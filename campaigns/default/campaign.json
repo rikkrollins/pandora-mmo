@@ -1,0 +1,397 @@
+{
+  "campaign_id": "default",
+  "title": "The Pandora Campaign",
+  "description": "The starting campaign for new Pandora MMO groups.",
+  "starting_location": "crossroads_tavern",
+  "locations": {
+    "surface": {
+      "crossroads_tavern": {
+        "name": "The Crossroads Tavern",
+        "layer": "surface",
+        "description": "A weathered inn where every road out of town seems to meet. The fire never quite warms the back corner.",
+        "connections": [
+          "whispering_wood",
+          "stonearch_bridge",
+          "market_row"
+        ],
+        "npcs": [
+          "grimsby",
+          "sera_wanderer"
+        ],
+        "shop": null
+      },
+      "market_row": {
+        "name": "Market Row",
+        "layer": "surface",
+        "description": "A crooked street of stalls and shopfronts. A locksmith here has stopped taking new keys to cut.",
+        "connections": [
+          "crossroads_tavern"
+        ],
+        "npcs": [
+          "old_maren"
+        ],
+        "shop": "marens_wares"
+      },
+      "whispering_wood": {
+        "name": "The Whispering Wood",
+        "layer": "surface",
+        "description": "An old forest where the leaves move without wind. Locals say the trees remember things.",
+        "connections": [
+          "crossroads_tavern",
+          "hollow_stump_shrine",
+          "greymoor_downs"
+        ],
+        "monsters": [
+          "goblin",
+          "wolf"
+        ]
+      },
+      "hollow_stump_shrine": {
+        "name": "The Hollow Stump Shrine",
+        "layer": "surface",
+        "description": "A shrine built into the base of a tree wider than a house, long since dead. Offerings left here are never touched by animals.",
+        "connections": [
+          "whispering_wood"
+        ],
+        "quest_items": [
+          "waterlogged_journal"
+        ]
+      },
+      "greymoor_downs": {
+        "name": "The Greymoor Downs",
+        "layer": "surface",
+        "description": "Rolling grey hills under a sky that seems one shade too dim, even at noon.",
+        "connections": [
+          "whispering_wood",
+          "stonearch_bridge"
+        ],
+        "monsters": [
+          "wolf"
+        ]
+      },
+      "stonearch_bridge": {
+        "name": "Stonearch Bridge",
+        "layer": "surface",
+        "description": "An ancient stone bridge spanning a gorge no one remembers naming. Half the carvings on its rail have worn past reading.",
+        "connections": [
+          "crossroads_tavern",
+          "greymoor_downs",
+          "the_weeping_well"
+        ],
+        "monsters": [
+          "giant_spider"
+        ]
+      },
+      "the_weeping_well": {
+        "name": "The Weeping Well",
+        "layer": "surface",
+        "description": "A well that hasn't run dry in living memory, though no one draws from it anymore. It is always slightly warmer than the air around it.",
+        "connections": [
+          "stonearch_bridge"
+        ],
+        "descends_to": "sunken_root_caverns"
+      }
+    },
+    "underground": {
+      "sunken_root_caverns": {
+        "name": "The Sunken Root Caverns",
+        "layer": "underground",
+        "description": "Caves threaded with the pale, massive roots of something above. The air smells faintly of rain that never falls down here.",
+        "connections": [
+          "goblin_warrens",
+          "glimmerdeep_grotto"
+        ],
+        "ascends_to": "the_weeping_well",
+        "monsters": [
+          "goblin",
+          "goblin_shaman"
+        ]
+      },
+      "goblin_warrens": {
+        "name": "The Goblin Warrens",
+        "layer": "underground",
+        "description": "A cramped, chattering network of tunnels. Someone, or something, has been organizing the goblins here far better than goblins usually organize themselves.",
+        "connections": [
+          "sunken_root_caverns"
+        ],
+        "monsters": [
+          "goblin",
+          "goblin_shaman",
+          "goblin_boss"
+        ]
+      },
+      "glimmerdeep_grotto": {
+        "name": "Glimmerdeep Grotto",
+        "layer": "underground",
+        "description": "Vast caverns lit by crystal formations that pulse very slowly, like something breathing. Some of the crystals have gone a wrong color.",
+        "connections": [
+          "sunken_root_caverns",
+          "the_hush_below"
+        ],
+        "monsters": [
+          "crystal_spider"
+        ],
+        "quest_items": [
+          "shard_of_dim_light"
+        ]
+      },
+      "the_hush_below": {
+        "name": "The Hush Below",
+        "layer": "underground",
+        "description": "A cavern so silent that your own footsteps seem to arrive a half-second late. Nothing living seems to want to be here, including, increasingly, you.",
+        "connections": [
+          "glimmerdeep_grotto",
+          "the_first_city"
+        ],
+        "monsters": [
+          "shadow_wisp"
+        ],
+        "hidden": true
+      },
+      "the_first_city": {
+        "name": "The First City",
+        "layer": "underground",
+        "description": "An impossibly old city, buried and forgotten, built by hands unfamiliar with any craft practiced above. Its central spire is still, somehow, faintly warm.",
+        "connections": [
+          "the_hush_below"
+        ],
+        "hidden": true,
+        "quest_items": [
+          "brass_key_no_lock"
+        ]
+      }
+    },
+    "sky": {
+      "the_unmoored_isle": {
+        "name": "The Unmoored Isle",
+        "layer": "sky",
+        "description": "An island of grey stone drifting slowly above the clouds, tethered to nothing anyone can see. Something on it has been waiting a very long time.",
+        "connections": [],
+        "hidden": true,
+        "requires_item": "shard_of_dim_light"
+      }
+    }
+  },
+  "npcs": {
+    "grimsby": {
+      "name": "Grimsby",
+      "role": "tavern_keeper",
+      "personality": "a gruff but kind-hearted innkeeper who's outlived three generations of regulars and buried more adventurers than he'll admit to",
+      "goals": "wants someone reliable to look into the strange things he won't say out loud",
+      "gives_quests": [
+        "welcome_to_the_crossroads"
+      ]
+    },
+    "old_maren": {
+      "name": "Old Maren",
+      "role": "shopkeeper",
+      "personality": "a sharp-tongued trader who has an answer for everything except why she never leaves Market Row after dark",
+      "shop": "marens_wares"
+    },
+    "sera_wanderer": {
+      "name": "Sera",
+      "role": "wandering_adventurer",
+      "personality": "a quiet, capable ranger passing through, sizing up anyone who might be worth traveling with",
+      "goals": "looking for a group heading somewhere interesting",
+      "recruitable": true,
+      "stats": {
+        "race": "Elf",
+        "char_class": "Ranger",
+        "strength": 12,
+        "dexterity": 17,
+        "constitution": 13,
+        "intelligence": 11,
+        "wisdom": 15,
+        "charisma": 10,
+        "hp_max": 11,
+        "armor_class": 14,
+        "gold": 50,
+        "inventory": {
+          "longbow": 1,
+          "shortsword": 1,
+          "leather_armor": 1
+        }
+      }
+    }
+  },
+  "shops": {
+    "marens_wares": {
+      "owner_npc": "old_maren",
+      "inventory": [
+        "rusty_dagger",
+        "shortsword",
+        "longsword",
+        "longbow",
+        "leather_armor",
+        "chain_shirt",
+        "wooden_shield",
+        "healing_potion",
+        "antitoxin",
+        "rations",
+        "torch",
+        "scroll_magic_missile",
+        "iron_ore"
+      ]
+    }
+  },
+  "quests": {
+    "welcome_to_the_crossroads": {
+      "title": "A Favor for Grimsby",
+      "description": "Grimsby has noticed something's off in the Whispering Wood and wants eyes on it.",
+      "location": "crossroads_tavern",
+      "objective_location": "whispering_wood",
+      "reward_xp": 100,
+      "reward_gold": 50
+    },
+    "the_hollow_stump": {
+      "title": "The Hollow Stump",
+      "description": "The shrine in the Whispering Wood may hold answers to what's been left behind there.",
+      "location": "hollow_stump_shrine",
+      "reward_xp": 150,
+      "reward_gold": 25,
+      "reward_item": "waterlogged_journal"
+    },
+    "clear_the_warrens": {
+      "title": "Clear the Goblin Warrens",
+      "description": "The goblins under Stonearch Bridge have grown bold. Someone should find out why.",
+      "location": "goblin_warrens",
+      "reward_xp": 300,
+      "reward_gold": 200
+    },
+    "the_wrong_color": {
+      "title": "The Wrong Color",
+      "description": "Something in Glimmerdeep Grotto is changing the crystals. Investigate.",
+      "location": "glimmerdeep_grotto",
+      "reward_xp": 500,
+      "reward_gold": 300,
+      "reward_item": "shard_of_dim_light"
+    },
+    "the_hush": {
+      "title": "Into the Hush",
+      "description": "Few who go into the Hush Below come back describing the same thing twice.",
+      "location": "the_hush_below",
+      "reward_xp": 750,
+      "reward_gold": 400
+    },
+    "the_first_city_quest": {
+      "title": "The First City",
+      "description": "Beneath everything, something predates the goblins, the roots, and the crystals.",
+      "location": "the_first_city",
+      "reward_xp": 1500,
+      "reward_gold": 1000,
+      "reward_item": "brass_key_no_lock"
+    },
+    "the_unmoored_isle_quest": {
+      "title": "What Waits Above",
+      "description": "The sky itself is not as empty as it looks.",
+      "location": "the_unmoored_isle",
+      "reward_xp": 3000,
+      "reward_gold": 2500,
+      "reward_item": "flametongue_shortsword"
+    }
+  },
+  "story_arcs": {
+    "arc_1_discovery": {
+      "title": "Discovery",
+      "description": "Small, strange things, easy to explain away individually.",
+      "quests": [
+        "welcome_to_the_crossroads",
+        "the_hollow_stump",
+        "clear_the_warrens"
+      ],
+      "required_level": 1
+    },
+    "arc_2_descent": {
+      "title": "The Descent",
+      "description": "The pattern beneath the strangeness starts to surface.",
+      "quests": [
+        "the_wrong_color",
+        "the_hush"
+      ],
+      "required_level": 5
+    },
+    "arc_3_revelation": {
+      "title": "What Was Buried",
+      "description": "The truth of what the surface world was built on top of.",
+      "quests": [
+        "the_first_city_quest"
+      ],
+      "required_level": 10
+    },
+    "arc_4_ascension": {
+      "title": "What Waits Above",
+      "description": "The final confrontation, far from where anyone thought to look.",
+      "quests": [
+        "the_unmoored_isle_quest"
+      ],
+      "required_level": 15
+    }
+  },
+  "monsters": {
+    "goblin": {
+      "name": "Goblin",
+      "dexterity": 14,
+      "strength": 8,
+      "armor_class": 13,
+      "hp_max": 7,
+      "proficiency_bonus": 2,
+      "xp_reward": 50
+    },
+    "goblin_shaman": {
+      "name": "Goblin Shaman",
+      "dexterity": 13,
+      "strength": 8,
+      "armor_class": 12,
+      "hp_max": 14,
+      "proficiency_bonus": 2,
+      "xp_reward": 100
+    },
+    "goblin_boss": {
+      "name": "Goblin Boss",
+      "dexterity": 15,
+      "strength": 12,
+      "armor_class": 15,
+      "hp_max": 21,
+      "proficiency_bonus": 2,
+      "xp_reward": 200
+    },
+    "wolf": {
+      "name": "Wolf",
+      "dexterity": 15,
+      "strength": 12,
+      "armor_class": 13,
+      "hp_max": 11,
+      "proficiency_bonus": 2,
+      "xp_reward": 50
+    },
+    "giant_spider": {
+      "name": "Giant Spider",
+      "dexterity": 16,
+      "strength": 14,
+      "armor_class": 14,
+      "hp_max": 26,
+      "proficiency_bonus": 3,
+      "xp_reward": 200,
+      "on_hit_condition": "poisoned"
+    },
+    "crystal_spider": {
+      "name": "Crystal Spider",
+      "dexterity": 15,
+      "strength": 10,
+      "armor_class": 15,
+      "hp_max": 18,
+      "proficiency_bonus": 2,
+      "xp_reward": 200,
+      "on_hit_condition": "poisoned"
+    },
+    "shadow_wisp": {
+      "name": "Shadow Wisp",
+      "dexterity": 18,
+      "strength": 6,
+      "armor_class": 16,
+      "hp_max": 22,
+      "proficiency_bonus": 3,
+      "xp_reward": 150
+    }
+  }
+}

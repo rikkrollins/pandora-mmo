@@ -1,0 +1,159 @@
+"""
+items.py
+The master item catalog. Every item players can carry, buy, sell, or
+find is defined here as data — adding a new item never requires
+touching bot.py or the rules engine.
+
+Item categories: weapon, armor, shield, consumable, scroll, ring,
+amulet, wondrous, quest_item, material.
+"""
+
+ITEMS = {
+    # --- Weapons ---
+    "rusty_dagger": {
+        "name": "Rusty Dagger", "type": "weapon", "rarity": "common",
+        "price": 2, "weight": 1, "damage_dice": "1d4", "ability": "dexterity",
+    },
+    "shortsword": {
+        "name": "Shortsword", "type": "weapon", "rarity": "common",
+        "price": 10, "weight": 2, "damage_dice": "1d6", "ability": "dexterity",
+    },
+    "longsword": {
+        "name": "Longsword", "type": "weapon", "rarity": "common",
+        "price": 15, "weight": 3, "damage_dice": "1d8", "ability": "strength",
+    },
+    "greataxe": {
+        "name": "Greataxe", "type": "weapon", "rarity": "common",
+        "price": 30, "weight": 7, "damage_dice": "1d12", "ability": "strength",
+    },
+    "longbow": {
+        "name": "Longbow", "type": "weapon", "rarity": "common",
+        "price": 50, "weight": 2, "damage_dice": "1d8", "ability": "dexterity",
+    },
+    "silvered_dagger": {
+        "name": "Silvered Dagger", "type": "weapon", "rarity": "uncommon",
+        "price": 75, "weight": 1, "damage_dice": "1d4+1", "ability": "dexterity",
+        "note": "Effective against creatures vulnerable to silver.",
+    },
+    "flametongue_shortsword": {
+        "name": "Flametongue Shortsword", "type": "weapon", "rarity": "rare",
+        "price": 0, "weight": 2, "damage_dice": "1d6+2", "ability": "dexterity",
+        "note": "Warm to the touch. Wreathes itself in fire when drawn in anger.",
+    },
+
+    # --- Armor & Shields ---
+    "leather_armor": {"name": "Leather Armor", "type": "armor", "rarity": "common", "price": 10, "weight": 10, "ac_base": 11},
+    "chain_shirt": {"name": "Chain Shirt", "type": "armor", "rarity": "common", "price": 50, "weight": 20, "ac_base": 13},
+    "chain_mail": {"name": "Chain Mail", "type": "armor", "rarity": "uncommon", "price": 75, "weight": 55, "ac_base": 16},
+    "wooden_shield": {"name": "Wooden Shield", "type": "shield", "rarity": "common", "price": 10, "weight": 6, "ac_bonus": 2},
+
+    # --- Consumables ---
+    "healing_potion": {
+        "name": "Healing Potion", "type": "consumable", "rarity": "common",
+        "price": 25, "weight": 0.5, "effect": "heal", "heal_dice": "2d4+2",
+    },
+    "greater_healing_potion": {
+        "name": "Greater Healing Potion", "type": "consumable", "rarity": "uncommon",
+        "price": 100, "weight": 0.5, "effect": "heal", "heal_dice": "4d4+4",
+    },
+    "antitoxin": {
+        "name": "Antitoxin", "type": "consumable", "rarity": "common",
+        "price": 15, "weight": 0.1, "effect": "cure_poison",
+    },
+    "rations": {
+        "name": "Rations (1 day)", "type": "consumable", "rarity": "common",
+        "price": 2, "weight": 2, "effect": "none",
+    },
+    "torch": {"name": "Torch", "type": "consumable", "rarity": "common", "price": 1, "weight": 1, "effect": "light"},
+
+    # --- Scrolls (single-use spells for non-casters) ---
+    "scroll_magic_missile": {
+        "name": "Scroll of Magic Missile", "type": "scroll", "rarity": "common",
+        "price": 30, "weight": 0.1, "spell": "magic_missile",
+    },
+    "scroll_fireball": {
+        "name": "Scroll of Fireball", "type": "scroll", "rarity": "rare",
+        "price": 300, "weight": 0.1, "spell": "fireball",
+    },
+
+    # --- Rings, Amulets, Wondrous Items ---
+    "ring_of_protection": {
+        "name": "Ring of Protection", "type": "ring", "rarity": "rare",
+        "price": 0, "weight": 0, "ac_bonus": 1,
+        "note": "A faint shimmer surrounds it.",
+    },
+    "amulet_of_health": {
+        "name": "Amulet of Health", "type": "amulet", "rarity": "rare",
+        "price": 0, "weight": 0, "constitution_set": 19,
+        "note": "Your vitality feels different the moment you put it on.",
+    },
+    "cloak_of_elvenkind": {
+        "name": "Cloak of Elvenkind", "type": "wondrous", "rarity": "uncommon",
+        "price": 0, "weight": 1, "stealth_advantage": True,
+    },
+    "boots_of_the_winterlands": {
+        "name": "Boots of the Winterlands", "type": "wondrous", "rarity": "uncommon",
+        "price": 0, "weight": 1, "note": "Cold never seems to trouble the wearer.",
+    },
+
+    # --- Quest items (never sellable, never have a price) ---
+    "waterlogged_journal": {
+        "name": "Waterlogged Journal", "type": "quest_item", "rarity": "unique",
+        "price": 0, "weight": 0.5,
+    },
+    "shard_of_dim_light": {
+        "name": "Shard of Dim Light", "type": "quest_item", "rarity": "unique",
+        "price": 0, "weight": 0.1,
+    },
+    "brass_key_no_lock": {
+        "name": "Brass Key That Fits No Lock", "type": "quest_item", "rarity": "unique",
+        "price": 0, "weight": 0.1,
+    },
+
+    # --- Crafting / trade materials ---
+    "iron_ore": {"name": "Iron Ore", "type": "material", "rarity": "common", "price": 5, "weight": 2},
+    "moonpetal": {"name": "Moonpetal Flower", "type": "material", "rarity": "uncommon", "price": 20, "weight": 0.05},
+}
+
+
+def get_item(item_id: str) -> dict | None:
+    return ITEMS.get(item_id)
+
+
+def is_sellable(item_id: str) -> bool:
+    item = ITEMS.get(item_id)
+    if item is None:
+        return False
+    return item["type"] != "quest_item" and item.get("price", 0) > 0
+
+
+def find_item_id_by_name(name_fragment: str) -> str | None:
+    """Fuzzy-ish lookup: match on item_id or display name, case-insensitively."""
+    lowered = name_fragment.strip().lower()
+    for item_id, data in ITEMS.items():
+        if lowered == item_id.lower() or lowered == data["name"].lower():
+            return item_id
+    for item_id, data in ITEMS.items():
+        if lowered in item_id.lower() or lowered in data["name"].lower():
+            return item_id
+    return None
+
+
+def find_item_mentioned_in_text(text: str, candidate_ids: list[str] | None = None) -> str | None:
+    """
+    Search for any item's name or id mentioned WITHIN a longer sentence
+    (e.g. "I want to buy a healing potion" -> "healing_potion"). Unlike
+    find_item_id_by_name, this checks whether the item name appears
+    inside the text, not the other way around. If candidate_ids is
+    given, only those items are considered (e.g. a shop's stock list).
+    """
+    lowered = text.strip().lower()
+    search_space = candidate_ids if candidate_ids is not None else list(ITEMS.keys())
+    # Check longer names first so "greater healing potion" doesn't get
+    # shadowed by a shorter partial match like "healing potion".
+    ordered = sorted(search_space, key=lambda i: -len(ITEMS[i]["name"]))
+    for item_id in ordered:
+        data = ITEMS[item_id]
+        if data["name"].lower() in lowered or item_id.replace("_", " ") in lowered:
+            return item_id
+    return None
