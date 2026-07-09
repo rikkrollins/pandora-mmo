@@ -130,7 +130,7 @@ def answer_support_question(question: str) -> str:
                 "prompt": prompt,
                 "stream": False,
             },
-            timeout=120,
+            timeout=200,
         )
         response.raise_for_status()
         data = response.json()

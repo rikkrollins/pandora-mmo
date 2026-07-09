@@ -1497,7 +1497,6 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     text = update.message.text.strip()
     known_npcs = [data["name"] for data in CAMPAIGN["npcs"].values()]
     intent = await asyncio.to_thread(parse_intent, text, known_npc_names=known_npcs)
-    print(f"DEBUG: text={text!r} known_npcs={known_npcs} intent={intent}")
     action = intent["action"]
 
     if action == "create_character":
@@ -1612,13 +1611,17 @@ async def changelog_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 MAX_ASSISTANT_HISTORY = 6
 
 
-async def _is_group_owner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+async def _is_group_owner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool | None:
     """
     Checks Telegram's actual group-owner ("creator") status for whoever
     sent this message. Uses the live Bot API rather than a hardcoded
     user ID, so it stays correct even if group ownership ever changes.
     Wrapped with a hard timeout so a stalled network call can never hang
-    this indefinitely — fails safe (denies access) instead.
+    this indefinitely. Returns None (not False) if the check itself
+    failed (network/API error) — a real incident showed the actual
+    owner getting a flat "restricted to owner" message from a transient
+    getChatMember hiccup, indistinguishable from genuinely not being the
+    owner. Callers must treat None as "couldn't verify," not "denied."
     """
     try:
         member = await asyncio.wait_for(
@@ -1627,14 +1630,18 @@ async def _is_group_owner(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         return member.status == "creator"
     except Exception as e:
-        print(f"[dev_access] owner check failed: {e}")
-        return False
+        logger.warning(f"[dev_access] owner check failed (treated as unverified, not denied): {e!r}")
+        return None
 
 
 async def development_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    print(f"DEBUG: development_topic_handler entered, user_id={update.effective_user.id}, chat_id={update.effective_chat.id}")
     is_owner = await _is_group_owner(update, context)
-    print(f"DEBUG: _is_group_owner returned {is_owner}")
+    if is_owner is None:
+        await update.message.reply_text(
+            "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
+            message_thread_id=config.TOPIC_DEVELOPMENT_ID,
+        )
+        return
     if not is_owner:
         await update.message.reply_text(
             "The Development topic is restricted to the group owner.",
@@ -1683,7 +1690,6 @@ async def text_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE
         await adventure_master_handler(update, context)
         return
 
-    print(f"DEBUG: router thread_id={thread_id}, is_development={topics.is_development(thread_id)}, expected TOPIC_DEVELOPMENT_ID={config.TOPIC_DEVELOPMENT_ID}")
     if topics.is_development(thread_id):
         await development_topic_handler(update, context)
         return
@@ -1691,6 +1697,28 @@ async def text_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE
     if topics.is_support(thread_id):
         await support_topic_handler(update, context)
         return
+
+
+async def _log_unhandled_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Global safety net. Without this registered, python-telegram-bot's
+    default behavior on any unhandled exception inside a handler (a
+    flaky Telegram API call, a bug in narration/game logic, etc.) is to
+    log it at its own internal level and otherwise fail completely
+    silently — no reply reaches the player, and nothing distinguishes
+    that from the handler simply choosing not to respond. This is the
+    most likely explanation for a real incident where an NPC dialogue
+    message got zero reply, not even the intended "..." fallback.
+    """
+    logger.error("Unhandled exception while processing update: %r", update, exc_info=context.error)
+    if isinstance(update, Update) and update.message:
+        try:
+            await update.message.reply_text(
+                "Something went wrong processing that — try again in a moment.",
+                message_thread_id=update.message.message_thread_id,
+            )
+        except Exception:
+            pass
 
 
 def build_application() -> Application:
@@ -1713,6 +1741,8 @@ def build_application() -> Application:
 
     # Single unified router for all plain text messages, across topics.
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message_router))
+
+    application.add_error_handler(_log_unhandled_error)
 
     return application
 

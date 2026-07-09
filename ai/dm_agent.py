@@ -63,7 +63,7 @@ def narrate_skill_check(character: dict, action_text: str, ability: str, mechani
                 "prompt": prompt,
                 "stream": False,
             },
-            timeout=60,
+            timeout=200,
         )
         response.raise_for_status()
         data = response.json()
@@ -172,7 +172,7 @@ def narrate_action(character: dict, action_text: str, mechanical_result: dict,
                 "prompt": prompt,
                 "stream": False,
             },
-            timeout=60,
+            timeout=200,
         )
         response.raise_for_status()
         data = response.json()
@@ -257,7 +257,7 @@ def narrate_welcome(character: dict, location: dict, party_summary: str) -> str:
                 "prompt": prompt,
                 "stream": False,
             },
-            timeout=60,
+            timeout=200,
         )
         response.raise_for_status()
         data = response.json()

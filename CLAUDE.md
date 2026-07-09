@@ -24,7 +24,9 @@ Current version: see `VERSION`. Full history: `CHANGELOG.md`.
 - **Ollama response time is genuinely 30–160+ seconds per call** on
   this CPU. This is normal, not a bug. Silence for under ~2 minutes
   after an action that needs AI narration (spell casting, NPC dialogue,
-  welcome messages) is expected, not broken.
+  welcome messages) is expected, not broken. All `requests.post(...,
+  timeout=...)` calls in `ai/*.py` are set to 200s specifically so they
+  don't cut this off early — if you add a new Ollama call, match that.
 - **OpenClaw gateway must stay stopped** — `sudo systemctl stop
   openclaw-gateway.service && sudo systemctl disable
   openclaw-gateway.service`. If it's running, it polls the same bot
@@ -95,31 +97,47 @@ alone missed all three.
   to avoid the AI inventing difficulty numbers.
 - Rest is a simplified full-heal, not full short/long rest rules.
 
-## Currently open investigation
+## Resolved investigations (2026-07-09)
 
-There's an unresolved report: an NPC dialogue message ("Say hello to
-grimsby") produced NO reply at all — not even the `"..."` fallback that
-`ai/npc_agent.py`'s `talk_to_npc()` should always produce on an Ollama
-timeout. Temporary debug logging was added to `bot.py` (line ~1500,
-right after the `parse_intent` call) and `ai/intent_parser.py` (lines
-~196/198, around the JSON extraction) to capture the raw model
-response and parsed intent for this exact phrase — logging is
-currently STILL IN PLACE, not yet removed. If you're picking this up:
-reproduce it, read the DEBUG lines, find out whether the model is
-misclassifying this as `action: "chat"` (which by design produces no
-reply) versus a JSON-parsing failure versus something else — then
-remove these two debug prints once resolved.
+Both previously-open investigations were reproduced live (per the
+testing convention above, through the real handlers) and fixed. All
+temporary `DEBUG:` print statements from both investigations have been
+removed — if you see `print(f"DEBUG:...")` anywhere in `bot.py` or
+`ai/`, it's new, not leftover.
 
-## Other debug logging still present — verify before removing
-
-Separately, `bot.py` also still has THREE older debug print statements
-around `development_topic_handler` (search for `DEBUG:` — you'll find
-them near "entered", "_is_group_owner returned", and "router
-thread_id=..."). These were added during an earlier investigation into
-the Development topic not responding. It's unclear from this file
-alone whether that issue was ever confirmed fixed — check recent real
-playtesting evidence (ask the user, or look for it) before assuming
-these are safe to delete. If the Development topic has been working
-reliably in actual play, these are just forgotten cleanup and can be
-removed; if not, they're your starting point for that investigation
-too.
+- **NPC dialogue silent failures.** Root cause had two layers:
+  1. Every Ollama call timeout across `ai/*.py` (30s in
+     `intent_parser.py`, 60s in `npc_agent.py`/`dm_agent.py`, 120s in
+     `support_agent.py`) was shorter than the documented real latency
+     above (30–160+s), so calls were frequently guaranteed to time out
+     before the model could answer. All of these were bumped to 200s.
+  2. With the model actually given time to respond, live reproduction
+     caught it genuinely misclassifying "Say hello to grimsby" as
+     `action: "chat"` while still correctly extracting
+     `npc_name: "Grimsby"` — `"chat"` is intentionally silent by
+     design, so this produced exactly the reported zero-reply bug.
+     Fixed in `ai/intent_parser.py`'s `parse_intent()`: if the model
+     returns `action: "chat"` but a known `npc_name` is present, it's
+     now reclassified to `talk_npc`. Confirmed via repeated live runs
+     through the real `adventure_master_handler`.
+  3. Separately (defense in depth, not the confirmed cause): no
+     `application.add_error_handler()` was registered anywhere, so ANY
+     unhandled exception in ANY handler — not just this one — failed
+     completely silently with no reply and no log trail. A global
+     `_log_unhandled_error` handler is now registered in
+     `build_application()`; it logs the full traceback via `logger` and
+     best-effort tells the player something broke, instead of silence.
+- **Development topic "restricted to owner" for the actual owner.**
+  Live-reproduced: `_is_group_owner()`'s `getChatMember` call is wrapped
+  in a broad `except Exception`, and on ANY failure (a transient
+  network/API hiccup, not just genuinely not being the owner) it
+  returned `False` — indistinguishable, from the player's side, from a
+  real permission denial. `_is_group_owner()` now returns `None` (not
+  `False`) when the check itself fails, and
+  `development_topic_handler` gives a distinct "couldn't verify
+  permissions, try again" message in that case, rather than the
+  fixed "restricted to owner" line. The routing (`topics.is_development`,
+  thread ID 41) and the ownership check itself were both confirmed
+  correct in live testing — Telegram reports Coffee's status as
+  `ChatMemberStatus.OWNER`, which does correctly compare equal to
+  `"creator"`.

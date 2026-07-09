@@ -59,7 +59,7 @@ def talk_to_npc(npc_id: str, player_message: str) -> str:
                 "prompt": prompt,
                 "stream": False,
             },
-            timeout=60,
+            timeout=200,
         )
         response.raise_for_status()
         data = response.json()

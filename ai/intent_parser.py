@@ -188,14 +188,12 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
                 "stream": False,
                 "format": "json",
             },
-            timeout=30,
+            timeout=200,
         )
         response.raise_for_status()
         data = response.json()
         raw_response = data.get("response", "")
-        print(f"DEBUG: raw model response for intent parsing: {raw_response!r}")
         parsed = _extract_json(strip_think_tags(raw_response))
-        print(f"DEBUG: parsed JSON: {parsed}")
         if parsed and "action" in parsed:
             parsed.setdefault("target", None)
             parsed.setdefault("npc_name", None)
@@ -212,6 +210,15 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
             )
             if parsed["action"] not in valid_actions:
                 return fallback
+            # The model reliably extracts npc_name even when it mislabels
+            # the action itself — confirmed live: "Say hello to grimsby"
+            # came back as action="chat", npc_name="Grimsby", which
+            # produces zero reply by design (chat is intentionally
+            # silent). Any known NPC name attached to the intent means
+            # the player addressed that NPC, regardless of what the
+            # model called the action.
+            if parsed["action"] == "chat" and parsed.get("npc_name"):
+                parsed["action"] = "talk_npc"
             return parsed
     except (requests.RequestException, ValueError) as e:
         print(f"[intent_parser] model call failed, using keyword fallback: {e}")
