@@ -133,7 +133,7 @@ def _drama_instruction(raw_roll: int | None, critical_hit: bool, critical_fail: 
 
 
 def _build_prompt(character: dict, action_text: str, mechanical_result: dict,
-                   recent_events: list[str] | None = None) -> str:
+                   recent_events: list[str] | None = None, actor_personality: str | None = None) -> str:
     recent_events = recent_events or []
     history = "\n".join(f"- {e}" for e in recent_events[-10:]) or "(no prior events)"
 
@@ -143,11 +143,17 @@ def _build_prompt(character: dict, action_text: str, mechanical_result: dict,
         mechanical_result.get("critical_hit", False),
         mechanical_result.get("critical_fail", False),
     )
+    personality_line = (
+        f"{character.get('name')}'s personality — reflect this in HOW they act, not just that "
+        f"they act: {actor_personality}\n\n"
+        if actor_personality else ""
+    )
 
     return (
         f"{SYSTEM_PREAMBLE}\n\n"
         f"Character: {character.get('name')} ({character.get('char_class')}), "
         f"HP: {character.get('hp_current')}/{character.get('hp_max')}\n\n"
+        f"{personality_line}"
         f"Player action: {action_text}\n\n"
         f"Mechanical result (already decided, narrate faithfully): {mechanical_result}\n\n"
         f"Tone guidance for this specific roll: {drama}\n\n"
@@ -157,12 +163,16 @@ def _build_prompt(character: dict, action_text: str, mechanical_result: dict,
 
 
 def narrate_action(character: dict, action_text: str, mechanical_result: dict,
-                    recent_events: list[str] | None = None) -> str:
+                    recent_events: list[str] | None = None, actor_personality: str | None = None) -> str:
     """
     Sends the mechanical result to the narration model and returns prose.
     Falls back to a plain template if Ollama is unreachable or errors.
+    `actor_personality` (a known NPC/AI companion's personality text) lets
+    a recruited companion's or a hostile NPC's combat turn read in their
+    own voice instead of generic monster-attack prose — same ground-truth
+    mechanical result either way, just narrated in character.
     """
-    prompt = _build_prompt(character, action_text, mechanical_result, recent_events)
+    prompt = _build_prompt(character, action_text, mechanical_result, recent_events, actor_personality)
 
     try:
         response = requests.post(

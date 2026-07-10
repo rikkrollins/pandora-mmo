@@ -445,10 +445,26 @@ async def _safe_send(update: Update, text: str) -> None:
         logger.warning(f"[combat] message send failed, continuing anyway: {e!r}")
 
 
+def _personality_for_character_name(name: str) -> str | None:
+    """
+    Looks up a known NPC/AI companion's personality by their display name
+    (recruited companions and hostile/ambient world-NPCs are both stored
+    in CAMPAIGN["npcs"], keyed by id but carrying their real display
+    name) — lets their combat turns read in character, not as generic
+    monster-attack prose. Returns None for plain monsters and real
+    players, who have no registered persona.
+    """
+    for npc_data in CAMPAIGN["npcs"].values():
+        if npc_data["name"] == name:
+            return npc_data.get("personality")
+    return None
+
+
 async def _post_narrated(update: Update, character: dict, action_text: str,
                           mechanical_result: dict, session: sessions.Session) -> None:
+    actor_personality = _personality_for_character_name(character.get("name", ""))
     flavor = await asyncio.to_thread(
-        narrate_action, character, action_text, mechanical_result, session.recent_events()
+        narrate_action, character, action_text, mechanical_result, session.recent_events(), actor_personality
     )
     message = _format_combat_result(
         flavor, mechanical_result,
