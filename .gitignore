@@ -8,3 +8,4 @@ __pycache__/
 bot_live_tmp.log
 bot_test_tmp.log
 .dev_bridge_state.json
+.autonomous_monitor_state.json
