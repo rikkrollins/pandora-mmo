@@ -2231,7 +2231,10 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
             reply = await asyncio.to_thread(
                 talk_to_npc, npc_id, text, character_name, relationship["memory_events"]
             )
-            await update.effective_chat.send_message(reply, message_thread_id=config.TOPIC_ADVENTURE_ID)
+            npc_display_name = CAMPAIGN["npcs"].get(npc_id, {}).get("name", intent["npc_name"])
+            await update.effective_chat.send_message(
+                f"💬 **{npc_display_name}:** {reply}", message_thread_id=config.TOPIC_ADVENTURE_ID
+            )
             # Ordinary conversation builds a small amount of rapport over
             # time — real, persistent, and separate from the short-term
             # conversation buffer talk_to_npc already keeps.
