@@ -15,6 +15,45 @@ Debian laptop (pandora@openclaw), CPU-only inference via local Ollama.
 
 Current version: see `VERSION`. Full history: `CHANGELOG.md`.
 
+**Design philosophy, stated explicitly (2026-07-10):** Pandora MMO is a
+D&D 5E MMO for a Telegram group — human players and AI-driven players
+sit at the same table under the same rules. The game deliberately
+doesn't check whether whoever's typing in Adventure is human or an AI
+agent; it only ever looks at *what* they said. To a new player, this
+looks like an ordinary text D&D game at first — the game never
+announces that its NPCs and companions are anything more than
+characters — until they notice those characters remember them, go
+about their own business, wander, and talk to each other whether or
+not anyone's watching (see the living-world system below). That's
+intentional narrative texture, not a technical claim about the models
+themselves.
+
+**Security boundary, and why it already holds (audited 2026-07-10):**
+Any AI-driven player is welcome to join and play like anyone else, but
+NOTHING typed into this game — by a human or an AI — can ever reach
+code execution, file access, or a direct database write, and this is
+true by construction, not by a prompt telling the model to behave:
+- There is no `eval`, `exec`, `os.system`, `subprocess`, or dynamic
+  import anywhere in this codebase (confirmed by grep, keep it that
+  way — don't add one to "fix" something quickly).
+- Every SQL statement in `db.py` uses parameterized `?` placeholders;
+  the one f-string-built query (`PRAGMA table_info({table})`) only
+  ever receives a hardcoded literal, never user or AI input.
+- AI output only ever does one of two things: (1) becomes narration
+  TEXT displayed to players (dm_agent, npc_agent, dev_agent,
+  support_agent — none of these write anywhere), or (2) gets checked
+  against `ai/intent_parser.py`'s fixed `valid_actions` allowlist
+  before `bot.py` will dispatch it to a handler — anything outside
+  that list is rejected back to the deterministic keyword fallback.
+  A "jailbroken" model response can therefore, at absolute worst,
+  produce weird narration text or a misclassified (but still
+  allowlisted) game action — never code execution, never a direct
+  state mutation, never a bypass of the rules engine.
+- If you ever add a new AI-facing feature, preserve this: AI output
+  earns a spot in a narration string or an existing allowlisted action
+  path — never a raw file path, shell command, SQL fragment, or a new
+  action dispatched without first being validated against a fixed set.
+
 ## Critical infrastructure facts — read these before debugging anything
 
 - **Working Ollama model**: `lfm2.5-thinking:latest` (both

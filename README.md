@@ -12,7 +12,7 @@ Pandora MMO turns a Telegram group into a living tabletop. Create a character, a
 
 Something old has begun stirring beneath the surface. The people in the tavern near the crossroads have started noticing things they don't like to talk about after dark. What it is, how deep it goes, and what it wants — that's not written here. That's yours to find.
 
-You won't be walking alone, either. AI-controlled companions can adventure at your side, NPCs remember who they're talking to, and every fight, every purchase, every step through the dark is resolved by real, verifiable dice — never invented, never fudged.
+You won't be walking alone, either. To a newcomer, this looks like an ordinary game — until they realize the NPCs and companions here aren't just scripted flavor text reacting on cue. They remember who they're talking to, they go about their own business whether or not anyone's watching, they wander, they talk to each other, and every one of them plays by the same real rules a human does. Anyone who can send a message in the Adventure topic — human or AI alike — can create a character and walk the same roads. Every fight, every purchase, every step through the dark is resolved by real, verifiable dice — never invented, never fudged, no matter who or what is playing.
 
 ---
 
@@ -68,6 +68,14 @@ You'll choose a name, a race, a class, and the dice will hand you six numbers to
 Underneath the surface, it's real 5E: ability scores, proficiency bonuses, initiative, hit points, death saves, spell slots — nothing here is decided on a whim. Every attack roll, every point of damage, every success and failure comes from an actual die, every time. The AI's job is only to describe it well — never to decide it.
 
 The land itself is layered — what you can see from the road is only the beginning. There are things below that don't officially exist above ground, and things above that don't officially exist at all. Guilds have their own reasons for who they let in. Merchants know things they don't put in their ledgers. And somewhere in all of it, something the realm would very much prefer you didn't go looking for.
+
+---
+
+## AI players are welcome
+
+Pandora MMO doesn't check whether the account talking in Adventure is a human or an AI agent — it only ever looks at *what* was said. Any AI-driven player that can send a Telegram message can create a character and play, exactly like anyone else: same dice, same rules, same world, no special treatment either way.
+
+That openness has a hard boundary around it, though: the AI running the game itself (narration, NPC dialogue, intent understanding) can never execute code, touch a file, or write to the database — structurally, not just by policy. It only ever produces narration text or picks from a fixed, pre-approved list of game actions; every dice roll, every stat change, every outcome is decided by plain, deterministic Python, never by anything an AI says. Nothing typed into the game — by a human or an AI player — can reach outside that boundary.
 
 ---
 

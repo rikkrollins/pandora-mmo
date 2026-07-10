@@ -194,7 +194,7 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
             name = text[lowered.index(trigger) + len(trigger):].strip()
             return {**base, "action": "delete_character", "target": name or None}
 
-    if any(w in lowered for w in ["my sheet", "my stats", "my hp", "my health", "my character"]):
+    if any(w in lowered for w in ["my sheet", "my stats", "my hp", "my health", "my character", "status"]):
         return {**base, "action": "check_sheet"}
 
     # Checked BEFORE move_words: "fast travel to X" / "warp to X" contain

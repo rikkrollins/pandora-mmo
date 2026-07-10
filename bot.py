@@ -401,7 +401,20 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
     text = update.message.text.strip()
 
     if step == "name":
-        creation["name"] = text
+        # A character's name flows straight into every narration prompt
+        # for the rest of that character's life — a light cap here
+        # keeps a name a name, not a multi-paragraph injection payload,
+        # even though the AI layer has no code-execution surface for
+        # such a payload to reach either way (see CLAUDE.md's security
+        # boundary section).
+        clean_name = " ".join(text.split())[:40]
+        if not clean_name:
+            await update.effective_chat.send_message(
+                "That doesn't look like a name — try again?",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+        creation["name"] = clean_name
         creation["step"] = "race"
         await update.effective_chat.send_message(
             f"Nice! What race? Choose one: {', '.join(VALID_RACES)}",
