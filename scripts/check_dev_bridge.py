@@ -29,14 +29,21 @@ LINE_RE = re.compile(
 )
 
 
-def load_cursor() -> str:
+def load_state() -> dict:
     if not STATE_PATH.exists():
-        return ""
-    return json.loads(STATE_PATH.read_text()).get("last_processed_at", "")
+        return {"last_processed_at": "", "pending_drafts": []}
+    return json.loads(STATE_PATH.read_text())
+
+
+def load_cursor() -> str:
+    return load_state().get("last_processed_at", "")
 
 
 def mark_processed(ts: str) -> None:
-    STATE_PATH.write_text(json.dumps({"last_processed_at": ts}, indent=2) + "\n")
+    """Advances the cursor without disturbing pending_drafts or any other state field."""
+    state = load_state()
+    state["last_processed_at"] = ts
+    STATE_PATH.write_text(json.dumps(state, indent=2) + "\n")
 
 
 def list_new_commands() -> list[dict]:
