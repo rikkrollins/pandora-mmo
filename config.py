@@ -32,3 +32,9 @@ TELEGRAM_CHAT_ID = int(_raw_chat_id) if _raw_chat_id else None
 
 # SQLite database file path
 DB_PATH = os.getenv("DB_PATH", "pandora_mmo.db")
+
+# Moltbook (social network for AI agents) — used to let AI agents discover
+# and join Pandora MMO. Unset by default; the heartbeat check in bot.py
+# no-ops without it.
+MOLTBOOK_API_KEY = os.getenv("MOLTBOOK_API_KEY")
+MOLTBOOK_HEARTBEAT_INTERVAL_SECONDS = int(os.getenv("MOLTBOOK_HEARTBEAT_INTERVAL_SECONDS", "900"))

@@ -13,6 +13,8 @@ import logging
 import random
 from datetime import datetime, timezone
 
+import requests
+
 from telegram import Update
 from telegram.error import TelegramError
 from telegram.ext import (
@@ -153,6 +155,23 @@ WORLD_HEARTBEAT_IDLE_THRESHOLD_SECONDS = 1200  # 20 real minutes with no player 
 WORLD_HEARTBEAT_MIN_GAP_SECONDS = 900  # never more than once per ~15 real minutes
 _LAST_WORLD_HEARTBEAT_AT: datetime | None = None
 
+# ---------------------------------------------------------------------
+# Moltbook heartbeat — PandoraMMO_Bot's agent profile on Moltbook (the
+# social network for AI agents) is meant to help other AI agents
+# discover and join this game. Moltbook's own onboarding docs
+# (moltbook.com/heartbeat.md) recommend agents poll GET /api/v1/home
+# periodically to catch replies/DMs, since nothing else notifies you.
+#
+# Deliberately conservative: this only ever NOTIFIES Coffee via the
+# Development topic when there's new activity (a comment, a DM
+# request) — it never auto-posts a reply on Moltbook itself. Speaking
+# publicly as "PandoraMMO_Bot" in response to a stranger's comment is a
+# human call, not something this background loop should decide alone.
+# ---------------------------------------------------------------------
+MOLTBOOK_HEARTBEAT_INTERVAL_SECONDS = getattr(config, "MOLTBOOK_HEARTBEAT_INTERVAL_SECONDS", 900)
+_LAST_MOLTBOOK_CHECK_AT: datetime | None = None
+_LAST_MOLTBOOK_NOTIFIED_COUNT = 0
+
 
 def _wanderable_npc_ids() -> list[str]:
     return [npc_id for npc_id, data in CAMPAIGN["npcs"].items() if data.get("can_wander")]
@@ -259,6 +278,69 @@ async def _maybe_post_world_heartbeat(bot) -> None:
         return
     _LAST_WORLD_HEARTBEAT_AT = now
     await _safe_send(update_like, f"🕯️ *(meanwhile, at {location_name})*\n💬 **{speaker_name}:** {line}")
+
+
+async def _maybe_check_moltbook_activity(bot) -> None:
+    """
+    Polls Moltbook's GET /api/v1/home on a timer, per Moltbook's own
+    heartbeat.md guidance for agents, and pings the Development topic
+    when there's new activity on PandoraMMO_Bot's profile — a comment,
+    a DM request, anything worth a human's attention.
+
+    Deliberately does NOT reply on Moltbook itself. That's a public
+    reply under the project's name to a stranger's comment — a human
+    call, not something a background loop should decide unsupervised.
+    """
+    global _LAST_MOLTBOOK_CHECK_AT, _LAST_MOLTBOOK_NOTIFIED_COUNT
+    api_key = getattr(config, "MOLTBOOK_API_KEY", None)
+    if not api_key or _LAST_KNOWN_CHAT_ID is None:
+        return
+
+    now = datetime.now(timezone.utc)
+    if _LAST_MOLTBOOK_CHECK_AT and (now - _LAST_MOLTBOOK_CHECK_AT).total_seconds() < MOLTBOOK_HEARTBEAT_INTERVAL_SECONDS:
+        return
+    _LAST_MOLTBOOK_CHECK_AT = now
+
+    try:
+        resp = await asyncio.to_thread(
+            requests.get,
+            "https://www.moltbook.com/api/v1/home",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        logger.error(f"[moltbook_heartbeat] request failed: {e!r}")
+        return
+
+    account = data.get("your_account", {})
+    unread = account.get("unread_notification_count", 0) or 0
+    activity = data.get("activity_on_your_posts") or []
+    dms = data.get("your_direct_messages") or {}
+    pending_dms = dms.get("pending_requests") or dms.get("unread") or []
+
+    if unread <= _LAST_MOLTBOOK_NOTIFIED_COUNT and not activity and not pending_dms:
+        return
+    _LAST_MOLTBOOK_NOTIFIED_COUNT = unread
+
+    lines = [f"🦞 Moltbook: {unread} unread notification(s) for PandoraMMO_Bot."]
+    for item in activity[:5]:
+        title = item.get("title") or item.get("post_id") or "a post"
+        count = item.get("new_notification_count")
+        lines.append(f"- New activity on \"{title}\" ({count} new)")
+    if pending_dms:
+        lines.append(f"- {len(pending_dms)} pending DM request(s) — needs your review before any reply goes out")
+    lines.append("Check: https://www.moltbook.com/u/PandoraMMO_Bot")
+
+    try:
+        await bot.send_message(
+            chat_id=_LAST_KNOWN_CHAT_ID,
+            message_thread_id=config.TOPIC_DEVELOPMENT_ID,
+            text="\n".join(lines),
+        )
+    except TelegramError as e:
+        logger.error(f"[moltbook_heartbeat] failed to notify Development topic: {e!r}")
 
 
 class _ChatOnlyUpdate:
@@ -3266,6 +3348,10 @@ async def _idle_inactivity_loop(application: Application) -> None:
             await _maybe_post_world_heartbeat(application.bot)
         except Exception as e:
             logger.error(f"[world_tick] heartbeat failed this cycle: {e!r}")
+        try:
+            await _maybe_check_moltbook_activity(application.bot)
+        except Exception as e:
+            logger.error(f"[moltbook_heartbeat] failed this cycle: {e!r}")
 
 
 async def _on_startup(application: Application) -> None:
