@@ -20,7 +20,7 @@
           "grimsby",
           "sera_wanderer"
         ],
-        "shop": null,
+        "shop": "grimsbys_tavern",
         "safe": true,
         "interactables": {
           "hearth_mantle": {
@@ -62,7 +62,8 @@
             "name": "rows of hanging keys in the locksmith's window",
             "description": "Dozens of unlabeled keys, none cut to any lock still in use in town, as far as anyone will say. Someone still dusts them."
           }
-        }
+        },
+        "safe": true
       },
       "whispering_wood": {
         "name": "The Whispering Wood",
@@ -558,6 +559,16 @@
         "lantern_of_true_sight",
         "ring_of_the_undertow",
         "scroll_summon_spirit"
+      ]
+    },
+    "grimsbys_tavern": {
+      "owner_npc": "grimsby",
+      "inventory": [
+        "ale",
+        "rations",
+        "healing_potion",
+        "antitoxin",
+        "torch"
       ]
     }
   },

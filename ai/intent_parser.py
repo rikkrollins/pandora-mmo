@@ -102,6 +102,7 @@ getting caught, with real consequences, not the same as "buy".
 - "invite_to_party" is for inviting another player's or AI companion's character into their own formed party. Set "target" to the invitee's name.
 - "accept_party_invite" is for accepting a pending party invite.
 - "leave_party" is for leaving a party the character is currently in.
+- "find_merchant" is for asking where to get supplies or find the nearest shop/merchant.
 - "chat" is for anything else — general roleplay talk with no clear game action.
 Output ONLY the JSON object, nothing else."""
 
@@ -170,6 +171,11 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
 
     if any(w in lowered for w in ["leave the party", "leave my party", "quit the party", "i quit my party"]):
         return {**base, "action": "leave_party"}
+
+    if any(w in lowered for w in ["where can i get supplies", "nearest merchant", "closest merchant",
+                                    "nearest shop", "closest shop", "where can i buy", "where can i shop",
+                                    "need supplies", "where's the nearest", "wheres the nearest"]):
+        return {**base, "action": "find_merchant"}
 
     attack_words = ["attack", "swing", "shoot", "strike", "hit", "stab", "cast at", "fire at"]
     if any(w in lowered for w in attack_words):
@@ -371,7 +377,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
                 "list_characters", "switch_character", "delete_character",
                 "fast_travel", "accept_quest", "check_quests", "ask_clue",
                 "answer_puzzle", "gamble", "chat", "examine", "flee", "resolve_choice",
-                "invite_to_party", "accept_party_invite", "leave_party",
+                "invite_to_party", "accept_party_invite", "leave_party", "find_merchant",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

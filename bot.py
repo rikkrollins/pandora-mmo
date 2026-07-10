@@ -3077,6 +3077,69 @@ async def _do_fast_travel(update: Update, text: str) -> None:
     await _check_quest_completions_reach_location(update, update.effective_user.id, destination_id)
 
 
+def _location_neighbors(location_id: str) -> list[str]:
+    location = cl.get_location(CAMPAIGN, location_id)
+    if not location:
+        return []
+    neighbors = list(location.get("connections", []))
+    if "descends_to" in location:
+        neighbors.append(location["descends_to"])
+    if "ascends_to" in location:
+        neighbors.append(location["ascends_to"])
+    return neighbors
+
+
+def _nearest_shop_location(start_location_id: str) -> tuple[str, int] | None:
+    """BFS over the real location graph for the closest location with a real shop. Returns (location_id, hops)."""
+    start = cl.get_location(CAMPAIGN, start_location_id)
+    if start and start.get("shop"):
+        return start_location_id, 0
+
+    visited = {start_location_id}
+    queue = [(start_location_id, 0)]
+    while queue:
+        current_id, dist = queue.pop(0)
+        for neighbor_id in _location_neighbors(current_id):
+            if neighbor_id in visited:
+                continue
+            visited.add(neighbor_id)
+            neighbor = cl.get_location(CAMPAIGN, neighbor_id)
+            if neighbor and neighbor.get("shop"):
+                return neighbor_id, dist + 1
+            queue.append((neighbor_id, dist + 1))
+    return None
+
+
+async def _do_find_merchant(update: Update) -> None:
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    result = _nearest_shop_location(character["current_location"])
+    if result is None:
+        await update.effective_chat.send_message(
+            "There's no known merchant reachable from here.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    location_id, hops = result
+    location = cl.get_location(CAMPAIGN, location_id)
+    shop = cl.get_shop(CAMPAIGN, location["shop"])
+    owner = CAMPAIGN["npcs"].get(shop.get("owner_npc")) if shop else None
+    owner_name = owner["name"] if owner else None
+
+    if hops == 0:
+        line = f"🛒 You're already at a merchant — {owner_name or 'the shop'} is right here."
+    else:
+        stops = "stop" if hops == 1 else "stops"
+        owner_line = f", run by {owner_name}" if owner_name else ""
+        line = f"🛒 Closest merchant: **{location['name']}**{owner_line} — {hops} {stops} from here."
+    await update.effective_chat.send_message(line, message_thread_id=config.TOPIC_ADVENTURE_ID)
+
+
 async def _do_buy(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -3790,6 +3853,8 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         await _do_accept_party_invite(update)
     elif action == "leave_party":
         await _do_leave_party(update)
+    elif action == "find_merchant":
+        await _do_find_merchant(update)
     elif action == "show_map":
         await _do_show_map(update)
     elif action == "gather":

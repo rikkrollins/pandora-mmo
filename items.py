@@ -65,6 +65,11 @@ ITEMS = {
         "price": 2, "weight": 2, "effect": "none",
     },
     "torch": {"name": "Torch", "type": "consumable", "rarity": "common", "price": 1, "weight": 1, "effect": "light"},
+    "ale": {
+        "name": "Mug of Ale", "type": "consumable", "rarity": "common",
+        "price": 1, "weight": 1, "effect": "none",
+        "note": "Grimsby's own brew. Doesn't heal anything, but it isn't meant to.",
+    },
 
     # --- Scrolls (single-use spells for non-casters — or anyone, once bought) ---
     "scroll_magic_missile": {
