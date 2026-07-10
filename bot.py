@@ -13,6 +13,7 @@ import logging
 import random
 
 from telegram import Update
+from telegram.error import TelegramError
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -413,16 +414,35 @@ async def _announce_defeats(update: Update, session: sessions.Session, removed: 
     for entry in removed:
         session.log_event(f"{entry['name']} has been defeated!")
         if not entry["is_ai"] and session.sides.get(entry["telegram_user_id"]) == "party":
-            await update.effective_chat.send_message(
+            await _safe_send(
+                update,
                 f"💀 **{entry['name']} has fallen!** They'll need to rest once "
                 f"combat ends to recover (just say \"I rest\" in Adventure).",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
         else:
-            await update.effective_chat.send_message(
-                f"💀 **{entry['name']} has been defeated!**",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
-            )
+            await _safe_send(update, f"💀 **{entry['name']} has been defeated!**")
+
+
+async def _safe_send(update: Update, text: str) -> None:
+    """
+    Sends a message to the Adventure topic, but never lets a transient
+    Telegram/network failure escape and abort whatever combat-state
+    progression the caller still needs to make (turn advancement,
+    combat-over checks, etc.). Confirmed live: a bare ConnectTimeout
+    during an ordinary attack-narration send propagated all the way up
+    through _resolve_ai_turns and _do_attack, aborting BEFORE
+    session.advance_turn() ever ran — permanently soft-locking that
+    combat on the crashed participant's turn, since nothing else ever
+    re-attempts resolving it. Mechanical state (damage, HP) is decided
+    and applied before this is ever called, so a lost message here is a
+    real but survivable narration gap, not a lost game fact — unlike
+    turn progression getting stuck, which has no other recovery path
+    short of the "cancel" escape hatch force-ending the whole fight.
+    """
+    try:
+        await update.effective_chat.send_message(text, message_thread_id=config.TOPIC_ADVENTURE_ID)
+    except TelegramError as e:
+        logger.warning(f"[combat] message send failed, continuing anyway: {e!r}")
 
 
 async def _post_narrated(update: Update, character: dict, action_text: str,
@@ -436,7 +456,7 @@ async def _post_narrated(update: Update, character: dict, action_text: str,
         defender_label=mechanical_result.get("defender", "?"),
     )
     session.log_event(f"{mechanical_result.get('attacker')} vs {mechanical_result.get('defender')}: {flavor}")
-    await update.effective_chat.send_message(message, message_thread_id=config.TOPIC_ADVENTURE_ID)
+    await _safe_send(update, message)
 
 
 def _sync_player_to_db(character: dict) -> None:
@@ -549,20 +569,20 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
     while not session.is_combat_over():
         iterations += 1
         if iterations > iteration_safety_cap:
-            await update.effective_chat.send_message(
+            await _safe_send(
+                update,
                 "⚠️ Combat seems stuck in a loop — ending it automatically. "
                 "Please report this if it happens again.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
             sessions.end_session(session.chat_id)
             return
 
         stall_threshold = max(len(session.turn_order) * 2, 4)
         if consecutive_noop_turns >= stall_threshold:
-            await update.effective_chat.send_message(
+            await _safe_send(
+                update,
                 "🏳️ **Stalemate — the enemy breaks off, unable to finish the fight. "
                 "Your party survives.**",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
             sessions.end_session(session.chat_id)
             return
@@ -575,32 +595,32 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
             _sync_player_to_db(current)
 
             if death_result["outcome"] == "dead":
-                await update.effective_chat.send_message(
+                await _safe_send(
+                    update,
                     f"💀 **{current['name']} rolls a {death_result['roll']} — "
                     f"3rd failed death save. {current['name']} has died.**",
-                    message_thread_id=config.TOPIC_ADVENTURE_ID,
                 )
                 session.remove_dead_player(current["telegram_user_id"])
             elif death_result["outcome"] == "stable":
                 session.stabilized_ids.add(current["telegram_user_id"])
-                await update.effective_chat.send_message(
+                await _safe_send(
+                    update,
                     f"💚 **{current['name']} rolls a {death_result['roll']} — "
                     f"3rd death save success! {current['name']} is stabilized "
                     f"(unconscious but no longer in danger).**",
-                    message_thread_id=config.TOPIC_ADVENTURE_ID,
                 )
             elif death_result["outcome"] == "natural_20_revived":
-                await update.effective_chat.send_message(
+                await _safe_send(
+                    update,
                     f"✨ **{current['name']} rolls a NATURAL 20 on their death save "
                     f"and springs back up with 1 HP!**",
-                    message_thread_id=config.TOPIC_ADVENTURE_ID,
                 )
             else:
-                await update.effective_chat.send_message(
+                await _safe_send(
+                    update,
                     f"🎲 **{current['name']}'s death save: rolled {death_result['roll']} "
                     f"({death_result['outcome']}) — "
                     f"{death_result['successes']} successes, {death_result['failures']} failures.**",
-                    message_thread_id=config.TOPIC_ADVENTURE_ID,
                 )
 
             if session.is_combat_over():
@@ -615,10 +635,10 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
         # turn (attack, cast, etc.) while unconscious.
         if not current.get("is_ai") and current["hp_current"] <= 0:
             consecutive_noop_turns += 1
-            await update.effective_chat.send_message(
+            await _safe_send(
+                update,
                 f"😴 **{current['name']} is unconscious and stable** — "
                 f"they can't act until healed above 0 HP.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
             if session.is_combat_over():
                 break
@@ -626,9 +646,7 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
             continue
 
         if not current.get("is_ai"):
-            await update.effective_chat.send_message(
-                _turn_announcement(session), message_thread_id=config.TOPIC_ADVENTURE_ID
-            )
+            await _safe_send(update, _turn_announcement(session))
             return
 
         opposing = session.living_on_side(session.opposing_side(current["telegram_user_id"]))
@@ -658,16 +676,13 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
 
         await _post_narrated(update, current, f"{current['name']} attacks {target['name']}", result, session)
         if applied_condition:
-            await update.effective_chat.send_message(
-                f"☠️ **{target['name']} is now {applied_condition.upper()}!**",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
-            )
+            await _safe_send(update, f"☠️ **{target['name']} is now {applied_condition.upper()}!**")
 
         if target["hp_current"] <= 0 and not target.get("is_ai"):
-            await update.effective_chat.send_message(
+            await _safe_send(
+                update,
                 f"⚠️ **{target['name']} drops to 0 HP and falls unconscious!** "
                 f"They'll roll death saving throws on their turns until stable, revived, or worse.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
 
         removed = session.remove_defeated()
@@ -679,11 +694,25 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
     if session.is_combat_over():
         winner = _determine_winner(session)
         xp_summary = _award_victory_xp(session) if winner == "party" else ""
-        await update.effective_chat.send_message(
-            f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
-        )
+        await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
         sessions.end_session(session.chat_id)
+
+
+async def _self_heal_stuck_ai_turn(update: Update, session: sessions.Session) -> None:
+    """
+    Defense-in-depth against a combat session getting soft-locked on an
+    AI's turn — confirmed live: a transient network failure while
+    sending an attack's narration once escaped mid-turn-resolution and
+    left a session permanently stuck (nothing else ever re-attempts
+    resolving an AI turn once _resolve_ai_turns has returned). _safe_send
+    closes the specific failure mode that caused it, but calling this
+    before every "is it actually your turn?" check gives players an
+    immediate, self-service recovery path for that class of bug in
+    general, instead of only the "cancel" escape hatch, which forfeits
+    the whole fight rather than resuming it.
+    """
+    if session.current_participant().get("is_ai"):
+        await _resolve_ai_turns(update, session)
 
 
 _NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "a couple of": 2, "a few": 3}
@@ -785,7 +814,7 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             f"🎯 **Initiative order:** {initiative_line}\n\n"
             + _turn_announcement(session)
         )
-        await update.effective_chat.send_message(header, message_thread_id=config.TOPIC_ADVENTURE_ID)
+        await _safe_send(update, header)
         await _resolve_ai_turns(update, session)
 
 
@@ -893,7 +922,7 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
                 f"🎯 **Initiative order:** {initiative_line}\n\n"
                 + _turn_announcement(session)
             )
-            await update.effective_chat.send_message(header, message_thread_id=config.TOPIC_ADVENTURE_ID)
+            await _safe_send(update, header)
             await _resolve_ai_turns(update, session)
     else:
         line = await asyncio.to_thread(
@@ -916,6 +945,15 @@ async def _do_attack(update: Update, action_text: str) -> None:
             return
 
         user_id = update.effective_user.id
+        if session.current_participant_id() != user_id:
+            await _self_heal_stuck_ai_turn(update, session)
+            session = sessions.get_session(chat_id)
+            if session is None:
+                await update.effective_chat.send_message(
+                    "Combat had stalled and just resolved itself — nothing active right now.",
+                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                )
+                return
         if session.current_participant_id() != user_id:
             current_name = session.current_participant()["name"]
             await update.effective_chat.send_message(
@@ -951,10 +989,7 @@ async def _do_attack(update: Update, action_text: str) -> None:
         if session.is_combat_over():
             winner = _determine_winner(session)
             xp_summary = _award_victory_xp(session) if winner == "party" else ""
-            await update.effective_chat.send_message(
-                f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
-            )
+            await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
             sessions.end_session(chat_id)
             return
 
@@ -973,9 +1008,7 @@ async def _do_pass_turn(update: Update) -> None:
             )
             return
         session.advance_turn()
-        await update.effective_chat.send_message(
-            _turn_announcement(session), message_thread_id=config.TOPIC_ADVENTURE_ID
-        )
+        await _safe_send(update, _turn_announcement(session))
         await _resolve_ai_turns(update, session)
 
 
@@ -1232,6 +1265,15 @@ async def _do_shove(update: Update, action_text: str) -> None:
             return
 
         user_id = update.effective_user.id
+        if session.current_participant_id() != user_id:
+            await _self_heal_stuck_ai_turn(update, session)
+            session = sessions.get_session(chat_id)
+            if session is None:
+                await update.effective_chat.send_message(
+                    "Combat had stalled and just resolved itself — nothing active right now.",
+                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                )
+                return
         if session.current_participant_id() != user_id:
             current_name = session.current_participant()["name"]
             await update.effective_chat.send_message(
@@ -1869,6 +1911,15 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                 )
                 return
             if session.current_participant_id() != update.effective_user.id:
+                await _self_heal_stuck_ai_turn(update, session)
+                session = sessions.get_session(chat_id)
+                if session is None:
+                    await update.effective_chat.send_message(
+                        "Combat had stalled and just resolved itself — nothing active right now.",
+                        message_thread_id=config.TOPIC_ADVENTURE_ID,
+                    )
+                    return
+            if session.current_participant_id() != update.effective_user.id:
                 current_name = session.current_participant()["name"]
                 await update.effective_chat.send_message(
                     f"It's not your turn — it's **{current_name}**'s turn.",
@@ -2184,6 +2235,13 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     known_npcs = [data["name"] for data in CAMPAIGN["npcs"].values()]
     intent = await asyncio.to_thread(parse_intent, text, known_npc_names=known_npcs)
     action = intent["action"]
+    # Player-facing message CONTENT is never logged elsewhere (only HTTP
+    # metadata is, via httpx's own logging) — without this, a
+    # misclassified action (confirmed to happen on this small model; see
+    # CHANGELOG) is undiagnosable after the fact. raw text + resolved
+    # action is the minimum needed to actually audit a "why did this
+    # happen" report.
+    logger.info(f"[intent] user={update.effective_user.id} action={action!r} text={text!r}")
 
     if action == "create_character":
         await _begin_character_creation(update, context)
