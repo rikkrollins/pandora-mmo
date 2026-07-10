@@ -40,7 +40,10 @@ import races as races_module
 import class_features as class_features_module
 import topics
 from ai.dev_agent import answer_dev_question
-from ai.dm_agent import narrate_action, narrate_welcome, narrate_skill_check, narrate_hourly_update, narrate_examine
+from ai.dm_agent import (
+    narrate_action, narrate_welcome, narrate_skill_check, narrate_hourly_update,
+    narrate_examine, narrate_branching_choice_outcome,
+)
 from ai.intent_parser import parse_intent
 from ai.npc_agent import register_npc, talk_to_npc, generate_ambient_line, _NPCS
 from ai.support_agent import answer_support_question
@@ -416,7 +419,7 @@ async def _maybe_post_hourly_status_update(bot) -> None:
     for comp in ai_companions:
         activity_lines.append(f"{comp['name']} the {comp['race']} {comp['char_class']} is here")
 
-    quest_board = [
+    story_quests_here = [
         (q["title"], q.get("description", ""))
         for q in CAMPAIGN["quests"].values()
         if q.get("location") == location_id
@@ -427,12 +430,11 @@ async def _maybe_post_hourly_status_update(bot) -> None:
 
     lines = [f"🕐 *(the hour turns over — {location_name})*", flavor, ""]
     lines.append(f"👥 Players: {active_count} active, {inactive_count} resting.")
-    if quest_board:
-        lines.append(f"📋 Story quest board at {location_name}:")
-        for title, desc in quest_board:
-            lines.append(f"  • {title} — {desc}" if desc else f"  • {title}")
-    else:
-        lines.append(f"📋 Story quest board at {location_name}: nothing posted right now.")
+    lines.append(f"📋 Quest board at {location_name}:")
+    if not story_quests_here and not area_board_quests:
+        lines.append("  nothing posted right now.")
+    for title, desc in story_quests_here:
+        lines.append(f"  • {title} — {desc}" if desc else f"  • {title}")
     if area_board_quests:
         lines.append(board_quests_module.format_board_listings(area_board_quests))
 
@@ -1013,15 +1015,23 @@ def _award_victory_xp(session: sessions.Session) -> str:
                 continue
             updated = db.record_board_quest_progress(board_quest["board_quest_id"], defeated_matching)
             if updated["progress_count"] >= updated["objective_count"]:
-                db.complete_board_quest(updated["board_quest_id"])
-                for pid in real_party_ids:
-                    db.add_xp(pid, updated["reward_xp"])
-                    character = db.get_character(pid)
-                    db.update_character(pid, gold=character["gold"] + updated["reward_gold"])
-                board_notes.append(
-                    f"\n📜 **Board quest complete: {updated['title']}!** "
-                    f"Party earns {updated['reward_xp']} XP, {updated['reward_gold']} gold each."
-                )
+                if updated.get("branch_data"):
+                    # Branching quests never auto-reward — a real choice
+                    # has to be made first (see _do_resolve_quest_choice).
+                    board_notes.append(
+                        f"\n📜 **{updated['title']}** — objective complete. A decision awaits "
+                        f"(check quests to see the choice)."
+                    )
+                else:
+                    db.complete_board_quest(updated["board_quest_id"])
+                    for pid in real_party_ids:
+                        db.add_xp(pid, updated["reward_xp"])
+                        character = db.get_character(pid)
+                        db.update_character(pid, gold=character["gold"] + updated["reward_gold"])
+                    board_notes.append(
+                        f"\n📜 **Board quest complete: {updated['title']}!** "
+                        f"Party earns {updated['reward_xp']} XP, {updated['reward_gold']} gold each."
+                    )
             else:
                 board_notes.append(
                     f"\n📋 Board quest progress: {updated['title']} "
@@ -2263,10 +2273,75 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
             return
 
     db.accept_board_quest(board_quest["board_quest_id"], telegram_user_id)
+    if board_quest.get("branch_data"):
+        await update.effective_chat.send_message(
+            f"📜 **Board quest accepted: {board_quest['title']}**\n{board_quest['branch_data']['setup_narration']}\n\n"
+            f"What you earn depends on the choice you make once it's done. Expires in 24h if not finished.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
     await update.effective_chat.send_message(
         f"📜 **Board quest accepted: {board_quest['title']}**\n{board_quest['description']}\n"
         f"Reward: {board_quest['reward_xp']} XP, {board_quest['reward_gold']} gold. "
         f"Expires in 24h if not finished.",
+        message_thread_id=config.TOPIC_ADVENTURE_ID,
+    )
+
+
+async def _do_resolve_quest_choice(update: Update, text: str) -> None:
+    """
+    Finalizes a branching board quest once its objective is complete —
+    the player names which of the two fixed, pre-defined choices they
+    want, and that choice's real reward/faction consequence (decided
+    in board_quests.py, never by the AI) is applied. The AI only
+    narrates the resolution of a choice that's already been made.
+    """
+    telegram_user_id = update.effective_user.id
+    character = db.get_character(telegram_user_id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    ready = [
+        q for q in db.get_accepted_board_quests_for_user(telegram_user_id)
+        if q.get("branch_data") and q["progress_count"] >= q["objective_count"]
+    ]
+    if not ready:
+        await update.effective_chat.send_message(
+            "You don't have a decision to make right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    quest = ready[0]
+    branch = quest["branch_data"]
+    lowered = text.lower()
+    choice_key = next((k for k, c in branch["choices"].items() if c["label"].lower() in lowered), None)
+    if choice_key is None:
+        labels = "\n".join(f'  • "{c["label"]}"' for c in branch["choices"].values())
+        await update.effective_chat.send_message(
+            f"Which way do you want to go on **{quest['title']}**?\n{labels}",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    chosen = branch["choices"][choice_key]
+    db.resolve_board_quest_branch(quest["board_quest_id"], choice_key)
+    db.add_xp(telegram_user_id, chosen["reward_xp"])
+    fresh = db.get_character(telegram_user_id)
+    db.update_character(telegram_user_id, gold=fresh["gold"] + chosen["reward_gold"])
+    if chosen.get("faction_id") and chosen.get("faction_delta"):
+        db.adjust_faction_standing(telegram_user_id, chosen["faction_id"], chosen["faction_delta"])
+
+    location = cl.get_location(CAMPAIGN, quest["location_id"])
+    location_name = location["name"] if location else quest["location_id"]
+    outcome_narration = await asyncio.to_thread(
+        narrate_branching_choice_outcome, location_name, chosen["label"], chosen["outcome_facts"]
+    )
+    await update.effective_chat.send_message(
+        f"📜 **{quest['title']} — resolved**\n{outcome_narration}\n\n"
+        f"You gain {chosen['reward_xp']} XP, {chosen['reward_gold']} gold.",
         message_thread_id=config.TOPIC_ADVENTURE_ID,
     )
 
@@ -2303,14 +2378,18 @@ async def _do_check_quests(update: Update) -> None:
 
     location_id = character["current_location"]
     location = cl.get_location(CAMPAIGN, location_id)
+    story_offer = _offerable_quest_at_location(character, location_id)
     area_board_quests = board_quests_module.get_or_generate_board_quests(CAMPAIGN, location_id)
     lines.append(f"\n📋 **Quest board — {location['name'] if location else location_id}**")
+    if not story_offer and not area_board_quests:
+        lines.append("Nothing posted here today.")
+    if story_offer:
+        _, quest = story_offer
+        lines.append(f"📜 **{quest['title']}**\n{quest['description']}")
     if area_board_quests:
         lines.append(board_quests_module.format_board_listings(area_board_quests))
-        if any(not q.get("accepted_by") and not q.get("completed_at") for q in area_board_quests):
-            lines.append("(Say \"I accept this quest\" — name it if more than one's posted.)")
-    else:
-        lines.append("Nothing posted here today.")
+    if story_offer or any(not q.get("accepted_by") and not q.get("completed_at") for q in area_board_quests):
+        lines.append("(Say \"I accept this quest\" — name it if more than one's posted.)")
 
     await update.effective_chat.send_message("\n".join(lines), message_thread_id=config.TOPIC_ADVENTURE_ID)
 
@@ -2537,14 +2616,20 @@ async def _do_gather(update: Update, action_text: str) -> None:
                 continue
             updated = db.record_board_quest_progress(board_quest["board_quest_id"], 1)
             if updated["progress_count"] >= updated["objective_count"]:
-                db.complete_board_quest(updated["board_quest_id"])
-                db.add_xp(update.effective_user.id, updated["reward_xp"])
-                fresh = db.get_character(update.effective_user.id)
-                db.update_character(update.effective_user.id, gold=fresh["gold"] + updated["reward_gold"])
-                message += (
-                    f"\n📜 **Board quest complete: {updated['title']}!** "
-                    f"You earn {updated['reward_xp']} XP, {updated['reward_gold']} gold."
-                )
+                if updated.get("branch_data"):
+                    message += (
+                        f"\n📜 **{updated['title']}** — objective complete. A decision awaits "
+                        f"(check quests to see the choice)."
+                    )
+                else:
+                    db.complete_board_quest(updated["board_quest_id"])
+                    db.add_xp(update.effective_user.id, updated["reward_xp"])
+                    fresh = db.get_character(update.effective_user.id)
+                    db.update_character(update.effective_user.id, gold=fresh["gold"] + updated["reward_gold"])
+                    message += (
+                        f"\n📜 **Board quest complete: {updated['title']}!** "
+                        f"You earn {updated['reward_xp']} XP, {updated['reward_gold']} gold."
+                    )
             else:
                 message += (
                     f"\n📋 Board quest progress: {updated['title']} "
@@ -3611,6 +3696,8 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         await _do_shove(update, text)
     elif action == "flee":
         await _do_flee(update, text)
+    elif action == "resolve_choice":
+        await _do_resolve_quest_choice(update, text)
     elif action == "show_map":
         await _do_show_map(update)
     elif action == "gather":

@@ -98,6 +98,7 @@ getting caught, with real consequences, not the same as "buy".
 - "cast_spell" is for casting/using a named spell.
 - "join_guild" is for joining/asking to join a specific guild or order.
 - "pass_turn" is for skipping, waiting, or passing.
+- "resolve_choice" is for declaring a decision on a moral choice/quest resolution (e.g. "I choose to...", "I'll go with...").
 - "chat" is for anything else — general roleplay talk with no clear game action.
 Output ONLY the JSON object, nothing else."""
 
@@ -165,6 +166,10 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in ["my quests", "quest journal", "quest log", "my quest log",
                                     "quest board", "the board", "what's on the board"]):
         return {**base, "action": "check_quests"}
+
+    if any(w in lowered for w in ["i choose", "i decide to", "i'll go with", "ill go with",
+                                    "my choice is", "i'll take the", "ill take the"]):
+        return {**base, "action": "resolve_choice"}
 
     if any(w in lowered for w in ["ask for a clue", "ask for clues", "give me a clue", "any clues",
                                     "what's the clue", "need a hint", "give me a hint"]):
@@ -340,7 +345,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
                 "go_inactive", "skill_check", "shove", "show_map", "gather", "craft",
                 "list_characters", "switch_character", "delete_character",
                 "fast_travel", "accept_quest", "check_quests", "ask_clue",
-                "answer_puzzle", "gamble", "chat", "examine", "flee",
+                "answer_puzzle", "gamble", "chat", "examine", "flee", "resolve_choice",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

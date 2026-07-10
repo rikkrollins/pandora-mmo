@@ -429,3 +429,96 @@ def narrate_examine(character: dict, location_name: str, object_name: str, objec
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] examine narration call failed, falling back to plain description: {e}")
     return object_description
+
+
+def _branching_setup_preamble() -> str:
+    return (
+        "You are the Dungeon Master writing the setup for a morally "
+        "ambiguous bounty posted on a location's quest board. You are "
+        "given real facts: the location, an NPC connected to it (if "
+        "any), and the real physical objective (a monster to deal with "
+        "or material to retrieve) — these facts have ALREADY been "
+        f"decided. Write a short, atmospheric setup ({scaled_sentences(3, 5)}) "
+        "that frames the task with a hint of moral ambiguity or an "
+        "unresolved question — something about this isn't quite as "
+        "simple as it first sounds. Do NOT invent any new named person, "
+        "place, faction, or object beyond what's given, and do NOT "
+        "resolve the ambiguity or state which choice is 'right' — leave "
+        "it genuinely open. Do NOT list or describe the specific "
+        "choices themselves; those are presented separately, after your "
+        f"narration. {style_directive()}"
+    )
+
+
+def _build_branching_setup_prompt(location_name: str, npc_name: str | None,
+                                   npc_personality: str | None, objective_facts: str) -> str:
+    npc_line = (
+        f"An NPC tied to this place: {npc_name} ({npc_personality})"
+        if npc_name else "No specific NPC is tied to this place — it's simply posted on the board."
+    )
+    return (
+        f"{_branching_setup_preamble()}\n\n"
+        f"Location: {location_name}\n"
+        f"{npc_line}\n"
+        f"Real objective (narrate ONLY this, faithfully): {objective_facts}\n\n"
+        f"Write the setup now:"
+    )
+
+
+def narrate_branching_quest_setup(location_name: str, npc_name: str | None,
+                                   npc_personality: str | None, objective_facts: str) -> str:
+    """
+    Narrates the atmospheric setup for a branching (moral-choice) board
+    quest. Grounded strictly in the real location/NPC/objective facts
+    given — never invents the choices themselves or their consequences,
+    which are fixed, deterministic data decided by board_quests.py.
+    """
+    prompt = _build_branching_setup_prompt(location_name, npc_name, npc_personality, objective_facts)
+    try:
+        response = requests.post(
+            f"{config.OLLAMA_BASE_URL}/api/generate",
+            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False},
+            timeout=200,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = strip_think_tags(data.get("response", ""))
+        if text:
+            return text
+    except (requests.RequestException, ValueError) as e:
+        print(f"[dm_agent] branching quest setup narration failed, falling back to plain text: {e}")
+    return f"Something about this task at {location_name} doesn't sit quite right."
+
+
+def _build_branching_outcome_prompt(location_name: str, choice_label: str, outcome_facts: str) -> str:
+    return (
+        "You are the Dungeon Master narrating the resolution of a moral "
+        "choice a character just made on a bounty. You are given the "
+        "real choice they made and its real, already-decided "
+        f"consequence — narrate ONLY this ({scaled_sentences(2, 4)}), faithfully, "
+        "without inventing new facts, and without passing judgment on "
+        f"whether it was the 'right' choice. {style_directive()}\n\n"
+        f"Location: {location_name}\n"
+        f"Choice made: {choice_label}\n"
+        f"Real consequence (narrate ONLY this, faithfully): {outcome_facts}\n\n"
+        f"Write the resolution now:"
+    )
+
+
+def narrate_branching_choice_outcome(location_name: str, choice_label: str, outcome_facts: str) -> str:
+    """Narrates the resolution of a branching quest's final choice, grounded in its fixed, real consequence."""
+    prompt = _build_branching_outcome_prompt(location_name, choice_label, outcome_facts)
+    try:
+        response = requests.post(
+            f"{config.OLLAMA_BASE_URL}/api/generate",
+            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False},
+            timeout=200,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = strip_think_tags(data.get("response", ""))
+        if text:
+            return text
+    except (requests.RequestException, ValueError) as e:
+        print(f"[dm_agent] branching quest outcome narration failed, falling back to plain text: {e}")
+    return outcome_facts

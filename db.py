@@ -124,7 +124,8 @@ CREATE TABLE IF NOT EXISTS board_quests (
     accepted_at TEXT,
     expires_at TEXT,
     progress_count INTEGER NOT NULL DEFAULT 0,
-    completed_at TEXT
+    completed_at TEXT,
+    branch_data TEXT
 );
 """
 
@@ -191,6 +192,10 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN last_active_at TEXT")
         if "active_quests" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN active_quests TEXT NOT NULL DEFAULT '{}'")
+
+        board_quest_columns = _existing_columns(conn, "board_quests")
+        if "branch_data" not in board_quest_columns:
+            conn.execute("ALTER TABLE board_quests ADD COLUMN branch_data TEXT")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -711,6 +716,12 @@ def get_idle_real_characters() -> list[dict]:
 
 # --- Area quest board ---
 
+def _board_quest_row_to_dict(row) -> dict:
+    d = dict(row)
+    d["branch_data"] = json.loads(d["branch_data"]) if d.get("branch_data") else None
+    return d
+
+
 def get_active_board_quests(location_id: str, day_key: str) -> list[dict]:
     """All of today's board quests for this location (accepted or not), oldest first."""
     with get_connection() as conn:
@@ -719,7 +730,7 @@ def get_active_board_quests(location_id: str, day_key: str) -> list[dict]:
             "ORDER BY board_quest_id ASC",
             (location_id, day_key),
         ).fetchall()
-    return [dict(r) for r in rows]
+    return [_board_quest_row_to_dict(r) for r in rows]
 
 
 def get_active_board_quest(location_id: str, day_key: str) -> dict | None:
@@ -730,7 +741,7 @@ def get_active_board_quest(location_id: str, day_key: str) -> dict | None:
             "ORDER BY board_quest_id DESC LIMIT 1",
             (location_id, day_key),
         ).fetchone()
-    return dict(row) if row else None
+    return _board_quest_row_to_dict(row) if row else None
 
 
 def create_board_quest(location_id: str, day_key: str, title: str, description: str,
@@ -753,7 +764,7 @@ def create_board_quest(location_id: str, day_key: str, title: str, description: 
         row = conn.execute(
             "SELECT * FROM board_quests WHERE board_quest_id = ?", (board_quest_id,)
         ).fetchone()
-    return dict(row)
+    return _board_quest_row_to_dict(row)
 
 
 def accept_board_quest(board_quest_id: int, telegram_user_id: int) -> dict | None:
@@ -769,7 +780,7 @@ def accept_board_quest(board_quest_id: int, telegram_user_id: int) -> dict | Non
         row = conn.execute(
             "SELECT * FROM board_quests WHERE board_quest_id = ?", (board_quest_id,)
         ).fetchone()
-    return dict(row) if row else None
+    return _board_quest_row_to_dict(row) if row else None
 
 
 def record_board_quest_progress(board_quest_id: int, amount: int = 1) -> dict | None:
@@ -781,7 +792,7 @@ def record_board_quest_progress(board_quest_id: int, amount: int = 1) -> dict | 
         row = conn.execute(
             "SELECT * FROM board_quests WHERE board_quest_id = ?", (board_quest_id,)
         ).fetchone()
-    return dict(row) if row else None
+    return _board_quest_row_to_dict(row) if row else None
 
 
 def complete_board_quest(board_quest_id: int) -> None:
@@ -792,6 +803,38 @@ def complete_board_quest(board_quest_id: int) -> None:
         )
 
 
+def set_board_quest_branch_data(board_quest_id: int, branch_data: dict) -> None:
+    """
+    Attaches branching-quest metadata (archetype id, AI-generated setup
+    narration, and the two named choices with their own fixed
+    reward/consequence data) to a board quest generated as a branching
+    one. Stored as JSON since its shape is archetype-specific, unlike
+    the other board_quests columns which are the same for every quest.
+    """
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE board_quests SET branch_data = ? WHERE board_quest_id = ?",
+            (json.dumps(branch_data), board_quest_id),
+        )
+
+
+def resolve_board_quest_branch(board_quest_id: int, choice_key: str) -> dict | None:
+    """Marks a branching quest completed with a specific choice recorded, for narration/history."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT branch_data FROM board_quests WHERE board_quest_id = ?", (board_quest_id,)
+        ).fetchone()
+        if row is None or not row["branch_data"]:
+            return None
+        branch_data = json.loads(row["branch_data"])
+        branch_data["resolved_choice"] = choice_key
+        conn.execute(
+            "UPDATE board_quests SET branch_data = ?, completed_at = ? WHERE board_quest_id = ?",
+            (json.dumps(branch_data), datetime.now(timezone.utc).isoformat(), board_quest_id),
+        )
+    return branch_data
+
+
 def get_accepted_board_quests_for_user(telegram_user_id: int) -> list[dict]:
     """A player's currently-accepted, not-yet-completed board quests (any location)."""
     with get_connection() as conn:
@@ -799,7 +842,7 @@ def get_accepted_board_quests_for_user(telegram_user_id: int) -> list[dict]:
             "SELECT * FROM board_quests WHERE accepted_by = ? AND completed_at IS NULL",
             (telegram_user_id,),
         ).fetchall()
-    return [dict(r) for r in rows]
+    return [_board_quest_row_to_dict(r) for r in rows]
 
 
 def expire_stale_board_quests() -> list[dict]:
@@ -816,7 +859,7 @@ def expire_stale_board_quests() -> list[dict]:
             "AND expires_at IS NOT NULL AND expires_at < ?",
             (now_iso,),
         ).fetchall()
-        expired = [dict(r) for r in rows]
+        expired = [_board_quest_row_to_dict(r) for r in rows]
         if expired:
             conn.execute(
                 "UPDATE board_quests SET accepted_by = NULL, accepted_at = NULL, expires_at = NULL, "
