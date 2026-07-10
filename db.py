@@ -98,6 +98,36 @@ CREATE TABLE IF NOT EXISTS faction_standing (
 );
 """
 
+# Area quest board — distinct from a character's personal quest journal
+# (active_quests/completed_quests on the characters table, which only
+# ever covers the hand-authored story quests). A board quest is a
+# repeatable, generated bounty tied to a LOCATION rather than to any
+# one character: anyone there can see it and accept it, it expires 24h
+# after being accepted if not finished (returning to the board for
+# someone else), and one gets generated per location per real day, so
+# there's something new to do without touching the main story arcs.
+CREATE_BOARD_QUESTS_TABLE = """
+CREATE TABLE IF NOT EXISTS board_quests (
+    board_quest_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    location_id TEXT NOT NULL,
+    day_key TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    giver_npc TEXT,
+    objective_type TEXT NOT NULL,
+    objective_target TEXT NOT NULL,
+    objective_count INTEGER NOT NULL DEFAULT 1,
+    reward_xp INTEGER NOT NULL DEFAULT 0,
+    reward_gold INTEGER NOT NULL DEFAULT 0,
+    generated_at TEXT NOT NULL,
+    accepted_by INTEGER,
+    accepted_at TEXT,
+    expires_at TEXT,
+    progress_count INTEGER NOT NULL DEFAULT 0,
+    completed_at TEXT
+);
+"""
+
 
 @contextmanager
 def get_connection():
@@ -143,6 +173,7 @@ def init_db() -> None:
         conn.execute(CREATE_ACTIVE_CHARACTERS_TABLE)
         conn.execute(CREATE_NPC_RELATIONSHIPS_TABLE)
         conn.execute(CREATE_FACTION_STANDING_TABLE)
+        conn.execute(CREATE_BOARD_QUESTS_TABLE)
 
         # Older DBs created before fog-of-war/character-slots/proficiency
         # may already have the new characters table but be missing later
@@ -676,3 +707,110 @@ def get_idle_real_characters() -> list[dict]:
             """
         ).fetchall()
     return [_row_to_dict(r) for r in rows]
+
+
+# --- Area quest board ---
+
+def get_active_board_quest(location_id: str, day_key: str) -> dict | None:
+    """The current, non-expired-out board quest for this location today, if any (accepted or not)."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM board_quests WHERE location_id = ? AND day_key = ? "
+            "ORDER BY board_quest_id DESC LIMIT 1",
+            (location_id, day_key),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def create_board_quest(location_id: str, day_key: str, title: str, description: str,
+                        giver_npc: str | None, objective_type: str, objective_target: str,
+                        objective_count: int, reward_xp: int, reward_gold: int) -> dict:
+    with get_connection() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO board_quests (
+                location_id, day_key, title, description, giver_npc,
+                objective_type, objective_target, objective_count,
+                reward_xp, reward_gold, generated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (location_id, day_key, title, description, giver_npc,
+             objective_type, objective_target, objective_count,
+             reward_xp, reward_gold, datetime.now(timezone.utc).isoformat()),
+        )
+        board_quest_id = cur.lastrowid
+        row = conn.execute(
+            "SELECT * FROM board_quests WHERE board_quest_id = ?", (board_quest_id,)
+        ).fetchone()
+    return dict(row)
+
+
+def accept_board_quest(board_quest_id: int, telegram_user_id: int) -> dict | None:
+    now = datetime.now(timezone.utc)
+    expires = now.timestamp() + (24 * 3600)
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE board_quests SET accepted_by = ?, accepted_at = ?, expires_at = ? "
+            "WHERE board_quest_id = ? AND accepted_by IS NULL",
+            (telegram_user_id, now.isoformat(), datetime.fromtimestamp(expires, timezone.utc).isoformat(),
+             board_quest_id),
+        )
+        row = conn.execute(
+            "SELECT * FROM board_quests WHERE board_quest_id = ?", (board_quest_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def record_board_quest_progress(board_quest_id: int, amount: int = 1) -> dict | None:
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE board_quests SET progress_count = progress_count + ? WHERE board_quest_id = ?",
+            (amount, board_quest_id),
+        )
+        row = conn.execute(
+            "SELECT * FROM board_quests WHERE board_quest_id = ?", (board_quest_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def complete_board_quest(board_quest_id: int) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE board_quests SET completed_at = ? WHERE board_quest_id = ?",
+            (datetime.now(timezone.utc).isoformat(), board_quest_id),
+        )
+
+
+def get_accepted_board_quests_for_user(telegram_user_id: int) -> list[dict]:
+    """A player's currently-accepted, not-yet-completed board quests (any location)."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM board_quests WHERE accepted_by = ? AND completed_at IS NULL",
+            (telegram_user_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def expire_stale_board_quests() -> list[dict]:
+    """
+    Releases any accepted-but-not-completed board quest whose 24h
+    window has passed, back to the board for someone else. Returns the
+    rows that were just expired (for narration/logging), not deleted --
+    the location simply gets a fresh one generated next time it's checked.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM board_quests WHERE accepted_by IS NOT NULL AND completed_at IS NULL "
+            "AND expires_at IS NOT NULL AND expires_at < ?",
+            (now_iso,),
+        ).fetchall()
+        expired = [dict(r) for r in rows]
+        if expired:
+            conn.execute(
+                "UPDATE board_quests SET accepted_by = NULL, accepted_at = NULL, expires_at = NULL, "
+                "progress_count = 0 WHERE accepted_by IS NOT NULL AND completed_at IS NULL "
+                "AND expires_at IS NOT NULL AND expires_at < ?",
+                (now_iso,),
+            )
+    return expired

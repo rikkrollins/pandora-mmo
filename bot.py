@@ -27,6 +27,7 @@ from telegram.ext import (
     filters,
 )
 
+import board_quests as board_quests_module
 import campaign_loader as cl
 import config
 import version
@@ -420,17 +421,20 @@ async def _maybe_post_hourly_status_update(bot) -> None:
         for q in CAMPAIGN["quests"].values()
         if q.get("location") == location_id
     ]
+    board_quest = board_quests_module.get_or_generate_board_quest(CAMPAIGN, location_id)
 
     flavor = await asyncio.to_thread(narrate_hourly_update, location_name, recent_events, activity_lines)
 
     lines = [f"🕐 *(the hour turns over — {location_name})*", flavor, ""]
     lines.append(f"👥 Players: {active_count} active, {inactive_count} resting.")
     if quest_board:
-        lines.append(f"📋 Quest board at {location_name}:")
+        lines.append(f"📋 Story quest board at {location_name}:")
         for title, desc in quest_board:
             lines.append(f"  • {title} — {desc}" if desc else f"  • {title}")
     else:
-        lines.append(f"📋 Quest board at {location_name}: nothing posted right now.")
+        lines.append(f"📋 Story quest board at {location_name}: nothing posted right now.")
+    if board_quest:
+        lines.append(board_quests_module.format_board_listing(board_quest))
 
     update_like = _ChatOnlyUpdate(bot, _LAST_KNOWN_CHAT_ID)
     await _safe_send(update_like, "\n".join(lines))
@@ -994,7 +998,36 @@ def _award_victory_xp(session: sessions.Session) -> str:
     if enemy_names:
         _log_world_event(event_location, f"The party defeated {', '.join(enemy_names)}.")
 
+    board_note = ""
+    if event_location:
+        board_quest = board_quests_module.get_todays_board_quest(event_location)
+        if board_quest and board_quest.get("accepted_by") and not board_quest.get("completed_at") \
+                and board_quest["objective_type"] == "defeat_monster":
+            defeated_matching = sum(
+                1 for p in session.participants
+                if session.sides.get(p["telegram_user_id"]) == "enemy"
+                and p.get("monster_key") == board_quest["objective_target"]
+            )
+            if defeated_matching:
+                updated = db.record_board_quest_progress(board_quest["board_quest_id"], defeated_matching)
+                if updated["progress_count"] >= updated["objective_count"]:
+                    db.complete_board_quest(updated["board_quest_id"])
+                    for pid in real_party_ids:
+                        db.add_xp(pid, updated["reward_xp"])
+                        character = db.get_character(pid)
+                        db.update_character(pid, gold=character["gold"] + updated["reward_gold"])
+                    board_note = (
+                        f"\n📜 **Board quest complete: {updated['title']}!** "
+                        f"Party earns {updated['reward_xp']} XP, {updated['reward_gold']} gold each."
+                    )
+                else:
+                    board_note = (
+                        f"\n📋 Board quest progress: {updated['title']} "
+                        f"({updated['progress_count']}/{updated['objective_count']})"
+                    )
+
     summary = f"\n✨ Party gains {xp_each} XP each ({enemy_xp_total} total)."
+    summary += board_note
     if level_up_notes:
         summary += "\n" + "\n".join(level_up_notes)
     return summary
@@ -1266,6 +1299,7 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 "is_ai": 1, "xp_reward": template.get("xp_reward", 0),
                 "on_hit_condition": template.get("on_hit_condition"),
                 "monster_key": monster_key,
+                "is_boss": template.get("is_boss", False),
             })
         sides = {p["telegram_user_id"]: "party" for p in party}
         for enemy in enemies:
@@ -1302,6 +1336,7 @@ def _npc_combatant_from_stats(npc_id: str, npc_data: dict) -> dict:
         "hp_max": stats["hp_max"], "proficiency_bonus": stats["proficiency_bonus"],
         "is_ai": 1, "xp_reward": stats.get("xp_reward", 0),
         "source_npc_id": npc_id,
+        "is_boss": npc_data.get("is_boss", False),
     }
 
 
@@ -1823,6 +1858,97 @@ async def _do_shove(update: Update, action_text: str) -> None:
         await _resolve_ai_turns(update, session)
 
 
+async def _do_flee(update: Update, action_text: str) -> None:
+    """
+    A real dice roll to escape an active fight — "cancel" no longer
+    force-ends combat for ordinary players (see adventure_master_handler's
+    UNIVERSAL_ESCAPE_PHRASES handling), so this is the actual way out.
+    Impossible against any enemy flagged is_boss in campaign.json —
+    those fights don't let you walk away. Uses the same fixed
+    SKILL_CHECK_DC as every other check in this game, on purpose, so
+    difficulty is never something the AI gets to invent.
+    """
+    chat_id = update.effective_chat.id
+    async with sessions.get_lock(chat_id):
+        session = sessions.get_session(chat_id)
+        if session is None:
+            await update.effective_chat.send_message(
+                "No combat is active right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            )
+            return
+
+        user_id = update.effective_user.id
+        if session.current_participant_id() != user_id:
+            await _self_heal_stuck_ai_turn(update, session)
+            session = sessions.get_session(chat_id)
+            if session is None:
+                await update.effective_chat.send_message(
+                    "Combat had stalled and just resolved itself — nothing active right now.",
+                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                )
+                return
+        if session.current_participant_id() != user_id:
+            current_name = session.current_participant()["name"]
+            await update.effective_chat.send_message(
+                f"It's not your turn — it's **{current_name}**'s turn.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+
+        fleeing = session.current_participant()
+        if fleeing["hp_current"] <= 0:
+            await update.effective_chat.send_message(
+                "You're unconscious (0 HP) and can't act until healed.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+
+        opposing = session.living_on_side(session.opposing_side(user_id))
+        if any(e.get("is_boss") for e in opposing):
+            await update.effective_chat.send_message(
+                "🚫 There's no fleeing this fight — whatever you're facing won't let you leave.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+
+        result = roll_ability_check(fleeing, "dexterity", proficient=False)
+        success = result["total"] >= SKILL_CHECK_DC
+
+        flavor = await asyncio.to_thread(
+            narrate_skill_check, fleeing, action_text, "dexterity",
+            {**result, "ability": "dexterity", "dc": SKILL_CHECK_DC, "success": success},
+        )
+        message = _format_skill_check_result(flavor, result, "dexterity", SKILL_CHECK_DC, success)
+
+        if not success:
+            await update.effective_chat.send_message(
+                f"{message}\n\n💨 The attempt fails — you're still in the fight.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            session.advance_turn()
+            await _resolve_ai_turns(update, session)
+            return
+
+        character = db.get_character(user_id)
+        destination_id = _nearest_safe_waypoint(character) if character else SAFE_LOCATION_FALLBACK
+        destination_name = cl.get_location(CAMPAIGN, destination_id)["name"]
+        if character:
+            db.update_character(user_id, current_location=destination_id)
+
+        session.remove_dead_player(user_id)
+        combat_over = session.is_combat_over()
+
+        await update.effective_chat.send_message(
+            f"{message}\n\n🏃 **You break away and flee to {destination_name}!**"
+            + ("\n\n🏳️ With you gone, the fight has no one left to finish — it ends here." if combat_over else ""),
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        if combat_over:
+            sessions.end_session(chat_id)
+        else:
+            await _resolve_ai_turns(update, session)
+
+
 async def _do_rest(update: Update) -> None:
     chat_id = update.effective_chat.id
     if sessions.get_session(chat_id) is not None:
@@ -2096,22 +2222,49 @@ async def _do_accept_quest(update: Update) -> None:
         )
         return
 
-    offer = _offerable_quest_at_location(character, character["current_location"])
-    if offer is None:
+    location_id = character["current_location"]
+    offer = _offerable_quest_at_location(character, location_id)
+    if offer is not None:
+        quest_id, quest = offer
+        db.accept_quest(telegram_user_id, quest_id)
+        await update.effective_chat.send_message(
+            f"📜 **Quest accepted: {quest['title']}**\n{quest['description']}",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    # No story quest on offer here — try the area's board quest instead.
+    board_quest = board_quests_module.get_or_generate_board_quest(CAMPAIGN, location_id)
+    if board_quest is None or board_quest.get("completed_at"):
         await update.effective_chat.send_message(
             "There's nothing to take on here right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
         )
         return
+    if board_quest.get("accepted_by"):
+        await update.effective_chat.send_message(
+            f"**{board_quest['title']}** has already been taken on by another party today.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
 
-    quest_id, quest = offer
-    db.accept_quest(telegram_user_id, quest_id)
+    db.accept_board_quest(board_quest["board_quest_id"], telegram_user_id)
     await update.effective_chat.send_message(
-        f"📜 **Quest accepted: {quest['title']}**\n{quest['description']}",
+        f"📜 **Board quest accepted: {board_quest['title']}**\n{board_quest['description']}\n"
+        f"Reward: {board_quest['reward_xp']} XP, {board_quest['reward_gold']} gold. "
+        f"Expires in 24h if not finished.",
         message_thread_id=config.TOPIC_ADVENTURE_ID,
     )
 
 
 async def _do_check_quests(update: Update) -> None:
+    """
+    Shows two distinct things, per Coffee's explicit terminology
+    (2026-07-10): the character's personal Quest Journal (story quests
+    from campaign.json, tracked per-character in active_quests/
+    completed_quests) AND the current location's area Quest Board (a
+    repeatable, generated bounty anyone there can accept — see
+    board_quests.py). These are never the same list.
+    """
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
@@ -2127,11 +2280,22 @@ async def _do_check_quests(update: Update) -> None:
             if quest:
                 lines.append(f"• {quest['title']} — {quest['description']}")
     else:
-        lines.append("\nNo active quests.")
+        lines.append("\nNo active story quests.")
 
     if character["completed_quests"]:
         titles = [CAMPAIGN["quests"][q]["title"] for q in character["completed_quests"] if q in CAMPAIGN["quests"]]
         lines.append(f"\n**Completed ({len(titles)}):** {', '.join(titles)}")
+
+    location_id = character["current_location"]
+    location = cl.get_location(CAMPAIGN, location_id)
+    board_quest = board_quests_module.get_or_generate_board_quest(CAMPAIGN, location_id)
+    lines.append(f"\n📋 **Quest board — {location['name'] if location else location_id}**")
+    if board_quest:
+        lines.append(board_quests_module.format_board_listing(board_quest))
+        if not board_quest.get("accepted_by") and not board_quest.get("completed_at"):
+            lines.append("(Say \"I accept this quest\" to take it on.)")
+    else:
+        lines.append("Nothing posted here today.")
 
     await update.effective_chat.send_message("\n".join(lines), message_thread_id=config.TOPIC_ADVENTURE_ID)
 
@@ -2350,6 +2514,27 @@ async def _do_gather(update: Update, action_text: str) -> None:
     message = _format_skill_check_result(flavor, result, node["ability"], SKILL_CHECK_DC, success)
     if success:
         message += f"\n🌿 You gather **1x {material['name']}**."
+
+        board_quest = board_quests_module.get_todays_board_quest(character["current_location"])
+        if board_quest and board_quest.get("accepted_by") and not board_quest.get("completed_at") \
+                and board_quest["objective_type"] == "gather_material" \
+                and board_quest["objective_target"] == node["material"]:
+            updated = db.record_board_quest_progress(board_quest["board_quest_id"], 1)
+            if updated["progress_count"] >= updated["objective_count"]:
+                db.complete_board_quest(updated["board_quest_id"])
+                db.add_xp(update.effective_user.id, updated["reward_xp"])
+                fresh = db.get_character(update.effective_user.id)
+                db.update_character(update.effective_user.id, gold=fresh["gold"] + updated["reward_gold"])
+                message += (
+                    f"\n📜 **Board quest complete: {updated['title']}!** "
+                    f"You earn {updated['reward_xp']} XP, {updated['reward_gold']} gold."
+                )
+            else:
+                message += (
+                    f"\n📋 Board quest progress: {updated['title']} "
+                    f"({updated['progress_count']}/{updated['objective_count']})"
+                )
+
     await update.effective_chat.send_message(message, message_thread_id=config.TOPIC_ADVENTURE_ID)
 
 
@@ -3003,7 +3188,11 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             _consume_scroll_if_any()
 
             stats = spell["summon_stats"]
-            synthetic_id = -3_000_000 - (abs(hash((chat_id, character["name"], session.round_number))) % 100_000)
+            # -4_000_000 range: distinct from _do_start_combat's -2_000_000
+            # monsters and _npc_combatant_from_stats's -3_000_000 hostile
+            # NPCs, so a summon's synthetic id can never collide with
+            # either inside the same session's participant list.
+            synthetic_id = -4_000_000 - (abs(hash((chat_id, character["name"], session.round_number))) % 100_000)
             summon = {
                 "telegram_user_id": synthetic_id, "name": stats["name"].title(),
                 "dexterity": stats["dexterity"], "strength": stats["strength"],
@@ -3244,17 +3433,32 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         had_active_state = _clear_all_stateful_flows(context)
 
         chat_id = update.effective_chat.id
-        had_active_combat = False
-        async with sessions.get_lock(chat_id):
-            if sessions.get_session(chat_id) is not None:
-                sessions.end_session(chat_id)
-                had_active_combat = True
+        session_active = sessions.get_session(chat_id) is not None
 
-        if had_active_state and had_active_combat:
-            msg = "Cancelled, and force-ended the stuck combat session. You're free to act again."
-        elif had_active_combat:
-            msg = "Force-ended the stuck combat session. You're free to act again."
-        elif had_active_state:
+        # "cancel" no longer walks a player out of a real fight — that's
+        # what fleeing (a real dice roll, and impossible against a boss)
+        # is for. It's still allowed as a genuine stuck-session recovery
+        # tool, but only for the verified group owner, so it can't
+        # double as a free escape hatch for anyone mid-combat.
+        if session_active:
+            is_owner = await _is_group_owner(update, context)
+            if is_owner:
+                async with sessions.get_lock(chat_id):
+                    if sessions.get_session(chat_id) is not None:
+                        sessions.end_session(chat_id)
+                await update.effective_chat.send_message(
+                    "Force-ended the stuck combat session (owner override). You're free to act again.",
+                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                )
+                return
+            await update.effective_chat.send_message(
+                "You can't just walk away from a fight — try to flee (a real risk, and impossible "
+                "against some enemies), or see it through.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+
+        if had_active_state:
             msg = "Cancelled. Say 'I want to create a character' whenever you're ready to try again."
         else:
             msg = "There's nothing in progress to cancel right now."
@@ -3384,6 +3588,8 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         await _do_skill_check(update, intent.get("ability") or "dexterity", text)
     elif action == "shove":
         await _do_shove(update, text)
+    elif action == "flee":
+        await _do_flee(update, text)
     elif action == "show_map":
         await _do_show_map(update)
     elif action == "gather":
@@ -3662,6 +3868,10 @@ async def _idle_inactivity_loop(application: Application) -> None:
             await _maybe_post_hourly_status_update(application.bot)
         except Exception as e:
             logger.error(f"[hourly_update] failed this cycle: {e!r}")
+        try:
+            db.expire_stale_board_quests()
+        except Exception as e:
+            logger.error(f"[board_quests] expiry check failed this cycle: {e!r}")
         try:
             await _maybe_check_moltbook_activity(application.bot)
         except Exception as e:

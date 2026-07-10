@@ -740,7 +740,8 @@
       "armor_class": 15,
       "hp_max": 21,
       "proficiency_bonus": 2,
-      "xp_reward": 200
+      "xp_reward": 200,
+      "is_boss": true
     },
     "wolf": {
       "name": "Wolf",

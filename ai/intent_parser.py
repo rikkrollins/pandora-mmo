@@ -46,6 +46,7 @@ answer_puzzle, gamble, chat>", \
 
 Rules:
 - "attack" is for any offensive action aimed at an enemy (attack, swing, shoot, cast at, strike).
+- "flee" is for trying to run away, escape, or retreat from an active fight (a real risk, not guaranteed).
 - "talk_npc" is for addressing a specific named NPC conversationally.
 - "start_combat" is when a player wants to begin a fight or encounter.
 - "create_character" is when a player wants to make/join with a new character.
@@ -139,6 +140,11 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
             if any(w in lowered for w in recruit_words):
                 return {**base, "action": "recruit_npc", "npc_name": npc_name}
             return {**base, "action": "talk_npc", "npc_name": npc_name}
+
+    flee_words = ["flee", "run away", "try to run", "try to escape", "escape the fight",
+                  "retreat", "get out of here", "make a break for it"]
+    if any(w in lowered for w in flee_words):
+        return {**base, "action": "flee"}
 
     attack_words = ["attack", "swing", "shoot", "strike", "hit", "stab", "cast at", "fire at"]
     if any(w in lowered for w in attack_words):
@@ -334,7 +340,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
                 "go_inactive", "skill_check", "shove", "show_map", "gather", "craft",
                 "list_characters", "switch_character", "delete_character",
                 "fast_travel", "accept_quest", "check_quests", "ask_clue",
-                "answer_puzzle", "gamble", "chat", "examine",
+                "answer_puzzle", "gamble", "chat", "examine", "flee",
             )
             if parsed["action"] not in valid_actions:
                 return fallback
