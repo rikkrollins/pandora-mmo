@@ -106,6 +106,28 @@ stabilized player faced a target-less enemy, a narration mismatch for
 skill checks) were only caught this way — reasoning about the code
 alone missed all three.
 
+**Never test against the live `pandora_mmo.db`** once it has real
+player data. Point `DB_PATH` at a throwaway file under `tests/tmp/`
+(gitignored) instead, e.g.:
+`DB_PATH=tests/tmp/whatever.db python3 bot_test_tmp.py`. Delete the
+throwaway `.py` script and the `.db`/`.db-journal` files when done,
+same as any other `*_tmp.py`.
+
+**Deploy safety, live production bot:**
+- Redeploys must always be one atomic stop-and-restart command
+  (`pkill -f "python3 bot.py"; sleep 1; cd ~/pandora_mmo && nohup
+  python3 bot.py >> bot_live_tmp.log 2>&1 & disown; sleep 4; ps aux |
+  grep "python3 bot.py"`) — note `>>` (append), not `>`, so restarting
+  doesn't erase log history needed to answer "did you see the message
+  I sent?" Never split the kill and the restart into separate tool
+  calls; if the atomic command's exit code looks wrong, immediately
+  check `ps aux` and restart standalone if the bot is actually down —
+  real players may be active.
+- Before a redeploy, post a heads-up to the group (Development topic)
+  that an update is coming with a rough ETA, via
+  `scripts/announce_deploy.py`, so players aren't caught by a silent
+  restart. The bot should otherwise stay online continuously.
+
 ## Known limitations (see SETUP_GUIDE.md for the full, current list)
 
 - Reactions (Shield, Counterspell, opportunity attacks) are NOT

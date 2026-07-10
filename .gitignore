@@ -1,6 +1,9 @@
 # Local runtime files — never commit these
 .env
 *.db
+*.db-journal
 __pycache__/
 *.pyc
 .DS_Store
+bot_live_tmp.log
+bot_test_tmp.log

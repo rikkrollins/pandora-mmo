@@ -18,6 +18,17 @@ import requests
 import config
 from ai.text_cleanup import strip_think_tags
 
+# Confirmed live, twice, on unrelated inputs ("my characters", "I'm
+# back"): this small model has a real bias toward guessing
+# "start_combat" when uncertain — an "attractor" wrong answer, not a
+# one-off. A false positive here is uniquely disruptive (an unwanted
+# fight), so it's held to a higher bar than other actions: trusted only
+# when the raw text actually contains one of these explicit phrases.
+COMBAT_START_WORDS = [
+    "start combat", "begin fight", "let's fight", "lets fight", "encounter",
+    "start a fight", "begin combat", "fight some", "fight the",
+]
+
 INTENT_SYSTEM_PROMPT = """You are an intent classifier for a text-based D&D 5E game. \
 Given a player's free-text message and some context, output ONLY a JSON object \
 (no other text, no markdown fences) with this shape:
@@ -131,11 +142,7 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in attack_words):
         return {**base, "action": "attack"}
 
-    combat_start_words = [
-        "start combat", "begin fight", "let's fight", "lets fight", "encounter",
-        "start a fight", "begin combat", "fight some", "fight the",
-    ]
-    if any(w in lowered for w in combat_start_words):
+    if any(w in lowered for w in COMBAT_START_WORDS):
         return {**base, "action": "start_combat"}
 
     if any(w in lowered for w in ["create a character", "make a character", "new character", "join the game"]):
@@ -340,6 +347,15 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
             # that opinion is trusted over the model's, rather than
             # special-casing just the newest action types.
             if fallback["action"] != "chat" and parsed["action"] != fallback["action"]:
+                return fallback
+            # Extra, narrower safeguard on top of the general rule above:
+            # "start_combat" specifically is never trusted from the model
+            # unless the raw text actually contains one of its explicit
+            # trigger phrases — confirmed live twice now that the model
+            # guesses this as a fallback answer for unrelated text ("I'm
+            # back" started a fight). Falls through to the keyword
+            # fallback's own (safe) classification instead.
+            if parsed["action"] == "start_combat" and not any(w in text.lower() for w in COMBAT_START_WORDS):
                 return fallback
             return parsed
     except (requests.RequestException, ValueError) as e:

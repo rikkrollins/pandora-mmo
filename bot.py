@@ -2675,16 +2675,6 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     db.touch_last_active(update.effective_user.id)
     _IDLE_WARNED.discard(update.effective_user.id)
 
-    # Any real message reactivates a resting character automatically —
-    # "until next session" means their next message, not a timer.
-    character = db.get_character(update.effective_user.id)
-    if character and character.get("is_inactive"):
-        db.mark_active(update.effective_user.id)
-        await update.effective_chat.send_message(
-            f"☀️ **{character['name']}** wakes and rejoins — welcome back!",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
-        )
-
     # Universal escape hatch, checked FIRST, before any stateful flow gets
     # a chance to swallow the message. Exact-match only (never a substring
     # check) so ordinary gameplay text like "I stop to look around" or
@@ -2728,6 +2718,30 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # action is the minimum needed to actually audit a "why did this
     # happen" report.
     logger.info(f"[intent] user={update.effective_user.id} action={action!r} text={text!r}")
+
+    # A resting character only wakes for a genuine action or an explicit
+    # confirmation — a passive status/info check (sheet, inventory,
+    # party, quests, map, clues) must NOT wake them by itself, or
+    # "resting until next session" is meaningless the moment someone
+    # checks on them. go_inactive is also excluded: asking to rest again
+    # while already resting isn't "waking up to act."
+    character = db.get_character(update.effective_user.id)
+    if character and character.get("is_inactive"):
+        is_status_check = action in (
+            "check_sheet", "check_inventory", "check_party", "check_quests",
+            "show_map", "ask_clue", "list_characters", "go_inactive",
+        )
+        explicit_wake = any(
+            phrase in text.lower()
+            for phrase in ("wake up", "wake me up", "i'm awake", "im awake", "i'm back", "im back",
+                           "i'm ready", "im ready")
+        )
+        if explicit_wake or not is_status_check:
+            db.mark_active(update.effective_user.id)
+            await update.effective_chat.send_message(
+                f"☀️ **{character['name']}** wakes and rejoins — welcome back!",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
 
     if action == "create_character":
         await _begin_character_creation(update, context)
@@ -2926,6 +2940,12 @@ async def development_topic_handler(update: Update, context: ContextTypes.DEFAUL
 
     question = update.message.text.strip()
     history = context.user_data.setdefault("dev_history", [])
+
+    # Message CONTENT wasn't logged here before — same gap as Adventure
+    # had (see the [intent] logging above). Coffee reported sending a
+    # Development message this session that got no visible acknowledgment
+    # here; this is so a future one is actually traceable.
+    logger.info(f"[dev_topic] user={update.effective_user.id} text={question!r}")
 
     reply = await asyncio.to_thread(answer_dev_question, question, history)
 
