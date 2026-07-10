@@ -11,6 +11,7 @@ route intent and narrate results.
 import asyncio
 import logging
 import random
+from datetime import datetime, timezone
 
 from telegram import Update
 from telegram.error import TelegramError
@@ -98,6 +99,52 @@ _DEFEATED_NPCS: set[str] = set()
 # rather than a scripted trigger every time.
 AMBIENT_NPC_ENCOUNTER_CHANCE = 0.4
 
+# "Resting until next session" — either a player says so explicitly
+# ("rest for the night") or 5 real-world minutes of chat silence gets
+# them a warning, then 5 more minutes of continued silence (10 total)
+# actually commences it automatically. An inactive character can't act,
+# but active party members can still target them with support spells
+# (healing/buffs/cures — never damage), and their owner can freely
+# switch to and play a different character in the meantime (character
+# slots already support this with no changes needed here).
+IDLE_WARNING_SECONDS = 300
+IDLE_TIMEOUT_SECONDS = 600
+IDLE_CHECK_INTERVAL_SECONDS = 60
+SAFE_LOCATION_FALLBACK = "crossroads_tavern"
+
+# Real telegram_user_ids already warned about their current idle
+# stretch, so the warning fires once, not every check cycle. In-memory
+# only, same reasoning as _UNLOCKED/_DEFEATED_NPCS — cleared the moment
+# they act again (see db.touch_last_active's call site).
+_IDLE_WARNED: set[int] = set()
+
+# Captured opportunistically from the first real Adventure message this
+# process sees — the auto-idle background loop has no incoming Update
+# to read a chat_id from otherwise. None until someone actually talks.
+_LAST_KNOWN_CHAT_ID: int | None = None
+
+
+class _ChatOnlyUpdate:
+    """
+    Minimal Update-like shim exposing only .effective_chat.send_message —
+    lets the auto-idle background loop (which has no real incoming
+    Update to hang off of) reuse _safe_send/_resolve_ai_turns/_go_inactive
+    completely unchanged, the same as a real player action would.
+    """
+
+    class _Chat:
+        def __init__(self, bot, chat_id: int):
+            self._bot = bot
+            self.id = chat_id
+
+        async def send_message(self, text, message_thread_id=None, **kwargs):
+            await self._bot.send_message(
+                chat_id=self.id, message_thread_id=message_thread_id, text=text, **kwargs
+            )
+
+    def __init__(self, bot, chat_id: int):
+        self.effective_chat = _ChatOnlyUpdate._Chat(bot, chat_id)
+
 
 async def hear_you_main(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Simple connection-test responder for the Main topic (unrelated to game logic)."""
@@ -145,6 +192,20 @@ def _party_summary_text() -> str:
         for p in party
     ]
     return f"{', '.join(names)} — {len(party)} member{'s' if len(party) != 1 else ''}"
+
+
+def _find_party_target_by_name(text: str) -> dict | None:
+    """
+    Finds a party member (real player, AI companion, or a currently
+    inactive/resting real player — all still count as "in the party")
+    named in free text, for support-spell targeting. Returns None if no
+    party member's name appears, letting the caller default to self.
+    """
+    lowered = text.lower()
+    for member in _get_party_members():
+        if member["name"].lower() in lowered:
+            return member
+    return None
 
 
 async def _send_welcome_narration(update: Update, character: dict) -> None:
@@ -1380,6 +1441,143 @@ async def _do_rest(update: Update) -> None:
     )
 
 
+def _nearest_safe_waypoint(character: dict) -> str:
+    """
+    Where a character ends up when going inactive/resting: their
+    current location if it's already tagged safe (an inn/tavern), else
+    the most recently visited safe location, else the Crossroads Tavern
+    — the only location tagged `"safe": true` in this campaign, but
+    this stays correct if a future campaign adds more.
+    """
+    current_loc = cl.get_location(CAMPAIGN, character["current_location"])
+    if current_loc and current_loc.get("safe"):
+        return character["current_location"]
+    for loc_id in reversed(character["visited_locations"]):
+        loc = cl.get_location(CAMPAIGN, loc_id)
+        if loc and loc.get("safe"):
+            return loc_id
+    return SAFE_LOCATION_FALLBACK
+
+
+def _in_active_combat(telegram_user_id: int, chat_id: int) -> bool:
+    session = sessions.get_session(chat_id)
+    return session is not None and telegram_user_id in session.turn_order
+
+
+async def _go_inactive(telegram_user_id: int, update_like, reason_text: str) -> None:
+    """
+    Marks a character inactive ("resting until next session"): moves
+    them to the nearest safe waypoint and announces it. Reactivation is
+    automatic on their owner's next real message (see
+    adventure_master_handler). Shared by the explicit "rest for X"
+    action and the automatic 5-minute idle check — `update_like` is
+    either a real Update or a _ChatOnlyUpdate shim.
+
+    NEVER call this while the character is in an active combat session
+    — per design, resting requires actually being out of battle first
+    (see _do_go_inactive's guard and _check_idle_characters' combat
+    handling, which auto-passes an idle player's turn instead of
+    resting them out of danger).
+    """
+    character = db.get_character(telegram_user_id)
+    if character is None or character.get("is_inactive"):
+        return
+
+    destination_id = _nearest_safe_waypoint(character)
+    destination_name = cl.get_location(CAMPAIGN, destination_id)["name"]
+
+    db.move_character(telegram_user_id, destination_id)
+    db.mark_visited(telegram_user_id, destination_id)
+    db.mark_inactive(telegram_user_id)
+
+    await _safe_send(
+        update_like,
+        f"😴 **{character['name']}** {reason_text} at **{destination_name}**, safe until they return.",
+    )
+
+
+async def _do_go_inactive(update: Update, duration_text: str) -> None:
+    telegram_user_id = update.effective_user.id
+    character = db.get_character(telegram_user_id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if character.get("is_inactive"):
+        await update.effective_chat.send_message(
+            "You're already resting.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if _in_active_combat(telegram_user_id, update.effective_chat.id):
+        await update.effective_chat.send_message(
+            "You can't rest in the middle of a fight — escape or finish the battle first.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    reason = f"settles in to rest{f' for {duration_text}' if duration_text else ''}, until next session"
+    await _go_inactive(telegram_user_id, update, reason)
+
+
+async def _check_idle_characters(bot) -> None:
+    """
+    Runs on a repeating background loop (see main()): a real, currently-
+    active character quiet for IDLE_WARNING_SECONDS gets ONE warning
+    naming where they'll end up; if they're STILL quiet by
+    IDLE_TIMEOUT_SECONDS, inactivity actually commences — UNLESS they're
+    in active combat, since resting requires being out of battle first
+    (same rule as the explicit command). An idle player mid-combat
+    instead just has their turn auto-passed once the full timeout is
+    reached, so they don't block everyone else, but they stay "in the
+    fight" — at whatever risk that implies — rather than getting a free
+    pass to safety by going quiet. No separate warning is given for the
+    in-combat case; the normal turn/timeout pressure already applies.
+    """
+    if _LAST_KNOWN_CHAT_ID is None:
+        return  # nobody has said anything yet this run — nothing to check against
+
+    now = datetime.now(timezone.utc)
+
+    for character in db.get_idle_real_characters():
+        try:
+            last_active = datetime.fromisoformat(character["last_active_at"])
+        except (TypeError, ValueError):
+            continue
+        idle_seconds = (now - last_active).total_seconds()
+        telegram_user_id = character["telegram_user_id"]
+
+        if idle_seconds < IDLE_WARNING_SECONDS:
+            continue
+
+        if idle_seconds < IDLE_TIMEOUT_SECONDS:
+            if telegram_user_id in _IDLE_WARNED or _in_active_combat(telegram_user_id, _LAST_KNOWN_CHAT_ID):
+                continue
+            _IDLE_WARNED.add(telegram_user_id)
+            destination_name = cl.get_location(CAMPAIGN, _nearest_safe_waypoint(character))["name"]
+            update_like = _ChatOnlyUpdate(bot, _LAST_KNOWN_CHAT_ID)
+            await _safe_send(
+                update_like,
+                f"⚠️ **{character['name']}** has been quiet a while — reply soon, or they'll "
+                f"head off to rest at **{destination_name}**.",
+            )
+            continue
+
+        _IDLE_WARNED.discard(telegram_user_id)
+        if _in_active_combat(telegram_user_id, _LAST_KNOWN_CHAT_ID):
+            async with sessions.get_lock(_LAST_KNOWN_CHAT_ID):
+                session = sessions.get_session(_LAST_KNOWN_CHAT_ID)
+                if session is not None and session.current_participant_id() == telegram_user_id:
+                    update_like = _ChatOnlyUpdate(bot, _LAST_KNOWN_CHAT_ID)
+                    session.advance_turn()
+                    await _safe_send(update_like, f"⏳ **{character['name']}** is idle — turn passed.")
+                    await _resolve_ai_turns(update_like, session)
+            continue
+
+        update_like = _ChatOnlyUpdate(bot, _LAST_KNOWN_CHAT_ID)
+        await _go_inactive(telegram_user_id, update_like, "drifts off to rest")
+
+
 async def _do_check_party(update: Update) -> None:
     await update.effective_chat.send_message(
         f"👥 Current party: {_party_summary_text()}",
@@ -2005,10 +2203,18 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                     message_thread_id=config.TOPIC_ADVENTURE_ID,
                 )
                 return
-        result = spells_module.resolve_heal_spell(spell_id, character, character)
-        db.update_character(update.effective_user.id, hp_current=character["hp_current"])
+        # Support spells (heal/cure) can target ANY party member by name,
+        # including one currently resting/inactive — per design, an
+        # inactive character can't act but can still be helped. Defaults
+        # to self if no other party member is named in the text.
+        target_character = _find_party_target_by_name(text) or character
+        result = spells_module.resolve_heal_spell(spell_id, character, target_character)
+        db.update_character(target_character["telegram_user_id"], hp_current=target_character["hp_current"])
+        is_self = target_character["telegram_user_id"] == character["telegram_user_id"]
+        target_note = "" if is_self else f" on **{target_character['name']}**"
+        inactive_note = " (resting)" if target_character.get("is_inactive") else ""
         await update.effective_chat.send_message(
-            f"✨ You cast {spell['name']} and heal {result['healing_done']} HP "
+            f"✨ You cast {spell['name']}{target_note}{inactive_note} and heal {result['healing_done']} HP "
             f"({result['hp_current']}/{result['hp_max']}).",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
@@ -2023,8 +2229,10 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                     message_thread_id=config.TOPIC_ADVENTURE_ID,
                 )
                 return
+        buff_target = _find_party_target_by_name(text)
+        target_note = f" on **{buff_target['name']}**" if buff_target else ""
         await update.effective_chat.send_message(
-            f"✨ You cast {spell['name']}. (Note: this spell's flavor is real, but it "
+            f"✨ You cast {spell['name']}{target_note}. (Note: this spell's flavor is real, but it "
             f"doesn't yet apply a mechanical effect in this build — that's a known "
             f"limitation, not a bug.)",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
@@ -2215,6 +2423,21 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     if not topics.is_adventure(update.message.message_thread_id or 0):
         return
 
+    global _LAST_KNOWN_CHAT_ID
+    _LAST_KNOWN_CHAT_ID = update.effective_chat.id
+    db.touch_last_active(update.effective_user.id)
+    _IDLE_WARNED.discard(update.effective_user.id)
+
+    # Any real message reactivates a resting character automatically —
+    # "until next session" means their next message, not a timer.
+    character = db.get_character(update.effective_user.id)
+    if character and character.get("is_inactive"):
+        db.mark_active(update.effective_user.id)
+        await update.effective_chat.send_message(
+            f"☀️ **{character['name']}** wakes and rejoins — welcome back!",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+
     # Universal escape hatch, checked FIRST, before any stateful flow gets
     # a chance to swallow the message. Exact-match only (never a substring
     # check) so ordinary gameplay text like "I stop to look around" or
@@ -2322,6 +2545,8 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         await _do_recruit_npc(update, intent["npc_name"])
     elif action == "rest":
         await _do_rest(update)
+    elif action == "go_inactive":
+        await _do_go_inactive(update, intent.get("target") or "")
     elif action == "skill_check":
         await _do_skill_check(update, intent.get("ability") or "dexterity", text)
     elif action == "shove":
@@ -2460,18 +2685,55 @@ async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TY
     await update.effective_chat.send_message(reply, message_thread_id=config.TOPIC_SUPPORT_ID)
 
 
-async def text_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+# Per-user message queues — see _run_in_user_order for why these exist.
+_USER_QUEUES: dict[int, asyncio.Queue] = {}
+_USER_WORKERS: dict[int, asyncio.Task] = {}
+
+
+async def _user_queue_worker(queue: asyncio.Queue) -> None:
+    while True:
+        coro_fn, future = await queue.get()
+        try:
+            result = await coro_fn()
+            if not future.done():
+                future.set_result(result)
+        except Exception as e:  # noqa: BLE001 — propagated to the caller's await, not swallowed
+            if not future.done():
+                future.set_exception(e)
+        finally:
+            queue.task_done()
+
+
+def _get_user_queue(user_id: int) -> asyncio.Queue:
+    if user_id not in _USER_QUEUES:
+        queue: asyncio.Queue = asyncio.Queue()
+        _USER_QUEUES[user_id] = queue
+        _USER_WORKERS[user_id] = asyncio.create_task(_user_queue_worker(queue))
+    return _USER_QUEUES[user_id]
+
+
+async def _run_in_user_order(user_id: int, coro_fn) -> None:
     """
-    Single entry point for ALL plain text messages, across every topic.
-    This exists because registering hear_you_main and
-    adventure_master_handler as two separate handlers with identical
-    filters caused a real bug: python-telegram-bot only runs the FIRST
-    matching handler per update by default, so the second one never
-    fired at all, in ANY topic. Routing internally, in one handler,
-    guarantees both code paths actually run.
+    Ensures this ONE user's messages are handled strictly in the order
+    they arrived, despite python-telegram-bot dispatching every update
+    concurrently (concurrent_updates=True — deliberate, so one slow
+    handler never freezes every other player; see build_application).
+    Without this, two quick messages from the SAME player race: intent
+    classification alone takes 30-160s (this hardware, this model), so
+    the second message's classification can easily finish before the
+    first's, and get processed out of order — corrupting stateful flows
+    like character creation (which tracks a step machine in
+    context.user_data) just as easily as it'd confuse ordinary play.
+    Different players are completely unaffected and still run fully
+    concurrently with each other and with this user's queue.
     """
-    if update.message is None or not update.message.text:
-        return
+    queue = _get_user_queue(user_id)
+    future = asyncio.get_event_loop().create_future()
+    await queue.put((coro_fn, future))
+    await future
+
+
+async def _route_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     raw_thread_id = update.message.message_thread_id  # may genuinely be None for Main
     thread_id = raw_thread_id or 0
 
@@ -2490,6 +2752,28 @@ async def text_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE
     if topics.is_support(thread_id):
         await support_topic_handler(update, context)
         return
+
+
+async def text_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Single entry point for ALL plain text messages, across every topic.
+    This exists because registering hear_you_main and
+    adventure_master_handler as two separate handlers with identical
+    filters caused a real bug: python-telegram-bot only runs the FIRST
+    matching handler per update by default, so the second one never
+    fired at all, in ANY topic. Routing internally, in one handler,
+    guarantees both code paths actually run. The actual routing is
+    queued per-user (_run_in_user_order) so this player's own messages
+    can never be handled out of order.
+    """
+    if update.message is None or not update.message.text:
+        return
+    if update.effective_user is None:
+        await _route_text_message(update, context)
+        return
+
+    user_id = update.effective_user.id
+    await _run_in_user_order(user_id, lambda: _route_text_message(update, context))
 
 
 async def _log_unhandled_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2514,6 +2798,28 @@ async def _log_unhandled_error(update: object, context: ContextTypes.DEFAULT_TYP
             pass
 
 
+async def _idle_inactivity_loop(application: Application) -> None:
+    """
+    Background loop for the automatic 5-minute-silence inactivity check
+    (see _check_idle_characters). A self-managed asyncio loop rather
+    than python-telegram-bot's JobQueue, since that requires an extra
+    dependency (the `[job-queue]` install extra) not currently installed
+    on this server — not worth adding for one simple periodic check.
+    """
+    while True:
+        await asyncio.sleep(IDLE_CHECK_INTERVAL_SECONDS)
+        try:
+            await _check_idle_characters(application.bot)
+        except Exception as e:
+            logger.error(f"[idle_check] background loop failed this cycle: {e!r}")
+
+
+async def _on_startup(application: Application) -> None:
+    # Application.create_task ties this loop's lifecycle to the
+    # application, so it's cancelled cleanly on shutdown.
+    application.create_task(_idle_inactivity_loop(application))
+
+
 def build_application() -> Application:
     # concurrent_updates=True is important: without it, python-telegram-bot
     # processes updates ONE AT A TIME. If any single handler ever stalls
@@ -2521,7 +2827,13 @@ def build_application() -> Application:
     # every topic until it resolves — exactly the kind of total, unrelated
     # freeze that's hard to diagnose. With this enabled, a stuck handler
     # only affects the update that triggered it.
-    application = ApplicationBuilder().token(config.BOT_TOKEN).concurrent_updates(True).build()
+    application = (
+        ApplicationBuilder()
+        .token(config.BOT_TOKEN)
+        .concurrent_updates(True)
+        .post_init(_on_startup)
+        .build()
+    )
 
     # Optional slash-command shortcuts.
     application.add_handler(CommandHandler("newcharacter", newcharacter_command))

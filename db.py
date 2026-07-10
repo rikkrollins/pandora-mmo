@@ -14,6 +14,7 @@ mean "my currently active character."
 import json
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 
 import config
 from rules.leveling import (
@@ -54,7 +55,9 @@ CREATE TABLE IF NOT EXISTS characters (
     spell_slots_current INTEGER NOT NULL DEFAULT 0,
     visited_locations TEXT NOT NULL DEFAULT '[]',
     is_deleted INTEGER NOT NULL DEFAULT 0,
-    skill_uses TEXT NOT NULL DEFAULT '{}'
+    skill_uses TEXT NOT NULL DEFAULT '{}',
+    is_inactive INTEGER NOT NULL DEFAULT 0,
+    last_active_at TEXT
 );
 """
 
@@ -150,6 +153,10 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0")
         if "skill_uses" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN skill_uses TEXT NOT NULL DEFAULT '{}'")
+        if "is_inactive" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN is_inactive INTEGER NOT NULL DEFAULT 0")
+        if "last_active_at" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN last_active_at TEXT")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -600,3 +607,53 @@ def record_skill_use(telegram_user_id: int, ability: str) -> int:
     uses[ability] = uses.get(ability, 0) + 1
     update_character(telegram_user_id, skill_uses=uses)
     return uses[ability]
+
+
+# ---------------------------------------------------------------------
+# Inactivity — "resting until next session," either explicit (a player
+# says so) or automatic (5 real-world minutes of chat silence). An
+# inactive character can still be targeted with support spells by
+# active party members; it just can't act itself until it's reactivated
+# (which happens automatically the next time its owner sends any real
+# message — see bot.py's adventure_master_handler).
+# ---------------------------------------------------------------------
+
+def touch_last_active(telegram_user_id: int) -> None:
+    """Records 'this player did something just now' — real players only in practice."""
+    with get_connection() as conn:
+        character_id = _active_character_id(telegram_user_id, conn)
+        if character_id is None:
+            return
+        conn.execute(
+            "UPDATE characters SET last_active_at = ? WHERE character_id = ?",
+            (datetime.now(timezone.utc).isoformat(), character_id),
+        )
+
+
+def mark_inactive(telegram_user_id: int) -> dict | None:
+    return update_character(telegram_user_id, is_inactive=1)
+
+
+def mark_active(telegram_user_id: int) -> dict | None:
+    return update_character(telegram_user_id, is_inactive=0)
+
+
+def get_idle_real_characters() -> list[dict]:
+    """
+    All real (non-AI), non-deleted, currently-active (not already
+    resting) characters that have a recorded last-activity time —
+    candidates for the auto-inactivity idle check. Filtering by actual
+    elapsed time is left to the caller (bot.py), which owns the
+    threshold and needs real wall-clock comparison, not a SQL string
+    comparison on ISO timestamps of unknown precision.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT c.* FROM characters c
+            JOIN active_characters a ON a.character_id = c.character_id
+            WHERE c.is_deleted = 0 AND c.is_ai = 0 AND c.is_inactive = 0
+              AND c.last_active_at IS NOT NULL
+            """
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]

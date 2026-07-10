@@ -18,7 +18,8 @@
           "grimsby",
           "sera_wanderer"
         ],
-        "shop": null
+        "shop": null,
+        "safe": true
       },
       "market_row": {
         "name": "Market Row",

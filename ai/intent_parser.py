@@ -24,7 +24,7 @@ Given a player's free-text message and some context, output ONLY a JSON object \
 
 {"action": "<one of: attack, pass_turn, start_combat, create_character, check_sheet, \
 talk_npc, move, look, check_inventory, check_party, buy, sell, steal, cast_spell, join_guild, \
-recruit_npc, rest, skill_check, shove, show_map, gather, craft, list_characters, \
+recruit_npc, rest, go_inactive, skill_check, shove, show_map, gather, craft, list_characters, \
 switch_character, delete_character, fast_travel, chat>", \
 "ability": "<one of: strength, dexterity, constitution, intelligence, wisdom, charisma, or null>", \
 "target": "<name/place/item mentioned, or null>", "npc_name": "<npc name if talking to one, or null>", \
@@ -42,6 +42,11 @@ Rules:
 - "check_party" is for asking who's in the party, how many members, or who's adventuring with them.
 - "recruit_npc" is for asking a specific named NPC to join their party / travel with them / come along.
 - "rest" is for resting, recovering, healing up outside combat, or asking to be revived/healed after being downed.
+- "go_inactive" is SPECIFICALLY for a player saying they're done playing for now / logging off / taking a rest \
+until their next session — e.g. "rest for the night", "take a rest", "rest for now", "resting for a few hours", \
+"I'm done for now". This is DIFFERENT from "rest" (an in-universe full heal usable anytime out of combat). \
+"go_inactive" is NEVER allowed during active combat — the player must escape or finish the fight first. Set \
+"target" to the duration mentioned, if any.
 - "skill_check" is for any risky non-combat action with uncertain outcome that isn't covered above: sneaking, \
 persuading, climbing, searching, lifting, recalling lore, perceiving hidden things, resisting an effect, etc. \
 Set "ability" to whichever of the 6 abilities best fits the action (dexterity for sneaking/climbing, strength \
@@ -190,7 +195,20 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in pass_words):
         return {**base, "action": "pass_turn"}
 
-    rest_words = ["i rest", "let's rest", "lets rest", "take a rest", "revive me", "heal up", "recover"]
+    # Checked BEFORE the plain "rest" keywords below: "rest for the
+    # night" contains "i rest" as a substring and would otherwise be
+    # shadowed as the in-universe full-heal action instead of this
+    # real-world "done playing until next session" one.
+    for trigger in ["rest for ", "resting for ", "rest for now", "take a rest", "logging off", "log off",
+                     "i'm done for now", "im done for now", "done playing for now"]:
+        if trigger in lowered:
+            duration = text[lowered.index(trigger) + len(trigger):].strip() if trigger.endswith(" ") else ""
+            return {**base, "action": "go_inactive", "target": duration or None}
+
+    # "take a rest" is deliberately NOT here — it's claimed by go_inactive
+    # above, since the user considers it equivalent to "resting until
+    # next session," not the in-universe full-heal action.
+    rest_words = ["i rest", "let's rest", "lets rest", "revive me", "heal up", "recover"]
     if any(w in lowered for w in rest_words):
         return {**base, "action": "rest"}
 
@@ -265,7 +283,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
                 "attack", "pass_turn", "start_combat", "create_character",
                 "check_sheet", "check_inventory", "check_party", "talk_npc", "move", "look",
                 "buy", "sell", "steal", "cast_spell", "join_guild", "recruit_npc", "rest",
-                "skill_check", "shove", "show_map", "gather", "craft",
+                "go_inactive", "skill_check", "shove", "show_map", "gather", "craft",
                 "list_characters", "switch_character", "delete_character",
                 "fast_travel", "chat",
             )
