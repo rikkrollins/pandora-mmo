@@ -2831,16 +2831,40 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             spell_id = candidate
             break
 
+    # Not a spell this character knows — but a scroll in their own
+    # backpack lets anyone use its one spell regardless, same as real
+    # 5E scrolls. Consumed on a successful cast, no spell slot spent
+    # (the scroll IS the resource being spent).
+    via_scroll = False
+    scroll_item_id = None
+    if spell_id is None:
+        for item_id, qty in character["inventory"].items():
+            if qty <= 0:
+                continue
+            item_data = items_module.get_item(item_id)
+            if not item_data or item_data.get("type") != "scroll":
+                continue
+            candidate = item_data.get("spell")
+            spell = spells_module.get_spell(candidate) if candidate else None
+            if spell and (candidate.replace("_", " ") in lowered or spell["name"].lower() in lowered):
+                spell_id, via_scroll, scroll_item_id = candidate, True, item_id
+                break
+
     if spell_id is None:
         known = ", ".join(character["known_spells"]) or "none yet"
         await update.effective_chat.send_message(
-            f"You don't know a spell by that name. Spells you know: {known}",
+            f"You don't know a spell by that name, and don't have a scroll for it either. "
+            f"Spells you know: {known}",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
 
     spell = spells_module.get_spell(spell_id)
     chat_id = update.effective_chat.id
+
+    def _consume_scroll_if_any() -> None:
+        if via_scroll:
+            db.remove_item(update.effective_user.id, scroll_item_id, 1)
 
     if spell["effect"] == "damage":
         async with sessions.get_lock(chat_id):
@@ -2881,7 +2905,8 @@ async def _do_cast_spell(update: Update, text: str) -> None:
 
             # Only spend a slot once we KNOW the cast is actually valid —
             # cantrips (level 0) are free/unlimited per real 5E rules.
-            if spell["level"] > 0:
+            # A scroll-cast spends the scroll instead of a slot.
+            if not via_scroll and spell["level"] > 0:
                 spent, _ = db.spend_spell_slot(update.effective_user.id)
                 if not spent:
                     await update.effective_chat.send_message(
@@ -2891,6 +2916,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                         message_thread_id=config.TOPIC_ADVENTURE_ID,
                     )
                     return
+            _consume_scroll_if_any()
 
             target = _pick_target(text, opposing)
             result = spells_module.resolve_damage_spell(spell_id, character, target)
@@ -2921,7 +2947,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             await _resolve_ai_turns(update, session)
 
     elif spell["effect"] == "heal":
-        if spell["level"] > 0:
+        if not via_scroll and spell["level"] > 0:
             spent, _ = db.spend_spell_slot(update.effective_user.id)
             if not spent:
                 await update.effective_chat.send_message(
@@ -2931,6 +2957,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                     message_thread_id=config.TOPIC_ADVENTURE_ID,
                 )
                 return
+        _consume_scroll_if_any()
         # Support spells (heal/cure) can target ANY party member by name,
         # including one currently resting/inactive — per design, an
         # inactive character can't act but can still be helped. Defaults
@@ -2947,7 +2974,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
     else:
-        if spell["level"] > 0:
+        if not via_scroll and spell["level"] > 0:
             spent, _ = db.spend_spell_slot(update.effective_user.id)
             if not spent:
                 await update.effective_chat.send_message(
@@ -2957,6 +2984,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                     message_thread_id=config.TOPIC_ADVENTURE_ID,
                 )
                 return
+        _consume_scroll_if_any()
         buff_target = _find_party_target_by_name(text)
         target_note = f" on **{buff_target['name']}**" if buff_target else ""
         await update.effective_chat.send_message(

@@ -66,7 +66,7 @@ ITEMS = {
     },
     "torch": {"name": "Torch", "type": "consumable", "rarity": "common", "price": 1, "weight": 1, "effect": "light"},
 
-    # --- Scrolls (single-use spells for non-casters) ---
+    # --- Scrolls (single-use spells for non-casters — or anyone, once bought) ---
     "scroll_magic_missile": {
         "name": "Scroll of Magic Missile", "type": "scroll", "rarity": "common",
         "price": 30, "weight": 0.1, "spell": "magic_missile",
@@ -74,6 +74,26 @@ ITEMS = {
     "scroll_fireball": {
         "name": "Scroll of Fireball", "type": "scroll", "rarity": "rare",
         "price": 300, "weight": 0.1, "spell": "fireball",
+    },
+    "scroll_cure_wounds": {
+        "name": "Scroll of Cure Wounds", "type": "scroll", "rarity": "common",
+        "price": 35, "weight": 0.1, "spell": "cure_wounds",
+    },
+    "scroll_shield": {
+        "name": "Scroll of Shield", "type": "scroll", "rarity": "uncommon",
+        "price": 60, "weight": 0.1, "spell": "shield",
+    },
+    "scroll_bless": {
+        "name": "Scroll of Bless", "type": "scroll", "rarity": "uncommon",
+        "price": 55, "weight": 0.1, "spell": "bless",
+    },
+    "scroll_invisibility": {
+        "name": "Scroll of Invisibility", "type": "scroll", "rarity": "rare",
+        "price": 175, "weight": 0.1, "spell": "invisibility",
+    },
+    "scroll_lightning_bolt": {
+        "name": "Scroll of Lightning Bolt", "type": "scroll", "rarity": "rare",
+        "price": 275, "weight": 0.1, "spell": "lightning_bolt",
     },
 
     # --- Rings, Amulets, Wondrous Items ---
@@ -94,6 +114,19 @@ ITEMS = {
     "boots_of_the_winterlands": {
         "name": "Boots of the Winterlands", "type": "wondrous", "rarity": "uncommon",
         "price": 0, "weight": 1, "note": "Cold never seems to trouble the wearer.",
+    },
+    "bracers_of_the_steady_hand": {
+        "name": "Bracers of the Steady Hand", "type": "wondrous", "rarity": "uncommon",
+        "price": 90, "weight": 1, "note": "Your hands never shake, even when the rest of you wants to.",
+    },
+    "lantern_of_true_sight": {
+        "name": "Lantern of True Sight", "type": "wondrous", "rarity": "rare",
+        "price": 220, "weight": 2, "note": "Its flame burns a color no ordinary fire does, and shows things exactly as they are, not as they'd rather look.",
+    },
+    "ring_of_the_undertow": {
+        "name": "Ring of the Undertow", "type": "ring", "rarity": "uncommon",
+        "price": 110, "weight": 0, "ac_bonus": 1,
+        "note": "Cold as riverwater no matter how long it's worn.",
     },
 
     # --- Quest items (never sellable, never have a price) ---

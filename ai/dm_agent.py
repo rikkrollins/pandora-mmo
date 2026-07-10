@@ -11,23 +11,26 @@ that were already computed by rules/combat.py or rules/dice.py.
 import requests
 
 import config
+from ai.story_mode import scaled_sentences, style_directive
 from ai.text_cleanup import strip_think_tags
 
-SKILL_CHECK_SYSTEM_PREAMBLE = (
-    "You are the Dungeon Master narrating the outcome of a NON-COMBAT "
-    "skill/ability check in a Dungeons & Dragons 5th Edition game — things "
-    "like sneaking, persuading, climbing, lifting, or searching. This is "
-    "NOT combat — never mention attacks, weapons, damage, or hit points. "
-    "You are given the mechanical result of a dice roll that has ALREADY "
-    "been decided by the game's rules engine. Your only job is to narrate "
-    "that result in vivid, sensory prose (4-6 sentences) that reads like "
-    "part of an ongoing journey, not an isolated dice log line — "
-    "faithfully reflecting whether it succeeded or failed. Ground it in "
-    "the physical scene: what the character sees, hears, and feels in "
-    "this exact moment. Mention the actual raw d20 number rolled "
-    "somewhere in your narration, and calibrate how dramatic your prose "
-    "is to how good or bad that roll actually was."
-)
+
+def _skill_check_preamble() -> str:
+    return (
+        "You are the Dungeon Master narrating the outcome of a NON-COMBAT "
+        "skill/ability check in a Dungeons & Dragons 5th Edition game — things "
+        "like sneaking, persuading, climbing, lifting, or searching. This is "
+        "NOT combat — never mention attacks, weapons, damage, or hit points. "
+        "You are given the mechanical result of a dice roll that has ALREADY "
+        "been decided by the game's rules engine. Your only job is to narrate "
+        f"that result in vivid, sensory prose ({scaled_sentences(4, 6)}) that reads "
+        "like part of an ongoing journey, not an isolated dice log line — "
+        "faithfully reflecting whether it succeeded or failed. Ground it in "
+        "the physical scene: what the character sees, hears, and feels in "
+        "this exact moment. Mention the actual raw d20 number rolled "
+        "somewhere in your narration, and calibrate how dramatic your prose "
+        f"is to how good or bad that roll actually was. {style_directive()}"
+    )
 
 
 def _build_skill_check_prompt(character: dict, action_text: str, ability: str,
@@ -39,7 +42,7 @@ def _build_skill_check_prompt(character: dict, action_text: str, ability: str,
         critical_fail=(raw_roll == 1),
     )
     return (
-        f"{SKILL_CHECK_SYSTEM_PREAMBLE}\n\n"
+        f"{_skill_check_preamble()}\n\n"
         f"Character: {character.get('name')} ({character.get('char_class')})\n\n"
         f"Attempted action: {action_text}\n"
         f"Ability used: {ability.title()}\n\n"
@@ -94,22 +97,23 @@ def _fallback_skill_check_narration(character: dict, action_text: str, mechanica
     return f"{name} doesn't quite manage it this time."
 
 
-SYSTEM_PREAMBLE = (
-    "You are the Dungeon Master narrating a Dungeons & Dragons 5th Edition "
-    "game in progress — an ongoing journey, not a series of disconnected "
-    "dice logs. You are given the mechanical result of a dice roll or "
-    "combat action that has ALREADY been decided by the game's rules "
-    "engine, plus a short list of recent events for continuity. Your job "
-    "is to narrate that result in vivid, sensory prose (4-6 sentences): "
-    "ground it in the physical scene, and where it's natural, let it "
-    "carry a thread from what just happened rather than starting cold "
-    "each time. You must NEVER invent or alter stat outcomes, dice "
-    "rolls, damage numbers, or hit/miss results — treat the provided "
-    "result as ground truth and narrate it faithfully. "
-    "Mention the actual raw d20 number rolled somewhere in your narration "
-    "(e.g. 'rolling a 17...'), and calibrate how dramatic or restrained "
-    "your prose is to how good or bad that roll actually was."
-)
+def _combat_preamble() -> str:
+    return (
+        "You are the Dungeon Master narrating a Dungeons & Dragons 5th Edition "
+        "game in progress — an ongoing journey, not a series of disconnected "
+        "dice logs. You are given the mechanical result of a dice roll or "
+        "combat action that has ALREADY been decided by the game's rules "
+        "engine, plus a short list of recent events for continuity. Your job "
+        f"is to narrate that result in vivid, sensory prose ({scaled_sentences(4, 6)}): "
+        "ground it in the physical scene, and where it's natural, let it "
+        "carry a thread from what just happened rather than starting cold "
+        "each time. You must NEVER invent or alter stat outcomes, dice "
+        "rolls, damage numbers, or hit/miss results — treat the provided "
+        "result as ground truth and narrate it faithfully. "
+        "Mention the actual raw d20 number rolled somewhere in your narration "
+        "(e.g. 'rolling a 17...'), and calibrate how dramatic or restrained "
+        f"your prose is to how good or bad that roll actually was. {style_directive()}"
+    )
 
 
 def _drama_instruction(raw_roll: int | None, critical_hit: bool, critical_fail: bool) -> str:
@@ -157,7 +161,7 @@ def _build_prompt(character: dict, action_text: str, mechanical_result: dict,
     )
 
     return (
-        f"{SYSTEM_PREAMBLE}\n\n"
+        f"{_combat_preamble()}\n\n"
         f"Character: {character.get('name')} ({character.get('char_class')}), "
         f"HP: {character.get('hp_current')}/{character.get('hp_max')}\n\n"
         f"{personality_line}"
@@ -221,24 +225,25 @@ def _fallback_narration(mechanical_result: dict) -> str:
     return f"{attacker} hits{roll_note} {defender} for {dmg} damage!"
 
 
-WELCOME_SYSTEM_PREAMBLE = (
-    "You are the Dungeon Master opening a brand-new character's journey "
-    "into a Dungeons & Dragons 5th Edition game — this is the first page "
-    "of their story, so make it feel like one. You are given real facts "
-    "about where they are starting (a location name, description, "
-    "who/what is physically present) that have ALREADY been decided by "
-    "the game data. Write a rich, immersive opening (6-9 sentences) "
-    "that: (1) welcomes the character by name and weaves in their "
-    "race/class as part of who they are, not a list of stats, (2) "
-    "brings the scene to life with real sensory detail — sound, light, "
-    "smell, texture — describing ONLY the real, provided location facts "
-    "faithfully, never inventing new people, objects, dangers, or "
-    "details beyond what's given, (3) NEVER gives hints, suggestions, "
-    "or advice about what to do next, where to go, or what anything "
-    "means — describe only what is visible right now, in this moment, "
-    "with no foreshadowing or speculation. End on a note of open "
-    "possibility, not a summary."
-)
+def _welcome_preamble() -> str:
+    return (
+        "You are the Dungeon Master opening a brand-new character's journey "
+        "into a Dungeons & Dragons 5th Edition game — this is the first page "
+        "of their story, so make it feel like one. You are given real facts "
+        "about where they are starting (a location name, description, "
+        "who/what is physically present) that have ALREADY been decided by "
+        f"the game data. Write a rich, immersive opening ({scaled_sentences(6, 9)}) "
+        "that: (1) welcomes the character by name and weaves in their "
+        "race/class as part of who they are, not a list of stats, (2) "
+        "brings the scene to life with real sensory detail — sound, light, "
+        "smell, texture — describing ONLY the real, provided location facts "
+        "faithfully, never inventing new people, objects, dangers, or "
+        "details beyond what's given, (3) NEVER gives hints, suggestions, "
+        "or advice about what to do next, where to go, or what anything "
+        "means — describe only what is visible right now, in this moment, "
+        f"with no foreshadowing or speculation. {style_directive()} End on a "
+        "note of open possibility, not a summary."
+    )
 
 
 def _build_welcome_prompt(character: dict, location: dict, party_summary: str) -> str:
@@ -256,7 +261,7 @@ def _build_welcome_prompt(character: dict, location: dict, party_summary: str) -
     )
 
     return (
-        f"{WELCOME_SYSTEM_PREAMBLE}\n\n"
+        f"{_welcome_preamble()}\n\n"
         f"New character: {character['name']}, a {character['race']} {character['char_class']}\n\n"
         f"Real facts about their starting location (narrate ONLY these, faithfully):\n{facts}\n\n"
         f"Write the welcome now:"
@@ -306,21 +311,22 @@ def _fallback_welcome(character: dict, location: dict, party_summary: str) -> st
     return " ".join(lines)
 
 
-HOURLY_UPDATE_SYSTEM_PREAMBLE = (
-    "You are the Dungeon Master delivering a brief, in-world \"town "
-    "crier\" update on what's been happening at a location, for players "
-    "checking the chat to catch up on the game's ongoing life. You are "
-    "given real facts — recent events, and what NPCs/companions are "
-    "currently doing here — that have ALREADY happened or are true "
-    "right now. Write a short, vivid update (2-4 sentences) that "
-    "narrates ONLY these real, provided facts faithfully, in the same "
-    "immersive voice as the rest of the game's narration — never "
-    "inventing new events, people, or details beyond what's given. If "
-    "there's nothing notable to report, just describe the quiet, "
-    "ordinary rhythm of the place. Do not list player counts, quest "
-    "names, or game statistics — those are added separately after your "
-    "narration, so leave them out entirely."
-)
+def _hourly_update_preamble() -> str:
+    return (
+        "You are the Dungeon Master delivering a brief, in-world \"town "
+        "crier\" update on what's been happening at a location, for players "
+        "checking the chat to catch up on the game's ongoing life. You are "
+        "given real facts — recent events, and what NPCs/companions are "
+        "currently doing here — that have ALREADY happened or are true "
+        f"right now. Write a vivid update ({scaled_sentences(2, 4)}) that "
+        "narrates ONLY these real, provided facts faithfully, in the same "
+        "immersive voice as the rest of the game's narration — never "
+        "inventing new events, people, or details beyond what's given. If "
+        "there's nothing notable to report, just describe the quiet, "
+        f"ordinary rhythm of the place. {style_directive()} Do not list player "
+        "counts, quest names, or game statistics — those are added "
+        "separately after your narration, so leave them out entirely."
+    )
 
 
 def _build_hourly_update_prompt(location_name: str, recent_events: list[str], activity_lines: list[str]) -> str:
@@ -331,7 +337,7 @@ def _build_hourly_update_prompt(location_name: str, recent_events: list[str], ac
         f"{'; '.join(activity_lines) if activity_lines else 'no one of note'}"
     )
     return (
-        f"{HOURLY_UPDATE_SYSTEM_PREAMBLE}\n\n"
+        f"{_hourly_update_preamble()}\n\n"
         f"Real facts (narrate ONLY these, faithfully):\n{facts}\n\n"
         f"Write the update now:"
     )
@@ -376,23 +382,24 @@ def _fallback_hourly_update(location_name: str, recent_events: list[str], activi
     return " ".join(lines)
 
 
-EXAMINE_SYSTEM_PREAMBLE = (
-    "You are the Dungeon Master describing a character taking a closer "
-    "look at ONE specific object or detail in their surroundings. You "
-    "are given the real, already-decided facts about what this object "
-    "is and what's noticeable about it — narrate ONLY these facts, "
-    "faithfully and vividly (2-4 sentences), in the same immersive "
-    "voice as the rest of the game. Sensory detail and atmosphere are "
-    "welcome; inventing a new object, a hidden mechanism, a secret "
-    "passage, or ANY fact beyond what's given is not. Never resolve or "
-    "explain what's strange about it — if it's presented as mysterious, "
-    "it must stay exactly as mysterious after your narration as before."
-)
+def _examine_preamble() -> str:
+    return (
+        "You are the Dungeon Master describing a character taking a closer "
+        "look at ONE specific object or detail in their surroundings. You "
+        "are given the real, already-decided facts about what this object "
+        "is and what's noticeable about it — narrate ONLY these facts, "
+        f"faithfully and vividly ({scaled_sentences(2, 4)}), in the same immersive "
+        "voice as the rest of the game. Sensory detail and atmosphere are "
+        "welcome; inventing a new object, a hidden mechanism, a secret "
+        "passage, or ANY fact beyond what's given is not. Never resolve or "
+        "explain what's strange about it — if it's presented as mysterious, "
+        f"it must stay exactly as mysterious after your narration as before. {style_directive()}"
+    )
 
 
 def _build_examine_prompt(character: dict, location_name: str, object_name: str, object_description: str) -> str:
     return (
-        f"{EXAMINE_SYSTEM_PREAMBLE}\n\n"
+        f"{_examine_preamble()}\n\n"
         f"Character: {character['name']}, a {character['race']} {character['char_class']}\n"
         f"Location: {location_name}\n"
         f"Object being examined: {object_name}\n"

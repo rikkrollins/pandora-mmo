@@ -41,3 +41,9 @@ MOLTBOOK_HEARTBEAT_INTERVAL_SECONDS = int(os.getenv("MOLTBOOK_HEARTBEAT_INTERVAL
 
 # Hourly Adventure-topic status update (recent events, who's around, quest board)
 HOURLY_UPDATE_INTERVAL_SECONDS = int(os.getenv("HOURLY_UPDATE_INTERVAL_SECONDS", "3600"))
+
+# Narration length/style, 0 (shortest, utilitarian) to 10 (longest, full
+# novel-chapter storybook prose). See ai/story_mode.py — scales every
+# narration function's own baseline sentence count by the same factor,
+# never changes WHAT gets narrated, only how much prose wraps around it.
+STORY_MODE = int(os.getenv("STORY_MODE", "5"))

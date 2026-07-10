@@ -42,7 +42,8 @@
         "layer": "surface",
         "description": "A crooked street of stalls and shopfronts. A locksmith here has stopped taking new keys to cut.",
         "connections": [
-          "crossroads_tavern"
+          "crossroads_tavern",
+          "the_arcane_nook"
         ],
         "npcs": [
           "old_maren"
@@ -259,6 +260,29 @@
           "guestbook": {
             "name": "a guestbook on the landing table",
             "description": "Names going back years, most in different hands. A handful of entries near the middle of the book are scratched out so hard the pen tore the page."
+          }
+        }
+      },
+      "the_arcane_nook": {
+        "name": "The Arcane Nook",
+        "layer": "surface",
+        "description": "A gap between two shopfronts on Market Row, barely wide enough to walk through, that most people swear wasn't there yesterday. It always is, if you're looking for it.",
+        "connections": [
+          "market_row"
+        ],
+        "npcs": [
+          "ossian_vane"
+        ],
+        "shop": "vanes_curiosities",
+        "safe": true,
+        "interactables": {
+          "vanes_shelves": {
+            "name": "shelves of curiosities behind the counter",
+            "description": "Nothing on them is labeled, and no two items seem to be from the same era, region, or maker \u2014 yet somehow none of it looks out of place next to the rest."
+          },
+          "the_uneven_floor": {
+            "name": "the shop's oddly uneven floor",
+            "description": "The floorboards slope gently toward the back of the nook, just enough to notice, never enough to explain."
           }
         }
       }
@@ -493,6 +517,14 @@
         "proficiency_bonus": 2,
         "xp_reward": 150
       }
+    },
+    "ossian_vane": {
+      "name": "Ossian Vane",
+      "role": "arcane_peddler",
+      "personality": "a charming, unhurried trader who never quite answers where his stock comes from, and seems to find that question more amusing each time it's asked",
+      "shop": "vanes_curiosities",
+      "alignment": "True Neutral",
+      "disposition": "neutral"
     }
   },
   "shops": {
@@ -512,6 +544,19 @@
         "torch",
         "scroll_magic_missile",
         "iron_ore"
+      ]
+    },
+    "vanes_curiosities": {
+      "owner_npc": "ossian_vane",
+      "inventory": [
+        "scroll_cure_wounds",
+        "scroll_shield",
+        "scroll_bless",
+        "scroll_invisibility",
+        "scroll_lightning_bolt",
+        "bracers_of_the_steady_hand",
+        "lantern_of_true_sight",
+        "ring_of_the_undertow"
       ]
     }
   },
