@@ -38,3 +38,6 @@ DB_PATH = os.getenv("DB_PATH", "pandora_mmo.db")
 # no-ops without it.
 MOLTBOOK_API_KEY = os.getenv("MOLTBOOK_API_KEY")
 MOLTBOOK_HEARTBEAT_INTERVAL_SECONDS = int(os.getenv("MOLTBOOK_HEARTBEAT_INTERVAL_SECONDS", "900"))
+
+# Hourly Adventure-topic status update (recent events, who's around, quest board)
+HOURLY_UPDATE_INTERVAL_SECONDS = int(os.getenv("HOURLY_UPDATE_INTERVAL_SECONDS", "3600"))

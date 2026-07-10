@@ -38,7 +38,7 @@ import races as races_module
 import class_features as class_features_module
 import topics
 from ai.dev_agent import answer_dev_question
-from ai.dm_agent import narrate_action, narrate_welcome, narrate_skill_check
+from ai.dm_agent import narrate_action, narrate_welcome, narrate_skill_check, narrate_hourly_update
 from ai.intent_parser import parse_intent
 from ai.npc_agent import register_npc, talk_to_npc, generate_ambient_line, _NPCS
 from ai.support_agent import answer_support_question
@@ -172,6 +172,36 @@ MOLTBOOK_HEARTBEAT_INTERVAL_SECONDS = getattr(config, "MOLTBOOK_HEARTBEAT_INTERV
 _LAST_MOLTBOOK_CHECK_AT: datetime | None = None
 _LAST_MOLTBOOK_NOTIFIED_COUNT = 0
 
+# ---------------------------------------------------------------------
+# Hourly Adventure-topic status update — separate from the "meanwhile"
+# ambient heartbeat above (which only fires during long idle stretches).
+# This one posts every real hour, regardless of activity, at whichever
+# location the most recently active real player currently occupies:
+# a short AI-narrated flavor beat (recent events + who's doing what)
+# followed by a plain, deterministic readout (player counts, quest
+# board) that never passes through the model — see narrate_hourly_
+# update's docstring for why that split matters.
+#
+# _RECENT_WORLD_EVENTS is a rolling in-memory log (combat victories,
+# level-ups, quest completions) tagged with the location they happened
+# at; entries older than two update cycles are pruned on every append
+# so this never grows unbounded. In-memory only, same reasoning as
+# _DEFEATED_NPCS/_NPC_LOCATIONS — it's recap texture, not a game fact
+# anything else depends on.
+# ---------------------------------------------------------------------
+HOURLY_UPDATE_INTERVAL_SECONDS = getattr(config, "HOURLY_UPDATE_INTERVAL_SECONDS", 3600)
+_LAST_HOURLY_UPDATE_AT: datetime | None = None
+_RECENT_WORLD_EVENTS: list[tuple[datetime, str, str]] = []  # (when, location_id, text)
+
+
+def _log_world_event(location_id: str | None, text: str) -> None:
+    if not location_id:
+        return
+    now = datetime.now(timezone.utc)
+    _RECENT_WORLD_EVENTS.append((now, location_id, text))
+    cutoff = now.timestamp() - (HOURLY_UPDATE_INTERVAL_SECONDS * 2)
+    _RECENT_WORLD_EVENTS[:] = [e for e in _RECENT_WORLD_EVENTS if e[0].timestamp() >= cutoff]
+
 
 def _wanderable_npc_ids() -> list[str]:
     return [npc_id for npc_id, data in CAMPAIGN["npcs"].items() if data.get("can_wander")]
@@ -278,6 +308,100 @@ async def _maybe_post_world_heartbeat(bot) -> None:
         return
     _LAST_WORLD_HEARTBEAT_AT = now
     await _safe_send(update_like, f"🕯️ *(meanwhile, at {location_name})*\n💬 **{speaker_name}:** {line}")
+
+
+async def _maybe_post_hourly_status_update(bot) -> None:
+    """
+    Posts an hourly status update to Adventure: a short AI-narrated
+    flavor beat (recent events + who's doing what) at whichever
+    location the most recently active real player currently occupies,
+    followed by a plain factual readout (player counts, quest board)
+    that never passes through the model — see narrate_hourly_update's
+    docstring for why that split matters. Fires every real hour
+    regardless of activity level, unlike _maybe_post_world_heartbeat
+    above, which only fires during long idle stretches.
+    """
+    global _LAST_HOURLY_UPDATE_AT
+    if _LAST_KNOWN_CHAT_ID is None:
+        return
+
+    now = datetime.now(timezone.utc)
+    if _LAST_HOURLY_UPDATE_AT and (now - _LAST_HOURLY_UPDATE_AT).total_seconds() < HOURLY_UPDATE_INTERVAL_SECONDS:
+        return
+
+    with db.get_connection() as conn:
+        active_row = conn.execute(
+            "SELECT COUNT(*) AS n FROM characters WHERE is_ai = 0 AND is_deleted = 0 AND is_inactive = 0"
+        ).fetchone()
+        inactive_row = conn.execute(
+            "SELECT COUNT(*) AS n FROM characters WHERE is_ai = 0 AND is_deleted = 0 AND is_inactive = 1"
+        ).fetchone()
+        last_active_row = conn.execute(
+            "SELECT current_location FROM characters WHERE is_ai = 0 AND is_deleted = 0 "
+            "ORDER BY last_active_at DESC LIMIT 1"
+        ).fetchone()
+
+    # Commit to firing this cycle regardless of what's found below —
+    # an hour with nothing to report still gets a (quiet) update, and
+    # either way we don't want to re-check every 60s until the next hour.
+    _LAST_HOURLY_UPDATE_AT = now
+
+    if not last_active_row:
+        return  # nobody has ever played — nothing to report on
+
+    location_id = last_active_row["current_location"] or SAFE_LOCATION_FALLBACK
+    location_data = cl.get_location(CAMPAIGN, location_id)
+    location_name = location_data["name"] if location_data else location_id
+
+    active_count = active_row["n"] if active_row else 0
+    inactive_count = inactive_row["n"] if inactive_row else 0
+
+    cutoff = now.timestamp() - HOURLY_UPDATE_INTERVAL_SECONDS
+    recent_events = [
+        text for (when, loc, text) in _RECENT_WORLD_EVENTS
+        if loc == location_id and when.timestamp() >= cutoff
+    ]
+
+    activity_lines = []
+    for npc_id in _npcs_at_location(location_id):
+        npc_data = CAMPAIGN["npcs"].get(npc_id)
+        if not npc_data:
+            continue
+        if npc_data.get("can_wander"):
+            activity = random.choice(npc_data.get("activity_goals", ["going about their business"]))
+            activity_lines.append(f"{npc_data['name']} is {activity}")
+        else:
+            role = (npc_data.get("role") or "").replace("_", " ")
+            activity_lines.append(f"{npc_data['name']} is here, as always" + (f" ({role})" if role else ""))
+
+    with db.get_connection() as conn:
+        ai_companions = conn.execute(
+            "SELECT name, race, char_class FROM characters "
+            "WHERE is_ai = 1 AND is_deleted = 0 AND current_location = ?",
+            (location_id,),
+        ).fetchall()
+    for comp in ai_companions:
+        activity_lines.append(f"{comp['name']} the {comp['race']} {comp['char_class']} is here")
+
+    quest_board = [
+        (q["title"], q.get("description", ""))
+        for q in CAMPAIGN["quests"].values()
+        if q.get("location") == location_id
+    ]
+
+    flavor = await asyncio.to_thread(narrate_hourly_update, location_name, recent_events, activity_lines)
+
+    lines = [f"🕐 *(the hour turns over — {location_name})*", flavor, ""]
+    lines.append(f"👥 Players: {active_count} active, {inactive_count} resting.")
+    if quest_board:
+        lines.append(f"📋 Quest board at {location_name}:")
+        for title, desc in quest_board:
+            lines.append(f"  • {title} — {desc}" if desc else f"  • {title}")
+    else:
+        lines.append(f"📋 Quest board at {location_name}: nothing posted right now.")
+
+    update_like = _ChatOnlyUpdate(bot, _LAST_KNOWN_CHAT_ID)
+    await _safe_send(update_like, "\n".join(lines))
 
 
 async def _maybe_check_moltbook_activity(bot) -> None:
@@ -829,14 +953,24 @@ def _award_victory_xp(session: sessions.Session) -> str:
 
     xp_each = max(enemy_xp_total // len(real_party_ids), 1)
     level_up_notes = []
+    event_location = None
     for pid in real_party_ids:
         before = db.get_character(pid)
         after = db.add_xp(pid, xp_each)
+        event_location = event_location or after.get("current_location")
         if after["level"] > before["level"]:
             level_up_notes.append(
                 f"🎉 {after['name']} leveled up to {after['level']}! "
                 f"(HP max: {before['hp_max']} → {after['hp_max']})"
             )
+            _log_world_event(event_location, f"{after['name']} reached level {after['level']}.")
+
+    enemy_names = [
+        p["name"] for p in session.participants
+        if session.sides.get(p["telegram_user_id"]) == "enemy"
+    ]
+    if enemy_names:
+        _log_world_event(event_location, f"The party defeated {', '.join(enemy_names)}.")
 
     summary = f"\n✨ Party gains {xp_each} XP each ({enemy_xp_total} total)."
     if level_up_notes:
@@ -1857,6 +1991,12 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
     reward_xp = quest.get("reward_xp", 0)
     reward_gold = quest.get("reward_gold", 0)
     reward_item = quest.get("reward_item")
+
+    character = db.get_character(telegram_user_id)
+    _log_world_event(
+        character.get("current_location") if character else None,
+        f"{character['name']} completed the quest \"{quest['title']}\"." if character else None,
+    )
 
     db.complete_quest(telegram_user_id, quest_id)
     if reward_xp:
@@ -3348,6 +3488,10 @@ async def _idle_inactivity_loop(application: Application) -> None:
             await _maybe_post_world_heartbeat(application.bot)
         except Exception as e:
             logger.error(f"[world_tick] heartbeat failed this cycle: {e!r}")
+        try:
+            await _maybe_post_hourly_status_update(application.bot)
+        except Exception as e:
+            logger.error(f"[hourly_update] failed this cycle: {e!r}")
         try:
             await _maybe_check_moltbook_activity(application.bot)
         except Exception as e:

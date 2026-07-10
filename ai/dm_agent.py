@@ -304,3 +304,73 @@ def _fallback_welcome(character: dict, location: dict, party_summary: str) -> st
         lines.append(f"Danger nearby: {', '.join(location['monster_names'])}.")
     lines.append(f"Your party: {party_summary}")
     return " ".join(lines)
+
+
+HOURLY_UPDATE_SYSTEM_PREAMBLE = (
+    "You are the Dungeon Master delivering a brief, in-world \"town "
+    "crier\" update on what's been happening at a location, for players "
+    "checking the chat to catch up on the game's ongoing life. You are "
+    "given real facts — recent events, and what NPCs/companions are "
+    "currently doing here — that have ALREADY happened or are true "
+    "right now. Write a short, vivid update (2-4 sentences) that "
+    "narrates ONLY these real, provided facts faithfully, in the same "
+    "immersive voice as the rest of the game's narration — never "
+    "inventing new events, people, or details beyond what's given. If "
+    "there's nothing notable to report, just describe the quiet, "
+    "ordinary rhythm of the place. Do not list player counts, quest "
+    "names, or game statistics — those are added separately after your "
+    "narration, so leave them out entirely."
+)
+
+
+def _build_hourly_update_prompt(location_name: str, recent_events: list[str], activity_lines: list[str]) -> str:
+    facts = (
+        f"Location: {location_name}\n"
+        f"Recent events here (last hour): {'; '.join(recent_events) if recent_events else 'none'}\n"
+        f"Who's currently here and what they're doing: "
+        f"{'; '.join(activity_lines) if activity_lines else 'no one of note'}"
+    )
+    return (
+        f"{HOURLY_UPDATE_SYSTEM_PREAMBLE}\n\n"
+        f"Real facts (narrate ONLY these, faithfully):\n{facts}\n\n"
+        f"Write the update now:"
+    )
+
+
+def narrate_hourly_update(location_name: str, recent_events: list[str], activity_lines: list[str]) -> str:
+    """
+    Generates the flavor portion of the hourly Adventure-topic status
+    update, grounded strictly in real events/activity already computed
+    by bot.py. Player counts and the quest board are appended
+    separately as plain deterministic text (never passed through the
+    model), so numbers and quest titles can never be misremembered or
+    invented — same "rules decide, AI narrates" split as everywhere
+    else in this game.
+    """
+    prompt = _build_hourly_update_prompt(location_name, recent_events, activity_lines)
+    try:
+        response = requests.post(
+            f"{config.OLLAMA_BASE_URL}/api/generate",
+            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False},
+            timeout=200,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = strip_think_tags(data.get("response", ""))
+        if text:
+            return text
+    except (requests.RequestException, ValueError) as e:
+        print(f"[dm_agent] hourly update narration call failed, falling back to template: {e}")
+    return _fallback_hourly_update(location_name, recent_events, activity_lines)
+
+
+def _fallback_hourly_update(location_name: str, recent_events: list[str], activity_lines: list[str]) -> str:
+    """Plain-text fallback if the narration model is unreachable."""
+    lines = [f"The hour turns over at {location_name}."]
+    if recent_events:
+        lines.append(" ".join(recent_events))
+    if activity_lines:
+        lines.append(" ".join(activity_lines))
+    if len(lines) == 1:
+        lines.append("Nothing much stirs here just now.")
+    return " ".join(lines)
