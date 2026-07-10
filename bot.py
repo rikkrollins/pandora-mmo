@@ -2499,10 +2499,96 @@ async def _do_gamble(update: Update, text: str) -> None:
 
 
 async def _do_check_party(update: Update) -> None:
+    lines = [f"👥 Everyone currently active: {_party_summary_text()}"]
+
+    character = db.get_character(update.effective_user.id)
+    if character:
+        party_id = character.get("party_id")
+        if party_id:
+            members = db.get_party_members_by_id(party_id)
+            names = [f"{m['name']} (AI)" if m.get("is_ai") else m["name"] for m in members]
+            lines.append(
+                f"\n🎗️ Your formed party ({len(members)}/{db.PARTY_MAX_MEMBERS}): {', '.join(names)}"
+            )
+        elif character.get("pending_party_invite"):
+            lines.append("\n🎗️ You have a pending party invite — say \"I accept the party invite\" to join.")
+        else:
+            lines.append("\n🎗️ You're not in a formed party. Say \"invite [name] to my party\" to start one.")
+
+    await update.effective_chat.send_message("\n".join(lines), message_thread_id=config.TOPIC_ADVENTURE_ID)
+
+
+async def _do_invite_to_party(update: Update, target_name: str) -> None:
+    telegram_user_id = update.effective_user.id
+    character = db.get_character(telegram_user_id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if not target_name:
+        await update.effective_chat.send_message(
+            "Invite who, exactly? Try \"invite [name] to my party\".",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    target = _find_party_target_by_name(target_name)
+    if target is None:
+        await update.effective_chat.send_message(
+            f"No one named \"{target_name}\" is around to invite.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if target["telegram_user_id"] == telegram_user_id:
+        await update.effective_chat.send_message(
+            "You can't invite yourself.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    party_id = character.get("party_id")
+    if not party_id:
+        party_id = db.create_party(telegram_user_id)
+
+    if db.get_party_size(party_id) >= db.PARTY_MAX_MEMBERS:
+        await update.effective_chat.send_message(
+            f"Your party is already full ({db.PARTY_MAX_MEMBERS} members).",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    if target.get("party_id") == party_id:
+        await update.effective_chat.send_message(
+            f"{target['name']} is already in your party.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    if target.get("is_ai"):
+        # AI companions have no real turn to accept with — they join immediately.
+        db.add_ai_companion_to_party(target["telegram_user_id"], party_id)
+        await update.effective_chat.send_message(
+            f"🎗️ **{target['name']}** joins your party!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    db.set_pending_party_invite(target["telegram_user_id"], party_id)
     await update.effective_chat.send_message(
-        f"👥 Current party: {_party_summary_text()}",
+        f"🎗️ Invited **{target['name']}** to your party — they'll need to accept "
+        f"(\"I accept the party invite\") to join.",
         message_thread_id=config.TOPIC_ADVENTURE_ID,
     )
+
+
+async def _do_accept_party_invite(update: Update) -> None:
+    success, message = db.accept_party_invite(update.effective_user.id)
+    await update.effective_chat.send_message(
+        ("🎗️ " if success else "") + message, message_thread_id=config.TOPIC_ADVENTURE_ID
+    )
+
+
+async def _do_leave_party(update: Update) -> None:
+    left = db.leave_party(update.effective_user.id)
+    message = "You've left your party." if left else "You're not in a party right now."
+    await update.effective_chat.send_message(message, message_thread_id=config.TOPIC_ADVENTURE_ID)
 
 
 async def _do_check_sheet(update: Update) -> None:
@@ -3698,6 +3784,12 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         await _do_flee(update, text)
     elif action == "resolve_choice":
         await _do_resolve_quest_choice(update, text)
+    elif action == "invite_to_party":
+        await _do_invite_to_party(update, intent.get("target") or "")
+    elif action == "accept_party_invite":
+        await _do_accept_party_invite(update)
+    elif action == "leave_party":
+        await _do_leave_party(update)
     elif action == "show_map":
         await _do_show_map(update)
     elif action == "gather":
@@ -3834,7 +3926,8 @@ async def development_topic_handler(update: Update, context: ContextTypes.DEFAUL
 
 async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     question = update.message.text.strip()
-    reply = await asyncio.to_thread(answer_support_question, question)
+    character = db.get_character(update.effective_user.id)
+    reply = await asyncio.to_thread(answer_support_question, question, character)
     await update.effective_chat.send_message(reply, message_thread_id=config.TOPIC_SUPPORT_ID)
 
 

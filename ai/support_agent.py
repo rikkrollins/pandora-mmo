@@ -17,6 +17,7 @@ import items as items_module
 import spells as spells_module
 from ai.text_cleanup import strip_think_tags
 from guilds import GUILDS
+from rules.leveling import XP_THRESHOLDS, level_for_xp
 
 SUPPORT_SYSTEM_PROMPT_HEADER = """You are the support guide for Pandora MMO, a \
 Dungeons & Dragons 5E game played entirely through natural language in a \
@@ -102,25 +103,85 @@ SUPPORT_SYSTEM_PROMPT = (
 
 Do not reveal or speculate about story content, plot, hidden areas, or what \
 the "great evil" or threat in the world might be. Do not give hints, \
-suggestions, or strategy advice about how to solve anything, where to go, \
-what to do next, or how to approach a challenge — if asked something like \
-that, say that's part of what they'll discover by playing, and that you \
-can only help with how the game's mechanics and interface work, not what \
-to do with them. Keep answers short and friendly."""
+suggestions, or strategy advice about where to go, what to do next, or how \
+to approach any in-world challenge or mystery — if asked something like \
+that, say that's part of what they'll discover by playing. You MAY answer \
+character-BUILD mechanical questions (e.g. which ability score to assign \
+where, what a stat means, how much XP is needed to level up) using real \
+5E rules and, if given, the player's own REAL character facts below — \
+that's how the game's mechanics work, not a story spoiler. If real \
+character facts are provided below, answer questions about THIS \
+character using ONLY those facts — never invent or guess a stat, item, \
+location, or quest that isn't actually listed. If no character facts are \
+given, and the question is clearly about "my character", say they don't \
+have one yet. Keep answers short and friendly."""
 )
 
 
-def _build_prompt(question: str) -> str:
-    return f"{SUPPORT_SYSTEM_PROMPT}\n\nPlayer question: {question}\nAnswer:"
+def _build_character_facts(character: dict) -> str:
+    """Real, current facts about the asking player's own character — never invented."""
+    xp = character.get("xp", 0)
+    level = character.get("level") or level_for_xp(xp)
+    next_level_xp = XP_THRESHOLDS.get(level + 1)
+    xp_to_next = f"{next_level_xp - xp} XP" if next_level_xp is not None else "already at max level (20)"
+
+    known_spells = character.get("known_spells") or []
+    active_quests = character.get("active_quests") or {}
+
+    return (
+        "\n\nREAL FACTS ABOUT THE PLAYER'S OWN CHARACTER (answer personal "
+        "questions using ONLY this, never invent or guess):\n"
+        f"- Name: {character.get('name')}, a {character.get('race')} {character.get('char_class')}, level {level}\n"
+        f"- XP: {xp} total, {xp_to_next} until next level\n"
+        f"- Ability scores: STR {character.get('strength')}, DEX {character.get('dexterity')}, "
+        f"CON {character.get('constitution')}, INT {character.get('intelligence')}, "
+        f"WIS {character.get('wisdom')}, CHA {character.get('charisma')}\n"
+        f"- HP: {character.get('hp_current')}/{character.get('hp_max')}, AC {character.get('armor_class')}\n"
+        f"- Gold: {character.get('gold')}\n"
+        f"- Current location: {character.get('current_location')}\n"
+        f"- Known spells: {', '.join(known_spells) if known_spells else 'none'}\n"
+        f"- Active quests: {', '.join(active_quests.keys()) if active_quests else 'none'}"
+    )
 
 
-def answer_support_question(question: str) -> str:
+_XP_QUESTION_WORDS = ["level up", "next level", "xp do i need", "xp to level", "experience do i need"]
+
+
+def _deterministic_xp_answer(character: dict) -> str:
     """
-    Send a player's how-to-play question to the narration model and
-    return its reply. Falls back to a short static pointer if Ollama
-    is unreachable.
+    Confirmed live (2026-07-10): asked with the correct fact ("300 XP
+    until next level") already in its prompt, the model still answered
+    "10 XP" -- a flat hallucination of an exact number it was given
+    verbatim. XP-to-level has exactly one correct value; there's no
+    reason to let free-form generation touch it at all, same reasoning
+    as every dice roll/reward elsewhere in this game never passing
+    through the model. Answered directly, no Ollama call.
     """
-    prompt = _build_prompt(question)
+    xp = character.get("xp", 0)
+    level = character.get("level") or level_for_xp(xp)
+    next_level_xp = XP_THRESHOLDS.get(level + 1)
+    if next_level_xp is None:
+        return f"You're level {level}, the maximum level in this game."
+    return f"You're level {level} with {xp} XP. You need {next_level_xp - xp} more XP to reach level {level + 1}."
+
+
+def _build_prompt(question: str, character: dict | None = None) -> str:
+    prompt = SUPPORT_SYSTEM_PROMPT
+    if character:
+        prompt += _build_character_facts(character)
+    return f"{prompt}\n\nPlayer question: {question}\nAnswer:"
+
+
+def answer_support_question(question: str, character: dict | None = None) -> str:
+    """
+    Send a player's how-to-play (or, if `character` is given, their own
+    character-specific) question to the narration model and return its
+    reply. Falls back to a short static pointer if Ollama is unreachable.
+    """
+    if character and any(w in question.lower() for w in _XP_QUESTION_WORDS):
+        return _deterministic_xp_answer(character)
+
+    prompt = _build_prompt(question, character)
 
     try:
         response = requests.post(

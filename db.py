@@ -129,6 +129,21 @@ CREATE TABLE IF NOT EXISTS board_quests (
 );
 """
 
+# Real, explicit party membership -- deliberately separate from combat
+# grouping (every active character still fights together regardless of
+# party, per Coffee's explicit call 2026-07-10: this is a social/roster
+# construct, not a change to who's on whose side in a fight). Up to 6
+# members, invite/accept-based, leave any time.
+CREATE_PARTIES_TABLE = """
+CREATE TABLE IF NOT EXISTS parties (
+    party_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_by INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+"""
+
+PARTY_MAX_MEMBERS = 6
+
 
 @contextmanager
 def get_connection():
@@ -175,6 +190,7 @@ def init_db() -> None:
         conn.execute(CREATE_NPC_RELATIONSHIPS_TABLE)
         conn.execute(CREATE_FACTION_STANDING_TABLE)
         conn.execute(CREATE_BOARD_QUESTS_TABLE)
+        conn.execute(CREATE_PARTIES_TABLE)
 
         # Older DBs created before fog-of-war/character-slots/proficiency
         # may already have the new characters table but be missing later
@@ -196,6 +212,11 @@ def init_db() -> None:
         board_quest_columns = _existing_columns(conn, "board_quests")
         if "branch_data" not in board_quest_columns:
             conn.execute("ALTER TABLE board_quests ADD COLUMN branch_data TEXT")
+
+        if "party_id" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN party_id INTEGER")
+        if "pending_party_invite" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN pending_party_invite INTEGER")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -868,3 +889,81 @@ def expire_stale_board_quests() -> list[dict]:
                 (now_iso,),
             )
     return expired
+
+
+# --- Real party membership (roster only -- see CREATE_PARTIES_TABLE's
+# comment: combat grouping is unaffected by this) ---
+
+def get_party_size(party_id: int) -> int:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM characters WHERE party_id = ? AND is_deleted = 0", (party_id,)
+        ).fetchone()
+    return row["n"] if row else 0
+
+
+def get_party_members_by_id(party_id: int) -> list[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT c.* FROM characters c JOIN active_characters a ON a.character_id = c.character_id "
+            "WHERE c.party_id = ? AND c.is_deleted = 0",
+            (party_id,),
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def create_party(telegram_user_id: int) -> int:
+    """Creates a new party and immediately puts the creator's active character in it."""
+    with get_connection() as conn:
+        cur = conn.execute(
+            "INSERT INTO parties (created_by, created_at) VALUES (?, ?)",
+            (telegram_user_id, datetime.now(timezone.utc).isoformat()),
+        )
+        party_id = cur.lastrowid
+        character_id = _active_character_id(telegram_user_id, conn)
+        conn.execute("UPDATE characters SET party_id = ? WHERE character_id = ?", (party_id, character_id))
+    return party_id
+
+
+def set_pending_party_invite(telegram_user_id: int, party_id: int) -> None:
+    with get_connection() as conn:
+        character_id = _active_character_id(telegram_user_id, conn)
+        conn.execute(
+            "UPDATE characters SET pending_party_invite = ? WHERE character_id = ?", (party_id, character_id)
+        )
+
+
+def accept_party_invite(telegram_user_id: int) -> tuple[bool, str]:
+    """Joins the party the character was invited to, if there's room. Returns (success, message)."""
+    character = get_character(telegram_user_id)
+    if character is None:
+        return False, "You don't have a character yet!"
+    party_id = character.get("pending_party_invite")
+    if not party_id:
+        return False, "You don't have a pending party invite."
+    if get_party_size(party_id) >= PARTY_MAX_MEMBERS:
+        return False, "That party is already full (6 members)."
+    with get_connection() as conn:
+        character_id = _active_character_id(telegram_user_id, conn)
+        conn.execute(
+            "UPDATE characters SET party_id = ?, pending_party_invite = NULL WHERE character_id = ?",
+            (party_id, character_id),
+        )
+    return True, "Joined the party!"
+
+
+def leave_party(telegram_user_id: int) -> bool:
+    """Returns False if the character wasn't in a party to begin with."""
+    character = get_character(telegram_user_id)
+    if character is None or not character.get("party_id"):
+        return False
+    with get_connection() as conn:
+        character_id = _active_character_id(telegram_user_id, conn)
+        conn.execute("UPDATE characters SET party_id = NULL WHERE character_id = ?", (character_id,))
+    return True
+
+
+def add_ai_companion_to_party(telegram_user_id: int, party_id: int) -> None:
+    """AI companions have no real turn to 'accept' with -- they join immediately when invited."""
+    with get_connection() as conn:
+        conn.execute("UPDATE characters SET party_id = ? WHERE telegram_user_id = ?", (party_id, telegram_user_id))

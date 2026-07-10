@@ -99,6 +99,9 @@ getting caught, with real consequences, not the same as "buy".
 - "join_guild" is for joining/asking to join a specific guild or order.
 - "pass_turn" is for skipping, waiting, or passing.
 - "resolve_choice" is for declaring a decision on a moral choice/quest resolution (e.g. "I choose to...", "I'll go with...").
+- "invite_to_party" is for inviting another player's or AI companion's character into their own formed party. Set "target" to the invitee's name.
+- "accept_party_invite" is for accepting a pending party invite.
+- "leave_party" is for leaving a party the character is currently in.
 - "chat" is for anything else — general roleplay talk with no clear game action.
 Output ONLY the JSON object, nothing else."""
 
@@ -147,6 +150,27 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in flee_words):
         return {**base, "action": "flee"}
 
+    # Real party invite/accept/leave — checked here, before any known NPC
+    # name would have already been caught above (recruit_npc's "join the
+    # party" phrasing is for campaign NPCs specifically; this is for
+    # inviting a fellow player's or AI companion's own character).
+    for trigger in ["invite ", "let "]:
+        if trigger in lowered and ("to my party" in lowered or "to the party" in lowered
+                                    or "join my party" in lowered or "join the party" in lowered):
+            name = text[lowered.index(trigger) + len(trigger):].strip()
+            for cut in (" to my party", " to the party", " join my party", " join the party"):
+                if cut in name.lower():
+                    name = name[:name.lower().index(cut)].strip()
+                    break
+            return {**base, "action": "invite_to_party", "target": name or None}
+
+    if any(w in lowered for w in ["accept the party invite", "accept the invite", "i'll join the party",
+                                    "ill join the party", "i accept the party"]):
+        return {**base, "action": "accept_party_invite"}
+
+    if any(w in lowered for w in ["leave the party", "leave my party", "quit the party", "i quit my party"]):
+        return {**base, "action": "leave_party"}
+
     attack_words = ["attack", "swing", "shoot", "strike", "hit", "stab", "cast at", "fire at"]
     if any(w in lowered for w in attack_words):
         return {**base, "action": "attack"}
@@ -160,7 +184,8 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in ["my backpack", "my bag", "my inventory", "what am i carrying", "what do i have"]):
         return {**base, "action": "check_inventory"}
 
-    if any(w in lowered for w in ["who's in my party", "whos in my party", "my party", "who is with me", "who's with me"]):
+    if any(w in lowered for w in ["who's in my party", "whos in my party", "my party", "who is with me",
+                                    "who's with me", "am i in a party", "party status"]):
         return {**base, "action": "check_party"}
 
     if any(w in lowered for w in ["my quests", "quest journal", "quest log", "my quest log",
@@ -346,6 +371,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
                 "list_characters", "switch_character", "delete_character",
                 "fast_travel", "accept_quest", "check_quests", "ask_clue",
                 "answer_puzzle", "gamble", "chat", "examine", "flee", "resolve_choice",
+                "invite_to_party", "accept_party_invite", "leave_party",
             )
             if parsed["action"] not in valid_actions:
                 return fallback
