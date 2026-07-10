@@ -711,8 +711,19 @@ def get_idle_real_characters() -> list[dict]:
 
 # --- Area quest board ---
 
+def get_active_board_quests(location_id: str, day_key: str) -> list[dict]:
+    """All of today's board quests for this location (accepted or not), oldest first."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM board_quests WHERE location_id = ? AND day_key = ? "
+            "ORDER BY board_quest_id ASC",
+            (location_id, day_key),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def get_active_board_quest(location_id: str, day_key: str) -> dict | None:
-    """The current, non-expired-out board quest for this location today, if any (accepted or not)."""
+    """The single most-recent board quest for this location today, if any (accepted or not)."""
     with get_connection() as conn:
         row = conn.execute(
             "SELECT * FROM board_quests WHERE location_id = ? AND day_key = ? "

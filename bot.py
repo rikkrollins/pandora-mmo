@@ -421,7 +421,7 @@ async def _maybe_post_hourly_status_update(bot) -> None:
         for q in CAMPAIGN["quests"].values()
         if q.get("location") == location_id
     ]
-    board_quest = board_quests_module.get_or_generate_board_quest(CAMPAIGN, location_id)
+    area_board_quests = board_quests_module.get_or_generate_board_quests(CAMPAIGN, location_id)
 
     flavor = await asyncio.to_thread(narrate_hourly_update, location_name, recent_events, activity_lines)
 
@@ -433,8 +433,8 @@ async def _maybe_post_hourly_status_update(bot) -> None:
             lines.append(f"  • {title} — {desc}" if desc else f"  • {title}")
     else:
         lines.append(f"📋 Story quest board at {location_name}: nothing posted right now.")
-    if board_quest:
-        lines.append(board_quests_module.format_board_listing(board_quest))
+    if area_board_quests:
+        lines.append(board_quests_module.format_board_listings(area_board_quests))
 
     update_like = _ChatOnlyUpdate(bot, _LAST_KNOWN_CHAT_ID)
     await _safe_send(update_like, "\n".join(lines))
@@ -998,36 +998,38 @@ def _award_victory_xp(session: sessions.Session) -> str:
     if enemy_names:
         _log_world_event(event_location, f"The party defeated {', '.join(enemy_names)}.")
 
-    board_note = ""
+    board_notes = []
     if event_location:
-        board_quest = board_quests_module.get_todays_board_quest(event_location)
-        if board_quest and board_quest.get("accepted_by") and not board_quest.get("completed_at") \
-                and board_quest["objective_type"] == "defeat_monster":
+        for board_quest in board_quests_module.get_todays_board_quests(event_location):
+            if not (board_quest.get("accepted_by") and not board_quest.get("completed_at")
+                    and board_quest["objective_type"] == "defeat_monster"):
+                continue
             defeated_matching = sum(
                 1 for p in session.participants
                 if session.sides.get(p["telegram_user_id"]) == "enemy"
                 and p.get("monster_key") == board_quest["objective_target"]
             )
-            if defeated_matching:
-                updated = db.record_board_quest_progress(board_quest["board_quest_id"], defeated_matching)
-                if updated["progress_count"] >= updated["objective_count"]:
-                    db.complete_board_quest(updated["board_quest_id"])
-                    for pid in real_party_ids:
-                        db.add_xp(pid, updated["reward_xp"])
-                        character = db.get_character(pid)
-                        db.update_character(pid, gold=character["gold"] + updated["reward_gold"])
-                    board_note = (
-                        f"\n📜 **Board quest complete: {updated['title']}!** "
-                        f"Party earns {updated['reward_xp']} XP, {updated['reward_gold']} gold each."
-                    )
-                else:
-                    board_note = (
-                        f"\n📋 Board quest progress: {updated['title']} "
-                        f"({updated['progress_count']}/{updated['objective_count']})"
-                    )
+            if not defeated_matching:
+                continue
+            updated = db.record_board_quest_progress(board_quest["board_quest_id"], defeated_matching)
+            if updated["progress_count"] >= updated["objective_count"]:
+                db.complete_board_quest(updated["board_quest_id"])
+                for pid in real_party_ids:
+                    db.add_xp(pid, updated["reward_xp"])
+                    character = db.get_character(pid)
+                    db.update_character(pid, gold=character["gold"] + updated["reward_gold"])
+                board_notes.append(
+                    f"\n📜 **Board quest complete: {updated['title']}!** "
+                    f"Party earns {updated['reward_xp']} XP, {updated['reward_gold']} gold each."
+                )
+            else:
+                board_notes.append(
+                    f"\n📋 Board quest progress: {updated['title']} "
+                    f"({updated['progress_count']}/{updated['objective_count']})"
+                )
 
     summary = f"\n✨ Party gains {xp_each} XP each ({enemy_xp_total} total)."
-    summary += board_note
+    summary += "".join(board_notes)
     if level_up_notes:
         summary += "\n" + "\n".join(level_up_notes)
     return summary
@@ -2213,7 +2215,7 @@ async def _check_quest_completions_defeat_monster(update_like, session: sessions
                 await _complete_quest_and_announce(update_like, telegram_user_id, quest_id)
 
 
-async def _do_accept_quest(update: Update) -> None:
+async def _do_accept_quest(update: Update, text: str = "") -> None:
     telegram_user_id = update.effective_user.id
     character = db.get_character(telegram_user_id)
     if character is None:
@@ -2233,19 +2235,32 @@ async def _do_accept_quest(update: Update) -> None:
         )
         return
 
-    # No story quest on offer here — try the area's board quest instead.
-    board_quest = board_quests_module.get_or_generate_board_quest(CAMPAIGN, location_id)
-    if board_quest is None or board_quest.get("completed_at"):
-        await update.effective_chat.send_message(
-            "There's nothing to take on here right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
-        )
+    # No story quest on offer here — try the area's board quest(s) instead.
+    all_quests = board_quests_module.get_or_generate_board_quests(CAMPAIGN, location_id)
+    available = [q for q in all_quests if not q.get("accepted_by") and not q.get("completed_at")]
+    if not available:
+        if all_quests:
+            await update.effective_chat.send_message(
+                "Everything on the board here has already been taken on for today.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+        else:
+            await update.effective_chat.send_message(
+                "There's nothing to take on here right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            )
         return
-    if board_quest.get("accepted_by"):
-        await update.effective_chat.send_message(
-            f"**{board_quest['title']}** has already been taken on by another party today.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
-        )
-        return
+
+    board_quest = board_quests_module.find_board_quest_by_name(available, text) if text else None
+    if board_quest is None:
+        if len(available) == 1:
+            board_quest = available[0]
+        else:
+            titles = ", ".join(f'"{q["title"]}"' for q in available)
+            await update.effective_chat.send_message(
+                f"There's more than one thing posted here — which one? {titles}",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
 
     db.accept_board_quest(board_quest["board_quest_id"], telegram_user_id)
     await update.effective_chat.send_message(
@@ -2288,12 +2303,12 @@ async def _do_check_quests(update: Update) -> None:
 
     location_id = character["current_location"]
     location = cl.get_location(CAMPAIGN, location_id)
-    board_quest = board_quests_module.get_or_generate_board_quest(CAMPAIGN, location_id)
+    area_board_quests = board_quests_module.get_or_generate_board_quests(CAMPAIGN, location_id)
     lines.append(f"\n📋 **Quest board — {location['name'] if location else location_id}**")
-    if board_quest:
-        lines.append(board_quests_module.format_board_listing(board_quest))
-        if not board_quest.get("accepted_by") and not board_quest.get("completed_at"):
-            lines.append("(Say \"I accept this quest\" to take it on.)")
+    if area_board_quests:
+        lines.append(board_quests_module.format_board_listings(area_board_quests))
+        if any(not q.get("accepted_by") and not q.get("completed_at") for q in area_board_quests):
+            lines.append("(Say \"I accept this quest\" — name it if more than one's posted.)")
     else:
         lines.append("Nothing posted here today.")
 
@@ -2515,10 +2530,11 @@ async def _do_gather(update: Update, action_text: str) -> None:
     if success:
         message += f"\n🌿 You gather **1x {material['name']}**."
 
-        board_quest = board_quests_module.get_todays_board_quest(character["current_location"])
-        if board_quest and board_quest.get("accepted_by") and not board_quest.get("completed_at") \
-                and board_quest["objective_type"] == "gather_material" \
-                and board_quest["objective_target"] == node["material"]:
+        for board_quest in board_quests_module.get_todays_board_quests(character["current_location"]):
+            if not (board_quest.get("accepted_by") and not board_quest.get("completed_at")
+                    and board_quest["objective_type"] == "gather_material"
+                    and board_quest["objective_target"] == node["material"]):
+                continue
             updated = db.record_board_quest_progress(board_quest["board_quest_id"], 1)
             if updated["progress_count"] >= updated["objective_count"]:
                 db.complete_board_quest(updated["board_quest_id"])
@@ -2534,6 +2550,7 @@ async def _do_gather(update: Update, action_text: str) -> None:
                     f"\n📋 Board quest progress: {updated['title']} "
                     f"({updated['progress_count']}/{updated['objective_count']})"
                 )
+            break
 
     await update.effective_chat.send_message(message, message_thread_id=config.TOPIC_ADVENTURE_ID)
 
@@ -2634,6 +2651,10 @@ async def _do_look(update: Update) -> None:
     if interactables:
         names = [i["name"] for i in interactables.values()]
         lines.append(f"Things worth a closer look: {', '.join(names)}")
+    resource_nodes = location.get("resource_nodes", [])
+    if resource_nodes:
+        node_names = [n["name"] for n in resource_nodes]
+        lines.append(f"Resources here: {', '.join(node_names)}")
 
     await update.effective_chat.send_message("\n".join(lines), message_thread_id=config.TOPIC_ADVENTURE_ID)
 
@@ -3575,7 +3596,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     elif action == "go_inactive":
         await _do_go_inactive(update, intent.get("target") or "")
     elif action == "accept_quest":
-        await _do_accept_quest(update)
+        await _do_accept_quest(update, text)
     elif action == "check_quests":
         await _do_check_quests(update)
     elif action == "ask_clue":
