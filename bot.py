@@ -123,6 +123,135 @@ _IDLE_WARNED: set[int] = set()
 # to read a chat_id from otherwise. None until someone actually talks.
 _LAST_KNOWN_CHAT_ID: int | None = None
 
+# ---------------------------------------------------------------------
+# Living world — NPCs tagged "can_wander" in campaign.json (currently
+# Sera and Theron) have a real, mutable current location, independent
+# of their static campaign.json placement, and can drift between
+# connected locations on their own over time. Fixed-role NPCs (the
+# innkeeper, the shopkeeper, the bandit) stay exactly where campaign
+# data puts them — they have jobs to do. All of this is in-memory only
+# (resets on restart), same reasoning as _UNLOCKED/_DEFEATED_NPCS: it's
+# ambient world texture, not a game fact anything depends on.
+#
+# Frequency is deliberately loose, not a tight timer: this runs off the
+# EXISTING 60s idle-check loop rather than its own schedule, and both
+# wandering and the "meanwhile, while everyone's away" heartbeat roll
+# low odds / long minimum gaps specifically so they can never compete
+# with a real player's request for the same CPU-bound Ollama instance.
+# ---------------------------------------------------------------------
+_NPC_LOCATIONS: dict[str, str] = {}
+NPC_WANDER_CHANCE_PER_CYCLE = 0.15
+WORLD_HEARTBEAT_IDLE_THRESHOLD_SECONDS = 1200  # 20 real minutes with no player activity at all
+WORLD_HEARTBEAT_MIN_GAP_SECONDS = 900  # never more than once per ~15 real minutes
+_LAST_WORLD_HEARTBEAT_AT: datetime | None = None
+
+
+def _wanderable_npc_ids() -> list[str]:
+    return [npc_id for npc_id, data in CAMPAIGN["npcs"].items() if data.get("can_wander")]
+
+
+def _seed_npc_locations() -> None:
+    """Gives each wanderable NPC a real starting location, from wherever campaign.json first placed them."""
+    for npc_id in _wanderable_npc_ids():
+        if npc_id in _NPC_LOCATIONS:
+            continue
+        for layer_locations in CAMPAIGN["locations"].values():
+            for loc_id, loc in layer_locations.items():
+                if npc_id in loc.get("npcs", []):
+                    _NPC_LOCATIONS[npc_id] = loc_id
+                    break
+            if npc_id in _NPC_LOCATIONS:
+                break
+
+
+def _npcs_at_location(location_id: str) -> list[str]:
+    """Fixed NPCs still listed in campaign.json for this location, plus any wanderers currently here."""
+    location = cl.get_location(CAMPAIGN, location_id)
+    static_npcs = [
+        n for n in (location.get("npcs", []) if location else [])
+        if not CAMPAIGN["npcs"].get(n, {}).get("can_wander")
+    ]
+    wandering_here = [npc_id for npc_id, loc_id in _NPC_LOCATIONS.items() if loc_id == location_id]
+    return static_npcs + wandering_here
+
+
+def _wander_npcs() -> None:
+    for npc_id in _wanderable_npc_ids():
+        if random.random() > NPC_WANDER_CHANCE_PER_CYCLE:
+            continue
+        current_loc_id = _NPC_LOCATIONS.get(npc_id)
+        if not current_loc_id:
+            continue
+        location = cl.get_location(CAMPAIGN, current_loc_id)
+        connections = list(location.get("connections", [])) if location else []
+        if not connections:
+            continue
+        _NPC_LOCATIONS[npc_id] = random.choice(connections)
+
+
+async def _maybe_post_world_heartbeat(bot) -> None:
+    """
+    "The world keeps living while everyone's away" — if real players
+    have been quiet for a long stretch, narrate one small, grounded
+    beat of NPC activity at wherever the last active/resting player
+    actually is, so checking back in feels like a place that kept
+    going, not a paused game. Never invents anything beyond a real
+    NPC's real current location and their own listed activity_goals.
+    """
+    global _LAST_WORLD_HEARTBEAT_AT
+    if _LAST_KNOWN_CHAT_ID is None:
+        return
+
+    now = datetime.now(timezone.utc)
+    with db.get_connection() as conn:
+        row = conn.execute(
+            "SELECT MAX(last_active_at) AS m FROM characters WHERE is_ai = 0 AND is_deleted = 0"
+        ).fetchone()
+    if not row or not row["m"]:
+        return  # nobody has ever actually played — nothing to be "meanwhile" about
+    idle_for = (now - datetime.fromisoformat(row["m"])).total_seconds()
+    if idle_for < WORLD_HEARTBEAT_IDLE_THRESHOLD_SECONDS:
+        return
+    if _LAST_WORLD_HEARTBEAT_AT and (now - _LAST_WORLD_HEARTBEAT_AT).total_seconds() < WORLD_HEARTBEAT_MIN_GAP_SECONDS:
+        return
+
+    with db.get_connection() as conn:
+        row = conn.execute(
+            "SELECT current_location FROM characters WHERE is_ai = 0 AND is_deleted = 0 "
+            "ORDER BY last_active_at DESC LIMIT 1"
+        ).fetchone()
+    location_id = row["current_location"] if row else SAFE_LOCATION_FALLBACK
+
+    npcs_here = _npcs_at_location(location_id)
+    if not npcs_here:
+        return
+
+    location_name = cl.get_location(CAMPAIGN, location_id)["name"]
+    update_like = _ChatOnlyUpdate(bot, _LAST_KNOWN_CHAT_ID)
+
+    if len(npcs_here) >= 2:
+        npc_a, npc_b = random.sample(npcs_here, 2)
+        npc_a_data, npc_b_data = CAMPAIGN["npcs"][npc_a], CAMPAIGN["npcs"][npc_b]
+        line = await asyncio.to_thread(
+            generate_ambient_line, npc_a, npc_b_data["name"],
+            f"has just crossed paths with {npc_b_data['name']} here at {location_name}, with no one else around",
+        )
+        speaker_name = npc_a_data["name"]
+    else:
+        npc_id = npcs_here[0]
+        npc_data = CAMPAIGN["npcs"][npc_id]
+        activity = random.choice(npc_data.get("activity_goals", ["going about their day"]))
+        line = await asyncio.to_thread(
+            generate_ambient_line, npc_id, npc_data["name"],
+            f"is {activity}, alone at {location_name}",
+        )
+        speaker_name = npc_data["name"]
+
+    if not line:
+        return
+    _LAST_WORLD_HEARTBEAT_AT = now
+    await _safe_send(update_like, f"🕯️ *(meanwhile, at {location_name})*\n💬 **{speaker_name}:** {line}")
+
 
 class _ChatOnlyUpdate:
     """
@@ -958,7 +1087,7 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
     if sessions.get_session(chat_id) is not None:
         return  # never interrupt combat already in progress
 
-    npc_ids = location.get("npcs", [])
+    npc_ids = _npcs_at_location(location["id"])
     if not npc_ids or random.random() > AMBIENT_NPC_ENCOUNTER_CHANCE:
         return
 
@@ -1004,6 +1133,24 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
             )
             await _safe_send(update, header)
             await _resolve_ai_turns(update, session)
+    elif len(npc_ids) >= 2 and random.random() < 0.5:
+        # Catch two NPCs mid-conversation rather than one reacting to the
+        # player — makes the world feel populated even when nobody's
+        # talking to anybody. Purely a narrated moment the player
+        # witnesses; nobody here is "reacting to" the arrival.
+        other_id = random.choice([n for n in npc_ids if n != npc_id])
+        other_data = CAMPAIGN["npcs"].get(other_id)
+        if other_data is None or other_id not in _NPCS:
+            return
+        line = await asyncio.to_thread(
+            generate_ambient_line, npc_id, other_data["name"],
+            f"is talking with {other_data['name']} here, both unaware {character['name']} just arrived",
+        )
+        if line:
+            await update.effective_chat.send_message(
+                f"💬 **{npc_data['name']}** (to {other_data['name']}): {line}",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
     else:
         line = await asyncio.to_thread(
             generate_ambient_line, npc_id, character["name"], "arrives", memory_facts
@@ -2011,7 +2158,7 @@ async def _do_look(update: Update) -> None:
     db.mark_visited(update.effective_user.id, character["current_location"])
 
     lines = [f"📍 **{location['name']}** ({location['layer']})", location["description"]]
-    npcs_here = location.get("npcs", [])
+    npcs_here = _npcs_at_location(character["current_location"])
     if npcs_here:
         npc_names = [cl.get_npc(CAMPAIGN, n)["name"] for n in npcs_here if cl.get_npc(CAMPAIGN, n)]
         lines.append(f"People here: {', '.join(npc_names)}")
@@ -2638,6 +2785,7 @@ def setup_default_npcs() -> None:
             alignment=npc_data.get("alignment", ""),
             disposition=npc_data.get("disposition", "friendly"),
         )
+    _seed_npc_locations()
 
 
 UNIVERSAL_ESCAPE_PHRASES = {"cancel", "start over", "nevermind", "never mind", "stop", "reset"}
@@ -3089,6 +3237,14 @@ async def _idle_inactivity_loop(application: Application) -> None:
             await _check_idle_characters(application.bot)
         except Exception as e:
             logger.error(f"[idle_check] background loop failed this cycle: {e!r}")
+        try:
+            _wander_npcs()
+        except Exception as e:
+            logger.error(f"[world_tick] npc wander failed this cycle: {e!r}")
+        try:
+            await _maybe_post_world_heartbeat(application.bot)
+        except Exception as e:
+            logger.error(f"[world_tick] heartbeat failed this cycle: {e!r}")
 
 
 async def _on_startup(application: Application) -> None:

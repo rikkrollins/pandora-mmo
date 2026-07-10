@@ -270,14 +270,28 @@
         }
       },
       "alignment": "Chaotic Good",
-      "disposition": "friendly"
+      "disposition": "friendly",
+      "can_wander": true,
+      "activity_goals": [
+        "scouting the treeline for whatever's been unsettling Grimsby",
+        "trading road stories with whoever's willing to listen",
+        "helping Old Maren haul in a delivery",
+        "sizing up the bridge crossing for safer routes"
+      ]
     },
     "theron_the_wanderer": {
       "name": "Theron",
       "role": "wandering_monk",
       "personality": "a quiet, unaligned drifter who speaks in riddles and owes loyalty to no one \u2014 not unfriendly, but never quite trustworthy either",
       "alignment": "True Neutral",
-      "disposition": "neutral"
+      "disposition": "neutral",
+      "can_wander": true,
+      "activity_goals": [
+        "sitting with the well's warmth, listening for something under it",
+        "trading a riddle for a rumor with anyone passing through",
+        "walking the tree line without any obvious destination",
+        "watching the goblin warrens from a safe distance"
+      ]
     },
     "kess_the_bandit": {
       "name": "Kess",
