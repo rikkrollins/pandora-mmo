@@ -57,7 +57,8 @@ CREATE TABLE IF NOT EXISTS characters (
     is_deleted INTEGER NOT NULL DEFAULT 0,
     skill_uses TEXT NOT NULL DEFAULT '{}',
     is_inactive INTEGER NOT NULL DEFAULT 0,
-    last_active_at TEXT
+    last_active_at TEXT,
+    active_quests TEXT NOT NULL DEFAULT '{}'
 );
 """
 
@@ -157,6 +158,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN is_inactive INTEGER NOT NULL DEFAULT 0")
         if "last_active_at" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN last_active_at TEXT")
+        if "active_quests" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN active_quests TEXT NOT NULL DEFAULT '{}'")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -166,6 +169,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     d["completed_quests"] = json.loads(d["completed_quests"])
     d["visited_locations"] = json.loads(d["visited_locations"])
     d["skill_uses"] = json.loads(d["skill_uses"])
+    d["active_quests"] = json.loads(d["active_quests"])
     return d
 
 
@@ -257,7 +261,7 @@ def update_character(telegram_user_id: int, **fields) -> dict | None:
     if not fields:
         return get_character(telegram_user_id)
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -355,12 +359,27 @@ def restore_spell_slots(telegram_user_id: int) -> dict | None:
 
 
 def complete_quest(telegram_user_id: int, quest_id: str) -> dict | None:
+    """Marks a quest completed and clears it from active_quests, if present."""
     character = get_character(telegram_user_id)
     if character is None:
         return None
     if quest_id not in character["completed_quests"]:
         character["completed_quests"].append(quest_id)
-    return update_character(telegram_user_id, completed_quests=character["completed_quests"])
+    active = character["active_quests"]
+    active.pop(quest_id, None)
+    return update_character(
+        telegram_user_id, completed_quests=character["completed_quests"], active_quests=active
+    )
+
+
+def accept_quest(telegram_user_id: int, quest_id: str) -> dict | None:
+    character = get_character(telegram_user_id)
+    if character is None:
+        return None
+    active = character["active_quests"]
+    if quest_id not in active:
+        active[quest_id] = {"accepted_at": datetime.now(timezone.utc).isoformat()}
+    return update_character(telegram_user_id, active_quests=active)
 
 
 def join_guild(telegram_user_id: int, guild_id: str) -> dict | None:

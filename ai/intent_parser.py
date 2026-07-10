@@ -25,7 +25,8 @@ Given a player's free-text message and some context, output ONLY a JSON object \
 {"action": "<one of: attack, pass_turn, start_combat, create_character, check_sheet, \
 talk_npc, move, look, check_inventory, check_party, buy, sell, steal, cast_spell, join_guild, \
 recruit_npc, rest, go_inactive, skill_check, shove, show_map, gather, craft, list_characters, \
-switch_character, delete_character, fast_travel, chat>", \
+switch_character, delete_character, fast_travel, accept_quest, check_quests, ask_clue, \
+answer_puzzle, gamble, chat>", \
 "ability": "<one of: strength, dexterity, constitution, intelligence, wisdom, charisma, or null>", \
 "target": "<name/place/item mentioned, or null>", "npc_name": "<npc name if talking to one, or null>", \
 "item_name": "<item mentioned for buy/sell, or null>", "spell_name": "<spell mentioned for cast_spell, or null>", \
@@ -47,6 +48,15 @@ until their next session — e.g. "rest for the night", "take a rest", "rest for
 "I'm done for now". This is DIFFERENT from "rest" (an in-universe full heal usable anytime out of combat). \
 "go_inactive" is NEVER allowed during active combat — the player must escape or finish the fight first. Set \
 "target" to the duration mentioned, if any.
+- "accept_quest" is for a player agreeing to take on a task/favor/quest that's just been described or offered \
+("I'll do it", "I accept", "count me in", "I'll help").
+- "check_quests" is for asking to see their quest log/journal, what quests they have, or their progress.
+- "ask_clue" is for asking for a clue, hint, or lead about their current quest(s) — NOT a general skill_check \
+search, specifically asking what they know or what to look for next.
+- "answer_puzzle" is for a player stating an answer/solution to a riddle or puzzle ("the answer is X", \
+"I think it's X", "could it be X?").
+- "gamble" is for wanting to bet, wager, or gamble gold on a game of chance/dice. Set "target" to the amount \
+mentioned, if any.
 - "skill_check" is for any risky non-combat action with uncertain outcome that isn't covered above: sneaking, \
 persuading, climbing, searching, lifting, recalling lore, perceiving hidden things, resisting an effect, etc. \
 Set "ability" to whichever of the 6 abilities best fits the action (dexterity for sneaking/climbing, strength \
@@ -136,6 +146,25 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
 
     if any(w in lowered for w in ["who's in my party", "whos in my party", "my party", "who is with me", "who's with me"]):
         return {**base, "action": "check_party"}
+
+    if any(w in lowered for w in ["my quests", "quest journal", "quest log", "my quest log"]):
+        return {**base, "action": "check_quests"}
+
+    if any(w in lowered for w in ["ask for a clue", "ask for clues", "give me a clue", "any clues",
+                                    "what's the clue", "need a hint", "give me a hint"]):
+        return {**base, "action": "ask_clue"}
+
+    if any(w in lowered for w in ["i accept", "i'll do it", "ill do it", "count me in", "i'll help",
+                                    "ill help", "i'll take the job", "i'll take it on"]):
+        return {**base, "action": "accept_quest"}
+
+    if any(w in lowered for w in ["the answer is", "my answer is", "i think it's", "i think the answer is",
+                                    "could it be"]):
+        return {**base, "action": "answer_puzzle"}
+
+    if any(w in lowered for w in ["gamble", "wager", "place a bet", "i bet", "let's bet", "lets bet",
+                                    "play dice for gold"]):
+        return {**base, "action": "gamble"}
 
     # Checked BEFORE check_sheet below: "my characters" (plural, roster) is
     # a substring-superset of check_sheet's "my character" (singular) —
@@ -285,7 +314,8 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
                 "buy", "sell", "steal", "cast_spell", "join_guild", "recruit_npc", "rest",
                 "go_inactive", "skill_check", "shove", "show_map", "gather", "craft",
                 "list_characters", "switch_character", "delete_character",
-                "fast_travel", "chat",
+                "fast_travel", "accept_quest", "check_quests", "ask_clue",
+                "answer_puzzle", "gamble", "chat",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

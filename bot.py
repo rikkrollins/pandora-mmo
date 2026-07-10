@@ -771,6 +771,8 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
     if session.is_combat_over():
         winner = _determine_winner(session)
         xp_summary = _award_victory_xp(session) if winner == "party" else ""
+        if winner == "party":
+            await _check_quest_completions_defeat_monster(update, session)
         await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
         sessions.end_session(session.chat_id)
 
@@ -875,6 +877,7 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 "hp_max": template["hp_max"], "proficiency_bonus": template["proficiency_bonus"],
                 "is_ai": 1, "xp_reward": template.get("xp_reward", 0),
                 "on_hit_condition": template.get("on_hit_condition"),
+                "monster_key": monster_key,
             })
         sides = {p["telegram_user_id"]: "party" for p in party}
         for enemy in enemies:
@@ -1066,6 +1069,8 @@ async def _do_attack(update: Update, action_text: str) -> None:
         if session.is_combat_over():
             winner = _determine_winner(session)
             xp_summary = _award_victory_xp(session) if winner == "party" else ""
+            if winner == "party":
+                await _check_quest_completions_defeat_monster(update, session)
             await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
             sessions.end_session(chat_id)
             return
@@ -1578,6 +1583,244 @@ async def _check_idle_characters(bot) -> None:
         await _go_inactive(telegram_user_id, update_like, "drifts off to rest")
 
 
+# ---------------------------------------------------------------------
+# Quests — journal, clues, acceptance, and deterministic completion
+# detection. Whether a quest is complete is always a real, computed
+# fact (reached a location, defeated a specific monster, matched a
+# puzzle's real answer) — never left to AI narration to decide, same
+# convention as every other outcome in this game.
+# ---------------------------------------------------------------------
+
+def _offerable_quest_at_location(character: dict, location_id: str) -> tuple[str, dict] | None:
+    """The first not-yet-completed, not-yet-active quest whose 'location' matches, if any."""
+    for quest_id, quest in CAMPAIGN.get("quests", {}).items():
+        if quest.get("location") != location_id:
+            continue
+        if quest_id in character["completed_quests"] or quest_id in character["active_quests"]:
+            continue
+        return quest_id, quest
+    return None
+
+
+async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest_id: str) -> None:
+    quest = CAMPAIGN["quests"][quest_id]
+    reward_xp = quest.get("reward_xp", 0)
+    reward_gold = quest.get("reward_gold", 0)
+    reward_item = quest.get("reward_item")
+
+    db.complete_quest(telegram_user_id, quest_id)
+    if reward_xp:
+        db.add_xp(telegram_user_id, reward_xp)
+    if reward_gold:
+        character = db.get_character(telegram_user_id)
+        db.update_character(telegram_user_id, gold=character["gold"] + reward_gold)
+    if reward_item:
+        db.add_item(telegram_user_id, reward_item, 1)
+
+    reward_parts = []
+    if reward_xp:
+        reward_parts.append(f"{reward_xp} XP")
+    if reward_gold:
+        reward_parts.append(f"{reward_gold} gold")
+    if reward_item:
+        reward_parts.append(items_module.get_item(reward_item)["name"])
+    reward_text = ", ".join(reward_parts) or "real progress, if nothing material"
+
+    await _safe_send(update_like, f"📜 **Quest complete: {quest['title']}!**\nYou've earned: {reward_text}.")
+
+
+async def _check_quest_completions_reach_location(update_like, telegram_user_id: int, location_id: str) -> None:
+    character = db.get_character(telegram_user_id)
+    if character is None:
+        return
+    for quest_id in list(character["active_quests"].keys()):
+        quest = CAMPAIGN["quests"].get(quest_id)
+        if not quest:
+            continue
+        trigger = quest.get("trigger", {})
+        if trigger.get("type") == "reach_location" and trigger.get("location") == location_id:
+            await _complete_quest_and_announce(update_like, telegram_user_id, quest_id)
+
+
+async def _check_quest_completions_defeat_monster(update_like, session: sessions.Session) -> None:
+    """Called only when the party won — checks every defeated enemy's monster_key against every real party member's active quests."""
+    defeated_monster_keys = {
+        p.get("monster_key") for p in session.participants
+        if session.sides.get(p["telegram_user_id"]) == "enemy" and p.get("monster_key")
+    }
+    if not defeated_monster_keys:
+        return
+    real_party_ids = [
+        pid for pid in session.turn_order
+        if session.sides.get(pid) == "party"
+        and not next(p for p in session.participants if p["telegram_user_id"] == pid).get("is_ai")
+    ]
+    for telegram_user_id in real_party_ids:
+        character = db.get_character(telegram_user_id)
+        if character is None:
+            continue
+        for quest_id in list(character["active_quests"].keys()):
+            quest = CAMPAIGN["quests"].get(quest_id)
+            if not quest:
+                continue
+            trigger = quest.get("trigger", {})
+            if trigger.get("type") == "defeat_monster" and trigger.get("monster") in defeated_monster_keys:
+                await _complete_quest_and_announce(update_like, telegram_user_id, quest_id)
+
+
+async def _do_accept_quest(update: Update) -> None:
+    telegram_user_id = update.effective_user.id
+    character = db.get_character(telegram_user_id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    offer = _offerable_quest_at_location(character, character["current_location"])
+    if offer is None:
+        await update.effective_chat.send_message(
+            "There's nothing to take on here right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    quest_id, quest = offer
+    db.accept_quest(telegram_user_id, quest_id)
+    await update.effective_chat.send_message(
+        f"📜 **Quest accepted: {quest['title']}**\n{quest['description']}",
+        message_thread_id=config.TOPIC_ADVENTURE_ID,
+    )
+
+
+async def _do_check_quests(update: Update) -> None:
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    lines = ["📖 **Quest journal**"]
+    if character["active_quests"]:
+        lines.append("\n**Active:**")
+        for quest_id in character["active_quests"]:
+            quest = CAMPAIGN["quests"].get(quest_id)
+            if quest:
+                lines.append(f"• {quest['title']} — {quest['description']}")
+    else:
+        lines.append("\nNo active quests.")
+
+    if character["completed_quests"]:
+        titles = [CAMPAIGN["quests"][q]["title"] for q in character["completed_quests"] if q in CAMPAIGN["quests"]]
+        lines.append(f"\n**Completed ({len(titles)}):** {', '.join(titles)}")
+
+    await update.effective_chat.send_message("\n".join(lines), message_thread_id=config.TOPIC_ADVENTURE_ID)
+
+
+async def _do_ask_clue(update: Update) -> None:
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    if not character["active_quests"]:
+        await update.effective_chat.send_message(
+            "You don't have any active quests to find clues for.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    lines = ["🔍 **What you know:**"]
+    for quest_id in character["active_quests"]:
+        quest = CAMPAIGN["quests"].get(quest_id)
+        if quest and quest.get("clue"):
+            lines.append(f"• *{quest['title']}*: {quest['clue']}")
+    if len(lines) == 1:
+        lines.append("Nothing concrete yet — keep exploring.")
+
+    await update.effective_chat.send_message("\n".join(lines), message_thread_id=config.TOPIC_ADVENTURE_ID)
+
+
+async def _do_answer_puzzle(update: Update, text: str) -> None:
+    telegram_user_id = update.effective_user.id
+    character = db.get_character(telegram_user_id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    lowered = text.lower()
+    for quest_id in list(character["active_quests"].keys()):
+        quest = CAMPAIGN["quests"].get(quest_id)
+        if not quest or quest.get("trigger", {}).get("type") != "solve_puzzle":
+            continue
+        puzzle_id = quest["trigger"]["puzzle_id"]
+        puzzle = CAMPAIGN.get("puzzles", {}).get(puzzle_id)
+        if not puzzle:
+            continue
+        if any(answer in lowered for answer in puzzle["accepted_answers"]):
+            await _complete_quest_and_announce(update, telegram_user_id, quest_id)
+            return
+
+    await update.effective_chat.send_message(
+        "That's not it — think it over some more.", message_thread_id=config.TOPIC_ADVENTURE_ID
+    )
+
+
+GAMBLE_WIN_THRESHOLD = 8  # 2d6 total needed to double your wager
+
+
+async def _do_gamble(update: Update, text: str) -> None:
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    location = cl.get_location(CAMPAIGN, character["current_location"])
+    if not location or not location.get("safe"):
+        await update.effective_chat.send_message(
+            "There's nowhere to gamble here — try somewhere like a tavern.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    amount = None
+    for token in text.split():
+        digits = "".join(c for c in token if c.isdigit())
+        if digits:
+            amount = int(digits)
+            break
+    if not amount or amount <= 0:
+        await update.effective_chat.send_message(
+            "How much gold do you want to wager? Say an amount, e.g. 'I bet 20 gold'.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    if amount > character["gold"]:
+        await update.effective_chat.send_message(
+            f"You only have {character['gold']} gold.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    dice_roll = roll(2, 6)
+    total = sum(dice_roll)
+    won = total >= GAMBLE_WIN_THRESHOLD
+    new_gold = character["gold"] + amount if won else character["gold"] - amount
+    db.update_character(update.effective_user.id, gold=new_gold)
+
+    banner = "🎉 **You win!**" if won else "💸 **You lose.**"
+    change = f"+{amount}" if won else f"-{amount}"
+    await update.effective_chat.send_message(
+        f"{banner} You roll {dice_roll[0]} + {dice_roll[1]} = **{total}** "
+        f"(need {GAMBLE_WIN_THRESHOLD}+). Gold: {change} → **{new_gold}**.",
+        message_thread_id=config.TOPIC_ADVENTURE_ID,
+    )
+
+
 async def _do_check_party(update: Update) -> None:
     await update.effective_chat.send_message(
         f"👥 Current party: {_party_summary_text()}",
@@ -1907,6 +2150,7 @@ async def _do_move(update: Update, text: str) -> None:
 
     updated_character = db.get_character(update.effective_user.id)
     await _maybe_trigger_npc_encounter(update, updated_character, destination)
+    await _check_quest_completions_reach_location(update, update.effective_user.id, destination_id)
 
 
 async def _do_fast_travel(update: Update, text: str) -> None:
@@ -1965,6 +2209,7 @@ async def _do_fast_travel(update: Update, text: str) -> None:
 
     updated_character = db.get_character(telegram_user_id)
     await _maybe_trigger_npc_encounter(update, updated_character, destination)
+    await _check_quest_completions_reach_location(update, update.effective_user.id, destination_id)
 
 
 async def _do_buy(update: Update, text: str) -> None:
@@ -2183,6 +2428,8 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             if session.is_combat_over():
                 winner = _determine_winner(session)
                 xp_summary = _award_victory_xp(session) if winner == "party" else ""
+                if winner == "party":
+                    await _check_quest_completions_defeat_monster(update, session)
                 await update.effective_chat.send_message(
                     f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}",
                     message_thread_id=config.TOPIC_ADVENTURE_ID,
@@ -2547,6 +2794,16 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         await _do_rest(update)
     elif action == "go_inactive":
         await _do_go_inactive(update, intent.get("target") or "")
+    elif action == "accept_quest":
+        await _do_accept_quest(update)
+    elif action == "check_quests":
+        await _do_check_quests(update)
+    elif action == "ask_clue":
+        await _do_ask_clue(update)
+    elif action == "answer_puzzle":
+        await _do_answer_puzzle(update, text)
+    elif action == "gamble":
+        await _do_gamble(update, text)
     elif action == "skill_check":
         await _do_skill_check(update, intent.get("ability") or "dexterity", text)
     elif action == "shove":

@@ -322,7 +322,12 @@
       "location": "crossroads_tavern",
       "objective_location": "whispering_wood",
       "reward_xp": 100,
-      "reward_gold": 50
+      "reward_gold": 50,
+      "trigger": {
+        "type": "reach_location",
+        "location": "whispering_wood"
+      },
+      "clue": "Grimsby says the wrongness he's felt seems to trail off toward the treeline west of the tavern."
     },
     "the_hollow_stump": {
       "title": "The Hollow Stump",
@@ -330,14 +335,24 @@
       "location": "hollow_stump_shrine",
       "reward_xp": 150,
       "reward_gold": 25,
-      "reward_item": "waterlogged_journal"
+      "reward_item": "waterlogged_journal",
+      "trigger": {
+        "type": "reach_location",
+        "location": "hollow_stump_shrine"
+      },
+      "clue": "Old offerings at the shrine are undisturbed by animals \u2014 worth seeing with your own eyes."
     },
     "clear_the_warrens": {
       "title": "Clear the Goblin Warrens",
       "description": "The goblins under Stonearch Bridge have grown bold. Someone should find out why.",
       "location": "goblin_warrens",
       "reward_xp": 300,
-      "reward_gold": 200
+      "reward_gold": 200,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "goblin_boss"
+      },
+      "clue": "Whatever's emboldened the goblins seems to answer to something bigger among them."
     },
     "the_wrong_color": {
       "title": "The Wrong Color",
@@ -345,14 +360,24 @@
       "location": "glimmerdeep_grotto",
       "reward_xp": 500,
       "reward_gold": 300,
-      "reward_item": "shard_of_dim_light"
+      "reward_item": "shard_of_dim_light",
+      "trigger": {
+        "type": "reach_location",
+        "location": "glimmerdeep_grotto"
+      },
+      "clue": "Travelers who've passed the Sunken Root Caverns mention a faint, wrong-colored light deeper in."
     },
     "the_hush": {
       "title": "Into the Hush",
       "description": "Few who go into the Hush Below come back describing the same thing twice.",
       "location": "the_hush_below",
       "reward_xp": 750,
-      "reward_gold": 400
+      "reward_gold": 400,
+      "trigger": {
+        "type": "reach_location",
+        "location": "the_hush_below"
+      },
+      "clue": "No two accounts of what's past Glimmerdeep Grotto agree \u2014 that alone is worth noting."
     },
     "the_first_city_quest": {
       "title": "The First City",
@@ -360,7 +385,12 @@
       "location": "the_first_city",
       "reward_xp": 1500,
       "reward_gold": 1000,
-      "reward_item": "brass_key_no_lock"
+      "reward_item": "brass_key_no_lock",
+      "trigger": {
+        "type": "reach_location",
+        "location": "the_first_city"
+      },
+      "clue": "Everything so far has felt like the edge of something older, further down."
     },
     "the_unmoored_isle_quest": {
       "title": "What Waits Above",
@@ -368,7 +398,37 @@
       "location": "the_unmoored_isle",
       "reward_xp": 3000,
       "reward_gold": 2500,
-      "reward_item": "flametongue_shortsword"
+      "reward_item": "flametongue_shortsword",
+      "trigger": {
+        "type": "reach_location",
+        "location": "the_unmoored_isle"
+      },
+      "clue": "The shard you carry seems to want to go up, not down."
+    },
+    "marens_locked_ledger": {
+      "title": "Maren's Locked Ledger",
+      "description": "Old Maren has an old strongbox she's lost the combination to, and swears there's a riddle carved into its lid that used to be the answer.",
+      "location": "market_row",
+      "trigger": {
+        "type": "solve_puzzle",
+        "puzzle_id": "marens_riddle"
+      },
+      "reward_xp": 200,
+      "reward_gold": 75,
+      "clue": "The riddle carved into the lid reads: \"I have cities, but no houses; forests, but no trees; rivers, but no water. What am I?\""
+    },
+    "the_weeping_wells_secret": {
+      "title": "The Weeping Well's Secret",
+      "description": "Sera thinks the well's strange warmth isn't natural, and that whatever's behind it is worth finding, not just noting.",
+      "location": "the_weeping_well",
+      "trigger": {
+        "type": "reach_location",
+        "location": "glimmerdeep_grotto"
+      },
+      "reward_xp": 250,
+      "reward_gold": 100,
+      "reward_item": "moonpetal",
+      "clue": "Sera says the sealed door low in the well's wall is the only part of it that isn't carved from ordinary stone."
     }
   },
   "story_arcs": {
@@ -505,6 +565,17 @@
         "theron_the_wanderer"
       ],
       "starting_standing": 0
+    }
+  },
+  "puzzles": {
+    "marens_riddle": {
+      "riddle": "I have cities, but no houses; forests, but no trees; rivers, but no water. What am I?",
+      "accepted_answers": [
+        "a map",
+        "map",
+        "a map of the world",
+        "a globe"
+      ]
     }
   }
 }
