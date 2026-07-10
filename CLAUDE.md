@@ -46,6 +46,25 @@ git pull                    # once this repo is the live source
 python3 bot.py
 ```
 
+**Standing authorization (from Coffee, 2026-07-09):** Claude Code may
+git pull, commit, and push to this repo's `origin` (rikkrollins/
+pandora-mmo) without asking permission first, for ordinary development
+work on this project. This does NOT cover force-pushing, rewriting
+history, or pushing to any repo/branch other than this one's normal
+flow — those still need explicit confirmation. Whenever a change is
+deployed (bot restarted with new code), post a short summary of what
+changed to the Development topic (thread ID in `config.TOPIC_
+DEVELOPMENT_ID`) — see `scripts/announce_deploy.py`.
+
+GitHub auth: a personal access token lives in `.env` as `GITHUB_TOKEN`
+(gitignored, never committed). It authenticates pushes via a Basic auth
+header built from it — see git history around 2026-07-09 for the exact
+pattern if it needs to be reconstructed. To rotate it: generate a new
+token by hand at github.com/settings/tokens (GitHub does not allow a
+token to mint its own replacement — this is a platform security rule,
+not a missing feature), then run
+`echo "ghp_..." | python3 scripts/rotate_github_token.py`.
+
 ## Architecture
 
 - **Rules are pure Python, deterministic, real dice math** —

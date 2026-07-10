@@ -24,5 +24,11 @@ TOPIC_SUPPORT_ID = int(os.getenv("TOPIC_SUPPORT_ID", "22"))
 TOPIC_ADVENTURE_ID = int(os.getenv("TOPIC_ADVENTURE_ID", "23"))
 TOPIC_DEVELOPMENT_ID = int(os.getenv("TOPIC_DEVELOPMENT_ID", "41"))
 
+# The group's own chat id (distinct from the topic thread ids above —
+# both are required together to post into a specific topic via the Bot
+# API). Only needed by scripts/announce_deploy.py; unset by default.
+_raw_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+TELEGRAM_CHAT_ID = int(_raw_chat_id) if _raw_chat_id else None
+
 # SQLite database file path
 DB_PATH = os.getenv("DB_PATH", "pandora_mmo.db")
