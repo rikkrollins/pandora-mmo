@@ -1688,7 +1688,14 @@ async def _do_skill_check(update: Update, ability: str, action_text: str) -> Non
         {**result, "ability": ability, "dc": SKILL_CHECK_DC, "success": success},
     )
     message = _format_skill_check_result(flavor, result, ability, SKILL_CHECK_DC, success)
-    await update.effective_chat.send_message(message, message_thread_id=config.TOPIC_ADVENTURE_ID)
+    # _safe_send, not a direct send: a transient network failure here
+    # (confirmed live 2026-07-10 — a bare ConnectTimeout on this exact
+    # call ate a real player's skill check result) must not become an
+    # unhandled exception. The roll itself is already decided and
+    # persisted (db.record_skill_use above) before this point, so a lost
+    # message here is a survivable narration gap, same reasoning as the
+    # combat-resolution paths this same fix was already applied to.
+    await _safe_send(update, message)
 
 
 # --- Conditions ---
@@ -2508,7 +2515,7 @@ async def _do_examine(update: Update, target_text: str) -> None:
     narration = await asyncio.to_thread(
         narrate_examine, character, location["name"], obj_data["name"], obj_data["description"]
     )
-    await update.effective_chat.send_message(f"🔍 {narration}", message_thread_id=config.TOPIC_ADVENTURE_ID)
+    await _safe_send(update, f"🔍 {narration}")
 
 
 async def _do_show_map(update: Update) -> None:
@@ -2973,6 +2980,49 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             f"({result['hp_current']}/{result['hp_max']}).",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
+
+    elif spell["effect"] == "summon":
+        async with sessions.get_lock(chat_id):
+            session = sessions.get_session(chat_id)
+            if session is None:
+                await update.effective_chat.send_message(
+                    "There's nothing to summon into right now — this only works in combat.",
+                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                )
+                return
+            if not via_scroll and spell["level"] > 0:
+                spent, _ = db.spend_spell_slot(update.effective_user.id)
+                if not spent:
+                    await update.effective_chat.send_message(
+                        f"You have no spell slots remaining to cast {spell['name']} "
+                        f"({character['spell_slots_current']}/{character['spell_slots_max']} left). "
+                        f"Rest to recover them.",
+                        message_thread_id=config.TOPIC_ADVENTURE_ID,
+                    )
+                    return
+            _consume_scroll_if_any()
+
+            stats = spell["summon_stats"]
+            synthetic_id = -3_000_000 - (abs(hash((chat_id, character["name"], session.round_number))) % 100_000)
+            summon = {
+                "telegram_user_id": synthetic_id, "name": stats["name"].title(),
+                "dexterity": stats["dexterity"], "strength": stats["strength"],
+                "armor_class": stats["armor_class"], "hp_current": stats["hp_max"],
+                "hp_max": stats["hp_max"], "proficiency_bonus": stats["proficiency_bonus"],
+                "is_ai": 1, "xp_reward": 0,
+            }
+            summon["initiative"] = roll_d20() + ability_modifier(stats["dexterity"])
+            session.participants.append(summon)
+            session.turn_order.append(synthetic_id)
+            session.sides[synthetic_id] = "party"
+            session.log_event(f"{character['name']} summons {summon['name']} to fight alongside the party!")
+
+        await update.effective_chat.send_message(
+            f"🌀 You cast {spell['name']} — **{summon['name']}** answers the call and joins the fight "
+            f"(HP: {summon['hp_max']}, AC: {summon['armor_class']}). It vanishes once combat ends.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+
     else:
         if not via_scroll and spell["level"] > 0:
             spent, _ = db.spend_spell_slot(update.effective_user.id)

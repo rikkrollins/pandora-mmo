@@ -95,6 +95,10 @@ ITEMS = {
         "name": "Scroll of Lightning Bolt", "type": "scroll", "rarity": "rare",
         "price": 275, "weight": 0.1, "spell": "lightning_bolt",
     },
+    "scroll_summon_spirit": {
+        "name": "Scroll of Summoning", "type": "scroll", "rarity": "rare",
+        "price": 200, "weight": 0.1, "spell": "summon_lesser_spirit",
+    },
 
     # --- Rings, Amulets, Wondrous Items ---
     "ring_of_protection": {

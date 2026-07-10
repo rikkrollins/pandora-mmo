@@ -90,6 +90,15 @@ SPELLS = {
         "name": "Thaumaturgy", "level": 0, "school": "transmutation",
         "effect": "buff", "duration_rounds": 1,
     },
+    "summon_lesser_spirit": {
+        "name": "Summon Lesser Spirit", "level": 2, "school": "conjuration",
+        "effect": "summon",
+        "summon_stats": {
+            "name": "a lesser spirit",
+            "dexterity": 14, "strength": 10, "armor_class": 12,
+            "hp_max": 9, "proficiency_bonus": 2,
+        },
+    },
 }
 
 # Cantrips (level 0) each class has at-will, alongside their leveled spells.
