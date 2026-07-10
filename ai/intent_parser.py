@@ -23,8 +23,9 @@ Given a player's free-text message and some context, output ONLY a JSON object \
 (no other text, no markdown fences) with this shape:
 
 {"action": "<one of: attack, pass_turn, start_combat, create_character, check_sheet, \
-talk_npc, move, look, check_inventory, check_party, buy, sell, cast_spell, join_guild, \
-recruit_npc, rest, skill_check, shove, chat>", \
+talk_npc, move, look, check_inventory, check_party, buy, sell, steal, cast_spell, join_guild, \
+recruit_npc, rest, skill_check, shove, show_map, gather, craft, list_characters, \
+switch_character, delete_character, fast_travel, chat>", \
 "ability": "<one of: strength, dexterity, constitution, intelligence, wisdom, charisma, or null>", \
 "target": "<name/place/item mentioned, or null>", "npc_name": "<npc name if talking to one, or null>", \
 "item_name": "<item mentioned for buy/sell, or null>", "spell_name": "<spell mentioned for cast_spell, or null>", \
@@ -47,10 +48,24 @@ Set "ability" to whichever of the 6 abilities best fits the action (dexterity fo
 for lifting/breaking, intelligence for recalling lore, wisdom for perceiving/insight, charisma for \
 persuading/deceiving, constitution for enduring/resisting).
 - "shove" is specifically for trying to knock an enemy down/prone (shoving, tackling, tripping).
-- "move" is for traveling, walking, heading to, entering, or descending/ascending to a place.
+- "show_map" is for asking to see the map or where they've explored.
+- "gather" is for foraging, harvesting, mining, or collecting raw materials (herbs, ore, flowers) from the \
+environment — NOT picking a lock (that's skill_check).
+- "craft" is for brewing, crafting, or making an item from materials. Set "item_name" to the item being crafted.
+- "list_characters" is for asking to see their own list/roster of characters.
+- "switch_character" is for asking to switch to, play as, or make active a specific one of their own \
+characters by name. Set "target" to the character name.
+- "delete_character" is for asking to delete, remove, or permanently get rid of one of their own characters \
+by name. Set "target" to the character name.
+- "move" is for traveling, walking, heading to, entering, or descending/ascending to a place — normal, \
+on-foot travel to a place directly reachable from here.
+- "fast_travel" is for warping, fast-traveling, or teleporting directly to a place already explored \
+before, skipping the walk. Set "target" to the destination name.
 - "look" is for looking around, examining the current area, or asking where they are.
 - "buy" is for purchasing something from a shop or merchant.
 - "sell" is for selling something they're carrying.
+- "steal" is for stealing, pickpocketing, robbing, or taking something without paying — a real risk of \
+getting caught, with real consequences, not the same as "buy".
 - "cast_spell" is for casting/using a named spell.
 - "join_guild" is for joining/asking to join a specific guild or order.
 - "pass_turn" is for skipping, waiting, or passing.
@@ -117,8 +132,37 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in ["who's in my party", "whos in my party", "my party", "who is with me", "who's with me"]):
         return {**base, "action": "check_party"}
 
+    # Checked BEFORE check_sheet below: "my characters" (plural, roster) is
+    # a substring-superset of check_sheet's "my character" (singular) —
+    # confirmed live to otherwise get shadowed and misread as check_sheet,
+    # so the more specific roster/switch/delete phrasings must win first.
+    if any(w in lowered for w in ["my characters", "show my characters", "list my characters",
+                                    "character roster", "my roster"]):
+        return {**base, "action": "list_characters"}
+
+    for trigger in ["switch to ", "switch character to ", "play as "]:
+        if trigger in lowered:
+            name = text[lowered.index(trigger) + len(trigger):].strip()
+            return {**base, "action": "switch_character", "target": name or None}
+
+    # "delete " alone (no literal word "character" required) is trusted —
+    # nothing else in this game is described as "deleting" something, so
+    # "delete Nyssa" is just as unambiguous as "delete my character Nyssa".
+    for trigger in ["delete my character ", "delete character ", "remove my character ", "delete "]:
+        if trigger in lowered:
+            name = text[lowered.index(trigger) + len(trigger):].strip()
+            return {**base, "action": "delete_character", "target": name or None}
+
     if any(w in lowered for w in ["my sheet", "my stats", "my hp", "my health", "my character"]):
         return {**base, "action": "check_sheet"}
+
+    # Checked BEFORE move_words: "fast travel to X" / "warp to X" contain
+    # "travel to" as a substring, which would otherwise shadow this as an
+    # ordinary "move" — fast_travel needs to win first.
+    for trigger in ["fast travel to ", "fast-travel to ", "warp to ", "teleport to "]:
+        if trigger in lowered:
+            name = text[lowered.index(trigger) + len(trigger):].strip()
+            return {**base, "action": "fast_travel", "target": name or None}
 
     move_words = ["go to", "head to", "walk to", "travel to", "move to", "enter the", "descend", "ascend", "climb down", "climb up"]
     if any(w in lowered for w in move_words):
@@ -132,6 +176,9 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
 
     if lowered.startswith("sell") or " sell " in lowered:
         return {**base, "action": "sell"}
+
+    if any(w in lowered for w in ["steal", "pickpocket", "rob the", "rob this", "swipe the", "take without paying"]):
+        return {**base, "action": "steal"}
 
     if any(w in lowered for w in ["cast ", "i cast"]):
         return {**base, "action": "cast_spell"}
@@ -151,6 +198,18 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     knock_down_phrasing = "knock" in lowered and ("prone" in lowered or "down" in lowered)
     if any(w in lowered for w in unconditional_shove_words) or knock_down_phrasing:
         return {**base, "action": "shove"}
+
+    if any(w in lowered for w in ["show me the map", "the map", "where have i explored", "my map", "show map"]):
+        return {**base, "action": "show_map"}
+
+    gather_words = ["gather", "forage", "harvest", "mine ", "collect", "pick the herbs",
+                    "pick some flowers", "pick flowers", "pick herbs"]
+    if any(w in lowered for w in gather_words):
+        return {**base, "action": "gather"}
+
+    craft_words = ["craft", "brew", "make a potion", "make an antitoxin", "make a scroll"]
+    if any(w in lowered for w in craft_words):
+        return {**base, "action": "craft"}
 
     # Ability-check verb -> ability mapping. Deliberately conservative:
     # only fires on fairly explicit risky-action phrasing, so ordinary
@@ -205,8 +264,10 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
             valid_actions = (
                 "attack", "pass_turn", "start_combat", "create_character",
                 "check_sheet", "check_inventory", "check_party", "talk_npc", "move", "look",
-                "buy", "sell", "cast_spell", "join_guild", "recruit_npc", "rest",
-                "skill_check", "shove", "chat",
+                "buy", "sell", "steal", "cast_spell", "join_guild", "recruit_npc", "rest",
+                "skill_check", "shove", "show_map", "gather", "craft",
+                "list_characters", "switch_character", "delete_character",
+                "fast_travel", "chat",
             )
             if parsed["action"] not in valid_actions:
                 return fallback
@@ -219,6 +280,19 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
             # model called the action.
             if parsed["action"] == "chat" and parsed.get("npc_name"):
                 parsed["action"] = "talk_npc"
+            # Confirmed live, repeatedly, on this small CPU-bound model
+            # once the action-type list grew large: it misclassifies
+            # against an explicit, unambiguous keyword trigger — "my
+            # characters" came back as "start_combat", "show me the map"
+            # came back as "move", and "I try to pick the lock on the
+            # offering chest" came back as "pass_turn". _keyword_fallback
+            # is deliberately conservative by design (its own docstring:
+            # only fires on fairly explicit phrasing, defaults to "chat"
+            # otherwise) — so whenever it has ANY non-default opinion,
+            # that opinion is trusted over the model's, rather than
+            # special-casing just the newest action types.
+            if fallback["action"] != "chat" and parsed["action"] != fallback["action"]:
+                return fallback
             return parsed
     except (requests.RequestException, ValueError) as e:
         print(f"[intent_parser] model call failed, using keyword fallback: {e}")

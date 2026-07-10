@@ -12,8 +12,14 @@ from guilds import shop_discount_for_guild
 def buy_item(telegram_user_id: int, shop_data: dict, item_id: str, quantity: int = 1) -> tuple[bool, str]:
     """
     Attempt to buy `quantity` of item_id from a shop. Returns (success, message).
-    Applies the character's guild discount, if any.
+    Applies the character's guild discount, if any. A real, persistent
+    consequence: a shopkeeper who caught this player stealing before
+    (db.set_banned_by_npc) refuses to do business with them at all.
     """
+    owner_npc = shop_data.get("owner_npc")
+    if owner_npc and db.is_banned_by_npc(telegram_user_id, owner_npc):
+        return False, "The shopkeeper won't sell you anything — not after what you did last time."
+
     if item_id not in shop_data["inventory"]:
         return False, f"This shop doesn't carry {item_id.replace('_', ' ')}."
 

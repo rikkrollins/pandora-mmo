@@ -10,6 +10,7 @@ route intent and narrate results.
 """
 import asyncio
 import logging
+import random
 
 from telegram import Update
 from telegram.ext import (
@@ -35,7 +36,7 @@ import topics
 from ai.dev_agent import answer_dev_question
 from ai.dm_agent import narrate_action, narrate_welcome, narrate_skill_check
 from ai.intent_parser import parse_intent
-from ai.npc_agent import register_npc, talk_to_npc, _NPCS
+from ai.npc_agent import register_npc, talk_to_npc, generate_ambient_line, _NPCS
 from ai.support_agent import answer_support_question
 from guilds import GUILDS, eligible_for_guild
 from models import (
@@ -46,8 +47,10 @@ from models import (
     BASE_ARMOR_CLASS,
 )
 from rules.combat import resolve_attack, resolve_death_save
+from rules.crafting import RECIPES, get_recipe, resolve_craft
 from rules.dice import roll, ability_modifier, roll_ability_check, roll_d20
 from rules.leveling import CLASS_HIT_DICE
+from rules.proficiency import practiced_bonus
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -59,6 +62,40 @@ ACTIVE_CAMPAIGN_ID = "default"
 CAMPAIGN = cl.load_campaign(ACTIVE_CAMPAIGN_ID)
 
 DEFAULT_WEAPON = {"ability": "strength", "damage_dice": "1d8", "damage_bonus": 0}
+
+# npc_id -> faction_id, precomputed once from campaign.json's factions
+# catalog — an NPC's actions and a player's actions toward them ripple
+# out to how the whole faction regards that player (db.faction_standing).
+_NPC_FACTION: dict[str, str] = {
+    npc_id: faction_id
+    for faction_id, faction in CAMPAIGN.get("factions", {}).items()
+    for npc_id in faction.get("member_npcs", [])
+}
+
+
+def _faction_for_npc(npc_id: str) -> str | None:
+    return _NPC_FACTION.get(npc_id)
+
+
+def _faction_starting_standing(faction_id: str) -> int:
+    return CAMPAIGN.get("factions", {}).get(faction_id, {}).get("starting_standing", 0)
+
+# Lockable chests/doors that have been picked, keyed by their lockable
+# "id" from campaign.json. In-memory, not persisted — same deliberate
+# simplification as combat conditions: shared world state that resets on
+# a bot restart rather than needing a new schema/table for it.
+_UNLOCKED: set[str] = set()
+
+# Named hostile NPCs (campaign.json npc ids) already defeated in combat —
+# in-memory, same reasoning as _UNLOCKED. A defeated antagonist doesn't
+# respawn to ambush the same world again.
+_DEFEATED_NPCS: set[str] = set()
+
+# Ambient world-NPC encounters (friendly small-talk, or a hostile NPC
+# provoking a real fight) roll this chance on arrival at a location that
+# has one — not every single arrival, so it reads as a living world
+# rather than a scripted trigger every time.
+AMBIENT_NPC_ENCOUNTER_CHANCE = 0.4
 
 
 async def hear_you_main(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -77,9 +114,19 @@ async def hear_you_main(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 # ---------------------------------------------------------------------
 
 def _get_party_members() -> list[dict]:
-    """Every character that currently exists — real players plus AI companions."""
+    """
+    Every currently-ACTIVE character — real players' active character
+    slot, plus AI companions. Deleted characters and a player's inactive
+    (non-active) character slots don't count as being "in the party."
+    """
     with db.get_connection() as conn:
-        rows = conn.execute("SELECT * FROM characters").fetchall()
+        rows = conn.execute(
+            """
+            SELECT c.* FROM characters c
+            JOIN active_characters a ON a.character_id = c.character_id
+            WHERE c.is_deleted = 0
+            """
+        ).fetchall()
     return [db._row_to_dict(r) for r in rows]
 
 
@@ -135,18 +182,24 @@ async def _send_welcome_narration(update: Update, character: dict) -> None:
 
 
 async def _begin_character_creation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Starts character creation. A player can own multiple character slots
+    — creating a new one doesn't require deleting an existing one; the
+    new character simply becomes their active character once finished
+    (db.create_character always inserts a new slot and activates it).
+    """
     existing = db.get_character(update.effective_user.id)
+    prefix = ""
     if existing:
-        await update.message.reply_text(
-            f"You already have a character: {existing['name']} the {existing['race']} "
-            f"{existing['char_class']}.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        prefix = (
+            f"You already have {existing['name']} the {existing['race']} {existing['char_class']} "
+            f"— creating an additional character alongside them. Say 'switch to <name>' or "
+            f"'my characters' any time to manage your roster.\n\n"
         )
-        return
 
     context.user_data["creation"] = {"step": "name"}
     await update.message.reply_text(
-        "Let's create your character! What's their name?",
+        f"{prefix}Let's create your character! What's their name?",
         message_thread_id=config.TOPIC_ADVENTURE_ID,
     )
 
@@ -256,7 +309,10 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
         cantrips = spells_module.CLASS_CANTRIPS.get(char_class.lower(), [])
         has_slots = spells_module.starting_spell_slots_for_class(char_class) > 0
         leveled_spells = spells_module.CLASS_SPELL_LISTS.get(char_class.lower(), [])[:2] if has_slots else []
-        for spell_id in cantrips + leveled_spells:
+        # Racial spell grants (e.g. Tiefling's Infernal Legacy -> Thaumaturgy)
+        # are independent of class and granted once, here, at creation.
+        racial_spells = races_module.racial_spells(creation["race"])
+        for spell_id in cantrips + leveled_spells + racial_spells:
             db.learn_spell(update.effective_user.id, spell_id)
         character = db.get_character(update.effective_user.id)  # refresh with known_spells populated
 
@@ -408,7 +464,29 @@ def _award_victory_xp(session: sessions.Session) -> str:
     to every real (non-AI) party member still in the fight, split evenly
     per standard 5E group-XP conventions. Returns a summary string to
     append to the victory message, or an empty string if nothing to award.
+    Only ever called when the party won, so any enemy participant tagged
+    with source_npc_id (a named hostile world-NPC, not a generic monster)
+    is genuinely defeated here — permanently removed from future ambient
+    encounters via _DEFEATED_NPCS, with a real, persistent faction-
+    standing consequence for every real player who took part (db.
+    adjust_faction_standing) — killing a faction's member sours that
+    whole faction on you, not just that one NPC.
     """
+    real_party_ids_all = [
+        pid for pid in session.turn_order
+        if session.sides.get(pid) == "party"
+        and not next(p for p in session.participants if p["telegram_user_id"] == pid).get("is_ai")
+    ]
+
+    for p in session.participants:
+        if session.sides.get(p["telegram_user_id"]) == "enemy" and p.get("source_npc_id"):
+            npc_id = p["source_npc_id"]
+            _DEFEATED_NPCS.add(npc_id)
+            faction_id = _faction_for_npc(npc_id)
+            if faction_id:
+                for pid in real_party_ids_all:
+                    db.adjust_faction_standing(pid, faction_id, -15, _faction_starting_standing(faction_id))
+
     enemy_xp_total = sum(
         p.get("xp_reward", 0) for p in session.participants
         if session.sides.get(p["telegram_user_id"]) == "enemy"
@@ -416,11 +494,7 @@ def _award_victory_xp(session: sessions.Session) -> str:
     if enemy_xp_total <= 0:
         return ""
 
-    real_party_ids = [
-        pid for pid in session.turn_order
-        if session.sides.get(pid) == "party"
-        and not next(p for p in session.participants if p["telegram_user_id"] == pid).get("is_ai")
-    ]
+    real_party_ids = real_party_ids_all
     if not real_party_ids:
         return ""
 
@@ -715,6 +789,122 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
         await _resolve_ai_turns(update, session)
 
 
+def _npc_combatant_from_stats(npc_id: str, npc_data: dict) -> dict:
+    """
+    Builds a combat participant dict for a named, alignment-driven NPC —
+    identical shape to _do_start_combat's monster-derived enemies, plus
+    source_npc_id so a win can be attributed back to this specific NPC
+    (see _award_victory_xp, which marks them into _DEFEATED_NPCS).
+    """
+    stats = npc_data["stats"]
+    enemy_id = -3_000_000 - (abs(hash(npc_id)) % 100_000)
+    return {
+        "telegram_user_id": enemy_id, "name": npc_data["name"],
+        "dexterity": stats["dexterity"], "strength": stats["strength"],
+        "armor_class": stats["armor_class"], "hp_current": stats["hp_max"],
+        "hp_max": stats["hp_max"], "proficiency_bonus": stats["proficiency_bonus"],
+        "is_ai": 1, "xp_reward": stats.get("xp_reward", 0),
+        "source_npc_id": npc_id,
+    }
+
+
+FACTION_HOSTILE_ESCALATION_STANDING = -50  # a faction this soured on a player turns its own members hostile
+
+
+def _effective_disposition(telegram_user_id: int, npc_id: str, npc_data: dict) -> str:
+    """
+    An NPC's disposition isn't fixed forever: a friendly/neutral NPC
+    whose faction has been badly wronged by this specific player (real,
+    earned faction standing — see db.adjust_faction_standing) turns
+    hostile toward them, even if the same NPC is perfectly friendly to
+    everyone else. A "hostile" NPC's own disposition is unaffected by
+    this (they don't need faction standing to justify being an enemy).
+    """
+    disposition = npc_data.get("disposition", "friendly")
+    if disposition == "hostile":
+        return disposition
+    faction_id = _faction_for_npc(npc_id)
+    if faction_id is None:
+        return disposition
+    standing = db.get_faction_standing(telegram_user_id, faction_id, _faction_starting_standing(faction_id))
+    if standing <= FACTION_HOSTILE_ESCALATION_STANDING:
+        return "hostile"
+    return disposition
+
+
+async def _maybe_trigger_npc_encounter(update: Update, character: dict, location: dict) -> None:
+    """
+    Living-world ambient encounters: an alignment-driven NPC placed at
+    this location has a chance to react to the player's arrival —
+    unprompted, not in response to anything the player said. Friendly/
+    neutral NPCs get a narrated ambient line grounded in persistent,
+    per-player memory (db.get_relationship); a hostile NPC (or a
+    friendly/neutral one whose faction has turned on this player, see
+    _effective_disposition) instead provokes a REAL combat encounter
+    through the exact same rules engine as any other fight
+    (sessions.start_session, real dice) — the AI only narrates the
+    provocation, never the fight's outcome.
+    """
+    chat_id = update.effective_chat.id
+    if sessions.get_session(chat_id) is not None:
+        return  # never interrupt combat already in progress
+
+    npc_ids = location.get("npcs", [])
+    if not npc_ids or random.random() > AMBIENT_NPC_ENCOUNTER_CHANCE:
+        return
+
+    npc_id = random.choice(npc_ids)
+    npc_data = CAMPAIGN["npcs"].get(npc_id)
+    if npc_data is None or npc_id not in _NPCS:
+        return
+
+    telegram_user_id = update.effective_user.id
+    disposition = _effective_disposition(telegram_user_id, npc_id, npc_data)
+    memory_facts = db.get_relationship(telegram_user_id, npc_id)["memory_events"]
+
+    if disposition == "hostile":
+        if npc_id in _DEFEATED_NPCS or "stats" not in npc_data:
+            return
+        async with sessions.get_lock(chat_id):
+            if sessions.get_session(chat_id) is not None:
+                return
+            all_characters = _get_party_members()
+            party = [p for p in all_characters if p["hp_current"] > 0]
+            if not party:
+                return
+
+            taunt = await asyncio.to_thread(
+                generate_ambient_line, npc_id, character["name"], "arrives, about to be attacked", memory_facts
+            )
+            enemy = _npc_combatant_from_stats(npc_id, npc_data)
+            sides = {p["telegram_user_id"]: "party" for p in party}
+            sides[enemy["telegram_user_id"]] = "enemy"
+            session = sessions.start_session(chat_id, party + [enemy], sides=sides)
+
+            initiative_line = ", ".join(
+                f"{p['name']} ({p['initiative']})" for p in session.participants
+            )
+            taunt_line = f"> *\"{taunt}\"*\n\n" if taunt else ""
+            header = (
+                f"⚠️ **{npc_data['name']} ({npc_data.get('alignment', 'unknown alignment')}) "
+                f"blocks your path!**\n{taunt_line}"
+                f"⚔️ **Combat Begins!**\n"
+                f"Your party ({_party_summary_text()}) faces **{npc_data['name']}**!\n\n"
+                f"🎯 **Initiative order:** {initiative_line}\n\n"
+                + _turn_announcement(session)
+            )
+            await update.effective_chat.send_message(header, message_thread_id=config.TOPIC_ADVENTURE_ID)
+            await _resolve_ai_turns(update, session)
+    else:
+        line = await asyncio.to_thread(
+            generate_ambient_line, npc_id, character["name"], "arrives", memory_facts
+        )
+        if line:
+            await update.effective_chat.send_message(
+                f"💬 **{npc_data['name']}:** {line}", message_thread_id=config.TOPIC_ADVENTURE_ID
+            )
+
+
 async def _do_attack(update: Update, action_text: str) -> None:
     chat_id = update.effective_chat.id
     async with sessions.get_lock(chat_id):
@@ -847,6 +1037,13 @@ async def _do_recruit_npc(update: Update, npc_name: str) -> None:
 # the AI invent a DC per situation (which risked exactly the kind of
 # made-up-numbers problem already fixed elsewhere in this build).
 SKILL_CHECK_DC = 13
+STEAL_DC = 15  # harder than an ordinary skill check — stealing carries real risk
+
+
+def _practiced_bonus_for(telegram_user_id: int, ability: str) -> int:
+    """Current earned bonus for this ability from repeated real use (rules/proficiency.py)."""
+    uses = db.get_skill_uses(telegram_user_id).get(ability, 0)
+    return practiced_bonus(uses)
 
 
 def _format_skill_check_result(flavor_text: str, result: dict, ability: str, dc: int, success: bool) -> str:
@@ -872,6 +1069,78 @@ def _format_skill_check_result(flavor_text: str, result: dict, ability: str, dc:
     return "\n".join(lines)
 
 
+def _find_lockable(location: dict, action_text: str) -> dict | None:
+    """
+    Match a chest/door target mentioned in the player's text against this
+    location's lockables. If exactly one lockable exists here and the
+    text generically mentions "lock"/"chest"/"door", that one is assumed.
+    """
+    lockables = location.get("lockables", [])
+    if not lockables:
+        return None
+    lowered = action_text.lower()
+    for lockable in lockables:
+        if lockable["id"] in lowered or lockable["name"].lower() in lowered:
+            return lockable
+    if len(lockables) == 1:
+        lockable = lockables[0]
+        # Kind-specific fallback words only — a location whose only
+        # lockable is a chest must not match generic "door" phrasing
+        # (and vice versa), or a player mentioning the wrong kind of
+        # lockable gets silently routed to the wrong one.
+        kind_words = {"chest": ("chest", "lock"), "door": ("door", "lock")}
+        if any(w in lowered for w in kind_words.get(lockable["kind"], ("lock",))):
+            return lockable
+    return None
+
+
+async def _do_lockpick(update: Update, character: dict, lockable: dict, action_text: str) -> None:
+    """
+    Real DC-13 DEX check to pick a chest/door lock — deterministic outcome
+    computed here (rules layer), the AI only narrates it. Success on a
+    chest grants its real loot/gold; success on a door permanently opens
+    that shortcut connection (see _do_move's locked_connections check).
+    """
+    if lockable["id"] in _UNLOCKED:
+        await update.effective_chat.send_message(
+            f"{lockable['name'].capitalize()} is already unlocked.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    result = roll_ability_check(character, "dexterity", proficient=False)
+    bonus = _practiced_bonus_for(update.effective_user.id, "dexterity")
+    result["total"] += bonus
+    result["practiced_bonus"] = bonus
+    db.record_skill_use(update.effective_user.id, "dexterity")
+    success = result["total"] >= SKILL_CHECK_DC
+
+    reward_line = ""
+    if success:
+        _UNLOCKED.add(lockable["id"])
+        if lockable["kind"] == "chest":
+            for item_id, qty in lockable.get("loot", {}).items():
+                db.add_item(update.effective_user.id, item_id, qty)
+            gold = lockable.get("gold", 0)
+            if gold:
+                updated = db.get_character(update.effective_user.id)
+                db.update_character(update.effective_user.id, gold=updated["gold"] + gold)
+            loot_names = ", ".join(
+                f"{qty}x {items_module.get_item(i)['name']}" for i, qty in lockable.get("loot", {}).items()
+            )
+            parts = [p for p in (loot_names, f"{lockable.get('gold', 0)} gold" if lockable.get("gold") else "") if p]
+            reward_line = f"\n🎁 You find: {', '.join(parts)}." if parts else ""
+        else:
+            reward_line = "\n🚪 The way is now open."
+
+    flavor = await asyncio.to_thread(
+        narrate_skill_check, character, action_text, "dexterity",
+        {**result, "ability": "dexterity", "dc": SKILL_CHECK_DC, "success": success},
+    )
+    message = _format_skill_check_result(flavor, result, "dexterity", SKILL_CHECK_DC, success) + reward_line
+    await update.effective_chat.send_message(message, message_thread_id=config.TOPIC_ADVENTURE_ID)
+
+
 async def _do_skill_check(update: Update, ability: str, action_text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -880,7 +1149,17 @@ async def _do_skill_check(update: Update, ability: str, action_text: str) -> Non
         )
         return
 
+    location = cl.get_location(CAMPAIGN, character["current_location"])
+    lockable = _find_lockable(location, action_text) if location else None
+    if lockable is not None:
+        await _do_lockpick(update, character, lockable, action_text)
+        return
+
     result = roll_ability_check(character, ability, proficient=False)
+    bonus = _practiced_bonus_for(update.effective_user.id, ability)
+    result["total"] += bonus
+    result["practiced_bonus"] = bonus
+    db.record_skill_use(update.effective_user.id, ability)
     success = result["total"] >= SKILL_CHECK_DC
 
     flavor = await asyncio.to_thread(
@@ -1101,6 +1380,120 @@ async def _do_check_inventory(update: Update) -> None:
     )
 
 
+def _find_resource_node(location: dict, action_text: str) -> dict | None:
+    nodes = location.get("resource_nodes", [])
+    if not nodes:
+        return None
+    lowered = action_text.lower()
+    for node in nodes:
+        if node["id"] in lowered or node["material"] in lowered or node["name"].lower() in lowered:
+            return node
+    if len(nodes) == 1:
+        return nodes[0]
+    return None
+
+
+async def _do_gather(update: Update, action_text: str) -> None:
+    """
+    Gathering a raw material from a location's resource node — a real
+    ability check (rules layer) decides success, matching every other
+    outcome in this game; the AI only narrates it.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    location = cl.get_location(CAMPAIGN, character["current_location"])
+    node = _find_resource_node(location, action_text) if location else None
+    if node is None:
+        await update.effective_chat.send_message(
+            "There's nothing worth gathering here.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    result = roll_ability_check(character, node["ability"], proficient=False)
+    bonus = _practiced_bonus_for(update.effective_user.id, node["ability"])
+    result["total"] += bonus
+    result["practiced_bonus"] = bonus
+    db.record_skill_use(update.effective_user.id, node["ability"])
+    success = result["total"] >= SKILL_CHECK_DC
+    material = items_module.get_item(node["material"])
+
+    if success:
+        db.add_item(update.effective_user.id, node["material"], 1)
+
+    flavor = await asyncio.to_thread(
+        narrate_skill_check, character, action_text, node["ability"],
+        {**result, "ability": node["ability"], "dc": SKILL_CHECK_DC, "success": success},
+    )
+    message = _format_skill_check_result(flavor, result, node["ability"], SKILL_CHECK_DC, success)
+    if success:
+        message += f"\n🌿 You gather **1x {material['name']}**."
+    await update.effective_chat.send_message(message, message_thread_id=config.TOPIC_ADVENTURE_ID)
+
+
+async def _do_craft(update: Update, text: str) -> None:
+    """
+    Crafting is fully resolved by rules/crafting.py — material checks and
+    the success roll are both deterministic; this handler only reports
+    the outcome and applies the resulting inventory changes.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    recipe_id = items_module.find_item_mentioned_in_text(text, candidate_ids=list(RECIPES.keys()))
+    if recipe_id is None:
+        recipe_names = ", ".join(items_module.get_item(r)["name"] for r in RECIPES)
+        await update.effective_chat.send_message(
+            f"Not sure what you're trying to craft. Known recipes: {recipe_names}",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    recipe_ability = get_recipe(recipe_id)["ability"]
+    bonus = _practiced_bonus_for(update.effective_user.id, recipe_ability)
+    result = resolve_craft(character, recipe_id, practiced_bonus=bonus)
+
+    if result["outcome"] == "missing_materials":
+        recipe = get_recipe(recipe_id)
+        need = ", ".join(
+            f"{qty}x {items_module.get_item(i)['name']}" for i, qty in recipe["materials"].items()
+        )
+        await update.effective_chat.send_message(
+            f"You don't have the materials for that. You need: {need}.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    db.record_skill_use(update.effective_user.id, recipe_ability)
+
+    for item_id, qty in result["materials_consumed"].items():
+        db.remove_item(update.effective_user.id, item_id, qty)
+
+    success = result["outcome"] == "success"
+    if success:
+        db.add_item(update.effective_user.id, result["result_item"], result["result_qty"])
+
+    flavor = await asyncio.to_thread(
+        narrate_skill_check, character, text, result["ability"],
+        {**result["check"], "ability": result["ability"], "dc": result["dc"], "success": success},
+    )
+    message = _format_skill_check_result(flavor, result["check"], result["ability"], result["dc"], success)
+    if success:
+        result_item = items_module.get_item(result["result_item"])
+        message += f"\n⚗️ You craft **{result['result_qty']}x {result_item['name']}**."
+    else:
+        message += "\n⚗️ The attempt fails, but your materials aren't wasted — you can try again."
+    await update.effective_chat.send_message(message, message_thread_id=config.TOPIC_ADVENTURE_ID)
+
+
 async def _do_look(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -1115,6 +1508,8 @@ async def _do_look(update: Update) -> None:
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
+
+    db.mark_visited(update.effective_user.id, character["current_location"])
 
     lines = [f"📍 **{location['name']}** ({location['layer']})", location["description"]]
     npcs_here = location.get("npcs", [])
@@ -1132,6 +1527,48 @@ async def _do_look(update: Update) -> None:
         lines.append(f"You could descend to: {cl.get_location(CAMPAIGN, location['descends_to'])['name']}")
     if "ascends_to" in location:
         lines.append(f"You could ascend to: {cl.get_location(CAMPAIGN, location['ascends_to'])['name']}")
+
+    await update.effective_chat.send_message("\n".join(lines), message_thread_id=config.TOPIC_ADVENTURE_ID)
+
+
+async def _do_show_map(update: Update) -> None:
+    """
+    Renders a fog-of-war map: only locations this character has actually
+    visited (character['visited_locations'], persisted in the DB) are
+    shown by name; connections leading to somewhere unvisited are shown
+    as an unexplored direction rather than revealing the destination.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    visited = set(character["visited_locations"])
+    if not visited:
+        await update.effective_chat.send_message(
+            "You haven't explored anywhere yet.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    lines = ["🗺️ **Your map**"]
+    for layer, layer_locations in CAMPAIGN["locations"].items():
+        visited_here = [loc_id for loc_id in layer_locations if loc_id in visited]
+        if not visited_here:
+            continue
+        lines.append(f"\n**{layer.title()}**")
+        for loc_id in visited_here:
+            loc = layer_locations[loc_id]
+            marker = "📍" if loc_id == character["current_location"] else "•"
+            connections = loc.get("connections", [])
+            known = [cl.get_location(CAMPAIGN, c)["name"] for c in connections if c in visited]
+            unknown_count = sum(1 for c in connections if c not in visited)
+            conn_bits = list(known)
+            if unknown_count:
+                conn_bits.append(f"{unknown_count} unexplored path{'s' if unknown_count != 1 else ''}")
+            conn_text = f" → {', '.join(conn_bits)}" if conn_bits else ""
+            lines.append(f"{marker} {loc['name']}{conn_text}")
 
     await update.effective_chat.send_message("\n".join(lines), message_thread_id=config.TOPIC_ADVENTURE_ID)
 
@@ -1159,6 +1596,13 @@ async def _do_move(update: Update, text: str) -> None:
         reachable.append(current["descends_to"])
     if "ascends_to" in current:
         reachable.append(current["ascends_to"])
+    # Locked-door destinations (see locked_connections) are real,
+    # nameable travel targets too — just blocked until picked. Without
+    # this they're silently invisible to move, indistinguishable from a
+    # location with no connection at all.
+    reachable.extend(
+        loc_id for loc_id in current.get("locked_connections", {}) if loc_id not in reachable
+    )
 
     destination_id = None
     lowered = text.lower()
@@ -1185,11 +1629,86 @@ async def _do_move(update: Update, text: str) -> None:
         )
         return
 
+    locked_connections = current.get("locked_connections", {})
+    lockable_id = locked_connections.get(destination_id)
+    if lockable_id and lockable_id not in _UNLOCKED:
+        lockable = next(
+            (lk for lk in current.get("lockables", []) if lk["id"] == lockable_id), None
+        )
+        name = lockable["name"] if lockable else "something locked"
+        await update.effective_chat.send_message(
+            f"The way to {destination['name']} is blocked by {name}. Try picking the lock first.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
     db.move_character(update.effective_user.id, destination_id)
+    db.mark_visited(update.effective_user.id, destination_id)
     await update.effective_chat.send_message(
         f"🚶 You travel to **{destination['name']}**.\n{destination['description']}",
         message_thread_id=config.TOPIC_ADVENTURE_ID,
     )
+
+    updated_character = db.get_character(update.effective_user.id)
+    await _maybe_trigger_npc_encounter(update, updated_character, destination)
+
+
+async def _do_fast_travel(update: Update, text: str) -> None:
+    """
+    Warp directly to any location this character has already visited
+    (character['visited_locations'], the same fog-of-war data driving
+    _do_show_map) — skipping the walk and its connection-graph
+    constraints entirely. Ordinary _do_move (on-foot, connection-by-
+    connection, fully narrated) is untouched; this is purely a
+    convenience for places already discovered the hard way.
+    """
+    telegram_user_id = update.effective_user.id
+    character = db.get_character(telegram_user_id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    if sessions.get_session(update.effective_chat.id) is not None:
+        await update.effective_chat.send_message(
+            "You can't fast-travel in the middle of combat.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    visited = character["visited_locations"]
+    lowered = text.lower()
+    destination_id = None
+    for loc_id in visited:
+        loc = cl.get_location(CAMPAIGN, loc_id)
+        if loc and (loc_id.replace("_", " ") in lowered or loc["name"].lower() in lowered):
+            destination_id = loc_id
+            break
+
+    if destination_id is None:
+        known_names = ", ".join(cl.get_location(CAMPAIGN, loc_id)["name"] for loc_id in visited)
+        await update.effective_chat.send_message(
+            f"You can only fast-travel somewhere you've actually been. Waypoints you've discovered: {known_names}",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    if destination_id == character["current_location"]:
+        await update.effective_chat.send_message(
+            "You're already there.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    destination = cl.get_location(CAMPAIGN, destination_id)
+    db.move_character(telegram_user_id, destination_id)
+    await update.effective_chat.send_message(
+        f"🌀 You fast-travel to **{destination['name']}**.\n{destination['description']}",
+        message_thread_id=config.TOPIC_ADVENTURE_ID,
+    )
+
+    updated_character = db.get_character(telegram_user_id)
+    await _maybe_trigger_npc_encounter(update, updated_character, destination)
 
 
 async def _do_buy(update: Update, text: str) -> None:
@@ -1237,6 +1756,81 @@ async def _do_sell(update: Update, text: str) -> None:
 
     ok, msg = shop_module.sell_item(update.effective_user.id, item_id, 1)
     await update.effective_chat.send_message(msg, message_thread_id=config.TOPIC_ADVENTURE_ID)
+
+
+async def _do_steal(update: Update, text: str) -> None:
+    """
+    A real, dice-resolved theft attempt (DC 15 — harder than an ordinary
+    skill check) with a genuine, persistent consequence on failure: the
+    shopkeeper bans this player from their shop forever (db.set_banned_
+    by_npc, enforced in shop.buy_item), their affinity toward this
+    player craters, the specific event is remembered (db.adjust_affinity's
+    `event`), and their whole faction's standing with this player drops.
+    Success carries no penalty — nobody noticed.
+    """
+    telegram_user_id = update.effective_user.id
+    character = db.get_character(telegram_user_id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    location = cl.get_location(CAMPAIGN, character["current_location"])
+    shop_id = location.get("shop") if location else None
+    if not shop_id:
+        await update.effective_chat.send_message(
+            "There's nothing here worth stealing.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    shop_data = cl.get_shop(CAMPAIGN, shop_id)
+    owner_npc = shop_data.get("owner_npc")
+    owner_name = CAMPAIGN["npcs"][owner_npc]["name"] if owner_npc else "the shopkeeper"
+
+    if owner_npc and db.is_banned_by_npc(telegram_user_id, owner_npc):
+        await update.effective_chat.send_message(
+            f"{owner_name} is already watching you like a hawk after last time — not worth the risk.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    item_id = items_module.find_item_mentioned_in_text(text, candidate_ids=shop_data["inventory"])
+    if item_id is None:
+        item_id = min(shop_data["inventory"], key=lambda i: items_module.get_item(i).get("price", 0))
+    item = items_module.get_item(item_id)
+
+    result = roll_ability_check(character, "dexterity", proficient=False)
+    bonus = _practiced_bonus_for(telegram_user_id, "dexterity")
+    result["total"] += bonus
+    result["practiced_bonus"] = bonus
+    db.record_skill_use(telegram_user_id, "dexterity")
+    success = result["total"] >= STEAL_DC
+
+    if success:
+        db.add_item(telegram_user_id, item_id, 1)
+        consequence_line = f"\n🤫 You slip away with **{item['name']}** — nobody noticed."
+    else:
+        db.add_item(telegram_user_id, item_id, 1)  # still takes it, just gets caught
+        consequence_line = f"\n🚨 **Caught!** {owner_name} won't sell to you ever again."
+        if owner_npc:
+            db.adjust_affinity(
+                telegram_user_id, owner_npc, -40,
+                event=f"Was caught stealing {item['name']} from {owner_name}'s shop.",
+            )
+            db.set_banned_by_npc(telegram_user_id, owner_npc, True)
+            faction_id = _faction_for_npc(owner_npc)
+            if faction_id:
+                db.adjust_faction_standing(
+                    telegram_user_id, faction_id, -15, _faction_starting_standing(faction_id)
+                )
+
+    flavor = await asyncio.to_thread(
+        narrate_skill_check, character, text, "dexterity",
+        {**result, "ability": "dexterity", "dc": STEAL_DC, "success": success},
+    )
+    message = _format_skill_check_result(flavor, result, "dexterity", STEAL_DC, success) + consequence_line
+    await update.effective_chat.send_message(message, message_thread_id=config.TOPIC_ADVENTURE_ID)
 
 
 async def _do_cast_spell(update: Update, text: str) -> None:
@@ -1409,6 +2003,96 @@ async def _do_join_guild(update: Update, text: str) -> None:
 
 
 # ---------------------------------------------------------------------
+# Character slots — a telegram user can own multiple characters; exactly
+# one is "active" (db.get_character resolves to it) at a time.
+# ---------------------------------------------------------------------
+
+async def _do_list_characters(update: Update) -> None:
+    roster = db.list_characters(update.effective_user.id)
+    if not roster:
+        await update.effective_chat.send_message(
+            "You don't have any characters yet — say 'I want to create a character' to get started!",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    active = db.get_character(update.effective_user.id)
+    active_id = active["character_id"] if active else None
+    lines = ["🎭 **Your characters:**"]
+    for c in roster:
+        marker = "📍 " if c["character_id"] == active_id else "   "
+        lines.append(
+            f"{marker}{c['name']} — Level {c['level']} {c['race']} {c['char_class']}"
+        )
+    lines.append("\nSay 'switch to <name>' to change your active character.")
+    await update.effective_chat.send_message("\n".join(lines), message_thread_id=config.TOPIC_ADVENTURE_ID)
+
+
+def _find_own_character_by_name_fragment(telegram_user_id: int, fragment: str) -> dict | None:
+    lowered = fragment.strip().lower()
+    for c in db.list_characters(telegram_user_id):
+        if lowered == c["name"].lower() or lowered in c["name"].lower():
+            return c
+    return None
+
+
+async def _do_switch_character(update: Update, text: str) -> None:
+    match = _find_own_character_by_name_fragment(update.effective_user.id, text)
+    if match is None:
+        roster = db.list_characters(update.effective_user.id)
+        names = ", ".join(c["name"] for c in roster) if roster else "none yet"
+        await update.effective_chat.send_message(
+            f"Couldn't find one of your characters by that name. Your characters: {names}",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    if sessions.get_session(update.effective_chat.id) is not None:
+        await update.effective_chat.send_message(
+            "You can't switch characters in the middle of combat.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    switched = db.switch_character(update.effective_user.id, match["character_id"])
+    await update.effective_chat.send_message(
+        f"🎭 Switched to **{switched['name']}** the {switched['race']} {switched['char_class']} "
+        f"(Level {switched['level']}).",
+        message_thread_id=config.TOPIC_ADVENTURE_ID,
+    )
+
+
+async def _do_delete_character(update: Update, text: str) -> None:
+    match = _find_own_character_by_name_fragment(update.effective_user.id, text)
+    if match is None:
+        roster = db.list_characters(update.effective_user.id)
+        names = ", ".join(c["name"] for c in roster) if roster else "none yet"
+        await update.effective_chat.send_message(
+            f"Couldn't find one of your characters by that name. Your characters: {names}",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    if sessions.get_session(update.effective_chat.id) is not None:
+        await update.effective_chat.send_message(
+            "You can't delete a character in the middle of combat.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    db.delete_character(update.effective_user.id, match["character_id"])
+    remaining = db.get_character(update.effective_user.id)
+    note = (
+        f" **{remaining['name']}** is now your active character."
+        if remaining else " You have no characters left — say 'I want to create a character' to start fresh."
+    )
+    await update.effective_chat.send_message(
+        f"🗑️ Deleted **{match['name']}**.{note}",
+        message_thread_id=config.TOPIC_ADVENTURE_ID,
+    )
+
+
+# ---------------------------------------------------------------------
 # Master natural-language handler for the Adventure topic
 # ---------------------------------------------------------------------
 
@@ -1429,6 +2113,8 @@ def setup_default_npcs() -> None:
         register_npc(
             npc_id, npc_data["name"], npc_data["personality"],
             goals=npc_data.get("goals", ""),
+            alignment=npc_data.get("alignment", ""),
+            disposition=npc_data.get("disposition", "friendly"),
         )
 
 
@@ -1524,6 +2210,10 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         await _do_buy(update, text)
     elif action == "sell":
         await _do_sell(update, text)
+    elif action == "steal":
+        await _do_steal(update, text)
+    elif action == "fast_travel":
+        await _do_fast_travel(update, intent.get("target") or text)
     elif action == "cast_spell":
         await _do_cast_spell(update, text)
     elif action == "join_guild":
@@ -1535,8 +2225,22 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     elif action == "talk_npc" and intent.get("npc_name"):
         npc_id = _find_npc_id_by_name(intent["npc_name"])
         if npc_id and npc_id in _NPCS:
-            reply = await asyncio.to_thread(talk_to_npc, npc_id, text)
+            character = db.get_character(update.effective_user.id)
+            character_name = character["name"] if character else "the player"
+            relationship = db.get_relationship(update.effective_user.id, npc_id)
+            reply = await asyncio.to_thread(
+                talk_to_npc, npc_id, text, character_name, relationship["memory_events"]
+            )
             await update.message.reply_text(reply, message_thread_id=config.TOPIC_ADVENTURE_ID)
+            # Ordinary conversation builds a small amount of rapport over
+            # time — real, persistent, and separate from the short-term
+            # conversation buffer talk_to_npc already keeps.
+            db.adjust_affinity(update.effective_user.id, npc_id, 1)
+            faction_id = _faction_for_npc(npc_id)
+            if faction_id:
+                db.adjust_faction_standing(
+                    update.effective_user.id, faction_id, 1, _faction_starting_standing(faction_id)
+                )
     elif action == "recruit_npc" and intent.get("npc_name"):
         await _do_recruit_npc(update, intent["npc_name"])
     elif action == "rest":
@@ -1545,6 +2249,18 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         await _do_skill_check(update, intent.get("ability") or "dexterity", text)
     elif action == "shove":
         await _do_shove(update, text)
+    elif action == "show_map":
+        await _do_show_map(update)
+    elif action == "gather":
+        await _do_gather(update, intent.get("raw_text", text))
+    elif action == "craft":
+        await _do_craft(update, text)
+    elif action == "list_characters":
+        await _do_list_characters(update)
+    elif action == "switch_character":
+        await _do_switch_character(update, intent.get("target") or text)
+    elif action == "delete_character":
+        await _do_delete_character(update, intent.get("target") or text)
     # action == "chat" (or unmatched talk_npc): no game action, let it be
     # ordinary roleplay chatter with no bot response required.
 

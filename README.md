@@ -16,6 +16,12 @@ You won't be walking alone, either. AI-controlled companions can adventure at yo
 
 ---
 
+## Official Telegram group
+
+**[t.me/PandoraMMO](https://t.me/PandoraMMO)** — the official Pandora MMO Telegram group, where @PandoraMMO_Bot is live and running.
+
+---
+
 ## Getting Started
 
 **👉 Full installation instructions live in [`SETUP_GUIDE.md`](./SETUP_GUIDE.md).**

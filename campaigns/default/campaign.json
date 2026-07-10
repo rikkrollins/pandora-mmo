@@ -44,6 +44,14 @@
         "monsters": [
           "goblin",
           "wolf"
+        ],
+        "resource_nodes": [
+          {
+            "id": "silverleaf_patch",
+            "name": "a patch of Silverleaf Herbs",
+            "material": "silverleaf_herb",
+            "ability": "wisdom"
+          }
         ]
       },
       "hollow_stump_shrine": {
@@ -55,6 +63,25 @@
         ],
         "quest_items": [
           "waterlogged_journal"
+        ],
+        "resource_nodes": [
+          {
+            "id": "moonpetal_bloom",
+            "name": "Moonpetal flowers growing at the shrine's base",
+            "material": "moonpetal",
+            "ability": "wisdom"
+          }
+        ],
+        "lockables": [
+          {
+            "id": "shrine_offering_chest",
+            "kind": "chest",
+            "name": "an old offering chest",
+            "loot": {
+              "healing_potion": 1
+            },
+            "gold": 15
+          }
         ]
       },
       "greymoor_downs": {
@@ -67,6 +94,9 @@
         ],
         "monsters": [
           "wolf"
+        ],
+        "npcs": [
+          "kess_the_bandit"
         ]
       },
       "stonearch_bridge": {
@@ -89,7 +119,21 @@
         "connections": [
           "stonearch_bridge"
         ],
-        "descends_to": "sunken_root_caverns"
+        "descends_to": "sunken_root_caverns",
+        "lockables": [
+          {
+            "id": "sealed_stone_door",
+            "kind": "door",
+            "name": "a sealed stone door low in the well's wall",
+            "leads_to": "glimmerdeep_grotto"
+          }
+        ],
+        "locked_connections": {
+          "glimmerdeep_grotto": "sealed_stone_door"
+        },
+        "npcs": [
+          "theron_the_wanderer"
+        ]
       }
     },
     "underground": {
@@ -105,6 +149,14 @@
         "monsters": [
           "goblin",
           "goblin_shaman"
+        ],
+        "resource_nodes": [
+          {
+            "id": "sulfur_vein",
+            "name": "a vein of Sulfur Dust in the cavern wall",
+            "material": "sulfur_dust",
+            "ability": "strength"
+          }
         ]
       },
       "goblin_warrens": {
@@ -180,13 +232,17 @@
       "goals": "wants someone reliable to look into the strange things he won't say out loud",
       "gives_quests": [
         "welcome_to_the_crossroads"
-      ]
+      ],
+      "alignment": "Neutral Good",
+      "disposition": "friendly"
     },
     "old_maren": {
       "name": "Old Maren",
       "role": "shopkeeper",
       "personality": "a sharp-tongued trader who has an answer for everything except why she never leaves Market Row after dark",
-      "shop": "marens_wares"
+      "shop": "marens_wares",
+      "alignment": "Lawful Neutral",
+      "disposition": "friendly"
     },
     "sera_wanderer": {
       "name": "Sera",
@@ -211,6 +267,30 @@
           "shortsword": 1,
           "leather_armor": 1
         }
+      },
+      "alignment": "Chaotic Good",
+      "disposition": "friendly"
+    },
+    "theron_the_wanderer": {
+      "name": "Theron",
+      "role": "wandering_monk",
+      "personality": "a quiet, unaligned drifter who speaks in riddles and owes loyalty to no one \u2014 not unfriendly, but never quite trustworthy either",
+      "alignment": "True Neutral",
+      "disposition": "neutral"
+    },
+    "kess_the_bandit": {
+      "name": "Kess",
+      "role": "bandit_captain",
+      "personality": "a cold, calculating highwaywoman who sizes up travelers as marks before they've even noticed her \u2014 cruel by choice, not desperation",
+      "alignment": "Chaotic Evil",
+      "disposition": "hostile",
+      "stats": {
+        "dexterity": 16,
+        "strength": 13,
+        "armor_class": 14,
+        "hp_max": 18,
+        "proficiency_bonus": 2,
+        "xp_reward": 150
       }
     }
   },
@@ -392,6 +472,38 @@
       "hp_max": 22,
       "proficiency_bonus": 3,
       "xp_reward": 150
+    }
+  },
+  "factions": {
+    "crossroads_folk": {
+      "name": "The Crossroads Folk",
+      "description": "The ordinary people who keep the Crossroads running \u2014 innkeepers, traders, and the wanderers who pass through and stay a while. No oaths, no hierarchy, just people who look out for each other.",
+      "alignment_lean": "good",
+      "member_npcs": [
+        "grimsby",
+        "old_maren",
+        "sera_wanderer"
+      ],
+      "starting_standing": 10
+    },
+    "blackthorn_raiders": {
+      "name": "The Blackthorn Raiders",
+      "description": "A loose band of highwaymen and opportunists preying on the roads between settlements. Small, cruel, and \u2014 some in the Crossroads whisper \u2014 funded by something bigger than banditry.",
+      "alignment_lean": "evil",
+      "member_npcs": [
+        "kess_the_bandit"
+      ],
+      "starting_standing": -10,
+      "story_arc": "arc_1_discovery"
+    },
+    "the_wanderers_road": {
+      "name": "The Wanderers' Road",
+      "description": "An informal fellowship of drifters, hermits, and those who owe allegiance to no settlement or crown. Neither friend nor enemy by default \u2014 standing with them is earned entirely by what you actually do.",
+      "alignment_lean": "neutral",
+      "member_npcs": [
+        "theron_the_wanderer"
+      ],
+      "starting_standing": 0
     }
   }
 }

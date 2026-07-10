@@ -71,8 +71,20 @@ RACES = {
 }
 
 
+# Cantrips granted purely by race, independent of class — e.g. Tiefling's
+# real 5E "Infernal Legacy" trait (already listed above in RACES' traits
+# text) actually knowing Thaumaturgy. Granted once at character creation.
+RACIAL_CANTRIPS = {
+    "Tiefling": ["thaumaturgy"],
+}
+
+
 def get_race(race_name: str) -> dict | None:
     return RACES.get(race_name)
+
+
+def racial_spells(race_name: str) -> list[str]:
+    return list(RACIAL_CANTRIPS.get(race_name, []))
 
 
 def apply_racial_bonuses(race_name: str, ability_scores: dict) -> dict:

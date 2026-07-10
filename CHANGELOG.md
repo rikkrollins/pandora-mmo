@@ -2,6 +2,86 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.1.0] — Living world: lockpicking, crafting, factions, memory, and more
+
+### New gameplay systems
+- **Lockpicking** — real chests and doors, gated behind a genuine DC-13
+  DEX check (rules/dice.py, same fixed-DC convention as every other
+  skill check). Chests grant real loot/gold; locked doors permanently
+  open a shortcut once picked. State is in-memory (resets on restart),
+  the same deliberate simplification as combat conditions.
+- **Gathering & crafting** — resource nodes at specific locations grant
+  raw materials on a successful ability check; a new deterministic
+  `rules/crafting.py` module resolves real recipes (material check +
+  ability roll decide success, never invented by narration). Failed
+  crafts don't consume materials, so a bad roll isn't punished twice.
+- **Fog-of-war map** — `visited_locations` is now tracked per character
+  and persisted to the DB; "show me the map" renders only what's
+  actually been explored, with unexplored connections shown as a count
+  rather than a name.
+- **Character slots** — a telegram user can now own multiple characters
+  (new `character_id` primary key + `active_characters` table). Create
+  additional characters without deleting existing ones, list your
+  roster, switch your active character, or delete one — the oldest
+  remaining character becomes active automatically if the active one is
+  deleted.
+- **Class/race spell grants on level-up** — leveling up now actually
+  grants new spells as they're unlocked (`spells.py`'s
+  `SPELL_LEVEL_UNLOCK_CHAR_LEVEL` table), not just at character
+  creation. Applies to AI companions too, since they level through the
+  same `db.add_xp`. Tiefling's Infernal Legacy trait now genuinely
+  grants the Thaumaturgy cantrip at creation.
+- **Fast-travel waypoints** — any location a character has actually
+  visited becomes a warpable waypoint ("warp to the crossroads
+  tavern"), skipping the walk. Ordinary on-foot `move` (fully narrated,
+  connection-by-connection) is unchanged; this is a pure convenience
+  layered on top of the same visited-locations data as the map.
+
+### Living AI world-NPCs
+- NPCs now have a real **alignment** and **disposition** (friendly,
+  neutral, or hostile), authored per-NPC in campaign.json. Arriving at
+  a location with one has a chance of an unprompted, in-character
+  ambient reaction — not just a reply to something the player said.
+- **Hostile NPCs are real threats** — a hostile NPC encountered this way
+  provokes a genuine, dice-resolved combat encounter through the exact
+  same combat engine as any other fight; the AI only narrates the
+  provocation, never the outcome. A defeated named antagonist doesn't
+  respawn.
+- **Persistent, per-player NPC memory** — a new `npc_relationships`
+  table tracks rapport (`affinity`) and specific remembered events per
+  (player, NPC) pair, surviving restarts. NPCs reference this in both
+  ordinary conversation and ambient lines, so a shopkeeper genuinely
+  remembers what a specific player has done.
+- **Real consequences** — stealing is a genuine DC-15 DEX check
+  (harder than an ordinary skill check). Getting caught permanently
+  bans that player from the shopkeeper's shop (`shop.buy_item` now
+  checks this), tanks affinity, and is remembered as a specific event.
+- **Factions** — NPCs belong to factions (`campaign.json`'s new
+  `factions` catalog) with their own standing per player
+  (`faction_standing` table). Defeating a faction member in combat, or
+  stealing from one, sours the whole faction's standing with that
+  player — and a badly-soured faction can turn even its friendly/
+  neutral members hostile toward that specific player.
+- **Proficiency growth** — "the more you do something, the better you
+  get": repeated real use of an ability in skill checks, lockpicking,
+  gathering, or crafting earns a small, capped bonus over time
+  (`rules/proficiency.py`), applied only to these non-combat checks,
+  never to attack rolls.
+
+### Fixes found via live testing
+- The AI intent classifier was unreliable against explicit keyword
+  triggers once the action list grew large (e.g. "my characters"
+  misread as starting combat, "pick the lock" misread as passing a
+  turn) — the keyword fallback's classification is now trusted whenever
+  it has any non-default opinion, not just for brand-new action types.
+- Locked-door destinations were invisible to `move` entirely (not even
+  reachable-but-blocked) because they weren't included in the
+  destination search — fixed so a locked connection is a real, nameable
+  travel target that reports as blocked until picked.
+- A single-lockable location could match the wrong kind of lockable
+  (a chest matching "door" phrasing, or vice versa) via an overly
+  generic fallback — now kind-specific.
+
 ## [1.0.0] — Initial tagged release
 
 ### Core game

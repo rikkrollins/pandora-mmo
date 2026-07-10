@@ -86,6 +86,10 @@ SPELLS = {
         "name": "Faerie Fire", "level": 1, "school": "evocation",
         "effect": "buff", "duration_rounds": 10,
     },
+    "thaumaturgy": {
+        "name": "Thaumaturgy", "level": 0, "school": "transmutation",
+        "effect": "buff", "duration_rounds": 1,
+    },
 }
 
 # Cantrips (level 0) each class has at-will, alongside their leveled spells.
@@ -116,6 +120,34 @@ def spells_known_for_class(char_class: str) -> list[str]:
     since a starting character always knows their cantrips at will."""
     cls = char_class.lower()
     return CLASS_CANTRIPS.get(cls, []) + CLASS_SPELL_LISTS.get(cls, [])
+
+
+# Minimum character level required before a spell of a given spell-list
+# level can be learned (a simplified, monotonic stand-in for 5E's real
+# spell-slot-by-level table — enough to gate CLASS_SPELL_LISTS entries
+# behind real level-ups instead of granting the whole list at level 1).
+SPELL_LEVEL_UNLOCK_CHAR_LEVEL = {0: 1, 1: 1, 2: 3, 3: 5, 4: 7, 5: 9}
+
+
+def max_spell_level_for_character_level(character_level: int) -> int:
+    """Highest spell-list level this character level has unlocked."""
+    unlocked = 0
+    for spell_level, required_char_level in SPELL_LEVEL_UNLOCK_CHAR_LEVEL.items():
+        if character_level >= required_char_level and spell_level > unlocked:
+            unlocked = spell_level
+    return unlocked
+
+
+def spells_unlocked_at_level(char_class: str, character_level: int) -> list[str]:
+    """
+    All spells (cantrips + leveled) a class can know at a given character
+    level, per SPELL_LEVEL_UNLOCK_CHAR_LEVEL — used to grant new spells on
+    level-up, not just at character creation.
+    """
+    cls = char_class.lower()
+    max_level = max_spell_level_for_character_level(character_level)
+    candidates = CLASS_CANTRIPS.get(cls, []) + CLASS_SPELL_LISTS.get(cls, [])
+    return [s for s in candidates if SPELLS[s]["level"] <= max_level]
 
 
 def get_spell(spell_id: str) -> dict | None:

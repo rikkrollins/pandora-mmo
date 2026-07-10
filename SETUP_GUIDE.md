@@ -196,6 +196,18 @@ as a reliable fallback.
   they can't read live logs, files, or run diagnostics on their own;
   they only know what's in their system prompt plus what you tell them
   in the conversation.
+- Lockable chests/doors and defeated named world-NPCs (e.g. a beaten
+  bandit captain) are tracked in-memory, not the database — like
+  combat conditions, this world state resets on a bot restart rather
+  than needing its own schema.
+- Ambient world-NPC encounters (friendly small talk, or a hostile NPC
+  provoking a fight) are a flat per-arrival chance
+  (`bot.AMBIENT_NPC_ENCOUNTER_CHANCE`), not aware of pacing, recent
+  encounters, or story context.
+- Faction standing and NPC affinity are simple integer scores with a
+  few fixed consequence hooks (theft, defeating a faction's member,
+  ordinary conversation) — there's no broader simulation of factions
+  acting on their own initiative between player actions.
 
 All of this is built to be extended — the data-driven campaign system
 in particular means most future content (new areas, monsters, items,
