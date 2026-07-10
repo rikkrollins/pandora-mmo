@@ -110,8 +110,8 @@ AMBIENT_NPC_ENCOUNTER_CHANCE = 0.4
 # (healing/buffs/cures — never damage), and their owner can freely
 # switch to and play a different character in the meantime (character
 # slots already support this with no changes needed here).
-IDLE_WARNING_SECONDS = 300
-IDLE_TIMEOUT_SECONDS = 600
+IDLE_WARNING_SECONDS = 900
+IDLE_TIMEOUT_SECONDS = 1800
 IDLE_CHECK_INTERVAL_SECONDS = 60
 SAFE_LOCATION_FALLBACK = "crossroads_tavern"
 
