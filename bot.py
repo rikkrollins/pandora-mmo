@@ -489,16 +489,6 @@ class _ChatOnlyUpdate:
         self.effective_chat = _ChatOnlyUpdate._Chat(bot, chat_id)
 
 
-async def hear_you_main(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Simple connection-test responder for the Main topic (unrelated to game logic)."""
-    if update.message is None or not topics.is_main(update.message.message_thread_id):
-        return
-    username = update.effective_user.first_name if update.effective_user else "there"
-    await update.effective_chat.send_message(
-        f"I hear you, {username}", message_thread_id=update.message.message_thread_id
-    )
-
-
 # ---------------------------------------------------------------------
 # Character creation — driven by free text, no /newcharacter needed.
 # State is tracked per-user in context.user_data["creation"].
@@ -3406,8 +3396,7 @@ async def _route_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     thread_id = raw_thread_id or 0
 
     if topics.is_main(raw_thread_id):
-        await hear_you_main(update, context)
-        return
+        return  # Main is human-to-human chat only — the bot never speaks here
 
     if topics.is_adventure(thread_id):
         await adventure_master_handler(update, context)
@@ -3425,12 +3414,12 @@ async def _route_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def text_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Single entry point for ALL plain text messages, across every topic.
-    This exists because registering hear_you_main and
-    adventure_master_handler as two separate handlers with identical
-    filters caused a real bug: python-telegram-bot only runs the FIRST
-    matching handler per update by default, so the second one never
-    fired at all, in ANY topic. Routing internally, in one handler,
-    guarantees both code paths actually run. The actual routing is
+    This exists because registering per-topic handlers separately with
+    identical filters caused a real bug: python-telegram-bot only runs
+    the FIRST matching handler per update by default, so later ones
+    never fired at all, in ANY topic. Routing internally, in one
+    handler, guarantees every topic's code path actually runs. The
+    actual routing is
     queued per-user (_run_in_user_order) so this player's own messages
     can never be handled out of order.
     """
