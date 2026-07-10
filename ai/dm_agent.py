@@ -374,3 +374,51 @@ def _fallback_hourly_update(location_name: str, recent_events: list[str], activi
     if len(lines) == 1:
         lines.append("Nothing much stirs here just now.")
     return " ".join(lines)
+
+
+EXAMINE_SYSTEM_PREAMBLE = (
+    "You are the Dungeon Master describing a character taking a closer "
+    "look at ONE specific object or detail in their surroundings. You "
+    "are given the real, already-decided facts about what this object "
+    "is and what's noticeable about it — narrate ONLY these facts, "
+    "faithfully and vividly (2-4 sentences), in the same immersive "
+    "voice as the rest of the game. Sensory detail and atmosphere are "
+    "welcome; inventing a new object, a hidden mechanism, a secret "
+    "passage, or ANY fact beyond what's given is not. Never resolve or "
+    "explain what's strange about it — if it's presented as mysterious, "
+    "it must stay exactly as mysterious after your narration as before."
+)
+
+
+def _build_examine_prompt(character: dict, location_name: str, object_name: str, object_description: str) -> str:
+    return (
+        f"{EXAMINE_SYSTEM_PREAMBLE}\n\n"
+        f"Character: {character['name']}, a {character['race']} {character['char_class']}\n"
+        f"Location: {location_name}\n"
+        f"Object being examined: {object_name}\n"
+        f"Real facts about it (narrate ONLY these, faithfully): {object_description}\n\n"
+        f"Write the description now:"
+    )
+
+
+def narrate_examine(character: dict, location_name: str, object_name: str, object_description: str) -> str:
+    """
+    Narrates a character examining one specific, real, campaign-defined
+    object — grounded strictly in that object's own description text.
+    Falls back to the plain description if Ollama is unreachable.
+    """
+    prompt = _build_examine_prompt(character, location_name, object_name, object_description)
+    try:
+        response = requests.post(
+            f"{config.OLLAMA_BASE_URL}/api/generate",
+            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False},
+            timeout=200,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = strip_think_tags(data.get("response", ""))
+        if text:
+            return text
+    except (requests.RequestException, ValueError) as e:
+        print(f"[dm_agent] examine narration call failed, falling back to plain description: {e}")
+    return object_description

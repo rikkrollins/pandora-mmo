@@ -39,7 +39,7 @@ import races as races_module
 import class_features as class_features_module
 import topics
 from ai.dev_agent import answer_dev_question
-from ai.dm_agent import narrate_action, narrate_welcome, narrate_skill_check, narrate_hourly_update
+from ai.dm_agent import narrate_action, narrate_welcome, narrate_skill_check, narrate_hourly_update, narrate_examine
 from ai.intent_parser import parse_intent
 from ai.npc_agent import register_npc, talk_to_npc, generate_ambient_line, _NPCS
 from ai.support_agent import answer_support_question
@@ -2438,8 +2438,77 @@ async def _do_look(update: Update) -> None:
         lines.append(f"You could descend to: {cl.get_location(CAMPAIGN, location['descends_to'])['name']}")
     if "ascends_to" in location:
         lines.append(f"You could ascend to: {cl.get_location(CAMPAIGN, location['ascends_to'])['name']}")
+    interactables = location.get("interactables", {})
+    if interactables:
+        names = [i["name"] for i in interactables.values()]
+        lines.append(f"Things worth a closer look: {', '.join(names)}")
 
     await update.effective_chat.send_message("\n".join(lines), message_thread_id=config.TOPIC_ADVENTURE_ID)
+
+
+def _find_interactable(location: dict, text: str) -> tuple[str, dict] | None:
+    """
+    Fuzzy-ish lookup of a real, campaign-defined interactable object at
+    this location, matched against free text (e.g. "examine the old
+    barrel" -> the marked_barrel entry at tavern_cellar). Same
+    name-appears-in-text approach as items.find_item_mentioned_in_text,
+    for the same reason: trusting a real substring match over asking
+    the small classifier model to extract the object name exactly.
+    """
+    interactables = location.get("interactables", {})
+    lowered = text.strip().lower()
+    ordered = sorted(interactables.items(), key=lambda kv: -len(kv[1]["name"]))
+    for obj_id, data in ordered:
+        if data["name"].lower() in lowered or obj_id.replace("_", " ") in lowered:
+            return obj_id, data
+    return None
+
+
+async def _do_examine(update: Update, target_text: str) -> None:
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    location = cl.get_location(CAMPAIGN, character["current_location"])
+    if location is None:
+        await update.effective_chat.send_message(
+            "You seem to be nowhere in particular. That's... concerning.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    interactables = location.get("interactables", {})
+    if not target_text or not target_text.strip():
+        if interactables:
+            names = [i["name"] for i in interactables.values()]
+            await update.effective_chat.send_message(
+                f"Examine what, exactly? Things worth a closer look here: {', '.join(names)}",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+        else:
+            await update.effective_chat.send_message(
+                "Nothing here catches your eye for a closer look.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+        return
+
+    found = _find_interactable(location, target_text)
+    if found is None:
+        names = [i["name"] for i in interactables.values()]
+        hint = f" Things worth a closer look here: {', '.join(names)}" if names else ""
+        await update.effective_chat.send_message(
+            f"You don't spot anything like that here.{hint}",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    _, obj_data = found
+    narration = await asyncio.to_thread(
+        narrate_examine, character, location["name"], obj_data["name"], obj_data["description"]
+    )
+    await update.effective_chat.send_message(f"🔍 {narration}", message_thread_id=config.TOPIC_ADVENTURE_ID)
 
 
 async def _do_show_map(update: Update) -> None:
@@ -3173,6 +3242,8 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         await _do_move(update, text)
     elif action == "look":
         await _do_look(update)
+    elif action == "examine":
+        await _do_examine(update, intent.get("target") or "")
     elif action == "check_inventory":
         await _do_check_inventory(update)
     elif action == "check_party":

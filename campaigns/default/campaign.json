@@ -12,14 +12,30 @@
         "connections": [
           "whispering_wood",
           "stonearch_bridge",
-          "market_row"
+          "market_row",
+          "tavern_cellar",
+          "tavern_upstairs"
         ],
         "npcs": [
           "grimsby",
           "sera_wanderer"
         ],
         "shop": null,
-        "safe": true
+        "safe": true,
+        "interactables": {
+          "hearth_mantle": {
+            "name": "the hearth mantle",
+            "description": "Carved dates and initials from a hundred travelers crowd the old wood, half worn smooth by hands running over them for luck."
+          },
+          "regulars_board": {
+            "name": "the corkboard by the door",
+            "description": "Taped-up notices, faded flyers, a couple of crude wanted posters. One scrap of paper has no name and no signature, just three words in shaky charcoal: IT COUNTS DOORS."
+          },
+          "grimsbys_ledger": {
+            "name": "the heavy ledger behind the bar",
+            "description": "Grimsby keeps it within arm's reach at all times and has never once let anyone else turn a page."
+          }
+        }
       },
       "market_row": {
         "name": "Market Row",
@@ -31,7 +47,21 @@
         "npcs": [
           "old_maren"
         ],
-        "shop": "marens_wares"
+        "shop": "marens_wares",
+        "interactables": {
+          "marens_scale": {
+            "name": "Old Maren's brass scale",
+            "description": "An ornate weighing scale on the counter. Maren swears by its accuracy, but it never quite balances evenly, even with identical weights on both sides."
+          },
+          "shuttered_stall": {
+            "name": "a boarded-up stall",
+            "description": "Nailed shut from the outside, which is the strange part \u2014 nobody in Market Row admits to knowing who used to run it."
+          },
+          "locksmiths_keys": {
+            "name": "rows of hanging keys in the locksmith's window",
+            "description": "Dozens of unlabeled keys, none cut to any lock still in use in town, as far as anyone will say. Someone still dusts them."
+          }
+        }
       },
       "whispering_wood": {
         "name": "The Whispering Wood",
@@ -53,7 +83,17 @@
             "material": "silverleaf_herb",
             "ability": "wisdom"
           }
-        ]
+        ],
+        "interactables": {
+          "listening_tree": {
+            "name": "an ancient, wide-boled tree",
+            "description": "Its bark seems to almost resolve into faces at the edge of your vision \u2014 never quite there when you look straight at it."
+          },
+          "carved_waystone": {
+            "name": "a weathered waystone",
+            "description": "A trailside marker carved with a script no one in the Crossroads can read, in strokes too regular to be natural weathering."
+          }
+        }
       },
       "hollow_stump_shrine": {
         "name": "The Hollow Stump Shrine",
@@ -83,7 +123,17 @@
             },
             "gold": 15
           }
-        ]
+        ],
+        "interactables": {
+          "offering_line": {
+            "name": "a row of small offerings",
+            "description": "Trinkets, coins, and dried flowers laid out at the shrine's base with an unnerving, exact symmetry no one seems to have arranged on purpose."
+          },
+          "stumps_rings": {
+            "name": "the stump's growth rings",
+            "description": "Visible where the outer bark has fallen away. One ring, deep in, is far darker than all the others \u2014 as if that entire year burned instead of grew."
+          }
+        }
       },
       "greymoor_downs": {
         "name": "The Greymoor Downs",
@@ -98,7 +148,17 @@
         ],
         "npcs": [
           "kess_the_bandit"
-        ]
+        ],
+        "interactables": {
+          "standing_stones": {
+            "name": "a loose ring of standing stones",
+            "description": "Weathered megaliths, all leaning in the same direction, like something long ago pushed the whole hill sideways at once."
+          },
+          "old_bandit_camp": {
+            "name": "a cold, abandoned campsite",
+            "description": "Ash gone stiff and grey, and a boot print frozen in old mud, pointed toward the road rather than away from it."
+          }
+        }
       },
       "stonearch_bridge": {
         "name": "Stonearch Bridge",
@@ -111,7 +171,17 @@
         ],
         "monsters": [
           "giant_spider"
-        ]
+        ],
+        "interactables": {
+          "worn_carvings": {
+            "name": "the bridge's worn rail carvings",
+            "description": "Half worn past reading, the other half still legible enough to make out a procession of small figures, all facing the same direction, toward the far bank."
+          },
+          "gorge_below": {
+            "name": "the gorge beneath the bridge",
+            "description": "Looking down, the sound that rises up doesn't quite match falling water \u2014 closer to something breathing, slow and even."
+          }
+        }
       },
       "the_weeping_well": {
         "name": "The Weeping Well",
@@ -134,7 +204,63 @@
         },
         "npcs": [
           "theron_the_wanderer"
-        ]
+        ],
+        "interactables": {
+          "wells_rim": {
+            "name": "the well's warm stone rim",
+            "description": "Warm to the touch no matter the season, with a faint hum that seems to rise and fall with no particular rhythm."
+          },
+          "door_carvings": {
+            "name": "carvings ringing the sealed stone door",
+            "description": "Spirals cut deep into the stone, none of them repeating exactly, all of them circling inward toward the door itself."
+          }
+        }
+      },
+      "tavern_cellar": {
+        "name": "The Tavern Cellar",
+        "layer": "surface",
+        "description": "A low stone cellar beneath the Crossroads Tavern, close with the smell of old wood and older wine.",
+        "connections": [
+          "crossroads_tavern"
+        ],
+        "safe": true,
+        "resource_nodes": [
+          {
+            "id": "cellar_mushroom_patch",
+            "name": "a patch of pale fungus growing in the damp corner",
+            "material": "silverleaf_herb",
+            "ability": "wisdom"
+          }
+        ],
+        "interactables": {
+          "marked_barrel": {
+            "name": "a barrel with a chalk symbol",
+            "description": "Every other barrel down here is unmarked. This one has a circle-and-line symbol chalked on its lid, redrawn recently enough that the dust hasn't settled on it."
+          },
+          "cellar_shelf": {
+            "name": "a shelf of dusty bottles",
+            "description": "Vintages going back further than the tavern's own sign out front. A few labels have worn away entirely."
+          }
+        }
+      },
+      "tavern_upstairs": {
+        "name": "The Tavern's Upper Rooms",
+        "layer": "surface",
+        "description": "A narrow hallway of guest rooms above the common room, quiet but for the creak of old floorboards.",
+        "connections": [
+          "crossroads_tavern"
+        ],
+        "safe": true,
+        "interactables": {
+          "room_seven_door": {
+            "name": "the door at the end of the hall",
+            "description": "Every other guest room door stands slightly ajar or plainly numbered. This one is shut, unmarked, and noticeably colder to stand near than the hallway around it."
+          },
+          "guestbook": {
+            "name": "a guestbook on the landing table",
+            "description": "Names going back years, most in different hands. A handful of entries near the middle of the book are scratched out so hard the pen tore the page."
+          }
+        }
       }
     },
     "underground": {
@@ -158,7 +284,17 @@
             "material": "sulfur_dust",
             "ability": "strength"
           }
-        ]
+        ],
+        "interactables": {
+          "massive_root": {
+            "name": "the cavern's massive pale root",
+            "description": "Wide enough to walk along like a bridge. Pressing a hand to it, you'd almost swear it shifts, slow as a held breath."
+          },
+          "damp_alcove": {
+            "name": "a damp stone alcove",
+            "description": "Old claw marks score the walls here, layered over each other by what must have been years of the same animal returning to the same spot \u2014 or several animals never learning better."
+          }
+        }
       },
       "goblin_warrens": {
         "name": "The Goblin Warrens",
@@ -171,7 +307,17 @@
           "goblin",
           "goblin_shaman",
           "goblin_boss"
-        ]
+        ],
+        "interactables": {
+          "chalk_markings": {
+            "name": "chalk markings on the tunnel walls",
+            "description": "Goblin scrawl, but organized \u2014 arrows, tallies, what might be a crude map \u2014 in a hand far steadier than goblins are known for."
+          },
+          "makeshift_totem": {
+            "name": "a crude bone totem",
+            "description": "Lashed together from bits of scavenged bone and wire, and kept in far better repair than anything else the goblins have bothered to maintain."
+          }
+        }
       },
       "glimmerdeep_grotto": {
         "name": "Glimmerdeep Grotto",
@@ -186,7 +332,17 @@
         ],
         "quest_items": [
           "shard_of_dim_light"
-        ]
+        ],
+        "interactables": {
+          "wrong_crystal": {
+            "name": "a crystal pulsing off-rhythm",
+            "description": "Every other formation in the grotto breathes in the same slow unison. This one pulses to its own beat, faintly, and a shade of color none of the others share."
+          },
+          "grotto_pool": {
+            "name": "a still, black pool",
+            "description": "The water is perfectly still, and reflects the ceiling above \u2014 except for one patch, near the center, that seems to reflect something else entirely."
+          }
+        }
       },
       "the_hush_below": {
         "name": "The Hush Below",
@@ -199,7 +355,17 @@
         "monsters": [
           "shadow_wisp"
         ],
-        "hidden": true
+        "hidden": true,
+        "interactables": {
+          "silent_footprints": {
+            "name": "footprints pressed into old dust",
+            "description": "Fresh enough that the dust hasn't resettled, in a size and stride that match no one currently down here."
+          },
+          "old_iron_door": {
+            "name": "an old iron door, ajar",
+            "description": "Rusted through in places, standing open just enough to see there's nothing but more dark on the other side. It wasn't open a moment ago."
+          }
+        }
       },
       "the_first_city": {
         "name": "The First City",
@@ -211,7 +377,17 @@
         "hidden": true,
         "quest_items": [
           "brass_key_no_lock"
-        ]
+        ],
+        "interactables": {
+          "warm_spire": {
+            "name": "the city's central spire",
+            "description": "Warm under your palm despite the age and the dark, with the faintest rise and fall to it, like something enormous breathing very slowly."
+          },
+          "unfamiliar_glyphs": {
+            "name": "glyphs carved into every visible surface",
+            "description": "A script that matches nothing above ground, repeated so often it starts to feel less like writing and more like counting."
+          }
+        }
       }
     },
     "sky": {
@@ -221,7 +397,17 @@
         "description": "An island of grey stone drifting slowly above the clouds, tethered to nothing anyone can see. Something on it has been waiting a very long time.",
         "connections": [],
         "hidden": true,
-        "requires_item": "shard_of_dim_light"
+        "requires_item": "shard_of_dim_light",
+        "interactables": {
+          "waiting_shape": {
+            "name": "a still shape at the island's center",
+            "description": "Motionless, silhouetted, and unmistakably waiting \u2014 for how long, and for what, you can't yet say."
+          },
+          "isles_edge": {
+            "name": "the island's crumbling edge",
+            "description": "Looking over it, the clouds below part just long enough to show how very far down the world actually is."
+          }
+        }
       }
     }
   },

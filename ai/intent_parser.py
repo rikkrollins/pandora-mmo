@@ -87,7 +87,9 @@ by name. Set "target" to the character name.
 on-foot travel to a place directly reachable from here.
 - "fast_travel" is for warping, fast-traveling, or teleporting directly to a place already explored \
 before, skipping the walk. Set "target" to the destination name.
-- "look" is for looking around, examining the current area, or asking where they are.
+- "look" is for looking around, examining the current area as a whole, or asking where they are.
+- "examine" is for looking at, inspecting, checking out, or searching one SPECIFIC object or detail \
+in the area (not the whole area itself — that's "look"). Set "target" to the object's name.
 - "buy" is for purchasing something from a shop or merchant.
 - "sell" is for selling something they're carrying.
 - "steal" is for stealing, pickpocketing, robbing, or taking something without paying — a real risk of \
@@ -212,6 +214,15 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in ["look around", "where am i", "look at my surroundings", "examine the area", "describe this place"]):
         return {**base, "action": "look"}
 
+    # A specific object/detail, not the whole area (that's "look" above,
+    # already checked first so "examine the area" can't be shadowed).
+    # Target text is matched against the current location's real
+    # interactables list in bot.py — never invented, same as items.
+    for trigger in ["examine the ", "examine ", "look at the ", "look closer at ", "inspect the ", "inspect ", "check out the ", "search the "]:
+        if trigger in lowered:
+            target = text[lowered.index(trigger) + len(trigger):].strip()
+            return {**base, "action": "examine", "target": target or None}
+
     if any(w in lowered for w in ["buy", "purchase"]):
         return {**base, "action": "buy"}
 
@@ -322,7 +333,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
                 "go_inactive", "skill_check", "shove", "show_map", "gather", "craft",
                 "list_characters", "switch_character", "delete_character",
                 "fast_travel", "accept_quest", "check_quests", "ask_clue",
-                "answer_puzzle", "gamble", "chat",
+                "answer_puzzle", "gamble", "chat", "examine",
             )
             if parsed["action"] not in valid_actions:
                 return fallback
