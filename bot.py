@@ -39,6 +39,7 @@ import spells as spells_module
 import races as races_module
 import class_features as class_features_module
 import topics
+from ai.autonomous_player import choose_next_action
 from ai.dev_agent import answer_dev_question
 from ai.dm_agent import (
     narrate_action, narrate_welcome, narrate_skill_check, narrate_hourly_update,
@@ -525,6 +526,43 @@ class _ChatOnlyUpdate:
 
     def __init__(self, bot, chat_id: int):
         self.effective_chat = _ChatOnlyUpdate._Chat(bot, chat_id)
+
+
+class _AiPlayerUpdate:
+    """
+    Full Update-like shim for an autonomous AI party character's own
+    "turn" — unlike _ChatOnlyUpdate, this also carries a real
+    effective_user.id (the character's own synthetic telegram_user_id)
+    and a message.text/message_thread_id, so it can be routed through
+    adventure_master_handler completely unchanged, exactly like a real
+    incoming Telegram message would be. This is deliberate: the point
+    is to actually exercise the same intent-parsing/action-dispatch
+    pipeline a human hits, not a privileged shortcut around it.
+    """
+
+    class _User:
+        def __init__(self, user_id: int):
+            self.id = user_id
+
+    class _Message:
+        def __init__(self, text: str, thread_id: int):
+            self.text = text
+            self.message_thread_id = thread_id
+
+    def __init__(self, bot, chat_id: int, user_id: int, text: str):
+        self.effective_chat = _ChatOnlyUpdate._Chat(bot, chat_id)
+        self.effective_user = _AiPlayerUpdate._User(user_id)
+        self.message = _AiPlayerUpdate._Message(text, config.TOPIC_ADVENTURE_ID)
+
+
+class _AiPlayerContext:
+    """context.user_data equivalent, persisted per autonomous character across ticks."""
+
+    def __init__(self):
+        self.user_data = {}
+
+
+_AI_PLAYER_CONTEXTS: dict[int, _AiPlayerContext] = {}
 
 
 # ---------------------------------------------------------------------
@@ -4108,6 +4146,138 @@ async def _log_unhandled_error(update: object, context: ContextTypes.DEFAULT_TYP
             pass
 
 
+# ---------------------------------------------------------------------
+# Autonomous AI-played party (2026-07-10, per Coffee) — a separate
+# party from any human's, playing the game for real through the exact
+# same natural-language pipeline a human message hits (intent parsing,
+# action dispatch, the works), for genuine ongoing playtesting. Combat
+# for these characters already auto-resolves via the existing is_ai=1
+# mechanism (_resolve_ai_turns) with no changes needed here — this loop
+# only ever generates their OUT-of-combat actions.
+# ---------------------------------------------------------------------
+AI_PARTY_ROSTER = [
+    {
+        "name": "Zara Windrift", "race": "elf", "char_class": "ranger",
+        "ability_scores": {"strength": 12, "dexterity": 17, "constitution": 13,
+                            "intelligence": 11, "wisdom": 15, "charisma": 10},
+        "hp_max": 11, "armor_class": 14, "gold": 25,
+        "inventory": {"longbow": 1, "shortsword": 1, "leather_armor": 1, "rations": 2},
+        "personality": "curious and methodical, always wants to know what's over the next hill",
+    },
+    {
+        "name": "Bram Ashfield", "race": "dwarf", "char_class": "cleric",
+        "ability_scores": {"strength": 13, "dexterity": 10, "constitution": 15,
+                            "intelligence": 10, "wisdom": 16, "charisma": 11},
+        "hp_max": 10, "armor_class": 14, "gold": 25,
+        "inventory": {"shortsword": 1, "leather_armor": 1, "healing_potion": 1},
+        "personality": "steady and protective, cautious about picking fights but never backs down from one already started",
+    },
+]
+
+AI_PARTY_TICK_INTERVAL_SECONDS = getattr(config, "AI_PARTY_TICK_INTERVAL_SECONDS", 900)
+_LAST_AI_PARTY_TICK_AT: datetime | None = None
+
+
+def _ensure_ai_party_exists() -> None:
+    """Creates the autonomous AI party once, if it doesn't already exist, and forms them into their own party."""
+    existing = db.get_autonomous_players()
+    if existing:
+        return
+    party_id = None
+    for member in AI_PARTY_ROSTER:
+        char = db.create_ai_companion(
+            name=member["name"], race=member["race"], char_class=member["char_class"],
+            ability_scores=member["ability_scores"], hp_max=member["hp_max"],
+            armor_class=member["armor_class"], gold=member["gold"], inventory=member["inventory"],
+        )
+        db.mark_autonomous(char["telegram_user_id"])
+        if party_id is None:
+            party_id = db.create_party(char["telegram_user_id"])
+        else:
+            db.add_ai_companion_to_party(char["telegram_user_id"], party_id)
+    logger.info(f"[ai_party] created autonomous AI party, party_id={party_id}")
+
+
+def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
+    location = cl.get_location(CAMPAIGN, location_id)
+    if not location:
+        return "You aren't sure where you are."
+
+    lines = [f"Location: {location['name']} — {location['description']}"]
+    npcs_here = _npcs_at_location(location_id)
+    if npcs_here:
+        names = [CAMPAIGN["npcs"][n]["name"] for n in npcs_here if n in CAMPAIGN["npcs"]]
+        lines.append(f"People here: {', '.join(names)}")
+    monsters_here = location.get("monsters", [])
+    if monsters_here:
+        lines.append(f"Danger here: {', '.join(monsters_here)}")
+    connections = location.get("connections", [])
+    if connections:
+        conn_names = [cl.get_location(CAMPAIGN, c)["name"] for c in connections]
+        lines.append(f"Places reachable from here: {', '.join(conn_names)}")
+    interactables = location.get("interactables", {})
+    if interactables:
+        lines.append(f"Things worth a closer look: {', '.join(i['name'] for i in interactables.values())}")
+    resource_nodes = location.get("resource_nodes", [])
+    if resource_nodes:
+        lines.append(f"Resources here: {', '.join(n['name'] for n in resource_nodes)}")
+    if location.get("shop"):
+        lines.append("There is a shop here.")
+
+    board_quests = board_quests_module.get_todays_board_quests(location_id)
+    unclaimed = [q for q in board_quests if not q.get("accepted_by") and not q.get("completed_at")]
+    if unclaimed:
+        lines.append(f"Quest board has something posted: {', '.join(q['title'] for q in unclaimed)}")
+
+    if character.get("active_quests"):
+        lines.append(f"You have {len(character['active_quests'])} active quest(s) in your journal already.")
+
+    return "\n".join(lines)
+
+
+async def _ai_party_autonomous_tick(bot) -> None:
+    """
+    Advances ONE autonomous AI party member's turn per cycle (never all
+    at once, to keep Adventure from being flooded). Skips anyone
+    currently in an active combat session — that already auto-resolves
+    via the existing is_ai=1 mechanism with no action needed here.
+    """
+    global _LAST_AI_PARTY_TICK_AT
+    if _LAST_KNOWN_CHAT_ID is None:
+        return
+
+    now = datetime.now(timezone.utc)
+    if _LAST_AI_PARTY_TICK_AT and (now - _LAST_AI_PARTY_TICK_AT).total_seconds() < AI_PARTY_TICK_INTERVAL_SECONDS:
+        return
+
+    _ensure_ai_party_exists()
+    roster = db.get_autonomous_players()
+    if not roster:
+        return
+
+    # Whoever's acted least recently goes next — a simple, fair rotation.
+    roster.sort(key=lambda c: c.get("last_active_at") or "")
+    actor = next(
+        (c for c in roster if not _in_active_combat(c["telegram_user_id"], _LAST_KNOWN_CHAT_ID)), None
+    )
+    if actor is None:
+        return  # everyone's currently mid-fight; nothing to do this cycle
+
+    _LAST_AI_PARTY_TICK_AT = now
+
+    personality = next((m["personality"] for m in AI_PARTY_ROSTER if m["name"] == actor["name"]), "")
+    situation_facts = _build_ai_player_situation_facts(actor, actor["current_location"])
+    action_text = await asyncio.to_thread(choose_next_action, actor, personality, situation_facts)
+
+    user_id = actor["telegram_user_id"]
+    context_like = _AI_PLAYER_CONTEXTS.setdefault(user_id, _AiPlayerContext())
+    update_like = _AiPlayerUpdate(bot, _LAST_KNOWN_CHAT_ID, user_id, action_text)
+    try:
+        await adventure_master_handler(update_like, context_like)
+    except Exception as e:
+        logger.error(f"[ai_party] {actor['name']}'s autonomous turn raised: {e!r}")
+
+
 async def _idle_inactivity_loop(application: Application) -> None:
     """
     Background loop for the automatic 5-minute-silence inactivity check
@@ -4138,6 +4308,10 @@ async def _idle_inactivity_loop(application: Application) -> None:
             db.expire_stale_board_quests()
         except Exception as e:
             logger.error(f"[board_quests] expiry check failed this cycle: {e!r}")
+        try:
+            await _ai_party_autonomous_tick(application.bot)
+        except Exception as e:
+            logger.error(f"[ai_party] autonomous tick failed this cycle: {e!r}")
         try:
             await _maybe_check_moltbook_activity(application.bot)
         except Exception as e:

@@ -217,6 +217,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN party_id INTEGER")
         if "pending_party_invite" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN pending_party_invite INTEGER")
+        if "is_autonomous" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN is_autonomous INTEGER NOT NULL DEFAULT 0")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -967,3 +969,21 @@ def add_ai_companion_to_party(telegram_user_id: int, party_id: int) -> None:
     """AI companions have no real turn to 'accept' with -- they join immediately when invited."""
     with get_connection() as conn:
         conn.execute("UPDATE characters SET party_id = ? WHERE telegram_user_id = ?", (party_id, telegram_user_id))
+
+
+# --- Autonomous AI-played party (2026-07-10, per Coffee: a separate,
+# self-directed party that plays through the exact same pipeline real
+# players use -- distinct from is_ai=1 combat companions, which only
+# ever auto-resolve combat turns and never act outside them) ---
+
+def mark_autonomous(telegram_user_id: int) -> None:
+    with get_connection() as conn:
+        conn.execute("UPDATE characters SET is_autonomous = 1 WHERE telegram_user_id = ?", (telegram_user_id,))
+
+
+def get_autonomous_players() -> list[dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM characters WHERE is_autonomous = 1 AND is_deleted = 0 ORDER BY character_id"
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]

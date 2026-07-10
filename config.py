@@ -47,3 +47,8 @@ HOURLY_UPDATE_INTERVAL_SECONDS = int(os.getenv("HOURLY_UPDATE_INTERVAL_SECONDS",
 # narration function's own baseline sentence count by the same factor,
 # never changes WHAT gets narrated, only how much prose wraps around it.
 STORY_MODE = int(os.getenv("STORY_MODE", "5"))
+
+# How often (seconds) the autonomous AI party takes its next turn, one
+# character at a time. 900 = 15 min, matching the other background-loop
+# cadences (world heartbeat, hourly update).
+AI_PARTY_TICK_INTERVAL_SECONDS = int(os.getenv("AI_PARTY_TICK_INTERVAL_SECONDS", "900"))
