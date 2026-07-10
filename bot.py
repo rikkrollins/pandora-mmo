@@ -103,7 +103,7 @@ async def hear_you_main(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if update.message is None or not topics.is_main(update.message.message_thread_id):
         return
     username = update.effective_user.first_name if update.effective_user else "there"
-    await update.message.reply_text(
+    await update.effective_chat.send_message(
         f"I hear you, {username}", message_thread_id=update.message.message_thread_id
     )
 
@@ -198,7 +198,7 @@ async def _begin_character_creation(update: Update, context: ContextTypes.DEFAUL
         )
 
     context.user_data["creation"] = {"step": "name"}
-    await update.message.reply_text(
+    await update.effective_chat.send_message(
         f"{prefix}Let's create your character! What's their name?",
         message_thread_id=config.TOPIC_ADVENTURE_ID,
     )
@@ -212,7 +212,7 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
     if step == "name":
         creation["name"] = text
         creation["step"] = "race"
-        await update.message.reply_text(
+        await update.effective_chat.send_message(
             f"Nice! What race? Choose one: {', '.join(VALID_RACES)}",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
@@ -221,14 +221,14 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
     if step == "race":
         race = text.title()
         if race not in VALID_RACES:
-            await update.message.reply_text(
+            await update.effective_chat.send_message(
                 f"Please choose one of: {', '.join(VALID_RACES)}",
                 message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
             return
         creation["race"] = race
         creation["step"] = "class"
-        await update.message.reply_text(
+        await update.effective_chat.send_message(
             f"Great, a {race}! What class? Choose one: {', '.join(VALID_CLASSES)}",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
@@ -237,7 +237,7 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
     if step == "class":
         char_class = text.title()
         if char_class not in VALID_CLASSES:
-            await update.message.reply_text(
+            await update.effective_chat.send_message(
                 f"Please choose one of: {', '.join(VALID_CLASSES)}",
                 message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
@@ -252,7 +252,7 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
         creation["step"] = "assign_scores"
 
         scores_str = ", ".join(str(s) for s in rolled_scores)
-        await update.message.reply_text(
+        await update.effective_chat.send_message(
             f"Your rolled ability scores are: {scores_str}\n\n"
             f"Now assign them to STR, DEX, CON, INT, WIS, CHA — reply with 6 "
             f"numbers in that order, using each rolled value exactly once "
@@ -269,7 +269,7 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
 
         rolled = creation["rolled_scores"]
         if len(assigned) != 6 or sorted(assigned) != sorted(rolled):
-            await update.message.reply_text(
+            await update.effective_chat.send_message(
                 f"That doesn't match your rolled scores ({', '.join(map(str, rolled))}). "
                 f"Please reply with all 6 values, each used exactly once, in "
                 f"STR DEX CON INT WIS CHA order.",
@@ -347,7 +347,7 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
             f"{features_line}"
             f"Inventory: {', '.join(items_module.get_item(i)['name'] for i in character['inventory'])}"
         )
-        await update.message.reply_text(sheet, message_thread_id=config.TOPIC_ADVENTURE_ID)
+        await update.effective_chat.send_message(sheet, message_thread_id=config.TOPIC_ADVENTURE_ID)
         del context.user_data["creation"]
 
         await _send_welcome_narration(update, character)
@@ -2172,7 +2172,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         else:
             msg = "There's nothing in progress to cancel right now."
 
-        await update.message.reply_text(msg, message_thread_id=config.TOPIC_ADVENTURE_ID)
+        await update.effective_chat.send_message(msg, message_thread_id=config.TOPIC_ADVENTURE_ID)
         return
 
     # If this user is mid-character-creation, that flow owns their next message.
@@ -2231,7 +2231,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
             reply = await asyncio.to_thread(
                 talk_to_npc, npc_id, text, character_name, relationship["memory_events"]
             )
-            await update.message.reply_text(reply, message_thread_id=config.TOPIC_ADVENTURE_ID)
+            await update.effective_chat.send_message(reply, message_thread_id=config.TOPIC_ADVENTURE_ID)
             # Ordinary conversation builds a small amount of rapport over
             # time — real, persistent, and separate from the short-term
             # conversation buffer talk_to_npc already keeps.
@@ -2303,14 +2303,14 @@ async def sheet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def version_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(
+    await update.effective_chat.send_message(
         f"Pandora MMO v{version.get_version()}",
         message_thread_id=update.message.message_thread_id,
     )
 
 
 async def changelog_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(
+    await update.effective_chat.send_message(
         version.get_changelog(),
         message_thread_id=update.message.message_thread_id,
     )
@@ -2353,13 +2353,13 @@ async def _is_group_owner(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def development_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     is_owner = await _is_group_owner(update, context)
     if is_owner is None:
-        await update.message.reply_text(
+        await update.effective_chat.send_message(
             "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
             message_thread_id=config.TOPIC_DEVELOPMENT_ID,
         )
         return
     if not is_owner:
-        await update.message.reply_text(
+        await update.effective_chat.send_message(
             "The Development topic is restricted to the group owner.",
             message_thread_id=config.TOPIC_DEVELOPMENT_ID,
         )
@@ -2374,13 +2374,13 @@ async def development_topic_handler(update: Update, context: ContextTypes.DEFAUL
     history.append(f"Assistant: {reply}")
     del history[:-MAX_ASSISTANT_HISTORY]
 
-    await update.message.reply_text(reply, message_thread_id=config.TOPIC_DEVELOPMENT_ID)
+    await update.effective_chat.send_message(reply, message_thread_id=config.TOPIC_DEVELOPMENT_ID)
 
 
 async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     question = update.message.text.strip()
     reply = await asyncio.to_thread(answer_support_question, question)
-    await update.message.reply_text(reply, message_thread_id=config.TOPIC_SUPPORT_ID)
+    await update.effective_chat.send_message(reply, message_thread_id=config.TOPIC_SUPPORT_ID)
 
 
 async def text_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2429,7 +2429,7 @@ async def _log_unhandled_error(update: object, context: ContextTypes.DEFAULT_TYP
     logger.error("Unhandled exception while processing update: %r", update, exc_info=context.error)
     if isinstance(update, Update) and update.message:
         try:
-            await update.message.reply_text(
+            await update.effective_chat.send_message(
                 "Something went wrong processing that — try again in a moment.",
                 message_thread_id=update.message.message_thread_id,
             )
