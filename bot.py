@@ -12,6 +12,7 @@ import asyncio
 import logging
 import random
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -191,6 +192,11 @@ _LAST_MOLTBOOK_NOTIFIED_COUNT = 0
 # ---------------------------------------------------------------------
 HOURLY_UPDATE_INTERVAL_SECONDS = getattr(config, "HOURLY_UPDATE_INTERVAL_SECONDS", 3600)
 _LAST_HOURLY_UPDATE_AT: datetime | None = None
+# Which clock hour (US Eastern, "%Y-%m-%d %H") the update last fired for —
+# e.g. "2026-07-10 05" — so it lands on the top of the hour rather than
+# drifting to whatever offset the bot process happened to start at.
+EASTERN_TZ = ZoneInfo("America/New_York")
+_LAST_HOURLY_UPDATE_BUCKET: str | None = None
 _RECENT_WORLD_EVENTS: list[tuple[datetime, str, str]] = []  # (when, location_id, text)
 
 
@@ -317,34 +323,60 @@ async def _maybe_post_hourly_status_update(bot) -> None:
     location the most recently active real player currently occupies,
     followed by a plain factual readout (player counts, quest board)
     that never passes through the model — see narrate_hourly_update's
-    docstring for why that split matters. Fires every real hour
-    regardless of activity level, unlike _maybe_post_world_heartbeat
-    above, which only fires during long idle stretches.
+    docstring for why that split matters. Fires at the top of every
+    real hour in US Eastern time (e.g. 5:00, 6:00 — within the ~60s
+    granularity of the background loop this runs in), regardless of
+    activity level, unlike _maybe_post_world_heartbeat above, which
+    only fires during long idle stretches. Gated on an hour-bucket
+    string rather than "N seconds since last fire" specifically so it
+    lands on the clock hour instead of drifting to whatever offset the
+    bot happened to start at.
     """
-    global _LAST_HOURLY_UPDATE_AT
+    global _LAST_HOURLY_UPDATE_AT, _LAST_HOURLY_UPDATE_BUCKET
     if _LAST_KNOWN_CHAT_ID is None:
         return
 
     now = datetime.now(timezone.utc)
-    if _LAST_HOURLY_UPDATE_AT and (now - _LAST_HOURLY_UPDATE_AT).total_seconds() < HOURLY_UPDATE_INTERVAL_SECONDS:
+    current_hour_bucket = datetime.now(EASTERN_TZ).strftime("%Y-%m-%d %H")
+    if _LAST_HOURLY_UPDATE_BUCKET == current_hour_bucket:
         return
 
+    # Joined through active_characters so a player's old, no-longer-played
+    # characters (from the character-slots feature — switching to a new
+    # active character never deletes the old one) can't be counted here.
+    # Without this join, an abandoned character's stale is_inactive flag
+    # gets counted alongside real, currently-played characters, skewing
+    # both numbers — confirmed as a real bug 2026-07-10 via code review
+    # after Coffee reported the inactive count reading low.
     with db.get_connection() as conn:
         active_row = conn.execute(
-            "SELECT COUNT(*) AS n FROM characters WHERE is_ai = 0 AND is_deleted = 0 AND is_inactive = 0"
+            """
+            SELECT COUNT(*) AS n FROM characters c
+            JOIN active_characters a ON a.character_id = c.character_id
+            WHERE c.is_ai = 0 AND c.is_deleted = 0 AND c.is_inactive = 0
+            """
         ).fetchone()
         inactive_row = conn.execute(
-            "SELECT COUNT(*) AS n FROM characters WHERE is_ai = 0 AND is_deleted = 0 AND is_inactive = 1"
+            """
+            SELECT COUNT(*) AS n FROM characters c
+            JOIN active_characters a ON a.character_id = c.character_id
+            WHERE c.is_ai = 0 AND c.is_deleted = 0 AND c.is_inactive = 1
+            """
         ).fetchone()
         last_active_row = conn.execute(
-            "SELECT current_location FROM characters WHERE is_ai = 0 AND is_deleted = 0 "
-            "ORDER BY last_active_at DESC LIMIT 1"
+            """
+            SELECT c.current_location FROM characters c
+            JOIN active_characters a ON a.character_id = c.character_id
+            WHERE c.is_ai = 0 AND c.is_deleted = 0
+            ORDER BY c.last_active_at DESC LIMIT 1
+            """
         ).fetchone()
 
     # Commit to firing this cycle regardless of what's found below —
     # an hour with nothing to report still gets a (quiet) update, and
     # either way we don't want to re-check every 60s until the next hour.
     _LAST_HOURLY_UPDATE_AT = now
+    _LAST_HOURLY_UPDATE_BUCKET = current_hour_bucket
 
     if not last_active_row:
         return  # nobody has ever played — nothing to report on
