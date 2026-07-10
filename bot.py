@@ -118,10 +118,18 @@ SAFE_LOCATION_FALLBACK = "crossroads_tavern"
 # they act again (see db.touch_last_active's call site).
 _IDLE_WARNED: set[int] = set()
 
-# Captured opportunistically from the first real Adventure message this
-# process sees — the auto-idle background loop has no incoming Update
-# to read a chat_id from otherwise. None until someone actually talks.
-_LAST_KNOWN_CHAT_ID: int | None = None
+# The auto-idle/living-world background loop has no incoming Update to
+# read a chat_id from, so it needs one cached here. Seeded from
+# config.TELEGRAM_CHAT_ID at import time if set (real value, captured
+# 2026-07-09 from a live update — see .env); refreshed from any actual
+# incoming Adventure message too. Confirmed live 2026-07-10: without
+# this seed, EVERY bot restart silently reset this to None, and since
+# the whole living-world system (idle-check, NPC wandering, the
+# "meanwhile" heartbeat) short-circuits when it's None, a restart with
+# no new message arriving afterward meant that system just never ran —
+# looked like it wasn't working at all, when really it just never had
+# a chat_id to post to.
+_LAST_KNOWN_CHAT_ID: int | None = getattr(config, "TELEGRAM_CHAT_ID", None)
 
 # ---------------------------------------------------------------------
 # Living world — NPCs tagged "can_wander" in campaign.json (currently
