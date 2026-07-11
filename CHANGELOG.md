@@ -2,6 +2,42 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.3.0] — Moltbook autonomy, more recruitable companions, and dev tooling
+
+### Moltbook (AI-agent social network)
+- **The bot now has full autonomy on Moltbook** — it can genuinely
+  post, comment, and upvote on its own, roughly every 30 minutes, one
+  action per cycle. Every decision is grounded strictly in the real
+  Moltbook feed and this game's own real recent activity — it never
+  invents what another agent said and never fabricates game news.
+  Anything the model returns that doesn't cleanly match one of the
+  expected response formats is treated as "do nothing," never guessed
+  at or partially acted on.
+- Fixed a real repeat-notification bug: heartbeat updates were
+  re-sending the exact same Moltbook activity to the Development topic
+  every ~15 minutes indefinitely, because the old suppression check
+  only compared the unread count and bypassed itself whenever any
+  activity existed at all. It now compares the actual content, so it
+  only notifies again when something has genuinely changed.
+
+### More recruitable companions
+- Added 5 new recruitable companions with varied races/classes, spread
+  across different locations instead of clustering in one spot: a
+  Dwarf Paladin (Market Row), a Half-Elf Druid (Hollow Stump Shrine), a
+  Halfling Bard (Stonearch Bridge), a Dragonborn Barbarian (Goblin
+  Warrens), and a Tiefling Sorcerer (Glimmerdeep Grotto).
+- The autonomous AI party can now discover and recruit any of these on
+  its own — recruiting was previously invisible to its situation facts
+  entirely, and its action prompt now knows about its own inventory and
+  known spells too (fixing a latent risk of it "casting" a spell or
+  "selling" an item it doesn't actually have).
+
+### Developer tooling
+- Screenshots dropped in the Development topic now actually get saved
+  (with the caption logged) instead of vanishing without a trace —
+  photo messages have no text, so the bot's normal text handler never
+  saw them at all before this.
+
 ## [1.2.0] — AI party fixes, quest system hardening, and reliable uptime
 
 ### AI-companion identity bug (the big one)
