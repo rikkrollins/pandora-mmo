@@ -16,8 +16,22 @@ MAX_MEMORY_TURNS = 10
 
 
 def register_npc(npc_id: str, name: str, personality: str, goals: str = "",
-                  alignment: str = "", disposition: str = "friendly") -> None:
-    """Register a new NPC persona. Call once per NPC at setup time."""
+                  alignment: str = "", disposition: str = "friendly",
+                  shop_items: list[dict] | None = None) -> None:
+    """
+    Register a new NPC persona. Call once per NPC at setup time.
+
+    `shop_items` (if this NPC owns a shop — see bot.py's
+    setup_default_npcs, which resolves it from the real campaign.json
+    shop inventory via items.py) grounds this NPC's dialogue in their
+    ACTUAL wares/prices. Without this, confirmed live 2026-07-11: a
+    player asking Grimsby "do you have items to sell" or "how can I
+    heal" got a different, invented answer each time — the model has no
+    way to know what a shopkeeper NPC really sells, so it hallucinated
+    plausible-sounding items/prices from general D&D knowledge, same
+    failure mode support_agent.py was already grounded against (see
+    CRITICAL_GROUNDING_RULE there). NPC dialogue needs the same fix.
+    """
     persona = (
         f"You are {name}, an NPC in a Dungeons & Dragons 5E game. "
         f"Personality: {personality}. "
@@ -25,7 +39,39 @@ def register_npc(npc_id: str, name: str, personality: str, goals: str = "",
         + (f"Goals: {goals}. " if goals else "")
         + "Stay in character at all times. Respond conversationally, in 1-4 sentences."
     )
-    _NPCS[npc_id] = {"persona": persona, "memory": [], "disposition": disposition}
+    _NPCS[npc_id] = {
+        "persona": persona, "memory": [], "disposition": disposition,
+        "shop_items": shop_items or [],
+    }
+
+
+def _shop_grounding_block(npc_id: str) -> str:
+    """
+    Real, current wares/prices for an NPC who owns a shop — the ONLY
+    accurate answer to "what do you have for sale" or "can you heal me
+    with a potion". Empty string for non-merchant NPCs (nothing to
+    ground). See register_npc's docstring for why this exists.
+    """
+    shop_items = _NPCS[npc_id].get("shop_items") or []
+    if not shop_items:
+        return ""
+    lines = [
+        "\n\nWhat you ACTUALLY have for sale right now (the ONLY items you can "
+        "offer — never invent other wares, prices, or services; if asked for "
+        "something not on this list, say honestly that you don't carry it):"
+    ]
+    for item in shop_items:
+        detail = f"- {item['name']} — {item['price']} gold"
+        if item.get("note"):
+            detail += f" ({item['note']})"
+        lines.append(detail)
+    lines.append(
+        "\nThe only real ways anyone recovers HP or spell slots in this world are "
+        "resting (which takes real time, not instant) or a healing item like the "
+        "ones above, if you sell one — don't invent other cures, healers, or "
+        "magical remedies you don't actually offer."
+    )
+    return "\n".join(lines)
 
 
 def _memory_facts_block(memory_facts: list[str] | None, character_name: str) -> str:
@@ -50,9 +96,10 @@ def _build_prompt(npc_id: str, player_message: str, character_name: str = "the p
         history_lines.append(f"{role}: {text}")
     history = "\n".join(history_lines) or "(no prior conversation this session)"
     memory_block = _memory_facts_block(memory_facts, character_name)
+    shop_block = _shop_grounding_block(npc_id)
 
     return (
-        f"{npc['persona']}\n\n"
+        f"{npc['persona']}{shop_block}\n\n"
         f"{memory_block}\n\n"
         f"Conversation so far this session:\n{history}\n\n"
         f"Player: {player_message}\n"
@@ -114,9 +161,10 @@ def generate_ambient_line(npc_id: str, character_name: str, situation: str,
     history_lines = [f"{role}: {text}" for role, text in npc["memory"][-MAX_MEMORY_TURNS:]]
     history = "\n".join(history_lines) or "(no prior conversation this session)"
     memory_block = _memory_facts_block(memory_facts, character_name)
+    shop_block = _shop_grounding_block(npc_id)
 
     prompt = (
-        f"{npc['persona']}\n\n"
+        f"{npc['persona']}{shop_block}\n\n"
         f"{memory_block}\n\n"
         f"Conversation so far this session:\n{history}\n\n"
         f"{character_name} {situation}. Nobody has spoken to you yet — say or do something "

@@ -3736,6 +3736,38 @@ def _find_npc_id_by_name(name: str) -> str | None:
     return None
 
 
+def _shop_items_for_npc(npc_id: str) -> list[dict]:
+    """
+    Real wares a shopkeeper NPC actually sells, resolved from
+    campaign.json's shops + items.py — used to ground that NPC's
+    dialogue (see ai/npc_agent.py's _shop_grounding_block) so asking
+    them what they have for sale gets the REAL inventory instead of
+    whatever the model invents.
+    """
+    items_out = []
+    for shop_data in CAMPAIGN.get("shops", {}).values():
+        if shop_data.get("owner_npc") != npc_id:
+            continue
+        for item_id in shop_data.get("inventory", []):
+            item = items_module.get_item(item_id)
+            if item is None:
+                continue
+            note_parts = []
+            if item.get("heal_dice"):
+                note_parts.append(f"heals {item['heal_dice']}")
+            if item.get("damage_dice"):
+                note_parts.append(f"damage {item['damage_dice']}")
+            if item.get("effect") and item["effect"] not in ("none", "heal"):
+                note_parts.append(item["effect"].replace("_", " "))
+            if item.get("note"):
+                note_parts.append(item["note"])
+            items_out.append({
+                "name": item["name"], "price": item.get("price", 0),
+                "note": "; ".join(note_parts) if note_parts else "",
+            })
+    return items_out
+
+
 def setup_default_npcs() -> None:
     for npc_id, npc_data in CAMPAIGN["npcs"].items():
         register_npc(
@@ -3743,6 +3775,7 @@ def setup_default_npcs() -> None:
             goals=npc_data.get("goals", ""),
             alignment=npc_data.get("alignment", ""),
             disposition=npc_data.get("disposition", "friendly"),
+            shop_items=_shop_items_for_npc(npc_id),
         )
     _seed_npc_locations()
 
