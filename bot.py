@@ -3878,8 +3878,14 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # confirmation — a passive status/info check (sheet, inventory,
     # party, quests, map, clues) must NOT wake them by itself, or
     # "resting until next session" is meaningless the moment someone
-    # checks on them. go_inactive is also excluded: asking to rest again
-    # while already resting isn't "waking up to act." "chat" is excluded
+    # checks on them. go_inactive AND rest are also excluded: asking to
+    # rest again while already resting isn't "waking up to act" — "I
+    # rest" classifies as action="rest" (not "go_inactive", which is
+    # reserved for "resting for the night"/"done for now" phrasing), so
+    # without "rest" here too, a resting character repeating "I rest"
+    # would get woken (partial heal, is_inactive cleared) and then
+    # immediately put back to sleep by _do_rest, losing whatever
+    # partial rest progress they'd built up. "chat" is excluded
     # too — confirmed live 2026-07-10: a message the parser couldn't
     # classify into any real action ("class board" instead of "quest
     # board", most likely dictation/autocorrect) fell through to
@@ -3891,7 +3897,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     if character and character.get("is_inactive"):
         is_status_check = action in (
             "check_sheet", "check_inventory", "check_party", "check_quests",
-            "show_map", "ask_clue", "list_characters", "go_inactive", "chat",
+            "show_map", "ask_clue", "list_characters", "go_inactive", "rest", "chat",
         )
         explicit_wake = any(
             phrase in text.lower()
