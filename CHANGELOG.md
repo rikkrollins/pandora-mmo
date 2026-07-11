@@ -51,10 +51,15 @@ All notable changes to Pandora MMO are documented here.
 - Character-creation progress (or any other mid-flow player state) no
   longer gets silently wiped by a routine bot restart — `user_data` now
   persists across restarts.
-- The support agent is now grounded in this game's real per-race
-  ability score bonuses — it was previously giving bad advice (once
-  suggesting a full class change) when asked to help assign rolled
-  stats, because it had no real bonus data to reason from.
+- Stat-assignment questions ("help me assign my rolled stats") now get
+  a real, deterministic answer computed directly from the character's
+  actual class and race — highest rolls to that class's real 5E
+  priority stats, real racial bonus applied — instead of asking the
+  model to reason it out. It was previously giving bad advice (once
+  suggesting a full class change) with no real bonus data to work
+  from, and even after grounding the prompt with real data, consistently
+  exceeded the response timeout. Same "rules decide, AI narrates"
+  principle already used for XP-to-level and active-character lookups.
 - "Who is my active character" now classifies correctly instead of
   falling through ungrounded.
 - Quest-accepted narration now includes the character's name, matching
