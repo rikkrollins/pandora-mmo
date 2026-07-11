@@ -40,8 +40,10 @@ import shop as shop_module
 import spells as spells_module
 import races as races_module
 import class_features as class_features_module
+import moltbook
 import topics
 from ai.autonomous_player import choose_next_action
+from ai.moltbook_agent import decide_social_action
 from ai.dev_agent import answer_dev_question
 from ai.dm_agent import (
     narrate_action, narrate_welcome, narrate_skill_check, narrate_hourly_update,
@@ -178,7 +180,7 @@ _LAST_WORLD_HEARTBEAT_AT: datetime | None = None
 # ---------------------------------------------------------------------
 MOLTBOOK_HEARTBEAT_INTERVAL_SECONDS = getattr(config, "MOLTBOOK_HEARTBEAT_INTERVAL_SECONDS", 900)
 _LAST_MOLTBOOK_CHECK_AT: datetime | None = None
-_LAST_MOLTBOOK_NOTIFIED_COUNT = 0
+_LAST_MOLTBOOK_NOTIFIED_SIGNATURE: tuple | None = None
 
 # ---------------------------------------------------------------------
 # Hourly Adventure-topic status update — separate from the "meanwhile"
@@ -456,7 +458,7 @@ async def _maybe_check_moltbook_activity(bot) -> None:
     reply under the project's name to a stranger's comment — a human
     call, not something a background loop should decide unsupervised.
     """
-    global _LAST_MOLTBOOK_CHECK_AT, _LAST_MOLTBOOK_NOTIFIED_COUNT
+    global _LAST_MOLTBOOK_CHECK_AT, _LAST_MOLTBOOK_NOTIFIED_SIGNATURE
     api_key = getattr(config, "MOLTBOOK_API_KEY", None)
     if not api_key or _LAST_KNOWN_CHAT_ID is None:
         return
@@ -485,7 +487,24 @@ async def _maybe_check_moltbook_activity(bot) -> None:
     dms = data.get("your_direct_messages") or {}
     pending_dms = dms.get("pending_requests") or dms.get("unread") or []
 
-    if unread <= _LAST_MOLTBOOK_NOTIFIED_COUNT and not activity and not pending_dms:
+    # Confirmed live (2026-07-11): Coffee reported "we keep getting
+    # notifications from Moltbook in Dev topic" every ~15 minutes. Root
+    # cause -- this used to suppress only on `unread <= last_notified_count
+    # and not activity and not pending_dms`, but activity_on_your_posts
+    # stays populated across heartbeats (nothing here ever marks a post's
+    # notifications "seen" on Moltbook's side), so `not activity` was
+    # False on almost every check, bypassing the suppression and
+    # re-sending the SAME activity/DM list over and over forever. Fixed
+    # by comparing a full signature of the actual content (not just the
+    # raw unread count) against what was last notified, so it only fires
+    # again when something in it has genuinely changed.
+    signature = (
+        unread,
+        tuple(sorted((item.get("post_id") or item.get("title"), item.get("new_notification_count"))
+                     for item in activity)),
+        tuple(sorted(str(d) for d in pending_dms)),
+    )
+    if signature == _LAST_MOLTBOOK_NOTIFIED_SIGNATURE:
         return
 
     lines = [f"🦞 Moltbook: {unread} unread notification(s) for PandoraMMO_Bot."]
@@ -506,9 +525,70 @@ async def _maybe_check_moltbook_activity(bot) -> None:
         # Only recorded as "notified" once the send actually succeeds —
         # otherwise a transient TimedOut here would mark this activity as
         # already-seen and it would never be retried on a later heartbeat.
-        _LAST_MOLTBOOK_NOTIFIED_COUNT = unread
+        _LAST_MOLTBOOK_NOTIFIED_SIGNATURE = signature
     except TelegramError as e:
         logger.error(f"[moltbook_heartbeat] failed to notify Development topic: {e!r}")
+
+
+MOLTBOOK_SOCIAL_TICK_INTERVAL_SECONDS = getattr(config, "MOLTBOOK_SOCIAL_TICK_INTERVAL_SECONDS", 1800)
+_LAST_MOLTBOOK_SOCIAL_TICK_AT: datetime | None = None
+
+
+async def _maybe_run_moltbook_social_tick(bot) -> None:
+    """
+    PandoraMMO_Bot's own autonomous participation on Moltbook -- posting,
+    commenting, and upvoting on its own, per Coffee's explicit direction
+    (2026-07-11): full autonomy, no human review before publishing. This
+    was a deliberate, informed choice he made after the tradeoff was laid
+    out directly (irreversible public posts under the project's real
+    name, with no review step) -- not an oversight or a default.
+
+    At most ONE action per tick (matching _ai_party_autonomous_tick's
+    same reasoning: never flood, and a bounded blast radius even under
+    full autonomy). Grounded strictly in the real feed just fetched from
+    Moltbook and this game's own real recent activity (_RECENT_WORLD_
+    EVENTS) -- ai/moltbook_agent.py's parser treats anything that
+    doesn't cleanly match one of its four exact response formats as
+    "skip", never guessing at a partial or malformed action.
+    """
+    global _LAST_MOLTBOOK_SOCIAL_TICK_AT
+    api_key = getattr(config, "MOLTBOOK_API_KEY", None)
+    if not api_key:
+        return
+
+    now = datetime.now(timezone.utc)
+    if _LAST_MOLTBOOK_SOCIAL_TICK_AT and (now - _LAST_MOLTBOOK_SOCIAL_TICK_AT).total_seconds() < MOLTBOOK_SOCIAL_TICK_INTERVAL_SECONDS:
+        return
+    _LAST_MOLTBOOK_SOCIAL_TICK_AT = now
+
+    try:
+        feed_posts = await asyncio.to_thread(moltbook.get_feed, "new", 15)
+    except Exception as e:
+        logger.error(f"[moltbook_social] feed fetch failed: {e!r}")
+        return
+
+    cutoff = now.timestamp() - MOLTBOOK_SOCIAL_TICK_INTERVAL_SECONDS
+    recent_activity = [text for (when, _loc, text) in _RECENT_WORLD_EVENTS if when.timestamp() >= cutoff]
+
+    decision = await asyncio.to_thread(decide_social_action, feed_posts, recent_activity)
+    action = decision.get("action")
+    if action == "skip":
+        return
+
+    try:
+        if action == "upvote_post":
+            await asyncio.to_thread(moltbook.upvote_post, decision["post_id"])
+            logger.info(f"[moltbook_social] upvoted post {decision['post_id']!r}")
+        elif action == "comment_post":
+            await asyncio.to_thread(moltbook.add_comment, decision["post_id"], decision["content"])
+            logger.info(f"[moltbook_social] commented on post {decision['post_id']!r}: {decision['content']!r}")
+        elif action == "create_post":
+            result = await asyncio.to_thread(
+                moltbook.create_post, "general", decision["title"], decision["content"]
+            )
+            logger.info(f"[moltbook_social] created post {decision['title']!r}: {result!r}")
+    except Exception as e:
+        logger.error(f"[moltbook_social] action {action!r} failed: {e!r}")
 
 
 class _ChatOnlyUpdate:
@@ -4611,6 +4691,10 @@ async def _idle_inactivity_loop(application: Application) -> None:
             await _maybe_check_moltbook_activity(application.bot)
         except Exception as e:
             logger.error(f"[moltbook_heartbeat] failed this cycle: {e!r}")
+        try:
+            await _maybe_run_moltbook_social_tick(application.bot)
+        except Exception as e:
+            logger.error(f"[moltbook_social] tick failed this cycle: {e!r}")
 
 
 async def _on_startup(application: Application) -> None:
