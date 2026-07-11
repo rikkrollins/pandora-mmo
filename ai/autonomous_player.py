@@ -39,6 +39,7 @@ a place/person/item that isn't actually listed there):
 - "I examine [something listed under Things worth a closer look]"
 - "I check the quest board"
 - "I accept the quest" (if the facts below say something's posted or on offer)
+- "I choose [the exact label of one of your options]" (if the facts below say you have a decision to make)
 - "I want to buy a healing potion"
 - "I cast cure wounds"
 - "I rest for now"

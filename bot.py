@@ -4415,6 +4415,20 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
     if unclaimed:
         lines.append(f"Quest board has something posted: {', '.join(q['title'] for q in unclaimed)}")
 
+    # Without this, an AI party member whose accepted branching quest is
+    # already objective-complete has no way to know a real decision is
+    # waiting on it, or what the two actual choices even are -- it would
+    # just sit on it forever, since resolve_choice requires saying one of
+    # the exact real labels (see _do_resolve_quest_choice), and nothing
+    # else here ever surfaces what those labels are.
+    ready_choices = [
+        q for q in db.get_accepted_board_quests_for_user(character["telegram_user_id"])
+        if q.get("branch_data") and q["progress_count"] >= q["objective_count"]
+    ]
+    for q in ready_choices:
+        labels = ", ".join(f'"{c["label"]}"' for c in q["branch_data"]["choices"].values())
+        lines.append(f"You have a decision to make on \"{q['title']}\" -- your options are: {labels}")
+
     if character.get("active_quests"):
         lines.append(f"You have {len(character['active_quests'])} active quest(s) in your journal already.")
 
