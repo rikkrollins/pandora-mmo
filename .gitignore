@@ -10,3 +10,4 @@ bot_test_tmp.log
 .dev_bridge_state.json
 .autonomous_monitor_state.json
 bot_persistence.pickle
+dev_screenshots/

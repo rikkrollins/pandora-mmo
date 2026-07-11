@@ -10,6 +10,7 @@ route intent and narrate results.
 """
 import asyncio
 import logging
+import os
 import random
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -4179,6 +4180,55 @@ async def development_topic_handler(update: Update, context: ContextTypes.DEFAUL
     await _safe_send(update, reply, thread_id=config.TOPIC_DEVELOPMENT_ID)
 
 
+DEV_SCREENSHOTS_DIR = "dev_screenshots"
+
+
+async def dev_topic_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Per Coffee's request (2026-07-11): he wants to drop screenshots into
+    Development for troubleshooting. Photos have no update.message.text,
+    so text_message_router's filters.TEXT handler never even sees them —
+    confirmed live that a screenshot he sent produced zero log trace at
+    all. This is a separate handler (registered on filters.PHOTO, which
+    text messages never match, so there's no ordering conflict with
+    text_message_router) that actually downloads the image to disk and
+    logs its path, so a live Claude Code session (or a future automated
+    check) can go look at it with the Read tool. Never actually "sees"
+    the image itself here — this bot has no image-understanding
+    capability of its own; it just makes the file available.
+    """
+    if update.message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
+        return
+
+    is_owner = await _is_group_owner(update, context)
+    if is_owner is None:
+        await update.effective_chat.send_message(
+            "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
+            message_thread_id=config.TOPIC_DEVELOPMENT_ID,
+        )
+        return
+    if not is_owner:
+        return
+
+    os.makedirs(DEV_SCREENSHOTS_DIR, exist_ok=True)
+    largest_photo = update.message.photo[-1]
+    file = await context.bot.get_file(largest_photo.file_id)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    filename = f"{timestamp}_{largest_photo.file_unique_id}.jpg"
+    filepath = os.path.join(DEV_SCREENSHOTS_DIR, filename)
+    await file.download_to_drive(filepath)
+
+    caption = (update.message.caption or "").strip()
+    logger.info(f"[dev_topic_image] user={update.effective_user.id} path={filepath!r} caption={caption!r}")
+
+    await update.effective_chat.send_message(
+        f"📸 Got it — saved for troubleshooting at `{filepath}`. I can't see it from here myself "
+        f"(no image capability in this running process), but it's ready for a live Claude Code "
+        f"session to look at directly.",
+        message_thread_id=config.TOPIC_DEVELOPMENT_ID,
+    )
+
+
 async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     question = update.message.text.strip()
     character = db.get_character(update.effective_user.id)
@@ -4607,6 +4657,7 @@ def build_application() -> Application:
 
     # Single unified router for all plain text messages, across topics.
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message_router))
+    application.add_handler(MessageHandler(filters.PHOTO, dev_topic_photo_handler))
 
     application.add_error_handler(_log_unhandled_error)
 
