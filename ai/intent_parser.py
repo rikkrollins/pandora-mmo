@@ -196,7 +196,7 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
         return {**base, "action": "check_party"}
 
     if any(w in lowered for w in ["my quests", "quest journal", "quest log", "my quest log",
-                                    "quest board", "the board", "what's on the board", "class board"]):
+                                    "quest board", "the board", "what's on the board"]):
         return {**base, "action": "check_quests"}
 
     if any(w in lowered for w in ["i choose", "i decide to", "i'll go with", "ill go with",

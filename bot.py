@@ -3899,12 +3899,12 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # immediately put back to sleep by _do_rest, losing whatever
     # partial rest progress they'd built up. "chat" is excluded
     # too — confirmed live 2026-07-10: a message the parser couldn't
-    # classify into any real action ("class board" instead of "quest
-    # board", most likely dictation/autocorrect) fell through to
-    # action='chat', which produces zero game effect either way, yet
-    # still woke the character with nothing actually done — worse than
-    # just not waking them, since "chat" already means "we don't know
-    # what this was," not "this was a genuine action."
+    # classify into any real action (most likely dictation/autocorrect
+    # garbling a real command) fell through to action='chat', which
+    # produces zero game effect either way, yet still woke the character
+    # with nothing actually done — worse than just not waking them,
+    # since "chat" already means "we don't know what this was," not
+    # "this was a genuine action."
     character = db.get_character(update.effective_user.id)
     if character and character.get("is_inactive"):
         is_status_check = action in (

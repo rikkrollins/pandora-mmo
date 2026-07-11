@@ -297,7 +297,7 @@ def create_character(telegram_user_id: int, name: str, race: str, char_class: st
     return get_character(telegram_user_id)
 
 
-_NEXT_AI_ID = -1000  # AI companions use negative synthetic IDs (never collide with real Telegram user IDs)
+_NEXT_AI_ID: int | None = None  # lazily seeded from the DB — see create_ai_companion
 
 
 def create_ai_companion(name: str, race: str, char_class: str, ability_scores: dict,
@@ -307,8 +307,25 @@ def create_ai_companion(name: str, race: str, char_class: str, ability_scores: d
     telegram_user_id so it can never collide with a real player's ID, and
     is flagged is_ai=1 so the turn engine knows to auto-resolve its turns.
     It is its own "owner" for active_characters purposes (self-mapped).
+
+    The ID counter is lazily seeded from whatever's already in the
+    database, not a hardcoded -1000 — confirmed live 2026-07-11: a
+    hardcoded counter that resets to -1000 on every process restart
+    collided a brand-new autonomous AI party member with an
+    already-existing recruited companion NPC that had claimed -1000 in
+    an earlier process. active_characters silently rebound to the new
+    character, orphaning the old one's activity tracking and corrupting
+    both characters' round-robin turn order and situational grounding
+    (the older character's frozen roster row kept winning turn-order
+    ties forever, while every action actually dispatched under the
+    shared ID landed on the newer character's real, moving location).
     """
     global _NEXT_AI_ID
+    if _NEXT_AI_ID is None:
+        with get_connection() as conn:
+            row = conn.execute("SELECT MIN(telegram_user_id) AS m FROM characters").fetchone()
+        lowest_existing = row["m"] if row and row["m"] is not None else 0
+        _NEXT_AI_ID = min(lowest_existing, -1000) - 1 if lowest_existing < 0 else -1000
     ai_id = _NEXT_AI_ID
     _NEXT_AI_ID -= 1
     return create_character(
