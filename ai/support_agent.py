@@ -262,7 +262,8 @@ def _deterministic_stat_assignment_answer(character: dict, rolls: list[int]) -> 
     bonuses = races_module.get_race(race)
     bonuses = bonuses["ability_bonuses"] if bonuses else {}
 
-    lines = [f"For a {race} {char_class}, here's how I'd assign {sorted_rolls}:"]
+    article = "an" if race[:1].lower() in "aeiou" else "a"
+    lines = [f"For {article} {race} {char_class}, here's how I'd assign {sorted_rolls}:"]
     for ability in _ALL_ABILITIES:
         base = assignment[ability]
         bonus = bonuses.get(ability, 0)
@@ -296,6 +297,12 @@ def answer_support_question(question: str, character: dict | None = None) -> str
         return _deterministic_active_character_answer(character)
     if not character and any(w in lowered for w in _ACTIVE_CHARACTER_QUESTION_WORDS):
         return "You don't have an active character yet — say \"I want to create a character\" in Adventure to get started."
+    if character and "assign" in lowered:
+        rolls = _extract_six_rolls(question)
+        if rolls is not None:
+            answer = _deterministic_stat_assignment_answer(character, rolls)
+            if answer is not None:
+                return answer
 
     prompt = _build_prompt(question, character)
 
