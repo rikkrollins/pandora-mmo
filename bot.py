@@ -25,6 +25,7 @@ from telegram.ext import (
     ContextTypes,
     ExtBot,
     MessageHandler,
+    PicklePersistence,
     filters,
 )
 
@@ -4498,10 +4499,22 @@ def build_application() -> Application:
     # every topic until it resolves — exactly the kind of total, unrelated
     # freeze that's hard to diagnose. With this enabled, a stuck handler
     # only affects the update that triggered it.
+    # user_data (currently just in-progress character creation, see
+    # _begin_character_creation/_continue_character_creation) is
+    # otherwise pure in-memory state — a live-reported bug on 2026-07-11
+    # traced a player's character creation silently losing its place mid-
+    # flow (their next messages, ability score rolls, fell through to
+    # generic 'chat' with no creation step to route them into) to an
+    # ordinary redeploy landing between two of their messages. Restarts
+    # are routine here (see CLAUDE.md's Deployment section), so this
+    # needs to survive them, unlike combat sessions/conditions, which are
+    # deliberately NOT persisted (see CLAUDE.md).
+    persistence = PicklePersistence(filepath="bot_persistence.pickle")
     application = (
         ApplicationBuilder()
         .token(config.BOT_TOKEN)
         .concurrent_updates(True)
+        .persistence(persistence)
         .post_init(_on_startup)
         .build()
     )
