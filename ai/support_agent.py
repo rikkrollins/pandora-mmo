@@ -208,7 +208,9 @@ def _deterministic_active_character_answer(character: dict) -> str:
     model on a plain lookup that's already sitting right there in the
     facts, any more than we trust it with XP.
     """
-    return f"Your active character is {character.get('name')}, a {character.get('race')} {character.get('char_class')}, level {character.get('level')}."
+    race = character.get("race") or ""
+    article = "an" if race[:1].lower() in "aeiou" else "a"
+    return f"Your active character is {character.get('name')}, {article} {race} {character.get('char_class')}, level {character.get('level')}."
 
 
 def _build_prompt(question: str, character: dict | None = None) -> str:
