@@ -50,7 +50,8 @@ Rules:
 - "talk_npc" is for addressing a specific named NPC conversationally.
 - "start_combat" is when a player wants to begin a fight or encounter.
 - "create_character" is when a player wants to make/join with a new character.
-- "check_sheet" is for asking about their own stats/HP/level (not items).
+- "check_sheet" is for asking about their own stats/HP/level (not items), including \
+asking who their active/current character is (e.g. "who is my active character").
 - "check_inventory" is for asking what's in their backpack/bag/items they're carrying.
 - "check_party" is for asking who's in the party, how many members, or who's adventuring with them.
 - "recruit_npc" is for asking a specific named NPC to join their party / travel with them / come along.
@@ -240,7 +241,10 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
             name = text[lowered.index(trigger) + len(trigger):].strip()
             return {**base, "action": "delete_character", "target": name or None}
 
-    if any(w in lowered for w in ["my sheet", "my stats", "my hp", "my health", "my character", "status"]):
+    if any(w in lowered for w in [
+        "my sheet", "my stats", "my hp", "my health", "my character", "status",
+        "active character", "current character", "who am i playing", "which character am i",
+    ]):
         return {**base, "action": "check_sheet"}
 
     # Checked BEFORE move_words: "fast travel to X" / "warp to X" contain
