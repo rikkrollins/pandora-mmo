@@ -4354,9 +4354,20 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
     monsters_here = location.get("monsters", [])
     if monsters_here:
         lines.append(f"Danger here: {', '.join(monsters_here)}")
-    connections = location.get("connections", [])
-    if connections:
-        conn_names = [cl.get_location(CAMPAIGN, c)["name"] for c in connections]
+    # Mirrors _do_move's own reachable-destination computation (minus
+    # locked_connections, which need an item the AI player may not have
+    # and aren't unconditionally reachable) -- without descends_to/
+    # ascends_to here, the AI party would never even learn sub-locations
+    # like tavern_cellar/tavern_upstairs exist, since _do_move itself
+    # treats those as fully reachable but this list previously only
+    # looked at "connections".
+    reachable = list(location.get("connections", []))
+    if "descends_to" in location:
+        reachable.append(location["descends_to"])
+    if "ascends_to" in location:
+        reachable.append(location["ascends_to"])
+    if reachable:
+        conn_names = [cl.get_location(CAMPAIGN, c)["name"] for c in reachable]
         lines.append(f"Places reachable from here: {', '.join(conn_names)}")
     interactables = location.get("interactables", {})
     if interactables:
