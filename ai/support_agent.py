@@ -10,6 +10,8 @@ a spell that was never defined in spells.py).
 Uses config.DM_NARRATION_MODEL, since this is a natural, conversational
 task rather than a structured/technical one.
 """
+import re
+
 import requests
 
 import config
@@ -19,6 +21,30 @@ import spells as spells_module
 from ai.text_cleanup import strip_think_tags
 from guilds import GUILDS
 from rules.leveling import XP_THRESHOLDS, level_for_xp
+
+# Standard 5E priority order for which ability scores matter most to each
+# class -- real, sourced SRD convention, not project-specific data (unlike
+# races.py's ability bonuses, which ARE this project's own real data and
+# get grounded via _build_catalog_reference below).
+_CLASS_PRIORITY_STATS = {
+    "Fighter": ["strength", "constitution", "dexterity"],
+    "Wizard": ["intelligence", "constitution", "dexterity"],
+    "Rogue": ["dexterity", "intelligence", "charisma"],
+    "Cleric": ["wisdom", "strength", "constitution"],
+    "Ranger": ["dexterity", "wisdom", "constitution"],
+    "Barbarian": ["strength", "constitution", "dexterity"],
+    "Bard": ["charisma", "dexterity", "constitution"],
+    "Druid": ["wisdom", "constitution", "dexterity"],
+    "Monk": ["dexterity", "wisdom", "constitution"],
+    "Paladin": ["strength", "charisma", "constitution"],
+    "Sorcerer": ["charisma", "constitution", "dexterity"],
+    "Warlock": ["charisma", "constitution", "dexterity"],
+}
+_ALL_ABILITIES = ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"]
+_ABILITY_ABBREV = {
+    "strength": "STR", "dexterity": "DEX", "constitution": "CON",
+    "intelligence": "INT", "wisdom": "WIS", "charisma": "CHA",
+}
 
 SUPPORT_SYSTEM_PROMPT_HEADER = """You are the support guide for Pandora MMO, a \
 Dungeons & Dragons 5E game played entirely through natural language in a \
@@ -129,18 +155,7 @@ character facts are provided below, answer questions about THIS \
 character using ONLY those facts — never invent or guess a stat, item, \
 location, or quest that isn't actually listed. If no character facts are \
 given, and the question is clearly about "my character", say they don't \
-have one yet.
-
-If asked to help assign a set of rolled ability scores, you MUST: (1) use \
-the player's ACTUAL race and class from their character facts below (never \
-suggest switching to a different class), (2) apply that race's REAL \
-ability bonuses from the list above, (3) recommend which specific rolled \
-number goes to which of the six ability slots (STR/DEX/CON/INT/WIS/CHA) \
-based on that class's standard 5E priority stats, and (4) show the final \
-score for each ability after the racial bonus is added. Give a concrete, \
-specific assignment — not just vague general advice.
-
-Keep answers short and friendly."""
+have one yet. Keep answers short and friendly."""
 )
 
 
@@ -213,6 +228,54 @@ def _deterministic_active_character_answer(character: dict) -> str:
     return f"Your active character is {character.get('name')}, {article} {race} {character.get('char_class')}, level {character.get('level')}."
 
 
+def _extract_six_rolls(question: str) -> list[int] | None:
+    numbers = [int(n) for n in re.findall(r"\d+", question)]
+    return numbers if len(numbers) == 6 else None
+
+
+def _deterministic_stat_assignment_answer(character: dict, rolls: list[int]) -> str | None:
+    """
+    Confirmed live (2026-07-11): asked to help assign rolled stats for an
+    existing Elf Ranger, the model ignored the character's real race and
+    class entirely and suggested switching to Fighter or Barbarian instead
+    -- and once the prompt was made big enough to ground this properly
+    (adding races.py's real ability bonuses), the same question started
+    consistently exceeding even a 280s timeout with zero output, three
+    times running. Like XP-to-level, this has one well-defined correct
+    answer (map the highest rolls to this class's standard 5E priority
+    stats, then apply the character's real racial bonuses) -- there's no
+    reason to pay for a slow, unreliable model call for something this
+    deterministic. Returns None if the class isn't recognized (falls back
+    to the LLM path in that case).
+    """
+    char_class = character.get("char_class")
+    priority = _CLASS_PRIORITY_STATS.get(char_class)
+    if priority is None:
+        return None
+
+    remaining_slots = [a for a in _ALL_ABILITIES if a not in priority]
+    slot_order = priority + remaining_slots
+    sorted_rolls = sorted(rolls, reverse=True)
+    assignment = dict(zip(slot_order, sorted_rolls))
+
+    race = character.get("race") or ""
+    bonuses = races_module.get_race(race)
+    bonuses = bonuses["ability_bonuses"] if bonuses else {}
+
+    lines = [f"For a {race} {char_class}, here's how I'd assign {sorted_rolls}:"]
+    for ability in _ALL_ABILITIES:
+        base = assignment[ability]
+        bonus = bonuses.get(ability, 0)
+        final = base + bonus
+        bonus_note = f" (+{bonus} {race} bonus = {final})" if bonus else ""
+        lines.append(f"- {_ABILITY_ABBREV[ability]}: {base}{bonus_note}")
+    lines.append(
+        f"Highest rolls go to {', '.join(_ABILITY_ABBREV[a] for a in priority)} "
+        f"since those matter most for a {char_class}."
+    )
+    return "\n".join(lines)
+
+
 def _build_prompt(question: str, character: dict | None = None) -> str:
     prompt = SUPPORT_SYSTEM_PROMPT
     if character:
@@ -244,13 +307,7 @@ def answer_support_question(question: str, character: dict | None = None) -> str
                 "prompt": prompt,
                 "stream": False,
             },
-            # Confirmed live (2026-07-11): a stat-assignment question with
-            # the fuller, race-bonus-grounded prompt consistently hit this
-            # exact ceiling three times in a row (200.1s every time) --
-            # a longer, more reasoning-heavy prompt genuinely needs more
-            # than 200s on this hardware, same underlying reason the other
-            # ai/*.py timeouts were already bumped to 200s earlier.
-            timeout=280,
+            timeout=200,
         )
         response.raise_for_status()
         data = response.json()
