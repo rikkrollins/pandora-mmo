@@ -16,13 +16,14 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from telegram import Chat, Update
+from telegram import Update
 from telegram.error import TelegramError
 from telegram.ext import (
     Application,
     ApplicationBuilder,
     CommandHandler,
     ContextTypes,
+    ExtBot,
     MessageHandler,
     filters,
 )
@@ -71,21 +72,26 @@ logger = logging.getLogger("pandora_mmo")
 # TEMP DIAG (2026-07-11, Coffee asked to watch the live chat for
 # responsiveness): httpx only logs "POST .../sendMessage 200 OK", never
 # the actual text, so there was no way to see real reply content without
-# this. Patches telegram.Chat.send_message (used by ~169 of bot.py's 171
-# outgoing sends) to also log the text + thread. Remove once the live
-# watch is done.
-_TEMP_DIAG_original_chat_send_message = Chat.send_message
+# this. Patched at telegram.ext.ExtBot.send_message rather than
+# telegram.Chat.send_message — confirmed live that the idle-loop/AI-party
+# path (_ChatOnlyUpdate._Chat, _AiPlayerUpdate) is a shim that calls
+# bot.send_message directly, never touching telegram.Chat at all, so a
+# Chat-level patch silently missed all of that traffic. ExtBot.send_message
+# is the one thing every path funnels through. Remove once the live watch
+# is done.
+_TEMP_DIAG_original_bot_send_message = ExtBot.send_message
 
 
-async def _TEMP_DIAG_logged_send_message(self, text=None, *args, **kwargs):
+async def _TEMP_DIAG_logged_bot_send_message(self, *args, **kwargs):
+    text = kwargs.get("text") or (args[1] if len(args) > 1 else None)
+    thread_id = kwargs.get("message_thread_id")
     if text is not None:
-        thread_id = kwargs.get("message_thread_id")
         preview = text if len(text) <= 400 else text[:400] + "...[truncated]"
         logger.info(f"[TEMP_DIAG outgoing] thread={thread_id} text={preview!r}")
-    return await _TEMP_DIAG_original_chat_send_message(self, text, *args, **kwargs)
+    return await _TEMP_DIAG_original_bot_send_message(self, *args, **kwargs)
 
 
-Chat.send_message = _TEMP_DIAG_logged_send_message
+ExtBot.send_message = _TEMP_DIAG_logged_bot_send_message
 
 ACTIVE_CAMPAIGN_ID = "default"
 CAMPAIGN = cl.load_campaign(ACTIVE_CAMPAIGN_ID)
