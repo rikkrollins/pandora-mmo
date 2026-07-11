@@ -54,12 +54,13 @@ Rules:
 - "check_inventory" is for asking what's in their backpack/bag/items they're carrying.
 - "check_party" is for asking who's in the party, how many members, or who's adventuring with them.
 - "recruit_npc" is for asking a specific named NPC to join their party / travel with them / come along.
-- "rest" is for resting, recovering, healing up outside combat, or asking to be revived/healed after being downed.
+- "rest" is for resting, recovering, healing up outside combat, or asking to be revived/healed after being downed. \
+Note this no longer heals instantly — it settles the character in to rest, and they recover in proportion to real \
+time actually spent resting, same mechanic as "go_inactive" below.
 - "go_inactive" is SPECIFICALLY for a player saying they're done playing for now / logging off / taking a rest \
 until their next session — e.g. "rest for the night", "take a rest", "rest for now", "resting for a few hours", \
-"I'm done for now". This is DIFFERENT from "rest" (an in-universe full heal usable anytime out of combat). \
-"go_inactive" is NEVER allowed during active combat — the player must escape or finish the fight first. Set \
-"target" to the duration mentioned, if any.
+"I'm done for now". "go_inactive" is NEVER allowed during active combat — the player must escape or finish the \
+fight first. Set "target" to the duration mentioned, if any.
 - "accept_quest" is for a player agreeing to take on a task/favor/quest that's just been described or offered \
 ("I'll do it", "I accept", "count me in", "I'll help").
 - "check_quests" is for asking to see their quest log/journal, what quests they have, or their progress.

@@ -175,7 +175,17 @@ same as any other `*_tmp.py`.
   bolt-on. Don't rush this.
 - Skill checks use one fixed DC (13) for every situation — deliberate,
   to avoid the AI inventing difficulty numbers.
-- Rest is a simplified full-heal, not full short/long rest rules.
+- Resting ("I rest"/"heal up" and "take a rest"/going inactive) is NOT
+  an instant full heal — changed 2026-07-11 per Coffee's direction.
+  Both now share one real-time-gated mechanic: going inactive starts a
+  `rest_started_at` clock, and `_apply_natural_healing()` in bot.py
+  heals HP/spell slots in proportion to real-world elapsed time on
+  reactivation, capped at full after `NATURAL_HEALING_FULL_REST_HOURS`
+  (currently 2h). Deliberate: resting was previously a free instant
+  full heal, which undercut needing potions/healing spells for
+  in-the-moment recovery. Still not full 5E short/long rest rules
+  (no distinction between the two, no hit-dice spending) — that's
+  still a simplification, just no longer an instant one.
 
 ## Resolved investigations (2026-07-09)
 

@@ -219,6 +219,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN pending_party_invite INTEGER")
         if "is_autonomous" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN is_autonomous INTEGER NOT NULL DEFAULT 0")
+        if "rest_started_at" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN rest_started_at TEXT")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -407,14 +409,6 @@ def spend_spell_slot(telegram_user_id: int) -> tuple[bool, dict | None]:
         telegram_user_id, spell_slots_current=character["spell_slots_current"] - 1
     )
     return True, updated
-
-
-def restore_spell_slots(telegram_user_id: int) -> dict | None:
-    """Restores spell slots to their max — called on rest."""
-    character = get_character(telegram_user_id)
-    if character is None:
-        return None
-    return update_character(telegram_user_id, spell_slots_current=character["spell_slots_max"])
 
 
 def complete_quest(telegram_user_id: int, quest_id: str) -> dict | None:

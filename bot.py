@@ -2012,7 +2012,50 @@ async def _do_flee(update: Update, action_text: str) -> None:
             await _resolve_ai_turns(update, session)
 
 
+NATURAL_HEALING_FULL_REST_HOURS = 2
+# Real-world hours of uninterrupted resting needed to fully recover HP
+# and spell slots; partial rest heals the proportional fraction. Changed
+# 2026-07-11 per Coffee's explicit direction: resting used to be an
+# instant full heal the moment you said "I rest" or went inactive — he
+# wants players to actually need OTHER means (potions, healing spells)
+# for in-the-moment recovery, and for "resting" to mean real downtime,
+# not a free heal button. Both the explicit `rest` action and going
+# inactive now share this same real-time-gated mechanic (see
+# _go_inactive and _apply_natural_healing) rather than each having its
+# own separate instant-heal behavior.
+
+
+def _apply_natural_healing(telegram_user_id: int, character: dict, elapsed_seconds: float) -> tuple[int, int]:
+    """
+    Heals a resting character in proportion to how much real-world time
+    has actually passed, capped at a full recovery after
+    NATURAL_HEALING_FULL_REST_HOURS. This IS the computed game fact
+    (rules-layer, deterministic) — callers just report whatever this
+    returns, same convention as every other outcome in this game.
+    Returns (hp_healed, slots_healed) actually applied (0, 0 if no time
+    has meaningfully passed or the character is already full).
+    """
+    fraction = min(1.0, max(0.0, elapsed_seconds) / (NATURAL_HEALING_FULL_REST_HOURS * 3600))
+    missing_hp = character["hp_max"] - character["hp_current"]
+    missing_slots = character["spell_slots_max"] - character["spell_slots_current"]
+    hp_gain = min(missing_hp, round(missing_hp * fraction))
+    slot_gain = min(missing_slots, round(missing_slots * fraction))
+    if hp_gain > 0 or slot_gain > 0:
+        db.update_character(
+            telegram_user_id,
+            hp_current=character["hp_current"] + hp_gain,
+            spell_slots_current=character["spell_slots_current"] + slot_gain,
+        )
+    return hp_gain, slot_gain
+
+
 async def _do_rest(update: Update) -> None:
+    """
+    "I rest" / "heal up" / "recover" — now just a phrasing alias for
+    settling in to rest; it shares _go_inactive's real-time-gated
+    healing instead of being a separate instant full heal. See
+    NATURAL_HEALING_FULL_REST_HOURS.
+    """
     chat_id = update.effective_chat.id
     if sessions.get_session(chat_id) is not None:
         await update.effective_chat.send_message(
@@ -2020,10 +2063,16 @@ async def _do_rest(update: Update) -> None:
         )
         return
 
-    character = db.get_character(update.effective_user.id)
+    telegram_user_id = update.effective_user.id
+    character = db.get_character(telegram_user_id)
     if character is None:
         await update.effective_chat.send_message(
             "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if character.get("is_inactive"):
+        await update.effective_chat.send_message(
+            "You're already resting.", message_thread_id=config.TOPIC_ADVENTURE_ID
         )
         return
 
@@ -2035,17 +2084,7 @@ async def _do_rest(update: Update) -> None:
         )
         return
 
-    db.update_character(update.effective_user.id, hp_current=character["hp_max"],
-                         death_save_successes=0, death_save_failures=0)
-    db.restore_spell_slots(update.effective_user.id)
-
-    slot_note = ""
-    if character["spell_slots_max"] > 0:
-        slot_note = f" Spell slots restored to {character['spell_slots_max']}/{character['spell_slots_max']}."
-    await update.effective_chat.send_message(
-        f"🌙 You rest and recover. HP restored to {character['hp_max']}/{character['hp_max']}.{slot_note}",
-        message_thread_id=config.TOPIC_ADVENTURE_ID,
-    )
+    await _go_inactive(telegram_user_id, update, "settles in to rest and recover")
 
 
 def _nearest_safe_waypoint(character: dict) -> str:
@@ -2073,26 +2112,23 @@ def _in_active_combat(telegram_user_id: int, chat_id: int) -> bool:
 
 async def _go_inactive(telegram_user_id: int, update_like, reason_text: str) -> None:
     """
-    Marks a character inactive ("resting until next session"): moves
-    them to the nearest safe waypoint, heals them to full (same as the
-    explicit `rest` action — see below), and announces it. Reactivation
-    is automatic on their owner's next real message (see
-    adventure_master_handler). Shared by the explicit "rest for X"
-    action and the automatic 5-minute idle check — `update_like` is
-    either a real Update or a _ChatOnlyUpdate shim.
+    Marks a character inactive ("resting"): moves them to the nearest
+    safe waypoint, starts the real-time healing clock (rest_started_at),
+    and announces it. Healing is NOT applied here — it accrues only
+    while actually resting and is computed and applied once, on
+    reactivation (see adventure_master_handler's wake block and
+    _apply_natural_healing), based on how much real time passed between
+    this call and that one. Shared by the explicit `rest` action
+    (_do_rest), the explicit "rest for X"/"I'm done for now" action
+    (_do_go_inactive), and the automatic 5-minute idle check —
+    `update_like` is either a real Update or a _ChatOnlyUpdate shim.
 
-    Confirmed live (2026-07-11): before this, going inactive this way
-    moved and flagged the character but never touched hp_current/
-    spell_slots_current — only the separate `_do_rest` (action=="rest")
-    healed. But this function's OWN narration calls itself "resting,"
-    both here and in every caller ("settles in to rest... until next
-    session", "drifts off to rest"), and the multi-day real-world gap
-    until a player's next session is exactly the kind of downtime a
-    full heal should apply to. A player returning to find zero HP
-    recovered after being told their character "rested" is a real bug,
-    not a deliberate distinction from `_do_rest` — that action stays a
-    separate, anytime-out-of-combat heal for a different phrasing
-    ("heal up", "revive me"), not a different OUTCOME of resting.
+    Changed 2026-07-11 (Coffee's direction): resting used to fully heal
+    the instant a character went inactive — a "say the word, come back
+    full" free heal that undercut needing potions/spells for real
+    recovery. Now it only ever heals in proportion to genuine elapsed
+    real time (NATURAL_HEALING_FULL_REST_HOURS to fully recover),
+    checked at wake time, not at rest-start time.
 
     NEVER call this while the character is in an active combat session
     — per design, resting requires actually being out of battle first
@@ -2110,17 +2146,12 @@ async def _go_inactive(telegram_user_id: int, update_like, reason_text: str) -> 
     db.move_character(telegram_user_id, destination_id)
     db.mark_visited(telegram_user_id, destination_id)
     db.mark_inactive(telegram_user_id)
-    db.update_character(telegram_user_id, hp_current=character["hp_max"],
-                         death_save_successes=0, death_save_failures=0)
-    db.restore_spell_slots(telegram_user_id)
-
-    heal_note = f", and rests to {character['hp_max']}/{character['hp_max']} HP"
-    if character["spell_slots_max"] > 0:
-        heal_note += " with spell slots fully restored"
+    db.update_character(telegram_user_id, rest_started_at=datetime.now(timezone.utc).isoformat())
 
     await _safe_send(
         update_like,
-        f"😴 **{character['name']}** {reason_text} at **{destination_name}**, safe until they return{heal_note}.",
+        f"😴 **{character['name']}** {reason_text} at **{destination_name}**, safe until they return — "
+        f"they'll recover naturally the longer they rest.",
     )
 
 
@@ -3835,9 +3866,29 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
                            "i'm ready", "im ready")
         )
         if explicit_wake or not is_status_check:
+            elapsed_seconds = 0.0
+            if character.get("rest_started_at"):
+                try:
+                    started = datetime.fromisoformat(character["rest_started_at"])
+                    elapsed_seconds = (datetime.now(timezone.utc) - started).total_seconds()
+                except (TypeError, ValueError):
+                    elapsed_seconds = 0.0
+            hp_gain, slot_gain = _apply_natural_healing(update.effective_user.id, character, elapsed_seconds)
             db.mark_active(update.effective_user.id)
+            db.update_character(update.effective_user.id, rest_started_at=None,
+                                 death_save_successes=0, death_save_failures=0)
+
+            heal_note = ""
+            gains = []
+            if hp_gain:
+                gains.append(f"+{hp_gain} HP")
+            if slot_gain:
+                gains.append(f"+{slot_gain} spell slot(s)")
+            if gains:
+                heal_note = f" Recovered {' and '.join(gains)} from resting."
+
             await update.effective_chat.send_message(
-                f"☀️ **{character['name']}** wakes and rejoins — welcome back!",
+                f"☀️ **{character['name']}** wakes and rejoins — welcome back!{heal_note}",
                 message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
 
