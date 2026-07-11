@@ -14,6 +14,7 @@ import requests
 
 import config
 import items as items_module
+import races as races_module
 import spells as spells_module
 from ai.text_cleanup import strip_think_tags
 from guilds import GUILDS
@@ -92,6 +93,20 @@ def _build_catalog_reference() -> str:
                if guild.get("join_requirement_classes") else "")
         )
 
+    # Confirmed live (2026-07-11): asked to help assign rolled stats for an
+    # Elf Ranger, the model ignored the character's actual race/class
+    # entirely and suggested switching to Fighter or Barbarian instead --
+    # because this game's real per-race ability bonuses were never in its
+    # prompt at all, so it had nothing concrete to reason from. These are
+    # this project's own real bonuses (some 5E subraces/variants are
+    # simplified here), not to be confused with generic D&D lore.
+    lines.append("\nREAL RACE ABILITY SCORE BONUSES IN THIS GAME:")
+    for race_name, race_data in races_module.RACES.items():
+        bonus_text = ", ".join(
+            f"+{v} {k}" for k, v in race_data["ability_bonuses"].items()
+        )
+        lines.append(f"- {race_name}: {bonus_text}")
+
     return "\n".join(lines)
 
 
@@ -114,7 +129,18 @@ character facts are provided below, answer questions about THIS \
 character using ONLY those facts — never invent or guess a stat, item, \
 location, or quest that isn't actually listed. If no character facts are \
 given, and the question is clearly about "my character", say they don't \
-have one yet. Keep answers short and friendly."""
+have one yet.
+
+If asked to help assign a set of rolled ability scores, you MUST: (1) use \
+the player's ACTUAL race and class from their character facts below (never \
+suggest switching to a different class), (2) apply that race's REAL \
+ability bonuses from the list above, (3) recommend which specific rolled \
+number goes to which of the six ability slots (STR/DEX/CON/INT/WIS/CHA) \
+based on that class's standard 5E priority stats, and (4) show the final \
+score for each ability after the racial bonus is added. Give a concrete, \
+specific assignment — not just vague general advice.
+
+Keep answers short and friendly."""
 )
 
 
@@ -165,6 +191,26 @@ def _deterministic_xp_answer(character: dict) -> str:
     return f"You're level {level} with {xp} XP. You need {next_level_xp - xp} more XP to reach level {level + 1}."
 
 
+_ACTIVE_CHARACTER_QUESTION_WORDS = [
+    "active character", "current character", "who am i playing",
+    "which character am i", "what character am i", "who is my character",
+]
+
+
+def _deterministic_active_character_answer(character: dict) -> str:
+    """
+    Per Coffee's request (2026-07-11): asking "who is my active
+    character" should reliably say which character they're CURRENTLY
+    playing (e.g. after switching characters and coming back an hour
+    later) -- this is a single real fact with exactly one correct
+    answer, same reasoning as XP-to-level above. The model answered it
+    correctly in one live trial, but there's no reason to trust a small
+    model on a plain lookup that's already sitting right there in the
+    facts, any more than we trust it with XP.
+    """
+    return f"Your active character is {character.get('name')}, a {character.get('race')} {character.get('char_class')}, level {character.get('level')}."
+
+
 def _build_prompt(question: str, character: dict | None = None) -> str:
     prompt = SUPPORT_SYSTEM_PROMPT
     if character:
@@ -178,8 +224,13 @@ def answer_support_question(question: str, character: dict | None = None) -> str
     character-specific) question to the narration model and return its
     reply. Falls back to a short static pointer if Ollama is unreachable.
     """
-    if character and any(w in question.lower() for w in _XP_QUESTION_WORDS):
+    lowered = question.lower()
+    if character and any(w in lowered for w in _XP_QUESTION_WORDS):
         return _deterministic_xp_answer(character)
+    if character and any(w in lowered for w in _ACTIVE_CHARACTER_QUESTION_WORDS):
+        return _deterministic_active_character_answer(character)
+    if not character and any(w in lowered for w in _ACTIVE_CHARACTER_QUESTION_WORDS):
+        return "You don't have an active character yet — say \"I want to create a character\" in Adventure to get started."
 
     prompt = _build_prompt(question, character)
 
