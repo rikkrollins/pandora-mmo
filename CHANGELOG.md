@@ -2,6 +2,72 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.2.0] — AI party fixes, quest system hardening, and reliable uptime
+
+### AI-companion identity bug (the big one)
+- **Fixed a real ID collision that was quietly corrupting the
+  autonomous AI party.** `create_ai_companion`'s synthetic ID counter
+  used to reset to a hardcoded `-1000` on every process restart. That
+  collided a brand-new autonomous party member (Zara Windrift) with an
+  already-existing recruited companion NPC (Sera) that had claimed
+  `-1000` in an earlier process. The collision silently rebound Sera's
+  active-character slot to Zara, which corrupted the AI party's
+  round-robin turn order (Bram Ashfield never got a single autonomous
+  turn all session) and explained the AI party's confusing behavior —
+  it wasn't inventing content, it was grounded in one character's real
+  location while its action landed on a different character standing
+  somewhere else. The counter now derives from what's actually in the
+  database, so this can't recur; Sera's existing data has been
+  repaired (her own ID restored, her own active-character slot back,
+  autonomous flag reset).
+
+### AI party / autonomous companions
+- The AI party's action prompt no longer names real, copyable
+  places/objects in its examples — the small local model was parroting
+  those exact examples verbatim regardless of whether they were true,
+  which is what caused the repeated "can't get there directly" spam.
+  Examples now use situational placeholders instead.
+- Moving to your own current location now gives a clear "you're
+  already at X" reply instead of the generic can't-get-there message.
+- The AI party's situation facts now include sub-locations reachable
+  via `descends_to`/`ascends_to` (e.g. a tavern cellar), a hand-authored
+  story quest on offer at the location (previously only area board
+  bounties were mentioned), a pending branching-quest decision and its
+  real choice labels, and what a shop actually has for sale — all
+  previously missing, all now grounded in real data.
+- The prompt now knows "accept the quest" is a real, expected action.
+- **AI-controlled party members can now actually complete quests they
+  accept.** A leftover exclusion (from before this game had autonomous
+  AI players) blocked every `is_ai` character from ever getting credit
+  for a monster kill, even for a `defeat_monster` quest they personally
+  held — contradicting this project's own design philosophy that an
+  AI-driven party member plays under exactly the same rules as a human
+  one.
+
+### Bug fixes
+- Resting no longer gets interrupted by repeating "I rest" — it used
+  to fully wake the character (losing partial healing) before putting
+  them right back to sleep.
+- Character-creation progress (or any other mid-flow player state) no
+  longer gets silently wiped by a routine bot restart — `user_data` now
+  persists across restarts.
+- The support agent is now grounded in this game's real per-race
+  ability score bonuses — it was previously giving bad advice (once
+  suggesting a full class change) when asked to help assign rolled
+  stats, because it had no real bonus data to reason from.
+- "Who is my active character" now classifies correctly instead of
+  falling through ungrounded.
+- Quest-accepted narration now includes the character's name, matching
+  the existing convention for other action messages in the shared
+  Adventure feed.
+
+### Infrastructure
+- The bot is now supervised by a `systemd --user` service
+  (`pandora-mmo-bot.service`, enabled for boot/login persistence)
+  instead of a manually launched process — restarts are now near-
+  instant and the bot's uptime no longer depends on any particular
+  Claude Code session staying open.
+
 ## [1.1.0] — Living world: lockpicking, crafting, factions, memory, and more
 
 ### New gameplay systems
