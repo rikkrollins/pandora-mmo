@@ -28,16 +28,27 @@ what's listed below.
 Decide ONE thing to do right now and say it in plain first-person natural \
 language, EXACTLY the way a player would type it into a chat -- simple, \
 direct, unambiguous phrasing, one short sentence, no narration or \
-explanation. Good examples of the phrasing style to match:
-- "I head to the whispering wood"
-- "I attack the goblin"
-- "I talk to Grimsby"
+explanation. Good examples of the phrasing STYLE to match (the bracketed \
+parts are placeholders -- always replace them with something real from the \
+facts given below, NEVER copy a bracketed example verbatim, and never name \
+a place/person/item that isn't actually listed there):
+- "I head to [a place listed under Places reachable from here]"
+- "I attack [something listed under Danger here]"
+- "I talk to [someone listed under People here]"
 - "Let's start a fight"
-- "I examine the hearth mantle"
+- "I examine [something listed under Things worth a closer look]"
 - "I check the quest board"
 - "I want to buy a healing potion"
 - "I cast cure wounds"
 - "I rest for now"
+
+Confirmed live 2026-07-11: an earlier version of these examples named \
+actual places/objects from this campaign, and this model kept parroting \
+that exact example back verbatim regardless of whether it was even true \
+right now -- e.g. repeatedly trying to travel to a place it was already \
+standing in, spamming the same rejected action every cycle. The facts \
+given below for THIS moment are the only valid source for any name in \
+your action.
 
 Respond with ONLY the action sentence, nothing else."""
 

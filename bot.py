@@ -3099,6 +3099,17 @@ async def _do_move(update: Update, text: str) -> None:
             break
 
     if destination_id is None:
+        # A location is never its own connection, so "go to X" while
+        # already AT X always fell through to the generic can't-get-
+        # there message below — confirmed live 2026-07-11 as the actual
+        # cause of an AI party member repeatedly spamming that message
+        # in Adventure (it kept trying to "head to" its own current
+        # location). Worth its own clearer reply for human players too.
+        if character["current_location"].replace("_", " ") in lowered or current["name"].lower() in lowered:
+            await update.effective_chat.send_message(
+                f"You're already at {current['name']}.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            )
+            return
         reachable_names = ", ".join(cl.get_location(CAMPAIGN, r)["name"] for r in reachable)
         await update.effective_chat.send_message(
             f"You can't get there directly from {current['name']}. "
