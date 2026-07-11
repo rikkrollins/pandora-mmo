@@ -2352,7 +2352,7 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
         quest_id, quest = offer
         db.accept_quest(telegram_user_id, quest_id)
         await update.effective_chat.send_message(
-            f"📜 **Quest accepted: {quest['title']}**\n{quest['description']}",
+            f"📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
@@ -2387,13 +2387,14 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
     db.accept_board_quest(board_quest["board_quest_id"], telegram_user_id)
     if board_quest.get("branch_data"):
         await update.effective_chat.send_message(
-            f"📜 **Board quest accepted: {board_quest['title']}**\n{board_quest['branch_data']['setup_narration']}\n\n"
+            f"📜 **{character['name']}** accepts Quest: {board_quest['title']}\n"
+            f"{board_quest['branch_data']['setup_narration']}\n\n"
             f"What you earn depends on the choice you make once it's done. Expires in 24h if not finished.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
     await update.effective_chat.send_message(
-        f"📜 **Board quest accepted: {board_quest['title']}**\n{board_quest['description']}\n"
+        f"📜 **{character['name']}** accepts Quest: {board_quest['title']}\n{board_quest['description']}\n"
         f"Reward: {board_quest['reward_xp']} XP, {board_quest['reward_gold']} gold. "
         f"Expires in 24h if not finished.",
         message_thread_id=config.TOPIC_ADVENTURE_ID,
