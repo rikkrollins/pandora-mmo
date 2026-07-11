@@ -244,7 +244,13 @@ def answer_support_question(question: str, character: dict | None = None) -> str
                 "prompt": prompt,
                 "stream": False,
             },
-            timeout=200,
+            # Confirmed live (2026-07-11): a stat-assignment question with
+            # the fuller, race-bonus-grounded prompt consistently hit this
+            # exact ceiling three times in a row (200.1s every time) --
+            # a longer, more reasoning-heavy prompt genuinely needs more
+            # than 200s on this hardware, same underlying reason the other
+            # ai/*.py timeouts were already bumped to 200s earlier.
+            timeout=280,
         )
         response.raise_for_status()
         data = response.json()
