@@ -4383,8 +4383,22 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
     resource_nodes = location.get("resource_nodes", [])
     if resource_nodes:
         lines.append(f"Resources here: {', '.join(n['name'] for n in resource_nodes)}")
-    if location.get("shop"):
-        lines.append("There is a shop here.")
+    shop_id = location.get("shop")
+    if shop_id:
+        # Same reasoning as the descends_to/ascends_to fix above: without
+        # naming what's actually for sale, the AI has nothing real to
+        # reference for a "buy" action and would have to either invent an
+        # item or parrot the "healing potion" example verbatim regardless
+        # of whether this shop even sells one -- _do_buy only matches
+        # against shop_data["inventory"], so an ungrounded guess just
+        # bounces with "not sure what item you mean" instead of a real
+        # purchase.
+        shop_data = cl.get_shop(CAMPAIGN, shop_id)
+        item_names = [items_module.get_item(i)["name"] for i in shop_data.get("inventory", []) if items_module.get_item(i)]
+        if item_names:
+            lines.append(f"Shop here sells: {', '.join(item_names)}")
+        else:
+            lines.append("There is a shop here.")
 
     # Story quests (campaign.json's hand-authored catalog) are a
     # separate thing from the area quest board below, and were missing
