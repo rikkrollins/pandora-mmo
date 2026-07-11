@@ -2304,19 +2304,27 @@ async def _check_quest_completions_reach_location(update_like, telegram_user_id:
 
 
 async def _check_quest_completions_defeat_monster(update_like, session: sessions.Session) -> None:
-    """Called only when the party won — checks every defeated enemy's monster_key against every real party member's active quests."""
+    """
+    Called only when the party won — checks every defeated enemy's
+    monster_key against every party member's active quests, including
+    AI-controlled ones (recruited companions and the autonomous AI
+    party alike). Previously excluded anyone with is_ai=1, from back
+    when only recruited companions carried that flag and holding a
+    quest for one made little sense — but per CLAUDE.md's design
+    philosophy (2026-07-10), an AI-driven party member plays under
+    exactly the same rules as a human one, including finishing quests
+    it personally accepted. A summoned combat participant (no real
+    character row) still naturally falls out below via the
+    `character is None` check, so this doesn't need its own filter.
+    """
     defeated_monster_keys = {
         p.get("monster_key") for p in session.participants
         if session.sides.get(p["telegram_user_id"]) == "enemy" and p.get("monster_key")
     }
     if not defeated_monster_keys:
         return
-    real_party_ids = [
-        pid for pid in session.turn_order
-        if session.sides.get(pid) == "party"
-        and not next(p for p in session.participants if p["telegram_user_id"] == pid).get("is_ai")
-    ]
-    for telegram_user_id in real_party_ids:
+    party_ids = [pid for pid in session.turn_order if session.sides.get(pid) == "party"]
+    for telegram_user_id in party_ids:
         character = db.get_character(telegram_user_id)
         if character is None:
             continue
@@ -4377,6 +4385,16 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
         lines.append(f"Resources here: {', '.join(n['name'] for n in resource_nodes)}")
     if location.get("shop"):
         lines.append("There is a shop here.")
+
+    # Story quests (campaign.json's hand-authored catalog) are a
+    # separate thing from the area quest board below, and were missing
+    # here entirely — the AI party could see a board bounty posted, but
+    # never learned a real story quest was on offer at its own location,
+    # so it had no way to know "accept the quest" was ever a sensible
+    # thing to say for one of those.
+    story_offer = _offerable_quest_at_location(character, location_id)
+    if story_offer:
+        lines.append(f"A quest is on offer here: {story_offer[1]['title']}")
 
     board_quests = board_quests_module.get_todays_board_quests(location_id)
     unclaimed = [q for q in board_quests if not q.get("accepted_by") and not q.get("completed_at")]
