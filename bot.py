@@ -4356,6 +4356,24 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
         return "You aren't sure where you are."
 
     lines = [f"Location: {location['name']} — {location['description']}"]
+
+    # Same reasoning as every other grounding fix here: the AI was never
+    # told what it's actually carrying or actually knows how to cast, so
+    # "sell my X" or "I cast X" (the latter a literal hardcoded example in
+    # ai/autonomous_player.py's prompt) had nothing real to check against
+    # -- risking the exact same verbatim-example-parroting failure already
+    # confirmed and fixed for movement ("I head to the whispering wood").
+    inventory = character.get("inventory") or {}
+    if inventory:
+        item_names = [items_module.get_item(i)["name"] for i in inventory if items_module.get_item(i)]
+        if item_names:
+            lines.append(f"You're carrying: {', '.join(item_names)}")
+    known_spells = character.get("known_spells") or []
+    if known_spells:
+        spell_names = [spells_module.get_spell(s)["name"] for s in known_spells if spells_module.get_spell(s)]
+        if spell_names:
+            lines.append(f"Spells you know: {', '.join(spell_names)}")
+
     npcs_here = _npcs_at_location(location_id)
     if npcs_here:
         names = [CAMPAIGN["npcs"][n]["name"] for n in npcs_here if n in CAMPAIGN["npcs"]]
@@ -4432,6 +4450,19 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
 
     if character.get("active_quests"):
         lines.append(f"You have {len(character['active_quests'])} active quest(s) in your journal already.")
+
+    # Same reasoning as the reachable-places/shop/branching-choice facts
+    # above: guild joining is a real, location-independent action
+    # (_do_join_guild has no location check at all), but nothing here
+    # ever told the AI party a guild even existed, so it could never
+    # autonomously decide to join one.
+    current_guild = character.get("guild")
+    joinable = [
+        guild["name"] for guild_id, guild in GUILDS.items()
+        if guild_id != current_guild and eligible_for_guild(character, guild_id)[0]
+    ]
+    if joinable:
+        lines.append(f"Guilds you could join: {', '.join(joinable)}")
 
     return "\n".join(lines)
 
