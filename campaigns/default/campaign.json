@@ -46,7 +46,8 @@
           "the_arcane_nook"
         ],
         "npcs": [
-          "old_maren"
+          "old_maren",
+          "borin_ironjaw"
         ],
         "shop": "marens_wares",
         "interactables": {
@@ -103,6 +104,9 @@
         "description": "A shrine built into the base of a tree wider than a house, long since dead. Offerings left here are never touched by animals.",
         "connections": [
           "whispering_wood"
+        ],
+        "npcs": [
+          "wren_hollowbrook"
         ],
         "quest_items": [
           "waterlogged_journal"
@@ -170,6 +174,9 @@
           "crossroads_tavern",
           "greymoor_downs",
           "the_weeping_well"
+        ],
+        "npcs": [
+          "pip_thistledown"
         ],
         "monsters": [
           "giant_spider"
@@ -328,6 +335,9 @@
         "connections": [
           "sunken_root_caverns"
         ],
+        "npcs": [
+          "grask_emberscale"
+        ],
         "monsters": [
           "goblin",
           "goblin_shaman",
@@ -351,6 +361,9 @@
         "connections": [
           "sunken_root_caverns",
           "the_hush_below"
+        ],
+        "npcs": [
+          "vesh_nightglass"
         ],
         "monsters": [
           "crystal_spider"
@@ -526,6 +539,135 @@
       "shop": "vanes_curiosities",
       "alignment": "True Neutral",
       "disposition": "neutral"
+    },
+    "borin_ironjaw": {
+      "name": "Borin Ironjaw",
+      "role": "retired_guard_captain",
+      "personality": "a stern, no-nonsense dwarf doing penance for an old failure by watching over the market instead of a castle gate",
+      "goals": "looking for someone worth vouching for, so he can finally stop watching this street",
+      "recruitable": true,
+      "stats": {
+        "race": "Dwarf",
+        "char_class": "Paladin",
+        "strength": 16,
+        "dexterity": 10,
+        "constitution": 16,
+        "intelligence": 8,
+        "wisdom": 12,
+        "charisma": 14,
+        "hp_max": 15,
+        "armor_class": 17,
+        "gold": 60,
+        "inventory": {
+          "longsword": 1,
+          "wooden_shield": 1,
+          "chain_mail": 1
+        }
+      },
+      "alignment": "Lawful Good",
+      "disposition": "friendly"
+    },
+    "wren_hollowbrook": {
+      "name": "Wren Hollowbrook",
+      "role": "shrine_keeper",
+      "personality": "a quiet half-elf hermit who has tended this shrine's wild garden longer than anyone in town can remember, and speaks more easily to the plants than to people",
+      "goals": "protecting the shrine from anyone who'd disturb it without understanding it first",
+      "recruitable": true,
+      "stats": {
+        "race": "Half-Elf",
+        "char_class": "Druid",
+        "strength": 8,
+        "dexterity": 13,
+        "constitution": 13,
+        "intelligence": 10,
+        "wisdom": 16,
+        "charisma": 12,
+        "hp_max": 9,
+        "armor_class": 12,
+        "gold": 20,
+        "inventory": {
+          "leather_armor": 1,
+          "rusty_dagger": 1
+        }
+      },
+      "alignment": "Neutral Good",
+      "disposition": "friendly"
+    },
+    "pip_thistledown": {
+      "name": "Pip Thistledown",
+      "role": "traveling_minstrel",
+      "personality": "a cheerful halfling bard who's been 'just about to cross' this bridge for three days now, always with one more story first",
+      "goals": "collecting a good enough story to finally justify moving on",
+      "recruitable": true,
+      "stats": {
+        "race": "Halfling",
+        "char_class": "Bard",
+        "strength": 8,
+        "dexterity": 16,
+        "constitution": 12,
+        "intelligence": 11,
+        "wisdom": 10,
+        "charisma": 15,
+        "hp_max": 9,
+        "armor_class": 13,
+        "gold": 40,
+        "inventory": {
+          "shortsword": 1,
+          "leather_armor": 1
+        }
+      },
+      "alignment": "Chaotic Good",
+      "disposition": "friendly"
+    },
+    "grask_emberscale": {
+      "name": "Grask Emberscale",
+      "role": "captive_fighter",
+      "personality": "a dragonborn barbarian the goblins captured but never quite managed to break, still watching the tunnel entrance for a chance worth taking",
+      "goals": "getting out of these warrens and putting them a long way behind him",
+      "recruitable": true,
+      "stats": {
+        "race": "Dragonborn",
+        "char_class": "Barbarian",
+        "strength": 17,
+        "dexterity": 12,
+        "constitution": 15,
+        "intelligence": 8,
+        "wisdom": 10,
+        "charisma": 11,
+        "hp_max": 16,
+        "armor_class": 12,
+        "gold": 15,
+        "inventory": {
+          "greataxe": 1
+        }
+      },
+      "alignment": "Chaotic Good",
+      "disposition": "friendly"
+    },
+    "vesh_nightglass": {
+      "name": "Vesh Nightglass",
+      "role": "stranded_wanderer",
+      "personality": "a tiefling sorcerer who got turned around chasing a light down here and has been living off crystal-glow for longer than she'll admit",
+      "goals": "finding someone who actually knows the way back to the surface",
+      "recruitable": true,
+      "stats": {
+        "race": "Tiefling",
+        "char_class": "Sorcerer",
+        "strength": 8,
+        "dexterity": 13,
+        "constitution": 12,
+        "intelligence": 10,
+        "wisdom": 10,
+        "charisma": 17,
+        "hp_max": 8,
+        "armor_class": 11,
+        "gold": 25,
+        "inventory": {
+          "rusty_dagger": 1
+        }
+      },
+      "alignment": "Chaotic Neutral",
+      "disposition": "friendly"
     }
   },
   "shops": {

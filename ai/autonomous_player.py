@@ -35,6 +35,7 @@ a place/person/item that isn't actually listed there):
 - "I head to [a place listed under Places reachable from here]"
 - "I attack [something listed under Danger here]"
 - "I talk to [someone listed under People here]"
+- "I ask [someone listed under You could recruit] to join our party"
 - "Let's start a fight"
 - "I examine [something listed under Things worth a closer look]"
 - "I check the quest board"

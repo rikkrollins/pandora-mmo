@@ -4378,6 +4378,19 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
     if npcs_here:
         names = [CAMPAIGN["npcs"][n]["name"] for n in npcs_here if n in CAMPAIGN["npcs"]]
         lines.append(f"People here: {', '.join(names)}")
+        # Same reasoning as every other grounding fix here: recruiting is
+        # a real action (_do_recruit_npc), but nothing distinguished a
+        # recruitable NPC from an ordinary shopkeeper/one-off character in
+        # "People here", so the AI party had no way to know who could
+        # actually be asked to join.
+        already_in_party = {p["name"] for p in _get_party_members()}
+        recruitable_here = [
+            CAMPAIGN["npcs"][n]["name"] for n in npcs_here
+            if n in CAMPAIGN["npcs"] and CAMPAIGN["npcs"][n].get("recruitable")
+            and CAMPAIGN["npcs"][n]["name"] not in already_in_party
+        ]
+        if recruitable_here:
+            lines.append(f"You could recruit: {', '.join(recruitable_here)}")
     monsters_here = location.get("monsters", [])
     if monsters_here:
         lines.append(f"Danger here: {', '.join(monsters_here)}")
