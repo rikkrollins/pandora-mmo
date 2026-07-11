@@ -485,7 +485,6 @@ async def _maybe_check_moltbook_activity(bot) -> None:
 
     if unread <= _LAST_MOLTBOOK_NOTIFIED_COUNT and not activity and not pending_dms:
         return
-    _LAST_MOLTBOOK_NOTIFIED_COUNT = unread
 
     lines = [f"🦞 Moltbook: {unread} unread notification(s) for PandoraMMO_Bot."]
     for item in activity[:5]:
@@ -502,6 +501,10 @@ async def _maybe_check_moltbook_activity(bot) -> None:
             message_thread_id=config.TOPIC_DEVELOPMENT_ID,
             text="\n".join(lines),
         )
+        # Only recorded as "notified" once the send actually succeeds —
+        # otherwise a transient TimedOut here would mark this activity as
+        # already-seen and it would never be retried on a later heartbeat.
+        _LAST_MOLTBOOK_NOTIFIED_COUNT = unread
     except TelegramError as e:
         logger.error(f"[moltbook_heartbeat] failed to notify Development topic: {e!r}")
 
@@ -906,10 +909,10 @@ async def _announce_defeats(update: Update, session: sessions.Session, removed: 
             await _safe_send(update, f"💀 **{entry['name']} has been defeated!**")
 
 
-async def _safe_send(update: Update, text: str) -> None:
+async def _safe_send(update: Update, text: str, thread_id: int | None = None) -> None:
     """
-    Sends a message to the Adventure topic, but never lets a transient
-    Telegram/network failure escape and abort whatever combat-state
+    Sends a message to a topic (Adventure by default), but never lets a
+    transient Telegram/network failure escape and abort whatever state
     progression the caller still needs to make (turn advancement,
     combat-over checks, etc.). Confirmed live: a bare ConnectTimeout
     during an ordinary attack-narration send propagated all the way up
@@ -921,11 +924,21 @@ async def _safe_send(update: Update, text: str) -> None:
     real but survivable narration gap, not a lost game fact — unlike
     turn progression getting stuck, which has no other recovery path
     short of the "cancel" escape hatch force-ending the whole fight.
+
+    Also confirmed live (2026-07-10) for the SAME underlying failure
+    mode outside combat: development_topic_handler and
+    support_topic_handler each send their final reply — after an
+    already-expensive 30-160s Ollama call — via a raw send_message with
+    no exception handling, so a plain telegram.error.TimedOut on that
+    one call silently threw away the answer Coffee had already waited
+    for. Both now route through here with their own thread_id instead.
     """
     try:
-        await update.effective_chat.send_message(text, message_thread_id=config.TOPIC_ADVENTURE_ID)
+        await update.effective_chat.send_message(
+            text, message_thread_id=thread_id if thread_id is not None else config.TOPIC_ADVENTURE_ID
+        )
     except TelegramError as e:
-        logger.warning(f"[combat] message send failed, continuing anyway: {e!r}")
+        logger.warning(f"[message] send failed, continuing anyway: {e!r}")
 
 
 def _personality_for_character_name(name: str) -> str | None:
@@ -2061,11 +2074,25 @@ def _in_active_combat(telegram_user_id: int, chat_id: int) -> bool:
 async def _go_inactive(telegram_user_id: int, update_like, reason_text: str) -> None:
     """
     Marks a character inactive ("resting until next session"): moves
-    them to the nearest safe waypoint and announces it. Reactivation is
-    automatic on their owner's next real message (see
+    them to the nearest safe waypoint, heals them to full (same as the
+    explicit `rest` action — see below), and announces it. Reactivation
+    is automatic on their owner's next real message (see
     adventure_master_handler). Shared by the explicit "rest for X"
     action and the automatic 5-minute idle check — `update_like` is
     either a real Update or a _ChatOnlyUpdate shim.
+
+    Confirmed live (2026-07-11): before this, going inactive this way
+    moved and flagged the character but never touched hp_current/
+    spell_slots_current — only the separate `_do_rest` (action=="rest")
+    healed. But this function's OWN narration calls itself "resting,"
+    both here and in every caller ("settles in to rest... until next
+    session", "drifts off to rest"), and the multi-day real-world gap
+    until a player's next session is exactly the kind of downtime a
+    full heal should apply to. A player returning to find zero HP
+    recovered after being told their character "rested" is a real bug,
+    not a deliberate distinction from `_do_rest` — that action stays a
+    separate, anytime-out-of-combat heal for a different phrasing
+    ("heal up", "revive me"), not a different OUTCOME of resting.
 
     NEVER call this while the character is in an active combat session
     — per design, resting requires actually being out of battle first
@@ -2083,10 +2110,17 @@ async def _go_inactive(telegram_user_id: int, update_like, reason_text: str) -> 
     db.move_character(telegram_user_id, destination_id)
     db.mark_visited(telegram_user_id, destination_id)
     db.mark_inactive(telegram_user_id)
+    db.update_character(telegram_user_id, hp_current=character["hp_max"],
+                         death_save_successes=0, death_save_failures=0)
+    db.restore_spell_slots(telegram_user_id)
+
+    heal_note = f", and rests to {character['hp_max']}/{character['hp_max']} HP"
+    if character["spell_slots_max"] > 0:
+        heal_note += " with spell slots fully restored"
 
     await _safe_send(
         update_like,
-        f"😴 **{character['name']}** {reason_text} at **{destination_name}**, safe until they return.",
+        f"😴 **{character['name']}** {reason_text} at **{destination_name}**, safe until they return{heal_note}.",
     )
 
 
@@ -2731,7 +2765,7 @@ async def _do_gather(update: Update, action_text: str) -> None:
     )
     message = _format_skill_check_result(flavor, result, node["ability"], SKILL_CHECK_DC, success)
     if success:
-        message += f"\n🌿 You gather **1x {material['name']}**."
+        message += f"\n🌿 **{character['name']}** gathers **1x {material['name']}**."
 
         for board_quest in board_quests_module.get_todays_board_quests(character["current_location"]):
             if not (board_quest.get("accepted_by") and not board_quest.get("completed_at")
@@ -2930,7 +2964,7 @@ async def _do_examine(update: Update, target_text: str) -> None:
     narration = await asyncio.to_thread(
         narrate_examine, character, location["name"], obj_data["name"], obj_data["description"]
     )
-    await _safe_send(update, f"🔍 {narration}")
+    await _safe_send(update, f"🔍 **{character['name']}** examines {obj_data['name']}: {narration}")
 
 
 async def _do_show_map(update: Update) -> None:
@@ -3047,7 +3081,7 @@ async def _do_move(update: Update, text: str) -> None:
     db.move_character(update.effective_user.id, destination_id)
     db.mark_visited(update.effective_user.id, destination_id)
     await update.effective_chat.send_message(
-        f"🚶 You travel to **{destination['name']}**.\n{destination['description']}",
+        f"🚶 **{character['name']}** travels to **{destination['name']}**.\n{destination['description']}",
         message_thread_id=config.TOPIC_ADVENTURE_ID,
     )
 
@@ -3454,7 +3488,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
         target_note = "" if is_self else f" on **{target_character['name']}**"
         inactive_note = " (resting)" if target_character.get("is_inactive") else ""
         await update.effective_chat.send_message(
-            f"✨ You cast {spell['name']}{target_note}{inactive_note} and heal {result['healing_done']} HP "
+            f"✨ **{character['name']}** casts {spell['name']}{target_note}{inactive_note} and heals {result['healing_done']} HP "
             f"({result['hp_current']}/{result['hp_max']}).",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
@@ -3500,7 +3534,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             session.log_event(f"{character['name']} summons {summon['name']} to fight alongside the party!")
 
         await update.effective_chat.send_message(
-            f"🌀 You cast {spell['name']} — **{summon['name']}** answers the call and joins the fight "
+            f"🌀 **{character['name']}** casts {spell['name']} — **{summon['name']}** answers the call and joins the fight "
             f"(HP: {summon['hp_max']}, AC: {summon['armor_class']}). It vanishes once combat ends.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
@@ -3520,7 +3554,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
         buff_target = _find_party_target_by_name(text)
         target_note = f" on **{buff_target['name']}**" if buff_target else ""
         await update.effective_chat.send_message(
-            f"✨ You cast {spell['name']}{target_note}. (Note: this spell's flavor is real, but it "
+            f"✨ **{character['name']}** casts {spell['name']}{target_note}. (Note: this spell's flavor is real, but it "
             f"doesn't yet apply a mechanical effect in this build — that's a known "
             f"limitation, not a bug.)",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
@@ -3781,12 +3815,19 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # party, quests, map, clues) must NOT wake them by itself, or
     # "resting until next session" is meaningless the moment someone
     # checks on them. go_inactive is also excluded: asking to rest again
-    # while already resting isn't "waking up to act."
+    # while already resting isn't "waking up to act." "chat" is excluded
+    # too — confirmed live 2026-07-10: a message the parser couldn't
+    # classify into any real action ("class board" instead of "quest
+    # board", most likely dictation/autocorrect) fell through to
+    # action='chat', which produces zero game effect either way, yet
+    # still woke the character with nothing actually done — worse than
+    # just not waking them, since "chat" already means "we don't know
+    # what this was," not "this was a genuine action."
     character = db.get_character(update.effective_user.id)
     if character and character.get("is_inactive"):
         is_status_check = action in (
             "check_sheet", "check_inventory", "check_party", "check_quests",
-            "show_map", "ask_clue", "list_characters", "go_inactive",
+            "show_map", "ask_clue", "list_characters", "go_inactive", "chat",
         )
         explicit_wake = any(
             phrase in text.lower()
@@ -4024,14 +4065,14 @@ async def development_topic_handler(update: Update, context: ContextTypes.DEFAUL
     history.append(f"Assistant: {reply}")
     del history[:-MAX_ASSISTANT_HISTORY]
 
-    await update.effective_chat.send_message(reply, message_thread_id=config.TOPIC_DEVELOPMENT_ID)
+    await _safe_send(update, reply, thread_id=config.TOPIC_DEVELOPMENT_ID)
 
 
 async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     question = update.message.text.strip()
     character = db.get_character(update.effective_user.id)
     reply = await asyncio.to_thread(answer_support_question, question, character)
-    await update.effective_chat.send_message(reply, message_thread_id=config.TOPIC_SUPPORT_ID)
+    await _safe_send(update, reply, thread_id=config.TOPIC_SUPPORT_ID)
 
 
 # Per-user message queues — see _run_in_user_order for why these exist.
