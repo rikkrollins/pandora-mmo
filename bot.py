@@ -63,6 +63,7 @@ from models import (
 from rules.combat import resolve_attack, resolve_death_save
 from rules.crafting import RECIPES, get_recipe, resolve_craft
 from rules.dice import roll, ability_modifier, roll_ability_check, roll_d20
+from rules.item_generator import generate_item
 from rules.leveling import CLASS_HIT_DICE
 from rules.proficiency import practiced_bonus
 
@@ -1178,7 +1179,25 @@ def _award_victory_xp(session: sessions.Session) -> str:
                     f"({updated['progress_count']}/{updated['objective_count']})"
                 )
 
+    # Bonus gear loot: this game has no equip system yet (combat damage
+    # doesn't read from carried weapons/armor), so a generated item is
+    # framed as sold in town rather than added to inventory -- honest
+    # about what actually exists, rather than half-building an equip
+    # mechanic just to give rules/item_generator.py a caller. Its price
+    # (already tier-weighted via roll_tier, same as every other rules/
+    # module) becomes a real, varied gold reward instead of a flat number.
+    loot_item = generate_item(item_type=random.choice(["weapon", "armor"]))
+    gold_each = max(loot_item["price"] // len(real_party_ids), 1)
+    for pid in real_party_ids:
+        character = db.get_character(pid)
+        db.update_character(pid, gold=character["gold"] + gold_each)
+    loot_line = (
+        f"\n💰 The party loots a **{loot_item['name']}** from the fallen — not worth "
+        f"carrying, so it's sold in town for {gold_each} gold each."
+    )
+
     summary = f"\n✨ Party gains {xp_each} XP each ({enemy_xp_total} total)."
+    summary += loot_line
     summary += "".join(board_notes)
     if level_up_notes:
         summary += "\n" + "\n".join(level_up_notes)
