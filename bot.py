@@ -2961,6 +2961,37 @@ async def _do_leave_party(update: Update) -> None:
     await update.effective_chat.send_message(message, message_thread_id=config.TOPIC_ADVENTURE_ID)
 
 
+def _feature_use_status(character: dict) -> str | None:
+    """
+    One line summarizing a character's per-rest limited-use class
+    feature and how many uses remain, for the character sheet -- so a
+    player can check before trying it, rather than only finding out via
+    an "already used" reply when they attempt the command. Returns None
+    for classes with no trackable per-rest feature (Rogue's Sneak
+    Attack and Warlock's Pact Magic are both automatic, no uses to
+    track; everything else not yet made mechanical has no state here).
+    """
+    telegram_user_id = character["telegram_user_id"]
+    char_class = character["char_class"]
+    if char_class == "Fighter":
+        used = db.get_feature_uses(telegram_user_id, "second_wind")
+        return f"Second Wind: {max(0, 1 - used)}/1 use(s) remaining this rest"
+    if char_class == "Barbarian":
+        used = db.get_feature_uses(telegram_user_id, "rage")
+        return f"Rage: {max(0, RAGE_MAX_USES - used)}/{RAGE_MAX_USES} use(s) remaining this rest"
+    if char_class == "Bard":
+        max_uses = max(1, ability_modifier(character["charisma"]))
+        used = db.get_feature_uses(telegram_user_id, "bardic_inspiration")
+        return f"Bardic Inspiration: {max(0, max_uses - used)}/{max_uses} use(s) remaining this rest"
+    if char_class == "Paladin":
+        used = db.get_feature_uses(telegram_user_id, "lay_on_hands")
+        return f"Lay on Hands: {max(0, 1 - used)}/1 use(s) remaining this rest"
+    if char_class == "Wizard":
+        used = db.get_feature_uses(telegram_user_id, "arcane_recovery")
+        return f"Arcane Recovery: {max(0, 1 - used)}/1 use(s) remaining this rest"
+    return None
+
+
 async def _do_check_sheet(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -2976,6 +3007,8 @@ async def _do_check_sheet(update: Update) -> None:
     slot_line = ""
     if character["spell_slots_max"] > 0:
         slot_line = f"Spell slots: {character['spell_slots_current']}/{character['spell_slots_max']}\n"
+    feature_status = _feature_use_status(character)
+    feature_use_line = f"{feature_status}\n" if feature_status else ""
     sheet = (
         f"**{character['name']}** — {character['race']} {character['char_class']}\n"
         f"Level {character['level']} | XP {character['xp']}\n"
@@ -2985,6 +3018,7 @@ async def _do_check_sheet(update: Update) -> None:
         f"{slot_line}"
         f"Racial traits: {'; '.join(race_data['traits']) if race_data else 'None'}\n"
         f"Class features: {'; '.join(features) if features else 'None'}\n"
+        f"{feature_use_line}"
         f"Location: {cl.get_location(CAMPAIGN, character['current_location'])['name']}"
     )
     await _safe_send(update, sheet)
