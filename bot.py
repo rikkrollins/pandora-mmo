@@ -753,9 +753,7 @@ async def _send_welcome_narration(update: Update, character: dict) -> None:
         narrate_welcome, character, location_facts, party_summary
     )
 
-    await update.effective_chat.send_message(
-        welcome_text, message_thread_id=config.TOPIC_ADVENTURE_ID
-    )
+    await _safe_send(update, welcome_text)
 
 
 async def _begin_character_creation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1662,18 +1660,13 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
             f"is talking with {other_data['name']} here, both unaware {character['name']} just arrived",
         )
         if line:
-            await update.effective_chat.send_message(
-                f"💬 **{npc_data['name']}** (to {other_data['name']}): {line}",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
-            )
+            await _safe_send(update, f"💬 **{npc_data['name']}** (to {other_data['name']}): {line}")
     else:
         line = await asyncio.to_thread(
             generate_ambient_line, npc_id, character["name"], "arrives", memory_facts
         )
         if line:
-            await update.effective_chat.send_message(
-                f"💬 **{npc_data['name']}:** {line}", message_thread_id=config.TOPIC_ADVENTURE_ID
-            )
+            await _safe_send(update, f"💬 **{npc_data['name']}:** {line}")
 
 
 async def _do_attack(update: Update, action_text: str) -> None:
@@ -1929,7 +1922,7 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
         {**result, "ability": "dexterity", "dc": SKILL_CHECK_DC, "success": success},
     )
     message = _format_skill_check_result(flavor, result, "dexterity", SKILL_CHECK_DC, success) + reward_line
-    await update.effective_chat.send_message(message, message_thread_id=config.TOPIC_ADVENTURE_ID)
+    await _safe_send(update, message)
 
 
 async def _do_skill_check(update: Update, ability: str, action_text: str) -> None:
@@ -2087,7 +2080,7 @@ async def _do_shove(update: Update, action_text: str) -> None:
         )
         if success:
             message += f"\n🛌 **{target['name']} is now PRONE** — attacks against them have advantage."
-        await update.effective_chat.send_message(message, message_thread_id=config.TOPIC_ADVENTURE_ID)
+        await _safe_send(update, message)
 
         session.advance_turn()
         await _resolve_ai_turns(update, session)
@@ -2156,10 +2149,7 @@ async def _do_flee(update: Update, action_text: str) -> None:
         message = _format_skill_check_result(flavor, result, "dexterity", SKILL_CHECK_DC, success)
 
         if not success:
-            await update.effective_chat.send_message(
-                f"{message}\n\n💨 The attempt fails — you're still in the fight.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
-            )
+            await _safe_send(update, f"{message}\n\n💨 The attempt fails — you're still in the fight.")
             session.advance_turn()
             await _resolve_ai_turns(update, session)
             return
@@ -2173,10 +2163,10 @@ async def _do_flee(update: Update, action_text: str) -> None:
         session.remove_dead_player(user_id)
         combat_over = session.is_combat_over()
 
-        await update.effective_chat.send_message(
+        await _safe_send(
+            update,
             f"{message}\n\n🏃 **You break away and flee to {destination_name}!**"
             + ("\n\n🏳️ With you gone, the fight has no one left to finish — it ends here." if combat_over else ""),
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         if combat_over:
             sessions.end_session(chat_id)
@@ -2703,10 +2693,10 @@ async def _do_resolve_quest_choice(update: Update, text: str) -> None:
     outcome_narration = await asyncio.to_thread(
         narrate_branching_choice_outcome, location_name, chosen["label"], chosen["outcome_facts"]
     )
-    await update.effective_chat.send_message(
+    await _safe_send(
+        update,
         f"📜 **{quest['title']} — resolved**\n{outcome_narration}\n\n"
         f"You gain {chosen['reward_xp']} XP, {chosen['reward_gold']} gold.",
-        message_thread_id=config.TOPIC_ADVENTURE_ID,
     )
 
 
@@ -3164,7 +3154,7 @@ async def _do_gather(update: Update, action_text: str) -> None:
                 )
             break
 
-    await update.effective_chat.send_message(message, message_thread_id=config.TOPIC_ADVENTURE_ID)
+    await _safe_send(update, message)
 
 
 async def _do_craft(update: Update, text: str) -> None:
@@ -3223,7 +3213,7 @@ async def _do_craft(update: Update, text: str) -> None:
         message += f"\n⚗️ You craft **{result['result_qty']}x {result_item['name']}**."
     else:
         message += "\n⚗️ The attempt fails, but your materials aren't wasted — you can try again."
-    await update.effective_chat.send_message(message, message_thread_id=config.TOPIC_ADVENTURE_ID)
+    await _safe_send(update, message)
 
 
 async def _do_second_wind(update: Update) -> None:
@@ -4002,7 +3992,7 @@ async def _do_steal(update: Update, text: str) -> None:
         {**result, "ability": "dexterity", "dc": STEAL_DC, "success": success},
     )
     message = _format_skill_check_result(flavor, result, "dexterity", STEAL_DC, success) + consequence_line
-    await update.effective_chat.send_message(message, message_thread_id=config.TOPIC_ADVENTURE_ID)
+    await _safe_send(update, message)
 
 
 async def _do_cast_spell(update: Update, text: str) -> None:
@@ -4621,9 +4611,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
                 talk_to_npc, npc_id, text, character_name, relationship["memory_events"], quest_facts
             )
             npc_display_name = CAMPAIGN["npcs"].get(npc_id, {}).get("name", intent["npc_name"])
-            await update.effective_chat.send_message(
-                f"💬 **{npc_display_name}:** {reply}", message_thread_id=config.TOPIC_ADVENTURE_ID
-            )
+            await _safe_send(update, f"💬 **{npc_display_name}:** {reply}")
             # Ordinary conversation builds a small amount of rapport over
             # time — real, persistent, and separate from the short-term
             # conversation buffer talk_to_npc already keeps.
