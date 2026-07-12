@@ -3,7 +3,7 @@ class_features.py
 Real Dungeons & Dragons 5E (SRD) class features available at character
 level 1, shown on the character sheet as real, accurate information.
 
-2026-07-11: five of these are now genuinely mechanical, not just
+2026-07-11/12: six of these are now genuinely mechanical, not just
 flavor text, backed by a real limited-use resource (db.py's
 feature_uses, resets on a full rest) or an in-memory combat condition
 (matching prone/poisoned):
@@ -21,6 +21,12 @@ feature_uses, resets on a full rest) or an in-memory combat condition
   - Paladin's Lay on Hands (real command, heals 5 x level HP, once per
     rest -- simplified to spending the whole pool at once rather than
     a separately-spendable partial pool)
+  - Wizard's Arcane Recovery (real command, recovers ceil(level/2)
+    spell slots once per rest -- real 5E caps this by COMBINED spell
+    level with a 6th-level-or-higher exclusion, but spell_slots_current/
+    max here are a flat count with no per-level tracking at all, same
+    simplification already used everywhere else in this build, so this
+    recovers a NUMBER of slots instead of a combined level)
 
 Everything else here is still real, accurate flavor text only --
 using it mechanically in combat beyond what's built above is a further

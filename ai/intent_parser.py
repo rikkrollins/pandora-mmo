@@ -37,7 +37,7 @@ Given a player's free-text message and some context, output ONLY a JSON object \
 talk_npc, move, look, check_inventory, check_party, buy, sell, steal, cast_spell, join_guild, \
 recruit_npc, rest, go_inactive, skill_check, shove, show_map, gather, craft, list_characters, \
 switch_character, delete_character, fast_travel, accept_quest, check_quests, ask_clue, \
-answer_puzzle, gamble, chat, second_wind, rage, bardic_inspiration, lay_on_hands>", \
+answer_puzzle, gamble, chat, second_wind, rage, bardic_inspiration, lay_on_hands, arcane_recovery>", \
 "ability": "<one of: strength, dexterity, constitution, intelligence, wisdom, charisma, or null>", \
 "target": "<name/place/item mentioned, or null>", "npc_name": "<npc name if talking to one, or null>", \
 "item_name": "<item mentioned for buy/sell, or null>", "spell_name": "<spell mentioned for cast_spell, or null>", \
@@ -113,6 +113,8 @@ bonus damage and damage resistance (e.g. "I rage", "I fly into a rage", "enter a
 help their next roll (e.g. "I give X bardic inspiration", "inspire my ally"). Set "target" to who it's for.
 - "lay_on_hands" is specifically a Paladin's real class feature: touching someone to heal them from their \
 pool of divine healing (e.g. "I use lay on hands on X", "I lay hands on myself"). Set "target" to who it's for.
+- "arcane_recovery" is specifically a Wizard's real class feature: recovering expended spell slots once per \
+rest without fully resting (e.g. "I use arcane recovery", "recover a spell slot", "recover my spell slots").
 - "chat" is for anything else — general roleplay talk with no clear game action.
 Output ONLY the JSON object, nothing else."""
 
@@ -250,6 +252,10 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
 
     if any(w in lowered for w in ["lay on hands", "lay hands"]):
         return {**base, "action": "lay_on_hands"}
+
+    if any(w in lowered for w in ["arcane recovery", "recover a spell slot", "recover my spell slot",
+                                    "recover spell slots"]):
+        return {**base, "action": "arcane_recovery"}
 
     # Checked BEFORE check_sheet below: "my characters" (plural, roster) is
     # a substring-superset of check_sheet's "my character" (singular) —
@@ -414,7 +420,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
                 "fast_travel", "accept_quest", "check_quests", "ask_clue",
                 "answer_puzzle", "gamble", "chat", "examine", "flee", "resolve_choice",
                 "invite_to_party", "accept_party_invite", "leave_party", "find_merchant",
-                "second_wind", "rage", "bardic_inspiration", "lay_on_hands",
+                "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "arcane_recovery",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

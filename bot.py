@@ -3343,6 +3343,62 @@ async def _do_lay_on_hands(update: Update, target_text: str) -> None:
     )
 
 
+async def _do_arcane_recovery(update: Update) -> None:
+    """
+    Real Wizard class feature: once per day, recover expended spell
+    slots without a full rest. Real 5E caps this by COMBINED spell
+    level (up to half wizard level, rounded up, never a 6th-level-or-
+    higher slot) -- this game's spell_slots_current/max are a flat
+    count with no per-level tracking at all (a simplification already
+    used everywhere else, e.g. starting slots, spend_spell_slot), so
+    this instead recovers a NUMBER of slots equal to half wizard level
+    (rounded up), capped at whatever's actually missing -- an honest
+    adaptation of the real rule to the flat-count model already in use,
+    not a smaller version of the rule pretending to be the same thing.
+    Same feature_uses gating as every other limited-use feature added
+    this pass (once per rest cycle).
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if character["char_class"] != "Wizard":
+        await update.effective_chat.send_message(
+            "Arcane Recovery is a real Wizard class feature — your class doesn't have it.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    if db.get_feature_uses(update.effective_user.id, "arcane_recovery") >= 1:
+        await update.effective_chat.send_message(
+            "You've already used Arcane Recovery since your last rest.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    missing_slots = character["spell_slots_max"] - character["spell_slots_current"]
+    if missing_slots <= 0:
+        await update.effective_chat.send_message(
+            "Your spell slots are already full — nothing to recover.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    max_recoverable = (character["level"] + 1) // 2
+    recovered = min(max_recoverable, missing_slots)
+    new_current = character["spell_slots_current"] + recovered
+    db.update_character(update.effective_user.id, spell_slots_current=new_current)
+    db.use_feature(update.effective_user.id, "arcane_recovery")
+
+    slot_word = "slot" if recovered == 1 else "slots"
+    await update.effective_chat.send_message(
+        f"📖 **{character['name']}** studies for a moment, recovering **{recovered} spell {slot_word}** "
+        f"through Arcane Recovery ({new_current}/{character['spell_slots_max']}).",
+        message_thread_id=config.TOPIC_ADVENTURE_ID,
+    )
+
+
 async def _do_look(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -4505,6 +4561,8 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         await _do_bardic_inspiration(update, intent.get("target") or text)
     elif action == "lay_on_hands":
         await _do_lay_on_hands(update, intent.get("target") or text)
+    elif action == "arcane_recovery":
+        await _do_arcane_recovery(update)
     elif action == "list_characters":
         await _do_list_characters(update)
     elif action == "switch_character":
