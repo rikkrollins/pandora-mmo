@@ -49,7 +49,7 @@ from ai.dm_agent import (
     narrate_action, narrate_welcome, narrate_skill_check, narrate_hourly_update,
     narrate_examine, narrate_branching_choice_outcome,
 )
-from ai.intent_parser import parse_intent
+from ai.intent_parser import parse_intents
 from ai.npc_agent import register_npc, talk_to_npc, generate_ambient_line, _NPCS
 from ai.support_agent import answer_support_question
 from guilds import GUILDS, eligible_for_guild
@@ -4547,15 +4547,24 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
 
     text = update.message.text.strip()
     known_npcs = [data["name"] for data in CAMPAIGN["npcs"].values()]
-    intent = await asyncio.to_thread(parse_intent, text, known_npc_names=known_npcs)
-    action = intent["action"]
+    # A genuinely compound message ("recruit Sera, look at the quest
+    # board, and leave the tavern") returns more than one intent here --
+    # see ai.intent_parser.parse_intents's own docstring for exactly how
+    # conservative the detection is (deliberately keyword-only, no extra
+    # Ollama calls, only splits on strong separators like commas/"then").
+    # An ordinary single-action message still returns exactly one intent,
+    # identical to what parse_intent alone would have returned before
+    # this existed.
+    intents = await asyncio.to_thread(parse_intents, text, known_npc_names=known_npcs)
+    action = intents[0]["action"]
     # Player-facing message CONTENT is never logged elsewhere (only HTTP
     # metadata is, via httpx's own logging) — without this, a
     # misclassified action (confirmed to happen on this small model; see
     # CHANGELOG) is undiagnosable after the fact. raw text + resolved
     # action is the minimum needed to actually audit a "why did this
-    # happen" report.
-    logger.info(f"[intent] user={update.effective_user.id} action={action!r} text={text!r}")
+    # happen" report. One line per sub-action when the message was split.
+    for i in intents:
+        logger.info(f"[intent] user={update.effective_user.id} action={i['action']!r} text={i['raw_text']!r}")
 
     # A resting character only wakes for a genuine action or an explicit
     # confirmation — a passive status/info check (sheet, inventory,
@@ -4614,6 +4623,21 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
                 message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
 
+    for i in intents:
+        await _dispatch_intent(update, context, i, text)
+
+
+async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, intent: dict, text: str) -> None:
+    """
+    Runs the single game action a classified intent resolves to. Split
+    out of adventure_master_handler so a genuinely compound message
+    (see ai.intent_parser.parse_intents) can call this once per
+    sub-action in sequence, awaiting each one fully before the next --
+    the exact same dispatch a single ordinary message always went
+    through, just reusable per action instead of inline.
+    """
+    action = intent["action"]
+    text = intent.get("raw_text") or text
     if action == "create_character":
         await _begin_character_creation(update, context)
     elif action == "start_combat":

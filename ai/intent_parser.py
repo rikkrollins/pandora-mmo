@@ -494,3 +494,72 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
         print(f"[intent_parser] model call failed, using keyword fallback: {e}")
 
     return fallback
+
+
+_COMPOUND_SPLIT_PATTERN = re.compile(r",\s*(?:and\s+)?|\s+and then\s+|\s+then\s+|;\s*")
+
+
+def _split_compound_message(text: str) -> list[str]:
+    """
+    Splits on strong, explicit multi-clause separators (commas, "and
+    then", "then", ";") -- deliberately does NOT split on a bare " and "
+    mid-sentence by itself, since that's exactly as likely to join two
+    NOUNS in one action ("attack the goblin and the wolf") as it is to
+    join two separate actions. The caller (parse_intents) only trusts a
+    split if multiple resulting segments independently classify to
+    different real actions anyway, so an overly narrow split here just
+    means falling back to single-action classification, never a wrong
+    split silently taken as truth.
+    """
+    segments = _COMPOUND_SPLIT_PATTERN.split(text)
+    cleaned = []
+    for s in segments:
+        s = s.strip()
+        # A leading "then"/"and" can survive the split itself (e.g. after
+        # a comma, "...board, then leave" splits into "then leave" with
+        # "then" stuck to the front since the whitespace on either side
+        # of it was already consumed by the comma match) -- purely
+        # cosmetic for logging/narration, doesn't change classification.
+        for lead in ("then ", "and then ", "and "):
+            if s.lower().startswith(lead):
+                s = s[len(lead):].strip()
+                break
+        if s:
+            cleaned.append(s)
+    return cleaned
+
+
+def parse_intents(text: str, known_npc_names: list[str] | None = None) -> list[dict]:
+    """
+    Like parse_intent, but detects genuinely compound player messages
+    ("recruit Sera, look at the quest board, and leave the tavern") and
+    returns one intent per real action instead of just the first guess.
+
+    Confirmed live 2026-07-12: a real compound message like this was
+    classified as a SINGLE action (whatever keyword happened to match
+    first), silently dropping every other requested step -- e.g.
+    "recruit Sera... look at the quest board... leave the tavern" only
+    ever ran check_quests, everything else was silently ignored.
+
+    Deliberately conservative, and deliberately keyword-only (no extra
+    Ollama calls -- classifying N segments would mean N sequential
+    30-160s+ calls on this CPU-only setup, unacceptable latency for
+    what's still usually a single, ordinary action):
+    1. Split the text on explicit multi-clause separators only.
+    2. Classify EACH segment with the free, instant keyword fallback.
+    3. Only treat this as a genuine multi-action message if at least
+       TWO segments independently produce DIFFERENT, non-chat actions
+       -- a weak or ambiguous split (a stray comma in an otherwise
+       single action, "attack the goblin and the wolf") falls through
+       to the existing single-message classification unchanged, exactly
+       as before this feature existed.
+    """
+    known_npc_names = known_npc_names or []
+    segments = _split_compound_message(text)
+    if len(segments) > 1:
+        segment_intents = [_keyword_fallback(seg, known_npc_names) for seg in segments]
+        distinct_real_actions = {i["action"] for i in segment_intents if i["action"] != "chat"}
+        if len(distinct_real_actions) >= 2:
+            return [i for i in segment_intents if i["action"] != "chat"]
+
+    return [parse_intent(text, known_npc_names)]

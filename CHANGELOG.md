@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.6.0] — Compound messages: one message, multiple actions
+
+Per Coffee's request: a message that clearly asks for several distinct
+things in sequence ("recruit Sera, look at the quest board, and leave
+the tavern") now actually does all of them in order, instead of
+picking one action and silently dropping the rest.
+
+New `ai/intent_parser.py`'s `parse_intents()` sits alongside the
+existing single-action `parse_intent()` (left completely unchanged, so
+every existing safeguard around model misclassification still applies
+exactly as before) and detects genuinely compound messages using only
+the free, instant keyword fallback — never an extra Ollama call, so an
+ordinary single-action message pays zero latency cost for this.
+Deliberately conservative: only splits on strong, explicit separators
+(commas, "then", "and then", ";"), and only actually treats a message
+as compound if at least two of the resulting pieces independently
+resolve to different real actions. A bare "and" joining two nouns in
+one action ("attack the goblin and the wolf", "buy a sword and
+shield") is left alone and classified as a single action, exactly as
+before — the ambiguity between "two nouns, one action" and "two
+actions" isn't reliably solvable by keyword splitting alone, so this
+only ever activates where the evidence is unambiguous.
+
+`bot.py`'s dispatch was split into `_dispatch_intent()` (one action)
+called in a loop, one per detected action, each fully awaited before
+the next runs.
+
 ## [1.5.0] — Reliability pass: real bug fixes, two more class features, natural-language coverage
 
 ### Real bugs found and fixed (all confirmed live, several from Coffee's own screenshots)
