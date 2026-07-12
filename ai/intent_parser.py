@@ -251,7 +251,7 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
         return {**base, "action": "answer_puzzle"}
 
     if any(w in lowered for w in ["gamble", "wager", "place a bet", "i bet", "let's bet", "lets bet",
-                                    "play dice for gold"]):
+                                    "play dice for gold", "bet "]):
         return {**base, "action": "gamble"}
 
     if any(w in lowered for w in ["second wind", "catch my breath", "catch our breath"]):
@@ -340,7 +340,9 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in ["cast ", "i cast"]):
         return {**base, "action": "cast_spell"}
 
-    if any(w in lowered for w in ["join the", "i want to join", "become a member of"]):
+    if any(w in lowered for w in ["join the", "i want to join", "become a member of",
+                                    "join a guild", "guilds can i join", "what guilds",
+                                    "which guilds"]):
         return {**base, "action": "join_guild"}
 
     pass_words = ["pass", "skip my turn", "i wait", "i'll wait", "ill wait", "wait and see", "hold my action"]
