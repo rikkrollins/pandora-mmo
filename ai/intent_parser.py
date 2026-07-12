@@ -164,6 +164,19 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                                     "what's my quest", "whats my quest", "active quest"]):
         return {**base, "action": "check_quests"}
 
+    # Checked BEFORE the known-NPC-name loop below, same reasoning as the
+    # quest-board fix above: "buy two potions from Grimsby" names an NPC
+    # and would otherwise be caught by that loop first and misread as
+    # talk_npc -- confirmed live 2026-07-12 via a real screenshot, a
+    # buy request that got silently swallowed as ordinary conversation
+    # with no purchase ever happening. "buy"/"purchase"/"sell" are
+    # explicit enough to win over a bare NPC-name mention.
+    if any(w in lowered for w in ["buy", "purchase"]):
+        return {**base, "action": "buy"}
+
+    if lowered.startswith("sell") or " sell " in lowered:
+        return {**base, "action": "sell"}
+
     recruit_words = ["join us", "join our party", "join my party", "come with us",
                       "travel with us", "come along", "join the party"]
     for npc_name in known_npc_names:
@@ -320,12 +333,6 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
         if trigger in lowered:
             target = text[lowered.index(trigger) + len(trigger):].strip()
             return {**base, "action": "examine", "target": target or None}
-
-    if any(w in lowered for w in ["buy", "purchase"]):
-        return {**base, "action": "buy"}
-
-    if lowered.startswith("sell") or " sell " in lowered:
-        return {**base, "action": "sell"}
 
     if any(w in lowered for w in ["steal", "pickpocket", "rob the", "rob this", "swipe the", "take without paying"]):
         return {**base, "action": "steal"}
