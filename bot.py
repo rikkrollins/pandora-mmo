@@ -5058,6 +5058,13 @@ AI_PARTY_ROSTER = [
 AI_PARTY_TICK_INTERVAL_SECONDS = getattr(config, "AI_PARTY_TICK_INTERVAL_SECONDS", 900)
 _LAST_AI_PARTY_TICK_AT: datetime | None = None
 
+# Paused 2026-07-12 per Coffee's direct request, while reliability for
+# real human players is the priority (ahead of eventually going public)
+# -- does NOT delete or reset anything, existing AI companions stay in
+# the party/DB exactly as they are, this just stops new autonomous
+# ticks from being generated. Flip back to True to resume.
+AI_PARTY_ENABLED = False
+
 
 def _ensure_ai_party_exists() -> None:
     """Creates the autonomous AI party once, if it doesn't already exist, and forms them into their own party."""
@@ -5217,6 +5224,8 @@ async def _ai_party_autonomous_tick(bot) -> None:
     via the existing is_ai=1 mechanism with no action needed here.
     """
     global _LAST_AI_PARTY_TICK_AT
+    if not AI_PARTY_ENABLED:
+        return
     if _LAST_KNOWN_CHAT_ID is None:
         return
 
