@@ -307,7 +307,9 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in move_words):
         return {**base, "action": "move"}
 
-    if any(w in lowered for w in ["look around", "where am i", "look at my surroundings", "examine the area", "describe this place"]):
+    if any(w in lowered for w in ["look around", "where am i", "look at my surroundings", "examine the area",
+                                    "describe this place", "what's around me", "whats around me",
+                                    "survey the area", "look like", "what is this place", "observe the"]):
         return {**base, "action": "look"}
 
     # A specific object/detail, not the whole area (that's "look" above,
