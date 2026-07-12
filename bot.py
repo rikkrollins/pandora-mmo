@@ -1715,10 +1715,7 @@ async def _do_pass_turn(update: Update) -> None:
     async with sessions.get_lock(chat_id):
         session = sessions.get_session(chat_id)
         if session is None:
-            await update.effective_chat.send_message(
-                "There's no active turn to pass right now.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
-            )
+            await _safe_send(update, "There's no active turn to pass right now.")
             return
         session.advance_turn()
         await _safe_send(update, _turn_announcement(session))
@@ -2994,9 +2991,7 @@ async def _do_check_inventory(update: Update) -> None:
         item = items_module.get_item(item_id)
         name = item["name"] if item else item_id
         lines.append(f"  {name} x{qty}")
-    await update.effective_chat.send_message(
-        "🎒 Your backpack:\n" + "\n".join(lines), message_thread_id=config.TOPIC_ADVENTURE_ID
-    )
+    await _safe_send(update, "🎒 Your backpack:\n" + "\n".join(lines))
 
 
 def _find_resource_node(location: dict, action_text: str) -> dict | None:
