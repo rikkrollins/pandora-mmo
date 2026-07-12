@@ -5,7 +5,7 @@ All notable changes to Pandora MMO are documented here.
 ## [1.4.0] — Real class features, complete spells/races, and epic environment-aware narration
 
 ### Mechanical class features (previously flavor text only)
-Seven real 5E class features are now genuinely usable, not just shown on
+Eight real 5E class features are now genuinely usable, not just shown on
 the character sheet, backed by a new shared "limited-use resource"
 system (resets on a full rest, same gating as HP/spell-slot recovery):
 - **Fighter — Second Wind**: bonus-action heal (1d10 + level), once per rest.
@@ -22,6 +22,9 @@ system (resets on a full rest, same gating as HP/spell-slot recovery):
   spell slots now recover on a much shorter real-time curve (1/8th of
   everyone else's) than their HP, reflecting real 5E's short-rest
   slot recovery vs. everyone else's long-rest recovery.
+- **Monk — Unarmored Defense + Martial Arts**: both automatic, no
+  command. AC is now 10 + DEX mod + WIS mod instead of a flat
+  approximation, and every Monk attack uses DEX instead of STR.
 
 Everything else in `class_features.py` (Divine Domain, Sorcerous
 Origin, Favored Enemy, etc.) is still accurate flavor text, not yet

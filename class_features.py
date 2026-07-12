@@ -3,10 +3,11 @@ class_features.py
 Real Dungeons & Dragons 5E (SRD) class features available at character
 level 1, shown on the character sheet as real, accurate information.
 
-2026-07-11/12: seven of these are now genuinely mechanical, not just
+2026-07-11/12: eight of these are now genuinely mechanical, not just
 flavor text, backed by a real limited-use resource (db.py's
 feature_uses, resets on a full rest), an in-memory combat condition
-(matching prone/poisoned), or a real-time healing-curve tweak:
+(matching prone/poisoned), a real-time healing-curve tweak, or a
+character-creation/combat-math tweak:
   - Fighter's Second Wind (real command, heals 1d10+level HP, 1/rest)
   - Barbarian's Rage (real command, bonus damage + damage resistance
     for the fight, 2/rest -- simplified to last until combat ends and
@@ -32,6 +33,18 @@ feature_uses, resets on a full rest), an in-memory combat condition
     of everyone else's NATURAL_HEALING_FULL_REST_HOURS, reflecting real
     5E's short-rest recovery vs. everyone else's long-rest recovery;
     their HP still heals on the normal shared curve)
+  - Monk's Unarmored Defense + Martial Arts (both automatic, no
+    command): AC is computed as 10 + DEX mod + WIS mod at character
+    creation instead of the shared BASE_ARMOR_CLASS approximation
+    (armor_class is a static stored field in this game, never
+    recalculated from equipment, so this is done once, up front); every
+    attack a Monk makes uses DEX instead of STR (rules/combat.py's
+    resolve_attack). Deliberately did NOT drop a Monk's damage die to
+    1d4 for "unarmed strikes" -- this game has no per-weapon-type
+    modeling at all (every attacker shares one flat weapon dict), so
+    there's no unarmed-vs-monk-weapon distinction to make, and shrinking
+    just the Monk's die would make them strictly worse than every other
+    martial class rather than matching the real rule's intent.
 
 Everything else here is still real, accurate flavor text only --
 using it mechanically in combat beyond what's built above is a further

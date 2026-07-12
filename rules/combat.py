@@ -59,11 +59,25 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     damage plus resistance to all incoming damage while raging
     (simplified from the real three specific physical damage types,
     since this system doesn't model damage types at all).
+
+    A Monk's Martial Arts is handled here too: real 5E lets a Monk use
+    Dexterity instead of Strength for attacks with a monk weapon or an
+    unarmed strike -- applied unconditionally for any Monk attacker,
+    since this game has no per-weapon-type modeling (every attacker
+    already shares one flat `weapon` dict) so there's no "monk weapon
+    vs. not" distinction to make. Deliberately NOT touching the damage
+    die: real Martial Arts drops an unarmed strike to 1d4, but every
+    class here already shares the same flat damage_dice regardless of
+    weapon, so shrinking just the Monk's die would make them strictly
+    worse than every other martial class instead of matching the real
+    rule's intent (a Monk fighting with an actual weapon, which this
+    game's starting equipment gives them, keeps the normal die).
     """
+    attack_ability = "dexterity" if attacker.get("char_class") == "Monk" else weapon.get("ability", "strength")
     attack_result = roll_attack(
         attacker,
         target_ac=defender["armor_class"],
-        ability=weapon.get("ability", "strength"),
+        ability=attack_ability,
         proficient=True,
         advantage=advantage,
         disadvantage=disadvantage,

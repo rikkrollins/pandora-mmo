@@ -343,6 +343,14 @@
           "goblin_shaman",
           "goblin_boss"
         ],
+        "resource_nodes": [
+          {
+            "id": "iron_ore_seam",
+            "name": "a seam of Iron Ore the goblins have been chipping at",
+            "material": "iron_ore",
+            "ability": "strength"
+          }
+        ],
         "interactables": {
           "chalk_markings": {
             "name": "chalk markings on the tunnel walls",

@@ -78,6 +78,19 @@ CAMPAIGN = cl.load_campaign(ACTIVE_CAMPAIGN_ID)
 
 DEFAULT_WEAPON = {"ability": "strength", "damage_dice": "1d8", "damage_bonus": 0}
 
+# Maps a resource node's gathering ability to the one class whose
+# training lets them naturally pick that kind of material out of a
+# location's generic description in _do_look (2026-07-12, per Coffee:
+# "an Alchemist skillset would be able to see alchemic materials" --
+# this game has no Alchemist class, so the two real classes closest to
+# that idea for the two ability types resource nodes actually use are
+# picked instead: Druid for wisdom-gathered nature materials (herbs,
+# flowers), Ranger for strength-gathered mineral/vein materials (ore,
+# mined dust) -- a survivalist's eye for a promising rock face). Every
+# node is still listed plainly for everyone regardless of class; this
+# only adds an extra "you notice this at a glance" flavor line.
+RESOURCE_SENSE_CLASS = {"wisdom": "Druid", "strength": "Ranger"}
+
 # npc_id -> faction_id, precomputed once from campaign.json's factions
 # catalog — an NPC's actions and a player's actions toward them ripple
 # out to how the whole faction regards that player (db.faction_standing).
@@ -869,6 +882,13 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
         armor_class = BASE_ARMOR_CLASS.get(char_class, 10)
         if char_class in ("Wizard", "Sorcerer"):
             armor_class += dex_mod
+        elif char_class == "Monk":
+            # Real Unarmored Defense: AC = 10 + DEX mod + WIS mod, instead
+            # of BASE_ARMOR_CLASS's flat approximation -- computed once
+            # here since armor_class is a static stored field in this
+            # game, never recalculated from equipment.
+            wis_mod = ability_modifier(ability_scores["wisdom"])
+            armor_class = 10 + dex_mod + wis_mod
 
         character = db.create_character(
             telegram_user_id=update.effective_user.id,
@@ -3490,6 +3510,18 @@ async def _do_look(update: Update) -> None:
     if resource_nodes:
         node_names = [n["name"] for n in resource_nodes]
         lines.append(f"Resources here: {', '.join(node_names)}")
+        sensed = [
+            n for n in resource_nodes
+            if RESOURCE_SENSE_CLASS.get(n["ability"]) == character["char_class"]
+        ]
+        if sensed:
+            sensed_materials = ", ".join(
+                items_module.get_item(n["material"])["name"] for n in sensed
+            )
+            lines.append(
+                f"Your {character['char_class']} training picks {sensed_materials} out "
+                f"at a glance — most people would walk right past it."
+            )
 
     await update.effective_chat.send_message("\n".join(lines), message_thread_id=config.TOPIC_ADVENTURE_ID)
 
