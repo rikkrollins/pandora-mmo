@@ -95,7 +95,8 @@ CLASS_FEATURES_LEVEL_1 = {
     ],
     "Sorcerer": [
         "Spellcasting: casts sorcerer spells using Charisma",
-        "Sorcerous Origin: grants a source of innate magical power (e.g. Draconic Bloodline)",
+        "Sorcerous Origin: Draconic Bloodline — Draconic Resilience grants "
+        "AC = 13 + DEX modifier when unarmored and +1 HP at level 1",
     ],
     "Warlock": [
         "Otherworldly Patron: a pact with a powerful entity grants abilities",

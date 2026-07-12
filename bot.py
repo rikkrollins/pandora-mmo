@@ -880,7 +880,7 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
         hp_max = max(hit_die + con_mod, 1)
         dex_mod = ability_modifier(ability_scores["dexterity"])
         armor_class = BASE_ARMOR_CLASS.get(char_class, 10)
-        if char_class in ("Wizard", "Sorcerer"):
+        if char_class == "Wizard":
             armor_class += dex_mod
         elif char_class == "Monk":
             # Real Unarmored Defense: AC = 10 + DEX mod + WIS mod, instead
@@ -889,6 +889,22 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
             # game, never recalculated from equipment.
             wis_mod = ability_modifier(ability_scores["wisdom"])
             armor_class = 10 + dex_mod + wis_mod
+        elif char_class == "Sorcerer":
+            # Draconic Bloodline is the default Sorcerous Origin for
+            # every Sorcerer here (no in-game choice mechanism exists
+            # for ANY subclass-style pick yet, so rather than half-build
+            # one, every Sorcerer gets the single most iconic origin --
+            # same convention as racial traits being fixed, not chosen).
+            # Draconic Resilience: AC = 13 + DEX mod when unarmored
+            # (better than the generic Wizard/Sorcerer 10+DEX formula),
+            # and +1 HP at level 1. Real 5E grants +1 HP per sorcerer
+            # level thereafter too, but hp_max is a static value set
+            # once at creation for every class in this build already
+            # (rules/leveling.py's hp_gain_for_level exists but isn't
+            # wired into any level-up path yet) -- so this is a flat,
+            # one-time +1, consistent with that existing simplification.
+            armor_class = 13 + dex_mod
+            hp_max += 1
 
         character = db.create_character(
             telegram_user_id=update.effective_user.id,
