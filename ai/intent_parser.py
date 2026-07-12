@@ -292,7 +292,16 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
             name = text[lowered.index(trigger) + len(trigger):].strip()
             return {**base, "action": "fast_travel", "target": name or None}
 
-    move_words = ["go to", "head to", "walk to", "travel to", "move to", "enter the", "descend", "ascend", "climb down", "climb up"]
+    # "leave the " is checked here (not "leave" alone, which would be too
+    # broad) -- confirmed live 2026-07-12: real messages like "I leave the
+    # seller" and "Leave the tavern cellar and go back upstairs" got
+    # misclassified as pass_turn (no keyword there matched either, so an
+    # unchecked LLM guess went through), producing a confusing "no active
+    # turn to pass" reply to someone just trying to leave and go
+    # elsewhere. leave_party's own "leave the party"/"leave my party"
+    # check above already wins first, so this can't shadow it.
+    move_words = ["go to", "head to", "walk to", "travel to", "move to", "enter the", "descend", "ascend",
+                  "climb down", "climb up", "leave the ", "go back"]
     if any(w in lowered for w in move_words):
         return {**base, "action": "move"}
 
