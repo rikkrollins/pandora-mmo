@@ -4348,9 +4348,10 @@ async def dev_topic_photo_handler(update: Update, context: ContextTypes.DEFAULT_
 
     is_owner = await _is_group_owner(update, context)
     if is_owner is None:
-        await update.effective_chat.send_message(
+        await _safe_send(
+            update,
             "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
-            message_thread_id=config.TOPIC_DEVELOPMENT_ID,
+            thread_id=config.TOPIC_DEVELOPMENT_ID,
         )
         return
     if not is_owner:
@@ -4367,11 +4368,18 @@ async def dev_topic_photo_handler(update: Update, context: ContextTypes.DEFAULT_
     caption = (update.message.caption or "").strip()
     logger.info(f"[dev_topic_image] user={update.effective_user.id} path={filepath!r} caption={caption!r}")
 
-    await update.effective_chat.send_message(
+    # Routed through _safe_send (not a raw send_message) since this was
+    # confirmed live 2026-07-11: a plain telegram.error.TimedOut on this
+    # exact confirmation call threw unhandled, right after the real work
+    # (downloading and saving the screenshot) had already succeeded --
+    # the file was safely on disk, but the transient timeout looked to
+    # Coffee like "not responding" with no indication anything happened.
+    await _safe_send(
+        update,
         f"📸 Got it — saved for troubleshooting at `{filepath}`. I can't see it from here myself "
         f"(no image capability in this running process), but it's ready for a live Claude Code "
         f"session to look at directly.",
-        message_thread_id=config.TOPIC_DEVELOPMENT_ID,
+        thread_id=config.TOPIC_DEVELOPMENT_ID,
     )
 
 
