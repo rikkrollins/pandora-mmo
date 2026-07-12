@@ -3,7 +3,7 @@ class_features.py
 Real Dungeons & Dragons 5E (SRD) class features available at character
 level 1, shown on the character sheet as real, accurate information.
 
-2026-07-11/12: eight of these are now genuinely mechanical, not just
+2026-07-11/12: nine of these are now genuinely mechanical, not just
 flavor text, backed by a real limited-use resource (db.py's
 feature_uses, resets on a full rest), an in-memory combat condition
 (matching prone/poisoned), a real-time healing-curve tweak, or a
@@ -32,7 +32,26 @@ character-creation/combat-math tweak:
     spell slots on bot.py's WARLOCK_PACT_MAGIC_REST_HOURS curve, 1/8th
     of everyone else's NATURAL_HEALING_FULL_REST_HOURS, reflecting real
     5E's short-rest recovery vs. everyone else's long-rest recovery;
-    their HP still heals on the normal shared curve)
+    their HP still heals on the normal shared curve) AND Otherworldly
+    Patron (automatic, no command): every Warlock defaults to The Fiend
+    (no in-game subclass-choice mechanism exists, same convention as
+    Sorcerer's Draconic Bloodline below) -- Dark One's Blessing grants
+    temp HP = CHA modifier + level (minimum 1, real 5E formula) whenever
+    a Warlock reduces a hostile creature to 0 HP (rules/combat.py's
+    resolve_attack). Temp HP is tracked as `temp_hp` on the in-memory
+    participant dict, absorbing damage before real HP for ANY
+    participant carrying it (not Warlock-specific) -- combat-only,
+    never persisted to the DB, same convention as `raging`/`conditions`.
+  - Sorcerer's Sorcerous Origin: Draconic Bloodline (automatic, no
+    command, computed once at character creation): every Sorcerer
+    defaults to this origin (no in-game subclass-choice mechanism
+    exists, same convention as racial traits being fixed rather than
+    picked) -- Draconic Resilience grants AC = 13 + DEX modifier when
+    unarmored (better than the generic Wizard/Sorcerer 10+DEX formula)
+    and +1 HP at level 1. Real 5E grants +1 HP per sorcerer level
+    thereafter too, but hp_max is already a static value set once at
+    creation for every class in this build, so this is a flat one-time
+    +1 consistent with that.
   - Monk's Unarmored Defense + Martial Arts (both automatic, no
     command): AC is computed as 10 + DEX mod + WIS mod at character
     creation instead of the shared BASE_ARMOR_CLASS approximation
@@ -99,7 +118,9 @@ CLASS_FEATURES_LEVEL_1 = {
         "AC = 13 + DEX modifier when unarmored and +1 HP at level 1",
     ],
     "Warlock": [
-        "Otherworldly Patron: a pact with a powerful entity grants abilities",
+        "Otherworldly Patron: The Fiend — Dark One's Blessing grants "
+        "temporary HP (CHA modifier + level, minimum 1) whenever you "
+        "reduce a hostile creature to 0 HP",
         "Pact Magic: casts warlock spells using Charisma, spell slots recover on a short rest",
     ],
     "Wizard": [

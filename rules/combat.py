@@ -72,6 +72,18 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     worse than every other martial class instead of matching the real
     rule's intent (a Monk fighting with an actual weapon, which this
     game's starting equipment gives them, keeps the normal die).
+
+    A Warlock's Otherworldly Patron (The Fiend, the default patron for
+    every Warlock -- no in-game subclass-choice mechanism exists, same
+    convention as Sorcerer's Draconic Bloodline) grants Dark One's
+    Blessing here: reducing a hostile creature to 0 HP grants temp HP
+    equal to CHA modifier + level (minimum 1, real 5E formula; doesn't
+    stack with itself, takes the higher value). Temp HP is tracked as
+    `temp_hp` on the participant dict -- combat-only, in-memory-only,
+    same convention as `raging`/`conditions` (reset when combat ends,
+    never persisted to the DB) -- and absorbs damage before real HP for
+    ANY participant carrying it, not just Warlocks, matching real 5E's
+    general temp-HP rule.
     """
     attack_ability = "dexterity" if attacker.get("char_class") == "Monk" else weapon.get("ability", "strength")
     attack_result = roll_attack(
@@ -85,6 +97,7 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
 
     damage_dealt = 0
     relentless_endurance_triggered = False
+    dark_ones_blessing_gained = 0
     if attack_result["hit"]:
         savage_attacks_die = 1 if (attacker.get("race") == "Half-Orc" and attack_result["critical_hit"]) else 0
         sneak_attack_die = 1 if (attacker.get("char_class") == "Rogue" and advantage) else 0
@@ -101,6 +114,20 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
             damage_dealt += sneak_dmg["total"]
         if defender.get("raging"):
             damage_dealt = damage_dealt // 2
+
+        # A Warlock's Otherworldly Patron (The Fiend, the default patron
+        # for every Warlock here -- see resolve_attack's Martial Arts
+        # comment above for why this game gives fixed defaults rather
+        # than a half-built subclass-choice system) grants temporary HP
+        # that absorbs damage before real HP, same combat-only,
+        # in-memory-only convention as `raging`/`conditions` (reset when
+        # combat ends, never persisted to the DB).
+        temp_hp = defender.get("temp_hp", 0)
+        if temp_hp > 0:
+            absorbed = min(temp_hp, damage_dealt)
+            defender["temp_hp"] = temp_hp - absorbed
+            damage_dealt -= absorbed
+
         hp_before = defender["hp_current"]
         hp_after = max(hp_before - damage_dealt, 0)
         if (hp_after == 0 and hp_before > 0 and defender.get("race") == "Half-Orc"
@@ -108,6 +135,16 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
             hp_after = 1
             relentless_endurance_triggered = True
         defender["hp_current"] = hp_after
+
+        # Dark One's Blessing: reducing a hostile creature to 0 HP grants
+        # the Warlock temp HP = CHA modifier + level (minimum 1, real 5E
+        # formula). Temp HP doesn't stack with itself -- take the higher
+        # value, not add to it, matching the real rule.
+        if hp_after == 0 and hp_before > 0 and attacker.get("char_class") == "Warlock":
+            blessing_hp = max(1, ability_modifier(attacker.get("charisma", 10)) + attacker.get("level", 1))
+            if blessing_hp > attacker.get("temp_hp", 0):
+                attacker["temp_hp"] = blessing_hp
+                dark_ones_blessing_gained = blessing_hp
 
     return {
         "attacker": attacker["name"],
@@ -120,6 +157,7 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         "target_ac": defender["armor_class"],
         "damage_dealt": damage_dealt,
         "relentless_endurance_triggered": relentless_endurance_triggered,
+        "dark_ones_blessing_gained": dark_ones_blessing_gained,
         "defender_hp_remaining": defender["hp_current"],
         "defender_hp_max": defender.get("hp_max", defender["hp_current"]),
     }

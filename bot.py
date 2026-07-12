@@ -1011,6 +1011,12 @@ def _format_combat_result(flavor_text: str, result: dict, actor_label: str, defe
             f"they cling to 1 HP!** (once per rest)"
         )
 
+    if result.get("dark_ones_blessing_gained"):
+        lines.append(
+            f"🖤 **{actor_label}'s Dark One's Blessing triggers — the killing blow grants "
+            f"{result['dark_ones_blessing_gained']} temporary HP!**"
+        )
+
     return "\n".join(lines)
 
 
