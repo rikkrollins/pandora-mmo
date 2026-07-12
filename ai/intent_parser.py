@@ -140,6 +140,18 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     base = {"action": "chat", "target": None, "npc_name": None, "ability": None,
             "item_name": None, "spell_name": None, "quantity": 1, "raw_text": text}
 
+    # Checked BEFORE the known-NPC-name loop below: naming an NPC while
+    # asking to read the quest board (e.g. "read the quest for Grimsby
+    # from the quest board") must not get swallowed as talk_npc just
+    # because the NPC's name appears in the sentence -- confirmed live
+    # 2026-07-11 via a real screenshot: this got misrouted to a talk_npc
+    # reply about shop stock instead of showing the actual board listing,
+    # because the NPC-name check below ran first and returned before this
+    # block was ever reached. "quest board" is explicit enough to win.
+    if any(w in lowered for w in ["my quests", "quest journal", "quest log", "my quest log",
+                                    "quest board", "the board", "what's on the board"]):
+        return {**base, "action": "check_quests"}
+
     recruit_words = ["join us", "join our party", "join my party", "come with us",
                       "travel with us", "come along", "join the party"]
     for npc_name in known_npc_names:
@@ -195,10 +207,6 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in ["who's in my party", "whos in my party", "my party", "who is with me",
                                     "who's with me", "am i in a party", "party status"]):
         return {**base, "action": "check_party"}
-
-    if any(w in lowered for w in ["my quests", "quest journal", "quest log", "my quest log",
-                                    "quest board", "the board", "what's on the board"]):
-        return {**base, "action": "check_quests"}
 
     if any(w in lowered for w in ["i choose", "i decide to", "i'll go with", "ill go with",
                                     "my choice is", "i'll take the", "ill take the"]):
