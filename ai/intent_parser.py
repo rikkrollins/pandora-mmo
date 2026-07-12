@@ -213,7 +213,8 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in ["create a character", "make a character", "new character", "join the game"]):
         return {**base, "action": "create_character"}
 
-    if any(w in lowered for w in ["my backpack", "my bag", "my inventory", "what am i carrying", "what do i have"]):
+    if any(w in lowered for w in ["my backpack", "my bag", "my inventory", "what am i carrying", "what do i have",
+                                    "check inventory", "show inventory", "view inventory", "what items", "my items"]):
         return {**base, "action": "check_inventory"}
 
     if any(w in lowered for w in ["who's in my party", "whos in my party", "my party", "who is with me",
