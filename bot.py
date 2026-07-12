@@ -573,6 +573,13 @@ async def _maybe_run_moltbook_social_tick(bot) -> None:
     decision = await asyncio.to_thread(decide_social_action, feed_posts, recent_activity)
     action = decision.get("action")
     if action == "skip":
+        # Logged deliberately, even though there's nothing to act on --
+        # without this, "no moltbook_social log lines" is ambiguous
+        # between "ran fine and chose not to act" and "never actually
+        # ran at all" (e.g. the idle loop silently failing before
+        # reaching this call). A tick that ran and chose skip should
+        # look different from a tick that never happened.
+        logger.info(f"[moltbook_social] tick ran, {len(feed_posts)} feed post(s) considered, decided: skip")
         return
 
     try:
@@ -2338,6 +2345,64 @@ def _offerable_quest_at_location(character: dict, location_id: str) -> tuple[str
     return None
 
 
+def _npc_quest_facts(character: dict, npc_id: str) -> str | None:
+    """
+    Real, current quest info to ground an NPC's dialogue when asked
+    about "your quest"/"the reward"/etc. Confirmed live 2026-07-11:
+    asking Grimsby about his own quest got a vague non-answer, since
+    nothing ever told the model what quest this NPC is connected to.
+
+    Story quests have no structured NPC field in campaign.json (only a
+    location), so any NPC standing at the quest's location is grounded
+    in it -- an approximation, but the only one the data supports, and
+    consistent with how "Guilds you could join" etc. don't check
+    location either. Board quests DO store a real giver_npc, checked
+    exactly. Never reveals a branching quest's outcome_facts (the
+    actual narrative consequences) -- only the setup and the choices'
+    real rewards, matching what a player could learn by simply asking.
+    """
+    location_id = character["current_location"]
+    lines = []
+
+    story_offer = _offerable_quest_at_location(character, location_id)
+    if story_offer:
+        _, quest = story_offer
+        reward_bits = [f"{quest['reward_xp']} XP"] if quest.get("reward_xp") else []
+        if quest.get("reward_gold"):
+            reward_bits.append(f"{quest['reward_gold']} gold")
+        if quest.get("reward_item"):
+            reward_bits.append(items_module.get_item(quest["reward_item"])["name"])
+        reward_text = f" Reward: {', '.join(reward_bits)}." if reward_bits else ""
+        lines.append(f"Your real quest to offer: \"{quest['title']}\" — {quest['description']}{reward_text}")
+
+    board_quests = board_quests_module.get_todays_board_quests(location_id)
+    for q in board_quests:
+        if q.get("giver_npc") != npc_id or q.get("completed_at"):
+            continue
+        if q.get("branch_data"):
+            branch = q["branch_data"]
+            choice_bits = []
+            for c in branch["choices"].values():
+                reward_bits = [f"{c['reward_xp']} XP", f"{c['reward_gold']} gold"]
+                choice_bits.append(f"\"{c['label']}\" ({', '.join(reward_bits)})")
+            lines.append(
+                f"Your real board quest to offer: \"{q['title']}\" — {branch['setup_narration']} "
+                f"The real choices and their rewards: {'; '.join(choice_bits)}."
+            )
+        else:
+            lines.append(
+                f"Your real board quest to offer: \"{q['title']}\" — {q['description']} "
+                f"Reward: {q['reward_xp']} XP, {q['reward_gold']} gold."
+            )
+
+    if not lines:
+        return None
+    return (
+        "What you can ACTUALLY tell the player about quests (the ONLY real details — "
+        "never invent a different reward or description if asked):\n" + "\n".join(lines)
+    )
+
+
 async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest_id: str) -> None:
     quest = CAMPAIGN["quests"][quest_id]
     reward_xp = quest.get("reward_xp", 0)
@@ -4078,8 +4143,9 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
             character = db.get_character(update.effective_user.id)
             character_name = character["name"] if character else "the player"
             relationship = db.get_relationship(update.effective_user.id, npc_id)
+            quest_facts = _npc_quest_facts(character, npc_id) if character else None
             reply = await asyncio.to_thread(
-                talk_to_npc, npc_id, text, character_name, relationship["memory_events"]
+                talk_to_npc, npc_id, text, character_name, relationship["memory_events"], quest_facts
             )
             npc_display_name = CAMPAIGN["npcs"].get(npc_id, {}).get("name", intent["npc_name"])
             await update.effective_chat.send_message(

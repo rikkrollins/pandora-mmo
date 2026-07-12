@@ -89,7 +89,7 @@ def _memory_facts_block(memory_facts: list[str] | None, character_name: str) -> 
 
 
 def _build_prompt(npc_id: str, player_message: str, character_name: str = "the player",
-                   memory_facts: list[str] | None = None) -> str:
+                   memory_facts: list[str] | None = None, quest_facts: str | None = None) -> str:
     npc = _NPCS[npc_id]
     history_lines = []
     for role, text in npc["memory"][-MAX_MEMORY_TURNS:]:
@@ -97,9 +97,10 @@ def _build_prompt(npc_id: str, player_message: str, character_name: str = "the p
     history = "\n".join(history_lines) or "(no prior conversation this session)"
     memory_block = _memory_facts_block(memory_facts, character_name)
     shop_block = _shop_grounding_block(npc_id)
+    quest_block = f"\n\n{quest_facts}" if quest_facts else ""
 
     return (
-        f"{npc['persona']}{shop_block}\n\n"
+        f"{npc['persona']}{shop_block}{quest_block}\n\n"
         f"{memory_block}\n\n"
         f"Conversation so far this session:\n{history}\n\n"
         f"Player: {player_message}\n"
@@ -108,18 +109,24 @@ def _build_prompt(npc_id: str, player_message: str, character_name: str = "the p
 
 
 def talk_to_npc(npc_id: str, player_message: str, character_name: str = "the player",
-                memory_facts: list[str] | None = None) -> str:
+                memory_facts: list[str] | None = None, quest_facts: str | None = None) -> str:
     """
     Send a player message to a registered NPC and return its in-character
     reply. Falls back to a neutral line if the model is unreachable.
     `memory_facts` (from db.get_relationship) lets the NPC stay
     consistent about this specific player across sessions/restarts, on
-    top of the short in-session conversation buffer.
+    top of the short in-session conversation buffer. `quest_facts`
+    (bot.py builds this fresh per call from real story/board quest data)
+    grounds "what's this quest about" / "what's the reward" — confirmed
+    live 2026-07-11: asking Grimsby about his own quest got a vague
+    non-answer, since nothing here ever told the model what quest, if
+    any, this NPC is actually connected to, same failure mode already
+    fixed for shop inventory.
     """
     if npc_id not in _NPCS:
         raise ValueError(f"Unknown NPC id: {npc_id!r}. Call register_npc() first.")
 
-    prompt = _build_prompt(npc_id, player_message, character_name, memory_facts)
+    prompt = _build_prompt(npc_id, player_message, character_name, memory_facts, quest_facts)
 
     try:
         response = requests.post(

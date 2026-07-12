@@ -290,7 +290,18 @@ def format_board_listing(board_quest: dict) -> str:
         giver_line = (
             f" Ask at: {board_quest['giver_npc'].replace('_', ' ').title()}." if board_quest.get("giver_npc") else ""
         )
-        return f"📜 **{board_quest['title']}**\n{setup}{giver_line}"
+        # Confirmed live 2026-07-11: a branching quest's unaccepted board
+        # listing showed the setup narration but no reward info at all --
+        # a player asked "what's the reward" and there was nothing to
+        # tell them, unlike an ordinary bounty's listing a few lines
+        # below, which always shows XP/gold. Never reveals outcome_facts
+        # (the real narrative consequences) here, only what a "wanted ad"
+        # would plausibly advertise: the choices and their rewards.
+        choice_rewards = "; ".join(
+            f"\"{c['label']}\" ({c['reward_xp']} XP, {c['reward_gold']} gold)"
+            for c in branch["choices"].values()
+        )
+        return f"📜 **{board_quest['title']}**\n{setup}\nPossible rewards: {choice_rewards}.{giver_line}"
 
     if board_quest.get("accepted_by"):
         progress = f"{board_quest['progress_count']}/{board_quest['objective_count']}"
