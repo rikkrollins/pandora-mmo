@@ -2,6 +2,58 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.5.0] — Reliability pass: real bug fixes, two more class features, natural-language coverage
+
+### Real bugs found and fixed (all confirmed live, several from Coffee's own screenshots)
+- NPC dialogue could crash on a transient network timeout, showing a
+  generic "Something went wrong" instead of the NPC's real reply, even
+  though the reply had already been generated. Swept the whole
+  codebase for the same pattern and fixed 12 spots with the identical
+  latent bug, including two inside combat that could have soft-locked
+  a fight.
+- A single transient send failure was logged and dropped with no
+  retry at all — now retries once after a short pause before giving up.
+- "buy X from `<NPC>`" (naming a real NPC while trying to shop) was
+  misread as just talking to them, with no purchase happening.
+- Buying/selling always silently used exactly 1 item regardless of
+  what was said — "buy two potions" only ever bought 1. The shop code
+  already supported real quantities; this was a pure wiring gap.
+- Item matching required the exact catalog name ("Healing Potion") as
+  a literal substring — "buy two potions" (the general word, not the
+  specific name) matched nothing. Now falls back to a generic category
+  word when it unambiguously picks out exactly one candidate.
+- Comprehensive sweep of natural-language phrasing across quests,
+  inventory, party, character sheet, looking around, gambling, joining
+  a guild, resting, fleeing, fast travel, and finding a merchant —
+  dozens of everyday phrasings ("what does this place look like",
+  "heal me up", "get me out of here", "where can I find supplies",
+  "ask for a hint", "check my equipment", and many more) were silently
+  falling through to a no-op instead of the game action they clearly meant.
+
+### Class features
+Two more of the four remaining subclass-style features now shipped,
+both using a fixed-default convention (no in-game subclass-choice
+mechanism exists yet, so each class gets the single most iconic
+default rather than a half-built choice system):
+- **Sorcerer — Draconic Bloodline**: Draconic Resilience grants
+  AC = 13 + DEX modifier when unarmored and +1 HP at level 1.
+- **Warlock — Otherworldly Patron: The Fiend**: Dark One's Blessing
+  grants temporary HP (CHA modifier + level) whenever you reduce a
+  hostile creature to 0 HP. Introduced a real `temp_hp` mechanic on
+  combat participants that absorbs damage before real HP for anyone
+  carrying it, not just Warlocks.
+
+That's 9 of 12 classes with at least one real mechanical feature now
+(Cleric, Druid, Ranger remain, all needing a subclass/choice design
+conversation first).
+
+### Operational
+- The autonomous AI party is paused for now, at Coffee's request,
+  while reliability for real human players is the priority ahead of
+  eventually opening the game up publicly. Nothing was deleted —
+  existing AI companions are untouched, autonomous ticking just stops
+  until it's turned back on.
+
 ## [1.4.0] — Real class features, complete spells/races, and epic environment-aware narration
 
 ### Mechanical class features (previously flavor text only)

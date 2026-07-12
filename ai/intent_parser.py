@@ -164,6 +164,17 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                                     "what's my quest", "whats my quest", "active quest"]):
         return {**base, "action": "check_quests"}
 
+    # Checked BEFORE "buy" below: "where can I buy potions" is asking
+    # about location/availability, not attempting an actual purchase --
+    # confirmed live 2026-07-12 this got shadowed as "buy" once that
+    # check was moved earlier (to fix "buy X from <NPC>" below), since
+    # "where can i buy" also contains the bare word "buy".
+    if any(w in lowered for w in ["where can i get supplies", "where can i find supplies", "nearest merchant",
+                                    "closest merchant", "nearest shop", "closest shop", "where can i buy",
+                                    "where can i shop", "need supplies", "where's the nearest",
+                                    "wheres the nearest"]):
+        return {**base, "action": "find_merchant"}
+
     # Checked BEFORE the known-NPC-name loop below, same reasoning as the
     # quest-board fix above: "buy two potions from Grimsby" names an NPC
     # and would otherwise be caught by that loop first and misread as
@@ -186,7 +197,7 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
             return {**base, "action": "talk_npc", "npc_name": npc_name}
 
     flee_words = ["flee", "run away", "try to run", "try to escape", "escape the fight",
-                  "retreat", "get out of here", "make a break for it"]
+                  "retreat", "get out of here", "get me out", "make a break for it"]
     if any(w in lowered for w in flee_words):
         return {**base, "action": "flee"}
 
@@ -211,11 +222,6 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in ["leave the party", "leave my party", "quit the party", "i quit my party"]):
         return {**base, "action": "leave_party"}
 
-    if any(w in lowered for w in ["where can i get supplies", "nearest merchant", "closest merchant",
-                                    "nearest shop", "closest shop", "where can i buy", "where can i shop",
-                                    "need supplies", "where's the nearest", "wheres the nearest"]):
-        return {**base, "action": "find_merchant"}
-
     attack_words = ["attack", "swing", "shoot", "strike", "hit", "stab", "cast at", "fire at"]
     if any(w in lowered for w in attack_words):
         return {**base, "action": "attack"}
@@ -227,7 +233,8 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
         return {**base, "action": "create_character"}
 
     if any(w in lowered for w in ["my backpack", "my bag", "my inventory", "what am i carrying", "what do i have",
-                                    "check inventory", "show inventory", "view inventory", "what items", "my items"]):
+                                    "check inventory", "show inventory", "view inventory", "what items", "my items",
+                                    "what weapons", "check my equipment", "my equipment"]):
         return {**base, "action": "check_inventory"}
 
     if any(w in lowered for w in ["who's in my party", "whos in my party", "my party", "who is with me",
@@ -239,7 +246,8 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
         return {**base, "action": "resolve_choice"}
 
     if any(w in lowered for w in ["ask for a clue", "ask for clues", "give me a clue", "any clues",
-                                    "what's the clue", "need a hint", "give me a hint"]):
+                                    "what's the clue", "need a hint", "give me a hint",
+                                    "ask for a hint", "what clues"]):
         return {**base, "action": "ask_clue"}
 
     if any(w in lowered for w in ["i accept", "i'll do it", "ill do it", "count me in", "i'll help",
@@ -295,14 +303,15 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in [
         "my sheet", "my stats", "my hp", "my health", "my character", "status",
         "active character", "current character", "who am i playing", "which character am i",
-        "my class", "what class", "my race", "what race", "my gold", "how much gold", "how much money",
+        "who am i currently playing", "my class", "what class", "my race", "what race",
+        "my gold", "how much gold", "how much money",
     ]):
         return {**base, "action": "check_sheet"}
 
     # Checked BEFORE move_words: "fast travel to X" / "warp to X" contain
     # "travel to" as a substring, which would otherwise shadow this as an
     # ordinary "move" — fast_travel needs to win first.
-    for trigger in ["fast travel to ", "fast-travel to ", "warp to ", "teleport to "]:
+    for trigger in ["fast travel to ", "fast-travel to ", "warp to ", "teleport to ", "teleport back to "]:
         if trigger in lowered:
             name = text[lowered.index(trigger) + len(trigger):].strip()
             return {**base, "action": "fast_travel", "target": name or None}
@@ -353,7 +362,8 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # night" contains "i rest" as a substring and would otherwise be
     # shadowed as the in-universe full-heal action instead of this
     # real-world "done playing until next session" one.
-    for trigger in ["rest for ", "resting for ", "rest for now", "take a rest", "logging off", "log off",
+    for trigger in ["rest for ", "resting for ", "rest for now", "take a rest", "take a break",
+                     "logging off", "log off",
                      "i'm done for now", "im done for now", "done playing for now"]:
         if trigger in lowered:
             duration = text[lowered.index(trigger) + len(trigger):].strip() if trigger.endswith(" ") else ""
@@ -362,7 +372,8 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # "take a rest" is deliberately NOT here — it's claimed by go_inactive
     # above, since the user considers it equivalent to "resting until
     # next session," not the in-universe full-heal action.
-    rest_words = ["i rest", "let's rest", "lets rest", "revive me", "heal up", "recover"]
+    rest_words = ["i rest", "let's rest", "lets rest", "revive me", "heal up", "recover",
+                  "heal me", "want to rest", "rest here"]
     if any(w in lowered for w in rest_words):
         return {**base, "action": "rest"}
 
@@ -371,7 +382,8 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in unconditional_shove_words) or knock_down_phrasing:
         return {**base, "action": "shove"}
 
-    if any(w in lowered for w in ["show me the map", "the map", "where have i explored", "my map", "show map"]):
+    if any(w in lowered for w in ["show me the map", "the map", "where have i explored", "where have i been",
+                                    "my map", "show map"]):
         return {**base, "action": "show_map"}
 
     gather_words = ["gather", "forage", "harvest", "mine ", "collect", "pick the herbs",
@@ -390,7 +402,7 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
         (["sneak", "hide", "climb", "balance", "pick the lock", "disarm the trap", "tiptoe"], "dexterity"),
         (["lift", "push", "break down", "force open", "shove the", "smash"], "strength"),
         (["recall", "remember lore", "investigate", "decipher", "figure out the puzzle"], "intelligence"),
-        (["search for", "look for hidden", "listen for", "spot", "sense", "track", "survive"], "wisdom"),
+        (["search for", "look for hidden", "listen for", "spot", "sense", "track", "survive", "perceive"], "wisdom"),
         (["persuade", "convince", "deceive", "lie to", "intimidate", "impress"], "charisma"),
         (["hold my breath", "endure", "resist the poison", "push through the pain"], "constitution"),
     ]
