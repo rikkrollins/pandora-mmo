@@ -2661,6 +2661,48 @@ async def _do_resolve_quest_choice(update: Update, text: str) -> None:
     )
 
 
+def _format_story_quest_poster(quest: dict, location_id: str) -> str:
+    """
+    A real "wanted poster" style display for an offerable story quest --
+    title, description, reward, and who's actually offering it. Real
+    2026-07-11 request: checking the quest board only ever showed the
+    title and description, no reward, no attribution of whose quest it
+    even was, unlike a board-quest listing which already shows both.
+
+    Story quests have no structured NPC-giver field in campaign.json
+    (only a "location"), so the giver shown here is whichever real NPC
+    is physically at that location -- the same approximation already
+    used by _npc_quest_facts for NPC dialogue grounding, so this poster
+    and what an NPC will actually tell you about their own quest agree
+    with each other.
+    """
+    reward_bits = [f"{quest['reward_xp']} XP"] if quest.get("reward_xp") else []
+    if quest.get("reward_gold"):
+        reward_bits.append(f"{quest['reward_gold']} gold")
+    if quest.get("reward_item"):
+        reward_bits.append(items_module.get_item(quest["reward_item"])["name"])
+    reward_line = f"\n💰 **Reward:** {', '.join(reward_bits)}" if reward_bits else ""
+
+    giver_ids = _npcs_at_location(location_id)
+    giver_names = [cl.get_npc(CAMPAIGN, n)["name"] for n in giver_ids if cl.get_npc(CAMPAIGN, n)]
+    location = cl.get_location(CAMPAIGN, location_id)
+    location_name = location["name"] if location else location_id
+    if giver_names:
+        giver_line = f"\n📍 **Posted by:** {', '.join(giver_names)} (at {location_name})"
+        ask_line = f"\n(Ask {giver_names[0]} for more details.)"
+    else:
+        giver_line = f"\n📍 **Posted at:** {location_name}"
+        ask_line = ""
+
+    return (
+        f"📜 **WANTED: {quest['title']}**\n"
+        f"{quest['description']}"
+        f"{reward_line}"
+        f"{giver_line}"
+        f"{ask_line}"
+    )
+
+
 async def _do_check_quests(update: Update) -> None:
     """
     Shows two distinct things, per Coffee's explicit terminology
@@ -2700,7 +2742,7 @@ async def _do_check_quests(update: Update) -> None:
         lines.append("Nothing posted here today.")
     if story_offer:
         _, quest = story_offer
-        lines.append(f"📜 **{quest['title']}**\n{quest['description']}")
+        lines.append(_format_story_quest_poster(quest, location_id))
     if area_board_quests:
         lines.append(board_quests_module.format_board_listings(area_board_quests))
     if story_offer or any(not q.get("accepted_by") and not q.get("completed_at") for q in area_board_quests):
