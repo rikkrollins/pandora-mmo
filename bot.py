@@ -2706,7 +2706,7 @@ async def _do_check_quests(update: Update) -> None:
     if story_offer or any(not q.get("accepted_by") and not q.get("completed_at") for q in area_board_quests):
         lines.append("(Say \"I accept this quest\" — name it if more than one's posted.)")
 
-    await update.effective_chat.send_message("\n".join(lines), message_thread_id=config.TOPIC_ADVENTURE_ID)
+    await _safe_send(update, "\n".join(lines))
 
 
 async def _do_ask_clue(update: Update) -> None:
