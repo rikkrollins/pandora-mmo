@@ -58,24 +58,37 @@ your action.
 Respond with ONLY the action sentence, nothing else."""
 
 
-def _build_prompt(character: dict, personality: str, situation_facts: str) -> str:
+def _build_prompt(character: dict, personality: str, situation_facts: str, last_action: str | None = None) -> str:
+    last_action_line = (
+        f"\nYour LAST action, already done, was: \"{last_action}\" -- do something "
+        f"DIFFERENT this time, don't just repeat it.\n"
+        if last_action else ""
+    )
     return (
         f"{ACTION_STYLE_PROMPT}\n\n"
         f"Your character: {character['name']}, a {character['race']} {character['char_class']}, "
         f"level {character['level']}, HP {character['hp_current']}/{character['hp_max']}\n"
-        f"Your personality: {personality}\n\n"
+        f"Your personality: {personality}\n"
+        f"{last_action_line}\n"
         f"Real facts about right now (use ONLY these):\n{situation_facts}\n\n"
         f"Your action:"
     )
 
 
-def choose_next_action(character: dict, personality: str, situation_facts: str) -> str:
+def choose_next_action(character: dict, personality: str, situation_facts: str, last_action: str | None = None) -> str:
     """
     Returns a single natural-language action sentence for this
     autonomous character to "type" into Adventure. Falls back to a
     harmless, always-valid action if Ollama is unreachable.
+
+    2026-07-12: `last_action`, when given, is folded into the prompt as
+    an explicit "don't repeat this" instruction -- confirmed live that
+    without it, this model can get stuck parroting the exact same
+    action (e.g. "examine an ancient, wide-boled tree") every single
+    tick for hours, since nothing here previously told it what it had
+    already just done.
     """
-    prompt = _build_prompt(character, personality, situation_facts)
+    prompt = _build_prompt(character, personality, situation_facts, last_action)
     try:
         response = requests.post(
             f"{config.OLLAMA_BASE_URL}/api/generate",

@@ -5150,12 +5150,15 @@ async def _ai_party_autonomous_tick(bot) -> None:
 
     _LAST_AI_PARTY_TICK_AT = now
 
-    personality = next((m["personality"] for m in AI_PARTY_ROSTER if m["name"] == actor["name"]), "")
-    situation_facts = _build_ai_player_situation_facts(actor, actor["current_location"])
-    action_text = await asyncio.to_thread(choose_next_action, actor, personality, situation_facts)
-
     user_id = actor["telegram_user_id"]
     context_like = _AI_PLAYER_CONTEXTS.setdefault(user_id, _AiPlayerContext())
+    last_action = context_like.user_data.get("last_autonomous_action")
+
+    personality = next((m["personality"] for m in AI_PARTY_ROSTER if m["name"] == actor["name"]), "")
+    situation_facts = _build_ai_player_situation_facts(actor, actor["current_location"])
+    action_text = await asyncio.to_thread(choose_next_action, actor, personality, situation_facts, last_action)
+    context_like.user_data["last_autonomous_action"] = action_text
+
     update_like = _AiPlayerUpdate(bot, _LAST_KNOWN_CHAT_ID, user_id, action_text)
     try:
         await adventure_master_handler(update_like, context_like)
