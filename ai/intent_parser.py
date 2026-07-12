@@ -157,7 +157,9 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # because the NPC-name check below ran first and returned before this
     # block was ever reached. "quest board" is explicit enough to win.
     if any(w in lowered for w in ["my quests", "quest journal", "quest log", "my quest log",
-                                    "quest board", "the board", "what's on the board"]):
+                                    "quest board", "the board", "what's on the board",
+                                    "quest details", "current quest", "my quest", "what quest",
+                                    "what's my quest", "whats my quest"]):
         return {**base, "action": "check_quests"}
 
     recruit_words = ["join us", "join our party", "join my party", "come with us",
