@@ -3640,6 +3640,26 @@ async def _do_move(update: Update, text: str) -> None:
             destination_id = loc_id
             break
 
+    # Generic "leave"/"go back"/"exit" phrasing names no specific
+    # destination at all -- confirmed live 2026-07-12: a real player
+    # saying "Leave the tavern cellar and go back upstairs" named
+    # neither "crossroads tavern" nor "The Crossroads Tavern" (the only
+    # real connection out of the cellar), so the name-matching loop
+    # above never found it, leaving them stuck. Six real locations in
+    # this campaign (tavern_cellar, tavern_upstairs, the_arcane_nook,
+    # hollow_stump_shrine, goblin_warrens, the_first_city) are exactly
+    # this kind of dead end with a SINGLE connection back out -- when
+    # that's true, "leave"/"go back"/"exit"/"upstairs"/"outside" is
+    # unambiguous regardless of exact wording, so resolve it directly
+    # rather than requiring the destination's literal name. Left
+    # multi-exit locations alone since guessing which way "leave" means
+    # there would be wrong as often as right.
+    generic_leave_words = ["leave", "exit", "go back", "head back", "back upstairs",
+                            "back outside", "back out", "step out", "walk out", "get out",
+                            "upstairs", "downstairs", "outside"]
+    if destination_id is None and len(reachable) == 1 and any(w in lowered for w in generic_leave_words):
+        destination_id = reachable[0]
+
     if destination_id is None:
         # A location is never its own connection, so "go to X" while
         # already AT X always fell through to the generic can't-get-
