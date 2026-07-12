@@ -2974,7 +2974,7 @@ async def _do_check_sheet(update: Update) -> None:
         f"Class features: {'; '.join(features) if features else 'None'}\n"
         f"Location: {cl.get_location(CAMPAIGN, character['current_location'])['name']}"
     )
-    await update.effective_chat.send_message(sheet, message_thread_id=config.TOPIC_ADVENTURE_ID)
+    await _safe_send(update, sheet)
 
 
 async def _do_check_inventory(update: Update) -> None:
@@ -4699,6 +4699,7 @@ async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TY
     question = update.message.text.strip()
     character = db.get_character(update.effective_user.id)
     reply = await asyncio.to_thread(answer_support_question, question, character)
+    logger.info(f"[support] user={update.effective_user.id} text={question!r} reply={reply!r}")
     await _safe_send(update, reply, thread_id=config.TOPIC_SUPPORT_ID)
 
 
