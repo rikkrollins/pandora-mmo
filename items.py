@@ -200,4 +200,21 @@ def find_item_mentioned_in_text(text: str, candidate_ids: list[str] | None = Non
         data = ITEMS[item_id]
         if data["name"].lower() in lowered or item_id.replace("_", " ") in lowered:
             return item_id
+
+    # Fall back to a generic category word (e.g. "potions" for "Healing
+    # Potion") when it unambiguously picks out exactly one candidate --
+    # confirmed live 2026-07-12 via a real screenshot: "buy two potions
+    # from Grimsby" never says the full item name, just the general
+    # kind, and this shop only sells one real potion. Word length >= 4
+    # guards against trivial words ("of", "the") in longer item names
+    # causing false matches.
+    matches = set()
+    for item_id in search_space:
+        for word in ITEMS[item_id]["name"].lower().split():
+            singular = word[:-1] if word.endswith("s") else word
+            if len(singular) >= 4 and (singular in lowered or f"{singular}s" in lowered):
+                matches.add(item_id)
+                break
+    if len(matches) == 1:
+        return matches.pop()
     return None
