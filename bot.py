@@ -3127,12 +3127,12 @@ async def _do_examine(update: Update, target_text: str) -> None:
         if interactables:
             names = [i["name"] for i in interactables.values()]
             await update.effective_chat.send_message(
-                f"Examine what, exactly? Things worth a closer look here: {', '.join(names)}",
+                f"🔍 **{character['name']}**, examine what, exactly? Things worth a closer look here: {', '.join(names)}",
                 message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
         else:
             await update.effective_chat.send_message(
-                "Nothing here catches your eye for a closer look.",
+                f"🔍 **{character['name']}** finds nothing here that catches the eye for a closer look.",
                 message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
         return
@@ -3142,7 +3142,7 @@ async def _do_examine(update: Update, target_text: str) -> None:
         names = [i["name"] for i in interactables.values()]
         hint = f" Things worth a closer look here: {', '.join(names)}" if names else ""
         await update.effective_chat.send_message(
-            f"You don't spot anything like that here.{hint}",
+            f"🔍 **{character['name']}** doesn't spot anything like that here.{hint}",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
