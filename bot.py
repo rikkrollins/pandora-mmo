@@ -2949,8 +2949,11 @@ async def _do_gather(update: Update, action_text: str) -> None:
     location = cl.get_location(CAMPAIGN, character["current_location"])
     node = _find_resource_node(location, action_text) if location else None
     if node is None:
+        resource_nodes = location.get("resource_nodes", []) if location else []
+        hint = f" Things worth gathering here: {', '.join(n['name'] for n in resource_nodes)}" if resource_nodes else ""
         await update.effective_chat.send_message(
-            "There's nothing worth gathering here.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            f"🌿 **{character['name']}** doesn't spot anything worth gathering here.{hint}",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
 
