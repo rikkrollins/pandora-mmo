@@ -62,7 +62,7 @@ from models import (
 )
 from rules.combat import resolve_attack, resolve_death_save
 from rules.crafting import RECIPES, get_recipe, resolve_craft
-from rules.dice import roll, ability_modifier, roll_ability_check, roll_d20
+from rules.dice import roll, roll_damage, ability_modifier, roll_ability_check, roll_d20
 from rules.item_generator import generate_item
 from rules.leveling import CLASS_HIT_DICE
 from rules.proficiency import practiced_bonus
@@ -971,6 +971,12 @@ def _format_combat_result(flavor_text: str, result: dict, actor_label: str, defe
     if hp_now is not None and hp_max is not None:
         lines.append(f"❤️ **{defender_label} HP:** {hp_now}/{hp_max}")
 
+    if result.get("relentless_endurance_triggered"):
+        lines.append(
+            f"💢 **{defender_label}'s Relentless Endurance triggers — instead of dropping, "
+            f"they cling to 1 HP!** (once per rest)"
+        )
+
     return "\n".join(lines)
 
 
@@ -1049,8 +1055,11 @@ def _personality_for_character_name(name: str) -> str | None:
 async def _post_narrated(update: Update, character: dict, action_text: str,
                           mechanical_result: dict, session: sessions.Session) -> None:
     actor_personality = _personality_for_character_name(character.get("name", ""))
+    location = cl.get_location(CAMPAIGN, character.get("current_location"))
+    location_description = location["description"] if location else None
     flavor = await asyncio.to_thread(
-        narrate_action, character, action_text, mechanical_result, session.recent_events(), actor_personality
+        narrate_action, character, action_text, mechanical_result, session.recent_events(),
+        actor_personality, location_description,
     )
     message = _format_combat_result(
         flavor, mechanical_result,
@@ -1332,7 +1341,12 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
         consecutive_noop_turns = 0
         target = min(opposing, key=lambda p: p["hp_current"])
         adv, disadv = _attack_advantage_disadvantage(current, target)
-        result = resolve_attack(current, target, DEFAULT_WEAPON, advantage=adv, disadvantage=disadv)
+        result = resolve_attack(
+            current, target, DEFAULT_WEAPON, advantage=adv, disadvantage=disadv,
+            defender_relentless_endurance_available=_relentless_endurance_available(target),
+        )
+        if result["relentless_endurance_triggered"]:
+            db.use_feature(target["telegram_user_id"], "relentless_endurance")
         _sync_player_to_db(target)
 
         applied_condition = None
@@ -1671,7 +1685,12 @@ async def _do_attack(update: Update, action_text: str) -> None:
         target = _pick_target(action_text, opposing)
 
         adv, disadv = _attack_advantage_disadvantage(attacker, target)
-        result = resolve_attack(attacker, target, DEFAULT_WEAPON, advantage=adv, disadvantage=disadv)
+        result = resolve_attack(
+            attacker, target, DEFAULT_WEAPON, advantage=adv, disadvantage=disadv,
+            defender_relentless_endurance_available=_relentless_endurance_available(target),
+        )
+        if result["relentless_endurance_triggered"]:
+            db.use_feature(target["telegram_user_id"], "relentless_endurance")
         _sync_player_to_db(target)
         await _post_narrated(update, attacker, action_text, result, session)
 
@@ -1771,6 +1790,18 @@ def _practiced_bonus_for(telegram_user_id: int, ability: str) -> int:
     """Current earned bonus for this ability from repeated real use (rules/proficiency.py)."""
     uses = db.get_skill_uses(telegram_user_id).get(ability, 0)
     return practiced_bonus(uses)
+
+
+def _relentless_endurance_available(character: dict) -> bool:
+    """
+    Whether a real (non-AI) Half-Orc character still has their real 5E
+    Relentless Endurance available this rest -- rules/combat.py has no DB
+    access by design, so this DB-backed check lives here and gets passed
+    IN to resolve_attack as a plain bool; see that function's docstring.
+    """
+    if character.get("race") != "Half-Orc" or character.get("is_ai"):
+        return False
+    return db.get_feature_uses(character["telegram_user_id"], "relentless_endurance") == 0
 
 
 def _format_skill_check_result(flavor_text: str, result: dict, ability: str, dc: int, success: bool) -> str:
@@ -2154,6 +2185,12 @@ def _apply_natural_healing(telegram_user_id: int, character: dict, elapsed_secon
             hp_current=character["hp_current"] + hp_gain,
             spell_slots_current=character["spell_slots_current"] + slot_gain,
         )
+    # Limited-use class/racial features (Second Wind, Rage, Bardic
+    # Inspiration, Lay on Hands, Relentless Endurance) are real "per long
+    # rest" resources, not gradually recovered like HP/spell slots above
+    # -- they only reset once a FULL rest has actually completed.
+    if fraction >= 1.0 and character.get("feature_uses"):
+        db.reset_feature_uses(telegram_user_id)
     return hp_gain, slot_gain
 
 
@@ -3064,6 +3101,209 @@ async def _do_craft(update: Update, text: str) -> None:
     else:
         message += "\n⚗️ The attempt fails, but your materials aren't wasted — you can try again."
     await update.effective_chat.send_message(message, message_thread_id=config.TOPIC_ADVENTURE_ID)
+
+
+async def _do_second_wind(update: Update) -> None:
+    """
+    Real Fighter class feature: bonus action, once per rest, heal
+    1d10 + fighter level HP. Uses the shared feature_uses resource
+    (see db.use_feature/get_feature_uses) -- resets on a full rest,
+    same as every other limited-use feature added in this pass.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if character["char_class"] != "Fighter":
+        await update.effective_chat.send_message(
+            "Second Wind is a real Fighter class feature — your class doesn't have it.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    if db.get_feature_uses(update.effective_user.id, "second_wind") >= 1:
+        await update.effective_chat.send_message(
+            "You've already used Second Wind since your last rest.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    healed = roll_damage("1d10", modifier=character["level"])["total"]
+    new_hp = min(character["hp_max"], character["hp_current"] + healed)
+    actual_healed = new_hp - character["hp_current"]
+    db.update_character(update.effective_user.id, hp_current=new_hp)
+    db.use_feature(update.effective_user.id, "second_wind")
+
+    await update.effective_chat.send_message(
+        f"💨 **{character['name']}** catches their breath with Second Wind, recovering "
+        f"**{actual_healed} HP** ({new_hp}/{character['hp_max']}).",
+        message_thread_id=config.TOPIC_ADVENTURE_ID,
+    )
+
+
+RAGE_MAX_USES = 2
+RAGE_DAMAGE_BONUS = 2
+
+
+async def _do_rage(update: Update) -> None:
+    """
+    Real Barbarian class feature: bonus action to enter a rage — bonus
+    melee damage and resistance to bludgeoning/piercing/slashing damage.
+    2 uses per rest at level 1 (real 5E). The "raging" flag lives on the
+    LIVE combat participant dict (session.participants), the same way
+    existing conditions like prone/poisoned already do -- in-memory
+    only, resets when combat ends, not persisted to the DB. Simplified
+    from real 5E: lasts until combat ends rather than tracking the real
+    per-round "no attack/no damage taken" end conditions, and applies as
+    a flat damage resistance (half incoming damage) rather than only to
+    the three specific physical damage types, since this combat system
+    doesn't model damage types at all -- an honest, documented
+    simplification, not an oversight.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if character["char_class"] != "Barbarian":
+        await update.effective_chat.send_message(
+            "Rage is a real Barbarian class feature — your class doesn't have it.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    if db.get_feature_uses(update.effective_user.id, "rage") >= RAGE_MAX_USES:
+        await update.effective_chat.send_message(
+            f"You've already raged {RAGE_MAX_USES} times since your last rest.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    session = sessions.get_session(update.effective_chat.id)
+    if session is None:
+        await update.effective_chat.send_message(
+            "You can only enter a rage in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    participant = next(
+        (p for p in session.participants if p["telegram_user_id"] == update.effective_user.id), None
+    )
+    if participant is None:
+        await update.effective_chat.send_message(
+            "You're not part of the current fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if participant.get("raging"):
+        await update.effective_chat.send_message(
+            "You're already raging.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    participant["raging"] = True
+    db.use_feature(update.effective_user.id, "rage")
+
+    await update.effective_chat.send_message(
+        f"😡 **{character['name']}** flies into a rage — bonus damage and resistance to "
+        f"physical harm for the rest of this fight!",
+        message_thread_id=config.TOPIC_ADVENTURE_ID,
+    )
+
+
+BARDIC_INSPIRATION_DIE = "1d6"
+
+
+async def _do_bardic_inspiration(update: Update, target_text: str) -> None:
+    """
+    Real Bard class feature: bonus action, give an ally Bardic
+    Inspiration. Real 5E grants a d6 to add to the ally's NEXT roll;
+    simplified here to an immediate temporary-HP-style boost (rather
+    than deferred pending-roll-bonus tracking, which would require
+    touching every roll call site in the game) -- an honest, documented
+    simplification, not a smaller version of the real rule pretending
+    to be the same thing. Uses = Charisma modifier (minimum 1), real
+    5E formula, refreshing on a full rest.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if character["char_class"] != "Bard":
+        await update.effective_chat.send_message(
+            "Bardic Inspiration is a real Bard class feature — your class doesn't have it.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    max_uses = max(1, ability_modifier(character["charisma"]))
+    if db.get_feature_uses(update.effective_user.id, "bardic_inspiration") >= max_uses:
+        await update.effective_chat.send_message(
+            f"You're out of Bardic Inspiration until your next rest ({max_uses} use(s) per rest).",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    target_character = _find_party_target_by_name(target_text) or character
+    boost = roll(1, 6)[0]
+    new_hp = min(target_character["hp_max"], target_character["hp_current"] + boost)
+    actual_boost = new_hp - target_character["hp_current"]
+    db.update_character(target_character["telegram_user_id"], hp_current=new_hp)
+    db.use_feature(update.effective_user.id, "bardic_inspiration")
+
+    is_self = target_character["telegram_user_id"] == character["telegram_user_id"]
+    target_note = "themself" if is_self else f"**{target_character['name']}**"
+    await update.effective_chat.send_message(
+        f"🎵 **{character['name']}** inspires {target_note} with a stirring word — "
+        f"a bolstering **+{actual_boost} HP** ({new_hp}/{target_character['hp_max']}).",
+        message_thread_id=config.TOPIC_ADVENTURE_ID,
+    )
+
+
+async def _do_lay_on_hands(update: Update, target_text: str) -> None:
+    """
+    Real Paladin class feature: touch to heal from a pool of 5 x
+    paladin level HP. Real 5E lets you spend the pool in any increment
+    across multiple uses; simplified here to spending the WHOLE pool in
+    one action, once per rest (same shape as Second Wind) rather than
+    tracking a separately-spendable partial pool -- an honest,
+    documented simplification matching how most actual play spends it
+    anyway.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if character["char_class"] != "Paladin":
+        await update.effective_chat.send_message(
+            "Lay on Hands is a real Paladin class feature — your class doesn't have it.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    if db.get_feature_uses(update.effective_user.id, "lay_on_hands") >= 1:
+        await update.effective_chat.send_message(
+            "You've already used your Lay on Hands pool since your last rest.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    pool = 5 * character["level"]
+    target_character = _find_party_target_by_name(target_text) or character
+    new_hp = min(target_character["hp_max"], target_character["hp_current"] + pool)
+    actual_healed = new_hp - target_character["hp_current"]
+    db.update_character(target_character["telegram_user_id"], hp_current=new_hp)
+    db.use_feature(update.effective_user.id, "lay_on_hands")
+
+    is_self = target_character["telegram_user_id"] == character["telegram_user_id"]
+    target_note = "themself" if is_self else f"**{target_character['name']}**"
+    await update.effective_chat.send_message(
+        f"🙏 **{character['name']}** lays hands on {target_note}, channeling divine healing — "
+        f"**{actual_healed} HP** restored ({new_hp}/{target_character['hp_max']}).",
+        message_thread_id=config.TOPIC_ADVENTURE_ID,
+    )
 
 
 async def _do_look(update: Update) -> None:
@@ -4220,6 +4460,14 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         await _do_gather(update, intent.get("raw_text", text))
     elif action == "craft":
         await _do_craft(update, text)
+    elif action == "second_wind":
+        await _do_second_wind(update)
+    elif action == "rage":
+        await _do_rage(update)
+    elif action == "bardic_inspiration":
+        await _do_bardic_inspiration(update, intent.get("target") or text)
+    elif action == "lay_on_hands":
+        await _do_lay_on_hands(update, intent.get("target") or text)
     elif action == "list_characters":
         await _do_list_characters(update)
     elif action == "switch_character":

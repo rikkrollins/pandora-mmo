@@ -99,28 +99,146 @@ SPELLS = {
             "hp_max": 9, "proficiency_bonus": 2,
         },
     },
+    # --- Cantrips added for full per-class coverage (2026-07-11) ---
+    "eldritch_blast": {
+        "name": "Eldritch Blast", "level": 0, "school": "evocation",
+        "effect": "damage", "damage_dice": "1d10",
+    },
+    "ray_of_frost": {
+        "name": "Ray of Frost", "level": 0, "school": "evocation",
+        "effect": "damage", "damage_dice": "1d8",
+    },
+    "produce_flame": {
+        "name": "Produce Flame", "level": 0, "school": "conjuration",
+        "effect": "damage", "damage_dice": "1d8",
+    },
+    "mage_hand": {
+        "name": "Mage Hand", "level": 0, "school": "conjuration",
+        "effect": "buff", "duration_rounds": 1,
+    },
+    "prestidigitation": {
+        "name": "Prestidigitation", "level": 0, "school": "transmutation",
+        "effect": "buff", "duration_rounds": 1,
+    },
+    "dancing_lights": {
+        "name": "Dancing Lights", "level": 0, "school": "evocation",
+        "effect": "buff", "duration_rounds": 10,
+    },
+    "spare_the_dying": {
+        "name": "Spare the Dying", "level": 0, "school": "necromancy",
+        "effect": "buff", "duration_rounds": 1,
+    },
+    # --- Leveled spells added for real level-up progression (2026-07-11) ---
+    "charm_person": {
+        "name": "Charm Person", "level": 1, "school": "enchantment",
+        "effect": "buff", "duration_rounds": 10,
+    },
+    "guiding_bolt": {
+        "name": "Guiding Bolt", "level": 1, "school": "evocation",
+        "effect": "damage", "damage_dice": "4d6",
+    },
+    "command": {
+        "name": "Command", "level": 1, "school": "enchantment",
+        "effect": "buff", "duration_rounds": 1,
+    },
+    "protection_from_evil_and_good": {
+        "name": "Protection from Evil and Good", "level": 1, "school": "abjuration",
+        "effect": "buff", "duration_rounds": 10,
+    },
+    "animal_friendship": {
+        "name": "Animal Friendship", "level": 1, "school": "enchantment",
+        "effect": "buff", "duration_rounds": 10,
+    },
+    "hunters_mark": {
+        "name": "Hunter's Mark", "level": 1, "school": "divination",
+        "effect": "buff", "duration_rounds": 10,
+    },
+    "hex": {
+        "name": "Hex", "level": 1, "school": "enchantment",
+        "effect": "buff", "duration_rounds": 10,
+    },
+    "longstrider": {
+        "name": "Longstrider", "level": 1, "school": "transmutation",
+        "effect": "buff", "duration_rounds": 10,
+    },
+    "scorching_ray": {
+        "name": "Scorching Ray", "level": 2, "school": "evocation",
+        "effect": "damage", "damage_dice": "6d6",
+    },
+    "spiritual_weapon": {
+        "name": "Spiritual Weapon", "level": 2, "school": "evocation",
+        "effect": "damage", "damage_dice": "1d8+3",
+    },
+    "misty_step": {
+        "name": "Misty Step", "level": 2, "school": "conjuration",
+        "effect": "buff", "duration_rounds": 1,
+    },
+    "hold_person": {
+        "name": "Hold Person", "level": 2, "school": "enchantment",
+        "effect": "buff", "duration_rounds": 10,
+    },
+    "moonbeam": {
+        "name": "Moonbeam", "level": 2, "school": "evocation",
+        "effect": "damage", "damage_dice": "2d10", "save_ability": "constitution",
+    },
+    "dispel_magic": {
+        "name": "Dispel Magic", "level": 3, "school": "abjuration",
+        "effect": "negate", "duration_rounds": 0,
+    },
+    "call_lightning": {
+        "name": "Call Lightning", "level": 3, "school": "conjuration",
+        "effect": "damage", "damage_dice": "3d10", "save_ability": "dexterity",
+    },
 }
 
 # Cantrips (level 0) each class has at-will, alongside their leveled spells.
+# Real 5E SRD per-class cantrip counts at level 1 (2026-07-11 pass: filled
+# these out to match real cantrip counts -- previously most classes only
+# had a single placeholder cantrip). Paladin and Ranger correctly have
+# none: neither class ever gets cantrips in 5E, only leveled spells
+# starting at character level 2.
 CLASS_CANTRIPS = {
-    "wizard": ["fire_bolt"],
-    "sorcerer": ["fire_bolt"],
-    "warlock": ["fire_bolt"],
-    "cleric": ["sacred_flame", "guidance"],
-    "druid": ["guidance"],
-    "bard": ["vicious_mockery"],
+    "wizard": ["fire_bolt", "ray_of_frost", "prestidigitation"],
+    "sorcerer": ["fire_bolt", "ray_of_frost", "mage_hand", "prestidigitation"],
+    "warlock": ["eldritch_blast", "mage_hand"],
+    "cleric": ["sacred_flame", "guidance", "thaumaturgy"],
+    "druid": ["guidance", "produce_flame"],
+    "bard": ["vicious_mockery", "dancing_lights"],
 }
 
-# Which classes get access to which spells, and at what character level.
+# Which classes get access to which spells, and at what character level
+# (see spells_unlocked_at_level). NOTE: bot.py's character-creation flow
+# grants the FIRST TWO entries of a class's list outright at level 1 (for
+# classes with starting slots), so the first two entries here MUST always
+# be real, valid 1st-level spells for that class -- everything after that
+# is unlocked later via spells_unlocked_at_level, which correctly filters
+# by real spell level regardless of list order.
+#
+# 2026-07-11 accuracy pass fixed three real 5E inaccuracies found here:
+# Cleric had "shield" (that's a Wizard/Sorcerer-only spell, never Cleric),
+# Druid had "healing_word" (never on Druid's real spell list), and
+# Warlock had "magic_missile"/"burning_hands" (neither is a real Warlock
+# spell -- Warlocks have their own distinct spell list). Also fixed: Bard
+# previously got a 2nd-level spell (Invisibility) granted at character
+# creation with no level gate, since the old list's first two entries
+# weren't both real 1st-level spells.
 CLASS_SPELL_LISTS = {
-    "wizard": ["magic_missile", "shield", "burning_hands", "invisibility", "fireball", "lightning_bolt", "counterspell"],
-    "sorcerer": ["magic_missile", "shield", "burning_hands", "fireball", "lightning_bolt"],
-    "cleric": ["cure_wounds", "healing_word", "shield"],
-    "druid": ["cure_wounds", "healing_word"],
-    "bard": ["healing_word", "invisibility"],
-    "warlock": ["magic_missile", "burning_hands"],
-    "paladin": ["cure_wounds"],
-    "ranger": ["cure_wounds"],
+    "wizard": ["magic_missile", "shield", "burning_hands", "charm_person",
+               "scorching_ray", "misty_step", "hold_person",
+               "fireball", "lightning_bolt", "counterspell", "dispel_magic"],
+    "sorcerer": ["magic_missile", "shield", "burning_hands", "charm_person",
+                 "scorching_ray", "misty_step", "hold_person",
+                 "fireball", "lightning_bolt", "counterspell"],
+    "cleric": ["cure_wounds", "healing_word", "guiding_bolt", "command",
+               "spiritual_weapon", "hold_person", "dispel_magic"],
+    "druid": ["cure_wounds", "animal_friendship", "faerie_fire",
+              "moonbeam", "hold_person", "call_lightning"],
+    "bard": ["healing_word", "charm_person", "faerie_fire",
+             "invisibility", "hold_person", "dispel_magic"],
+    "warlock": ["charm_person", "hex", "protection_from_evil_and_good",
+                "misty_step", "hold_person", "counterspell", "dispel_magic"],
+    "paladin": ["cure_wounds", "command", "protection_from_evil_and_good"],
+    "ranger": ["cure_wounds", "animal_friendship", "hunters_mark", "longstrider"],
 }
 
 

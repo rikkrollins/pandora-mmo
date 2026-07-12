@@ -1,11 +1,30 @@
 """
 class_features.py
 Real Dungeons & Dragons 5E (SRD) class features available at character
-level 1. This build doesn't yet model resource tracking for all of
-these (e.g. Rage uses/day, Ki points), so features are granted and
-shown on the character sheet as real, accurate information — using
-them mechanically in combat beyond what's already built (attacks,
-spells) is a further step, not yet wired in everywhere.
+level 1, shown on the character sheet as real, accurate information.
+
+2026-07-11: five of these are now genuinely mechanical, not just
+flavor text, backed by a real limited-use resource (db.py's
+feature_uses, resets on a full rest) or an in-memory combat condition
+(matching prone/poisoned):
+  - Fighter's Second Wind (real command, heals 1d10+level HP, 1/rest)
+  - Barbarian's Rage (real command, bonus damage + damage resistance
+    for the fight, 2/rest -- simplified to last until combat ends and
+    to resist ALL damage rather than the three specific physical types,
+    since this system has no damage-type modeling at all)
+  - Rogue's Sneak Attack (automatic +1d6 when attacking with advantage
+    -- no adjacent-ally trigger, since this system has no positioning)
+  - Bard's Bardic Inspiration (real command, immediate +1d6 HP to an
+    ally, uses = CHA modifier/rest -- simplified from a deferred bonus
+    on the ally's next roll, which would need plumbing into every roll
+    call site in the game)
+  - Paladin's Lay on Hands (real command, heals 5 x level HP, once per
+    rest -- simplified to spending the whole pool at once rather than
+    a separately-spendable partial pool)
+
+Everything else here is still real, accurate flavor text only --
+using it mechanically in combat beyond what's built above is a further
+step, not yet wired in everywhere.
 """
 
 CLASS_FEATURES_LEVEL_1 = {

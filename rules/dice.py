@@ -92,12 +92,17 @@ def roll_attack(character: dict, target_ac: int, ability: str = "strength",
 _DICE_NOTATION_RE = re.compile(r"^(\d+)d(\d+)\s*([+-]\s*\d+)?$")
 
 
-def roll_damage(dice_notation: str, modifier: int = 0, critical: bool = False) -> dict:
+def roll_damage(dice_notation: str, modifier: int = 0, critical: bool = False, extra_dice: int = 0) -> dict:
     """
     Parse dice notation like '1d8', '2d6', or '1d8+2' and return damage
     rolled. An explicit `modifier` argument is ADDED to any modifier
     already present in the notation string itself. On a critical hit,
-    the DICE are doubled (not the modifier), per 5E rules.
+    the DICE are doubled (not the modifier), per 5E rules. `extra_dice`
+    (e.g. a Half-Orc's real Savage Attacks trait: "roll one additional
+    weapon damage die when determining the extra damage for a critical
+    hit") adds that many MORE dice of the same size on top of whatever
+    `critical` already doubled — distinct from doubling, per the real
+    5E wording of that trait.
     """
     match = _DICE_NOTATION_RE.match(dice_notation.strip())
     if not match:
@@ -109,6 +114,7 @@ def roll_damage(dice_notation: str, modifier: int = 0, critical: bool = False) -
 
     if critical:
         num_dice *= 2
+    num_dice += extra_dice
 
     rolls = roll(num_dice, sides)
     total = sum(rolls) + total_modifier

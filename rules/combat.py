@@ -22,7 +22,8 @@ def start_combat(participants: list[dict]) -> list[dict]:
 
 
 def resolve_attack(attacker: dict, defender: dict, weapon: dict,
-                    advantage: bool = False, disadvantage: bool = False) -> dict:
+                    advantage: bool = False, disadvantage: bool = False,
+                    defender_relentless_endurance_available: bool = False) -> dict:
     """
     Resolve one attack. `weapon` is a dict like:
         {"ability": "strength", "damage_dice": "1d8", "damage_bonus": 0}
@@ -32,6 +33,32 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     prone attacker has disadvantage; attacking a prone target has
     advantage) — if both are True they correctly cancel out (5E rule,
     already handled inside roll_attack/roll_d20).
+
+    Two real Half-Orc racial traits are handled here (both check
+    attacker/defender['race'], so every other race is completely
+    unaffected): Savage Attacks (an extra weapon damage die on a melee
+    crit, real 5E wording — distinct from the normal crit doubling) is
+    pure logic, resolved unconditionally. Relentless Endurance (drop to
+    1 HP instead of 0, once per long rest) needs real "already used
+    this rest" state that only the DB-backed caller (bot.py) knows —
+    this module has no I/O by design, so the caller passes whether it's
+    currently AVAILABLE via `defender_relentless_endurance_available`,
+    and this function reports back whether it actually triggered
+    (`relentless_endurance_triggered`) so the caller can persist that
+    the use was spent, same rules-decide/bot.py-persists split used
+    everywhere else in this game.
+
+    Two more real class features are also handled here, purely from
+    flags already present on the participant dicts (bot.py sets these,
+    see _do_rage): a Rogue's Sneak Attack (+1d6 damage, once per turn —
+    automatically satisfied since this system already gives each
+    participant only one attack per turn — when attacking with
+    advantage; real 5E's other trigger, "an ally within 5 ft. of the
+    target," has no equivalent here since this combat has no
+    positioning/adjacency system at all) and a raging Barbarian's bonus
+    damage plus resistance to all incoming damage while raging
+    (simplified from the real three specific physical damage types,
+    since this system doesn't model damage types at all).
     """
     attack_result = roll_attack(
         attacker,
@@ -43,14 +70,30 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     )
 
     damage_dealt = 0
+    relentless_endurance_triggered = False
     if attack_result["hit"]:
+        savage_attacks_die = 1 if (attacker.get("race") == "Half-Orc" and attack_result["critical_hit"]) else 0
+        sneak_attack_die = 1 if (attacker.get("char_class") == "Rogue" and advantage) else 0
+        rage_bonus = 2 if attacker.get("raging") else 0
         dmg = roll_damage(
             weapon["damage_dice"],
-            modifier=weapon.get("damage_bonus", 0),
+            modifier=weapon.get("damage_bonus", 0) + rage_bonus,
             critical=attack_result["critical_hit"],
+            extra_dice=savage_attacks_die,
         )
         damage_dealt = max(dmg["total"], 0)
-        defender["hp_current"] = max(defender["hp_current"] - damage_dealt, 0)
+        if sneak_attack_die:
+            sneak_dmg = roll_damage("1d6", critical=attack_result["critical_hit"])
+            damage_dealt += sneak_dmg["total"]
+        if defender.get("raging"):
+            damage_dealt = damage_dealt // 2
+        hp_before = defender["hp_current"]
+        hp_after = max(hp_before - damage_dealt, 0)
+        if (hp_after == 0 and hp_before > 0 and defender.get("race") == "Half-Orc"
+                and defender_relentless_endurance_available):
+            hp_after = 1
+            relentless_endurance_triggered = True
+        defender["hp_current"] = hp_after
 
     return {
         "attacker": attacker["name"],
@@ -62,6 +105,7 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         "attack_roll": attack_result["total"],
         "target_ac": defender["armor_class"],
         "damage_dealt": damage_dealt,
+        "relentless_endurance_triggered": relentless_endurance_triggered,
         "defender_hp_remaining": defender["hp_current"],
         "defender_hp_max": defender.get("hp_max", defender["hp_current"]),
     }

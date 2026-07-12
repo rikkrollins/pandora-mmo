@@ -109,7 +109,13 @@ def _combat_preamble() -> str:
         "carry a thread from what just happened rather than starting cold "
         "each time. You must NEVER invent or alter stat outcomes, dice "
         "rolls, damage numbers, or hit/miss results — treat the provided "
-        "result as ground truth and narrate it faithfully. "
+        "result as ground truth and narrate it faithfully. Make this feel "
+        "epic and alive, not a dry log line: lean into real sensory, "
+        "elemental, and environmental imagery appropriate to the action "
+        "(a lightning spell crashing down like the wrath of a storm, flame "
+        "roaring hungrily, steel ringing against steel) — grounded in "
+        "whatever real physical surroundings you're given, never invented "
+        "beyond them. "
         "Mention the actual raw d20 number rolled somewhere in your narration "
         "(e.g. 'rolling a 17...'), and calibrate how dramatic or restrained "
         f"your prose is to how good or bad that roll actually was. {style_directive()}"
@@ -144,7 +150,8 @@ def _drama_instruction(raw_roll: int | None, critical_hit: bool, critical_fail: 
 
 
 def _build_prompt(character: dict, action_text: str, mechanical_result: dict,
-                   recent_events: list[str] | None = None, actor_personality: str | None = None) -> str:
+                   recent_events: list[str] | None = None, actor_personality: str | None = None,
+                   location_description: str | None = None) -> str:
     recent_events = recent_events or []
     history = "\n".join(f"- {e}" for e in recent_events[-10:]) or "(no prior events)"
 
@@ -159,12 +166,27 @@ def _build_prompt(character: dict, action_text: str, mechanical_result: dict,
         f"they act: {actor_personality}\n\n"
         if actor_personality else ""
     )
+    # Real, already-decided physical surroundings -- the ONLY environment
+    # detail the model is allowed to react to, never invented. Lets a
+    # lightning/fire effect meaningfully play off a real wet/dry/enclosed
+    # setting (a storm crashing down in an open field, a flame licking
+    # dangerously close to spilled ale in a tavern) instead of narrating
+    # every cast in a placeless void — ground truth (hit/miss, damage)
+    # never changes because of this, it only colors HOW it's described.
+    environment_line = (
+        f"The physical surroundings this is happening in (let this genuinely "
+        f"color the imagery — an apt or ironic environmental detail is far "
+        f"more memorable than generic prose, but never let it change who won, "
+        f"lost, or how much damage was dealt): {location_description}\n\n"
+        if location_description else ""
+    )
 
     return (
         f"{_combat_preamble()}\n\n"
         f"Character: {character.get('name')} ({character.get('char_class')}), "
         f"HP: {character.get('hp_current')}/{character.get('hp_max')}\n\n"
         f"{personality_line}"
+        f"{environment_line}"
         f"Player action: {action_text}\n\n"
         f"Mechanical result (already decided, narrate faithfully): {mechanical_result}\n\n"
         f"Tone guidance for this specific roll: {drama}\n\n"
@@ -174,7 +196,8 @@ def _build_prompt(character: dict, action_text: str, mechanical_result: dict,
 
 
 def narrate_action(character: dict, action_text: str, mechanical_result: dict,
-                    recent_events: list[str] | None = None, actor_personality: str | None = None) -> str:
+                    recent_events: list[str] | None = None, actor_personality: str | None = None,
+                    location_description: str | None = None) -> str:
     """
     Sends the mechanical result to the narration model and returns prose.
     Falls back to a plain template if Ollama is unreachable or errors.
@@ -182,8 +205,13 @@ def narrate_action(character: dict, action_text: str, mechanical_result: dict,
     a recruited companion's or a hostile NPC's combat turn read in their
     own voice instead of generic monster-attack prose — same ground-truth
     mechanical result either way, just narrated in character.
+    `location_description` (bot.py's _post_narrated resolves this from the
+    real, current location) lets the environment genuinely inform the
+    prose — see its note in _build_prompt for why and its limits.
     """
-    prompt = _build_prompt(character, action_text, mechanical_result, recent_events, actor_personality)
+    prompt = _build_prompt(
+        character, action_text, mechanical_result, recent_events, actor_personality, location_description
+    )
 
     try:
         response = requests.post(

@@ -21,6 +21,7 @@ RACES = {
             "Darkvision 60 ft.",
             "Fey Ancestry: advantage on saves vs. being charmed, immune to magical sleep",
             "Keen Senses: proficiency in Perception",
+            "Trance: doesn't need to sleep -- meditates 4 hours a day for the same benefit as 8 hours of sleep",
         ],
     },
     "Dwarf": {
@@ -30,6 +31,7 @@ RACES = {
             "Darkvision 60 ft.",
             "Dwarven Resilience: advantage on saves vs. poison, resistance to poison damage",
             "Stonecunning: double proficiency bonus on History checks about stonework",
+            "Dwarven Combat Training: proficiency with battleaxe, handaxe, light hammer, and warhammer",
         ],
     },
     "Halfling": {
@@ -66,6 +68,26 @@ RACES = {
             "Darkvision 60 ft.",
             "Hellish Resistance: resistance to fire damage",
             "Infernal Legacy: knows the Thaumaturgy cantrip",
+        ],
+    },
+    "Gnome": {
+        "ability_bonuses": {"intelligence": 2},
+        "speed": 25,
+        "traits": [
+            "Darkvision 60 ft.",
+            "Gnome Cunning: advantage on Intelligence, Wisdom, and Charisma "
+            "saving throws against magic",
+        ],
+    },
+    "Half-Orc": {
+        "ability_bonuses": {"strength": 2, "constitution": 1},
+        "speed": 30,
+        "traits": [
+            "Darkvision 60 ft.",
+            "Menacing: proficiency in Intimidation",
+            "Relentless Endurance: when reduced to 0 HP but not killed outright, "
+            "drop to 1 HP instead, once per long rest",
+            "Savage Attacks: roll one additional weapon damage die on a melee critical hit",
         ],
     },
 }

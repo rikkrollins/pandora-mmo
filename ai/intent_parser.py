@@ -37,7 +37,7 @@ Given a player's free-text message and some context, output ONLY a JSON object \
 talk_npc, move, look, check_inventory, check_party, buy, sell, steal, cast_spell, join_guild, \
 recruit_npc, rest, go_inactive, skill_check, shove, show_map, gather, craft, list_characters, \
 switch_character, delete_character, fast_travel, accept_quest, check_quests, ask_clue, \
-answer_puzzle, gamble, chat>", \
+answer_puzzle, gamble, chat, second_wind, rage, bardic_inspiration, lay_on_hands>", \
 "ability": "<one of: strength, dexterity, constitution, intelligence, wisdom, charisma, or null>", \
 "target": "<name/place/item mentioned, or null>", "npc_name": "<npc name if talking to one, or null>", \
 "item_name": "<item mentioned for buy/sell, or null>", "spell_name": "<spell mentioned for cast_spell, or null>", \
@@ -105,6 +105,14 @@ getting caught, with real consequences, not the same as "buy".
 - "accept_party_invite" is for accepting a pending party invite.
 - "leave_party" is for leaving a party the character is currently in.
 - "find_merchant" is for asking where to get supplies or find the nearest shop/merchant.
+- "second_wind" is specifically a Fighter's real class feature: a bonus action to catch their breath and \
+recover some HP outside of resting (e.g. "I use second wind", "catch my breath", "second wind").
+- "rage" is specifically a Barbarian's real class feature: entering a rage before or during a fight for \
+bonus damage and damage resistance (e.g. "I rage", "I fly into a rage", "enter a rage").
+- "bardic_inspiration" is specifically a Bard's real class feature: giving an ally an inspiration die to \
+help their next roll (e.g. "I give X bardic inspiration", "inspire my ally"). Set "target" to who it's for.
+- "lay_on_hands" is specifically a Paladin's real class feature: touching someone to heal them from their \
+pool of divine healing (e.g. "I use lay on hands on X", "I lay hands on myself"). Set "target" to who it's for.
 - "chat" is for anything else — general roleplay talk with no clear game action.
 Output ONLY the JSON object, nothing else."""
 
@@ -227,6 +235,19 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in ["gamble", "wager", "place a bet", "i bet", "let's bet", "lets bet",
                                     "play dice for gold"]):
         return {**base, "action": "gamble"}
+
+    if any(w in lowered for w in ["second wind", "catch my breath", "catch our breath"]):
+        return {**base, "action": "second_wind"}
+
+    if any(w in lowered for w in ["i rage", "fly into a rage", "enter a rage", "go into a rage",
+                                    "i enter rage", "rage now"]):
+        return {**base, "action": "rage"}
+
+    if any(w in lowered for w in ["bardic inspiration", "inspire "]):
+        return {**base, "action": "bardic_inspiration"}
+
+    if any(w in lowered for w in ["lay on hands", "lay hands"]):
+        return {**base, "action": "lay_on_hands"}
 
     # Checked BEFORE check_sheet below: "my characters" (plural, roster) is
     # a substring-superset of check_sheet's "my character" (singular) —
@@ -391,6 +412,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
                 "fast_travel", "accept_quest", "check_quests", "ask_clue",
                 "answer_puzzle", "gamble", "chat", "examine", "flee", "resolve_choice",
                 "invite_to_party", "accept_party_invite", "leave_party", "find_merchant",
+                "second_wind", "rage", "bardic_inspiration", "lay_on_hands",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

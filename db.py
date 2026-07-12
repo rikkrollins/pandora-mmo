@@ -58,7 +58,8 @@ CREATE TABLE IF NOT EXISTS characters (
     skill_uses TEXT NOT NULL DEFAULT '{}',
     is_inactive INTEGER NOT NULL DEFAULT 0,
     last_active_at TEXT,
-    active_quests TEXT NOT NULL DEFAULT '{}'
+    active_quests TEXT NOT NULL DEFAULT '{}',
+    feature_uses TEXT NOT NULL DEFAULT '{}'
 );
 """
 
@@ -221,6 +222,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN is_autonomous INTEGER NOT NULL DEFAULT 0")
         if "rest_started_at" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN rest_started_at TEXT")
+        if "feature_uses" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN feature_uses TEXT NOT NULL DEFAULT '{}'")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -231,6 +234,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     d["visited_locations"] = json.loads(d["visited_locations"])
     d["skill_uses"] = json.loads(d["skill_uses"])
     d["active_quests"] = json.loads(d["active_quests"])
+    d["feature_uses"] = json.loads(d["feature_uses"])
     return d
 
 
@@ -339,7 +343,7 @@ def update_character(telegram_user_id: int, **fields) -> dict | None:
     if not fields:
         return get_character(telegram_user_id)
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -696,6 +700,36 @@ def record_skill_use(telegram_user_id: int, ability: str) -> int:
     uses[ability] = uses.get(ability, 0) + 1
     update_character(telegram_user_id, skill_uses=uses)
     return uses[ability]
+
+
+# ---------------------------------------------------------------------
+# feature_uses: same shape/rest-gating as skill_uses, but for limited-use
+# class/racial features (Second Wind, Rage, Bardic Inspiration, Lay on
+# Hands, Relentless Endurance) instead of ability practice. Reset to {}
+# by _apply_natural_healing (bot.py) only on a FULL rest completion --
+# these are real "per long rest" resources, not gradually recovered like
+# HP/spell slots, so they either reset all at once or not at all.
+# ---------------------------------------------------------------------
+
+def get_feature_uses(telegram_user_id: int, feature_id: str) -> int:
+    character = get_character(telegram_user_id)
+    return character["feature_uses"].get(feature_id, 0) if character else 0
+
+
+def use_feature(telegram_user_id: int, feature_id: str) -> int:
+    """Increments and returns the new use count for this feature this rest cycle."""
+    character = get_character(telegram_user_id)
+    if character is None:
+        return 0
+    uses = character["feature_uses"]
+    uses[feature_id] = uses.get(feature_id, 0) + 1
+    update_character(telegram_user_id, feature_uses=uses)
+    return uses[feature_id]
+
+
+def reset_feature_uses(telegram_user_id: int) -> None:
+    """Clears all limited-use feature counters -- called on a full rest."""
+    update_character(telegram_user_id, feature_uses={})
 
 
 # ---------------------------------------------------------------------

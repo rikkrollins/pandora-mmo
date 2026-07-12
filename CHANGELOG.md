@@ -2,6 +2,73 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.4.0] — Real class features, complete spells/races, and epic environment-aware narration
+
+### Mechanical class features (previously flavor text only)
+Five real 5E class features are now genuinely usable, not just shown on
+the character sheet, backed by a new shared "limited-use resource"
+system (resets on a full rest, same gating as HP/spell-slot recovery):
+- **Fighter — Second Wind**: bonus-action heal (1d10 + level), once per rest.
+- **Barbarian — Rage**: bonus damage and resistance to incoming damage
+  for the rest of a fight, 2 uses per rest.
+- **Rogue — Sneak Attack**: automatic +1d6 damage once per turn when
+  attacking with advantage.
+- **Bard — Bardic Inspiration**: an immediate HP boost to an ally,
+  uses per rest equal to Charisma modifier.
+- **Paladin — Lay on Hands**: heals a real 5-x-level HP pool, once per rest.
+
+Everything else in `class_features.py` (Divine Domain, Sorcerous
+Origin, Favored Enemy, etc.) is still accurate flavor text, not yet
+mechanical — this build is honest about that split rather than
+half-building any of them.
+
+### Complete spells, cantrips, and races
+- Filled out real 5E cantrip counts for every casting class (Wizard,
+  Sorcerer, Warlock, Cleric, Druid, Bard) — most previously had only a
+  single placeholder cantrip.
+- Added real leveled spells so every casting class actually gains new
+  spells on level-up through character level 5, not just their two
+  starting spells.
+- Fixed three real accuracy bugs found along the way: Cleric had
+  "Shield" (a Wizard/Sorcerer-only spell), Druid had "Healing Word"
+  (never on Druid's real spell list), and Warlock had "Magic Missile"/
+  "Burning Hands" (neither is a real Warlock spell — replaced with
+  Warlock's actual spell list, including its signature Eldritch Blast
+  cantrip). Also fixed Bard previously being granted a 2nd-level spell
+  at character creation with no level gate.
+- Added the two missing core 5E races, **Gnome** and **Half-Orc** —
+  both fully playable with real ability bonuses and traits, including
+  two genuinely mechanical Half-Orc traits: **Relentless Endurance**
+  (drop to 1 HP instead of 0 once per rest) and **Savage Attacks**
+  (an extra weapon damage die on a melee critical hit).
+- Filled in two missing traits on existing races: Elf's Trance and
+  Dwarf's Dwarven Combat Training.
+
+### Epic, environment-aware narration
+Combat and spell narration now gets the real, current location's
+description, with explicit instruction to let the physical
+surroundings genuinely color the imagery (a lightning spell crashing
+down like the wrath of a storm in an open field reads very differently
+than the same spell cast in a cramped tavern) — never inventing new
+environment details, and never changing who won, lost, or how much
+damage was actually dealt.
+
+### Combat loot and quest-of-the-day fixes (carried over from small
+live fixes shipped since 1.3.0)
+- Combat victories now award real, varied gold from procedurally
+  generated loot (previously XP only) — `rules/item_generator.py`
+  existed fully built but had no caller anywhere in the game.
+- Fixed asking to read the quest board while naming an NPC (e.g.
+  "read the quest for Grimsby from the quest board") getting
+  misrouted to that NPC's shop dialogue instead of showing the board.
+- NPC dialogue and quest board listings now ground themselves in real
+  quest rewards/choices instead of vague non-answers or no reward info.
+- Fixed two "no character name" inconsistencies: examining or
+  gathering with nothing to find now names the acting character, same
+  as their own success-path messages already did.
+- Dev-topic screenshot uploads now survive a transient network timeout
+  on their confirmation reply instead of crashing silently.
+
 ## [1.3.0] — Moltbook autonomy, more recruitable companions, and dev tooling
 
 ### Moltbook (AI-agent social network)
