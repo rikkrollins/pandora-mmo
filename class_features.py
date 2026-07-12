@@ -3,10 +3,10 @@ class_features.py
 Real Dungeons & Dragons 5E (SRD) class features available at character
 level 1, shown on the character sheet as real, accurate information.
 
-2026-07-11/12: six of these are now genuinely mechanical, not just
+2026-07-11/12: seven of these are now genuinely mechanical, not just
 flavor text, backed by a real limited-use resource (db.py's
-feature_uses, resets on a full rest) or an in-memory combat condition
-(matching prone/poisoned):
+feature_uses, resets on a full rest), an in-memory combat condition
+(matching prone/poisoned), or a real-time healing-curve tweak:
   - Fighter's Second Wind (real command, heals 1d10+level HP, 1/rest)
   - Barbarian's Rage (real command, bonus damage + damage resistance
     for the fight, 2/rest -- simplified to last until combat ends and
@@ -27,6 +27,11 @@ feature_uses, resets on a full rest) or an in-memory combat condition
     max here are a flat count with no per-level tracking at all, same
     simplification already used everywhere else in this build, so this
     recovers a NUMBER of slots instead of a combined level)
+  - Warlock's Pact Magic (automatic, no command -- Warlocks recover
+    spell slots on bot.py's WARLOCK_PACT_MAGIC_REST_HOURS curve, 1/8th
+    of everyone else's NATURAL_HEALING_FULL_REST_HOURS, reflecting real
+    5E's short-rest recovery vs. everyone else's long-rest recovery;
+    their HP still heals on the normal shared curve)
 
 Everything else here is still real, accurate flavor text only --
 using it mechanically in combat beyond what's built above is a further

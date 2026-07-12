@@ -5,7 +5,7 @@ All notable changes to Pandora MMO are documented here.
 ## [1.4.0] — Real class features, complete spells/races, and epic environment-aware narration
 
 ### Mechanical class features (previously flavor text only)
-Five real 5E class features are now genuinely usable, not just shown on
+Seven real 5E class features are now genuinely usable, not just shown on
 the character sheet, backed by a new shared "limited-use resource"
 system (resets on a full rest, same gating as HP/spell-slot recovery):
 - **Fighter — Second Wind**: bonus-action heal (1d10 + level), once per rest.
@@ -16,6 +16,12 @@ system (resets on a full rest, same gating as HP/spell-slot recovery):
 - **Bard — Bardic Inspiration**: an immediate HP boost to an ally,
   uses per rest equal to Charisma modifier.
 - **Paladin — Lay on Hands**: heals a real 5-x-level HP pool, once per rest.
+- **Wizard — Arcane Recovery**: recovers ceil(level/2) spell slots once
+  per rest.
+- **Warlock — Pact Magic**: automatic, no command needed — a Warlock's
+  spell slots now recover on a much shorter real-time curve (1/8th of
+  everyone else's) than their HP, reflecting real 5E's short-rest
+  slot recovery vs. everyone else's long-rest recovery.
 
 Everything else in `class_features.py` (Divine Domain, Sorcerous
 Origin, Favored Enemy, etc.) is still accurate flavor text, not yet

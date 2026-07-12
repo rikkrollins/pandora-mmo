@@ -2161,21 +2161,37 @@ NATURAL_HEALING_FULL_REST_HOURS = 2
 # own separate instant-heal behavior.
 
 
+WARLOCK_PACT_MAGIC_REST_HOURS = NATURAL_HEALING_FULL_REST_HOURS / 8
+# Real 5E Pact Magic: a Warlock's spell slots recover on a SHORT rest
+# (~1 hour) rather than the long rest (~8 hours) everyone else's
+# spellcasting needs -- roughly 1/8th the time. This game has no
+# separate short/long rest distinction, only one shared real-time
+# healing curve (NATURAL_HEALING_FULL_REST_HOURS), so Pact Magic is
+# modeled as Warlocks alone using a much shorter curve for SPELL SLOTS
+# specifically (their HP still follows the normal shared curve, same
+# as every other class).
+
+
 def _apply_natural_healing(telegram_user_id: int, character: dict, elapsed_seconds: float) -> tuple[int, int]:
     """
     Heals a resting character in proportion to how much real-world time
     has actually passed, capped at a full recovery after
-    NATURAL_HEALING_FULL_REST_HOURS. This IS the computed game fact
+    NATURAL_HEALING_FULL_REST_HOURS (or, for a Warlock's spell slots
+    only, WARLOCK_PACT_MAGIC_REST_HOURS). This IS the computed game fact
     (rules-layer, deterministic) — callers just report whatever this
     returns, same convention as every other outcome in this game.
     Returns (hp_healed, slots_healed) actually applied (0, 0 if no time
     has meaningfully passed or the character is already full).
     """
     fraction = min(1.0, max(0.0, elapsed_seconds) / (NATURAL_HEALING_FULL_REST_HOURS * 3600))
+    slot_rest_hours = (
+        WARLOCK_PACT_MAGIC_REST_HOURS if character.get("char_class") == "Warlock" else NATURAL_HEALING_FULL_REST_HOURS
+    )
+    slot_fraction = min(1.0, max(0.0, elapsed_seconds) / (slot_rest_hours * 3600))
     missing_hp = character["hp_max"] - character["hp_current"]
     missing_slots = character["spell_slots_max"] - character["spell_slots_current"]
     hp_gain = min(missing_hp, round(missing_hp * fraction))
-    slot_gain = min(missing_slots, round(missing_slots * fraction))
+    slot_gain = min(missing_slots, round(missing_slots * slot_fraction))
     if hp_gain > 0 or slot_gain > 0:
         db.update_character(
             telegram_user_id,
