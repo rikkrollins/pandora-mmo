@@ -1068,13 +1068,28 @@ async def _safe_send(update: Update, text: str, thread_id: int | None = None) ->
     no exception handling, so a plain telegram.error.TimedOut on that
     one call silently threw away the answer Coffee had already waited
     for. Both now route through here with their own thread_id instead.
+
+    2026-07-12: confirmed live again -- a transient TimedOut on this
+    call was simply logged and dropped, with no retry at all, silently
+    eating a real reply Coffee had already waited minutes for (an
+    Ollama-narrated check_quests response). One retry, after a short
+    pause, catches exactly this kind of one-off network blip without
+    turning a genuinely broken connection into a long hang -- the
+    caller's already-decided game state doesn't depend on this send
+    succeeding either way, so a short, bounded retry is pure upside.
     """
-    try:
-        await update.effective_chat.send_message(
-            text, message_thread_id=thread_id if thread_id is not None else config.TOPIC_ADVENTURE_ID
-        )
-    except TelegramError as e:
-        logger.warning(f"[message] send failed, continuing anyway: {e!r}")
+    for attempt in range(2):
+        try:
+            await update.effective_chat.send_message(
+                text, message_thread_id=thread_id if thread_id is not None else config.TOPIC_ADVENTURE_ID
+            )
+            return
+        except TelegramError as e:
+            if attempt == 0:
+                logger.warning(f"[message] send failed, retrying once: {e!r}")
+                await asyncio.sleep(2)
+            else:
+                logger.warning(f"[message] send failed again, giving up: {e!r}")
 
 
 def _personality_for_character_name(name: str) -> str | None:
@@ -3879,6 +3894,36 @@ async def _do_find_merchant(update: Update) -> None:
     await update.effective_chat.send_message(line, message_thread_id=config.TOPIC_ADVENTURE_ID)
 
 
+_QUANTITY_WORDS = {
+    "one": 1, "couple": 2, "two": 2, "three": 3, "four": 4,
+    "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+}
+
+
+def _extract_quantity(text: str) -> int:
+    """
+    Real number of items to buy/sell mentioned anywhere in the sentence,
+    e.g. "buy two potions" -> 2, "sell 3 rations" -> 3. Confirmed live
+    2026-07-12: _do_buy/_do_sell always silently bought/sold exactly 1
+    regardless of what the player actually said (shop.buy_item/sell_item
+    already fully support a real quantity, this was purely a wiring gap
+    -- the number was just never read out of the text). Defaults to 1,
+    the previous behavior, when no number is found. Deliberately no
+    "a"/"an" entry -- since the default is already 1, adding them would
+    only risk shadowing a REAL number word appearing later in the same
+    sentence (e.g. "buy a couple potions" stopping at "a" before ever
+    reaching "couple").
+    """
+    words = [w.strip(".,!?").lower() for w in text.split()]
+    for word in words:
+        if word.isdigit():
+            return max(1, int(word))
+    for word in words:
+        if word in _QUANTITY_WORDS:
+            return _QUANTITY_WORDS[word]
+    return 1
+
+
 async def _do_buy(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -3903,7 +3948,8 @@ async def _do_buy(update: Update, text: str) -> None:
         )
         return
 
-    ok, msg = shop_module.buy_item(update.effective_user.id, shop_data, item_id, 1)
+    quantity = _extract_quantity(text)
+    ok, msg = shop_module.buy_item(update.effective_user.id, shop_data, item_id, quantity)
     await update.effective_chat.send_message(msg, message_thread_id=config.TOPIC_ADVENTURE_ID)
 
 
@@ -3922,7 +3968,8 @@ async def _do_sell(update: Update, text: str) -> None:
         )
         return
 
-    ok, msg = shop_module.sell_item(update.effective_user.id, item_id, 1)
+    quantity = _extract_quantity(text)
+    ok, msg = shop_module.sell_item(update.effective_user.id, item_id, quantity)
     await update.effective_chat.send_message(msg, message_thread_id=config.TOPIC_ADVENTURE_ID)
 
 
