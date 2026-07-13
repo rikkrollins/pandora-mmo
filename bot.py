@@ -2594,6 +2594,32 @@ async def _check_quest_completions_reach_location(update_like, telegram_user_id:
             await _complete_quest_and_announce(update_like, telegram_user_id, quest_id)
 
 
+async def _check_board_quest_turnin(update_like, telegram_user_id: int, location_id: str) -> None:
+    """
+    Grants a completed-but-not-yet-collected board quest's reward when
+    the player arrives back at the location where it's posted -- the
+    counterpart to _do_gather deferring the reward instead of granting
+    it the instant the objective is met (see that function's comment).
+    Deliberately skips branch_data quests: those are resolved through
+    the separate _do_resolve_quest_choice flow, not a location arrival.
+    """
+    for board_quest in board_quests_module.get_todays_board_quests(location_id):
+        if not (board_quest.get("accepted_by") == telegram_user_id
+                and not board_quest.get("completed_at")
+                and not board_quest.get("branch_data")
+                and board_quest["progress_count"] >= board_quest["objective_count"]):
+            continue
+        db.complete_board_quest(board_quest["board_quest_id"])
+        db.add_xp(telegram_user_id, board_quest["reward_xp"])
+        character = db.get_character(telegram_user_id)
+        db.update_character(telegram_user_id, gold=character["gold"] + board_quest["reward_gold"])
+        await _safe_send(
+            update_like,
+            f"📜 **Board quest complete: {board_quest['title']}!** "
+            f"You earn {board_quest['reward_xp']} XP, {board_quest['reward_gold']} gold.",
+        )
+
+
 async def _check_quest_completions_defeat_monster(update_like, session: sessions.Session) -> None:
     """
     Called only when the party won — checks every defeated enemy's
@@ -3189,13 +3215,17 @@ async def _do_gather(update: Update, action_text: str) -> None:
                         f"(check quests to see the choice)."
                     )
                 else:
-                    db.complete_board_quest(updated["board_quest_id"])
-                    db.add_xp(update.effective_user.id, updated["reward_xp"])
-                    fresh = db.get_character(update.effective_user.id)
-                    db.update_character(update.effective_user.id, gold=fresh["gold"] + updated["reward_gold"])
+                    # Confirmed live 2026-07-12 (Coffee): a multi-step quest
+                    # should tell the player where to go next instead of
+                    # silently auto-granting the reward the instant the
+                    # objective is met. The reward is now handed out by
+                    # _check_board_quest_turnin, triggered on arrival at
+                    # this same location_id (see _do_move/_do_fast_travel)
+                    # -- exactly the same "objective done, come back here to
+                    # collect" pattern as returning to a story quest-giver.
                     message += (
-                        f"\n📜 **Board quest complete: {updated['title']}!** "
-                        f"You earn {updated['reward_xp']} XP, {updated['reward_gold']} gold."
+                        f"\n📜 **{updated['title']}** — objective complete! Return to "
+                        f"**{location['name']}** to collect your reward."
                     )
             else:
                 message += (
@@ -3826,6 +3856,7 @@ async def _do_move(update: Update, text: str) -> None:
     updated_character = db.get_character(update.effective_user.id)
     await _maybe_trigger_npc_encounter(update, updated_character, destination)
     await _check_quest_completions_reach_location(update, update.effective_user.id, destination_id)
+    await _check_board_quest_turnin(update, update.effective_user.id, destination_id)
 
 
 async def _do_fast_travel(update: Update, text: str) -> None:
@@ -3885,6 +3916,7 @@ async def _do_fast_travel(update: Update, text: str) -> None:
     updated_character = db.get_character(telegram_user_id)
     await _maybe_trigger_npc_encounter(update, updated_character, destination)
     await _check_quest_completions_reach_location(update, update.effective_user.id, destination_id)
+    await _check_board_quest_turnin(update, update.effective_user.id, destination_id)
 
 
 def _location_neighbors(location_id: str) -> list[str]:
