@@ -390,6 +390,21 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # exact same pass_turn misclassification the comment above already
     # describes -- a common enough typo/one-word habit to handle directly
     # rather than relying on the player to always include the space.
+    # Checked BEFORE move_words below, same reasoning as the quest-board
+    # and "where can i buy" fixes above: "Where do I go to complete the
+    # quest Silverleaf herbs?" is a genuine question about quest status,
+    # not an actual travel command -- confirmed live 2026-07-12 this got
+    # misread as move (via the bare "go to" inside the question) with no
+    # destination named, producing a confusing "can't get there" reply
+    # instead of showing the player their real quest state (gather-type
+    # board quests already auto-complete the moment enough material is
+    # gathered -- see _do_gather -- so check_quests will show them it's
+    # actually done already, which is the real answer to what they asked).
+    if any(w in lowered for w in ["where do i go to complete", "where do i turn in", "how do i turn in",
+                                    "where do i deliver", "how do i complete the quest",
+                                    "where do i complete", "how do i deliver"]):
+        return {**base, "action": "check_quests"}
+
     move_words = ["go to", "goto", "head to", "walk to", "travel to", "move to", "enter the", "descend", "ascend",
                   "climb down", "climb up", "leave the ", "go back"]
     if any(w in lowered for w in move_words):
