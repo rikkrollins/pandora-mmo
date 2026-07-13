@@ -238,7 +238,21 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     recruit_words = ["join us", "join our party", "join my party", "come with us",
                       "travel with us", "come along", "join the party"]
     for npc_name in known_npc_names:
-        if npc_name.lower() in lowered:
+        # Matches the NPC's full registered name as a substring ("old
+        # maren" in "go talk to old maren") OR any single word of it, at
+        # least 3 letters, as a whole word ("maren" in "say hello to
+        # maren") -- confirmed live 2026-07-12: "Say hello to Maren"
+        # never matched "Old Maren" at all (the full name isn't a
+        # substring of the message), silently fell through everything to
+        # pass_turn ("There's no active turn to pass right now"), even
+        # though a player naturally drops title words like "Old" once
+        # introduced. Whole-word (not substring-within-a-word) matching
+        # on individual name words avoids a short/common fragment
+        # accidentally firing on unrelated text.
+        name_words = [w for w in npc_name.lower().split() if len(w) >= 3]
+        if npc_name.lower() in lowered or any(
+            re.search(r"\b" + re.escape(w) + r"\b", lowered) for w in name_words
+        ):
             if any(w in lowered for w in recruit_words):
                 return {**base, "action": "recruit_npc", "npc_name": npc_name}
             return {**base, "action": "talk_npc", "npc_name": npc_name}
