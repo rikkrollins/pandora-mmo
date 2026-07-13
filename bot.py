@@ -2013,11 +2013,27 @@ def _attack_advantage_disadvantage(attacker: dict, defender: dict) -> tuple[bool
     - Prone defender: attacker gets advantage (simplified — real 5E only
       grants this to attackers within 5 ft.; distance isn't modeled here).
     If both would apply, they correctly cancel (handled inside roll_d20).
+
+    A Ranger's Favored Enemy (2026-07-12, fixed-default convention same
+    as Sorcerer's/Warlock's subclass features — no in-game "choose a
+    creature type" mechanism exists) also grants advantage here: every
+    Ranger defaults to goblinoids as their favored enemy, since goblin/
+    goblin_shaman/goblin_boss are this campaign's single most common
+    enemy type (whispering_wood, sunken_root_caverns, goblin_warrens).
+    Real 5E's Favored Enemy is advantage on Survival checks to track
+    them and recalling information, not combat advantage — but this
+    game has no tracking/information-recall mechanic to hook into, so
+    granting attack-roll advantage vs. the chosen type is the closest
+    real in-combat expression of "favored enemy" available, matching
+    how Rage/Sneak Attack/etc. were each adapted to fit what this
+    engine actually models rather than left as flavor text.
     """
     attacker_conditions = attacker.get("conditions", [])
     defender_conditions = defender.get("conditions", [])
     disadvantage = "prone" in attacker_conditions or "poisoned" in attacker_conditions
-    advantage = "prone" in defender_conditions
+    favored_enemy = (attacker.get("char_class") == "Ranger"
+                      and defender.get("monster_key", "").startswith("goblin"))
+    advantage = "prone" in defender_conditions or favored_enemy
     return advantage, disadvantage
 
 

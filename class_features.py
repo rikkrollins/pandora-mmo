@@ -64,6 +64,17 @@ character-creation/combat-math tweak:
     there's no unarmed-vs-monk-weapon distinction to make, and shrinking
     just the Monk's die would make them strictly worse than every other
     martial class rather than matching the real rule's intent.
+  - Ranger's Favored Enemy (automatic, no command, 2026-07-12): every
+    Ranger defaults to goblinoids (fixed-default convention, same as
+    Sorcerer/Warlock -- no in-game "choose a creature type" mechanism
+    exists; goblin/goblin_shaman/goblin_boss are this campaign's single
+    most common enemy type). Real 5E grants advantage on Survival
+    checks to track/recall information about the favored enemy, which
+    this game has no mechanic for at all -- adapted instead to grant
+    attack-roll advantage vs. that enemy type
+    (bot.py's _attack_advantage_disadvantage), the closest real
+    in-combat expression available, matching how every other feature
+    above was adapted to what this engine actually models.
 
 Everything else here is still real, accurate flavor text only --
 using it mechanically in combat beyond what's built above is a further
@@ -103,7 +114,8 @@ CLASS_FEATURES_LEVEL_1 = {
         "Lay on Hands: heal a pool of HP (5 x paladin level) by touch",
     ],
     "Ranger": [
-        "Favored Enemy: advantage on tracking and recalling information about a chosen enemy type",
+        "Favored Enemy: Goblinoids — advantage on attack rolls against goblins, "
+        "goblin shamans, and goblin bosses",
         "Natural Explorer: expertise navigating and surviving in a chosen terrain type",
     ],
     "Rogue": [
