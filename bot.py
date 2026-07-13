@@ -2702,6 +2702,17 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
             return
 
     db.accept_board_quest(board_quest["board_quest_id"], telegram_user_id)
+
+    # A player who already holds the target material shouldn't have to
+    # gather it again from scratch -- credit whatever they already have
+    # toward the objective right away, same as a fresh gather would.
+    if board_quest["objective_type"] == "gather_material":
+        held = character.get("inventory", {}).get(board_quest["objective_target"], 0)
+        already_credited = board_quest["progress_count"]
+        credit = min(held, board_quest["objective_count"]) - already_credited
+        if credit > 0:
+            db.record_board_quest_progress(board_quest["board_quest_id"], credit)
+
     if board_quest.get("branch_data"):
         await update.effective_chat.send_message(
             f"📜 **{character['name']}** accepts Quest: {board_quest['title']}\n"
@@ -2716,6 +2727,12 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
         f"Expires in 24h if not finished.",
         message_thread_id=config.TOPIC_ADVENTURE_ID,
     )
+    # Same-location counterpart to the arrival-triggered check in
+    # _do_move/_do_fast_travel -- if the retroactive credit above (or an
+    # objective_count of 0) already finished it, the player is standing
+    # right here and would otherwise have to leave and come back to
+    # collect a reward they already qualify for.
+    await _check_board_quest_turnin(update, telegram_user_id, location_id)
 
 
 async def _do_resolve_quest_choice(update: Update, text: str) -> None:
