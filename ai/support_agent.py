@@ -11,6 +11,7 @@ Uses config.DM_NARRATION_MODEL, since this is a natural, conversational
 task rather than a structured/technical one.
 """
 import re
+import time
 
 import requests
 
@@ -306,23 +307,34 @@ def answer_support_question(question: str, character: dict | None = None) -> str
 
     prompt = _build_prompt(question, character)
 
-    try:
-        response = requests.post(
-            f"{config.OLLAMA_BASE_URL}/api/generate",
-            json={
-                "model": config.DM_NARRATION_MODEL,
-                "prompt": prompt,
-                "stream": False,
-            },
-            timeout=200,
-        )
-        response.raise_for_status()
-        data = response.json()
-        text = strip_think_tags(data.get("response", ""))
-        if text:
-            return text
-    except (requests.RequestException, ValueError) as e:
-        print(f"[support_agent] model call failed: {e}")
+    # Confirmed live 2026-07-12: a Support question ("What can I use
+    # silverleaf herb for?") hit the static fallback below on the very
+    # first attempt, with no retry at all -- under real system load
+    # (this CPU-only box's single Ollama model genuinely can queue up
+    # behind other in-flight calls), one attempt timing out doesn't mean
+    # the model is actually unreachable, just busy. One retry after a
+    # short pause catches that transient case without meaningfully
+    # changing the worst-case wait for a genuinely dead model.
+    for attempt in range(2):
+        try:
+            response = requests.post(
+                f"{config.OLLAMA_BASE_URL}/api/generate",
+                json={
+                    "model": config.DM_NARRATION_MODEL,
+                    "prompt": prompt,
+                    "stream": False,
+                },
+                timeout=200,
+            )
+            response.raise_for_status()
+            data = response.json()
+            text = strip_think_tags(data.get("response", ""))
+            if text:
+                return text
+        except (requests.RequestException, ValueError) as e:
+            print(f"[support_agent] model call failed (attempt {attempt + 1}/2): {e}")
+            if attempt == 0:
+                time.sleep(5)
 
     return (
         "I couldn't reach the local model just now. In the meantime: just "
