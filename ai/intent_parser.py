@@ -318,8 +318,22 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                                     "who's with me", "am i in a party", "party status", "party members"]):
         return {**base, "action": "check_party"}
 
-    if any(w in lowered for w in ["i choose", "i decide to", "i'll go with", "ill go with",
-                                    "my choice is", "i'll take the", "ill take the"]):
+    # Confirmed live 2026-07-13 (Coffee): "I have decided to 'Keep it and
+    # collect the reward'" -- the exact answer the game itself tells the
+    # player to say when a branching quest is ready to resolve -- matched
+    # none of the phrasings below ("i decide to" is present tense, his
+    # message was "i have decided to"), fell all the way through to the
+    # "gather" check further down (its "collect" keyword matched "collect
+    # the reward"), and got silently misclassified as a gather action.
+    # Broadened to also cover past-tense "decided" framing, and the two
+    # actual choice labels defined in board_quests.py verbatim, so a
+    # player who just echoes the game's own quoted suggested answer back
+    # (with or without an "I choose"/"I've decided" wrapper) is always
+    # caught here, before "collect" ever gets a chance to misfire as gather.
+    if any(w in lowered for w in ["i choose", "i decide to", "i decided to", "i've decided", "ive decided",
+                                    "i have decided", "i'll go with", "ill go with",
+                                    "my choice is", "i'll take the", "ill take the",
+                                    "keep it and collect the reward", "leave it be instead"]):
         return {**base, "action": "resolve_choice"}
 
     if any(w in lowered for w in ["ask for a clue", "ask for clues", "give me a clue", "any clues",
