@@ -188,6 +188,53 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if lowered.startswith("sell") or " sell " in lowered:
         return {**base, "action": "sell"}
 
+    # "recruit X" is checked BEFORE the known-NPC-name loop below and
+    # regardless of whether the name matches one exactly -- confirmed
+    # live 2026-07-12, twice: "Recruit Sera to my party" (correct
+    # spelling, a known NPC) still came back as talk_npc, because the
+    # only recruit_words phrases below all require the word "join",
+    # never the word "recruit" itself, even though that's the action's
+    # own name and the single most obvious way a player would phrase
+    # it. "Recruit Seta to my party" (a likely typo/mishearing of
+    # "Sera") is even worse off: it doesn't match any known NPC name at
+    # all, so it fell through everything else to "my party" and got
+    # misread as check_party. Extracting the name after "recruit "
+    # directly handles both a correct and a misspelled name the exact
+    # same way -- _do_recruit_npc already has its own real,
+    # DB-backed "no one by that name" handling either way.
+    for trigger in ["recruit "]:
+        if trigger in lowered:
+            name = text[lowered.index(trigger) + len(trigger):].strip()
+            for cut in (" to my party", " to the party", " to our party", " to join", " to my group"):
+                if cut in name.lower():
+                    name = name[:name.lower().index(cut)].strip()
+                    break
+            return {**base, "action": "recruit_npc", "npc_name": name or None}
+
+    # "invite X to my party" is genuinely ambiguous between two
+    # different actions: recruiting a campaign NPC (recruit_npc) or
+    # inviting a fellow player's/AI companion's own character
+    # (invite_to_party, checked later below) -- disambiguated here by
+    # whether the named person is a real campaign NPC. Confirmed live
+    # 2026-07-12: "Invite Sera to my party" (Sera IS a real recruitable
+    # NPC) still came back as talk_npc, the same root cause as the
+    # "recruit " gap just above -- this only ever matched invite_to_
+    # party's OWN trigger below, which never got reached because the
+    # known-NPC-name loop further down already returned talk_npc first.
+    for trigger in ["invite ", "let "]:
+        if trigger in lowered and ("to my party" in lowered or "to the party" in lowered
+                                    or "join my party" in lowered or "join the party" in lowered):
+            name = text[lowered.index(trigger) + len(trigger):].strip()
+            for cut in (" to my party", " to the party", " join my party", " join the party"):
+                if cut in name.lower():
+                    name = name[:name.lower().index(cut)].strip()
+                    break
+            for npc_name in known_npc_names:
+                if npc_name.lower() == name.lower():
+                    return {**base, "action": "recruit_npc", "npc_name": npc_name}
+            # Not a known campaign NPC -- fall through to invite_to_party's
+            # own check further below, unchanged.
+
     recruit_words = ["join us", "join our party", "join my party", "come with us",
                       "travel with us", "come along", "join the party"]
     for npc_name in known_npc_names:
