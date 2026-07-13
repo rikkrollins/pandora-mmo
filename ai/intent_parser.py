@@ -543,20 +543,28 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
     return fallback
 
 
-_COMPOUND_SPLIT_PATTERN = re.compile(r",\s*(?:and\s+)?|\s+and then\s+|\s+then\s+|;\s*")
+_COMPOUND_SPLIT_PATTERN = re.compile(r",\s*(?:and\s+)?|\s+and then\s+|\s+then\s+|\s+and\s+|;\s*")
 
 
 def _split_compound_message(text: str) -> list[str]:
     """
-    Splits on strong, explicit multi-clause separators (commas, "and
-    then", "then", ";") -- deliberately does NOT split on a bare " and "
-    mid-sentence by itself, since that's exactly as likely to join two
-    NOUNS in one action ("attack the goblin and the wolf") as it is to
-    join two separate actions. The caller (parse_intents) only trusts a
-    split if multiple resulting segments independently classify to
-    different real actions anyway, so an overly narrow split here just
-    means falling back to single-action classification, never a wrong
-    split silently taken as truth.
+    Splits on strong, explicit multi-clause separators: commas, "and
+    then", "then", ";", and (2026-07-12, extended) a bare " and " too.
+    Bare "and" was deliberately excluded at first, on the reasoning that
+    it's exactly as likely to join two NOUNS in one action ("attack the
+    goblin and the wolf") as it is to join two separate actions -- but
+    confirmed live 2026-07-12 that excluding it silently drops entire
+    requests instead: "Invite Sera to join my party and check my
+    inventory" never split at all (no comma/"then"), fell through to
+    single-action classification, and check_inventory was silently
+    never run. The caller (parse_intents) already only trusts a split
+    if multiple resulting segments independently classify to DIFFERENT
+    real (non-chat) actions -- that's exactly what makes bare "and"
+    safe to split on now too: "attack the goblin and the wolf" splits
+    into "attack the goblin" (action) and "the wolf" (classifies as
+    "chat", not a second real action), so it correctly falls back to
+    single-action classification unchanged, while a genuine two-action
+    "and" message now actually gets both actions run.
     """
     segments = _COMPOUND_SPLIT_PATTERN.split(text)
     cleaned = []
