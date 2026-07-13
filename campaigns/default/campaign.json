@@ -402,6 +402,7 @@
           "shadow_wisp"
         ],
         "hidden": true,
+        "min_level": 5,
         "interactables": {
           "silent_footprints": {
             "name": "footprints pressed into old dust",
@@ -421,6 +422,7 @@
           "the_hush_below"
         ],
         "hidden": true,
+        "min_level": 7,
         "quest_items": [
           "brass_key_no_lock"
         ],

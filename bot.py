@@ -3833,6 +3833,10 @@ async def _do_move(update: Update, text: str) -> None:
         )
         return
 
+    if not _meets_location_level(character, destination):
+        await _send_level_gate_message(update, destination)
+        return
+
     locked_connections = current.get("locked_connections", {})
     lockable_id = locked_connections.get(destination_id)
     if lockable_id and lockable_id not in _UNLOCKED:
@@ -3857,6 +3861,31 @@ async def _do_move(update: Update, text: str) -> None:
     await _maybe_trigger_npc_encounter(update, updated_character, destination)
     await _check_quest_completions_reach_location(update, update.effective_user.id, destination_id)
     await _check_board_quest_turnin(update, update.effective_user.id, destination_id)
+
+
+def _meets_location_level(character: dict, destination: dict) -> bool:
+    """
+    Real level-gating for the campaign's deepest, hidden endgame locations
+    (currently the_hush_below and the_first_city -- confirmed via
+    campaign.json these are the only two locations already marked
+    "hidden": true, which was never actually enforced anywhere in code
+    before this; the game's design clearly intended them as special/deep
+    content, this just wires that intent up). Coffee asked directly: a
+    level-1 character shouldn't be able to reach endgame content. Any
+    location with no "min_level" set (i.e. everything else in the
+    campaign) is unaffected.
+    """
+    min_level = destination.get("min_level")
+    return min_level is None or character.get("level", 1) >= min_level
+
+
+async def _send_level_gate_message(update: Update, destination: dict) -> None:
+    await update.effective_chat.send_message(
+        f"A deep, wordless dread stops you at the threshold of **{destination['name']}** — "
+        f"whatever waits there, you can feel you're not ready for it yet "
+        f"(recommended level {destination['min_level']}+).",
+        message_thread_id=config.TOPIC_ADVENTURE_ID,
+    )
 
 
 async def _do_fast_travel(update: Update, text: str) -> None:
@@ -3907,6 +3936,10 @@ async def _do_fast_travel(update: Update, text: str) -> None:
         return
 
     destination = cl.get_location(CAMPAIGN, destination_id)
+    if not _meets_location_level(character, destination):
+        await _send_level_gate_message(update, destination)
+        return
+
     db.move_character(telegram_user_id, destination_id)
     await update.effective_chat.send_message(
         f"🌀 You fast-travel to **{destination['name']}**.\n{destination['description']}",
