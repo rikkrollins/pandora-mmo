@@ -64,7 +64,7 @@ from rules.combat import resolve_attack, resolve_death_save
 from rules.crafting import RECIPES, get_recipe, resolve_craft
 from rules.dice import roll, roll_damage, ability_modifier, roll_ability_check, roll_d20
 from rules.item_generator import generate_item
-from rules.leveling import CLASS_HIT_DICE
+from rules.leveling import CLASS_HIT_DICE, scaled_enemy_count
 from rules.proficiency import practiced_bonus
 
 logging.basicConfig(
@@ -1458,14 +1458,17 @@ async def _self_heal_stuck_ai_turn(update: Update, session: sessions.Session) ->
 _NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "a couple of": 2, "a few": 3}
 
 
-def _parse_enemy_count(lowered_text: str) -> int:
+def _parse_enemy_count(lowered_text: str) -> int | None:
     """
     Looks for an explicit count of enemies in natural language ("3
-    goblins", "two goblins", "a few goblins"). Defaults to 2 if a
-    plural monster name appears with no explicit number (a reasonable
-    "small group" default), or 1 otherwise. Capped at 4 for sanity —
-    this build's targeting is simple and a huge mob would be unwieldy
-    to specify targets for via plain text.
+    goblins", "two goblins", "a few goblins"). Returns 2 if a plural
+    monster name appears with no explicit number (a reasonable "small
+    group" default), or None if there's no signal at all -- letting the
+    caller auto-scale the encounter to the party instead of always
+    defaulting to a lone monster regardless of party size/level.
+    Explicit counts capped at 4 for sanity — this build's targeting is
+    simple and a huge mob would be unwieldy to specify targets for via
+    plain text.
     """
     for word, value in _NUMBER_WORDS.items():
         if word in lowered_text:
@@ -1479,10 +1482,10 @@ def _parse_enemy_count(lowered_text: str) -> int:
         plural_hint = key.replace("_", " ") + "s"
         if plural_hint in lowered_text:
             return 2
-    return 1
+    return None
 
 
-async def _do_start_combat(update: Update, monster_key: str | None = None, count: int = 1) -> None:
+async def _do_start_combat(update: Update, monster_key: str | None = None, count: int | None = None) -> None:
     chat_id = update.effective_chat.id
     async with sessions.get_lock(chat_id):
         if sessions.get_session(chat_id) is not None:
@@ -1526,6 +1529,16 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
             return
+
+        # No explicit count requested -- scale the encounter to the
+        # CURRENT party (size and level) via real 5E Medium-difficulty
+        # encounter math instead of always defaulting to one lone
+        # monster, so a bigger/higher-level party actually faces a
+        # proportionally bigger fight. See rules/leveling.scaled_enemy_count.
+        if count is None:
+            count = scaled_enemy_count(
+                [p.get("level", 1) for p in party], template.get("xp_reward", 0)
+            )
 
         enemies = []
         for i in range(count):

@@ -93,3 +93,43 @@ def hp_gain_for_level(char_class: str, constitution_modifier: int) -> int:
     """
     hit_die = CLASS_HIT_DICE.get(char_class.lower(), 8)
     return max(hit_die // 2 + 1 + constitution_modifier, 1)
+
+
+# Real 5E DMG "Medium difficulty" encounter XP budget, per individual
+# character, by level (2014 DMG encounter-building table).
+MEDIUM_ENCOUNTER_XP_PER_CHARACTER = {
+    1: 50, 2: 100, 3: 150, 4: 250, 5: 500, 6: 600, 7: 750, 8: 900,
+    9: 1100, 10: 1200, 11: 1600, 12: 2000, 13: 2200, 14: 2500,
+    15: 2800, 16: 3200, 17: 3900, 18: 4200, 19: 4900, 20: 5700,
+}
+
+# Real 5E DMG encounter multiplier, by number of monsters in the fight
+# (the multiplier normally also shifts a column for a very small/large
+# party -- deliberately not modeled here, since this game's parties are
+# always small (1-6), matching other intentional simplifications
+# already in this build). Only goes to 4 since bot.py's own enemy-count
+# parsing already caps encounters at 4 for plain-text targeting.
+_ENCOUNTER_MULTIPLIER_BY_COUNT = {1: 1, 2: 1.5, 3: 2, 4: 2}
+
+
+def scaled_enemy_count(party_levels: list[int], monster_xp_reward: int, max_count: int = 4) -> int:
+    """
+    Picks how many of a given monster makes a real 5E "Medium difficulty"
+    encounter for this party, instead of always defaulting to a single
+    monster regardless of party size or level. Sums each party member's
+    own Medium XP budget (real 5E table above), then finds the largest
+    monster count (1..max_count) whose adjusted encounter XP -- count *
+    monster_xp_reward * the real monster-count multiplier -- doesn't
+    exceed that combined budget. Always returns at least 1.
+    """
+    if not party_levels:
+        return 1
+    budget = sum(MEDIUM_ENCOUNTER_XP_PER_CHARACTER.get(min(max(lvl, 1), 20), 5700) for lvl in party_levels)
+    best = 1
+    for count in range(1, max_count + 1):
+        multiplier = _ENCOUNTER_MULTIPLIER_BY_COUNT[count]
+        if count * monster_xp_reward * multiplier <= budget:
+            best = count
+        else:
+            break
+    return best
