@@ -501,6 +501,21 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                     "pick some flowers", "pick flowers", "pick herbs"]
     if any(w in lowered for w in gather_words):
         return {**base, "action": "gather"}
+    # Confirmed live 2026-07-13 (Coffee, repeatedly since the night
+    # before): "Pick a silverleaf herb" matched none of the fixed
+    # phrasings above (they only cover "pick the/some herbs/flowers" as
+    # exact substrings, not "pick a/an <specific material name>"), fell
+    # through the keyword fallback entirely to its safe "chat" default,
+    # which meant the small model's own answer was trusted instead --
+    # and this model has a documented bias toward guessing "pass_turn"
+    # for any "pick ..." phrasing it doesn't recognize (see the
+    # lockpicking case further down). Result: gathering the exact
+    # material a board quest needs silently did nothing, so the quest
+    # could never progress no matter how many times it was retried.
+    # "pick the lock"/"pick lock" is deliberately excluded -- that's a
+    # real skill_check (dexterity), handled below.
+    if "pick" in lowered and "lock" not in lowered:
+        return {**base, "action": "gather"}
 
     craft_words = ["craft", "brew", "make a potion", "make an antitoxin", "make a scroll"]
     if any(w in lowered for w in craft_words):
