@@ -150,6 +150,22 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     base = {"action": "chat", "target": None, "npc_name": None, "ability": None,
             "item_name": None, "spell_name": None, "quantity": 1, "raw_text": text}
 
+    # Checked BEFORE check_quests below: "Accept the quest on the quest
+    # board" and "Accept the quest 'a quiet request for Silverleaf Herb'"
+    # both contain "quest board"/"quest" and would otherwise be swallowed
+    # by check_quests's broader triggers just below -- confirmed live
+    # 2026-07-12/13 via two real screenshots, the second falling through
+    # everything all the way to pass_turn since the quoted quest name
+    # didn't match anything else either ("There's no active turn to pass
+    # right now"). The game's own board-quest prompt literally tells
+    # players to say "I accept this quest" (already covered by "i accept"
+    # below), but the equally natural imperative phrasing "accept the/
+    # this quest" (no "I") was never a trigger at all. raw_text is passed
+    # through unchanged so _do_accept_quest's existing find_board_quest_by_name
+    # can still resolve a quoted/named quest exactly as before.
+    if any(w in lowered for w in ["accept the quest", "accept this quest", "accept that quest"]):
+        return {**base, "action": "accept_quest"}
+
     # Checked BEFORE the known-NPC-name loop below: naming an NPC while
     # asking to read the quest board (e.g. "read the quest for Grimsby
     # from the quest board") must not get swallowed as talk_npc just
