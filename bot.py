@@ -3728,6 +3728,33 @@ async def _do_move(update: Update, text: str) -> None:
             destination_id = loc_id
             break
 
+    if destination_id is None:
+        # Word-level fallback for multi-word location names -- confirmed
+        # live 2026-07-12: "Go to the cellar" never matched "The Tavern
+        # Cellar" at all, since neither the full name nor the location
+        # id appears verbatim in that phrasing (same root cause/fix
+        # shape as the earlier NPC full-name-only matching bug). Only
+        # accepts a single word when it's unique among the destinations
+        # actually reachable right now -- e.g. "cellar" uniquely picks
+        # "The Tavern Cellar" even though "tavern" alone would be
+        # ambiguous between it and "The Tavern's Upper Rooms", so an
+        # ambiguous shared word is deliberately left unmatched rather
+        # than guessed.
+        stopwords = {"the", "a", "of", "in", "at", "on"}
+        word_sets = {}
+        for loc_id in reachable:
+            name = cl.get_location(CAMPAIGN, loc_id)["name"]
+            words = {w.strip("'s").lower() for w in name.replace("'", " ").split()}
+            word_sets[loc_id] = {w for w in words if w and w not in stopwords and len(w) >= 3}
+        for loc_id, words in word_sets.items():
+            for word in words:
+                unique = all(word not in other for other_id, other in word_sets.items() if other_id != loc_id)
+                if unique and word in lowered:
+                    destination_id = loc_id
+                    break
+            if destination_id:
+                break
+
     # Generic "leave"/"go back"/"exit" phrasing names no specific
     # destination at all -- confirmed live 2026-07-12: a real player
     # saying "Leave the tavern cellar and go back upstairs" named
