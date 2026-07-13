@@ -385,7 +385,12 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # turn to pass" reply to someone just trying to leave and go
     # elsewhere. leave_party's own "leave the party"/"leave my party"
     # check above already wins first, so this can't shadow it.
-    move_words = ["go to", "head to", "walk to", "travel to", "move to", "enter the", "descend", "ascend",
+    # "goto" (no space) confirmed live 2026-07-12: "Goto the Crossroads
+    # Tavern" missed "go to" entirely (no space) and fell through to the
+    # exact same pass_turn misclassification the comment above already
+    # describes -- a common enough typo/one-word habit to handle directly
+    # rather than relying on the player to always include the space.
+    move_words = ["go to", "goto", "head to", "walk to", "travel to", "move to", "enter the", "descend", "ascend",
                   "climb down", "climb up", "leave the ", "go back"]
     if any(w in lowered for w in move_words):
         return {**base, "action": "move"}
