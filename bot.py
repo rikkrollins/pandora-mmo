@@ -12,6 +12,7 @@ import asyncio
 import logging
 import os
 import random
+import re
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -52,6 +53,7 @@ from ai.dm_agent import (
 from ai.intent_parser import parse_intents
 from ai.npc_agent import register_npc, talk_to_npc, generate_ambient_line, _NPCS
 from ai.support_agent import answer_support_question
+from ai.text_cleanup import to_speakable_text
 from guilds import GUILDS, eligible_for_guild
 from models import (
     VALID_CLASSES,
@@ -569,6 +571,11 @@ async def _maybe_run_moltbook_social_tick(bot) -> None:
     api_key = getattr(config, "MOLTBOOK_API_KEY", None)
     if not api_key:
         return
+    # 2026-07-14: a live pause switch (Development-topic "turn off
+    # moltbook social"), on by default (missing setting == enabled) so
+    # existing always-on behavior is unchanged unless explicitly paused.
+    if db.get_setting("moltbook_social_enabled") == "0":
+        return
 
     now = datetime.now(timezone.utc)
     if _LAST_MOLTBOOK_SOCIAL_TICK_AT and (now - _LAST_MOLTBOOK_SOCIAL_TICK_AT).total_seconds() < MOLTBOOK_SOCIAL_TICK_INTERVAL_SECONDS:
@@ -1083,6 +1090,8 @@ async def _safe_send(update: Update, text: str, thread_id: int | None = None) ->
             await update.effective_chat.send_message(
                 text, message_thread_id=thread_id if thread_id is not None else config.TOPIC_ADVENTURE_ID
             )
+            if not isinstance(update.effective_chat, _BufferingChatProxy):
+                await _maybe_speak(update, text, thread_id)
             return
         except TelegramError as e:
             if attempt == 0:
@@ -1090,6 +1099,37 @@ async def _safe_send(update: Update, text: str, thread_id: int | None = None) ->
                 await asyncio.sleep(2)
             else:
                 logger.warning(f"[message] send failed again, giving up: {e!r}")
+
+
+async def _maybe_speak(update: Update, text: str, thread_id: int | None) -> None:
+    """
+    Optional TTS narration via @TextTSBot, already added to this group
+    (2026-07-14) -- confirmed live it responds to another bot's own
+    /tts command, not just a real player's, and Coffee picked a voice
+    (Alan, Australian) he likes for the group. Off by default, toggled
+    via db.get_setting("tts_enabled") (see the Development-topic
+    "turn on/off tts" command). Deliberately one shared voice, not
+    distinct per-NPC voices -- @TextTSBot's voice is one account-wide
+    setting, not something safe to switch per-message -- so this is
+    the "read narration aloud" slice Coffee asked to try as an on/off
+    option, not the full per-character-voice item still on the
+    backlog. Skipped during a compound-message's buffered sub-sends
+    (see adventure_master_handler) so a multi-action message triggers
+    exactly one /tts call on the final combined text, not one per
+    sub-action.
+    """
+    if db.get_setting("tts_enabled") != "1":
+        return
+    speakable = to_speakable_text(text)
+    if not speakable:
+        return
+    try:
+        await update.effective_chat.send_message(
+            f"/tts {speakable}",
+            message_thread_id=thread_id if thread_id is not None else config.TOPIC_ADVENTURE_ID,
+        )
+    except TelegramError as e:
+        logger.warning(f"[tts] failed to trigger TextTSBot: {e!r}")
 
 
 def _personality_for_character_name(name: str) -> str | None:
@@ -1842,7 +1882,7 @@ async def _do_recruit_npc(update: Update, npc_name: str) -> None:
 # check as a deliberate, documented simplification, rather than having
 # the AI invent a DC per situation (which risked exactly the kind of
 # made-up-numbers problem already fixed elsewhere in this build).
-SKILL_CHECK_DC = 13
+SKILL_CHECK_DC = config.SKILL_CHECK_DC  # moved to config.py 2026-07-14, now .env-configurable
 STEAL_DC = 15  # harder than an ordinary skill check — stealing carries real risk
 
 
@@ -2266,7 +2306,7 @@ async def _do_flee(update: Update, action_text: str) -> None:
             await _resolve_ai_turns(update, session)
 
 
-NATURAL_HEALING_FULL_REST_HOURS = 2
+NATURAL_HEALING_FULL_REST_HOURS = config.NATURAL_HEALING_FULL_REST_HOURS  # moved to config.py 2026-07-14
 # Real-world hours of uninterrupted resting needed to fully recover HP
 # and spell slots; partial rest heals the proportional fraction. Changed
 # 2026-07-11 per Coffee's explicit direction: resting used to be an
@@ -5111,6 +5151,60 @@ async def development_topic_handler(update: Update, context: ContextTypes.DEFAUL
         return
 
     question = update.message.text.strip()
+
+    # TTS on/off toggle (2026-07-14) -- checked before the AI dev-question
+    # flow gets a turn, same "specific command before general" pattern
+    # used throughout ai/intent_parser.py all session. Persisted in
+    # db.game_settings so it survives a bot restart, unlike an in-memory
+    # flag would.
+    lowered_question = question.lower()
+    if any(w in lowered_question for w in ("turn on tts", "enable tts", "turn tts on")):
+        db.set_setting("tts_enabled", "1")
+        await _safe_send(
+            update,
+            "🔊 TTS narration is now **ON** — real narration will also be read aloud via @TextTSBot.",
+            thread_id=config.TOPIC_DEVELOPMENT_ID,
+        )
+        return
+    if any(w in lowered_question for w in ("turn off tts", "disable tts", "turn tts off")):
+        db.set_setting("tts_enabled", "0")
+        await _safe_send(update, "🔇 TTS narration is now **OFF**.", thread_id=config.TOPIC_DEVELOPMENT_ID)
+        return
+
+    # Live narration-length override (2026-07-14) -- "set story mode to N"
+    # lets Coffee try a different narration length immediately, without a
+    # redeploy (see ai/story_mode.py's _level(), which now checks this
+    # same db.game_settings key before falling back to config.STORY_MODE).
+    story_mode_match = re.search(r"(?:set )?story ?mode(?: to| =)?\s*(\d+)", lowered_question)
+    if story_mode_match:
+        level = max(0, min(10, int(story_mode_match.group(1))))
+        db.set_setting("story_mode", str(level))
+        await _safe_send(
+            update, f"📖 Story mode set to **{level}** (0=shortest, 10=full novel-chapter prose).",
+            thread_id=config.TOPIC_DEVELOPMENT_ID,
+        )
+        return
+
+    # Live pause/resume for the two background autonomous loops (2026-07-14)
+    # -- previously required a code edit + redeploy (AI_PARTY_ENABLED) or
+    # wasn't pausable at all (Moltbook social).
+    if any(w in lowered_question for w in ("turn on ai party", "enable ai party", "resume ai party")):
+        db.set_setting("ai_party_enabled", "1")
+        await _safe_send(update, "🎲 Autonomous AI party is now **ON**.", thread_id=config.TOPIC_DEVELOPMENT_ID)
+        return
+    if any(w in lowered_question for w in ("turn off ai party", "disable ai party", "pause ai party")):
+        db.set_setting("ai_party_enabled", "0")
+        await _safe_send(update, "⏸️ Autonomous AI party is now **OFF**.", thread_id=config.TOPIC_DEVELOPMENT_ID)
+        return
+    if any(w in lowered_question for w in ("turn on moltbook", "enable moltbook", "resume moltbook")):
+        db.set_setting("moltbook_social_enabled", "1")
+        await _safe_send(update, "🦞 Moltbook autonomous social is now **ON**.", thread_id=config.TOPIC_DEVELOPMENT_ID)
+        return
+    if any(w in lowered_question for w in ("turn off moltbook", "disable moltbook", "pause moltbook")):
+        db.set_setting("moltbook_social_enabled", "0")
+        await _safe_send(update, "⏸️ Moltbook autonomous social is now **OFF**.", thread_id=config.TOPIC_DEVELOPMENT_ID)
+        return
+
     history = context.user_data.setdefault("dev_history", [])
 
     # Message CONTENT wasn't logged here before — same gap as Adventure
@@ -5502,7 +5596,11 @@ async def _ai_party_autonomous_tick(bot) -> None:
     via the existing is_ai=1 mechanism with no action needed here.
     """
     global _LAST_AI_PARTY_TICK_AT
-    if not AI_PARTY_ENABLED:
+    # 2026-07-14: now a live toggle (Development-topic "turn on/off ai
+    # party") instead of a hardcoded flag needing a code edit + redeploy
+    # to flip. AI_PARTY_ENABLED below is just the seed default (still
+    # paused) for whenever no live override has been set yet.
+    if db.get_setting("ai_party_enabled", "1" if AI_PARTY_ENABLED else "0") != "1":
         return
     if _LAST_KNOWN_CHAT_ID is None:
         return

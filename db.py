@@ -143,7 +143,14 @@ CREATE TABLE IF NOT EXISTS parties (
 );
 """
 
-PARTY_MAX_MEMBERS = 6
+CREATE_GAME_SETTINGS_TABLE = """
+CREATE TABLE IF NOT EXISTS game_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+"""
+
+PARTY_MAX_MEMBERS = config.PARTY_MAX_MEMBERS  # moved to config.py 2026-07-14, now .env-configurable
 
 
 @contextmanager
@@ -192,6 +199,7 @@ def init_db() -> None:
         conn.execute(CREATE_FACTION_STANDING_TABLE)
         conn.execute(CREATE_BOARD_QUESTS_TABLE)
         conn.execute(CREATE_PARTIES_TABLE)
+        conn.execute(CREATE_GAME_SETTINGS_TABLE)
 
         # Older DBs created before fog-of-war/character-slots/proficiency
         # may already have the new characters table but be missing later
@@ -780,6 +788,23 @@ def get_idle_real_characters() -> list[dict]:
             """
         ).fetchall()
     return [_row_to_dict(r) for r in rows]
+
+
+# --- Game-wide settings (simple key/value toggles, e.g. TTS on/off) ---
+
+def get_setting(key: str, default: str | None = None) -> str | None:
+    with get_connection() as conn:
+        row = conn.execute("SELECT value FROM game_settings WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def set_setting(key: str, value: str) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO game_settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
 
 
 # --- Area quest board ---

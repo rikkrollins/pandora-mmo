@@ -55,3 +55,18 @@ STORY_MODE = int(os.getenv("STORY_MODE", "5"))
 # character at a time. 900 = 15 min, matching the other background-loop
 # cadences (world heartbeat, hourly update).
 AI_PARTY_TICK_INTERVAL_SECONDS = int(os.getenv("AI_PARTY_TICK_INTERVAL_SECONDS", "900"))
+
+# Fixed DC for every skill check in the game (deliberate: the AI never
+# gets to invent a difficulty number). Moved here from bot.py 2026-07-14
+# so it's changeable via .env like everything else, without editing code.
+SKILL_CHECK_DC = int(os.getenv("SKILL_CHECK_DC", "13"))
+
+# Real-time hours of continuous resting/inactivity needed to heal a
+# character from 0 to full HP/spell slots (see _apply_natural_healing).
+# Moved here from bot.py 2026-07-14, same reason as SKILL_CHECK_DC.
+NATURAL_HEALING_FULL_REST_HOURS = float(os.getenv("NATURAL_HEALING_FULL_REST_HOURS", "2"))
+
+# Largest a single formed party (invite/accept, not the whole active
+# player roster) can grow to. Moved here from db.py 2026-07-14, same
+# reason as SKILL_CHECK_DC.
+PARTY_MAX_MEMBERS = int(os.getenv("PARTY_MAX_MEMBERS", "6"))

@@ -14,6 +14,7 @@ every preamble in dm_agent.py still gets the same "narrate ONLY the
 real, provided facts" instruction regardless of story mode.
 """
 import config
+import db
 
 # Index i = STORY_MODE level i. 5 is a modest step up from this
 # project's original fixed baselines (per Coffee's "longer, a bit more
@@ -22,6 +23,20 @@ _FACTORS = [0.35, 0.5, 0.65, 0.8, 0.95, 1.15, 1.4, 1.7, 2.1, 2.6, 3.2]
 
 
 def _level() -> int:
+    """
+    A live db.game_settings override (2026-07-14, via the Development-
+    topic "set story mode to N" command) takes priority over
+    config.STORY_MODE's .env value -- lets Coffee try a different
+    narration length immediately, without a redeploy, exactly what he
+    asked for when testing STORY_MODE=10 earlier. Falls back to the
+    .env default if no live override has ever been set.
+    """
+    override = db.get_setting("story_mode")
+    if override is not None:
+        try:
+            return max(0, min(10, int(override)))
+        except ValueError:
+            pass
     return max(0, min(10, getattr(config, "STORY_MODE", 5)))
 
 

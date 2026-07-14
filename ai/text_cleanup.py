@@ -15,3 +15,30 @@ def strip_think_tags(text: str) -> str:
     """Remove any <think>...</think> block(s) and surrounding whitespace."""
     cleaned = _THINK_TAG_RE.sub("", text)
     return cleaned.strip()
+
+
+_MARKDOWN_EMPHASIS_RE = re.compile(r"\*\*(.+?)\*\*|\*(.+?)\*|__(.+?)__|_(.+?)_|`(.+?)`")
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F300-\U0001FAFF"
+    "\U00002600-\U000027BF"
+    "\U0001F1E6-\U0001F1FF"
+    "]+",
+    flags=re.UNICODE,
+)
+TTS_CHAR_LIMIT = 1000  # TextTSBot's own stated /tts limit
+
+
+def to_speakable_text(text: str, char_limit: int = TTS_CHAR_LIMIT) -> str:
+    """
+    Strips markdown emphasis markers and emoji so a TTS engine reads
+    prose instead of literal asterisks/underscores, and truncates to
+    TextTSBot's own stated 1000-character /tts limit (2026-07-14).
+    """
+    def _unwrap(m: re.Match) -> str:
+        return next(g for g in m.groups() if g is not None)
+
+    cleaned = _MARKDOWN_EMPHASIS_RE.sub(_unwrap, text)
+    cleaned = _EMOJI_RE.sub("", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned[:char_limit]
