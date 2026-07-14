@@ -388,6 +388,18 @@ async def _maybe_post_hourly_status_update(bot) -> None:
             WHERE c.is_ai = 0 AND c.is_deleted = 0 AND c.is_inactive = 1
             """
         ).fetchone()
+        # Per Coffee's request (2026-07-14): AI players should count too,
+        # not just real humans -- the design philosophy (CLAUDE.md) is
+        # that AI-driven and human players sit at the same table under
+        # the same rules, so the world's own reported player count
+        # shouldn't quietly exclude half the table.
+        ai_active_row = conn.execute(
+            """
+            SELECT COUNT(*) AS n FROM characters c
+            JOIN active_characters a ON a.character_id = c.character_id
+            WHERE c.is_ai = 1 AND c.is_deleted = 0
+            """
+        ).fetchone()
         last_active_row = conn.execute(
             """
             SELECT c.current_location FROM characters c
@@ -412,6 +424,7 @@ async def _maybe_post_hourly_status_update(bot) -> None:
 
     active_count = active_row["n"] if active_row else 0
     inactive_count = inactive_row["n"] if inactive_row else 0
+    ai_active_count = ai_active_row["n"] if ai_active_row else 0
 
     cutoff = now.timestamp() - HOURLY_UPDATE_INTERVAL_SECONDS
     recent_events = [
@@ -450,7 +463,9 @@ async def _maybe_post_hourly_status_update(bot) -> None:
     flavor = await asyncio.to_thread(narrate_hourly_update, location_name, recent_events, activity_lines)
 
     lines = [f"🕐 *(the hour turns over — {location_name})*", flavor, ""]
-    lines.append(f"👥 Players: {active_count} active, {inactive_count} resting.")
+    total_active = active_count + ai_active_count
+    ai_note = f" ({ai_active_count} AI)" if ai_active_count else ""
+    lines.append(f"👥 Players: {total_active} active{ai_note}, {inactive_count} resting.")
     lines.append(f"📋 Quest board at {location_name}:")
     if not story_quests_here and not area_board_quests:
         lines.append("  nothing posted right now.")
@@ -3143,10 +3158,33 @@ async def _do_gamble(update: Update, text: str) -> None:
     )
 
 
-async def _do_check_party(update: Update) -> None:
+async def _do_check_party(update: Update, text: str = "") -> None:
+    character = db.get_character(update.effective_user.id)
+
+    # Per Coffee's request (2026-07-14): "view my party character sheets"
+    # should show a real full sheet per member -- himself included, plus
+    # any recruit/AI companion -- not just names. Only triggers on
+    # explicit "sheet(s)" phrasing so plain "check my party" keeps its
+    # existing compact behavior.
+    if character and "sheet" in text.lower():
+        party_id = character.get("party_id")
+        if not party_id:
+            await update.effective_chat.send_message(
+                "You're not in a formed party — here's your own sheet:\n\n"
+                + _format_character_sheet(character),
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+        members = db.get_party_members_by_id(party_id)
+        sheets = "\n\n".join(_format_character_sheet(m) for m in members)
+        await update.effective_chat.send_message(
+            f"🎗️ **Your party's sheets ({len(members)}/{db.PARTY_MAX_MEMBERS}):**\n\n{sheets}",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
     lines = [f"👥 Everyone currently active: {_party_summary_text()}"]
 
-    character = db.get_character(update.effective_user.id)
     if character:
         party_id = character.get("party_id")
         if party_id:
@@ -3267,15 +3305,14 @@ def _feature_use_status(character: dict) -> str | None:
     return None
 
 
-async def _do_check_sheet(update: Update) -> None:
-    character = db.get_character(update.effective_user.id)
-    if character is None:
-        await update.effective_chat.send_message(
-            "You don't have a character yet — say something like "
-            "'I want to create a character' to get started!",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
-        )
-        return
+def _format_character_sheet(character: dict) -> str:
+    """
+    Full sheet text for one character -- shared by _do_check_sheet (the
+    asking player's own character) and the "show my party's sheets"
+    path below (2026-07-14, per Coffee: asking for the whole party's
+    sheets should show a real full sheet per member, including
+    recruits/AI companions, not just names).
+    """
     spell_names = [spells_module.get_spell(s)["name"] for s in character["known_spells"]]
     race_data = races_module.get_race(character["race"])
     features = class_features_module.get_class_features(character["char_class"])
@@ -3297,11 +3334,12 @@ async def _do_check_sheet(update: Update) -> None:
         if uses > 0
     ]
     skills_line = f"Skills: {', '.join(skill_lines) if skill_lines else 'None practiced yet'}\n"
-    sheet = (
-        f"**{character['name']}** — {character['race']} {character['char_class']}\n"
+    name_line = f"**{character['name']}**" + (" *(AI companion)*" if character.get("is_ai") else "")
+    return (
+        f"{name_line} — {character['race']} {character['char_class']}\n"
         f"Level {character['level']} | XP {character['xp']}\n"
         f"HP {character['hp_current']}/{character['hp_max']} | AC {character['armor_class']}\n"
-        f"Gold: {character['gold']} | Guild: {character['guild'] or 'None'}\n"
+        f"Gold: {character['gold']} | Guild: {character.get('guild') or 'None'}\n"
         f"Spells known: {', '.join(spell_names) if spell_names else 'None'}\n"
         f"{slot_line}"
         f"Racial traits: {'; '.join(race_data['traits']) if race_data else 'None'}\n"
@@ -3310,7 +3348,18 @@ async def _do_check_sheet(update: Update) -> None:
         f"{skills_line}"
         f"Location: {cl.get_location(CAMPAIGN, character['current_location'])['name']}"
     )
-    await _safe_send(update, sheet)
+
+
+async def _do_check_sheet(update: Update) -> None:
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet — say something like "
+            "'I want to create a character' to get started!",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    await _safe_send(update, _format_character_sheet(character))
 
 
 async def _do_check_inventory(update: Update) -> None:
@@ -5175,7 +5224,7 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     elif action == "check_inventory":
         await _do_check_inventory(update)
     elif action == "check_party":
-        await _do_check_party(update)
+        await _do_check_party(update, text)
     elif action == "buy":
         await _do_buy(update, text)
     elif action == "sell":
