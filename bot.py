@@ -1793,6 +1793,27 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
 
 async def _do_attack(update: Update, action_text: str) -> None:
     chat_id = update.effective_chat.id
+
+    # Auto-start combat when no fight is running yet but the player is
+    # clearly naming a real monster at their current location -- confirmed
+    # live 2026-07-14 (Coffee): "I attack the goblin" with no session
+    # active just refused with "No combat is active right now," requiring
+    # a separate "let's start a fight" first even though the intent was
+    # already completely unambiguous. Done BEFORE acquiring this
+    # function's own lock below, since _do_start_combat acquires the same
+    # per-chat lock itself (asyncio.Lock isn't reentrant -- nesting them
+    # would deadlock).
+    if sessions.get_session(chat_id) is None:
+        character = db.get_character(update.effective_user.id)
+        location = cl.get_location(CAMPAIGN, character["current_location"]) if character else None
+        local_monsters = location.get("monsters", []) if location else []
+        lowered = action_text.lower()
+        matched_monster = next(
+            (m for m in local_monsters if m.replace("_", " ") in lowered), None
+        ) or (local_monsters[0] if len(local_monsters) == 1 else None)
+        if matched_monster is not None:
+            await _do_start_combat(update, monster_key=matched_monster)
+
     async with sessions.get_lock(chat_id):
         session = sessions.get_session(chat_id)
         if session is None:
@@ -3453,6 +3474,25 @@ def _find_resource_node(location: dict, action_text: str) -> dict | None:
     for node in nodes:
         if node["id"] in lowered or node["material"] in lowered or node["name"].lower() in lowered:
             return node
+
+    # Fallback: a word from the input as a substring of the node's
+    # skill name or material id, in either direction -- confirmed live
+    # 2026-07-14 (Coffee): "I would like to chop for lumber" didn't
+    # match the wood node at all (material id is "wood", display name
+    # mentions "timber", and neither contains "lumber"), even though
+    # "lumber" is exactly what its skill (lumberjacking) is named for.
+    stopwords = {"the", "a", "an", "of", "at", "on", "in", "to", "for", "and"}
+    words = [w for w in lowered.split() if len(w) >= 4]
+    for node in nodes:
+        skill = node.get("skill", "")
+        material = node["material"]
+        name_words = {w for w in node["name"].lower().split() if w not in stopwords and len(w) >= 4}
+        if any(
+            (skill and (w in skill or skill in w)) or w in material or material in w or w in name_words
+            for w in words
+        ):
+            return node
+
     if len(nodes) == 1:
         return nodes[0]
     return None
@@ -5752,7 +5792,8 @@ async def dev_topic_document_handler(update: Update, context: ContextTypes.DEFAU
     )
 
 
-_NAMED_SHEET_EXCLUDED_WORDS = ("my", "the", "a", "an", "her", "his", "their", "your", "our")
+_NAMED_SHEET_EXCLUDED_WORDS = ("the", "a", "an", "her", "his", "their", "your", "our")
+_SELF_SHEET_WORDS = ("my", "mine", "myself")
 
 
 async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -5770,20 +5811,46 @@ async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TY
     # same reasoning as every other deterministic answer in
     # ai/support_agent.py -- so it's resolved here directly rather than
     # handed to the model.
-    named_sheet_match = re.search(r"(\w+)(?:'s)? (?:character )?sheet", question.lower())
-    if named_sheet_match and named_sheet_match.group(1) not in _NAMED_SHEET_EXCLUDED_WORDS:
-        target_name = named_sheet_match.group(1)
-        target = _find_party_target_by_name(target_name) or db.find_character_by_name(target_name)
-        if target is not None:
-            reply = _format_character_sheet(target)
-        else:
-            npc = _find_campaign_npc_by_name(target_name)
-            reply = _format_npc_basic_info(npc) if npc is not None else (
-                f"Nobody named {target_name.title()} is playing right now — can't show a sheet for them."
+    #
+    # Confirmed live 2026-07-14 (Coffee, real screenshot): "Show me my
+    # character sheet and Sera's character sheet" -- TWO sheets in one
+    # message -- used re.search, which only ever finds the FIRST match
+    # ("my", which was then excluded), so this fell through to the LLM
+    # entirely. The model then answered Coffee's own sheet reasonably
+    # but OUTRIGHT INVENTED Sera's ("mirrors this structure... similar
+    # stats based on available data") -- a real hallucination of fake
+    # stats, exactly what this game's grounding rules exist to prevent.
+    # Fixed with re.findall (every match, not just the first) and a
+    # real per-name lookup for each one, never handing ANY of it to the
+    # model once at least one real name resolves.
+    sheet_names = re.findall(r"(\w+)(?:'s)? (?:character )?sheet", question.lower())
+    if sheet_names:
+        seen = set()
+        replies = []
+        for raw_name in sheet_names:
+            if raw_name in seen or raw_name in _NAMED_SHEET_EXCLUDED_WORDS:
+                continue
+            seen.add(raw_name)
+            if raw_name in _SELF_SHEET_WORDS:
+                replies.append(
+                    _format_character_sheet(character) if character is not None
+                    else "You don't have a character yet."
+                )
+                continue
+            target = _find_party_target_by_name(raw_name) or db.find_character_by_name(raw_name)
+            if target is not None:
+                replies.append(_format_character_sheet(target))
+                continue
+            npc = _find_campaign_npc_by_name(raw_name)
+            replies.append(
+                _format_npc_basic_info(npc) if npc is not None
+                else f"Nobody named {raw_name.title()} is playing right now — can't show a sheet for them."
             )
-        logger.info(f"[support] user={update.effective_user.id} text={question!r} reply={reply!r}")
-        await _safe_send(update, reply, thread_id=config.TOPIC_SUPPORT_ID)
-        return
+        if replies:
+            reply = "\n\n".join(replies)
+            logger.info(f"[support] user={update.effective_user.id} text={question!r} reply={reply!r}")
+            await _safe_send(update, reply, thread_id=config.TOPIC_SUPPORT_ID)
+            return
 
     reply = await asyncio.to_thread(answer_support_question, question, character, party_members)
     logger.info(f"[support] user={update.effective_user.id} text={question!r} reply={reply!r}")

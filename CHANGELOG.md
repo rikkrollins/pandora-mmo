@@ -2,6 +2,60 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.7.7] — Attacking now just works, and Support stopped inventing a companion's stats
+
+- **"I attack the goblin" now works with no fight already running.**
+  Per Coffee: "I also tried to attack the goblin, but it didn't work
+  either." `_do_attack` required an already-active combat session and
+  just refused otherwise, forcing a separate "let's start a fight"
+  first even when the intent to fight a specific, present monster was
+  completely unambiguous. It now auto-starts combat itself when no
+  session exists but the player is naming (or there's exactly one)
+  real monster at their current location. Verified live: a real fight
+  auto-starts, resolves real rounds, and concludes correctly.
+- **Support topic no longer hallucinates a companion's stats.** Real
+  screenshot: "Show me my character sheet and Sera's character sheet"
+  showed Coffee's own sheet correctly, then OUTRIGHT INVENTED Sera's
+  ("mirrors this structure... similar stats based on available data")
+  — exactly the kind of fabrication this game's grounding rules exist
+  to prevent. Root cause: the lookup only ever found the FIRST "X's
+  sheet" mention in a message (re.search, not re.findall) — since "my"
+  came first and was excluded, the whole message fell through to the
+  model instead. Now finds every name mentioned and shows each one's
+  real sheet, never touching the model once any name resolves.
+
+## [1.7.6] — Every gathering skill now has real verb coverage, and Support became a real wiki
+
+Per Coffee's live report and follow-up: "I would like to chop for
+lumber" hit pass_turn, then asked to audit every skill so this
+class of bug couldn't be hiding elsewhere.
+
+- Audited all 7 real resource nodes across all 4 gathering skills.
+  Lumberjacking and fishing had ZERO working verb triggers at all
+  ("chop"/"cut down"/"cut wood" and "go fishing"/"catch fish"/word-
+  boundary "fish" added); mining only recognized the bare word "mine"
+  ("dig for"/"dig up" added).
+- `_find_resource_node` only matched a node's exact material id or
+  full display name as a substring — broadened to also match a
+  significant word against the node's skill name or display-name
+  words in either direction (e.g. "chop the timber" now finds the
+  wood node via "timber", not just its material id "wood").
+- Verified with 12 unit cases (including negative cases — "selfish"/
+  "shellfish"/"finish" must NOT trigger gathering just because they
+  contain "fish") plus two real handler-level runs (lumberjacking,
+  fishing) with real dice rolls and real narration.
+
+- **Support topic is now a much fuller wiki**, per Coffee: "make sure
+  support topic is well rounded like an encyclopedia... for players to
+  find out anything they need." The command list only ever covered
+  the game's early state — gathering/skills, crafting, campfires,
+  resting, status conditions, death/revivify, full party sheets
+  (including anyone's, not just your own), board vs. story quests,
+  and recruit/invite were all missing. Added a real crafting-recipes
+  catalog and gathering-skills list alongside the existing item/spell/
+  guild/race catalogs, so none of it is invented — grounded the same
+  way as everything else Support answers from.
+
 ## [1.7.5] — Fixed examine/look-at failing on real, correctly-described objects
 
 Per Coffee's live report (screenshots, 2026-07-14): "when I was looking

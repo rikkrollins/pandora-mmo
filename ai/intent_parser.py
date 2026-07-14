@@ -575,9 +575,29 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                                     "light a campfire", "make camp", "set up camp"]):
         return {**base, "action": "make_campfire"}
 
-    gather_words = ["gather", "forage", "harvest", "mine ", "collect", "pick the herbs",
-                    "pick some flowers", "pick flowers", "pick herbs"]
-    if any(w in lowered for w in gather_words):
+    # Confirmed live 2026-07-14 (Coffee): "I would like to chop for
+    # lumber" fell all the way through to pass_turn -- lumberjacking
+    # (a real gathering skill, campaign.json's old_timber_stand node)
+    # had no matching verb at all here. "gather"/"forage"/"harvest"/
+    # "mine"/"collect"/"pick" cover herbs/ore, but nobody naturally
+    # says any of those for wood. Same audit request from Coffee
+    # ("make sure all skills work... if I say go fishing, it means
+    # using my fishing skill") turned up fishing had NO trigger verb
+    # at all either, and mining only covered the bare word "mine".
+    gather_words = ["gather", "forage", "harvest", "mine ", "dig for", "dig up", "collect", "pick the herbs",
+                    "pick some flowers", "pick flowers", "pick herbs",
+                    "chop", "cut down", "cut wood", "cut some wood",
+                    "go fishing", "catch fish", "catch some fish", "cast a line",
+                    # Confirmed live 2026-07-14 (Coffee): "Get wood from
+                    # the whispering wood" also fell through -- "get "
+                    # is too common a word to trigger bare (would
+                    # misfire on "let me get my bearings" etc.), so only
+                    # "get <real material>" phrasings are covered.
+                    "get wood", "get some wood", "get ore", "get some ore",
+                    "get herbs", "get some herbs", "get fish", "get some fish"]
+    # Bare "fish" needs a word boundary, not a plain substring -- it's
+    # embedded in ordinary words like "selfish"/"shellfish"/"finish".
+    if any(w in lowered for w in gather_words) or re.search(r"\bfish\b", lowered):
         return {**base, "action": "gather"}
     # Confirmed live 2026-07-13 (Coffee, repeatedly since the night
     # before): "Pick a silverleaf herb" matched none of the fixed

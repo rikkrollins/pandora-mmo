@@ -21,6 +21,7 @@ import races as races_module
 import spells as spells_module
 from ai.text_cleanup import strip_think_tags
 from guilds import GUILDS
+from rules.crafting import RECIPES
 from rules.leveling import XP_THRESHOLDS, level_for_xp
 
 # Standard 5E priority order for which ability scores matter most to each
@@ -56,19 +57,54 @@ can do (do not invent anything beyond this list):
 - "I want to create a character" -> starts character creation (name, race, \
 class, then assigning 6 rolled ability scores to STR/DEX/CON/INT/WIS/CHA)
 - "Look around" / "where am I" -> describes the current location
-- "I head to the [place]" -> travels to a connected location
+- "I head to the [place]" / "go downstairs" / "leave this area" -> travels \
+to a connected location
 - "What am I carrying?" -> shows backpack contents
 - "I want to buy [item]" -> purchases from a shop, only if standing in a \
 location that has one
 - "sell my [item]" -> sells an item from the backpack for half its value
 - "Let's start a fight" / "I attack the goblin" -> begins or continues combat
+- "I flee" / "I try to escape" -> breaks off from combat, but every living \
+enemy gets one free attack as you go -- not risk-free
 - "I cast [spell name]" -> casts a spell the character actually knows
+- "examine the [thing]" / "read the [thing]" / "look at the [thing]" -> a \
+closer look at one specific object in the current location
+- "I gather [material]" -> collects a resource from a real gathering node \
+at the current location (herbalism, mining, lumberjacking, fishing are the \
+real gathering skills in this game) -- repeated success at a skill raises \
+a real, persistent proficiency bonus for it, shown on the character sheet
+- "I craft [item]" -> makes an item from a known recipe, if the character \
+has the real materials for it in their backpack
+- "I make a campfire" -> uses 1 wood to recover a small amount of HP \
+outside combat
+- "I rest" / going quiet for a while -> heals HP and spell slots over \
+real-world elapsed time (not an instant full heal)
 - "I want to join the [guild name]" -> requests guild membership, subject to \
 level/class requirements
 - Saying an NPC's name -> starts an in-character conversation with them
+- "recruit [NPC]" / "invite [NPC] to my party" -> asks a recruitable NPC to \
+join the party as an AI companion
+- "invite [player/companion] to my party" -> invites a fellow real player's \
+or AI companion's own character
+- "show me my party" / "show me [name]'s character sheet" -> shows a full \
+sheet for any real character, human or AI, not just your own -- an \
+un-recruited NPC instead gets honest basic info (role/personality), since \
+they don't have real combat stats until recruited
+- "what's on the quest board" / "my quests" -> shows the location's board \
+bounty AND the character's own story/board quest progress -- board quests \
+are randomly generated daily bounties (gather or defeat something for XP/ \
+gold); story quests are hand-authored and tied to specific locations
+- "I accept the quest" / "accept this quest" -> accepts whichever quest is \
+currently on offer at the current location
 - "cancel" / "stop" / "reset" -> exits out of character creation or any \
 other multi-step process, at any time
-- "/sheet" or asking about stats/HP/level -> shows the character sheet"""
+- "/sheet" or asking about stats/HP/level -> shows the character sheet
+
+Status conditions that can affect a character in combat, each with a real \
+mechanical effect (not just flavor text): prone, poisoned, blinded, \
+silenced, paralyzed, frightened. A character reduced to 0 HP starts making \
+death saves -- 3 failures means real, permanent death, reversible only by \
+a genuine Revivify spell/scroll, not an instant free undo."""
 
 CRITICAL_GROUNDING_RULE = """
 
@@ -119,6 +155,29 @@ def _build_catalog_reference() -> str:
             + (f", classes: {', '.join(guild['join_requirement_classes'])}"
                if guild.get("join_requirement_classes") else "")
         )
+
+    # Per Coffee (2026-07-14): Support should be "like an encyclopedia
+    # or wiki" -- crafting recipes and the real gathering skills were
+    # never grounded here at all, so a question like "what can I craft"
+    # had nothing real to answer from.
+    lines.append("\nREAL CRAFTING RECIPES IN THIS GAME:")
+    for recipe_id, recipe in RECIPES.items():
+        result = items_module.get_item(recipe["result_item"])
+        material_names = ", ".join(
+            f"{qty}x {items_module.get_item(mat)['name'] if items_module.get_item(mat) else mat}"
+            for mat, qty in recipe["materials"].items()
+        )
+        lines.append(
+            f"- {result['name'] if result else recipe_id}: needs {material_names} "
+            f"({recipe['ability']} check, DC {recipe['dc']})"
+        )
+
+    lines.append(
+        "\nREAL GATHERING SKILLS IN THIS GAME: herbalism, mining, lumberjacking, "
+        "fishing -- each is tied to real resource nodes at specific locations, "
+        "uses a real ability check to succeed, and gets a persistent proficiency "
+        "bonus the more it's successfully practiced (shown on the character sheet)."
+    )
 
     # Confirmed live (2026-07-11): asked to help assign rolled stats for an
     # Elf Ranger, the model ignored the character's actual race/class
