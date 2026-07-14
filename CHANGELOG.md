@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.8.1] — Every recruitable now has a real personal quest
+
+Direct follow-up to 1.8.0's companion-quest system (Sera's Safer
+Crossing) — now all 6 recruitable NPCs have one, each grounded in
+their existing established personality/goals text, not invented fresh:
+
+- **Borin Ironjaw** (Market Row): "A Name Worth Vouching For" — wants
+  proof against something real in the Goblin Warrens before he'll
+  vouch for the party.
+- **Wren Hollowbrook** (Hollow Stump Shrine): "What the Roots Are
+  Hiding" — sends the party into the Sunken Root Caverns to check what
+  changed.
+- **Pip Thistledown** (Stonearch Bridge): "A Story Worth Telling" —
+  wants proof of something worth singing about from the Whispering
+  Wood.
+- **Grask Emberscale** (Goblin Warrens): "Grask's Freedom" — tied to
+  defeating the goblin boss, the first companion quest using the
+  defeat_monster trigger rather than reach_location.
+- **Vesh Nightglass** (Glimmerdeep Grotto): "Vesh's Way Back" — wants
+  walking back up to The Crossroads Tavern.
+
+Verified live: all 5 recruit-then-narrate-then-accept-then-track flows
+confirmed end-to-end. Grask's defeat_monster trigger is verified at
+the code level (same generic, already-proven completion-checking loop
+the pre-existing "Clear the Goblin Warrens" quest already relies on)
+rather than a full live combat replay, given heavy shared-capacity
+contention with the live game at the time (Ollama runs a single
+concurrent generation slot, so a long test directly competes with real
+players' live requests).
+
 ## [1.8.0] — Recruitable companions now have real personal quests
 
 Coffee's idea: "each recruitable has a mission or quest they go on with

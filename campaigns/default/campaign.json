@@ -773,6 +773,71 @@
       },
       "clue": "Sera says she'll feel better about the bridge once someone's actually walked it with her."
     },
+    "borins_vouching_task": {
+      "title": "A Name Worth Vouching For",
+      "description": "Borin's done penance on this street long enough to know he can't vouch for anyone he hasn't actually seen handle real danger -- he wants the party to deal with whatever's really going on in the Goblin Warrens before he'll put his name behind them.",
+      "objective_location": "goblin_warrens",
+      "giver_npc": "borin_ironjaw",
+      "reward_xp": 120,
+      "reward_gold": 40,
+      "trigger": {
+        "type": "reach_location",
+        "location": "goblin_warrens"
+      },
+      "clue": "Borin says a name means nothing until it's been tested somewhere that actually matters."
+    },
+    "wrens_root_worry": {
+      "title": "What the Roots Are Hiding",
+      "description": "Wren's shrine draws on something growing down in the Sunken Root Caverns, and lately it's felt wrong -- she wants someone who isn't afraid of the dark to go see what's changed down there.",
+      "objective_location": "sunken_root_caverns",
+      "giver_npc": "wren_hollowbrook",
+      "reward_xp": 120,
+      "reward_gold": 40,
+      "trigger": {
+        "type": "reach_location",
+        "location": "sunken_root_caverns"
+      },
+      "clue": "Wren says the shrine's garden has been restless the same way it was the last time something changed down below."
+    },
+    "pips_story_worth_telling": {
+      "title": "A Story Worth Telling",
+      "description": "Pip's been stalling on this bridge for three days waiting for one good story before he'll finally move on -- he wants the party to bring back proof of something genuinely worth singing about from the Whispering Wood.",
+      "objective_location": "whispering_wood",
+      "giver_npc": "pip_thistledown",
+      "reward_xp": 80,
+      "reward_gold": 30,
+      "trigger": {
+        "type": "reach_location",
+        "location": "whispering_wood"
+      },
+      "clue": "Pip says a story only counts if he can honestly say he sent someone to go get it."
+    },
+    "grasks_freedom": {
+      "title": "Grask's Freedom",
+      "description": "Grask has been watching the tunnel entrance for a chance worth taking ever since the goblins caught him -- the party dealing with what's really running this warren is exactly the chance he's been waiting for.",
+      "objective_location": "goblin_warrens",
+      "giver_npc": "grask_emberscale",
+      "reward_xp": 120,
+      "reward_gold": 40,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "goblin_boss"
+      },
+      "clue": "Grask says whoever's giving these goblins their orders is the only thing standing between him and the surface."
+    },
+    "veshs_way_back": {
+      "title": "Vesh's Way Back",
+      "description": "Vesh got turned around chasing a light down into Glimmerdeep Grotto and has been living off crystal-glow ever since -- she just wants someone who actually knows the way to walk her back up to The Crossroads Tavern.",
+      "objective_location": "crossroads_tavern",
+      "giver_npc": "vesh_nightglass",
+      "reward_xp": 100,
+      "reward_gold": 30,
+      "trigger": {
+        "type": "reach_location",
+        "location": "crossroads_tavern"
+      },
+      "clue": "Vesh says she stopped trying to count the days once the crystal-glow started tasting normal."
+    },
     "the_hollow_stump": {
       "title": "The Hollow Stump",
       "description": "The shrine in the Whispering Wood may hold answers to what's been left behind there.",
