@@ -3349,15 +3349,26 @@ async def _do_gather(update: Update, action_text: str) -> None:
         )
         return
 
+    # 2026-07-14, per Coffee: named gathering professions (herbalism,
+    # mining, fishing, lumberjacking) each level up independently, not
+    # lumped into the shared ability-check practice track a combat skill
+    # check would also feed. A node's "skill" field is the tracked
+    # practice key; the dice roll itself still uses the node's "ability"
+    # (e.g. mining is a Strength check, fishing is Wisdom) -- same
+    # split db.py's skill_uses dict already supports for free, since
+    # it's just an arbitrary string-keyed JSON dict, not one column per
+    # ability. Falls back to the ability name for any node without an
+    # explicit "skill" (keeps old behavior for anything not yet tagged).
+    skill_key = node.get("skill", node["ability"])
     result = roll_ability_check(character, node["ability"], proficient=False)
-    bonus = _practiced_bonus_for(update.effective_user.id, node["ability"])
+    bonus = _practiced_bonus_for(update.effective_user.id, skill_key)
     result["total"] += bonus
     result["practiced_bonus"] = bonus
     success = result["total"] >= SKILL_CHECK_DC
     material = items_module.get_item(node["material"])
 
     if success:
-        db.record_skill_use(update.effective_user.id, node["ability"])
+        db.record_skill_use(update.effective_user.id, skill_key)
         db.add_item(update.effective_user.id, node["material"], 1)
 
     flavor = await asyncio.to_thread(
@@ -3425,8 +3436,11 @@ async def _do_craft(update: Update, text: str) -> None:
         )
         return
 
-    recipe_ability = get_recipe(recipe_id)["ability"]
-    bonus = _practiced_bonus_for(update.effective_user.id, recipe_ability)
+    # 2026-07-14, per Coffee: "crafting" is its own named, levelable
+    # skill -- tracked separately from whichever ability a given recipe
+    # happens to roll with (wisdom for a potion, intelligence for a
+    # scroll), same split as the gathering professions above.
+    bonus = _practiced_bonus_for(update.effective_user.id, "crafting")
     result = resolve_craft(character, recipe_id, practiced_bonus=bonus)
 
     if result["outcome"] == "missing_materials":
@@ -3445,7 +3459,7 @@ async def _do_craft(update: Update, text: str) -> None:
 
     success = result["outcome"] == "success"
     if success:
-        db.record_skill_use(update.effective_user.id, recipe_ability)
+        db.record_skill_use(update.effective_user.id, "crafting")
         db.add_item(update.effective_user.id, result["result_item"], result["result_qty"])
 
     flavor = await asyncio.to_thread(
@@ -3459,6 +3473,58 @@ async def _do_craft(update: Update, text: str) -> None:
     else:
         message += "\n⚗️ The attempt fails, but your materials aren't wasted — you can try again."
     await _safe_send(update, message)
+
+
+async def _do_make_campfire(update: Update) -> None:
+    """
+    Consumes 1 wood to make a campfire (2026-07-14, per Coffee's idea)
+    -- a real, small, immediate HP benefit (1d4, deterministic dice roll
+    same as every other outcome in this game), not full-rest-scale
+    healing (that's what actually resting does, over real time). Doesn't
+    require being combat-free -- unlike resting, a quick fire by the
+    roadside isn't a multi-hour commitment, so it's allowed any time
+    outside an active fight.
+    """
+    telegram_user_id = update.effective_user.id
+    character = db.get_character(telegram_user_id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if sessions.get_session(update.effective_chat.id) is not None:
+        await update.effective_chat.send_message(
+            "Not in the middle of a fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if character["inventory"].get("wood", 0) < 1:
+        await update.effective_chat.send_message(
+            "You don't have any wood to burn.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if character["hp_current"] >= character["hp_max"]:
+        await update.effective_chat.send_message(
+            "Already at full health — no need for a fire right now.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    db.remove_item(telegram_user_id, "wood", 1)
+    heal = roll_damage("1d4")["total"]
+    new_hp = min(character["hp_current"] + heal, character["hp_max"])
+    actual_heal = new_hp - character["hp_current"]
+    db.update_character(telegram_user_id, hp_current=new_hp)
+
+    flavor = await asyncio.to_thread(
+        narrate_action, character, "makes a campfire and warms up beside it",
+        {"success": True},
+    )
+    await _safe_send(
+        update,
+        f"🔥 **{character['name']}** builds a campfire and rests beside its warmth.\n"
+        f"> {flavor}\n\n"
+        f"Recovers {actual_heal} HP ({new_hp}/{character['hp_max']}).",
+    )
 
 
 async def _do_second_wind(update: Update) -> None:
@@ -5164,6 +5230,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_gather(update, intent.get("raw_text", text))
     elif action == "craft":
         await _do_craft(update, text)
+    elif action == "make_campfire":
+        await _do_make_campfire(update)
     elif action == "second_wind":
         await _do_second_wind(update)
     elif action == "rage":

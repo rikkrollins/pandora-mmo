@@ -84,7 +84,15 @@
             "id": "silverleaf_patch",
             "name": "a patch of Silverleaf Herbs",
             "material": "silverleaf_herb",
-            "ability": "wisdom"
+            "ability": "wisdom",
+            "skill": "herbalism"
+          },
+          {
+            "id": "old_timber_stand",
+            "name": "a stand of old, sturdy timber",
+            "material": "wood",
+            "ability": "strength",
+            "skill": "lumberjacking"
           }
         ],
         "interactables": {
@@ -116,7 +124,8 @@
             "id": "moonpetal_bloom",
             "name": "Moonpetal flowers growing at the shrine's base",
             "material": "moonpetal",
-            "ability": "wisdom"
+            "ability": "wisdom",
+            "skill": "herbalism"
           }
         ],
         "lockables": [
@@ -181,6 +190,15 @@
         "monsters": [
           "giant_spider"
         ],
+        "resource_nodes": [
+          {
+            "id": "gorge_stream",
+            "name": "the stream running through the gorge below",
+            "material": "raw_fish",
+            "ability": "wisdom",
+            "skill": "fishing"
+          }
+        ],
         "interactables": {
           "worn_carvings": {
             "name": "the bridge's worn rail carvings",
@@ -238,7 +256,8 @@
             "id": "cellar_mushroom_patch",
             "name": "a patch of pale fungus growing in the damp corner",
             "material": "silverleaf_herb",
-            "ability": "wisdom"
+            "ability": "wisdom",
+            "skill": "herbalism"
           }
         ],
         "interactables": {
@@ -314,7 +333,8 @@
             "id": "sulfur_vein",
             "name": "a vein of Sulfur Dust in the cavern wall",
             "material": "sulfur_dust",
-            "ability": "strength"
+            "ability": "strength",
+            "skill": "mining"
           }
         ],
         "interactables": {
@@ -348,7 +368,8 @@
             "id": "iron_ore_seam",
             "name": "a seam of Iron Ore the goblins have been chipping at",
             "material": "iron_ore",
-            "ability": "strength"
+            "ability": "strength",
+            "skill": "mining"
           }
         ],
         "interactables": {

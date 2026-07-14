@@ -81,6 +81,7 @@ persuading/deceiving, constitution for enduring/resisting).
 - "gather" is for foraging, harvesting, mining, or collecting raw materials (herbs, ore, flowers) from the \
 environment — NOT picking a lock (that's skill_check).
 - "craft" is for brewing, crafting, or making an item from materials. Set "item_name" to the item being crafted.
+- "make_campfire" is specifically for making/building/lighting a campfire or making/setting up camp, using wood.
 - "list_characters" is for asking to see their own list/roster of characters.
 - "switch_character" is for asking to switch to, play as, or make active a specific one of their own \
 characters by name. Set "target" to the character name.
@@ -497,6 +498,10 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                                     "my map", "show map"]):
         return {**base, "action": "show_map"}
 
+    if any(w in lowered for w in ["make a campfire", "build a campfire", "start a campfire",
+                                    "light a campfire", "make camp", "set up camp"]):
+        return {**base, "action": "make_campfire"}
+
     gather_words = ["gather", "forage", "harvest", "mine ", "collect", "pick the herbs",
                     "pick some flowers", "pick flowers", "pick herbs"]
     if any(w in lowered for w in gather_words):
@@ -603,6 +608,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
                 "answer_puzzle", "gamble", "chat", "examine", "flee", "resolve_choice",
                 "invite_to_party", "accept_party_invite", "leave_party", "find_merchant",
                 "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "arcane_recovery",
+                "make_campfire",
             )
             if parsed["action"] not in valid_actions:
                 return fallback
