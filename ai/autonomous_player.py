@@ -19,7 +19,7 @@ import requests
 import config
 from ai.text_cleanup import strip_think_tags
 
-ACTION_STYLE_PROMPT = """You are role-playing an autonomous character in a \
+ACTION_STYLE_PREAMBLE = """You are role-playing an autonomous character in a \
 Dungeons & Dragons 5E game, deciding your own next action for yourself. You \
 are given real facts about your character and your surroundings -- use \
 ONLY these, never invent a person, monster, place, item, or quest beyond \
@@ -31,22 +31,43 @@ direct, unambiguous phrasing, one short sentence, no narration or \
 explanation. Good examples of the phrasing STYLE to match (the bracketed \
 parts are placeholders -- always replace them with something real from the \
 facts given below, NEVER copy a bracketed example verbatim, and never name \
-a place/person/item that isn't actually listed there):
-- "I head to [a place listed under Places reachable from here]"
-- "I attack [something listed under Danger here]"
-- "I talk to [someone listed under People here]"
-- "I ask [someone listed under You could recruit] to join our party"
-- "Let's start a fight"
-- "I examine [something listed under Things worth a closer look]"
-- "I check the quest board"
-- "I accept the quest" (if the facts below say something's posted or on offer)
-- "I choose [the exact label of one of your options]" (if the facts below say you have a decision to make)
-- "I want to buy [something listed under Shop here sells]"
-- "sell my [something listed under You're carrying]"
-- "I want to join the [a guild listed under Guilds you could join]"
-- "I cast [something listed under Spells you know]"
-- "I rest for now"
+a place/person/item that isn't actually listed there):"""
 
+# (required situation_facts substring, example line) -- the substring is
+# the exact "You could X" / "Y here" heading _build_ai_player_situation_facts
+# (bot.py) only ever writes when that thing is REALLY true right now.
+# None means always show it (no grounding needed, e.g. "Let's start a fight"
+# is always a syntactically valid thing to try saying).
+#
+# Confirmed live 2026-07-14 (Coffee): with recruiting always shown as an
+# example regardless of whether a recruitable NPC was actually nearby, an
+# AI party member with nobody real to recruit still generated "I ask
+# villagers to join our party" -- pattern-matching the example's shape
+# and hallucinating a filler ("villagers") for the bracketed placeholder,
+# instead of recognizing the example didn't apply and picking something
+# it actually had real grounding for. Same root cause already fixed once
+# for place/object names specifically (2026-07-11, see the note below) --
+# this generalizes that fix to EVERY example, not just names within an
+# always-shown line: an example whose entire premise isn't true right now
+# is now omitted from the prompt entirely, not just its placeholder name.
+_EXAMPLE_LINES = [
+    ("Places reachable from here", "I head to [a place listed under Places reachable from here]"),
+    ("Danger here", "I attack [something listed under Danger here]"),
+    ("People here", "I talk to [someone listed under People here]"),
+    ("You could recruit", "I ask [someone listed under You could recruit] to join our party"),
+    (None, "Let's start a fight"),
+    ("Things worth a closer look", "I examine [something listed under Things worth a closer look]"),
+    (None, "I check the quest board"),
+    (None, "I accept the quest (if the facts below say something's posted or on offer)"),
+    (None, "I choose [the exact label of one of your options] (if the facts below say you have a decision to make)"),
+    ("Shop here sells", "I want to buy [something listed under Shop here sells]"),
+    ("You're carrying", "sell my [something listed under You're carrying]"),
+    ("Guilds you could join", "I want to join the [a guild listed under Guilds you could join]"),
+    ("Spells you know", "I cast [something listed under Spells you know]"),
+    (None, "I rest for now"),
+]
+
+ACTION_STYLE_CLOSING = """
 Confirmed live 2026-07-11: an earlier version of these examples named \
 actual places/objects from this campaign, and this model kept parroting \
 that exact example back verbatim regardless of whether it was even true \
@@ -58,6 +79,15 @@ your action.
 Respond with ONLY the action sentence, nothing else."""
 
 
+def _action_style_prompt(situation_facts: str) -> str:
+    """Only shows example action shapes actually grounded in something real right now."""
+    lines = [
+        f'- "{example}"' for required, example in _EXAMPLE_LINES
+        if required is None or required in situation_facts
+    ]
+    return f"{ACTION_STYLE_PREAMBLE}\n{chr(10).join(lines)}\n{ACTION_STYLE_CLOSING}"
+
+
 def _build_prompt(character: dict, personality: str, situation_facts: str, last_action: str | None = None) -> str:
     last_action_line = (
         f"\nYour LAST action, already done, was: \"{last_action}\" -- do something "
@@ -65,7 +95,7 @@ def _build_prompt(character: dict, personality: str, situation_facts: str, last_
         if last_action else ""
     )
     return (
-        f"{ACTION_STYLE_PROMPT}\n\n"
+        f"{_action_style_prompt(situation_facts)}\n\n"
         f"Your character: {character['name']}, a {character['race']} {character['char_class']}, "
         f"level {character['level']}, HP {character['hp_current']}/{character['hp_max']}\n"
         f"Your personality: {personality}\n"
