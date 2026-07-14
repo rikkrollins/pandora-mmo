@@ -5256,7 +5256,16 @@ async def development_topic_handler(update: Update, context: ContextTypes.DEFAUL
     # lets Coffee try a different narration length immediately, without a
     # redeploy (see ai/story_mode.py's _level(), which now checks this
     # same db.game_settings key before falling back to config.STORY_MODE).
-    story_mode_match = re.search(r"(?:set )?story ?mode(?: to| =)?\s*(\d+)", lowered_question)
+    # Confirmed live the same day: Coffee actually said "Set narration to
+    # 5", not "story mode" -- the original pattern only matched "story
+    # mode" literally, so his real command silently fell through to the
+    # general AI dev-question flow with zero effect. "narration" is the
+    # more natural word for this (it's what STORY_MODE's own .env comment
+    # calls it -- "narration length/style"), so it's the primary
+    # alternative covered here, alongside "story mode"/"narrative".
+    story_mode_match = re.search(
+        r"(?:set )?(?:story ?mode|narration(?: length| level)?|narrative)(?: to| =)?\s*(\d+)", lowered_question
+    )
     if story_mode_match:
         level = max(0, min(10, int(story_mode_match.group(1))))
         db.set_setting("story_mode", str(level))
