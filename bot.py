@@ -5295,6 +5295,24 @@ async def development_topic_handler(update: Update, context: ContextTypes.DEFAUL
         await _safe_send(update, "⏸️ Moltbook autonomous social is now **OFF**.", thread_id=config.TOPIC_DEVELOPMENT_ID)
         return
 
+    # Campaign-source link (2026-07-14): Coffee wants to send links to
+    # campaign books/PDFs for a future Claude Code session to pull from
+    # when the campaign-loading feature gets built. A link dropped here
+    # is almost always "save this," not "answer a question about this,"
+    # so it's recorded directly instead of spending an Ollama call on
+    # answer_dev_question producing a generic, unhelpful response to a
+    # bare URL. Same campaign_sources/INDEX.md record dev_topic_document_
+    # handler writes to, so PDFs and links end up in one combined list.
+    url_match = re.search(r"https?://\S+", question)
+    if url_match:
+        _append_campaign_source(f"Link: {url_match.group(0)} — {question}")
+        await _safe_send(
+            update,
+            "🔗 Got it — logged in campaign_sources/INDEX.md for a future Claude Code session to pull from.",
+            thread_id=config.TOPIC_DEVELOPMENT_ID,
+        )
+        return
+
     history = context.user_data.setdefault("dev_history", [])
 
     # Message CONTENT wasn't logged here before — same gap as Adventure
@@ -5365,6 +5383,75 @@ async def dev_topic_photo_handler(update: Update, context: ContextTypes.DEFAULT_
         f"📸 Got it — saved for troubleshooting at `{filepath}`. I can't see it from here myself "
         f"(no image capability in this running process), but it's ready for a live Claude Code "
         f"session to look at directly.",
+        thread_id=config.TOPIC_DEVELOPMENT_ID,
+    )
+
+
+CAMPAIGN_SOURCES_DIR = "campaign_sources"
+CAMPAIGN_SOURCES_INDEX = os.path.join(CAMPAIGN_SOURCES_DIR, "INDEX.md")
+
+
+def _append_campaign_source(entry: str) -> None:
+    """
+    Running record of every campaign-book PDF/document and link Coffee
+    sends via Development (2026-07-14), so nothing sent gets lost track
+    of before the campaign-loading feature (Campaign topic, thread
+    1941) is actually designed and built. A plain append-only Markdown
+    log, same low-tech spirit as the other *_state.json cursor files.
+    """
+    os.makedirs(CAMPAIGN_SOURCES_DIR, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    is_new = not os.path.exists(CAMPAIGN_SOURCES_INDEX)
+    with open(CAMPAIGN_SOURCES_INDEX, "a") as f:
+        if is_new:
+            f.write("# Campaign sources\n\nPDFs/documents and links Coffee has sent for a future campaign-loading feature.\n\n")
+        f.write(f"- [{timestamp}] {entry}\n")
+
+
+async def dev_topic_document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Per Coffee's request (2026-07-14): he wants to send campaign-book
+    PDFs (and other reference documents) into Development so a live
+    Claude Code session has them on record to pull from later, when the
+    campaign-loading feature itself gets designed. Mirrors
+    dev_topic_photo_handler's pattern exactly (separate handler on
+    filters.Document.ALL, no ordering conflict with filters.TEXT/PHOTO),
+    except the original filename is kept (unlike a screenshot's
+    synthetic name, a real document's name is meaningful) and every
+    upload is recorded in campaign_sources/INDEX.md.
+    """
+    if update.message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
+        return
+
+    is_owner = await _is_group_owner(update, context)
+    if is_owner is None:
+        await _safe_send(
+            update,
+            "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
+            thread_id=config.TOPIC_DEVELOPMENT_ID,
+        )
+        return
+    if not is_owner:
+        return
+
+    os.makedirs(CAMPAIGN_SOURCES_DIR, exist_ok=True)
+    doc = update.message.document
+    file = await context.bot.get_file(doc.file_id)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", doc.file_name or "document")
+    filename = f"{timestamp}_{safe_name}"
+    filepath = os.path.join(CAMPAIGN_SOURCES_DIR, filename)
+    await file.download_to_drive(filepath)
+
+    caption = (update.message.caption or "").strip()
+    caption_note = f" — {caption}" if caption else ""
+    _append_campaign_source(f"File: `{filepath}` (original name: {doc.file_name!r}){caption_note}")
+    logger.info(f"[dev_topic_document] user={update.effective_user.id} path={filepath!r} caption={caption!r}")
+
+    await _safe_send(
+        update,
+        f"📄 Got it — saved at `{filepath}` and logged in campaign_sources/INDEX.md for a future "
+        f"Claude Code session to pull from when building the campaign-loading feature.",
         thread_id=config.TOPIC_DEVELOPMENT_ID,
     )
 
@@ -5819,6 +5906,7 @@ def build_application() -> Application:
     # Single unified router for all plain text messages, across topics.
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message_router))
     application.add_handler(MessageHandler(filters.PHOTO, dev_topic_photo_handler))
+    application.add_handler(MessageHandler(filters.Document.ALL, dev_topic_document_handler))
 
     application.add_error_handler(_log_unhandled_error)
 

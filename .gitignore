@@ -12,3 +12,6 @@ bot_test_tmp.log
 .topic_monitor_state.json
 bot_persistence.pickle
 dev_screenshots/
+# Coffee-uploaded campaign-book PDFs/links — likely copyrighted, never
+# belongs in a public GitHub repo regardless.
+campaign_sources/
