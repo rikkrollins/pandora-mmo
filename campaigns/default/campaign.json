@@ -894,7 +894,8 @@
       "armor_class": 12,
       "hp_max": 14,
       "proficiency_bonus": 2,
-      "xp_reward": 100
+      "xp_reward": 100,
+      "on_hit_condition": "silenced"
     },
     "goblin_boss": {
       "name": "Goblin Boss",
@@ -942,7 +943,8 @@
       "armor_class": 16,
       "hp_max": 22,
       "proficiency_bonus": 3,
-      "xp_reward": 150
+      "xp_reward": 150,
+      "on_hit_condition": "blinded"
     }
   },
   "factions": {

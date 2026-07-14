@@ -2040,19 +2040,27 @@ def _attack_advantage_disadvantage(attacker: dict, defender: dict) -> tuple[bool
     real in-combat expression of "favored enemy" available, matching
     how Rage/Sneak Attack/etc. were each adapted to fit what this
     engine actually models rather than left as flavor text.
+
+    Blinded (2026-07-13, first new on_hit_condition since prone/
+    poisoned): real 5E gives a blinded creature disadvantage on its own
+    attack rolls, and attack rolls against it have advantage — the same
+    shape as prone, just symmetric instead of attacker-only.
     """
     attacker_conditions = attacker.get("conditions", [])
     defender_conditions = defender.get("conditions", [])
-    disadvantage = "prone" in attacker_conditions or "poisoned" in attacker_conditions
+    disadvantage = (
+        "prone" in attacker_conditions or "poisoned" in attacker_conditions
+        or "blinded" in attacker_conditions
+    )
     favored_enemy = (attacker.get("char_class") == "Ranger"
                       and defender.get("monster_key", "").startswith("goblin"))
-    advantage = "prone" in defender_conditions or favored_enemy
+    advantage = "prone" in defender_conditions or "blinded" in defender_conditions or favored_enemy
     return advantage, disadvantage
 
 
 def _condition_tags(character: dict) -> str:
     """Short display tags for a character's active conditions, e.g. '🛌😷'."""
-    icons = {"prone": "🛌", "poisoned": "😷"}
+    icons = {"prone": "🛌", "poisoned": "😷", "blinded": "🙈", "silenced": "🔇"}
     conditions = character.get("conditions", [])
     return "".join(icons.get(c, "") for c in conditions)
 
@@ -4232,6 +4240,25 @@ async def _do_cast_spell(update: Update, text: str) -> None:
 
     spell = spells_module.get_spell(spell_id)
     chat_id = update.effective_chat.id
+
+    # Silenced (2026-07-13): this game doesn't model spell components, so
+    # rather than special-case which spells need a verbal component (real
+    # 5E: almost all of them), silenced simply blocks casting outright,
+    # the same blanket-condition simplification prone/poisoned already
+    # use for their effects. Only meaningful mid-combat, since conditions
+    # only ever exist on an active session participant.
+    async with sessions.get_lock(chat_id):
+        session = sessions.get_session(chat_id)
+        caster = (
+            next((p for p in session.participants if p["telegram_user_id"] == update.effective_user.id), None)
+            if session else None
+        )
+        if caster and "silenced" in caster.get("conditions", []):
+            await update.effective_chat.send_message(
+                f"🔇 **{character['name']}** can't get the words out — silenced!",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
 
     def _consume_scroll_if_any() -> None:
         if via_scroll:
