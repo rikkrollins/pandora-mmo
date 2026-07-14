@@ -2,6 +2,32 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.7.2] — Recruits and AI party members act on their own initiative
+
+Per Coffee: "make recruitable able to make their own choices... this
+goes for AIs also" — e.g. noticing an active party gather quest and a
+matching resource node nearby, and just going and gathering it.
+
+- Recruited companions (Sera, and any future recruit) now get
+  autonomous turns the same way the separate AI party already did —
+  previously they sat completely idle between being directly talked
+  to. Personality for these comes from their real campaign.json NPC
+  entry, not the hardcoded AI-party roster.
+- Any AI-controlled character now sees, as a real fact, when the
+  party has an accepted gather-quest bounty that a resource node at
+  their CURRENT location can satisfy — even if the quest was posted
+  at a different, connected location (e.g. accepted at the tavern,
+  fulfilled down in the cellar) — and is nudged to go gather it to
+  help finish the quest.
+- They also now see their own real skill proficiency at each resource
+  node (or a lack of any practice yet), and are told to lean on
+  skills they're already good at, but treat an untried/weak one as
+  worth practicing rather than avoiding.
+- Verified live: with a real accepted "gather silverleaf herb" bounty
+  and Sera standing in the tavern cellar with zero herbalism practice,
+  a real (unmocked) model call chose "I gather Silverleaf Herb" on
+  its own, unprompted.
+
 ## [1.7.1] — Character sheets for anyone, not just your own party, in Adventure and Support
 
 Direct follow-up to 1.7.0's named-sheet-lookup fix, per Coffee: "I want

@@ -1075,3 +1075,19 @@ def get_autonomous_players() -> list[dict]:
             "SELECT * FROM characters WHERE is_autonomous = 1 AND is_deleted = 0 ORDER BY character_id"
         ).fetchall()
     return [_row_to_dict(r) for r in rows]
+
+
+def get_ai_controlled_characters() -> list[dict]:
+    """
+    Every AI-controlled character -- the separate autonomous party
+    AND recruited companions alike (2026-07-14, per Coffee: "make
+    recruitable able to make their own choices... this goes for AIs
+    also"). Broader than get_autonomous_players, which only covers the
+    hardcoded autonomous party and previously left recruits like Sera
+    doing nothing on their own between being talked to.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM characters WHERE is_ai = 1 AND is_deleted = 0 ORDER BY character_id"
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]

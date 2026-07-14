@@ -5919,6 +5919,49 @@ def _ensure_ai_party_exists() -> None:
     logger.info(f"[ai_party] created autonomous AI party, party_id={party_id}")
 
 
+def _party_gather_needs_here(location_id: str) -> list[dict]:
+    """
+    Real, currently-accepted party gather-quest objectives that THIS
+    location's resource nodes can actually satisfy right now (2026-07-14,
+    per Coffee: recruits/AI party members should recognize "the party
+    has an active gather quest and I can do something about it here"
+    on their own, not just wait to be told -- e.g. gathering silverleaf
+    herb in the tavern cellar for a bounty posted up at the tavern
+    itself). Board quests are checked across the WHOLE party, not just
+    one character, since the board/progress tracking is shared -- and
+    across all locations' boards, not just this one, since a quest is
+    often posted somewhere else (the tavern) while the actual resource
+    node lives in a connected sub-location (the cellar).
+    """
+    location = cl.get_location(CAMPAIGN, location_id)
+    if not location:
+        return []
+    nodes_by_material = {n["material"]: n for n in location.get("resource_nodes", [])}
+    if not nodes_by_material:
+        return []
+    seen_ids = set()
+    needs = []
+    for member in _get_party_members():
+        for q in db.get_accepted_board_quests_for_user(member["telegram_user_id"]):
+            if (
+                q["board_quest_id"] in seen_ids
+                or q.get("objective_type") != "gather_material"
+                or q["objective_target"] not in nodes_by_material
+                or q["progress_count"] >= q["objective_count"]
+            ):
+                continue
+            seen_ids.add(q["board_quest_id"])
+            node = nodes_by_material[q["objective_target"]]
+            item = items_module.get_item(q["objective_target"])
+            needs.append({
+                "quest_title": q["title"],
+                "material_name": item["name"] if item else q["objective_target"],
+                "remaining": q["objective_count"] - q["progress_count"],
+                "node_name": node["name"],
+            })
+    return needs
+
+
 def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
     location = cl.get_location(CAMPAIGN, location_id)
     if not location:
@@ -5942,6 +5985,19 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
         spell_names = [spells_module.get_spell(s)["name"] for s in known_spells if spells_module.get_spell(s)]
         if spell_names:
             lines.append(f"Spells you know: {', '.join(spell_names)}")
+
+    # Per Coffee (2026-07-14): AI-controlled characters should "naturally
+    # know" what they're strong or weak at overall, not just at the one
+    # resource node in front of them -- lets the model lean toward a
+    # skill it's already good at when several options are open, or
+    # recognize a weak/untried one as worth practicing.
+    practiced_skills = {k: v for k, v in (character.get("skill_uses") or {}).items() if v > 0}
+    if practiced_skills:
+        strong = sorted(practiced_skills.items(), key=lambda kv: -kv[1])
+        lines.append(
+            "Skills you've practiced: "
+            + ", ".join(f"{skill} +{practiced_bonus(uses)} ({uses} uses)" for skill, uses in strong)
+        )
 
     npcs_here = _npcs_at_location(location_id)
     if npcs_here:
@@ -5983,7 +6039,31 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
         lines.append(f"Things worth a closer look: {', '.join(i['name'] for i in interactables.values())}")
     resource_nodes = location.get("resource_nodes", [])
     if resource_nodes:
-        lines.append(f"Resources here: {', '.join(n['name'] for n in resource_nodes)}")
+        # Per Coffee (2026-07-14): AI-controlled characters should
+        # "naturally know" what they're already good at versus what's
+        # worth practicing -- annotate each node with its skill and this
+        # character's real, current proficiency (same practiced_bonus
+        # mechanic shown on the character sheet), so gathering something
+        # you're untried at reads as a genuine opportunity to level up,
+        # not a random guess.
+        skill_uses = character.get("skill_uses") or {}
+        node_descriptions = []
+        for n in resource_nodes:
+            skill_key = n.get("skill", n.get("ability"))
+            uses = skill_uses.get(skill_key, 0)
+            proficiency_note = (
+                f"you're not practiced in {skill_key} yet" if uses == 0
+                else f"{skill_key} +{practiced_bonus(uses)}, {uses} use{'s' if uses != 1 else ''}"
+            )
+            node_descriptions.append(f"{n['name']} ({proficiency_note})")
+        lines.append(f"Resources here: {', '.join(node_descriptions)}")
+
+        gather_needs = _party_gather_needs_here(location_id)
+        for need in gather_needs:
+            lines.append(
+                f"The party's quest \"{need['quest_title']}\" still needs {need['remaining']} "
+                f"more {need['material_name']} -- you could gather that right here to help finish it."
+            )
 
     # 2026-07-14, per Coffee: gathering already had grounding above, but
     # crafting and campfires (both shipped the same day) didn't -- the
@@ -6070,10 +6150,20 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
 
 async def _ai_party_autonomous_tick(bot) -> None:
     """
-    Advances ONE autonomous AI party member's turn per cycle (never all
-    at once, to keep Adventure from being flooded). Skips anyone
-    currently in an active combat session — that already auto-resolves
-    via the existing is_ai=1 mechanism with no action needed here.
+    Advances ONE AI-controlled character's turn per cycle (never all at
+    once, to keep Adventure from being flooded). Skips anyone currently
+    in an active combat session — that already auto-resolves via the
+    existing is_ai=1 mechanism with no action needed here.
+
+    2026-07-14, per Coffee: "make recruitable able to make their own
+    choices... this goes for AIs also." Previously only the separate
+    hardcoded autonomous party (Zara/Bram) ever got a tick here --
+    recruited companions like Sera sat completely idle between being
+    directly talked to, with no way to notice and act on something like
+    an active party gather quest on their own. Broadened to every
+    AI-controlled character (db.get_ai_controlled_characters), sharing
+    the same one-actor-per-tick rotation so this doesn't flood the chat
+    any more than before.
     """
     global _LAST_AI_PARTY_TICK_AT
     # 2026-07-14: now a live toggle (Development-topic "turn on/off ai
@@ -6090,7 +6180,7 @@ async def _ai_party_autonomous_tick(bot) -> None:
         return
 
     _ensure_ai_party_exists()
-    roster = db.get_autonomous_players()
+    roster = db.get_ai_controlled_characters()
     if not roster:
         return
 
@@ -6108,7 +6198,14 @@ async def _ai_party_autonomous_tick(bot) -> None:
     context_like = _AI_PLAYER_CONTEXTS.setdefault(user_id, _AiPlayerContext())
     last_action = context_like.user_data.get("last_autonomous_action")
 
-    personality = next((m["personality"] for m in AI_PARTY_ROSTER if m["name"] == actor["name"]), "")
+    # Recruited companions (e.g. Sera) aren't in the hardcoded
+    # AI_PARTY_ROSTER at all -- their real personality lives in
+    # campaign.json's NPC entry instead, same place their sheet-lookup
+    # basic-info fallback already reads from.
+    personality = next((m["personality"] for m in AI_PARTY_ROSTER if m["name"] == actor["name"]), None)
+    if personality is None:
+        npc = _find_campaign_npc_by_name(actor["name"])
+        personality = npc.get("personality", "") if npc else ""
     situation_facts = _build_ai_player_situation_facts(actor, actor["current_location"])
     action_text = await asyncio.to_thread(choose_next_action, actor, personality, situation_facts, last_action)
     context_like.user_data["last_autonomous_action"] = action_text
