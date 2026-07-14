@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.7.4] — Fixed players getting stuck, unable to leave a location
+
+Per Coffee's live report (screenshot, 2026-07-14): stuck in the
+Tavern's Upper Rooms — "Go downstairs" and "Leave this area" both got
+"There's no active turn to pass right now."
+
+`_do_move` already knew how to resolve generic leave/exit/downstairs/
+upstairs phrasing for single-exit locations (its own
+`generic_leave_words`) — the bug was upstream: the intent parser's
+`move_words` trigger list never routed these phrasings to the move
+action in the first place. "leave the " required the literal word
+"the" (not "this"/"here"), and there was no bare downstairs/upstairs/
+exit trigger at all, so both commands fell all the way through to
+pass_turn before `_do_move` ever got a chance to run.
+
+Broadened `move_words` to include "leave this", "leave here", "go
+downstairs", "go upstairs", "head downstairs/upstairs", bare
+"downstairs"/"upstairs", "exit this", "exit the", "step out", "walk
+out". Verified with 9 unit cases (including that "leave the party"
+still correctly resolves to leave_party, not move) plus a real
+handler-level test — a character actually placed in tavern_upstairs
+and given "Go downstairs" now really leaves and lands in The
+Crossroads Tavern.
+
 ## [1.7.3] — Fixed a severe, near-universal action-misrouting bug
 
 Per Coffee's live report (screenshot, 2026-07-14): "there is obviously

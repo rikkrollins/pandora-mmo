@@ -474,8 +474,21 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                                     "where do i complete", "how do i deliver"]):
         return {**base, "action": "check_quests"}
 
+    # Confirmed live 2026-07-14 (Coffee, "stuck in the upper rooms"):
+    # _do_move already handles generic leave/exit/downstairs/upstairs
+    # phrasing for single-exit locations (its own generic_leave_words,
+    # bot.py ~line 4166) -- but the intent parser never even dispatched
+    # to move for "Go downstairs" or "Leave this area" in the first
+    # place, since move_words only covered "leave the " (not "leave
+    # this"/"leave here") and had no bare downstairs/upstairs/exit
+    # phrasing at all. The handler could already resolve the
+    # destination; the classifier just never sent it there, so both
+    # commands fell through all the way to pass_turn, leaving the
+    # player with no way to leave.
     move_words = ["go to", "goto", "head to", "walk to", "travel to", "move to", "enter the", "descend", "ascend",
-                  "climb down", "climb up", "leave the ", "go back"]
+                  "climb down", "climb up", "leave the ", "leave this", "leave here", "go back",
+                  "go downstairs", "go upstairs", "head downstairs", "head upstairs",
+                  "downstairs", "upstairs", "exit this", "exit the", "step out", "walk out"]
     if any(w in lowered for w in move_words):
         return {**base, "action": "move"}
 
