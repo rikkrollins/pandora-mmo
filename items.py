@@ -84,6 +84,11 @@ ITEMS = {
         "name": "Scroll of Cure Wounds", "type": "scroll", "rarity": "common",
         "price": 35, "weight": 0.1, "spell": "cure_wounds",
     },
+    "scroll_revivify": {
+        "name": "Scroll of Revivify", "type": "scroll", "rarity": "rare",
+        "price": 350, "weight": 0.1, "spell": "revivify",
+        "note": "Brings a fallen ally back from death itself, at real cost — not to be used lightly.",
+    },
     "scroll_shield": {
         "name": "Scroll of Shield", "type": "scroll", "rarity": "uncommon",
         "price": 60, "weight": 0.1, "spell": "shield",

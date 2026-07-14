@@ -34,6 +34,10 @@ SPELLS = {
         "name": "Cure Wounds", "level": 1, "school": "evocation",
         "effect": "heal", "heal_dice": "1d8+2",
     },
+    "revivify": {
+        "name": "Revivify", "level": 3, "school": "necromancy",
+        "effect": "resurrect",
+    },
     "burning_hands": {
         "name": "Burning Hands", "level": 1, "school": "evocation",
         "effect": "damage", "damage_dice": "3d6", "save_ability": "dexterity",
@@ -230,7 +234,7 @@ CLASS_SPELL_LISTS = {
                  "scorching_ray", "misty_step", "hold_person",
                  "fireball", "lightning_bolt", "counterspell"],
     "cleric": ["cure_wounds", "healing_word", "guiding_bolt", "command",
-               "spiritual_weapon", "hold_person", "dispel_magic"],
+               "spiritual_weapon", "hold_person", "dispel_magic", "revivify"],
     "druid": ["cure_wounds", "animal_friendship", "faerie_fire",
               "moonbeam", "hold_person", "call_lightning"],
     "bard": ["healing_word", "charm_person", "faerie_fire",

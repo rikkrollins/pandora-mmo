@@ -232,6 +232,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN rest_started_at TEXT")
         if "feature_uses" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN feature_uses TEXT NOT NULL DEFAULT '{}'")
+        if "is_dead" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN is_dead INTEGER NOT NULL DEFAULT 0")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:

@@ -1368,10 +1368,23 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
             _sync_player_to_db(current)
 
             if death_result["outcome"] == "dead":
+                # Real, persistent death (2026-07-14, per Coffee): previously
+                # this was narration-only -- hp_current sat at 0 with no
+                # actual death flag, so a later rest would silently heal
+                # them back up as if nothing happened. Now genuinely
+                # permanent until a Revivify (Cleric spell or scroll)
+                # brings them back -- see the "resurrect" spell effect in
+                # _do_cast_spell. A dead character can't act or be moved
+                # (see adventure_master_handler's is_dead gate) and stays
+                # exactly where they died until revived; the player can
+                # switch to another character of theirs in the meantime.
+                if not current.get("is_ai"):
+                    db.update_character(current["telegram_user_id"], is_dead=1)
                 await _safe_send(
                     update,
                     f"💀 **{current['name']} rolls a {death_result['roll']} — "
-                    f"3rd failed death save. {current['name']} has died.**",
+                    f"3rd failed death save. {current['name']} has died.** "
+                    f"They can't act or be moved until revived — you can play another character in the meantime.",
                 )
                 session.remove_dead_player(current["telegram_user_id"])
             elif death_result["outcome"] == "stable":
@@ -4419,6 +4432,18 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             await _resolve_ai_turns(update, session)
 
     elif spell["effect"] == "heal":
+        # Support spells (heal/cure) can target ANY party member by name,
+        # including one currently resting/inactive — per design, an
+        # inactive character can't act but can still be helped. Defaults
+        # to self if no other party member is named in the text.
+        target_character = _find_party_target_by_name(text) or character
+        if target_character.get("is_dead"):
+            await update.effective_chat.send_message(
+                f"**{target_character['name']}** is dead, not just hurt — {spell['name']} won't bring them back. "
+                f"Revivify (or a Scroll of Revivify) is what's needed.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
         if not via_scroll and spell["level"] > 0:
             spent, _ = db.spend_spell_slot(update.effective_user.id)
             if not spent:
@@ -4430,11 +4455,6 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                 )
                 return
         _consume_scroll_if_any()
-        # Support spells (heal/cure) can target ANY party member by name,
-        # including one currently resting/inactive — per design, an
-        # inactive character can't act but can still be helped. Defaults
-        # to self if no other party member is named in the text.
-        target_character = _find_party_target_by_name(text) or character
         result = spells_module.resolve_heal_spell(spell_id, character, target_character)
         db.update_character(target_character["telegram_user_id"], hp_current=target_character["hp_current"])
         is_self = target_character["telegram_user_id"] == character["telegram_user_id"]
@@ -4443,6 +4463,45 @@ async def _do_cast_spell(update: Update, text: str) -> None:
         await update.effective_chat.send_message(
             f"✨ **{character['name']}** casts {spell['name']}{target_note}{inactive_note} and heals {result['healing_done']} HP "
             f"({result['hp_current']}/{result['hp_max']}).",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+
+    elif spell["effect"] == "resurrect":
+        # Revivify (2026-07-14, per Coffee): the real way a dead
+        # character (see the "dead" death-save outcome in the main
+        # combat loop) gets a second chance. Works outside combat, same
+        # as heal -- reviving happens after the fight, not mid-round.
+        # Real 5E requires a costly diamond component and a 1-minute
+        # window since death; this build tracks neither real-world
+        # minutes tightly enough nor material components at all, so
+        # both are deliberately skipped, same simplification style as
+        # every other adapted spell/feature in this file. Restores to
+        # 1 HP, matching Revivify's real effect exactly.
+        target_character = _find_party_target_by_name(text)
+        if target_character is None or not target_character.get("is_dead"):
+            await update.effective_chat.send_message(
+                "Name a dead party member to revive — there's no one to bring back right now.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+        if not via_scroll and spell["level"] > 0:
+            spent, _ = db.spend_spell_slot(update.effective_user.id)
+            if not spent:
+                await update.effective_chat.send_message(
+                    f"You have no spell slots remaining to cast {spell['name']} "
+                    f"({character['spell_slots_current']}/{character['spell_slots_max']} left). "
+                    f"Rest to recover them.",
+                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                )
+                return
+        _consume_scroll_if_any()
+        db.update_character(
+            target_character["telegram_user_id"], is_dead=0, hp_current=1,
+            death_save_successes=0, death_save_failures=0,
+        )
+        await update.effective_chat.send_message(
+            f"✨ **{character['name']}** casts {spell['name']} on **{target_character['name']}** — "
+            f"breath returns, and they gasp back to life at 1 HP.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
 
@@ -4825,6 +4884,28 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # since "chat" already means "we don't know what this was," not
     # "this was a genuine action."
     character = db.get_character(update.effective_user.id)
+    # A dead character (2026-07-14, per Coffee) can't act OR be moved --
+    # they stay exactly where they died until a Revivify brings them
+    # back (see the "resurrect" spell effect in _do_cast_spell). Same
+    # status-check allowlist shape as the is_inactive gate below, plus
+    # switch_character/create_character/delete_character so the player
+    # can actually go play someone else in the meantime, per his
+    # explicit direction.
+    if character and character.get("is_dead"):
+        is_status_check = action in (
+            "check_sheet", "check_inventory", "check_party", "check_quests",
+            "show_map", "ask_clue", "list_characters", "switch_character",
+            "create_character", "delete_character", "chat",
+        )
+        if not is_status_check:
+            await update.effective_chat.send_message(
+                f"💀 **{character['name']}** is dead and can't act or be moved until revived — "
+                f"staying right where they died. Say \"switch to <character>\" to play someone else, "
+                f"or \"I want to create a character\" to start fresh.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+
     if character and character.get("is_inactive"):
         is_status_check = action in (
             "check_sheet", "check_inventory", "check_party", "check_quests",
