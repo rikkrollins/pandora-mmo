@@ -493,6 +493,22 @@ def list_characters(telegram_user_id: int) -> list[dict]:
     return [_row_to_dict(r) for r in rows]
 
 
+def find_character_by_name(name: str) -> dict | None:
+    """
+    Finds any non-deleted character (human or AI, active or a player's
+    other non-active character slot) by name, case-insensitive. Used
+    for read-only sheet lookups -- Coffee wants to see anyone's sheet,
+    not just whoever's currently marked active (2026-07-14).
+    """
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM characters WHERE is_deleted = 0 AND LOWER(name) = LOWER(?) "
+            "ORDER BY character_id LIMIT 1",
+            (name,),
+        ).fetchone()
+    return _row_to_dict(row) if row else None
+
+
 def switch_character(telegram_user_id: int, character_id: int) -> dict | None:
     """
     Makes character_id the active character for telegram_user_id, if it

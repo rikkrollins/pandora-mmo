@@ -3305,6 +3305,43 @@ def _feature_use_status(character: dict) -> str | None:
     return None
 
 
+def _find_campaign_npc_by_name(name: str) -> dict | None:
+    """
+    Looks up a campaign.json NPC (Grimsby, Old Maren, etc.) by display
+    name, case-insensitive. Only for NPCs who were never recruited into
+    a real character row -- once recruited (like Sera), they show up
+    via db.find_character_by_name/_find_party_target_by_name instead,
+    with a real full sheet.
+    """
+    lowered = name.lower()
+    for npc in CAMPAIGN["npcs"].values():
+        if npc.get("name", "").lower() == lowered:
+            return npc
+    return None
+
+
+def _format_npc_basic_info(npc: dict) -> str:
+    """
+    An un-recruited campaign NPC has no real 5E character sheet -- no
+    ability scores/HP/AC in the player sense, just narrative fields in
+    campaign.json (some do carry a 'stats' block used only if/when
+    they're recruited, but showing it here would misrepresent an NPC
+    who was never actually recruited as if they were already a party
+    member with those exact numbers). Show what's actually true of them
+    instead of fabricating or leaking a stat block.
+    """
+    lines = [f"**{npc['name']}** *(NPC — not currently recruited)*"]
+    if npc.get("role"):
+        lines.append(f"Role: {npc['role'].replace('_', ' ')}")
+    if npc.get("personality"):
+        lines.append(f"Personality: {npc['personality']}")
+    if npc.get("disposition"):
+        lines.append(f"Disposition: {npc['disposition']}")
+    if npc.get("recruitable"):
+        lines.append("They can be recruited — try inviting them to your party.")
+    return "\n".join(lines)
+
+
 def _format_character_sheet(character: dict) -> str:
     """
     Full sheet text for one character -- shared by _do_check_sheet (the
@@ -3355,19 +3392,26 @@ async def _do_check_sheet(update: Update, target_name: str | None = None) -> Non
     # sheet" had nowhere to go -- check_sheet only ever showed the
     # asker's OWN sheet, so it fell through to "examine" and searched
     # for an interactable object named "Sera" instead. A named target
-    # is looked up among real party members (same lookup used for
-    # support-spell targeting) -- never a random/off-roster name, since
-    # that would either invent a character or leak an unrelated one's
-    # full sheet to someone who isn't in a party with them.
+    # is looked up among real party members first (same lookup used for
+    # support-spell targeting), then broadened (2026-07-14, per Coffee:
+    # "character sheets of all players AI, NPC and human") to any real
+    # character row at all -- covers a human's other, non-currently-
+    # active character slot -- and finally to un-recruited campaign
+    # NPCs, who get honest basic info instead of a fabricated stat
+    # block, since they don't have a real 5E sheet until recruited.
     if target_name:
-        target = _find_party_target_by_name(target_name)
-        if target is None:
-            await update.effective_chat.send_message(
-                f"{target_name.title()} isn't in your current party — can't show a sheet for them.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
-            )
+        target = _find_party_target_by_name(target_name) or db.find_character_by_name(target_name)
+        if target is not None:
+            await _safe_send(update, _format_character_sheet(target))
             return
-        await _safe_send(update, _format_character_sheet(target))
+        npc = _find_campaign_npc_by_name(target_name)
+        if npc is not None:
+            await _safe_send(update, _format_npc_basic_info(npc))
+            return
+        await update.effective_chat.send_message(
+            f"Nobody named {target_name.title()} is playing right now — can't show a sheet for them.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
         return
 
     character = db.get_character(update.effective_user.id)
@@ -5666,6 +5710,9 @@ async def dev_topic_document_handler(update: Update, context: ContextTypes.DEFAU
     )
 
 
+_NAMED_SHEET_EXCLUDED_WORDS = ("my", "the", "a", "an", "her", "his", "their", "your", "our")
+
+
 async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     question = update.message.text.strip()
     character = db.get_character(update.effective_user.id)
@@ -5673,6 +5720,29 @@ async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TY
     # me my party character sheets" both had nothing real to answer from
     # -- only the asking player's OWN character was ever passed here.
     party_members = _get_party_members() if character else None
+
+    # Same "show me X's sheet" capability as Adventure (same regex as
+    # ai/intent_parser.py's check_sheet trigger), per Coffee's explicit
+    # request (2026-07-14) that this "shud be able to work in adventure
+    # and support chat." A named-lookup sheet is a real, fixed fact --
+    # same reasoning as every other deterministic answer in
+    # ai/support_agent.py -- so it's resolved here directly rather than
+    # handed to the model.
+    named_sheet_match = re.search(r"(\w+)(?:'s)? (?:character )?sheet", question.lower())
+    if named_sheet_match and named_sheet_match.group(1) not in _NAMED_SHEET_EXCLUDED_WORDS:
+        target_name = named_sheet_match.group(1)
+        target = _find_party_target_by_name(target_name) or db.find_character_by_name(target_name)
+        if target is not None:
+            reply = _format_character_sheet(target)
+        else:
+            npc = _find_campaign_npc_by_name(target_name)
+            reply = _format_npc_basic_info(npc) if npc is not None else (
+                f"Nobody named {target_name.title()} is playing right now — can't show a sheet for them."
+            )
+        logger.info(f"[support] user={update.effective_user.id} text={question!r} reply={reply!r}")
+        await _safe_send(update, reply, thread_id=config.TOPIC_SUPPORT_ID)
+        return
+
     reply = await asyncio.to_thread(answer_support_question, question, character, party_members)
     logger.info(f"[support] user={update.effective_user.id} text={question!r} reply={reply!r}")
     await _safe_send(update, reply, thread_id=config.TOPIC_SUPPORT_ID)

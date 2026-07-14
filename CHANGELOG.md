@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.7.1] — Character sheets for anyone, not just your own party, in Adventure and Support
+
+Direct follow-up to 1.7.0's named-sheet-lookup fix, per Coffee: "I want
+to be able to see character sheets of all players AI, NPC and human...
+shud be able to work in adventure and support chat."
+
+- "Show me X's sheet" now finds ANY real character (human or AI), not
+  just someone in the asker's own currently-active roster — including
+  a player's other, non-active character slot.
+- Asking for an un-recruited campaign NPC (Grimsby, Old Maren, etc.)
+  now gets honest basic info (role, personality, disposition) instead
+  of a "not in your party" rejection or a fabricated stat block — NPCs
+  don't have a real 5E sheet until they're actually recruited.
+- The same lookup now works in the Support topic, not just Adventure,
+  resolved deterministically (no LLM call) the same way the existing
+  party-roster and XP questions already are.
+
 ## [1.7.0] — Status ailments, real death, gathering professions, TTS, and a full live-bug-fix pass
 
 A large batch — real player-reported bugs fixed live, several new
