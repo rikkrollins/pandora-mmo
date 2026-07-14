@@ -400,8 +400,16 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # and correctly (given what it was asked) found nothing. Checked
     # before the "my sheet" block below since a possessive name always
     # means someone else's sheet is wanted, never the asker's own.
-    named_sheet_match = re.search(r"(\w+)'s (?:character )?sheet", lowered)
-    if named_sheet_match:
+    # The possessive apostrophe is optional -- confirmed live the SAME
+    # day: a retyped "Show me sera character sheet" (no "'s", plausibly
+    # autocorrect dropping it) matched nothing either and fell through
+    # to talk_npc instead. The excluded-words guard keeps "my"/"the"/
+    # pronoun-only phrasing ("check my character sheet") from being
+    # misread as a party member literally named "my".
+    named_sheet_match = re.search(r"(\w+)(?:'s)? (?:character )?sheet", lowered)
+    if named_sheet_match and named_sheet_match.group(1) not in (
+        "my", "the", "a", "an", "her", "his", "their", "your", "our"
+    ):
         return {**base, "action": "check_sheet", "target": named_sheet_match.group(1)}
 
     if any(w in lowered for w in [
