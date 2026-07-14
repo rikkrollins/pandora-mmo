@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.7.5] — Fixed examine/look-at failing on real, correctly-described objects
+
+Per Coffee's live report (screenshots, 2026-07-14): "when I was looking
+at things it didn't register what I was trying to look at even though
+I typed it as described."
+
+`_find_interactable` (bot.py) only ever matched an EXACT substring of
+the object's stored name — two real, reported failures:
+- "Read the guest book on the landing table" didn't match the stored
+  name "a guestbook on the landing table" — the leading article and
+  the missing space in "guestbook" (one word in the data, naturally
+  typed as two) broke the exact match.
+- "look at the door down the hall" didn't match "the door at the end
+  of the hall" — genuinely different wording for the same object.
+
+Added two fallback tiers, only used when the exact match misses:
+article-stripped + compound-word-joined comparison, then a majority
+word-overlap match that only fires when there's a single unambiguous
+leader (same "don't guess when ambiguous" convention already used for
+NPC-name and location-name word matching elsewhere in this codebase).
+Verified with unit cases and two real handler-level runs using
+Coffee's exact reported phrases against the real campaign data.
+
 ## [1.7.4] — Fixed players getting stuck, unable to leave a location
 
 Per Coffee's live report (screenshot, 2026-07-14): stuck in the

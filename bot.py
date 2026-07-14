@@ -3991,6 +3991,48 @@ def _find_interactable(location: dict, text: str) -> tuple[str, dict] | None:
     for obj_id, data in ordered:
         if data["name"].lower() in lowered or obj_id.replace("_", " ") in lowered:
             return obj_id, data
+
+    # Fallback 1: ignore a leading article and compound-word spacing --
+    # confirmed live 2026-07-14 (Coffee): "Read the guest book on the
+    # landing table" didn't match the real stored name "a guestbook on
+    # the landing table" at all -- both the leading "a" and the missing
+    # space in "guestbook" were never how a player would naturally type
+    # it, so the exact-substring check above failed even though this
+    # was clearly the same object.
+    stopwords = {"a", "an", "the", "of", "at", "on", "in", "to"}
+    for obj_id, data in ordered:
+        name = data["name"].lower()
+        for article in ("a ", "an ", "the "):
+            if name.startswith(article):
+                name = name[len(article):]
+                break
+        if name in lowered or name.replace(" ", "") in lowered.replace(" ", ""):
+            return obj_id, data
+
+    # Fallback 2: majority word-overlap -- confirmed live the same day:
+    # "look at the door down the hall" didn't match the real "the door
+    # at the end of the hall" at all (genuinely different wording, not
+    # just spacing/articles), even though it's clearly the same door.
+    # Picks whichever interactable's significant words (stopwords/short
+    # words excluded) overlap the input the most, but only when there's
+    # a single clear leader with OVER HALF its words present -- a weak
+    # or tied overlap is left unmatched rather than guessed, same
+    # "don't guess when ambiguous" philosophy as every other word-level
+    # fallback in this codebase (NPC names, location names).
+    best_obj, best_score, ambiguous = None, 0, False
+    for obj_id, data in ordered:
+        words = [w for w in data["name"].lower().split() if w not in stopwords and len(w) >= 3]
+        if not words:
+            continue
+        matches = sum(1 for w in words if re.search(r"\b" + re.escape(w) + r"\b", lowered))
+        if matches > len(words) / 2:
+            if matches > best_score:
+                best_obj, best_score, ambiguous = (obj_id, data), matches, False
+            elif matches == best_score:
+                ambiguous = True
+    if best_obj and not ambiguous:
+        return best_obj
+
     return None
 
 
