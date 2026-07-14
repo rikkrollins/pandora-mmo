@@ -392,6 +392,18 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
             name = text[lowered.index(trigger) + len(trigger):].strip()
             return {**base, "action": "delete_character", "target": name or None}
 
+    # Confirmed live 2026-07-14 (Coffee): "Show me SERA's character
+    # sheet" -- asking for a SPECIFIC party member's sheet by name, not
+    # "my sheet" or "my party's sheets" (already handled elsewhere) --
+    # matched nothing here at all and fell through all the way to
+    # "examine", which searched for an interactable object named "SERA"
+    # and correctly (given what it was asked) found nothing. Checked
+    # before the "my sheet" block below since a possessive name always
+    # means someone else's sheet is wanted, never the asker's own.
+    named_sheet_match = re.search(r"(\w+)'s (?:character )?sheet", lowered)
+    if named_sheet_match:
+        return {**base, "action": "check_sheet", "target": named_sheet_match.group(1)}
+
     if any(w in lowered for w in [
         "my sheet", "my stats", "my hp", "my health", "my character", "status",
         "active character", "current character", "who am i playing", "which character am i",

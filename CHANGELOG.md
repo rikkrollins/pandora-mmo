@@ -2,6 +2,92 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.7.0] — Status ailments, real death, gathering professions, TTS, and a full live-bug-fix pass
+
+A large batch — real player-reported bugs fixed live, several new
+systems, and infrastructure work, all shipped and deployed the same
+session.
+
+### Real bugs found and fixed (several from Coffee's own live reports)
+- A gather-quest board bounty gave zero credit if the player already
+  held the target material at accept time — now credited immediately,
+  and instantly completes/pays out if that's already enough.
+- Answering a branching quest's own suggested reply verbatim (e.g. "I
+  have decided to 'Keep it and collect the reward'") was silently
+  misread as a gather action — "collect" tripped the wrong keyword.
+- "Pick a &lt;material&gt;" gather phrasing (beyond the fixed "pick the
+  herbs" pattern) fell through to a small model's own bias toward
+  guessing `pass_turn` — the real, repeated root cause behind several
+  "my quest won't complete" reports.
+- The live-set "story mode" command didn't recognize the word
+  "narration," only "story mode" literally.
+- Accepted board quests never showed up when checking active
+  quests — the quest journal only ever looked at story quests.
+- Support couldn't answer party questions ("is Sera in my party?",
+  "show me my party's sheets") — it was never given the real party
+  roster, only the asking player's own character.
+- "Show me SERA's character sheet" (a specific named party member, not
+  "my sheet") had nowhere to go and fell through to `examine`, which
+  searched for an object named "Sera" and correctly found nothing.
+  check_sheet now supports a named target, looked up among real party
+  members only.
+- The autonomous AI party generated an ungrounded action ("I ask
+  villagers to join our party") because an example in its prompt was
+  always shown even when nothing recruitable was actually nearby.
+
+### New systems
+- **Status ailments**: blinded, silenced, paralyzed, and frightened,
+  each with a real mechanical effect (attack advantage/disadvantage,
+  blocked spellcasting, or a fully skipped turn) — not flavor text.
+- **Opportunity attacks**: breaking off from a fight isn't
+  consequence-free anymore — every living enemy gets one attack roll
+  as you flee, which can knock you out instead of letting you escape.
+- **Real permanent death + Revivify**: 3 failed death saves is now
+  actually final — the character can't act or be moved, and stays
+  exactly where they died — reversible only via Revivify (a real
+  Cleric spell, or a purchasable Scroll of Revivify).
+- **Gathering professions**: Herbalism, Mining, Fishing,
+  Lumberjacking, and Crafting each level up independently now (their
+  own practiced-use track, not lumped into a shared ability check).
+  New Fishing/Lumberjacking resource nodes, Raw Fish and Wood
+  materials, and a real "make a campfire" action.
+- **Combined multi-action replies**: a compound message ("recruit Sera
+  and check my inventory") now sends one combined reply instead of one
+  Telegram message per sub-action.
+- **Optional TTS narration**: real narration can be read aloud via
+  @TextTSBot when enabled (off by default) — plus a new live-settings
+  framework (`db.game_settings`) for story mode, AI party pause, and
+  Moltbook pause, changeable from the Development topic with no
+  redeploy.
+- **Full party sheets**: "show me my party's character sheets" now
+  gives a real full sheet per member, including AI companions/recruits
+  — not just names. The hourly "Players: X active" count now includes
+  AI players too, instead of silently only counting humans.
+- **8 previously-missing skill-check triggers** added (Arcana, Nature,
+  Religion, Animal Handling, Insight, Medicine, Performance, general
+  Sleight of Hand) after auditing against all 18 real 5E skills.
+- Skill points (the practiced-use bonus system) now only earned on a
+  successful roll, not every attempt — and shown directly on the
+  character sheet next to each practiced skill.
+- Campaign-book PDFs/links can now be dropped in Development for a
+  future campaign-loading feature (saved to `campaign_sources/`,
+  gitignored — copyrighted content has no business in a public repo).
+- `CONFIG.md` — a full reference for every `.env` setting and every
+  live Development-topic command.
+- Level-gating for the campaign's two hidden endgame locations, and
+  "accept the/this quest" phrasing now routes correctly.
+- The autonomous AI party's action-generation prompt and `SKILL.md`
+  (the integration doc for any AI agent joining the game externally)
+  are both now grounded in every capability shipped this pass —
+  gathering, crafting, campfires, party sheets, status conditions, and
+  real death/resurrection — not just the older action set.
+
+### Known limitation surfaced, not yet fixed
+- Equipment doesn't currently affect combat stats at all — weapon
+  damage and AC are fixed regardless of what's actually equipped. A
+  real, separate architecture gap, flagged rather than silently
+  patched over.
+
 ## [1.6.0] — Compound messages: one message, multiple actions
 
 Per Coffee's request: a message that clearly asks for several distinct

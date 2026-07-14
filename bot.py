@@ -63,7 +63,7 @@ from models import (
     BASE_ARMOR_CLASS,
 )
 from rules.combat import resolve_attack, resolve_death_save
-from rules.crafting import RECIPES, get_recipe, resolve_craft
+from rules.crafting import RECIPES, get_recipe, has_materials, resolve_craft
 from rules.dice import roll, roll_damage, ability_modifier, roll_ability_check, roll_d20
 from rules.item_generator import generate_item
 from rules.leveling import CLASS_HIT_DICE, scaled_enemy_count
@@ -3350,7 +3350,26 @@ def _format_character_sheet(character: dict) -> str:
     )
 
 
-async def _do_check_sheet(update: Update) -> None:
+async def _do_check_sheet(update: Update, target_name: str | None = None) -> None:
+    # Per Coffee's live report (2026-07-14): "Show me SERA's character
+    # sheet" had nowhere to go -- check_sheet only ever showed the
+    # asker's OWN sheet, so it fell through to "examine" and searched
+    # for an interactable object named "Sera" instead. A named target
+    # is looked up among real party members (same lookup used for
+    # support-spell targeting) -- never a random/off-roster name, since
+    # that would either invent a character or leak an unrelated one's
+    # full sheet to someone who isn't in a party with them.
+    if target_name:
+        target = _find_party_target_by_name(target_name)
+        if target is None:
+            await update.effective_chat.send_message(
+                f"{target_name.title()} isn't in your current party — can't show a sheet for them.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+        await _safe_send(update, _format_character_sheet(target))
+        return
+
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
@@ -5240,7 +5259,7 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     elif action == "pass_turn":
         await _do_pass_turn(update)
     elif action == "check_sheet":
-        await _do_check_sheet(update)
+        await _do_check_sheet(update, intent.get("target"))
     elif action == "talk_npc" and intent.get("npc_name"):
         npc_id = _find_npc_id_by_name(intent["npc_name"])
         if npc_id and npc_id in _NPCS:
@@ -5895,6 +5914,25 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
     resource_nodes = location.get("resource_nodes", [])
     if resource_nodes:
         lines.append(f"Resources here: {', '.join(n['name'] for n in resource_nodes)}")
+
+    # 2026-07-14, per Coffee: gathering already had grounding above, but
+    # crafting and campfires (both shipped the same day) didn't -- the
+    # AI party had real facts to gather materials but nothing telling it
+    # what those materials could actually MAKE, or that a campfire was
+    # ever an option. Same "only mention what's real right now" pattern
+    # as every other fact here: only lists a recipe if the character
+    # genuinely has the materials for it, and only mentions the campfire
+    # if they're actually carrying wood and not already at full HP
+    # (matching _do_make_campfire's own real refusal conditions exactly).
+    craftable = [
+        items_module.get_item(recipe["result_item"])["name"]
+        for recipe in RECIPES.values()
+        if has_materials(inventory, recipe) and items_module.get_item(recipe["result_item"])
+    ]
+    if craftable:
+        lines.append(f"You have the materials to craft: {', '.join(craftable)}")
+    if inventory.get("wood", 0) >= 1 and character.get("hp_current", 0) < character.get("hp_max", 0):
+        lines.append("You're carrying wood and could make a campfire to recover some HP.")
     shop_id = location.get("shop")
     if shop_id:
         # Same reasoning as the descends_to/ascends_to fix above: without

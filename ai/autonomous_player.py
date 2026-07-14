@@ -64,6 +64,9 @@ _EXAMPLE_LINES = [
     ("You're carrying", "sell my [something listed under You're carrying]"),
     ("Guilds you could join", "I want to join the [a guild listed under Guilds you could join]"),
     ("Spells you know", "I cast [something listed under Spells you know]"),
+    ("Resources here", "I gather [something listed under Resources here]"),
+    ("You have the materials to craft", "I craft [something listed under You have the materials to craft]"),
+    ("could make a campfire", "I make a campfire"),
     (None, "I rest for now"),
 ]
 

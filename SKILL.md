@@ -30,7 +30,10 @@ section below if you want the specifics.
 
 ## Playing the game
 
-There's no required syntax. Some examples:
+There's no required syntax. Some examples — this list grows as the game
+does, so treat it as a strong starting vocabulary, not a fixed command
+set; plain, direct phrasing (matching the style of these examples)
+classifies far more reliably than creative or indirect phrasing:
 
 | Say something like... | To... |
 |---|---|
@@ -39,12 +42,46 @@ There's no required syntax. Some examples:
 | *"What am I carrying?"* | Check your inventory |
 | *"I want to buy a healing potion"* | Trade with a nearby merchant |
 | *"Let's start a fight"* / *"I attack the goblin"* | Enter combat |
+| *"I flee"* | Try to escape an active fight (a real dice roll — enemies still standing get a free attack as you break away, and some enemies can't be fled at all) |
 | *"I cast [spell]"* | Use a spell you know |
 | *"I want to join the [guild name]"* | Petition to join a guild |
 | Just say an NPC's name | Speak with them, in character |
-| *"Check my sheet"* / *"status"* | See your character sheet |
-| *"Rest for now"* / *"take a rest"* | Go inactive until you return (only out of combat) |
-| *"cancel"* | Back out of anything you've started |
+| *"Check my sheet"* / *"status"* | See your character sheet, including skill levels |
+| *"Show me my party's character sheets"* | Full sheets for every party member, including AI companions/recruits — not just names |
+| *"Who's in my party?"* | A compact list of your party |
+| *"Invite [name] to my party"* / *"recruit [NPC]"* | Form or grow a party |
+| *"I accept this/the quest"* | Take a quest that's on offer or posted |
+| *"Check my quests"* | Your story quest journal AND any board quests you've personally accepted, wherever they're posted |
+| *"I gather/forage/mine/fish/chop wood"* | Collect a raw material from a resource node here (see Gathering professions below) |
+| *"I craft [item]"* | Brew a potion or make an item from materials you're carrying |
+| *"I make a campfire"* | Consumes 1 wood, a real (small) HP heal, allowed outside combat any time |
+| *"Rest for now"* / *"take a rest"* | Go inactive until you return (only out of combat) — real-time-scaled healing, not an instant full heal |
+| *"cancel"* | Back out of anything you've started (not a way out of combat — see flee) |
+
+### Gathering professions
+
+Herbalism, Mining, Fishing, Lumberjacking, and Crafting each level up
+**independently** the more you succeed at them (not lumped into one
+generic skill) — practice bonuses are real and persistent. Materials
+only come from the right resource node at the right location (e.g.
+fishing needs actual water nearby); asking to gather something that
+isn't there just tells you what actually is.
+
+### Status conditions
+
+Beyond prone and poisoned, this game models blinded, silenced,
+paralyzed, and frightened — each with a real mechanical effect (extra
+attack risk, blocked spellcasting, or a skipped turn), not just flavor
+text. These come from specific enemies' attacks, not something your
+own character chooses.
+
+### Death is real, and reversible
+
+3 failed death saves means your character is genuinely dead — they
+can't act or be moved, and stay exactly where they died. You can
+switch to another character of yours in the meantime (or make a new
+one). A party member with Revivify (a real Cleric spell, or a
+purchasable scroll) can bring a dead character back to 1 HP.
 
 ## The other Telegram topics
 
