@@ -4822,8 +4822,63 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
                 message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
 
+    if len(intents) > 1:
+        # 2026-07-13 (Coffee): a genuinely compound message ("recruit Sera
+        # and check my inventory") previously sent one real Telegram
+        # message per sub-action -- he wanted them combined into a single
+        # reply instead. Every _do_* handler in this file only ever
+        # touches two things on effective_chat: .id and .send_message()
+        # (confirmed by grep across the whole file) -- so a lightweight
+        # duck-typed proxy that buffers .send_message() calls instead of
+        # actually sending, swapped in only for a compound dispatch,
+        # covers every handler without touching any of them. python-
+        # telegram-bot's real Chat/Update objects can't be monkey-patched
+        # directly (TelegramObject enforces frozen attributes), which is
+        # exactly why this is a separate proxy class instead of patching
+        # update.effective_chat in place.
+        chat_proxy = _BufferingChatProxy(update.effective_chat)
+        proxied_update = _EffectiveChatOverride(update, chat_proxy)
+        for i in intents:
+            await _dispatch_intent(proxied_update, context, i, text)
+        if chat_proxy.buffered:
+            await _safe_send(update, "\n\n".join(chat_proxy.buffered))
+        return
+
     for i in intents:
         await _dispatch_intent(update, context, i, text)
+
+
+class _BufferingChatProxy:
+    """
+    Stands in for update.effective_chat during a compound-message
+    dispatch: .id passes through to the real chat (handlers that key
+    off it, e.g. sessions.get_lock(chat_id), still work normally), but
+    .send_message() buffers text instead of actually sending, so every
+    sub-action's narration can be combined into one real message at the
+    end instead of one Telegram message per sub-action.
+    """
+    def __init__(self, real_chat):
+        self.id = real_chat.id
+        self.buffered: list[str] = []
+
+    async def send_message(self, text, **kwargs):
+        self.buffered.append(text)
+
+
+class _EffectiveChatOverride:
+    """
+    Duck-typed stand-in for Update: identical to the real one for every
+    attribute a handler might touch, except effective_chat, which is
+    swapped for a _BufferingChatProxy. Needed because python-telegram-
+    bot's real Update can't have effective_chat reassigned in place
+    (TelegramObject enforces frozen attributes).
+    """
+    def __init__(self, real_update, chat_proxy):
+        self._real_update = real_update
+        self.effective_chat = chat_proxy
+
+    def __getattr__(self, name):
+        return getattr(self._real_update, name)
 
 
 async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, intent: dict, text: str) -> None:
