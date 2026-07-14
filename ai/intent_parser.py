@@ -524,12 +524,34 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # Ability-check verb -> ability mapping. Deliberately conservative:
     # only fires on fairly explicit risky-action phrasing, so ordinary
     # roleplay chat isn't constantly misread as a check attempt.
+    #
+    # 2026-07-14 (Coffee): audited against all 18 real 5E skills --
+    # Arcana, Nature, Religion, Animal Handling, Insight, Medicine, and
+    # Performance had NO trigger phrase at all (a player asking "do I
+    # sense any magic here" or "can I calm this animal down" fell
+    # through to chat, same silent-gap pattern as every other
+    # intent_parser fix this session), and Sleight of Hand only had
+    # "pick the lock" (lockpicking), not general dexterous trickery like
+    # palming an object. This game already collapses all skills sharing
+    # one ability into that ability's single practiced_bonus bucket
+    # (Persuasion/Deception/Intimidation/Performance are all "charisma",
+    # not four separate tracked skills) -- adding these fills the real
+    # gap (a phrase with nothing to route to) without inventing new
+    # per-skill tracking that doesn't exist anywhere else in this game.
     skill_check_verb_abilities = [
-        (["sneak", "hide", "climb", "balance", "pick the lock", "disarm the trap", "tiptoe"], "dexterity"),
+        (["sneak", "hide", "climb", "balance", "pick the lock", "disarm the trap", "tiptoe",
+          "palm the", "pickpocket", "lift the coin purse", "plant this on", "swap the", "conceal the"], "dexterity"),
         (["lift", "push", "break down", "force open", "shove the", "smash"], "strength"),
-        (["recall", "remember lore", "investigate", "decipher", "figure out the puzzle"], "intelligence"),
-        (["search for", "look for hidden", "listen for", "spot", "sense", "track", "survive", "perceive"], "wisdom"),
-        (["persuade", "convince", "deceive", "lie to", "intimidate", "impress"], "charisma"),
+        (["recall", "remember lore", "investigate", "decipher", "figure out the puzzle",
+          "identify the magic", "sense the magic", "what spell is this", "arcane knowledge",
+          "what kind of creature", "what plant is this", "identify the plant", "identify the animal",
+          "what do i know about this holy site", "what religion", "identify the deity", "identify the god"], "intelligence"),
+        (["search for", "look for hidden", "listen for", "spot", "sense", "track", "survive", "perceive",
+          "calm the animal", "calm down the", "soothe the animal", "tame the", "read them",
+          "sense if they're lying", "sense if he's lying", "sense if she's lying", "gut feeling about",
+          "treat the wound", "stabilize", "administer first aid", "diagnose", "identify the poison"], "wisdom"),
+        (["persuade", "convince", "deceive", "lie to", "intimidate", "impress",
+          "perform for", "sing for", "play music for", "put on a show", "tell a story to entertain"], "charisma"),
         (["hold my breath", "endure", "resist the poison", "push through the pain"], "constitution"),
     ]
     for verbs, ability in skill_check_verb_abilities:

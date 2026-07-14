@@ -906,7 +906,8 @@
       "hp_max": 21,
       "proficiency_bonus": 2,
       "xp_reward": 200,
-      "is_boss": true
+      "is_boss": true,
+      "on_hit_condition": "paralyzed"
     },
     "wolf": {
       "name": "Wolf",
@@ -915,7 +916,8 @@
       "armor_class": 13,
       "hp_max": 11,
       "proficiency_bonus": 2,
-      "xp_reward": 50
+      "xp_reward": 50,
+      "on_hit_condition": "frightened"
     },
     "giant_spider": {
       "name": "Giant Spider",

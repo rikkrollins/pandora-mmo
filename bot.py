@@ -1431,6 +1431,26 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
             session.advance_turn()
             continue
 
+        # Paralyzed (2026-07-14, second new on_hit_condition batch after
+        # blinded/silenced): real 5E fully incapacitates a paralyzed
+        # creature -- no actions, no reactions. This engine has no
+        # duration tracking for ANY condition (prone/poisoned/blinded/
+        # silenced all persist until combat ends too), so paralyzed
+        # follows the same simplification rather than inventing a
+        # save-ends mechanic just for this one. Checked here, before the
+        # real-player announce-and-return below, so it uniformly skips
+        # BOTH AI and real-player turns from one place -- a paralyzed
+        # real player never even gets prompted to act, so there's
+        # nothing for _do_attack/etc.'s "not your turn" checks to have
+        # to separately guard against.
+        if "paralyzed" in current.get("conditions", []):
+            consecutive_noop_turns += 1
+            await _safe_send(update, f"⛓️ **{current['name']} is paralyzed and can't act this turn.**")
+            if session.is_combat_over():
+                break
+            session.advance_turn()
+            continue
+
         if not current.get("is_ai"):
             await _safe_send(update, _turn_announcement(session))
             return
@@ -1983,8 +2003,12 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
     bonus = _practiced_bonus_for(update.effective_user.id, "dexterity")
     result["total"] += bonus
     result["practiced_bonus"] = bonus
-    db.record_skill_use(update.effective_user.id, "dexterity")
     success = result["total"] >= SKILL_CHECK_DC
+    # 2026-07-14, per Coffee: skill points (practiced-use progress) are
+    # only earned on a SUCCESSFUL roll, not just any attempt -- same
+    # change applied at every record_skill_use call site.
+    if success:
+        db.record_skill_use(update.effective_user.id, "dexterity")
 
     reward_line = ""
     if success:
@@ -2030,8 +2054,9 @@ async def _do_skill_check(update: Update, ability: str, action_text: str) -> Non
     bonus = _practiced_bonus_for(update.effective_user.id, ability)
     result["total"] += bonus
     result["practiced_bonus"] = bonus
-    db.record_skill_use(update.effective_user.id, ability)
     success = result["total"] >= SKILL_CHECK_DC
+    if success:
+        db.record_skill_use(update.effective_user.id, ability)
 
     flavor = await asyncio.to_thread(
         narrate_skill_check, character, action_text, ability,
@@ -2098,22 +2123,37 @@ def _attack_advantage_disadvantage(attacker: dict, defender: dict) -> tuple[bool
     poisoned): real 5E gives a blinded creature disadvantage on its own
     attack rolls, and attack rolls against it have advantage — the same
     shape as prone, just symmetric instead of attacker-only.
+
+    Paralyzed and frightened (2026-07-14): a paralyzed defender grants
+    advantage (real 5E also auto-crits any hit from within 5 ft., not
+    modeled here — same no-positioning limitation as Sneak Attack).
+    Paralyzed also fully skips the paralyzed creature's own turn (see
+    _resolve_ai_turns), so it never reaches this function as an
+    attacker. Frightened is disadvantage-on-attacks only, same shape as
+    poisoned — real 5E's "can't willingly move closer to the fear
+    source" has no equivalent since this game has no positioning.
     """
     attacker_conditions = attacker.get("conditions", [])
     defender_conditions = defender.get("conditions", [])
     disadvantage = (
         "prone" in attacker_conditions or "poisoned" in attacker_conditions
-        or "blinded" in attacker_conditions
+        or "blinded" in attacker_conditions or "frightened" in attacker_conditions
     )
     favored_enemy = (attacker.get("char_class") == "Ranger"
                       and defender.get("monster_key", "").startswith("goblin"))
-    advantage = "prone" in defender_conditions or "blinded" in defender_conditions or favored_enemy
+    advantage = (
+        "prone" in defender_conditions or "blinded" in defender_conditions
+        or "paralyzed" in defender_conditions or favored_enemy
+    )
     return advantage, disadvantage
 
 
 def _condition_tags(character: dict) -> str:
     """Short display tags for a character's active conditions, e.g. '🛌😷'."""
-    icons = {"prone": "🛌", "poisoned": "😷", "blinded": "🙈", "silenced": "🔇"}
+    icons = {
+        "prone": "🛌", "poisoned": "😷", "blinded": "🙈", "silenced": "🔇",
+        "paralyzed": "⛓️", "frightened": "😱",
+    }
     conditions = character.get("conditions", [])
     return "".join(icons.get(c, "") for c in conditions)
 
@@ -3223,6 +3263,19 @@ async def _do_check_sheet(update: Update) -> None:
         slot_line = f"Spell slots: {character['spell_slots_current']}/{character['spell_slots_max']}\n"
     feature_status = _feature_use_status(character)
     feature_use_line = f"{feature_status}\n" if feature_status else ""
+    # Per Coffee's request (2026-07-14): show each practiced skill's
+    # current level right next to it on the sheet, not just buried in
+    # skill_uses. practiced_bonus (rules/proficiency.py) already existed
+    # as a real "the more you do it, the better you get" mechanic --
+    # this just surfaces it. Only lists abilities actually used at least
+    # once, so a fresh character's sheet isn't cluttered with six zeros.
+    skill_uses = character.get("skill_uses") or {}
+    skill_lines = [
+        f"{ability.capitalize()} +{practiced_bonus(uses)} ({uses} use{'s' if uses != 1 else ''})"
+        for ability, uses in sorted(skill_uses.items())
+        if uses > 0
+    ]
+    skills_line = f"Skills: {', '.join(skill_lines) if skill_lines else 'None practiced yet'}\n"
     sheet = (
         f"**{character['name']}** — {character['race']} {character['char_class']}\n"
         f"Level {character['level']} | XP {character['xp']}\n"
@@ -3233,6 +3286,7 @@ async def _do_check_sheet(update: Update) -> None:
         f"Racial traits: {'; '.join(race_data['traits']) if race_data else 'None'}\n"
         f"Class features: {'; '.join(features) if features else 'None'}\n"
         f"{feature_use_line}"
+        f"{skills_line}"
         f"Location: {cl.get_location(CAMPAIGN, character['current_location'])['name']}"
     )
     await _safe_send(update, sheet)
@@ -3299,11 +3353,11 @@ async def _do_gather(update: Update, action_text: str) -> None:
     bonus = _practiced_bonus_for(update.effective_user.id, node["ability"])
     result["total"] += bonus
     result["practiced_bonus"] = bonus
-    db.record_skill_use(update.effective_user.id, node["ability"])
     success = result["total"] >= SKILL_CHECK_DC
     material = items_module.get_item(node["material"])
 
     if success:
+        db.record_skill_use(update.effective_user.id, node["ability"])
         db.add_item(update.effective_user.id, node["material"], 1)
 
     flavor = await asyncio.to_thread(
@@ -3386,13 +3440,12 @@ async def _do_craft(update: Update, text: str) -> None:
         )
         return
 
-    db.record_skill_use(update.effective_user.id, recipe_ability)
-
     for item_id, qty in result["materials_consumed"].items():
         db.remove_item(update.effective_user.id, item_id, qty)
 
     success = result["outcome"] == "success"
     if success:
+        db.record_skill_use(update.effective_user.id, recipe_ability)
         db.add_item(update.effective_user.id, result["result_item"], result["result_qty"])
 
     flavor = await asyncio.to_thread(
@@ -4252,10 +4305,10 @@ async def _do_steal(update: Update, text: str) -> None:
     bonus = _practiced_bonus_for(telegram_user_id, "dexterity")
     result["total"] += bonus
     result["practiced_bonus"] = bonus
-    db.record_skill_use(telegram_user_id, "dexterity")
     success = result["total"] >= STEAL_DC
 
     if success:
+        db.record_skill_use(telegram_user_id, "dexterity")
         db.add_item(telegram_user_id, item_id, 1)
         consequence_line = f"\n🤫 You slip away with **{item['name']}** — nobody noticed."
     else:
