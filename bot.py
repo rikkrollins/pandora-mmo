@@ -3000,6 +3000,27 @@ async def _do_check_quests(update: Update) -> None:
         titles = [CAMPAIGN["quests"][q]["title"] for q in character["completed_quests"] if q in CAMPAIGN["quests"]]
         lines.append(f"\n**Completed ({len(titles)}):** {', '.join(titles)}")
 
+    # Confirmed live 2026-07-14 (Coffee): accepted a board quest, then
+    # asked to look at his active quests -- it never showed up. This
+    # journal previously only ever looked at character["active_quests"]
+    # (story quests), never board_quests_module/db's separate tracking
+    # for a player's own accepted board quests (accepted_by, keyed by
+    # board_quest_id, not tied to active_quests at all). The real data
+    # already existed (db.get_accepted_board_quests_for_user, already
+    # used by _do_resolve_quest_choice) -- it just wasn't being shown
+    # here, the one place a player would naturally look for it.
+    accepted_board_quests = db.get_accepted_board_quests_for_user(update.effective_user.id)
+    if accepted_board_quests:
+        lines.append("\n**Board quests accepted:**")
+        for bq in accepted_board_quests:
+            bq_location = cl.get_location(CAMPAIGN, bq["location_id"])
+            bq_location_name = bq_location["name"] if bq_location else bq["location_id"]
+            if bq.get("branch_data") and bq["progress_count"] >= bq["objective_count"]:
+                lines.append(f"• {bq['title']} ({bq_location_name}) — ready to decide, say which choice you want")
+            else:
+                progress = f"{bq['progress_count']}/{bq['objective_count']}"
+                lines.append(f"• {bq['title']} ({bq_location_name}) — {progress}")
+
     location_id = character["current_location"]
     location = cl.get_location(CAMPAIGN, location_id)
     story_offer = _offerable_quest_at_location(character, location_id)
