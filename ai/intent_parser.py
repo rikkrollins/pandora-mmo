@@ -252,6 +252,26 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
             # Not a known campaign NPC -- fall through to invite_to_party's
             # own check further below, unchanged.
 
+    # Checked BEFORE the known-NPC-name loop below, same reasoning as
+    # every fix above it: "Show me SERA's character sheet" (and the
+    # apostrophe-less retype "Show me sera character sheet") both
+    # contain "Sera" -- a real known NPC -- so the loop below caught
+    # them FIRST and returned talk_npc before this ever ran, even
+    # though it was already sitting further down in this same function.
+    # Confirmed live 2026-07-14: moving the check earlier (not just
+    # broadening its regex, which alone didn't fix it) was the actual
+    # fix -- every single "show me X's sheet" attempt that day, with or
+    # without the apostrophe, kept coming back as talk_npc/Sera
+    # replying instead, because it never got the chance to run. The
+    # excluded-words guard keeps "my"/"the"/pronoun-only phrasing
+    # ("check my character sheet") from being misread as a party
+    # member literally named "my".
+    named_sheet_match = re.search(r"(\w+)(?:'s)? (?:character )?sheet", lowered)
+    if named_sheet_match and named_sheet_match.group(1) not in (
+        "my", "the", "a", "an", "her", "his", "their", "your", "our"
+    ):
+        return {**base, "action": "check_sheet", "target": named_sheet_match.group(1)}
+
     recruit_words = ["join us", "join our party", "join my party", "come with us",
                       "travel with us", "come along", "join the party"]
     for npc_name in known_npc_names:
@@ -391,26 +411,6 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
         if trigger in lowered:
             name = text[lowered.index(trigger) + len(trigger):].strip()
             return {**base, "action": "delete_character", "target": name or None}
-
-    # Confirmed live 2026-07-14 (Coffee): "Show me SERA's character
-    # sheet" -- asking for a SPECIFIC party member's sheet by name, not
-    # "my sheet" or "my party's sheets" (already handled elsewhere) --
-    # matched nothing here at all and fell through all the way to
-    # "examine", which searched for an interactable object named "SERA"
-    # and correctly (given what it was asked) found nothing. Checked
-    # before the "my sheet" block below since a possessive name always
-    # means someone else's sheet is wanted, never the asker's own.
-    # The possessive apostrophe is optional -- confirmed live the SAME
-    # day: a retyped "Show me sera character sheet" (no "'s", plausibly
-    # autocorrect dropping it) matched nothing either and fell through
-    # to talk_npc instead. The excluded-words guard keeps "my"/"the"/
-    # pronoun-only phrasing ("check my character sheet") from being
-    # misread as a party member literally named "my".
-    named_sheet_match = re.search(r"(\w+)(?:'s)? (?:character )?sheet", lowered)
-    if named_sheet_match and named_sheet_match.group(1) not in (
-        "my", "the", "a", "an", "her", "his", "their", "your", "our"
-    ):
-        return {**base, "action": "check_sheet", "target": named_sheet_match.group(1)}
 
     if any(w in lowered for w in [
         "my sheet", "my stats", "my hp", "my health", "my character", "status",

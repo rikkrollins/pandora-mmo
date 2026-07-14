@@ -27,10 +27,14 @@ session.
   "show me my party's sheets") — it was never given the real party
   roster, only the asking player's own character.
 - "Show me SERA's character sheet" (a specific named party member, not
-  "my sheet") had nowhere to go and fell through to `examine`, which
-  searched for an object named "Sera" and correctly found nothing.
-  check_sheet now supports a named target, looked up among real party
-  members only.
+  "my sheet") took three attempts to actually fix. First it had nowhere
+  to go and fell through to `examine`. Then the fix that added it
+  looked right in isolation but never fired in production, twice in a
+  row — it was sitting in the intent parser's keyword fallback AFTER
+  the known-NPC-name loop, which matched "Sera" first and returned
+  `talk_npc` before the sheet check ever ran. The real fix was moving
+  the check before that loop, not tweaking its regex. check_sheet now
+  supports a named target, looked up among real party members.
 - The autonomous AI party generated an ungrounded action ("I ask
   villagers to join our party") because an example in its prompt was
   always shown even when nothing recruitable was actually nearby.
