@@ -2,6 +2,39 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.7.3] — Fixed a severe, near-universal action-misrouting bug
+
+Per Coffee's live report (screenshot, 2026-07-14): "there is obviously
+a roadblock on the taking a closer look/observing/look at functions...
+this is probably what is stopping the AI from being able to function
+further." Investigation found the actual bug was much bigger than
+examine specifically.
+
+- **Root cause**: the per-word NPC-name matching added earlier this
+  session (so "Say hello to Maren" would match "Old Maren") only
+  filtered candidate words by length, not by whether they were actual
+  filler words. "Theron **the** Wanderer" and "Kess **the** Bandit"
+  both contributed the bare word "the" as a supposedly-distinctive
+  match target — meaning almost any message containing "the" (i.e.
+  nearly every sentence in English) was misrouted to `talk_npc`
+  before it could ever reach any later, more specific check. "Old
+  Maren" similarly leaked the common word "old". Fixed with an
+  explicit filler-word denylist ("the", "a", "an", "of", "and", "old")
+  excluded from per-word matching.
+- Separately, broadened `examine` to cover phrasings that were never
+  matched at all even without the above bug: "read", "observed"
+  (past tense — only the imperative "observe the" was covered, and
+  only as part of the whole-area `look` action), "examined",
+  "inspected", "searched", "checked out", "looked at", "peered at",
+  "glanced at".
+- Verified with 24 unit cases (including negative cases — "already",
+  "bread", "spread" must not falsely trigger on the substring "read")
+  and two real handler-level runs.
+
+This affected every player and every AI-controlled character equally,
+since both go through the same shared intent parser — likely the
+single highest-impact fix this session.
+
 ## [1.7.2] — Recruits and AI party members act on their own initiative
 
 Per Coffee: "make recruitable able to make their own choices... this

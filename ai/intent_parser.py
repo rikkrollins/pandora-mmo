@@ -272,6 +272,21 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     ):
         return {**base, "action": "check_sheet", "target": named_sheet_match.group(1)}
 
+    # Confirmed live 2026-07-14 (Coffee, reported as a broad "roadblock"
+    # affecting both himself and the AI party): the per-word matching
+    # below only filtered by word length (>=3), so filler words inside
+    # a multi-word NPC name -- "the" in "Theron THE Wanderer"/"Kess THE
+    # Bandit", "old" in "OLD Maren" -- were themselves treated as
+    # distinctive identifying words. Since "the" appears in nearly
+    # every English sentence, ANY message reaching this loop (not just
+    # ones actually about Theron/Kess) matched and returned talk_npc
+    # here, before it could ever reach later checks -- including
+    # "Read the guest book", "Check out the door", every other
+    # not-yet-covered examine phrasing below, and surely plenty more.
+    # This is a strict denylist, not a rewrite of the length filter,
+    # since genuine short distinctive name-parts (Sera, Kess, Vane...)
+    # still need to keep matching.
+    _NPC_NAME_FILLER_WORDS = {"the", "a", "an", "of", "and", "old"}
     recruit_words = ["join us", "join our party", "join my party", "come with us",
                       "travel with us", "come along", "join the party"]
     for npc_name in known_npc_names:
@@ -286,7 +301,10 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
         # introduced. Whole-word (not substring-within-a-word) matching
         # on individual name words avoids a short/common fragment
         # accidentally firing on unrelated text.
-        name_words = [w for w in npc_name.lower().split() if len(w) >= 3]
+        name_words = [
+            w for w in npc_name.lower().split()
+            if len(w) >= 3 and w not in _NPC_NAME_FILLER_WORDS
+        ]
         if npc_name.lower() in lowered or any(
             re.search(r"\b" + re.escape(w) + r"\b", lowered) for w in name_words
         ):
@@ -474,6 +492,28 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
         if trigger in lowered:
             target = text[lowered.index(trigger) + len(trigger):].strip()
             return {**base, "action": "examine", "target": target or None}
+
+    # Confirmed live 2026-07-14 (Coffee, both himself and the AI party
+    # independently): "Read the guest book on the landing table" and
+    # "Observed the guest book" both fell all the way through to
+    # pass_turn -- neither "read" nor the past tense "observed" (only
+    # the imperative "observe the", and only as part of the whole-area
+    # "look" trigger above, not a specific-object examine) was ever
+    # covered. Coffee called this out as a real "roadblock" stopping
+    # both humans and AI party members from freely interacting with
+    # things -- broadened to a word-boundary regex (not another plain
+    # substring in the list above) specifically because bare "read" is
+    # a substring of ordinary words like "already"/"bread"/"spread",
+    # which a naive substring check would misfire on.
+    examine_verb_match = re.search(
+        r"\b(?:read|observed|examined|inspected|searched|checked out|"
+        r"looked (?:at|closer at)|peered? at|glanced? at)\b\s+"
+        r"(?:the |a |an )?(.+)",
+        lowered,
+    )
+    if examine_verb_match:
+        target = text[examine_verb_match.start(1):examine_verb_match.end(1)].strip()
+        return {**base, "action": "examine", "target": target or None}
 
     if any(w in lowered for w in ["steal", "pickpocket", "rob the", "rob this", "swipe the", "take without paying"]):
         return {**base, "action": "steal"}
