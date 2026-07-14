@@ -2212,6 +2212,40 @@ async def _do_flee(update: Update, action_text: str) -> None:
             await _resolve_ai_turns(update, session)
             return
 
+        # Opportunity attacks (2026-07-13): breaking off from a fight
+        # isn't a real Disengage action, it's turning your back mid-melee
+        # -- real 5E lets every enemy still standing take one free swing
+        # as you go. This game has no positioning system to gate that on
+        # (see resolve_attack's Sneak Attack comment on the same
+        # limitation), so every living opposing enemy gets one plain
+        # attack roll (no advantage/disadvantage) against the fleeing
+        # character before the escape is finalized. Deliberately skips
+        # the AI narrator per hit -- with several enemies that would
+        # stack multiple 30-160s Ollama calls onto a single flee attempt
+        # -- and reuses _format_combat_result with no flavor text for a
+        # fast, fully deterministic result instead.
+        opportunity_blocks = []
+        for enemy in session.living_on_side(session.opposing_side(user_id)):
+            if fleeing["hp_current"] <= 0:
+                break
+            atk_result = resolve_attack(enemy, fleeing, DEFAULT_WEAPON)
+            opportunity_blocks.append(_format_combat_result(
+                "", atk_result, enemy["name"], fleeing["name"],
+            ))
+        if opportunity_blocks:
+            _sync_player_to_db(fleeing)
+            message = message + "\n\n🗡️ **Opportunity attacks as you break away:**\n\n" + "\n\n".join(opportunity_blocks)
+
+        if fleeing["hp_current"] <= 0:
+            await _safe_send(
+                update,
+                f"{message}\n\n⚠️ **{fleeing['name']} is cut down before escaping — knocked unconscious!** "
+                f"Still in the fight, rolling death saving throws on their turns until stable, revived, or worse.",
+            )
+            session.advance_turn()
+            await _resolve_ai_turns(update, session)
+            return
+
         character = db.get_character(user_id)
         destination_id = _nearest_safe_waypoint(character) if character else SAFE_LOCATION_FALLBACK
         destination_name = cl.get_location(CAMPAIGN, destination_id)["name"]
