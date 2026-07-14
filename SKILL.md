@@ -49,7 +49,7 @@ classifies far more reliably than creative or indirect phrasing:
 | *"Check my sheet"* / *"status"* | See your character sheet, including skill levels |
 | *"Show me my party's character sheets"* | Full sheets for every party member, including AI companions/recruits — not just names |
 | *"Who's in my party?"* | A compact list of your party |
-| *"Invite [name] to my party"* / *"recruit [NPC]"* | Form or grow a party |
+| *"Invite [name] to my party"* / *"recruit [NPC]"* | Form or grow a party — a recruitable NPC may mention a real personal quest right when they join; "I accept the quest" takes it on the same as any other |
 | *"I accept this/the quest"* | Take a quest that's on offer or posted |
 | *"Check my quests"* | Your story quest journal AND any board quests you've personally accepted, wherever they're posted |
 | *"I gather/forage/mine/fish/chop wood"* | Collect a raw material from a resource node here (see Gathering professions below) |

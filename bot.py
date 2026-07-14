@@ -1944,6 +1944,25 @@ async def _do_recruit_npc(update: Update, npc_name: str) -> None:
         message_thread_id=config.TOPIC_ADVENTURE_ID,
     )
 
+    # Per Coffee (2026-07-14): each recruitable should mention "a task,
+    # mission, journey or adventure" once they join, so the party can
+    # choose to help -- a real hook toward following the story
+    # linearly, not just flavor text. Only surfaces a quest that's
+    # actually real (giver_npc == this NPC) and not already done.
+    personal_quest = next(
+        (
+            (qid, q) for qid, q in CAMPAIGN.get("quests", {}).items()
+            if q.get("giver_npc") == npc_id
+        ),
+        None,
+    )
+    if personal_quest is not None:
+        _, quest = personal_quest
+        await update.effective_chat.send_message(
+            f"💬 **{npc['name']}:** {quest['description']} Say \"I accept the quest\" if the party wants to help.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+
 
 # A fixed, moderate DC for all non-combat skill checks. Real 5E lets a
 # DM set the DC per situation (Easy=10, Medium=15, Hard=20, etc.) — this
@@ -2661,6 +2680,32 @@ def _offerable_quest_at_location(character: dict, location_id: str) -> tuple[str
     return None
 
 
+def _offerable_companion_quest(character: dict) -> tuple[str, dict] | None:
+    """
+    A real party companion's own personal quest (2026-07-14, per
+    Coffee: each recruitable should have "a mission or quest they go
+    on with players" -- e.g. Sera mentioning a task she'd like help
+    with once recruited). Matched by 'giver_npc' against whoever's
+    ACTUALLY in the party right now, not by location -- a companion's
+    own request travels with the party rather than being tied to
+    wherever they happened to be recruited, and this deliberately
+    never collides with the ordinary location-based quests above
+    (this game's only other quest with a 'location' field matching
+    that spot might already be a different quest entirely).
+    """
+    party_npc_ids = {
+        _find_npc_id_by_name(p["name"]) for p in _get_party_members() if p.get("is_ai")
+    }
+    for quest_id, quest in CAMPAIGN.get("quests", {}).items():
+        giver = quest.get("giver_npc")
+        if not giver or giver not in party_npc_ids:
+            continue
+        if quest_id in character["completed_quests"] or quest_id in character["active_quests"]:
+            continue
+        return quest_id, quest
+    return None
+
+
 def _npc_quest_facts(character: dict, npc_id: str) -> str | None:
     """
     Real, current quest info to ground an NPC's dialogue when asked
@@ -2831,6 +2876,21 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
     if character is None:
         await update.effective_chat.send_message(
             "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    # Checked BEFORE the location-based offer below: a companion's own
+    # personal quest is a real, specific thing the party just agreed to
+    # help with (see _offerable_companion_quest) -- it should win over
+    # an unrelated location-based quest that happens to also be posted
+    # wherever the player's currently standing.
+    companion_offer = _offerable_companion_quest(character)
+    if companion_offer is not None:
+        quest_id, quest = companion_offer
+        db.accept_quest(telegram_user_id, quest_id)
+        await update.effective_chat.send_message(
+            f"📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
 
@@ -6218,6 +6278,13 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
     story_offer = _offerable_quest_at_location(character, location_id)
     if story_offer:
         lines.append(f"A quest is on offer here: {story_offer[1]['title']}")
+
+    # Per Coffee (2026-07-14): a recruited companion's own personal
+    # quest should be something the AI party can choose to help with
+    # too, not just something a human player notices.
+    companion_offer = _offerable_companion_quest(character)
+    if companion_offer:
+        lines.append(f"A party companion has a personal task on offer: {companion_offer[1]['title']}")
 
     board_quests = board_quests_module.get_todays_board_quests(location_id)
     unclaimed = [q for q in board_quests if not q.get("accepted_by") and not q.get("completed_at")]

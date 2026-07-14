@@ -2,6 +2,38 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.8.0] — Recruitable companions now have real personal quests
+
+Coffee's idea: "each recruitable has a mission or quest they go on with
+players" — e.g. recruiting Sera at the starting tavern, she mentions a
+real task she'd like help with, and the party can choose to follow it.
+Meant to double as an optional, guided path through the story for
+players who want one, not just decoration.
+
+- Story quests gained an optional `giver_npc` field (mirrors board
+  quests' existing one). A new `_offerable_companion_quest` matches by
+  who's ACTUALLY in the party right now, not by location — a
+  companion's request travels with the party rather than being tied to
+  wherever they were recruited, and never collides with an unrelated
+  quest that happens to share that same location.
+- Recruiting a companion with a personal quest now narrates their real
+  hook immediately, in-character; "I accept the quest" (the same
+  phrase as any other quest) takes it on for real, tracked the same as
+  any story quest.
+- AI-controlled characters (companions and the autonomous party alike)
+  see this as a real fact too, so they can choose to accept it on
+  their own.
+- Sera (met at The Crossroads Tavern) is the first real example:
+  "Sera's Safer Crossing," pointing the party toward Stonearch Bridge —
+  grounded in her existing established backstory, not invented fresh.
+  The remaining recruitables (Borin Ironjaw, Wren Hollowbrook, Pip
+  Thistledown, Grask Emberscale, Vesh Nightglass) don't have one yet —
+  same "needs real authored content" follow-up as cooking/forging/
+  enchanting.
+- Verified live end-to-end: recruiting Sera narrates her real quest
+  hook, "I accept the quest" takes it on, and it's genuinely tracked
+  as an active quest afterward.
+
 ## [1.7.7] — Attacking now just works, and Support stopped inventing a companion's stats
 
 - **"I attack the goblin" now works with no fight already running.**

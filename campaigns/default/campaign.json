@@ -760,6 +760,19 @@
       },
       "clue": "Grimsby says the wrongness he's felt seems to trail off toward the treeline west of the tavern."
     },
+    "seras_safer_crossing": {
+      "title": "Sera's Safer Crossing",
+      "description": "Sera's been sizing up the Stonearch Bridge crossing, uneasy about who else might be using it to move unseen -- she'd rather have a second set of eyes before trusting the route.",
+      "objective_location": "stonearch_bridge",
+      "giver_npc": "sera_wanderer",
+      "reward_xp": 100,
+      "reward_gold": 50,
+      "trigger": {
+        "type": "reach_location",
+        "location": "stonearch_bridge"
+      },
+      "clue": "Sera says she'll feel better about the bridge once someone's actually walked it with her."
+    },
     "the_hollow_stump": {
       "title": "The Hollow Stump",
       "description": "The shrine in the Whispering Wood may hold answers to what's been left behind there.",
