@@ -5601,7 +5601,11 @@ async def dev_topic_document_handler(update: Update, context: ContextTypes.DEFAU
 async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     question = update.message.text.strip()
     character = db.get_character(update.effective_user.id)
-    reply = await asyncio.to_thread(answer_support_question, question, character)
+    # 2026-07-14, per Coffee: "Is Sera in my current party?" and "Show
+    # me my party character sheets" both had nothing real to answer from
+    # -- only the asking player's OWN character was ever passed here.
+    party_members = _get_party_members() if character else None
+    reply = await asyncio.to_thread(answer_support_question, question, character, party_members)
     logger.info(f"[support] user={update.effective_user.id} text={question!r} reply={reply!r}")
     await _safe_send(update, reply, thread_id=config.TOPIC_SUPPORT_ID)
 

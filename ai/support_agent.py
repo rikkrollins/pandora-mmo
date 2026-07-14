@@ -229,6 +229,67 @@ def _deterministic_active_character_answer(character: dict) -> str:
     return f"Your active character is {character.get('name')}, {article} {race} {character.get('char_class')}, level {character.get('level')}."
 
 
+def _build_party_facts(party_members: list[dict]) -> str:
+    """Real, current facts about who's actually in the party -- never invented."""
+    if not party_members:
+        return "\n\nREAL FACTS ABOUT THE PLAYER'S PARTY: not currently in a formed party with anyone."
+    lines = ["\n\nREAL FACTS ABOUT THE PLAYER'S PARTY (answer party questions using ONLY this, "
+             "never invent or guess a member who isn't listed):"]
+    for member in party_members:
+        kind = "AI companion" if member.get("is_ai") else "player character"
+        lines.append(
+            f"- {member.get('name')} ({kind}): a {member.get('race')} {member.get('char_class')}, "
+            f"level {member.get('level')}, HP {member.get('hp_current')}/{member.get('hp_max')}"
+        )
+    return "\n".join(lines)
+
+
+_PARTY_QUESTION_WORDS = [
+    "in my party", "in our party", "in my current party", "in the party",
+    "party character sheet", "party sheets", "who's in my party", "whos in my party",
+    "who is in my party", "party members", "my party members",
+]
+
+
+def _deterministic_party_answer(party_members: list[dict], question: str) -> str | None:
+    """
+    Confirmed live (2026-07-14, Coffee): asked "Is Sera in my current
+    party?" and "Show me my party character sheets" with only the
+    asking player's OWN character ever passed to this module -- the
+    model had zero real party data to answer from, so it either
+    answered about the player's own sheet only or admitted (correctly,
+    given what it was given) that it didn't know. Same reasoning as
+    every other deterministic answer here: a party roster is a real,
+    fixed lookup, not something a model should generate.
+    """
+    lowered = question.lower()
+    if not any(w in lowered for w in _PARTY_QUESTION_WORDS):
+        return None
+
+    if not party_members:
+        return "You're not currently in a formed party with anyone."
+
+    # "Is <name> in my party?" -- direct yes/no if a specific name is asked about.
+    named = [m for m in party_members if m.get("name") and m["name"].lower() in lowered]
+    if named and ("is " in lowered or "in my" in lowered) and len(lowered.split()) < 12:
+        member = named[0]
+        kind = "an AI companion" if member.get("is_ai") else "a party member"
+        return (
+            f"Yes, {member['name']} is {kind} in your current party -- "
+            f"a {member.get('race')} {member.get('char_class')}, level {member.get('level')}, "
+            f"HP {member.get('hp_current')}/{member.get('hp_max')}."
+        )
+
+    lines = [f"Your party ({len(party_members)}):"]
+    for member in party_members:
+        kind = "AI companion" if member.get("is_ai") else "player character"
+        lines.append(
+            f"- {member.get('name')} ({kind}): {member.get('race')} {member.get('char_class')}, "
+            f"level {member.get('level')}, HP {member.get('hp_current')}/{member.get('hp_max')}"
+        )
+    return "\n".join(lines)
+
+
 def _extract_six_rolls(question: str) -> list[int] | None:
     numbers = [int(n) for n in re.findall(r"\d+", question)]
     return numbers if len(numbers) == 6 else None
@@ -278,18 +339,25 @@ def _deterministic_stat_assignment_answer(character: dict, rolls: list[int]) -> 
     return "\n".join(lines)
 
 
-def _build_prompt(question: str, character: dict | None = None) -> str:
+def _build_prompt(question: str, character: dict | None = None, party_members: list[dict] | None = None) -> str:
     prompt = SUPPORT_SYSTEM_PROMPT
     if character:
         prompt += _build_character_facts(character)
+    if party_members is not None:
+        prompt += _build_party_facts(party_members)
     return f"{prompt}\n\nPlayer question: {question}\nAnswer:"
 
 
-def answer_support_question(question: str, character: dict | None = None) -> str:
+def answer_support_question(
+    question: str, character: dict | None = None, party_members: list[dict] | None = None
+) -> str:
     """
     Send a player's how-to-play (or, if `character` is given, their own
     character-specific) question to the narration model and return its
     reply. Falls back to a short static pointer if Ollama is unreachable.
+    `party_members`, if given, is this player's real, current party
+    roster (see bot.py's _get_party_members) -- grounds both the
+    deterministic party-roster answer below and the general LLM prompt.
     """
     lowered = question.lower()
     if character and any(w in lowered for w in _XP_QUESTION_WORDS):
@@ -304,8 +372,12 @@ def answer_support_question(question: str, character: dict | None = None) -> str
             answer = _deterministic_stat_assignment_answer(character, rolls)
             if answer is not None:
                 return answer
+    if party_members is not None:
+        party_answer = _deterministic_party_answer(party_members, question)
+        if party_answer is not None:
+            return party_answer
 
-    prompt = _build_prompt(question, character)
+    prompt = _build_prompt(question, character, party_members)
 
     # Confirmed live 2026-07-12: a Support question ("What can I use
     # silverleaf herb for?") hit the static fallback below on the very
