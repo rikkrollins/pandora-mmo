@@ -193,6 +193,55 @@ SPELLS = {
         "name": "Call Lightning", "level": 3, "school": "conjuration",
         "effect": "damage", "damage_dice": "3d10", "save_ability": "dexterity",
     },
+    # --- 4th/5th-level spells (2026-07-15): SPELL_LEVEL_UNLOCK_CHAR_LEVEL
+    # already promised these tiers at character levels 7/9, but no spell
+    # of either level actually existed -- casters got nothing new from
+    # level 7 onward. Filled in below, reusing the same shared-across-
+    # classes convention already used for e.g. hold_person/dispel_magic.
+    "ice_storm": {
+        "name": "Ice Storm", "level": 4, "school": "evocation",
+        "effect": "damage", "damage_dice": "6d8", "save_ability": "dexterity",
+    },
+    "polymorph": {
+        "name": "Polymorph", "level": 4, "school": "transmutation",
+        "effect": "buff", "duration_rounds": 10,
+    },
+    "death_ward": {
+        "name": "Death Ward", "level": 4, "school": "abjuration",
+        "effect": "buff", "duration_rounds": 10,
+    },
+    "banishment": {
+        "name": "Banishment", "level": 4, "school": "abjuration",
+        "effect": "buff", "duration_rounds": 10,
+    },
+    "dimension_door": {
+        "name": "Dimension Door", "level": 4, "school": "conjuration",
+        "effect": "buff", "duration_rounds": 1,
+    },
+    "guardian_of_faith": {
+        "name": "Guardian of Faith", "level": 4, "school": "conjuration",
+        "effect": "damage", "damage_dice": "2d8",
+    },
+    "cone_of_cold": {
+        "name": "Cone of Cold", "level": 5, "school": "evocation",
+        "effect": "damage", "damage_dice": "8d8", "save_ability": "dexterity",
+    },
+    "mass_cure_wounds": {
+        "name": "Mass Cure Wounds", "level": 5, "school": "evocation",
+        "effect": "heal", "heal_dice": "3d8+5",
+    },
+    "flame_strike": {
+        "name": "Flame Strike", "level": 5, "school": "evocation",
+        "effect": "damage", "damage_dice": "8d6", "save_ability": "dexterity",
+    },
+    "insect_plague": {
+        "name": "Insect Plague", "level": 5, "school": "conjuration",
+        "effect": "damage", "damage_dice": "4d10", "save_ability": "constitution",
+    },
+    "hold_monster": {
+        "name": "Hold Monster", "level": 5, "school": "enchantment",
+        "effect": "buff", "duration_rounds": 10,
+    },
 }
 
 # Cantrips (level 0) each class has at-will, alongside their leveled spells.
@@ -205,7 +254,7 @@ CLASS_CANTRIPS = {
     "wizard": ["fire_bolt", "ray_of_frost", "prestidigitation"],
     "sorcerer": ["fire_bolt", "ray_of_frost", "mage_hand", "prestidigitation"],
     "warlock": ["eldritch_blast", "mage_hand"],
-    "cleric": ["sacred_flame", "guidance", "thaumaturgy"],
+    "cleric": ["sacred_flame", "guidance", "thaumaturgy", "spare_the_dying"],
     "druid": ["guidance", "produce_flame"],
     "bard": ["vicious_mockery", "dancing_lights"],
 }
@@ -228,21 +277,29 @@ CLASS_CANTRIPS = {
 # weren't both real 1st-level spells.
 CLASS_SPELL_LISTS = {
     "wizard": ["magic_missile", "shield", "burning_hands", "charm_person",
-               "scorching_ray", "misty_step", "hold_person",
-               "fireball", "lightning_bolt", "counterspell", "dispel_magic"],
+               "detect_magic", "scorching_ray", "misty_step", "hold_person",
+               "fireball", "lightning_bolt", "counterspell", "dispel_magic",
+               "ice_storm", "polymorph", "cone_of_cold", "hold_monster"],
     "sorcerer": ["magic_missile", "shield", "burning_hands", "charm_person",
                  "scorching_ray", "misty_step", "hold_person",
-                 "fireball", "lightning_bolt", "counterspell"],
-    "cleric": ["cure_wounds", "healing_word", "guiding_bolt", "command",
-               "spiritual_weapon", "hold_person", "dispel_magic", "revivify"],
+                 "fireball", "lightning_bolt", "counterspell",
+                 "ice_storm", "polymorph", "cone_of_cold", "hold_monster"],
+    "cleric": ["cure_wounds", "healing_word", "guiding_bolt", "command", "bless",
+               "spiritual_weapon", "hold_person", "dispel_magic", "revivify",
+               "death_ward", "guardian_of_faith", "flame_strike", "mass_cure_wounds"],
     "druid": ["cure_wounds", "animal_friendship", "faerie_fire",
-              "moonbeam", "hold_person", "call_lightning"],
+              "moonbeam", "hold_person", "call_lightning",
+              "ice_storm", "polymorph", "insect_plague", "mass_cure_wounds"],
     "bard": ["healing_word", "charm_person", "faerie_fire",
-             "invisibility", "hold_person", "dispel_magic"],
+             "invisibility", "hold_person", "dispel_magic",
+             "polymorph", "dimension_door", "mass_cure_wounds", "hold_monster"],
     "warlock": ["charm_person", "hex", "protection_from_evil_and_good",
-                "misty_step", "hold_person", "counterspell", "dispel_magic"],
-    "paladin": ["cure_wounds", "command", "protection_from_evil_and_good"],
-    "ranger": ["cure_wounds", "animal_friendship", "hunters_mark", "longstrider"],
+                "misty_step", "hold_person", "counterspell", "dispel_magic",
+                "banishment", "dimension_door", "hold_monster"],
+    "paladin": ["cure_wounds", "command", "protection_from_evil_and_good",
+                "death_ward", "banishment"],
+    "ranger": ["cure_wounds", "animal_friendship", "hunters_mark", "longstrider",
+               "summon_lesser_spirit", "insect_plague"],
 }
 
 
@@ -330,9 +387,17 @@ def resolve_heal_spell(spell_id: str, caster: dict, target: dict) -> dict:
     if spell["effect"] != "heal":
         raise ValueError(f"{spell_id} is not a healing spell")
     healing = roll_damage(spell["heal_dice"])
+    total_healed = healing["total"]
+    # Cleric's Divine Domain (fixed-default: Life Domain, same convention
+    # as Sorcerer's Draconic Bloodline/Warlock's Fiend patron -- no
+    # in-game subclass-choice mechanism exists): Disciple of Life adds
+    # 2 + the spell's level whenever a leveled (not cantrip) spell
+    # restores HP, real 5E formula.
+    if caster.get("char_class", "").lower() == "cleric" and spell["level"] > 0:
+        total_healed += 2 + spell["level"]
     hp_before = target["hp_current"]
     hp_max = target.get("hp_max", hp_before)
-    target["hp_current"] = min(hp_before + healing["total"], hp_max)
+    target["hp_current"] = min(hp_before + total_healed, hp_max)
     return {
         "spell": spell["name"], "caster": caster.get("name", "Unknown"),
         "target": target.get("name", "Unknown"), "healing_done": target["hp_current"] - hp_before,

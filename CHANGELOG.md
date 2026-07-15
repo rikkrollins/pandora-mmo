@@ -2,6 +2,37 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.10.3] — Spellcasting actually keeps growing past level 6, and Clerics get their Domain back
+
+Fourth finding from the reverse-playthrough sweep: the level-up system
+(`spells_unlocked_at_level`) has promised 4th- and 5th-level spells at
+character levels 7 and 9 since it was written, but no spell of either
+level existed in the whole catalog — every full caster (Wizard,
+Sorcerer, Cleric, Druid, Bard, Warlock) hit a wall at level 6 with
+literally nothing new to learn for the rest of a 20-level game. Added
+11 real 4th/5th-level spells (Ice Storm, Polymorph, Death Ward,
+Banishment, Dimension Door, Guardian of Faith, Cone of Cold, Mass Cure
+Wounds, Flame Strike, Insect Plague, Hold Monster) and wired each into
+the classes that get it in real 5E.
+
+While auditing spell reachability, also found 4 completely orphaned
+spells nothing could ever learn: Summon Lesser Spirit (now Ranger's,
+also filling a level 2-4 gap in Ranger's own progression), Bless
+(Cleric), Detect Magic (Wizard), and Spare the Dying (Cleric cantrip —
+this one's been sitting in the catalog unreferenced since it was
+added). Added a permanent regression test asserting every spell in the
+catalog is reachable by at least one class, so a new spell added
+without a class assignment fails a fast test instead of sitting dead
+for months.
+
+Separately: Cleric's "Divine Domain" class feature has been flavor
+text only since class features were made real. Gave every Cleric a
+fixed default of the Life Domain (same fixed-default convention as
+Sorcerer's Draconic Bloodline, Warlock's Fiend patron, and Ranger's
+Favored Enemy) — Disciple of Life now genuinely adds 2 + the spell's
+level whenever a Cleric casts a leveled healing spell, the real 5E
+formula.
+
 ## [1.10.2] — Seven previously-unobtainable magic items are now real, and puzzle answers work again
 
 Third finding from the reverse-playthrough sweep: an "orphaned items"

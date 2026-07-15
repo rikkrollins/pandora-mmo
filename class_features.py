@@ -75,6 +75,13 @@ character-creation/combat-math tweak:
     (bot.py's _attack_advantage_disadvantage), the closest real
     in-combat expression available, matching how every other feature
     above was adapted to what this engine actually models.
+  - Cleric's Divine Domain (automatic, no command, 2026-07-15): every
+    Cleric defaults to the Life Domain (fixed-default convention, same
+    as Sorcerer/Warlock/Ranger above -- no in-game domain-choice
+    mechanism exists; Life fits a game where healing spells are a
+    party's main sustain). Disciple of Life (spells.py's
+    resolve_heal_spell) adds 2 + the spell's level whenever a Cleric
+    casts a leveled (not cantrip) healing spell, the real 5E formula.
 
 Everything else here is still real, accurate flavor text only --
 using it mechanically in combat beyond what's built above is a further
@@ -94,7 +101,8 @@ CLASS_FEATURES_LEVEL_1 = {
     ],
     "Cleric": [
         "Spellcasting: casts cleric spells using Wisdom",
-        "Divine Domain: grants an additional domain spell and domain feature",
+        "Divine Domain: Life Domain — Disciple of Life adds 2 + the spell's "
+        "level to any leveled healing spell you cast",
     ],
     "Druid": [
         "Spellcasting: casts druid spells using Wisdom",

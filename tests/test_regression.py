@@ -15,6 +15,7 @@ import unittest
 
 import bot
 import db
+import spells
 from ai.intent_parser import _keyword_fallback
 from ai.support_agent import _deterministic_inventory_answer
 from rules.crafting import RECIPES
@@ -332,6 +333,50 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         }
         missing = previously_orphaned - acquirable
         self.assertEqual(missing, set(), f"still orphaned: {missing}")
+
+    # -- Spell progression actually reaches every level the unlock table
+    #    promises, up to character level 9 (v1.10.3) ---------------------
+    def test_every_class_has_real_spells_at_every_promised_tier(self):
+        """
+        SPELL_LEVEL_UNLOCK_CHAR_LEVEL promised 4th/5th-level spells at
+        character levels 7/9, but no spell of either level existed in
+        SPELLS at all -- full casters got nothing new from level 7
+        onward. Added real 4th/5th-level spells and wired them into
+        every full caster's CLASS_SPELL_LISTS; paladin/ranger (half-
+        casters) are allowed to cap out early, same as they already did
+        for 2nd/3rd level before this fix.
+        """
+        full_casters = ["wizard", "sorcerer", "cleric", "druid", "bard", "warlock"]
+        for cls in full_casters:
+            highest_known = max(
+                spells.SPELLS[s]["level"] for s in spells.spells_unlocked_at_level(cls, 9)
+            )
+            self.assertEqual(highest_known, 5, f"{cls} caps below the promised 5th-level tier")
+
+    def test_no_orphaned_spells_unreachable_by_any_class(self):
+        referenced = set()
+        for cantrips in spells.CLASS_CANTRIPS.values():
+            referenced.update(cantrips)
+        for spell_list in spells.CLASS_SPELL_LISTS.values():
+            referenced.update(spell_list)
+        orphaned = set(spells.SPELLS.keys()) - referenced
+        self.assertEqual(orphaned, set(), f"unreachable by any class: {orphaned}")
+
+    # -- Cleric's Divine Domain (Life Domain fixed-default) was flavor
+    #    text only; Disciple of Life is now a real heal bonus (v1.10.3) --
+    def test_cleric_disciple_of_life_adds_bonus_healing(self):
+        cleric = {"char_class": "Cleric", "name": "Test Cleric"}
+        target = {"name": "Ally", "hp_current": 1, "hp_max": 100}
+        result = spells.resolve_heal_spell("cure_wounds", cleric, target)
+        # cure_wounds is heal_dice "1d8+2" (min 3) + Disciple of Life's
+        # 2 + spell level (1) = +3 -- minimum possible total is 6.
+        self.assertGreaterEqual(result["healing_done"], 6)
+
+    def test_non_cleric_gets_no_disciple_of_life_bonus(self):
+        wizard = {"char_class": "Wizard", "name": "Test Wizard"}
+        target = {"name": "Ally", "hp_current": 1, "hp_max": 100}
+        result = spells.resolve_heal_spell("cure_wounds", wizard, target)
+        self.assertLessEqual(result["healing_done"], 11)  # 1d8+2 max, no bonus
 
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
