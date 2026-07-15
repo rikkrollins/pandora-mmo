@@ -544,6 +544,59 @@ class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id)
         self.assertNotIn("seras_safer_crossing", character["active_quests"])
 
+    # -- Boss Multiattack + The Waiting Shape's Life Drain (v1.10.6) ---
+    async def test_boss_gets_two_attacks_and_drains_life(self):
+        """
+        Real bugs from campaign.json (2026-07-15 reverse-playthrough):
+        both bosses (goblin_boss, the_waiting_shape) fought exactly like
+        a regular monster with a bigger stat block -- no is_boss-gated
+        mechanic existed at all. Added boss Multiattack (2 attacks/turn)
+        plus The Waiting Shape's own life_drain flag. Needs real
+        narration calls (_post_narrated), hence SlowLiveTests.
+        """
+        import sessions
+        sessions.end_session(-999)
+
+        player_id = 999901
+        player = make_basic_character(
+            player_id, "Bulwark", current_location="the_unmoored_isle",
+            hp_max=200, armor_class=1,  # guaranteed hits so drain/multiattack are deterministic
+        )
+        player["hp_current"] = 200
+        player["telegram_user_id"] = player_id
+
+        template = bot.CAMPAIGN["monsters"]["the_waiting_shape"]
+        boss_id = -2_500_000
+        boss = {
+            "telegram_user_id": boss_id, "name": template["name"],
+            "dexterity": template["dexterity"], "strength": template["strength"],
+            "armor_class": template["armor_class"],
+            "hp_max": template["hp_max"], "hp_current": template["hp_max"] - 20,
+            "proficiency_bonus": template["proficiency_bonus"],
+            "is_ai": 1, "xp_reward": template["xp_reward"],
+            "on_hit_condition": template.get("on_hit_condition"),
+            "monster_key": "the_waiting_shape", "is_boss": True,
+            "life_drain": template.get("life_drain", False),
+        }
+        session = sessions.start_session(
+            -999, [boss, player], {boss_id: "enemy", player_id: "party"},
+        )
+        session.turn_order = [boss_id, player_id]
+        session.current_turn_index = 0
+        boss_hp_before = boss["hp_current"]
+
+        events_before = len(session.event_log)  # start_session already logged "Combat begins!"
+        sink = []
+        await bot._resolve_ai_turns(FakeUpdate(player_id, "irrelevant", sink), session)
+
+        new_events = len(session.event_log) - events_before
+        self.assertEqual(new_events, 2, "boss should get exactly 2 attacks (Multiattack)")
+        self.assertGreater(
+            boss["hp_current"], boss_hp_before,
+            "Life Drain should have healed the boss after landing a hit",
+        )
+        sessions.end_session(-999)
+
 
 if __name__ == "__main__":
     unittest.main()

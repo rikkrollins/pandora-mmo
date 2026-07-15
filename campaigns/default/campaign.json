@@ -1066,7 +1066,8 @@
       "proficiency_bonus": 4,
       "xp_reward": 500,
       "is_boss": true,
-      "on_hit_condition": "frightened"
+      "on_hit_condition": "frightened",
+      "life_drain": true
     }
   },
   "factions": {

@@ -1531,38 +1531,78 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
             session.advance_turn()
             continue
         consecutive_noop_turns = 0
-        target = min(opposing, key=lambda p: p["hp_current"])
-        adv, disadv = _attack_advantage_disadvantage(current, target)
-        result = resolve_attack(
-            current, target, DEFAULT_WEAPON, advantage=adv, disadvantage=disadv,
-            defender_relentless_endurance_available=_relentless_endurance_available(target),
-        )
-        if result["relentless_endurance_triggered"]:
-            db.use_feature(target["telegram_user_id"], "relentless_endurance")
-        _sync_player_to_db(target)
 
-        applied_condition = None
-        if result["hit"] and current.get("on_hit_condition"):
-            condition = current["on_hit_condition"]
-            target.setdefault("conditions", [])
-            if condition not in target["conditions"]:
-                target["conditions"].append(condition)
-                applied_condition = condition
-
-        await _post_narrated(update, current, f"{current['name']} attacks {target['name']}", result, session)
-        if applied_condition:
-            await _safe_send(update, f"☠️ **{target['name']} is now {applied_condition.upper()}!**")
-
-        if target["hp_current"] <= 0 and not target.get("is_ai"):
-            await _safe_send(
-                update,
-                f"⚠️ **{target['name']} drops to 0 HP and falls unconscious!** "
-                f"They'll roll death saving throws on their turns until stable, revived, or worse.",
+        # Boss Multiattack (2026-07-15, boss-specific abilities finding
+        # from the reverse-playthrough sweep): every is_boss monster
+        # previously fought exactly like a regular monster, just with a
+        # bigger stat block -- real 5E boss-tier stat blocks almost
+        # universally get Multiattack (2 attacks/turn). Loops the same
+        # single-attack resolution below either once or twice; breaks
+        # early if a mid-turn kill leaves no target for the 2nd attack,
+        # or if combat itself ends mid-multiattack.
+        attack_count = 2 if current.get("is_boss") else 1
+        combat_ended_mid_turn = False
+        for attack_num in range(attack_count):
+            opposing = session.living_on_side(session.opposing_side(current["telegram_user_id"]))
+            if not opposing:
+                break
+            target = min(opposing, key=lambda p: p["hp_current"])
+            adv, disadv = _attack_advantage_disadvantage(current, target)
+            result = resolve_attack(
+                current, target, DEFAULT_WEAPON, advantage=adv, disadvantage=disadv,
+                defender_relentless_endurance_available=_relentless_endurance_available(target),
             )
+            if result["relentless_endurance_triggered"]:
+                db.use_feature(target["telegram_user_id"], "relentless_endurance")
+            _sync_player_to_db(target)
 
-        removed = session.remove_defeated()
-        await _announce_defeats(update, session, removed)
-        if session.is_combat_over():
+            applied_condition = None
+            if result["hit"] and current.get("on_hit_condition"):
+                condition = current["on_hit_condition"]
+                target.setdefault("conditions", [])
+                if condition not in target["conditions"]:
+                    target["conditions"].append(condition)
+                    applied_condition = condition
+
+            # Life Drain (The Waiting Shape's boss-specific ability, set
+            # via campaign.json's life_drain flag): heals itself for half
+            # the damage it deals, capped at its own hp_max, real
+            # vampiric/undead-flavored 5E trope fitting its "waiting
+            # shadow" theme.
+            drain_amount = 0
+            if result["hit"] and current.get("life_drain") and result["damage_dealt"] > 0:
+                drain_amount = result["damage_dealt"] // 2
+                if drain_amount > 0:
+                    hp_max = current.get("hp_max", current["hp_current"])
+                    current["hp_current"] = min(hp_max, current["hp_current"] + drain_amount)
+
+            attack_label = (
+                f"{current['name']} attacks {target['name']}" if attack_count == 1
+                else f"{current['name']} attacks {target['name']} ({attack_num + 1}/{attack_count})"
+            )
+            await _post_narrated(update, current, attack_label, result, session)
+            if applied_condition:
+                await _safe_send(update, f"☠️ **{target['name']} is now {applied_condition.upper()}!**")
+            if drain_amount > 0:
+                await _safe_send(
+                    update,
+                    f"🩸 **{current['name']} drains {drain_amount} HP from the attack, healing itself!**",
+                )
+
+            if target["hp_current"] <= 0 and not target.get("is_ai"):
+                await _safe_send(
+                    update,
+                    f"⚠️ **{target['name']} drops to 0 HP and falls unconscious!** "
+                    f"They'll roll death saving throws on their turns until stable, revived, or worse.",
+                )
+
+            removed = session.remove_defeated()
+            await _announce_defeats(update, session, removed)
+            if session.is_combat_over():
+                combat_ended_mid_turn = True
+                break
+
+        if combat_ended_mid_turn:
             break
         session.advance_turn()
 
@@ -1703,6 +1743,7 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 "on_hit_condition": template.get("on_hit_condition"),
                 "monster_key": monster_key,
                 "is_boss": template.get("is_boss", False),
+                "life_drain": template.get("life_drain", False),
             })
         sides = {p["telegram_user_id"]: "party" for p in party}
         for enemy in enemies:

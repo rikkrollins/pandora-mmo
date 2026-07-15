@@ -2,6 +2,28 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.10.6] — Bosses finally fight like bosses
+
+Seventh finding from the reverse-playthrough sweep: both bosses
+(Goblin Boss, The Waiting Shape) fought exactly like a regular monster
+with a bigger stat block — the only "special ability" mechanism that
+existed (`on_hit_condition`) was already shared by every regular
+monster too. Nothing distinguished a boss fight from a normal one
+except higher numbers.
+
+- **Multiattack**: every monster flagged `is_boss` now gets 2 attacks
+  per turn, the near-universal real-5E boss-tier convention. Handles
+  a mid-turn kill or combat ending between attacks correctly.
+- **The Waiting Shape's Life Drain**: heals itself for half the damage
+  it deals on a hit, capped at its own max HP — a real vampiric/undead
+  trope fitting its spectral "waiting shadow" theme, and this
+  campaign's first monster with a genuinely unique signature ability
+  beyond the shared on-hit-condition system.
+
+Verified with a real combat session and real narration calls (not
+just code review): the boss attacked twice in one turn and its HP
+rose after landing a hit.
+
 ## [1.10.5] — The campaign's four story chapters are finally visible in play
 
 Sixth finding from the reverse-playthrough sweep: `campaign.json`'s
