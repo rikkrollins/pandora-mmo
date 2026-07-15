@@ -164,6 +164,14 @@ ITEMS = {
     "sulfur_dust": {"name": "Sulfur Dust", "type": "material", "rarity": "common", "price": 6, "weight": 0.1},
     "raw_fish": {"name": "Raw Fish", "type": "material", "rarity": "common", "price": 3, "weight": 0.3},
     "wood": {"name": "Wood", "type": "material", "rarity": "common", "price": 2, "weight": 1},
+
+    # --- Cooking (2026-07-15: raw_fish was gatherable but had zero
+    # recipe using it -- a real cooking recipe below turns it, plus
+    # wood for the fire, into an actually usable food item) ---
+    "cooked_fish": {
+        "name": "Cooked Fish", "type": "consumable", "rarity": "common",
+        "price": 8, "weight": 0.3, "effect": "heal", "heal_dice": "1d4+1",
+    },
 }
 
 

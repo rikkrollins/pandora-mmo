@@ -4761,6 +4761,86 @@ async def _do_give_item(update: Update, text: str) -> None:
     )
 
 
+async def _do_use_item(update: Update, text: str) -> None:
+    """
+    Real bug from the reverse-playthrough sweep (2026-07-15): NOTHING in
+    this entire codebase ever read a consumable item's "heal_dice" or
+    "effect" field -- Healing Potions, Greater Healing Potions, and
+    Antitoxin were all completely non-functional. A player could buy
+    one for real gold and there was no action anywhere to ever drink
+    it. Fixed by adding this handler, following the exact same
+    rules-decide/bot.py-narrates split as every other outcome (heal
+    amount rolled via rules.dice.roll_damage, never invented).
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    consumable_ids = [
+        item_id for item_id in character["inventory"]
+        if (items_module.get_item(item_id) or {}).get("type") == "consumable"
+    ]
+    item_id = items_module.find_item_mentioned_in_text(text, candidate_ids=consumable_ids)
+    if item_id is None:
+        await update.effective_chat.send_message(
+            "Use what, exactly? Name a consumable you're actually carrying.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    item = items_module.get_item(item_id)
+    target = _find_party_target_by_name(text) or character
+    is_self = target["telegram_user_id"] == character["telegram_user_id"]
+    target_note = "" if is_self else f" on **{target['name']}**"
+
+    removed, _ = db.remove_item(update.effective_user.id, item_id, 1)
+    if not removed:
+        await update.effective_chat.send_message(
+            f"You don't have a {item['name']} to use.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    effect = item.get("effect", "none")
+    if effect == "heal" and item.get("heal_dice"):
+        healing = roll_damage(item["heal_dice"])
+        hp_before = target["hp_current"]
+        hp_max = target.get("hp_max", hp_before)
+        new_hp = min(hp_before + healing["total"], hp_max)
+        db.update_character(target["telegram_user_id"], hp_current=new_hp)
+        await _safe_send(
+            update,
+            f"🧪 **{character['name']}** uses a {item['name']}{target_note}, "
+            f"healing {new_hp - hp_before} HP ({new_hp}/{hp_max}).",
+        )
+        return
+
+    if effect == "cure_poison":
+        session = sessions.get_session(update.effective_chat.id)
+        cured = False
+        if session is not None:
+            live_target = next(
+                (p for p in session.participants if p["telegram_user_id"] == target["telegram_user_id"]), None,
+            )
+            if live_target and "poisoned" in live_target.get("conditions", []):
+                live_target["conditions"].remove("poisoned")
+                cured = True
+        message = (
+            f"🧪 **{character['name']}** uses a {item['name']}{target_note} — the poison is neutralized."
+            if cured else
+            f"🧪 **{character['name']}** uses a {item['name']}{target_note}, just in case."
+        )
+        await _safe_send(update, message)
+        return
+
+    # Flavor-only consumables (rations, ale, torch, etc.) -- real 5E
+    # items this game has no mechanic for (hunger, light radius), same
+    # honesty convention as every other unmodeled mechanic in this build.
+    await _safe_send(update, f"🧺 **{character['name']}** uses a {item['name']}{target_note}.")
+
+
 _QUANTITY_WORDS = {
     "one": 1, "couple": 2, "two": 2, "three": 3, "four": 4,
     "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
@@ -5747,6 +5827,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_find_merchant(update)
     elif action == "give_item":
         await _do_give_item(update, intent.get("raw_text", text))
+    elif action == "use_item":
+        await _do_use_item(update, intent.get("raw_text", text))
     elif action == "show_map":
         await _do_show_map(update)
     elif action == "gather":

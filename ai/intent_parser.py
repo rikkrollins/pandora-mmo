@@ -99,6 +99,8 @@ in the area (not the whole area itself — that's "look"). Set "target" to the o
 - "steal" is for stealing, pickpocketing, robbing, or taking something without paying — a real risk of \
 getting caught, with real consequences, not the same as "buy".
 - "cast_spell" is for casting/using a named spell.
+- "use_item" is for drinking/using/consuming/quaffing a carried consumable item (e.g. a potion, antitoxin, \
+rations) — NOT a spell and NOT a shop purchase. Set "item_name" to the item, and "target" to who it's for if named (defaults to self).
 - "join_guild" is for joining/asking to join a specific guild or order.
 - "pass_turn" is for skipping, waiting, or passing.
 - "resolve_choice" is for declaring a decision on a moral choice/quest resolution (e.g. "I choose to...", "I'll go with...").
@@ -569,6 +571,10 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in ["cast ", "i cast"]):
         return {**base, "action": "cast_spell"}
 
+    if any(w in lowered for w in ["drink ", "quaff", "i use my", "i use the", "i use a",
+                                    "eat my rations", "eat the rations"]):
+        return {**base, "action": "use_item"}
+
     if any(w in lowered for w in ["join the", "i want to join", "become a member of",
                                     "join a guild", "guilds can i join", "what guilds",
                                     "which guilds"]):
@@ -736,7 +742,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
                 "answer_puzzle", "gamble", "chat", "examine", "flee", "resolve_choice",
                 "invite_to_party", "accept_party_invite", "leave_party", "find_merchant",
                 "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "arcane_recovery",
-                "make_campfire", "give_item",
+                "make_campfire", "give_item", "use_item",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

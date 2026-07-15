@@ -15,6 +15,7 @@ import unittest
 
 import bot
 import db
+import items as items_module
 import spells
 from ai.intent_parser import _keyword_fallback
 from ai.support_agent import _deterministic_inventory_answer
@@ -544,6 +545,69 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         recipient = db.get_character(recipient_id)
         self.assertEqual(recipient["inventory"].get("healing_potion", 0), 0)
+
+    # -- Potions were completely non-functional: no action anywhere ever
+    #    read a consumable's heal_dice/effect field (v1.10.8) ----------
+    def test_use_item_phrasing_classified_correctly(self):
+        for text in ["drink the healing potion", "I use my antitoxin", "quaff the potion"]:
+            self.assertEqual(_keyword_fallback(text, [])["action"], "use_item", text)
+
+    def test_use_item_doesnt_shadow_arcane_recovery(self):
+        self.assertEqual(_keyword_fallback("I use arcane recovery", [])["action"], "arcane_recovery")
+
+    async def test_use_item_heals_and_consumes_the_potion(self):
+        use_test_db("tests/tmp/use_item_test.db")
+        user_id = 900101
+        make_basic_character(user_id, "Drinker", current_location="crossroads_tavern", hp_max=20)
+        db.update_character(user_id, hp_current=5)
+        db.add_item(user_id, "healing_potion", 2)
+
+        sink = []
+        await bot._do_use_item(FakeUpdate(user_id, "drink the healing potion", sink), "drink the healing potion")
+        combined = " ".join(sink)
+        self.assertIn("healing", combined.lower())
+
+        character = db.get_character(user_id)
+        self.assertGreater(character["hp_current"], 5)
+        self.assertEqual(character["inventory"].get("healing_potion", 0), 1)  # consumed exactly 1
+
+    async def test_use_item_cures_poison_mid_combat(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900102
+        make_basic_character(user_id, "Poisoned", current_location="crossroads_tavern")
+        db.add_item(user_id, "antitoxin", 1)
+        character = db.get_character(user_id)
+        character["conditions"] = ["poisoned"]
+        session = sessions.start_session(-999, [character], {user_id: "party"})
+
+        sink = []
+        await bot._do_use_item(FakeUpdate(user_id, "I use my antitoxin", sink), "I use my antitoxin")
+        combined = " ".join(sink)
+        self.assertIn("neutralized", combined.lower())
+        live = next(p for p in session.participants if p["telegram_user_id"] == user_id)
+        self.assertNotIn("poisoned", live.get("conditions", []))
+        sessions.end_session(-999)
+
+    async def test_use_item_rejects_when_none_carried(self):
+        use_test_db("tests/tmp/use_item_test2.db")
+        user_id = 900103
+        make_basic_character(user_id, "Empty", current_location="crossroads_tavern")
+
+        sink = []
+        await bot._do_use_item(FakeUpdate(user_id, "drink the healing potion", sink), "drink the healing potion")
+        combined = " ".join(sink)
+        self.assertIn("carrying", combined.lower())
+
+    # -- Cooking: raw_fish was gatherable but no recipe used it --------
+    def test_cooked_fish_recipe_is_real_and_usable(self):
+        from rules.crafting import RECIPES
+        self.assertIn("cooked_fish", RECIPES)
+        recipe = RECIPES["cooked_fish"]
+        self.assertIn("raw_fish", recipe["materials"])
+        result_item = items_module.get_item(recipe["result_item"])
+        self.assertEqual(result_item["type"], "consumable")
+        self.assertIn("heal_dice", result_item)
 
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):

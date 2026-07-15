@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.10.8] — Potions actually work now (they never did), plus a real cooking recipe
+
+Eighth, and probably the most significant, finding from the reverse-
+playthrough sweep: while looking into the crafting-recipes backlog
+item, an exhaustive search turned up **zero references anywhere in
+this codebase** to ever consuming an item. Healing Potions, Greater
+Healing Potions, and Antitoxin have had real `heal_dice`/`effect`
+fields since they were added, but no action existed to ever drink or
+use one — a player could spend real gold on a potion and it would just
+sit in inventory forever. This has apparently been broken since
+potions were introduced.
+
+Added a real `use_item` action ("drink the healing potion", "I use my
+antitoxin", "quaff the potion"): heal potions roll their `heal_dice`
+and apply it (targetable at another party member, same convention as
+heal spells), Antitoxin cures the `poisoned` condition mid-combat,
+and flavor-only consumables (rations, ale, torches) get an honest
+flavor-only response rather than silently failing.
+
+Also, while auditing gatherable materials against real recipes:
+`raw_fish` was gatherable but used by zero recipes. Added a real
+Cooked Fish recipe (raw_fish + wood, cooking over a fire) producing an
+actually-usable food item now that `use_item` exists.
+
 ## [1.10.7] — Player-to-player item trading
 
 New feature (backlog item): "give my healing potion to Sera" now

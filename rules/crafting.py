@@ -27,6 +27,14 @@ RECIPES = {
         "result_item": "scroll_magic_missile", "result_qty": 1,
         "ability": "intelligence", "dc": 15,
     },
+    # Cooking (2026-07-15): raw_fish was gatherable but no recipe used
+    # it at all -- uses wood too (cooking over a fire), producing an
+    # actually usable food item now that _do_use_item exists.
+    "cooked_fish": {
+        "materials": {"raw_fish": 1, "wood": 1},
+        "result_item": "cooked_fish", "result_qty": 1,
+        "ability": "wisdom", "dc": 10,
+    },
 }
 
 
