@@ -288,6 +288,35 @@ def _deterministic_active_character_answer(character: dict) -> str:
     return f"Your active character is {character.get('name')}, {article} {race} {character.get('char_class')}, level {character.get('level')}."
 
 
+_INVENTORY_QUESTION_WORDS = [
+    "what am i carrying", "whats in my inventory", "what's in my inventory",
+    "what do i have", "check my inventory", "my backpack", "my inventory",
+    "what items do i have", "what am i holding",
+]
+
+
+def _deterministic_inventory_answer(character: dict) -> str:
+    """
+    Confirmed live (2026-07-14, real player "Sugar"): "What am I
+    carrying?" fell all the way through to the generic LLM path (no
+    deterministic check existed for it at all), and when Ollama
+    genuinely couldn't be reached in time, the player got the raw
+    "couldn't reach the local model" fallback for a question that has
+    exactly one correct, already-known answer -- same reasoning as
+    XP-to-level and active-character above. A real inventory listing
+    never needs a model call at all.
+    """
+    inventory = character.get("inventory") or {}
+    if not inventory:
+        return "Your backpack is empty right now."
+    lines = []
+    for item_id, qty in inventory.items():
+        item = items_module.get_item(item_id)
+        name = item["name"] if item else item_id
+        lines.append(f"{name} x{qty}" if qty != 1 else name)
+    return f"You're carrying: {', '.join(lines)}."
+
+
 def _build_party_facts(party_members: list[dict]) -> str:
     """Real, current facts about who's actually in the party -- never invented."""
     if not party_members:
@@ -424,6 +453,10 @@ def answer_support_question(
     if character and any(w in lowered for w in _ACTIVE_CHARACTER_QUESTION_WORDS):
         return _deterministic_active_character_answer(character)
     if not character and any(w in lowered for w in _ACTIVE_CHARACTER_QUESTION_WORDS):
+        return "You don't have an active character yet — say \"I want to create a character\" in Adventure to get started."
+    if character and any(w in lowered for w in _INVENTORY_QUESTION_WORDS):
+        return _deterministic_inventory_answer(character)
+    if not character and any(w in lowered for w in _INVENTORY_QUESTION_WORDS):
         return "You don't have an active character yet — say \"I want to create a character\" in Adventure to get started."
     if character and "assign" in lowered:
         rolls = _extract_six_rolls(question)

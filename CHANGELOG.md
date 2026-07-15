@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.8.2] — "What am I carrying" never fails again, plus a permanent regression suite
+
+- Real player report ("Sugar", Support topic): "What am I carrying?"
+  fell through to the generic model-backed path — no deterministic
+  check existed for it at all — and when Ollama genuinely couldn't be
+  reached in time, the player got the raw "couldn't reach the local
+  model" fallback for a question with exactly one correct, already-
+  known answer. Same reasoning as the existing XP-to-level and active-
+  character deterministic answers: added `_deterministic_inventory_answer`
+  so this never needs a model call at all.
+- **New**: `tests/` now has a real, permanent regression suite
+  (`python3 -m unittest tests.test_regression -v`) covering every real
+  bug fixed this session — extracted from the many throwaway
+  `bot_test_tmp.py` scripts into shared fixtures (`tests/helpers.py`)
+  so future fixes don't reinvent the same fake Telegram objects. Split
+  into `FastRegressionTests` (no Ollama, ~5 min under current disk
+  contention, safe before every deploy) and `SlowLiveTests` (real
+  narration calls, run when touching that code directly). All 18 fast
+  tests pass.
+
 ## [1.8.1] — Every recruitable now has a real personal quest
 
 Direct follow-up to 1.8.0's companion-quest system (Sera's Safer
