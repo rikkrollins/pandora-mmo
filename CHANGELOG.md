@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.9.1] — accept_quest now honors the specific quest you actually name
+
+Real regression from the same day's companion-quest feature (1.8.0):
+"Accept the quest, a quiet request for wood" — a specific, real,
+correctly-classified request naming a real board quest by title — got
+silently swallowed into accepting Sera's personal quest instead,
+because that shortcut ran unconditionally regardless of what was
+actually typed. Fixed: the companion-quest shortcut now only fires
+for a generic "I accept the quest" with nothing else named; naming a
+different real quest (story or board) that's actually available here
+takes that one instead. Verified live end-to-end and added as a
+permanent regression test.
+
 ## [1.9.0] — Combat now stays where it happens, and TTS coverage was audited game-wide
 
 - **Combat no longer pulls in characters from other locations, or

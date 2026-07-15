@@ -259,6 +259,40 @@ class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Combat Begins!", combined)
         self.assertNotIn("no combat is active right now", combined.lower())
 
+    async def test_accept_quest_honors_a_specifically_named_quest_over_companion_quest(self):
+        """
+        Real regression (2026-07-14): "Accept the quest, a quiet request
+        for wood" -- a specific, real, correctly-classified accept_quest
+        naming a real board quest -- got silently swallowed into
+        accepting Sera's companion quest instead, because that shortcut
+        ran unconditionally. Needs a real board quest generated (a live
+        Ollama call for its branching setup_narration), hence SlowLiveTests.
+        """
+        import board_quests as board_quests_module
+
+        bot.setup_default_npcs()
+        user_id = 111111
+        make_basic_character(user_id, "Elduinn", current_location="crossroads_tavern")
+
+        sink = []
+        await bot.adventure_master_handler(
+            FakeUpdate(user_id, "Recruit Sera to my party", sink), DummyContext())
+
+        db.update_character(user_id, current_location="whispering_wood")
+        board_quests = board_quests_module.get_or_generate_board_quests(bot.CAMPAIGN, "whispering_wood")
+        self.assertTrue(board_quests, "expected a real board quest to generate here")
+        named_quest = board_quests[0]
+
+        sink.clear()
+        text = f"Accept the quest, {named_quest['title'].lower()}"
+        await bot.adventure_master_handler(FakeUpdate(user_id, text, sink), DummyContext())
+        combined = " ".join(sink)
+        self.assertIn(named_quest["title"], combined)
+        self.assertNotIn("Sera's Safer Crossing", combined)
+
+        character = db.get_character(user_id)
+        self.assertNotIn("seras_safer_crossing", character["active_quests"])
+
 
 if __name__ == "__main__":
     unittest.main()

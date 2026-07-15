@@ -2011,10 +2011,7 @@ async def _do_recruit_npc(update: Update, npc_name: str) -> None:
         inventory=dict(stats["inventory"]),
     )
 
-    await update.effective_chat.send_message(
-        f"🤝 {npc['name']} joins your party! {_party_summary_text()}",
-        message_thread_id=config.TOPIC_ADVENTURE_ID,
-    )
+    await _safe_send(update, f"🤝 {npc['name']} joins your party! {_party_summary_text()}")
 
     # Per Coffee (2026-07-14): each recruitable should mention "a task,
     # mission, journey or adventure" once they join, so the party can
@@ -2030,9 +2027,9 @@ async def _do_recruit_npc(update: Update, npc_name: str) -> None:
     )
     if personal_quest is not None:
         _, quest = personal_quest
-        await update.effective_chat.send_message(
+        await _safe_send(
+            update,
             f"💬 **{npc['name']}:** {quest['description']} Say \"I accept the quest\" if the party wants to help.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
 
 
@@ -2951,30 +2948,44 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
         )
         return
 
+    location_id = character["current_location"]
+
     # Checked BEFORE the location-based offer below: a companion's own
     # personal quest is a real, specific thing the party just agreed to
     # help with (see _offerable_companion_quest) -- it should win over
     # an unrelated location-based quest that happens to also be posted
-    # wherever the player's currently standing.
+    # wherever the player's currently standing, for a GENERIC "I accept
+    # the quest" with nothing specific named.
+    #
+    # Confirmed live 2026-07-14 (Coffee): this shortcut was
+    # unconditional, so "Accept the quest, a quiet request for wood" --
+    # a SPECIFIC, correctly-classified accept_quest naming a real
+    # different (board) quest by title -- got silently swallowed into
+    # accepting the companion quest instead, regardless of what was
+    # actually typed. Now only takes the shortcut when the text doesn't
+    # clearly name something else that's actually available here.
     companion_offer = _offerable_companion_quest(character)
     if companion_offer is not None:
         quest_id, quest = companion_offer
-        db.accept_quest(telegram_user_id, quest_id)
-        await update.effective_chat.send_message(
-            f"📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        location_offer_for_check = _offerable_quest_at_location(character, location_id)
+        board_quests_here = board_quests_module.get_or_generate_board_quests(CAMPAIGN, location_id)
+        available_board = [
+            q for q in board_quests_here if not q.get("accepted_by") and not q.get("completed_at")
+        ]
+        names_something_else = (
+            (location_offer_for_check is not None and location_offer_for_check[1]["title"].lower() in text.lower())
+            or any(q["title"].lower() in text.lower() for q in available_board)
         )
-        return
+        if not names_something_else:
+            db.accept_quest(telegram_user_id, quest_id)
+            await _safe_send(update, f"📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}")
+            return
 
-    location_id = character["current_location"]
     offer = _offerable_quest_at_location(character, location_id)
     if offer is not None:
         quest_id, quest = offer
         db.accept_quest(telegram_user_id, quest_id)
-        await update.effective_chat.send_message(
-            f"📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
-        )
+        await _safe_send(update, f"📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}")
         return
 
     # No story quest on offer here — try the area's board quest(s) instead.
@@ -3017,18 +3028,18 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
             db.record_board_quest_progress(board_quest["board_quest_id"], credit)
 
     if board_quest.get("branch_data"):
-        await update.effective_chat.send_message(
+        await _safe_send(
+            update,
             f"📜 **{character['name']}** accepts Quest: {board_quest['title']}\n"
             f"{board_quest['branch_data']['setup_narration']}\n\n"
             f"What you earn depends on the choice you make once it's done. Expires in 24h if not finished.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
-    await update.effective_chat.send_message(
+    await _safe_send(
+        update,
         f"📜 **{character['name']}** accepts Quest: {board_quest['title']}\n{board_quest['description']}\n"
         f"Reward: {board_quest['reward_xp']} XP, {board_quest['reward_gold']} gold. "
         f"Expires in 24h if not finished.",
-        message_thread_id=config.TOPIC_ADVENTURE_ID,
     )
     # Same-location counterpart to the arrival-triggered check in
     # _do_move/_do_fast_travel -- if the retroactive credit above (or an
@@ -3229,7 +3240,7 @@ async def _do_ask_clue(update: Update) -> None:
     if len(lines) == 1:
         lines.append("Nothing concrete yet — keep exploring.")
 
-    await update.effective_chat.send_message("\n".join(lines), message_thread_id=config.TOPIC_ADVENTURE_ID)
+    await _safe_send(update, "\n".join(lines))
 
 
 async def _do_answer_puzzle(update: Update, text: str) -> None:
