@@ -26,6 +26,21 @@ import config
 REQUIRED_ENV = "TELEGRAM_CHAT_ID"
 
 
+def _escape_markdown(text: str) -> str:
+    """
+    Escapes Telegram legacy Markdown's special characters so a message
+    describing code (which routinely mentions function_names, snake_case,
+    or asterisks) can't accidentally break parsing. Confirmed live
+    2026-07-14, twice: a deploy message mentioning "talk_npc" and later
+    "accept_quest" each hit a 400 Bad Request from Telegram's Markdown
+    parser choking on the bare underscore (an unmatched italic marker) --
+    not something the caller should have to remember to avoid every time.
+    """
+    for ch in ("_", "*", "`", "["):
+        text = text.replace(ch, f"\\{ch}")
+    return text
+
+
 def _send(text: str) -> None:
     chat_id = getattr(config, "TELEGRAM_CHAT_ID", None)
     if not chat_id:
@@ -48,12 +63,12 @@ def _send(text: str) -> None:
 
 
 def announce(message: str) -> None:
-    _send(f"🚀 **Deploy update**\n{message}")
+    _send(f"🚀 **Deploy update**\n{_escape_markdown(message)}")
 
 
 def warn(eta: str) -> None:
     """Posted before a redeploy — the bot briefly restarts, players shouldn't be caught off guard."""
-    _send(f"🛠️ **Update coming soon** — the bot will restart shortly (ETA: {eta}). Back momentarily.")
+    _send(f"🛠️ **Update coming soon** — the bot will restart shortly (ETA: {_escape_markdown(eta)}). Back momentarily.")
 
 
 if __name__ == "__main__":
