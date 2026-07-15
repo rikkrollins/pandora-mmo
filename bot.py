@@ -80,6 +80,27 @@ CAMPAIGN = cl.load_campaign(ACTIVE_CAMPAIGN_ID)
 
 DEFAULT_WEAPON = {"ability": "strength", "damage_dice": "1d8", "damage_bonus": 0}
 
+
+def _weapon_for_attacker(attacker: dict) -> dict:
+    """
+    Real bug fixed 2026-07-15: every attack in this game used
+    DEFAULT_WEAPON unconditionally, regardless of what the attacker
+    actually bought/found/equipped -- items.py's weapon damage_dice/
+    ability fields existed but nothing ever read them. Monsters and
+    hostile NPCs have no "equipped_weapon" field at all, so .get()
+    safely falls through to DEFAULT_WEAPON for them unchanged.
+    """
+    equipped_id = attacker.get("equipped_weapon")
+    if equipped_id:
+        item = items_module.get_item(equipped_id)
+        if item and item.get("type") == "weapon":
+            return {
+                "ability": item.get("ability", "strength"),
+                "damage_dice": item["damage_dice"],
+                "damage_bonus": item.get("damage_bonus", 0),
+            }
+    return DEFAULT_WEAPON
+
 # Maps a resource node's gathering ability to the one class whose
 # training lets them naturally pick that kind of material out of a
 # location's generic description in _do_look (2026-07-12, per Coffee:
@@ -1347,11 +1368,12 @@ def _award_victory_xp(session: sessions.Session) -> str:
                     f"({updated['progress_count']}/{updated['objective_count']})"
                 )
 
-    # Bonus gear loot: this game has no equip system yet (combat damage
-    # doesn't read from carried weapons/armor), so a generated item is
-    # framed as sold in town rather than added to inventory -- honest
-    # about what actually exists, rather than half-building an equip
-    # mechanic just to give rules/item_generator.py a caller. Its price
+    # Bonus gear loot: rules/item_generator.py procedurally rolls a
+    # fresh weapon/armor dict on demand (tier-weighted stats, no stable
+    # item_id) rather than picking from items.py's fixed catalog, so it
+    # can't be added to inventory or equipped via db.equip_item (2026-
+    # 07-15, which DOES now make items.py's real catalog weapons/armor
+    # affect combat) -- framed as sold in town instead. Its price
     # (already tier-weighted via roll_tier, same as every other rules/
     # module) becomes a real, varied gold reward instead of a flat number.
     loot_item = generate_item(item_type=random.choice(["weapon", "armor"]))
@@ -1549,7 +1571,7 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
             target = min(opposing, key=lambda p: p["hp_current"])
             adv, disadv = _attack_advantage_disadvantage(current, target)
             result = resolve_attack(
-                current, target, DEFAULT_WEAPON, advantage=adv, disadvantage=disadv,
+                current, target, _weapon_for_attacker(current), advantage=adv, disadvantage=disadv,
                 defender_relentless_endurance_available=_relentless_endurance_available(target),
             )
             if result["relentless_endurance_triggered"]:
@@ -1971,7 +1993,7 @@ async def _do_attack(update: Update, action_text: str) -> None:
 
         adv, disadv = _attack_advantage_disadvantage(attacker, target)
         result = resolve_attack(
-            attacker, target, DEFAULT_WEAPON, advantage=adv, disadvantage=disadv,
+            attacker, target, _weapon_for_attacker(attacker), advantage=adv, disadvantage=disadv,
             defender_relentless_endurance_available=_relentless_endurance_available(target),
         )
         if result["relentless_endurance_triggered"]:
@@ -3630,11 +3652,18 @@ def _format_character_sheet(character: dict) -> str:
     ]
     skills_line = f"Skills: {', '.join(skill_lines) if skill_lines else 'None practiced yet'}\n"
     name_line = f"**{character['name']}**" + (" *(AI companion)*" if character.get("is_ai") else "")
+    weapon_item = items_module.get_item(character.get("equipped_weapon") or "")
+    armor_item = items_module.get_item(character.get("equipped_armor") or "")
+    equipped_line = (
+        f"Equipped: {weapon_item['name'] if weapon_item else 'no weapon'}, "
+        f"{armor_item['name'] if armor_item else 'no armor'}\n"
+    )
     return (
         f"{name_line} — {character['race']} {character['char_class']}\n"
         f"Level {character['level']} | XP {character['xp']}\n"
         f"HP {character['hp_current']}/{character['hp_max']} | AC {character['armor_class']}\n"
         f"Gold: {character['gold']} | Guild: {character.get('guild') or 'None'}\n"
+        f"{equipped_line}"
         f"Spells known: {', '.join(spell_names) if spell_names else 'None'}\n"
         f"{slot_line}"
         f"Racial traits: {'; '.join(race_data['traits']) if race_data else 'None'}\n"
@@ -4841,6 +4870,42 @@ async def _do_use_item(update: Update, text: str) -> None:
     await _safe_send(update, f"🧺 **{character['name']}** uses a {item['name']}{target_note}.")
 
 
+async def _do_equip_item(update: Update, text: str) -> None:
+    """
+    Real bug from the same reverse-playthrough finding as _do_use_item
+    (2026-07-15): items.py's weapon (damage_dice/ability) and armor
+    (ac_base) fields existed the whole time but nothing ever equipped
+    anything, so combat always used one hardcoded default weapon and
+    armor_class never changed after character creation regardless of
+    what was bought. db.equip_item does the real work (validation,
+    armor_class recompute); this just parses which item from free text.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    equippable_ids = [
+        item_id for item_id in character["inventory"]
+        if (items_module.get_item(item_id) or {}).get("type") in ("weapon", "armor")
+    ]
+    item_id = items_module.find_item_mentioned_in_text(text, candidate_ids=equippable_ids)
+    if item_id is None:
+        await update.effective_chat.send_message(
+            "Equip what, exactly? Name a weapon or armor piece you're actually carrying.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    success, message, _ = db.equip_item(update.effective_user.id, item_id)
+    if not success:
+        await update.effective_chat.send_message(message, message_thread_id=config.TOPIC_ADVENTURE_ID)
+        return
+    await _safe_send(update, f"⚔️ {message}")
+
+
 _QUANTITY_WORDS = {
     "one": 1, "couple": 2, "two": 2, "three": 3, "four": 4,
     "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
@@ -5829,6 +5894,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_give_item(update, intent.get("raw_text", text))
     elif action == "use_item":
         await _do_use_item(update, intent.get("raw_text", text))
+    elif action == "equip_item":
+        await _do_equip_item(update, intent.get("raw_text", text))
     elif action == "show_map":
         await _do_show_map(update)
     elif action == "gather":

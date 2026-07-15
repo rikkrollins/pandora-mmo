@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.10.9] — Equipment finally affects combat
+
+Ninth finding from the reverse-playthrough sweep, and the same bug
+shape as v1.10.8's potions: `items.py` has had real weapon stats
+(`damage_dice`, `ability`) and armor stats (`ac_base`) on Shortsword,
+Longsword, Greataxe, Longbow, both daggers, Leather/Chain
+Shirt/Chain Mail since they were added — but nothing ever equipped
+anything, and every single attack in the game used one hardcoded
+default weapon (1d8, Strength) regardless of what was bought or found.
+Armor Class never changed after character creation either.
+
+Added a real `equip_item` action ("equip my longsword", "wear the
+chain mail", "wield the dagger"): weapons change the attack's damage
+die AND ability (a Longbow correctly uses Dexterity, a Greataxe
+correctly uses Strength, matching each weapon's real 5E properties);
+armor recomputes Armor Class on the spot (`ac_base` + DEX modifier,
+same formula character creation already uses). Applies to AI party
+companions too, not just human players — anyone with a real inventory
+benefits from what they're actually carrying. The character sheet now
+shows what's equipped. Verified with a real DB-backed test that
+equipping a Greataxe changes the actual damage dice an attack rolls,
+and equipping Chain Mail changes actual stored Armor Class.
+
 ## [1.10.8] — Potions actually work now (they never did), plus a real cooking recipe
 
 Eighth, and probably the most significant, finding from the reverse-

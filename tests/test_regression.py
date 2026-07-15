@@ -609,6 +609,70 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result_item["type"], "consumable")
         self.assertIn("heal_dice", result_item)
 
+    # -- Equipment never affected combat: items.py's weapon damage_dice/
+    #    ability and armor ac_base fields existed but nothing ever
+    #    equipped anything or read them (v1.10.9) -----------------------
+    def test_equip_item_phrasing_classified_correctly(self):
+        for text in ["equip my longsword", "wield the dagger", "wear the chain mail", "put on my leather armor"]:
+            self.assertEqual(_keyword_fallback(text, [])["action"], "equip_item", text)
+
+    def test_equipping_weapon_changes_what_weapon_for_attacker_returns(self):
+        use_test_db("tests/tmp/equip_test.db")
+        user_id = 900201
+        make_basic_character(user_id, "Wielder", current_location="crossroads_tavern")
+        db.add_item(user_id, "greataxe", 1)
+
+        default_weapon = bot._weapon_for_attacker(db.get_character(user_id))
+        self.assertNotEqual(default_weapon["damage_dice"], "1d12")
+
+        success, message, updated = db.equip_item(user_id, "greataxe")
+        self.assertTrue(success)
+        self.assertEqual(updated["equipped_weapon"], "greataxe")
+        equipped_weapon = bot._weapon_for_attacker(updated)
+        self.assertEqual(equipped_weapon["damage_dice"], "1d12")
+        self.assertEqual(equipped_weapon["ability"], "strength")
+
+    def test_equipping_armor_recomputes_armor_class(self):
+        use_test_db("tests/tmp/equip_test2.db")
+        user_id = 900202
+        character = make_basic_character(user_id, "Armored", current_location="crossroads_tavern")
+        db.add_item(user_id, "chain_mail", 1)
+
+        success, message, updated = db.equip_item(user_id, "chain_mail")
+        self.assertTrue(success)
+        from rules.dice import ability_modifier
+        expected_ac = 16 + ability_modifier(character["dexterity"])  # chain_mail's ac_base is 16
+        self.assertEqual(updated["armor_class"], expected_ac)
+        self.assertEqual(updated["equipped_armor"], "chain_mail")
+
+    def test_equip_rejects_item_not_carried(self):
+        use_test_db("tests/tmp/equip_test3.db")
+        user_id = 900203
+        make_basic_character(user_id, "Empty2", current_location="crossroads_tavern")
+        success, message, _ = db.equip_item(user_id, "longsword")
+        self.assertFalse(success)
+
+    def test_equip_rejects_non_equippable_item(self):
+        use_test_db("tests/tmp/equip_test4.db")
+        user_id = 900204
+        make_basic_character(user_id, "Drinker2", current_location="crossroads_tavern")
+        db.add_item(user_id, "healing_potion", 1)
+        success, message, _ = db.equip_item(user_id, "healing_potion")
+        self.assertFalse(success)
+
+    async def test_do_equip_item_handler_end_to_end(self):
+        use_test_db("tests/tmp/equip_test5.db")
+        user_id = 900205
+        make_basic_character(user_id, "Handler", current_location="crossroads_tavern")
+        db.add_item(user_id, "longsword", 1)
+
+        sink = []
+        await bot._do_equip_item(FakeUpdate(user_id, "equip my longsword", sink), "equip my longsword")
+        combined = " ".join(sink)
+        self.assertIn("Longsword", combined)
+        character = db.get_character(user_id)
+        self.assertEqual(character["equipped_weapon"], "longsword")
+
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
     """

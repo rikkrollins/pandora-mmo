@@ -17,6 +17,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import config
+import items as items_module
+from rules.dice import ability_modifier
 from rules.leveling import (
     level_for_xp, proficiency_bonus_for_level,
     hp_gain_for_level, ASI_LEVELS, CLASS_PRIMARY_ABILITY,
@@ -234,6 +236,10 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN feature_uses TEXT NOT NULL DEFAULT '{}'")
         if "is_dead" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN is_dead INTEGER NOT NULL DEFAULT 0")
+        if "equipped_weapon" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN equipped_weapon TEXT")
+        if "equipped_armor" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN equipped_armor TEXT")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -400,6 +406,39 @@ def remove_item(telegram_user_id: int, item_id: str, quantity: int = 1) -> tuple
         character["inventory"][item_id] = remaining
     updated = update_character(telegram_user_id, inventory=character["inventory"])
     return True, updated
+
+
+def equip_item(telegram_user_id: int, item_id: str) -> tuple[bool, str, dict | None]:
+    """
+    Equip a weapon or armor item the character is actually carrying.
+    Returns (success, message, updated_character). Real bug fixed
+    2026-07-15: items.py's weapon (damage_dice/ability) and armor
+    (ac_base) fields existed the whole time but nothing ever equipped
+    anything or read them in combat -- every attack used one hardcoded
+    default weapon regardless of what was bought/found, and armor_class
+    never changed after character creation. Equipping armor recomputes
+    armor_class the same way character creation does (ac_base + DEX
+    modifier) -- a deliberate simplification (no heavy-armor-caps-DEX
+    nuance) consistent with this build's existing style elsewhere.
+    """
+    character = get_character(telegram_user_id)
+    if character is None:
+        return False, "No character found.", None
+    if character["inventory"].get(item_id, 0) < 1:
+        return False, "You don't have that to equip.", character
+
+    item = items_module.get_item(item_id)
+    if item is None or item.get("type") not in ("weapon", "armor"):
+        return False, f"{item['name'] if item else item_id} isn't something you can equip.", character
+
+    if item["type"] == "weapon":
+        updated = update_character(telegram_user_id, equipped_weapon=item_id)
+        return True, f"You equip the {item['name']}.", updated
+
+    dex_mod = ability_modifier(character["dexterity"])
+    new_ac = item["ac_base"] + dex_mod
+    updated = update_character(telegram_user_id, equipped_armor=item_id, armor_class=new_ac)
+    return True, f"You put on the {item['name']} (AC {new_ac}).", updated
 
 
 def move_character(telegram_user_id: int, new_location: str) -> dict | None:
