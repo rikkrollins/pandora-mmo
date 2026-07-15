@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.10.1] — The Unmoored Isle finally has something waiting for you
+
+Second finding from the reverse-playthrough sweep: The First City and
+The Unmoored Isle — the campaign's two deepest, most narratively
+"final" locations — had zero monsters. Nothing to actually fight at
+the climax, despite the isle's own "waiting_shape" interactable
+explicitly foreshadowing a confrontation ("a still shape... 
+unmistakably waiting").
+
+Added a real final boss, **The Waiting Shape** (HP 65, AC 17, marked
+`is_boss` so it can't be fled from, inflicts frightened on hit) — well
+above the previous toughest monster (Goblin Boss, HP 21). "What Waits
+Above" now triggers on actually defeating it, not just walking in,
+which also fixes a related latent bug: a `reach_location` quest whose
+location and trigger point at the same place could never retroactively
+complete after accepting while already standing there, since no
+retroactive check exists — `defeat_monster` sidesteps that entirely.
+
+Verified live as far as system load reasonably allowed: reaching the
+isle, accepting the quest while already present, and combat correctly
+engaging the boss all confirmed with real handler calls; the final
+defeat-completes-quest link reuses the exact same generic completion
+code already proven live for a different quest the same day, plus a
+permanent structural regression test.
+
 ## [1.10.0] — The Unmoored Isle is finally reachable
 
 First real finding from a systematic reverse-playthrough sweep

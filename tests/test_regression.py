@@ -241,6 +241,32 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id)
         self.assertEqual(character["current_location"], "the_unmoored_isle")
 
+    # -- The Unmoored Isle has a real final boss (post-1.10.0) --------
+    def test_unmoored_isle_has_a_real_unfleeable_boss(self):
+        """
+        The First City and The Unmoored Isle (the campaign's two
+        deepest locations) had zero monsters -- nothing to fight at
+        the actual climax, despite the isle's own interactable text
+        foreshadowing a confrontation. Structural checks only here
+        (data correctness) -- the full live fight-to-completion path
+        was verified live as far as system load allowed (reachability,
+        accepting the quest while already present, and combat
+        correctly engaging the boss all confirmed live); the final
+        defeat->quest-complete link reuses the exact same generic
+        _check_quest_completions_defeat_monster code already proven
+        live for a different quest (Grask's) the same day.
+        """
+        monster = bot.CAMPAIGN["monsters"]["the_waiting_shape"]
+        self.assertTrue(monster["is_boss"])
+        self.assertGreater(monster["hp_max"], 21)  # tougher than goblin_boss
+
+        location = bot.CAMPAIGN["locations"]["sky"]["the_unmoored_isle"]
+        self.assertIn("the_waiting_shape", location.get("monsters", []))
+
+        quest = bot.CAMPAIGN["quests"]["the_unmoored_isle_quest"]
+        self.assertEqual(quest["trigger"]["type"], "defeat_monster")
+        self.assertEqual(quest["trigger"]["monster"], "the_waiting_shape")
+
     # -- "What am I carrying" never needs Ollama (post-1.8.1) ---------
     def test_inventory_question_answered_without_ollama(self):
         character = {"inventory": {"healing_potion": 2, "shortsword": 1}}

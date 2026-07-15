@@ -468,6 +468,7 @@
         "connections": [],
         "hidden": true,
         "requires_item": "shard_of_dim_light",
+        "monsters": ["the_waiting_shape"],
         "interactables": {
           "waiting_shape": {
             "name": "a still shape at the island's center",
@@ -904,14 +905,14 @@
     },
     "the_unmoored_isle_quest": {
       "title": "What Waits Above",
-      "description": "The sky itself is not as empty as it looks.",
+      "description": "The sky itself is not as empty as it looks — something has been waiting at the island's center for a very long time, and it's noticed you.",
       "location": "the_unmoored_isle",
       "reward_xp": 3000,
       "reward_gold": 2500,
       "reward_item": "flametongue_shortsword",
       "trigger": {
-        "type": "reach_location",
-        "location": "the_unmoored_isle"
+        "type": "defeat_monster",
+        "monster": "the_waiting_shape"
       },
       "clue": "The shard you carry seems to want to go up, not down."
     },
@@ -1048,6 +1049,17 @@
       "proficiency_bonus": 3,
       "xp_reward": 150,
       "on_hit_condition": "blinded"
+    },
+    "the_waiting_shape": {
+      "name": "The Waiting Shape",
+      "dexterity": 14,
+      "strength": 18,
+      "armor_class": 17,
+      "hp_max": 65,
+      "proficiency_bonus": 4,
+      "xp_reward": 500,
+      "is_boss": true,
+      "on_hit_condition": "frightened"
     }
   },
   "factions": {
