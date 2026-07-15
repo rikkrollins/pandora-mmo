@@ -648,7 +648,7 @@ class _ChatOnlyUpdate:
             self.id = chat_id
 
         async def send_message(self, text, message_thread_id=None, **kwargs):
-            await self._bot.send_message(
+            return await self._bot.send_message(
                 chat_id=self.id, message_thread_id=message_thread_id, text=text, **kwargs
             )
 
@@ -715,13 +715,30 @@ def _get_party_members() -> list[dict]:
     return [db._row_to_dict(r) for r in rows]
 
 
-def _party_summary_text() -> str:
+def _get_combat_eligible_party_members(location_id: str) -> list[dict]:
     """
-    A clear, factual description of who's currently in the party and how
-    many, e.g. 'Kara, Finn (AI companion) — 2 members'. Never guesses or
-    invents members; only reports what's actually in the database.
+    Real party members who could actually join a fight breaking out at
+    location_id right now (2026-07-14, per Coffee: "only characters
+    that are active and at the same location shud be in the same
+    battle... if a character is in the tavern and another is in the
+    whispering woods they shud not be able to fight"). _get_party_members
+    deliberately returns EVERY active character globally, with no
+    location or resting filter at all, since it's also used for things
+    like "who's in my party" listings where a global roster makes
+    sense -- but _do_start_combat was reusing that same unfiltered list
+    directly, so a fight breaking out anywhere pulled in the whole
+    party regardless of where they actually were or whether they'd
+    gone inactive/resting. Filters to characters actually AT this
+    location and not currently resting (is_inactive).
     """
-    party = _get_party_members()
+    return [
+        p for p in _get_party_members()
+        if p["current_location"] == location_id and not p.get("is_inactive")
+    ]
+
+
+def _format_party_names(party: list[dict]) -> str:
+    """Shared formatter, e.g. 'Kara, Finn (AI companion) — 2 members'. Never guesses members."""
     if not party:
         return "No one has joined yet."
     names = [
@@ -729,6 +746,15 @@ def _party_summary_text() -> str:
         for p in party
     ]
     return f"{', '.join(names)} — {len(party)} member{'s' if len(party) != 1 else ''}"
+
+
+def _party_summary_text() -> str:
+    """
+    A clear, factual description of who's currently in the party and how
+    many, e.g. 'Kara, Finn (AI companion) — 2 members'. Never guesses or
+    invents members; only reports what's actually in the database.
+    """
+    return _format_party_names(_get_party_members())
 
 
 def _find_party_target_by_name(text: str) -> dict | None:
@@ -1607,7 +1633,20 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             )
             return
 
-        all_characters = _get_party_members()
+        requester = db.get_character(update.effective_user.id)
+        if requester is None:
+            await update.effective_chat.send_message(
+                "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            )
+            return
+
+        # Per Coffee (2026-07-14): "only characters that are active and
+        # at the same location shud be in the same battle... if a
+        # character is in the tavern and another is in the whispering
+        # woods they shud not be able to fight." Scoped to wherever the
+        # player actually starting this fight is standing, not every
+        # active character in the whole game.
+        all_characters = _get_combat_eligible_party_members(requester["current_location"])
         # Characters at 0 HP can't fight until they rest — never silently
         # dragged into a new combat as if nothing happened.
         party = [p for p in all_characters if p["hp_current"] > 0]
@@ -1616,12 +1655,12 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
         if not party:
             if downed:
                 await update.effective_chat.send_message(
-                    "Everyone in your party has fallen — say \"I rest\" to recover before continuing.",
+                    "Everyone here has fallen — say \"I rest\" to recover before continuing.",
                     message_thread_id=config.TOPIC_ADVENTURE_ID,
                 )
             else:
                 await update.effective_chat.send_message(
-                    "No characters exist yet — say something like 'I want to create a character' first!",
+                    "No one here is in a fit state to fight right now.",
                     message_thread_id=config.TOPIC_ADVENTURE_ID,
                 )
             return
@@ -1676,7 +1715,11 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
         enemy_description = f"{count}x **{template['name']}**" if count > 1 else f"**{template['name']}**"
         header = (
             f"⚔️ **Combat Begins!**\n"
-            f"Your party ({_party_summary_text()}) faces {enemy_description}!\n\n"
+            # Per Coffee (2026-07-14): must reflect who's ACTUALLY in
+            # this fight (the location-scoped `party`), not the global
+            # _party_summary_text() -- otherwise the header lists
+            # people who aren't really here.
+            f"Your party ({_format_party_names(party)}) faces {enemy_description}!\n\n"
             f"🎯 **Initiative order:** {initiative_line}\n\n"
             + _turn_announcement(session)
         )
@@ -1764,7 +1807,10 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
         async with sessions.get_lock(chat_id):
             if sessions.get_session(chat_id) is not None:
                 return
-            all_characters = _get_party_members()
+            # Same location-scoping fix as _do_start_combat (2026-07-14,
+            # per Coffee): an ambush breaking out here shouldn't pull in
+            # party members who are actually somewhere else entirely.
+            all_characters = _get_combat_eligible_party_members(location["id"])
             party = [p for p in all_characters if p["hp_current"] > 0]
             if not party:
                 return
@@ -1785,7 +1831,10 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
                 f"⚠️ **{npc_data['name']} ({npc_data.get('alignment', 'unknown alignment')}) "
                 f"blocks your path!**\n{taunt_line}"
                 f"⚔️ **Combat Begins!**\n"
-                f"Your party ({_party_summary_text()}) faces **{npc_data['name']}**!\n\n"
+                # Per Coffee (2026-07-14): same fix as _do_start_combat
+                # -- reflect who's ACTUALLY here (location-scoped
+                # `party`), not the global party summary.
+                f"Your party ({_format_party_names(party)}) faces **{npc_data['name']}**!\n\n"
                 f"🎯 **Initiative order:** {initiative_line}\n\n"
                 + _turn_announcement(session)
             )
@@ -3273,18 +3322,15 @@ async def _do_check_party(update: Update, text: str = "") -> None:
     if character and "sheet" in text.lower():
         party_id = character.get("party_id")
         if not party_id:
-            await update.effective_chat.send_message(
+            await _safe_send(
+                update,
                 "You're not in a formed party — here's your own sheet:\n\n"
                 + _format_character_sheet(character),
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
             return
         members = db.get_party_members_by_id(party_id)
         sheets = "\n\n".join(_format_character_sheet(m) for m in members)
-        await update.effective_chat.send_message(
-            f"🎗️ **Your party's sheets ({len(members)}/{db.PARTY_MAX_MEMBERS}):**\n\n{sheets}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
-        )
+        await _safe_send(update, f"🎗️ **Your party's sheets ({len(members)}/{db.PARTY_MAX_MEMBERS}):**\n\n{sheets}")
         return
 
     lines = [f"👥 Everyone currently active: {_party_summary_text()}"]
@@ -3302,7 +3348,7 @@ async def _do_check_party(update: Update, text: str = "") -> None:
         else:
             lines.append("\n🎗️ You're not in a formed party. Say \"invite [name] to my party\" to start one.")
 
-    await update.effective_chat.send_message("\n".join(lines), message_thread_id=config.TOPIC_ADVENTURE_ID)
+    await _safe_send(update, "\n".join(lines))
 
 
 async def _do_invite_to_party(update: Update, target_name: str) -> None:
@@ -3352,30 +3398,26 @@ async def _do_invite_to_party(update: Update, target_name: str) -> None:
     if target.get("is_ai"):
         # AI companions have no real turn to accept with — they join immediately.
         db.add_ai_companion_to_party(target["telegram_user_id"], party_id)
-        await update.effective_chat.send_message(
-            f"🎗️ **{target['name']}** joins your party!", message_thread_id=config.TOPIC_ADVENTURE_ID
-        )
+        await _safe_send(update, f"🎗️ **{target['name']}** joins your party!")
         return
 
     db.set_pending_party_invite(target["telegram_user_id"], party_id)
-    await update.effective_chat.send_message(
+    await _safe_send(
+        update,
         f"🎗️ Invited **{target['name']}** to your party — they'll need to accept "
         f"(\"I accept the party invite\") to join.",
-        message_thread_id=config.TOPIC_ADVENTURE_ID,
     )
 
 
 async def _do_accept_party_invite(update: Update) -> None:
     success, message = db.accept_party_invite(update.effective_user.id)
-    await update.effective_chat.send_message(
-        ("🎗️ " if success else "") + message, message_thread_id=config.TOPIC_ADVENTURE_ID
-    )
+    await _safe_send(update, ("🎗️ " if success else "") + message)
 
 
 async def _do_leave_party(update: Update) -> None:
     left = db.leave_party(update.effective_user.id)
     message = "You've left your party." if left else "You're not in a party right now."
-    await update.effective_chat.send_message(message, message_thread_id=config.TOPIC_ADVENTURE_ID)
+    await _safe_send(update, message)
 
 
 def _feature_use_status(character: dict) -> str | None:
@@ -3815,10 +3857,10 @@ async def _do_second_wind(update: Update) -> None:
     db.update_character(update.effective_user.id, hp_current=new_hp)
     db.use_feature(update.effective_user.id, "second_wind")
 
-    await update.effective_chat.send_message(
+    await _safe_send(
+        update,
         f"💨 **{character['name']}** catches their breath with Second Wind, recovering "
         f"**{actual_healed} HP** ({new_hp}/{character['hp_max']}).",
-        message_thread_id=config.TOPIC_ADVENTURE_ID,
     )
 
 
@@ -3883,10 +3925,10 @@ async def _do_rage(update: Update) -> None:
     participant["raging"] = True
     db.use_feature(update.effective_user.id, "rage")
 
-    await update.effective_chat.send_message(
+    await _safe_send(
+        update,
         f"😡 **{character['name']}** flies into a rage — bonus damage and resistance to "
         f"physical harm for the rest of this fight!",
-        message_thread_id=config.TOPIC_ADVENTURE_ID,
     )
 
 
@@ -3934,10 +3976,10 @@ async def _do_bardic_inspiration(update: Update, target_text: str) -> None:
 
     is_self = target_character["telegram_user_id"] == character["telegram_user_id"]
     target_note = "themself" if is_self else f"**{target_character['name']}**"
-    await update.effective_chat.send_message(
+    await _safe_send(
+        update,
         f"🎵 **{character['name']}** inspires {target_note} with a stirring word — "
         f"a bolstering **+{actual_boost} HP** ({new_hp}/{target_character['hp_max']}).",
-        message_thread_id=config.TOPIC_ADVENTURE_ID,
     )
 
 
@@ -3979,10 +4021,10 @@ async def _do_lay_on_hands(update: Update, target_text: str) -> None:
 
     is_self = target_character["telegram_user_id"] == character["telegram_user_id"]
     target_note = "themself" if is_self else f"**{target_character['name']}**"
-    await update.effective_chat.send_message(
+    await _safe_send(
+        update,
         f"🙏 **{character['name']}** lays hands on {target_note}, channeling divine healing — "
         f"**{actual_healed} HP** restored ({new_hp}/{target_character['hp_max']}).",
-        message_thread_id=config.TOPIC_ADVENTURE_ID,
     )
 
 
@@ -4035,10 +4077,10 @@ async def _do_arcane_recovery(update: Update) -> None:
     db.use_feature(update.effective_user.id, "arcane_recovery")
 
     slot_word = "slot" if recovered == 1 else "slots"
-    await update.effective_chat.send_message(
+    await _safe_send(
+        update,
         f"📖 **{character['name']}** studies for a moment, recovering **{recovered} spell {slot_word}** "
         f"through Arcane Recovery ({new_current}/{character['spell_slots_max']}).",
-        message_thread_id=config.TOPIC_ADVENTURE_ID,
     )
 
 
@@ -4096,7 +4138,16 @@ async def _do_look(update: Update) -> None:
                 f"at a glance — most people would walk right past it."
             )
 
-    await update.effective_chat.send_message("\n".join(lines), message_thread_id=config.TOPIC_ADVENTURE_ID)
+    # Confirmed live 2026-07-14 (Coffee): TTS was silently skipped for
+    # "look around" -- this reply went straight to
+    # update.effective_chat.send_message, bypassing _safe_send
+    # entirely, and _maybe_speak (TTS) is only ever hooked in there.
+    # This is one of many direct-send call sites in this file (~195 of
+    # them vs 64 through _safe_send) -- most are short refusal/error
+    # messages that were never meant to be narrated aloud, but "look"
+    # is real player-facing narration and should have gone through
+    # _safe_send like every other primary action reply already does.
+    await _safe_send(update, "\n".join(lines))
 
 
 def _find_interactable(location: dict, text: str) -> tuple[str, dict] | None:
@@ -4245,7 +4296,7 @@ async def _do_show_map(update: Update) -> None:
             conn_text = f" → {', '.join(conn_bits)}" if conn_bits else ""
             lines.append(f"{marker} {loc['name']}{conn_text}")
 
-    await update.effective_chat.send_message("\n".join(lines), message_thread_id=config.TOPIC_ADVENTURE_ID)
+    await _safe_send(update, "\n".join(lines))
 
 
 def _find_location_by_name_fragment(fragment: str) -> str | None:
@@ -4381,10 +4432,10 @@ async def _do_move(update: Update, text: str) -> None:
 
     db.move_character(update.effective_user.id, destination_id)
     db.mark_visited(update.effective_user.id, destination_id)
-    await update.effective_chat.send_message(
-        f"🚶 **{character['name']}** travels to **{destination['name']}**.\n{destination['description']}",
-        message_thread_id=config.TOPIC_ADVENTURE_ID,
-    )
+    # Per Coffee (2026-07-14): TTS coverage audit -- _do_move's primary
+    # reply never went through _safe_send, so this (one of the most
+    # common actions in the game) always silently skipped TTS.
+    await _safe_send(update, f"🚶 **{character['name']}** travels to **{destination['name']}**.\n{destination['description']}")
 
     updated_character = db.get_character(update.effective_user.id)
     await _maybe_trigger_npc_encounter(update, updated_character, destination)
@@ -4541,7 +4592,7 @@ async def _do_find_merchant(update: Update) -> None:
         stops = "stop" if hops == 1 else "stops"
         owner_line = f", run by {owner_name}" if owner_name else ""
         line = f"🛒 Closest merchant: **{location['name']}**{owner_line} — {hops} {stops} from here."
-    await update.effective_chat.send_message(line, message_thread_id=config.TOPIC_ADVENTURE_ID)
+    await _safe_send(update, line)
 
 
 _QUANTITY_WORDS = {
@@ -5051,7 +5102,7 @@ async def _do_list_characters(update: Update) -> None:
             f"{marker}{c['name']} — Level {c['level']} {c['race']} {c['char_class']}"
         )
     lines.append("\nSay 'switch to <name>' to change your active character.")
-    await update.effective_chat.send_message("\n".join(lines), message_thread_id=config.TOPIC_ADVENTURE_ID)
+    await _safe_send(update, "\n".join(lines))
 
 
 def _find_own_character_by_name_fragment(telegram_user_id: int, fragment: str) -> dict | None:
@@ -5081,10 +5132,10 @@ async def _do_switch_character(update: Update, text: str) -> None:
         return
 
     switched = db.switch_character(update.effective_user.id, match["character_id"])
-    await update.effective_chat.send_message(
+    await _safe_send(
+        update,
         f"🎭 Switched to **{switched['name']}** the {switched['race']} {switched['char_class']} "
         f"(Level {switched['level']}).",
-        message_thread_id=config.TOPIC_ADVENTURE_ID,
     )
 
 

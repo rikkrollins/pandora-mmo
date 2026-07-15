@@ -2,6 +2,45 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.9.0] — Combat now stays where it happens, and TTS coverage was audited game-wide
+
+- **Combat no longer pulls in characters from other locations, or
+  characters who are resting.** Per Coffee: "only characters that are
+  active and at the same location shud be in the same battle... if a
+  character is in the tavern and another is in the whispering woods
+  they shud not be able to fight. if a character is inactive they
+  shud be excluded from the fight also." `_get_party_members()`
+  deliberately returns every active character globally (used
+  elsewhere for real party-roster listings) — but both places combat
+  actually starts (`_do_start_combat` and the ambient hostile-NPC
+  encounter) were reusing that same unfiltered list directly. Added
+  `_get_combat_eligible_party_members(location_id)`, filtered to
+  characters actually at that location and not resting, wired into
+  both. The "Combat Begins! Your party (...)" header text was also
+  quietly listing everyone in the whole game regardless — fixed to
+  reflect who's actually in the fight.
+- **Fixed "Who is in my current party?" answering nothing** — fell
+  through to plain chat because "current" inserted between "my" and
+  "party" broke the exact-substring trigger, and the fully spelled-out
+  "who is in my party" (not just the contraction "who's") was never
+  covered either. Broadened with a regex tolerant of a word or two
+  between "my" and "party".
+- **TTS coverage audit.** Per Coffee, after finding "look around"
+  silently skipped TTS: about half of all action handlers never called
+  `_safe_send` at all (the only place TTS is hooked), so their primary
+  replies always skipped it silently. Fixed look, move, check_party,
+  invite/accept/leave party, second wind, rage, bardic inspiration,
+  lay on hands, arcane recovery, find merchant, list/switch character,
+  and show map. Also fixed the actual root cause of a live crash this
+  surfaced: `_ChatOnlyUpdate` (used for background system messages —
+  hourly updates, AI party ticks) never returned the sent message
+  object at all, so the new TTS-trigger-cleanup code (1.8.3) crashed
+  with an unretrieved exception whenever a background message had TTS
+  enabled.
+
+All fixes verified with real handler-level tests; 23 fast regression
+tests pass.
+
 ## [1.8.3] — TTS no longer leaves a visible duplicate message
 
 Per Coffee: "The TTS is giving two messages — one is the original, the

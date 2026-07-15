@@ -97,6 +97,52 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(found)
         self.assertEqual(found[0], "room_seven_door")
 
+    # -- check_party covers "current"/"active" inserted before "party" (post-1.8.3) --
+    def test_check_party_tolerates_words_between_my_and_party(self):
+        for text in ("Who is in my current party?", "my active party status"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "check_party", text)
+
+    def test_check_party_still_works_for_original_phrasings(self):
+        for text in ("Who's in my party?", "who is in my party", "party members"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "check_party", text)
+
+    # -- Combat scoped to the fight's real location (post-1.8.3) -------
+    async def test_combat_excludes_characters_at_a_different_location(self):
+        import sessions
+        sessions.end_session(-999)  # tests share chat_id -999 -- don't inherit another test's session
+        tavern_id, wood_id = 444444, 555555
+        make_basic_character(tavern_id, "Elduinn", current_location="crossroads_tavern")
+        make_basic_character(wood_id, "Roric", current_location="whispering_wood")
+
+        sink = []
+        await bot.adventure_master_handler(
+            FakeUpdate(wood_id, "Let's start a fight", sink), DummyContext())
+
+        session = sessions.get_session(-999)
+        self.assertIsNotNone(session)
+        participant_ids = {p["telegram_user_id"] for p in session.participants}
+        self.assertIn(wood_id, participant_ids)
+        self.assertNotIn(tavern_id, participant_ids)
+        sessions.end_session(-999)
+
+    async def test_combat_excludes_resting_characters(self):
+        import sessions
+        sessions.end_session(-999)
+        wood_id, resting_id = 666666, 777777
+        make_basic_character(wood_id, "Roric2", current_location="whispering_wood")
+        make_basic_character(resting_id, "Snorri", current_location="whispering_wood")
+        db.update_character(resting_id, is_inactive=1)
+
+        sink = []
+        await bot.adventure_master_handler(
+            FakeUpdate(wood_id, "Let's start a fight", sink), DummyContext())
+
+        session = sessions.get_session(-999)
+        self.assertIsNotNone(session)
+        participant_ids = {p["telegram_user_id"] for p in session.participants}
+        self.assertNotIn(resting_id, participant_ids)
+        sessions.end_session(-999)
+
     # -- Gathering verb coverage (v1.7.6) ------------------------------
     def test_gather_covers_every_skill_verb(self):
         cases = ["I would like to chop for lumber", "go fishing", "catch some fish",

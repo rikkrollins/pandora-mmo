@@ -353,8 +353,20 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                                     "what weapons", "check my equipment", "my equipment"]):
         return {**base, "action": "check_inventory"}
 
-    if any(w in lowered for w in ["who's in my party", "whos in my party", "my party", "who is with me",
-                                    "who's with me", "am i in a party", "party status", "party members"]):
+    # Confirmed live 2026-07-14 (Coffee): "Who is in my current party?"
+    # fell through to plain chat entirely -- "my party" was a required
+    # exact substring, but "current" inserted between "my" and "party"
+    # broke it, and "who is in my party" (the fully spelled-out, non-
+    # contraction phrasing) was never covered at all, only "who's"/
+    # "whos". A regex tolerant of a word or two between "my" and
+    # "party" (e.g. "my current party", "my active party") is more
+    # robust than an ever-growing literal-phrase list.
+    if (
+        any(w in lowered for w in ["who's in my party", "whos in my party", "who is in my party",
+                                    "who is with me", "who's with me", "am i in a party",
+                                    "party status", "party members"])
+        or re.search(r"\bmy\b(?:\s+\w+){0,2}\s+party\b", lowered)
+    ):
         return {**base, "action": "check_party"}
 
     # Confirmed live 2026-07-13 (Coffee): "I have decided to 'Keep it and
