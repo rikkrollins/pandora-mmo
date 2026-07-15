@@ -126,3 +126,18 @@ def roll_damage(dice_notation: str, modifier: int = 0, critical: bool = False, e
         "critical": critical,
         "total": total,
     }
+
+
+def average_damage(dice_notation: str, modifier: int = 0) -> float:
+    """
+    Expected (average, not rolled) damage for a dice string plus a flat
+    modifier -- e.g. "1d8+2" with modifier=0 -> 6.5. Used to pick the
+    real best weapon out of several carried ones (auto-equip, 2026-07-15)
+    without needing to actually roll anything.
+    """
+    match = _DICE_NOTATION_RE.match(dice_notation.strip())
+    if not match:
+        raise ValueError(f"Invalid dice notation: {dice_notation!r}")
+    num_dice, sides = int(match.group(1)), int(match.group(2))
+    inline_modifier = int(match.group(3).replace(" ", "")) if match.group(3) else 0
+    return num_dice * (sides + 1) / 2 + inline_modifier + modifier

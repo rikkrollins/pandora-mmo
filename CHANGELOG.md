@@ -2,6 +2,55 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.10.10] — Reactions, shields, auto-equip, video support, and two live bug fixes
+
+**Reactions** (per Coffee, "tackle the reactions system next" — the one
+item CLAUDE.md explicitly flagged as needing `resolve_attack` to have a
+real checkpoint between the attack roll and applying damage, not a
+bolt-on): that checkpoint already existed naturally, so both plug in
+there. Shield (Wizard/Sorcerer, a real spell that's had an `ac_bonus`
+effect nobody ever read) auto-triggers when a hit isn't a crit and
+would actually be avoided by the +5 AC, spending a real spell slot.
+Uncanny Dodge (Rogue level 5+) halves confirmed damage. Both share one
+reaction per round. Opportunity attacks were already implemented
+(2026-07-13) — CLAUDE.md just hadn't been updated to say so, fixed
+here too. Counterspell isn't implemented and can't meaningfully be yet:
+no monster or NPC in this game ever casts a spell, so there's no real
+trigger for it.
+
+**Equipment, round 2** (per Coffee): shields are a real, separate 5E
+slot (worn in addition to armor, adding their `ac_bonus` on top rather
+than replacing it) — `equip_item` now handles all three slots
+correctly, including re-adding a shield's bonus if armor is equipped/
+changed afterward. New `auto_equip` action ("auto equip my character",
+"put on my gear automatically") picks the real best weapon/armor/
+shield by actual stats. Both `equip_item` and `auto_equip` can now
+target another party member ("equip Sera with the longbow"). New
+characters auto-equip their starting gear on creation instead of it
+sitting inert. The character sheet now shows both what's equipped and
+what's carried-but-not-equipped.
+
+**Video support in the Development topic** (per Coffee, to send the
+campaign page by page): videos previously had no handler at all (only
+text/photos/documents were), so a video sent before this would have
+gotten zero response — same silent-failure gap photos had before
+2026-07-11. Downloads the video and extracts a frame every 2 seconds
+via `imageio`/`imageio-ffmpeg` (a bundled ffmpeg binary invoked by that
+library internally, not by any subprocess call added to this
+codebase) so a live Claude Code session can read them as real images,
+same as saved screenshots.
+
+**Two real live bugs**, both caught from actual dev-topic reports
+during this session: "Write my characters name in the guest book"
+(Coffee dropped the apostrophe on "character's") matched
+`list_characters`' roster trigger and showed his unrelated character
+list instead. And "Glare into the shadows listen, what do I hear?" — a
+real Perception-check phrasing — fell through to the small local
+model, which misjudged it as `pass_turn`; bare "listen,"/"what do I
+hear" had no keyword trigger at all (only "listen for" did), so
+nothing could override the model's mistake. Both fixed with permanent
+regression tests.
+
 ## [1.10.9] — Equipment finally affects combat
 
 Ninth finding from the reverse-playthrough sweep, and the same bug

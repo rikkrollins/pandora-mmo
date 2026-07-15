@@ -11,6 +11,8 @@ deploy. SlowLiveTests exercise real Ollama-backed narration and can
 take minutes each under load; run these when you have time to spare,
 or when touching code they cover directly.
 """
+import os
+import shutil
 import unittest
 
 import bot
@@ -672,6 +674,258 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Longsword", combined)
         character = db.get_character(user_id)
         self.assertEqual(character["equipped_weapon"], "longsword")
+
+    # -- Reactions (Shield, Uncanny Dodge): CLAUDE.md flagged this as
+    #    needing resolve_attack's roll-then-damage step to have a real
+    #    checkpoint rather than a bolt-on -- that checkpoint already
+    #    existed, both plug into it there (v1.10.10) ---------------------
+    def test_shield_turns_a_would_be_hit_into_a_miss(self):
+        # attacker with +0 to hit (str 10, proficiency_bonus 0) means the
+        # attack total is just the raw d20 roll -- AC 15 means rolls
+        # 15-19 would hit without Shield but not with it (+5 AC), while
+        # 20 is a crit (unaffected) and under 15 already misses. Retry
+        # until landing in that band so this isn't flaky.
+        weapon = {"ability": "strength", "damage_dice": "1d1", "damage_bonus": 0}
+        for _ in range(60):
+            attacker = {"name": "Attacker", "strength": 10, "proficiency_bonus": 0}
+            defender = {
+                "name": "Shielder", "dexterity": 10, "armor_class": 15,
+                "hp_current": 50, "hp_max": 50, "char_class": "Wizard",
+                "known_spells": ["shield"], "spell_slots_current": 2,
+            }
+            result = resolve_attack(attacker, defender, weapon, round_number=1)
+            if result["attack_roll"] in range(15, 20) and not result["critical_hit"]:
+                self.assertFalse(result["hit"])
+                self.assertTrue(result["shield_reaction_triggered"])
+                self.assertEqual(defender["spell_slots_current"], 1)
+                self.assertEqual(defender["reaction_used_round"], 1)
+                return
+        self.fail("never landed a roll in the Shield-relevant band in 60 tries")
+
+    def test_shield_doesnt_fire_without_a_spell_slot(self):
+        weapon = {"ability": "strength", "damage_dice": "1d1", "damage_bonus": 0}
+        for _ in range(60):
+            attacker = {"name": "Attacker", "strength": 10, "proficiency_bonus": 0}
+            defender = {
+                "name": "OutOfSlots", "dexterity": 10, "armor_class": 15,
+                "hp_current": 50, "hp_max": 50, "char_class": "Wizard",
+                "known_spells": ["shield"], "spell_slots_current": 0,
+            }
+            result = resolve_attack(attacker, defender, weapon, round_number=1)
+            if result["attack_roll"] in range(15, 20) and not result["critical_hit"]:
+                self.assertTrue(result["hit"])
+                self.assertFalse(result["shield_reaction_triggered"])
+                return
+        self.fail("never landed a roll in the Shield-relevant band in 60 tries")
+
+    def test_uncanny_dodge_halves_damage_for_a_level_5_rogue(self):
+        weapon = {"ability": "strength", "damage_dice": "8d1", "damage_bonus": 0}  # always deals 8
+        attacker = {"name": "Attacker", "strength": 20, "proficiency_bonus": 5}
+        defender = {
+            "name": "Dodger", "dexterity": 10, "armor_class": 1,
+            "hp_current": 50, "hp_max": 50, "char_class": "Rogue", "level": 5,
+        }
+        for _ in range(20):
+            result = resolve_attack(dict(attacker), defender, weapon, round_number=1)
+            if result["hit"] and not result["critical_hit"]:
+                self.assertTrue(result["uncanny_dodge_triggered"])
+                self.assertEqual(result["damage_dealt"], 4)
+                return
+        self.fail("no plain hit landed in 20 tries at AC 1")
+
+    def test_uncanny_dodge_doesnt_fire_below_level_5(self):
+        weapon = {"ability": "strength", "damage_dice": "8d1", "damage_bonus": 0}
+        attacker = {"name": "Attacker", "strength": 20, "proficiency_bonus": 5}
+        defender = {
+            "name": "TooYoung", "dexterity": 10, "armor_class": 1,
+            "hp_current": 50, "hp_max": 50, "char_class": "Rogue", "level": 4,
+        }
+        for _ in range(20):
+            result = resolve_attack(dict(attacker), defender, weapon, round_number=1)
+            if result["hit"] and not result["critical_hit"]:
+                self.assertFalse(result["uncanny_dodge_triggered"])
+                self.assertEqual(result["damage_dealt"], 8)
+                return
+        self.fail("no plain hit landed in 20 tries at AC 1")
+
+    def test_only_one_reaction_per_round(self):
+        # A level-5 Rogue Wizard hybrid isn't real, but this directly
+        # tests the shared reaction economy: once reaction_used_round
+        # matches the current round, neither Shield nor Uncanny Dodge
+        # should fire again this round.
+        defender = {
+            "name": "Spent", "dexterity": 10, "armor_class": 15,
+            "hp_current": 50, "hp_max": 50, "char_class": "Rogue", "level": 5,
+            "known_spells": ["shield"], "spell_slots_current": 5,
+            "reaction_used_round": 1,
+        }
+        weapon = {"ability": "strength", "damage_dice": "8d1", "damage_bonus": 0}
+        attacker = {"name": "Attacker", "strength": 10, "proficiency_bonus": 0}
+        for _ in range(60):
+            result = resolve_attack(dict(attacker), dict(defender), weapon, round_number=1)
+            if result["attack_roll"] in range(15, 20) and not result["critical_hit"]:
+                self.assertFalse(result["shield_reaction_triggered"])
+                self.assertFalse(result["uncanny_dodge_triggered"])
+                return
+        self.fail("never landed a roll in the relevant band in 60 tries")
+
+    # -- Shields, auto-equip, equipping party members, sheet display of
+    #    equipped/carried-not-equipped gear (v1.10.10, per Coffee) ------
+    def test_equip_item_handles_shields_additively(self):
+        use_test_db("tests/tmp/shield_test.db")
+        user_id = 900301
+        make_basic_character(user_id, "Shieldbearer", current_location="crossroads_tavern", armor_class=16)
+        db.add_item(user_id, "wooden_shield", 1)
+        success, message, updated = db.equip_item(user_id, "wooden_shield")
+        self.assertTrue(success)
+        self.assertEqual(updated["equipped_shield"], "wooden_shield")
+        self.assertEqual(updated["armor_class"], 18)  # 16 + wooden_shield's ac_bonus of 2
+
+    def test_equipping_new_armor_preserves_an_already_equipped_shields_bonus(self):
+        use_test_db("tests/tmp/shield_test2.db")
+        user_id = 900302
+        character = make_basic_character(user_id, "Upgrader", current_location="crossroads_tavern")
+        db.add_item(user_id, "wooden_shield", 1)
+        db.add_item(user_id, "chain_mail", 1)
+        db.equip_item(user_id, "wooden_shield")
+        success, message, updated = db.equip_item(user_id, "chain_mail")
+        self.assertTrue(success)
+        from rules.dice import ability_modifier
+        expected = 16 + ability_modifier(character["dexterity"]) + 2  # chain_mail + dex + shield
+        self.assertEqual(updated["armor_class"], expected)
+
+    def test_auto_equip_picks_the_real_best_weapon_and_armor(self):
+        use_test_db("tests/tmp/auto_equip_test.db")
+        user_id = 900303
+        make_basic_character(user_id, "Auto", current_location="crossroads_tavern")
+        db.add_item(user_id, "rusty_dagger", 1)   # 1d4, worse
+        db.add_item(user_id, "greataxe", 1)       # 1d12, better
+        db.add_item(user_id, "leather_armor", 1)  # ac_base 11, worse
+        db.add_item(user_id, "chain_mail", 1)     # ac_base 16, better
+        summary, character = db.auto_equip_best_gear(user_id)
+        self.assertEqual(character["equipped_weapon"], "greataxe")
+        self.assertEqual(character["equipped_armor"], "chain_mail")
+
+    async def test_auto_equip_handler_end_to_end(self):
+        use_test_db("tests/tmp/auto_equip_test2.db")
+        user_id = 900304
+        make_basic_character(user_id, "AutoHandler", current_location="crossroads_tavern")
+        db.add_item(user_id, "longsword", 1)
+        sink = []
+        await bot._do_auto_equip_gear(FakeUpdate(user_id, "auto equip my character", sink), "auto equip my character")
+        character = db.get_character(user_id)
+        self.assertEqual(character["equipped_weapon"], "longsword")
+        self.assertTrue(any("Longsword" in msg for msg in sink))
+
+    def test_auto_equip_phrasing_classified_correctly(self):
+        for text in ["auto equip my character", "put on my gear automatically", "help me equip my player"]:
+            self.assertEqual(_keyword_fallback(text, [])["action"], "auto_equip", text)
+
+    def test_my_sheet_still_classified_as_check_sheet(self):
+        for text in ["my sheet", "my character", "my stats", "my class"]:
+            self.assertEqual(_keyword_fallback(text, [])["action"], "check_sheet", text)
+
+    async def test_equip_can_target_another_party_member(self):
+        use_test_db("tests/tmp/equip_other_test.db")
+        equipper_id, helped_id = 900305, 900306
+        make_basic_character(equipper_id, "Helper", current_location="crossroads_tavern")
+        helped = make_basic_character(helped_id, "Helped", current_location="crossroads_tavern")
+        db.add_item(helped_id, "longsword", 1)  # in HELPED's own inventory, not the helper's
+
+        sink = []
+        await bot._do_equip_item(
+            FakeUpdate(equipper_id, "equip Helped with the longsword", sink),
+            "equip Helped with the longsword",
+        )
+        combined = " ".join(sink)
+        self.assertIn("Helped", combined)
+        helped_after = db.get_character(helped_id)
+        self.assertEqual(helped_after["equipped_weapon"], "longsword")
+        equipper_after = db.get_character(equipper_id)
+        self.assertIsNone(equipper_after["equipped_weapon"])  # the HELPER didn't equip anything
+
+    def test_sheet_shows_equipped_and_carried_not_equipped_gear(self):
+        use_test_db("tests/tmp/sheet_gear_test.db")
+        user_id = 900307
+        make_basic_character(user_id, "SheetTest", current_location="crossroads_tavern")
+        db.add_item(user_id, "longsword", 1)
+        db.add_item(user_id, "shortsword", 1)
+        db.equip_item(user_id, "longsword")
+        character = db.get_character(user_id)
+        sheet = bot._format_character_sheet(character)
+        self.assertIn("Equipped: Longsword", sheet)
+        self.assertIn("Carried but not equipped: Shortsword", sheet)
+
+    # -- Dev-topic video handling (2026-07-15, per Coffee): videos had NO
+    #    handler at all before this (only TEXT/PHOTO/Document.ALL were
+    #    registered) -- same silent-failure gap photos had before
+    #    2026-07-11, now fixed with frame extraction via imageio. -------
+    def test_extract_video_frames_produces_real_readable_jpegs(self):
+        import numpy as np
+        import imageio.v3 as iio
+
+        video_path = "tests/tmp/synthetic_test_video.mp4"
+        os.makedirs("tests/tmp", exist_ok=True)
+        # 6 seconds at 10fps, distinct-colored frames so a real decode is
+        # verifiable (not just "a file exists").
+        frames = [np.full((64, 64, 3), (i * 12) % 256, dtype=np.uint8) for i in range(60)]
+        iio.imwrite(video_path, frames, fps=10, plugin="FFMPEG")
+
+        try:
+            count, frames_dir, error = bot._extract_video_frames(video_path)
+            self.assertIsNone(error)
+            # 6s of video at one frame per VIDEO_FRAME_INTERVAL_SECONDS (2s) -> 3 frames.
+            self.assertEqual(count, 3)
+            saved_files = sorted(os.listdir(frames_dir))
+            self.assertEqual(len(saved_files), 3)
+            first_frame = iio.imread(os.path.join(frames_dir, saved_files[0]))
+            self.assertEqual(first_frame.shape, (64, 64, 3))
+        finally:
+            if os.path.exists(video_path):
+                os.remove(video_path)
+            if os.path.isdir(video_path + "_frames"):
+                shutil.rmtree(video_path + "_frames")
+
+    def test_extract_video_frames_reports_error_for_a_bad_file(self):
+        bad_path = "tests/tmp/not_a_real_video.mp4"
+        os.makedirs("tests/tmp", exist_ok=True)
+        with open(bad_path, "w") as f:
+            f.write("this is not a real video file")
+        try:
+            count, frames_dir, error = bot._extract_video_frames(bad_path)
+            self.assertEqual(count, 0)
+            self.assertIsNotNone(error)
+        finally:
+            os.remove(bad_path)
+            if os.path.isdir(bad_path + "_frames"):
+                shutil.rmtree(bad_path + "_frames")
+
+    # -- Real live bug (2026-07-15): "Write my characters name in the
+    #    guest book" -- Coffee dropped the apostrophe on "character's",
+    #    and the literal text matched list_characters' "my characters"
+    #    trigger, showing his unrelated character roster instead of
+    #    responding to what he actually typed. --------------------------
+    def test_dropped_apostrophe_possessive_not_misread_as_list_characters(self):
+        result = _keyword_fallback("Write my characters name in the guest book", [])
+        self.assertNotEqual(result["action"], "list_characters")
+
+    def test_list_characters_still_works_for_real_roster_requests(self):
+        for text in ("show my characters", "my characters", "list my characters", "character roster"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "list_characters", text)
+
+    # -- Real live bug (2026-07-15): "Glare into the shadows listen, what
+    #    do I hear?" -- a real Perception-check phrasing -- fell through
+    #    the keyword fallback (returning "chat", i.e. no opinion) to the
+    #    small local model, which misjudged it as pass_turn. Bare
+    #    "listen,"/"what do I hear" had no trigger at all (only "listen
+    #    for" did), so the fallback had nothing to override the model's
+    #    error with. -----------------------------------------------------
+    def test_listen_and_what_do_i_hear_route_to_skill_check(self):
+        for text in ["Glare into the shadows listen, what do I hear?",
+                     "I listen. What do I hear?", "What do I hear in the tunnel?"]:
+            result = _keyword_fallback(text, [])
+            self.assertEqual(result["action"], "skill_check", text)
+            self.assertEqual(result["ability"], "wisdom", text)
 
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):

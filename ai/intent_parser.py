@@ -102,7 +102,11 @@ getting caught, with real consequences, not the same as "buy".
 - "use_item" is for drinking/using/consuming/quaffing a carried consumable item (e.g. a potion, antitoxin, \
 rations) — NOT a spell and NOT a shop purchase. Set "item_name" to the item, and "target" to who it's for if named (defaults to self).
 - "equip_item" is for equipping/wielding/wearing/putting on a weapon or piece of armor they're carrying \
-(e.g. "equip my longsword", "wear the chain mail", "wield the dagger"). Set "item_name" to the item.
+(e.g. "equip my longsword", "wear the chain mail", "wield the dagger", "equip Sera with the longbow"). \
+Set "item_name" to the item, and "target" to who it's for if a specific OTHER party member is named (defaults to self).
+- "auto_equip" is for asking the game to automatically equip the best weapon/armor/shield being carried, \
+without naming a specific item (e.g. "auto equip my character", "put on my gear automatically", \
+"help me equip my player"). Set "target" to a specific party member's name if named, else self.
 - "join_guild" is for joining/asking to join a specific guild or order.
 - "pass_turn" is for skipping, waiting, or passing.
 - "resolve_choice" is for declaring a decision on a moral choice/quest resolution (e.g. "I choose to...", "I'll go with...").
@@ -452,8 +456,17 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # a substring-superset of check_sheet's "my character" (singular) —
     # confirmed live to otherwise get shadowed and misread as check_sheet,
     # so the more specific roster/switch/delete phrasings must win first.
-    if any(w in lowered for w in ["my characters", "show my characters", "list my characters",
-                                    "character roster", "my roster"]):
+    # Real bug (2026-07-15, live): "Write my characters name in the guest
+    # book" -- Coffee dropped the apostrophe on the possessive "my
+    # character's name", and the literal text "my characters" matched
+    # this roster trigger anyway, showing his character list instead of
+    # interacting with the guest book. "my characters name" (no
+    # apostrophe, immediately followed by "name") is excluded as an
+    # unambiguous signal of the mistyped-possessive case, not a real
+    # roster request.
+    if (any(w in lowered for w in ["my characters", "show my characters", "list my characters",
+                                     "character roster", "my roster"])
+            and "my characters name" not in lowered):
         return {**base, "action": "list_characters"}
 
     for trigger in ["switch to ", "switch character to ", "play as "]:
@@ -468,6 +481,14 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
         if trigger in lowered:
             name = text[lowered.index(trigger) + len(trigger):].strip()
             return {**base, "action": "delete_character", "target": name or None}
+
+    # Checked BEFORE check_sheet below: "auto equip my character"/"equip
+    # my player" would otherwise match check_sheet's broad "my
+    # character" trigger first and never reach a more specific check.
+    if any(w in lowered for w in ["auto equip", "auto-equip", "autoequip", "equip automatically",
+                                    "equip me automatically", "help me equip", "gear up automatically",
+                                    "put on my gear automatically", "equip my gear automatically"]):
+        return {**base, "action": "auto_equip"}
 
     if any(w in lowered for w in [
         "my sheet", "my stats", "my hp", "my health", "my character", "status",
@@ -691,7 +712,8 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
           "identify the magic", "sense the magic", "what spell is this", "arcane knowledge",
           "what kind of creature", "what plant is this", "identify the plant", "identify the animal",
           "what do i know about this holy site", "what religion", "identify the deity", "identify the god"], "intelligence"),
-        (["search for", "look for hidden", "listen for", "spot", "sense", "track", "survive", "perceive",
+        (["search for", "look for hidden", "listen for", "listen,", "listen.", "what do i hear",
+          "spot", "sense", "track", "survive", "perceive",
           "calm the animal", "calm down the", "soothe the animal", "tame the", "read them",
           "sense if they're lying", "sense if he's lying", "sense if she's lying", "gut feeling about",
           "treat the wound", "stabilize", "administer first aid", "diagnose", "identify the poison"], "wisdom"),
@@ -748,7 +770,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
                 "answer_puzzle", "gamble", "chat", "examine", "flee", "resolve_choice",
                 "invite_to_party", "accept_party_invite", "leave_party", "find_merchant",
                 "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "arcane_recovery",
-                "make_campfire", "give_item", "use_item", "equip_item",
+                "make_campfire", "give_item", "use_item", "equip_item", "auto_equip",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

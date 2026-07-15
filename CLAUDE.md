@@ -169,10 +169,20 @@ same as any other `*_tmp.py`.
 
 ## Known limitations (see SETUP_GUIDE.md for the full, current list)
 
-- Reactions (Shield, Counterspell, opportunity attacks) are NOT
-  implemented — doing this properly requires restructuring
-  `resolve_attack()`'s atomic roll-and-apply-damage step, not a
-  bolt-on. Don't rush this.
+- Reactions (2026-07-15, real, not a bolt-on): `resolve_attack()`
+  already fully resolves an attack roll before any damage is rolled or
+  applied, so that's the real checkpoint both plug into — Shield
+  (Wizard/Sorcerer, auto-triggers when the hit isn't a crit and a real
+  spell slot is available, turning it into a miss if it actually would
+  have mattered) and Uncanny Dodge (Rogue level 5+, halves confirmed
+  damage). Both share one reaction per round via `reaction_used_round`
+  on the participant dict. Opportunity attacks were already
+  implemented (2026-07-13, `_do_flee`'s "opportunity attacks as you
+  break away" block) before this doc was updated to say so. Counterspell
+  is NOT implemented and can't meaningfully be yet: no monster or
+  hostile NPC in this game ever casts a spell, so there is currently no
+  real trigger for it — would need monster/NPC spellcasting to exist
+  first.
 - Skill checks use one fixed DC (13) for every situation — deliberate,
   to avoid the AI inventing difficulty numbers.
 - Resting ("I rest"/"heal up" and "take a rest"/going inactive) is NOT

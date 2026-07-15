@@ -31,7 +31,8 @@ def start_combat(participants: list[dict]) -> list[dict]:
 
 def resolve_attack(attacker: dict, defender: dict, weapon: dict,
                     advantage: bool = False, disadvantage: bool = False,
-                    defender_relentless_endurance_available: bool = False) -> dict:
+                    defender_relentless_endurance_available: bool = False,
+                    round_number: int = 0) -> dict:
     """
     Resolve one attack. `weapon` is a dict like:
         {"ability": "strength", "damage_dice": "1d8", "damage_bonus": 0}
@@ -92,6 +93,30 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     never persisted to the DB) -- and absorbs damage before real HP for
     ANY participant carrying it, not just Warlocks, matching real 5E's
     general temp-HP rule.
+
+    Two real reactions (2026-07-15) are handled here too -- CLAUDE.md's
+    Known Limitations flagged reactions as needing resolve_attack's
+    roll-then-apply-damage step to actually have a checkpoint in
+    between, rather than a bolt-on; that checkpoint already exists
+    naturally (attack_result is fully known before any damage is
+    rolled or applied), so both plug in there. This engine has no
+    real-time "declare a reaction" prompt, so both are auto-triggered
+    exactly when they'd actually change the outcome, spending a real
+    resource, never wasted on a roll they couldn't have affected:
+    - Shield (Wizard/Sorcerer, real spell + real spell slot): if the
+      hit isn't a critical and the attack total is below
+      defender's AC + 5, casting Shield retroactively turns it into a
+      miss -- the same "ac_bonus" effect Shield's spells.py entry has
+      always had, just never read anywhere before now (same silent-
+      dead-effect shape as this session's potions/equipment fixes).
+    - Uncanny Dodge (real 5E Rogue feature, level 5+): halves the
+      damage from a confirmed hit.
+    Both cost the defender their one reaction for the round (`round_
+    number`, tracked via `reaction_used_round` on the participant dict,
+    the same combat-only in-memory convention as `raging`/`conditions`
+    -- resets naturally once round_number advances past it) so a
+    defender can't Shield AND Uncanny-Dodge the same hit, matching real
+    5E's one-reaction-per-round economy.
     """
     attack_ability = "dexterity" if attacker.get("char_class") == "Monk" else weapon.get("ability", "strength")
     attack_result = roll_attack(
@@ -103,9 +128,22 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         disadvantage=disadvantage,
     )
 
+    shield_reaction_triggered = False
+    reaction_available = defender.get("reaction_used_round") != round_number
+    if (attack_result["hit"] and not attack_result["critical_hit"] and reaction_available
+            and "shield" in (defender.get("known_spells") or [])
+            and defender.get("spell_slots_current", 0) > 0
+            and attack_result["total"] < defender["armor_class"] + 5):
+        defender["spell_slots_current"] -= 1
+        defender["reaction_used_round"] = round_number
+        attack_result["hit"] = False
+        shield_reaction_triggered = True
+        reaction_available = False
+
     damage_dealt = 0
     relentless_endurance_triggered = False
     dark_ones_blessing_gained = 0
+    uncanny_dodge_triggered = False
     if attack_result["hit"]:
         savage_attacks_die = 1 if (attacker.get("race") == "Half-Orc" and attack_result["critical_hit"]) else 0
         sneak_attack_die = 1 if (attacker.get("char_class") == "Rogue" and advantage) else 0
@@ -129,6 +167,16 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
             damage_dealt += sneak_dmg["total"]
         if defender.get("raging"):
             damage_dealt = damage_dealt // 2
+
+        # Uncanny Dodge (real 5E Rogue feature, level 5+): halves damage
+        # from a confirmed hit, once per round -- shares the same
+        # reaction economy as Shield above (reaction_available already
+        # reflects whether Shield used it first this round).
+        if (reaction_available and defender.get("char_class") == "Rogue"
+                and defender.get("level", 1) >= 5 and damage_dealt > 0):
+            damage_dealt = damage_dealt // 2
+            defender["reaction_used_round"] = round_number
+            uncanny_dodge_triggered = True
 
         # A Warlock's Otherworldly Patron (The Fiend, the default patron
         # for every Warlock here -- see resolve_attack's Martial Arts
@@ -173,6 +221,8 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         "damage_dealt": damage_dealt,
         "relentless_endurance_triggered": relentless_endurance_triggered,
         "dark_ones_blessing_gained": dark_ones_blessing_gained,
+        "shield_reaction_triggered": shield_reaction_triggered,
+        "uncanny_dodge_triggered": uncanny_dodge_triggered,
         "defender_hp_remaining": defender["hp_current"],
         "defender_hp_max": defender.get("hp_max", defender["hp_current"]),
     }

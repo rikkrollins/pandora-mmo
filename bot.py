@@ -981,6 +981,15 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
             spell_slots_max=spells_module.starting_spell_slots_for_class(char_class),
         )
 
+        # Auto-equip starting gear (2026-07-15, per Coffee): whatever
+        # weapon/armor/shield STARTING_EQUIPMENT just granted is
+        # immediately worn, not left sitting inert in the backpack the
+        # way every character's gear was before equip_item existed --
+        # replaces the flat BASE_ARMOR_CLASS approximation above with
+        # the character's REAL equipped armor's AC, which is more
+        # accurate now that armor actually means something.
+        db.auto_equip_best_gear(update.effective_user.id)
+
         # Grant real starting spells based on class: ALL cantrips (known
         # outright at-will, per real 5E rules) plus up to 2 leveled spells —
         # but ONLY for classes that actually have spell slots at level 1.
@@ -1022,6 +1031,7 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
             f"CON {character['constitution']} INT {character['intelligence']} "
             f"WIS {character['wisdom']} CHA {character['charisma']}\n"
             f"Gold: {character['gold']}\n"
+            f"{_format_equipped_line(character)}"
             f"{spell_line}"
             f"{traits_line}"
             f"{features_line}"
@@ -1232,6 +1242,22 @@ def _personality_for_character_name(name: str) -> str | None:
     return None
 
 
+async def _announce_reaction(update: Update, defender: dict, result: dict) -> None:
+    """
+    A short, deterministic (no Ollama call -- reactions happen often
+    enough in a fight that adding another 30-160s narration call per
+    trigger isn't worth it) follow-up line so a Shield/Uncanny Dodge
+    trigger is never silently invisible to players -- without this, an
+    attack that "should" have hit going wide, or damage being oddly
+    halved, would look like an unexplained inconsistency rather than a
+    real reaction firing.
+    """
+    if result.get("shield_reaction_triggered"):
+        await _safe_send(update, f"🛡️ **{defender['name']}** casts Shield as a reaction — the attack goes wide!")
+    elif result.get("uncanny_dodge_triggered"):
+        await _safe_send(update, f"🌀 **{defender['name']}** uses Uncanny Dodge, halving the damage!")
+
+
 async def _post_narrated(update: Update, character: dict, action_text: str,
                           mechanical_result: dict, session: sessions.Session) -> None:
     actor_personality = _personality_for_character_name(character.get("name", ""))
@@ -1250,14 +1276,36 @@ async def _post_narrated(update: Update, character: dict, action_text: str,
     await _safe_send(update, message)
 
 
+def _refresh_real_player_spell_slots(character: dict) -> None:
+    """
+    Keeps the in-memory combat participant dict's spell_slots_current
+    honest for a real player right before an attack that might trigger
+    Shield's reaction (2026-07-15). _do_cast_spell spends slots via a
+    direct, separate DB write (db.spend_spell_slot) that never touches
+    session.participants, so a player who cast a spell earlier in the
+    same fight would otherwise have Shield check a stale, too-high slot
+    count here. AI companions never cast spells on their own turn (see
+    _resolve_ai_turns -- only a plain attack), so their in-memory value
+    can't go stale this way and doesn't need refreshing.
+    """
+    if character.get("is_ai"):
+        return
+    fresh = db.get_character(character["telegram_user_id"])
+    if fresh:
+        character["spell_slots_current"] = fresh["spell_slots_current"]
+
+
 def _sync_player_to_db(character: dict) -> None:
     """
-    Persists a real player's combat-mutated state (HP, death saves) back
-    to the database. Combat mutates participant dicts in-memory only —
-    without this, damage taken mid-fight would silently vanish the
-    moment combat ends or another /sheet lookup re-reads the database.
-    AI companions/monsters have no database row to sync (negative
-    synthetic IDs), so this is a no-op for them.
+    Persists a real player's combat-mutated state (HP, death saves,
+    spell slots) back to the database. Combat mutates participant dicts
+    in-memory only — without this, damage taken mid-fight would
+    silently vanish the moment combat ends or another /sheet lookup
+    re-reads the database. AI companions/monsters have no database row
+    to sync (negative synthetic IDs), so this is a no-op for them.
+    spell_slots_current is included here (2026-07-15) because Shield's
+    reaction spends a real slot mid-combat now — without persisting it,
+    a defender could Shield away every hit for free every fight.
     """
     if character.get("is_ai"):
         return
@@ -1266,6 +1314,7 @@ def _sync_player_to_db(character: dict) -> None:
         hp_current=character["hp_current"],
         death_save_successes=character.get("death_save_successes", 0),
         death_save_failures=character.get("death_save_failures", 0),
+        spell_slots_current=character.get("spell_slots_current", 0),
     )
 
 
@@ -1570,13 +1619,17 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
                 break
             target = min(opposing, key=lambda p: p["hp_current"])
             adv, disadv = _attack_advantage_disadvantage(current, target)
+            _refresh_real_player_spell_slots(target)
             result = resolve_attack(
                 current, target, _weapon_for_attacker(current), advantage=adv, disadvantage=disadv,
                 defender_relentless_endurance_available=_relentless_endurance_available(target),
+                round_number=session.round_number,
             )
             if result["relentless_endurance_triggered"]:
                 db.use_feature(target["telegram_user_id"], "relentless_endurance")
             _sync_player_to_db(target)
+            if result["shield_reaction_triggered"] or result["uncanny_dodge_triggered"]:
+                await _announce_reaction(update, target, result)
 
             applied_condition = None
             if result["hit"] and current.get("on_hit_condition"):
@@ -1992,13 +2045,17 @@ async def _do_attack(update: Update, action_text: str) -> None:
         target = _pick_target(action_text, opposing)
 
         adv, disadv = _attack_advantage_disadvantage(attacker, target)
+        _refresh_real_player_spell_slots(target)
         result = resolve_attack(
             attacker, target, _weapon_for_attacker(attacker), advantage=adv, disadvantage=disadv,
             defender_relentless_endurance_available=_relentless_endurance_available(target),
+            round_number=session.round_number,
         )
         if result["relentless_endurance_triggered"]:
             db.use_feature(target["telegram_user_id"], "relentless_endurance")
         _sync_player_to_db(target)
+        if result["shield_reaction_triggered"] or result["uncanny_dodge_triggered"]:
+            await _announce_reaction(update, target, result)
         await _post_narrated(update, attacker, action_text, result, session)
 
         removed = session.remove_defeated()
@@ -2505,10 +2562,13 @@ async def _do_flee(update: Update, action_text: str) -> None:
         # -- and reuses _format_combat_result with no flavor text for a
         # fast, fully deterministic result instead.
         opportunity_blocks = []
+        _refresh_real_player_spell_slots(fleeing)
         for enemy in session.living_on_side(session.opposing_side(user_id)):
             if fleeing["hp_current"] <= 0:
                 break
-            atk_result = resolve_attack(enemy, fleeing, DEFAULT_WEAPON)
+            atk_result = resolve_attack(
+                enemy, fleeing, _weapon_for_attacker(enemy), round_number=session.round_number,
+            )
             opportunity_blocks.append(_format_combat_result(
                 "", atk_result, enemy["name"], fleeing["name"],
             ))
@@ -3622,6 +3682,45 @@ def _format_npc_basic_info(npc: dict) -> str:
     return "\n".join(lines)
 
 
+def _format_equipped_line(character: dict) -> str:
+    """
+    Shared by _format_character_sheet and the character-creation
+    summary (2026-07-15, per Coffee) -- what's actually worn, weapon/
+    armor/shield each shown honestly as "none" rather than omitted
+    when empty, so it's obvious at a glance there's nothing to equip.
+    """
+    weapon_item = items_module.get_item(character.get("equipped_weapon") or "")
+    armor_item = items_module.get_item(character.get("equipped_armor") or "")
+    shield_item = items_module.get_item(character.get("equipped_shield") or "")
+    parts = [weapon_item["name"] if weapon_item else "no weapon",
+             armor_item["name"] if armor_item else "no armor"]
+    if shield_item:
+        parts.append(shield_item["name"])
+    return f"Equipped: {', '.join(parts)}\n"
+
+
+def _format_carried_gear_line(character: dict) -> str:
+    """
+    Real weapons/armor/shields sitting in the backpack, NOT currently
+    equipped (2026-07-15, per Coffee) -- a player asking "what could I
+    equip" shouldn't have to cross-reference their own inventory list
+    against items.py's type field by hand. Empty string (no line at
+    all) if nothing equippable is being carried unequipped.
+    """
+    equipped_ids = {character.get("equipped_weapon"), character.get("equipped_armor"),
+                    character.get("equipped_shield")}
+    carried_names = []
+    for item_id, qty in (character.get("inventory") or {}).items():
+        if qty <= 0 or item_id in equipped_ids:
+            continue
+        item = items_module.get_item(item_id)
+        if item and item.get("type") in ("weapon", "armor", "shield"):
+            carried_names.append(item["name"])
+    if not carried_names:
+        return ""
+    return f"Carried but not equipped: {', '.join(sorted(carried_names))}\n"
+
+
 def _format_character_sheet(character: dict) -> str:
     """
     Full sheet text for one character -- shared by _do_check_sheet (the
@@ -3652,18 +3751,15 @@ def _format_character_sheet(character: dict) -> str:
     ]
     skills_line = f"Skills: {', '.join(skill_lines) if skill_lines else 'None practiced yet'}\n"
     name_line = f"**{character['name']}**" + (" *(AI companion)*" if character.get("is_ai") else "")
-    weapon_item = items_module.get_item(character.get("equipped_weapon") or "")
-    armor_item = items_module.get_item(character.get("equipped_armor") or "")
-    equipped_line = (
-        f"Equipped: {weapon_item['name'] if weapon_item else 'no weapon'}, "
-        f"{armor_item['name'] if armor_item else 'no armor'}\n"
-    )
+    equipped_line = _format_equipped_line(character)
+    carried_gear_line = _format_carried_gear_line(character)
     return (
         f"{name_line} — {character['race']} {character['char_class']}\n"
         f"Level {character['level']} | XP {character['xp']}\n"
         f"HP {character['hp_current']}/{character['hp_max']} | AC {character['armor_class']}\n"
         f"Gold: {character['gold']} | Guild: {character.get('guild') or 'None'}\n"
         f"{equipped_line}"
+        f"{carried_gear_line}"
         f"Spells known: {', '.join(spell_names) if spell_names else 'None'}\n"
         f"{slot_line}"
         f"Racial traits: {'; '.join(race_data['traits']) if race_data else 'None'}\n"
@@ -4873,12 +4969,20 @@ async def _do_use_item(update: Update, text: str) -> None:
 async def _do_equip_item(update: Update, text: str) -> None:
     """
     Real bug from the same reverse-playthrough finding as _do_use_item
-    (2026-07-15): items.py's weapon (damage_dice/ability) and armor
-    (ac_base) fields existed the whole time but nothing ever equipped
-    anything, so combat always used one hardcoded default weapon and
-    armor_class never changed after character creation regardless of
-    what was bought. db.equip_item does the real work (validation,
-    armor_class recompute); this just parses which item from free text.
+    (2026-07-15): items.py's weapon (damage_dice/ability), armor
+    (ac_base), and shield (ac_bonus) fields existed the whole time but
+    nothing ever equipped anything, so combat always used one
+    hardcoded default weapon and armor_class never changed after
+    character creation regardless of what was bought. db.equip_item
+    does the real work (validation, armor_class recompute); this just
+    parses which item, and for whom, from free text.
+
+    Supports helping another party member gear up too (per Coffee:
+    "equip Sera with the longbow") -- same location-scoped "physically
+    present" lookup as _do_give_item, defaulting to the caller's own
+    character when no other real party member is named. The item comes
+    from the TARGET's own inventory, not the caller's -- this is
+    "help them equip what they're already carrying," not a transfer.
     """
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -4887,23 +4991,66 @@ async def _do_equip_item(update: Update, text: str) -> None:
         )
         return
 
+    target = character
+    others = [
+        p for p in _get_combat_eligible_party_members(character["current_location"])
+        if p["telegram_user_id"] != character["telegram_user_id"]
+    ]
+    lowered = text.lower()
+    named_other = next((p for p in others if p["name"].lower() in lowered), None)
+    if named_other is not None:
+        target = named_other
+
     equippable_ids = [
-        item_id for item_id in character["inventory"]
-        if (items_module.get_item(item_id) or {}).get("type") in ("weapon", "armor")
+        item_id for item_id in target["inventory"]
+        if (items_module.get_item(item_id) or {}).get("type") in ("weapon", "armor", "shield")
     ]
     item_id = items_module.find_item_mentioned_in_text(text, candidate_ids=equippable_ids)
     if item_id is None:
+        who = "you" if target is character else target["name"]
         await update.effective_chat.send_message(
-            "Equip what, exactly? Name a weapon or armor piece you're actually carrying.",
+            f"Equip what, exactly? Name a weapon, armor, or shield {who} actually {'are' if who == 'you' else 'is'} carrying.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
 
-    success, message, _ = db.equip_item(update.effective_user.id, item_id)
+    success, message, _ = db.equip_item(target["telegram_user_id"], item_id)
     if not success:
         await update.effective_chat.send_message(message, message_thread_id=config.TOPIC_ADVENTURE_ID)
         return
-    await _safe_send(update, f"⚔️ {message}")
+    prefix = "" if target is character else f"**{target['name']}**: "
+    await _safe_send(update, f"⚔️ {prefix}{message}")
+
+
+async def _do_auto_equip_gear(update: Update, text: str) -> None:
+    """
+    Auto-equip (2026-07-15, per Coffee): picks the real best weapon/
+    armor/shield out of whatever's actually carried and equips all of
+    them, via db.auto_equip_best_gear -- so a player doesn't need to
+    know every item's exact damage die or AC to get sensible gear on.
+    Supports naming another real party member ("help Borin gear up"),
+    same location-scoped lookup as _do_equip_item/_do_give_item.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    target = character
+    others = [
+        p for p in _get_combat_eligible_party_members(character["current_location"])
+        if p["telegram_user_id"] != character["telegram_user_id"]
+    ]
+    lowered = text.lower()
+    named_other = next((p for p in others if p["name"].lower() in lowered), None)
+    if named_other is not None:
+        target = named_other
+
+    summary, _ = db.auto_equip_best_gear(target["telegram_user_id"])
+    prefix = "" if target is character else f"**{target['name']}**: "
+    await _safe_send(update, f"⚔️ {prefix}{summary}")
 
 
 _QUANTITY_WORDS = {
@@ -5896,6 +6043,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_use_item(update, intent.get("raw_text", text))
     elif action == "equip_item":
         await _do_equip_item(update, intent.get("raw_text", text))
+    elif action == "auto_equip":
+        await _do_auto_equip_gear(update, intent.get("raw_text", text))
     elif action == "show_map":
         await _do_show_map(update)
     elif action == "gather":
@@ -6247,6 +6396,113 @@ async def dev_topic_document_handler(update: Update, context: ContextTypes.DEFAU
         f"Claude Code session to pull from when building the campaign-loading feature.",
         thread_id=config.TOPIC_DEVELOPMENT_ID,
     )
+
+
+DEV_VIDEOS_DIR = "dev_videos"
+VIDEO_FRAME_INTERVAL_SECONDS = 2  # one saved frame every N seconds -- enough to catch each page of a slow page-by-page walkthrough without saving hundreds of near-duplicate frames
+
+
+async def dev_topic_video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Per Coffee's request (2026-07-15): sending the campaign as a video,
+    showing it page by page, rather than one screenshot/PDF at a time.
+    Mirrors dev_topic_photo_handler's pattern exactly (download to disk,
+    log the path, never claim to "see" it from the live bot process
+    itself) -- videos previously had NO handler at all (only filters.
+    TEXT/PHOTO/Document.ALL were registered), so a video sent before
+    this existed would have produced zero response, the same silent-
+    failure gap photos had before 2026-07-11.
+
+    Frame extraction uses the `imageio` package (which bundles its own
+    ffmpeg binary via imageio-ffmpeg, invoked internally by that
+    library, not by any subprocess/os.system call added here) to pull
+    one frame every VIDEO_FRAME_INTERVAL_SECONDS and save it as a real
+    JPEG a live Claude Code session can then read directly with vision
+    (the same way saved screenshots already get read) -- this bot
+    process still never "sees" the video itself, same disclosed
+    limitation as the photo handler.
+    """
+    if update.message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
+        return
+
+    is_owner = await _is_group_owner(update, context)
+    if is_owner is None:
+        await _safe_send(
+            update,
+            "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
+            thread_id=config.TOPIC_DEVELOPMENT_ID,
+        )
+        return
+    if not is_owner:
+        return
+
+    os.makedirs(DEV_VIDEOS_DIR, exist_ok=True)
+    video = update.message.video
+    file = await context.bot.get_file(video.file_id)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    video_filename = f"{timestamp}_{video.file_unique_id}.mp4"
+    video_path = os.path.join(DEV_VIDEOS_DIR, video_filename)
+    await file.download_to_drive(video_path)
+
+    caption = (update.message.caption or "").strip()
+    logger.info(f"[dev_topic_video] user={update.effective_user.id} path={video_path!r} caption={caption!r}")
+
+    frame_count, frames_dir, extraction_error = await asyncio.to_thread(_extract_video_frames, video_path)
+
+    if extraction_error:
+        await _safe_send(
+            update,
+            f"🎥 Got the video — saved at `{video_path}`, but frame extraction failed ({extraction_error}). "
+            f"The raw video file is still there for a live session to look at directly.",
+            thread_id=config.TOPIC_DEVELOPMENT_ID,
+        )
+        return
+
+    await _safe_send(
+        update,
+        f"🎥 Got it — saved at `{video_path}`, and extracted {frame_count} frame(s) "
+        f"(one every {VIDEO_FRAME_INTERVAL_SECONDS}s) to `{frames_dir}` for a live Claude Code session "
+        f"to read page by page. I can't see it from here myself (no video capability in this running "
+        f"process) — same as screenshots, it's ready for a live session to look at directly.",
+        thread_id=config.TOPIC_DEVELOPMENT_ID,
+    )
+
+
+def _extract_video_frames(video_path: str) -> tuple[int, str, str | None]:
+    """
+    Runs in a worker thread (see asyncio.to_thread above) since imageio's
+    video decoding is blocking I/O/CPU work -- returns
+    (frame_count, frames_dir, error_message_or_None). Never raises: a
+    live session should still be able to look at the raw video even if
+    frame extraction itself fails for some reason (corrupt file, codec
+    imageio can't handle, etc.).
+    """
+    frames_dir = video_path + "_frames"
+    try:
+        import imageio.v3 as iio
+    except ImportError as e:
+        return 0, frames_dir, f"imageio not installed ({e})"
+
+    try:
+        os.makedirs(frames_dir, exist_ok=True)
+        # imopen's context-manager form (rather than the immeta/imiter
+        # shorthands) so the underlying ffmpeg subprocess pipe is always
+        # closed -- confirmed via a real test run that the shorthand form
+        # leaves it open (ResourceWarning), which matters here since this
+        # bot runs 24/7 and could see many video uploads over time.
+        with iio.imopen(video_path, "r", plugin="FFMPEG") as reader:
+            fps = reader.metadata().get("fps", 30) or 30
+            frame_stride = max(int(fps * VIDEO_FRAME_INTERVAL_SECONDS), 1)
+            saved = 0
+            for i, frame in enumerate(reader.iter()):
+                if i % frame_stride != 0:
+                    continue
+                frame_path = os.path.join(frames_dir, f"frame_{saved:04d}.jpg")
+                iio.imwrite(frame_path, frame)
+                saved += 1
+        return saved, frames_dir, None
+    except Exception as e:
+        return 0, frames_dir, str(e)
 
 
 _NAMED_SHEET_EXCLUDED_WORDS = ("the", "a", "an", "her", "his", "their", "your", "our")
@@ -6880,6 +7136,7 @@ def build_application() -> Application:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message_router))
     application.add_handler(MessageHandler(filters.PHOTO, dev_topic_photo_handler))
     application.add_handler(MessageHandler(filters.Document.ALL, dev_topic_document_handler))
+    application.add_handler(MessageHandler(filters.VIDEO, dev_topic_video_handler))
 
     application.add_error_handler(_log_unhandled_error)
 

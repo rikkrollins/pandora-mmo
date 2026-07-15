@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 
 import config
 import items as items_module
-from rules.dice import ability_modifier
+from rules.dice import ability_modifier, average_damage
 from rules.leveling import (
     level_for_xp, proficiency_bonus_for_level,
     hp_gain_for_level, ASI_LEVELS, CLASS_PRIMARY_ABILITY,
@@ -240,6 +240,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN equipped_weapon TEXT")
         if "equipped_armor" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN equipped_armor TEXT")
+        if "equipped_shield" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN equipped_shield TEXT")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -410,16 +412,21 @@ def remove_item(telegram_user_id: int, item_id: str, quantity: int = 1) -> tuple
 
 def equip_item(telegram_user_id: int, item_id: str) -> tuple[bool, str, dict | None]:
     """
-    Equip a weapon or armor item the character is actually carrying.
-    Returns (success, message, updated_character). Real bug fixed
-    2026-07-15: items.py's weapon (damage_dice/ability) and armor
-    (ac_base) fields existed the whole time but nothing ever equipped
-    anything or read them in combat -- every attack used one hardcoded
-    default weapon regardless of what was bought/found, and armor_class
-    never changed after character creation. Equipping armor recomputes
-    armor_class the same way character creation does (ac_base + DEX
-    modifier) -- a deliberate simplification (no heavy-armor-caps-DEX
-    nuance) consistent with this build's existing style elsewhere.
+    Equip a weapon, armor, or shield item the character is actually
+    carrying. Returns (success, message, updated_character). Real bug
+    fixed 2026-07-15: items.py's weapon (damage_dice/ability), armor
+    (ac_base), and shield (ac_bonus) fields existed the whole time but
+    nothing ever equipped anything or read them in combat -- every
+    attack used one hardcoded default weapon regardless of what was
+    bought/found, and armor_class never changed after character
+    creation. Equipping armor recomputes armor_class the same way
+    character creation does (ac_base + DEX modifier) -- a deliberate
+    simplification (no heavy-armor-caps-DEX nuance) consistent with
+    this build's existing style elsewhere. A shield is a real 5E
+    SEPARATE slot from armor (worn in addition to it, not instead),
+    so its ac_bonus is added on top of whatever armor_class already
+    is, rather than replacing it -- and correctly re-added if armor is
+    equipped/changed afterward while a shield is already worn.
     """
     character = get_character(telegram_user_id)
     if character is None:
@@ -428,17 +435,85 @@ def equip_item(telegram_user_id: int, item_id: str) -> tuple[bool, str, dict | N
         return False, "You don't have that to equip.", character
 
     item = items_module.get_item(item_id)
-    if item is None or item.get("type") not in ("weapon", "armor"):
+    if item is None or item.get("type") not in ("weapon", "armor", "shield"):
         return False, f"{item['name'] if item else item_id} isn't something you can equip.", character
 
     if item["type"] == "weapon":
         updated = update_character(telegram_user_id, equipped_weapon=item_id)
         return True, f"You equip the {item['name']}.", updated
 
-    dex_mod = ability_modifier(character["dexterity"])
-    new_ac = item["ac_base"] + dex_mod
-    updated = update_character(telegram_user_id, equipped_armor=item_id, armor_class=new_ac)
-    return True, f"You put on the {item['name']} (AC {new_ac}).", updated
+    current_shield_bonus = 0
+    if character.get("equipped_shield"):
+        current_shield = items_module.get_item(character["equipped_shield"])
+        if current_shield:
+            current_shield_bonus = current_shield.get("ac_bonus", 0)
+
+    if item["type"] == "armor":
+        dex_mod = ability_modifier(character["dexterity"])
+        new_ac = item["ac_base"] + dex_mod + current_shield_bonus
+        updated = update_character(telegram_user_id, equipped_armor=item_id, armor_class=new_ac)
+        return True, f"You put on the {item['name']} (AC {new_ac}).", updated
+
+    # Shield: additive on top of current AC, swapping out any
+    # previously-equipped shield's bonus first rather than stacking both.
+    new_ac = character["armor_class"] - current_shield_bonus + item["ac_bonus"]
+    updated = update_character(telegram_user_id, equipped_shield=item_id, armor_class=new_ac)
+    return True, f"You raise the {item['name']} (AC {new_ac}).", updated
+
+
+def auto_equip_best_gear(telegram_user_id: int) -> tuple[str, dict | None]:
+    """
+    Picks the real best weapon (highest average damage -- see
+    rules.dice.average_damage) and real best armor (highest ac_base)
+    out of whatever this character is actually carrying, and equips
+    both via equip_item above. Added 2026-07-15 alongside equip_item
+    itself, per Coffee: a player shouldn't have to know every weapon's
+    exact damage die to get sensible gear on -- this picks for them.
+    Always returns a real, honest summary, even if there was nothing
+    to equip in one or both slots (never silently no-ops).
+    """
+    character = get_character(telegram_user_id)
+    if character is None:
+        return "No character found.", None
+
+    weapon_ids = [
+        item_id for item_id, qty in character["inventory"].items()
+        if qty > 0 and (items_module.get_item(item_id) or {}).get("type") == "weapon"
+    ]
+    armor_ids = [
+        item_id for item_id, qty in character["inventory"].items()
+        if qty > 0 and (items_module.get_item(item_id) or {}).get("type") == "armor"
+    ]
+
+    messages = []
+    if weapon_ids:
+        best_weapon = max(
+            weapon_ids,
+            key=lambda i: average_damage(items_module.get_item(i)["damage_dice"],
+                                          items_module.get_item(i).get("damage_bonus", 0)),
+        )
+        _, msg, character = equip_item(telegram_user_id, best_weapon)
+        messages.append(msg)
+    else:
+        messages.append("No weapon carried to equip.")
+
+    if armor_ids:
+        best_armor = max(armor_ids, key=lambda i: items_module.get_item(i)["ac_base"])
+        _, msg, character = equip_item(telegram_user_id, best_armor)
+        messages.append(msg)
+    else:
+        messages.append("No armor carried to equip.")
+
+    shield_ids = [
+        item_id for item_id, qty in character["inventory"].items()
+        if qty > 0 and (items_module.get_item(item_id) or {}).get("type") == "shield"
+    ]
+    if shield_ids:
+        best_shield = max(shield_ids, key=lambda i: items_module.get_item(i)["ac_bonus"])
+        _, msg, character = equip_item(telegram_user_id, best_shield)
+        messages.append(msg)
+
+    return " ".join(messages), character
 
 
 def move_character(telegram_user_id: int, new_location: str) -> dict | None:
