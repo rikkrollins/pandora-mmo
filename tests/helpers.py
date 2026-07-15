@@ -41,13 +41,27 @@ class FakeMessage:
         self.message_thread_id = thread_id if thread_id is not None else config.TOPIC_ADVENTURE_ID
 
 
+class FakeSentMessage:
+    """Real enough to stand in for python-telegram-bot's Message where a test needs .delete()."""
+    def __init__(self, sink):
+        self.deleted = False
+        self._sink = sink
+
+    async def delete(self):
+        self.deleted = True
+        self._sink.append("<deleted>")
+
+
 class FakeChat:
     def __init__(self, sink):
         self.id = -999
         self._sink = sink
+        self.last_sent_message = None
 
     async def send_message(self, text, **kwargs):
         self._sink.append(text)
+        self.last_sent_message = FakeSentMessage(self._sink)
+        return self.last_sent_message
 
 
 class FakeUser:

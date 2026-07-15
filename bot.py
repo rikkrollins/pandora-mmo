@@ -1139,12 +1139,35 @@ async def _maybe_speak(update: Update, text: str, thread_id: int | None) -> None
     if not speakable:
         return
     try:
-        await update.effective_chat.send_message(
+        trigger_message = await update.effective_chat.send_message(
             f"/tts {speakable}",
             message_thread_id=thread_id if thread_id is not None else config.TOPIC_ADVENTURE_ID,
         )
     except TelegramError as e:
         logger.warning(f"[tts] failed to trigger TextTSBot: {e!r}")
+        return
+
+    # Confirmed live 2026-07-14 (Coffee): triggering @TextTSBot this way
+    # leaves our own "/tts <text>" command sitting in the chat as a
+    # real, visible SECOND copy of the narration alongside the actual
+    # text reply -- Telegram has no way to send another bot a command
+    # without it being a real message. @TextTSBot already receives its
+    # own copy of this update the instant it's sent (independent of
+    # what happens to the message afterward), so deleting our own copy
+    # shortly after doesn't affect whether it actually speaks -- just
+    # cleans up the visible duplicate. Scheduled as a background task,
+    # not awaited here, so this doesn't add a delay to every TTS-enabled
+    # message's real send path -- a short delay before deleting is a
+    # safety margin against @TextTSBot's own polling interval, not
+    # something the caller needs to wait on.
+    async def _delete_trigger_after_delay():
+        await asyncio.sleep(2)
+        try:
+            await trigger_message.delete()
+        except TelegramError as e:
+            logger.warning(f"[tts] couldn't delete the trigger message afterward: {e!r}")
+
+    asyncio.create_task(_delete_trigger_after_delay())
 
 
 def _personality_for_character_name(name: str) -> str | None:

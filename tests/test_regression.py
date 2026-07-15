@@ -155,6 +155,20 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_keyword_fallback("Recruit sera to my party", known_npcs)["action"], "recruit_npc")
         self.assertEqual(_keyword_fallback("Invite Sera to my party", known_npcs)["action"], "recruit_npc")
 
+    # -- TTS no longer leaves a visible duplicate message (post-1.8.2) -
+    async def test_tts_trigger_message_gets_cleaned_up(self):
+        db.set_setting("tts_enabled", "1")
+        try:
+            sink = []
+            update = FakeUpdate(333333, "irrelevant", sink)
+            await bot._maybe_speak(update, "The goblin attacks!", None)
+            self.assertEqual(sink, ["/tts The goblin attacks!"])
+            self.assertFalse(update.effective_chat.last_sent_message.deleted)
+            await __import__("asyncio").sleep(2.5)
+            self.assertTrue(update.effective_chat.last_sent_message.deleted)
+        finally:
+            db.set_setting("tts_enabled", "0")
+
     # -- "What am I carrying" never needs Ollama (post-1.8.1) ---------
     def test_inventory_question_answered_without_ollama(self):
         character = {"inventory": {"healing_potion": 2, "shortsword": 1}}

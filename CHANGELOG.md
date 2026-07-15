@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.8.3] — TTS no longer leaves a visible duplicate message
+
+Per Coffee: "The TTS is giving two messages — one is the original, the
+other is the tts... there should only be one message." Triggering
+@TextTSBot works by sending it a real `/tts <text>` command message —
+Telegram has no way to hand another bot a command invisibly — so that
+trigger message sat in the chat as a second, redundant copy of the
+narration text right below the real one.
+
+Fixed by capturing the sent trigger message and deleting it ~2 seconds
+later, as a background task that doesn't block the real reply's send
+path. @TextTSBot already receives its own copy of the update the
+instant the message is sent, independent of what happens to it
+afterward, so deleting our copy doesn't affect whether it actually
+speaks — it just cleans up the visible duplicate. Added as a permanent
+regression test.
+
 ## [1.8.2] — "What am I carrying" never fails again, plus a permanent regression suite
 
 - Real player report ("Sugar", Support topic): "What am I carrying?"
