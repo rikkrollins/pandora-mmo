@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.10.0] — The Unmoored Isle is finally reachable
+
+First real finding from a systematic reverse-playthrough sweep
+(mapping the full location graph before playing it end to end):
+**The Unmoored Isle** — a real location with its own quest ("What
+Waits Above"), real interactables, and a `requires_item` gate on
+`shard_of_dim_light` — had NO connection from anywhere in the entire
+campaign. Its own `connections` list was empty, and no other location
+listed it as a connection, descends_to, or ascends_to target. The
+shard itself was real and obtainable (a reward from "The Wrong Color"
+at Glimmerdeep Grotto), so the item-gate half of the design was
+genuinely built — it just never got wired to an actual path. This
+was completely dead, unreachable content until now.
+
+Fixed by adding `ascends_to: the_unmoored_isle` to The First City (the
+campaign's deepest, most narratively "final" location, level 7+) —
+`_do_move`'s existing `requires_item` check already handles the gating
+correctly once the destination is reachable at all; no new mechanic
+needed. Verified live: blocked without the shard, genuinely reachable
+with it. Added as a permanent regression test.
+
 ## [1.9.2] — TTS coverage audit completed for every action
 
 Finishes the audit started in 1.9.0: every action handler's primary

@@ -442,6 +442,7 @@
         "connections": [
           "the_hush_below"
         ],
+        "ascends_to": "the_unmoored_isle",
         "hidden": true,
         "min_level": 7,
         "quest_items": [

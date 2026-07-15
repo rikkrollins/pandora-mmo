@@ -215,6 +215,32 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         finally:
             db.set_setting("tts_enabled", "0")
 
+    # -- The Unmoored Isle is actually reachable (post-1.9.2) ---------
+    async def test_unmoored_isle_reachable_with_shard_blocked_without(self):
+        """
+        Found while mapping the location graph for the reverse
+        playthrough: The Unmoored Isle (real quest, real interactables,
+        a requires_item gate) had no connection from ANYWHERE in the
+        whole campaign -- completely unreachable dead content. Fixed
+        by adding ascends_to on The First City.
+        """
+        user_id = 888888
+        make_basic_character(user_id, "Roamer", current_location="the_first_city")
+        db.update_character(user_id, level=10)
+
+        sink = []
+        await bot.adventure_master_handler(
+            FakeUpdate(user_id, "Ascend to the Unmoored Isle", sink), DummyContext())
+        character = db.get_character(user_id)
+        self.assertEqual(character["current_location"], "the_first_city")  # blocked, no shard
+
+        db.add_item(user_id, "shard_of_dim_light", 1)
+        sink.clear()
+        await bot.adventure_master_handler(
+            FakeUpdate(user_id, "Ascend to the Unmoored Isle", sink), DummyContext())
+        character = db.get_character(user_id)
+        self.assertEqual(character["current_location"], "the_unmoored_isle")
+
     # -- "What am I carrying" never needs Ollama (post-1.8.1) ---------
     def test_inventory_question_answered_without_ollama(self):
         character = {"inventory": {"healing_potion": 2, "shortsword": 1}}
