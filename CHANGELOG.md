@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.10.5] — The campaign's four story chapters are finally visible in play
+
+Sixth finding from the reverse-playthrough sweep: `campaign.json`'s
+`story_arcs` mapped the whole main questline into four real chapters
+("Discovery" → "The Descent" → "What Was Buried" → "What Waits Above",
+the same climax added in 1.10.1/1.10.2) with titles, descriptions, and
+required levels — but nothing in `bot.py` ever read it. Players had no
+way to know they were in a structured story at all.
+
+- Finishing the last quest in a chapter now shows a real "🌟 Chapter
+  complete" beat alongside the quest-complete message.
+- The quest journal ("check my quests") now opens with the character's
+  current chapter title and description, so the story is visible
+  throughout, not just at each chapter's end.
+
 ## [1.10.4] — Guild membership benefits are finally real, not just a database flag
 
 Fifth finding from the reverse-playthrough sweep: `guilds.py` defined

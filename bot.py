@@ -2833,6 +2833,55 @@ def _npc_quest_facts(character: dict, npc_id: str) -> str | None:
     )
 
 
+def _current_story_arc(character: dict) -> tuple[str, dict] | None:
+    """
+    The earliest story arc (in campaign.json's own narrative order --
+    Discovery -> Descent -> What Was Buried -> What Waits Above) that
+    still has at least one quest this character hasn't completed yet.
+    None once every arc's quests are all done (the story's finished).
+    """
+    completed = set(character["completed_quests"])
+    for arc_id, arc in CAMPAIGN.get("story_arcs", {}).items():
+        if not set(arc.get("quests", [])).issubset(completed):
+            return arc_id, arc
+    return None
+
+
+def _story_arc_for_quest(quest_id: str) -> tuple[str, dict] | None:
+    """
+    Which story arc (if any) a quest belongs to, per campaign.json's
+    story_arcs -- this data mapped the whole campaign's main questline
+    (Discovery -> The Descent -> What Was Buried -> What Waits Above)
+    but nothing in bot.py ever read it (2026-07-15 reverse-playthrough
+    finding). Sorted so the check below always finds the LOWEST arc a
+    quest appears in first, matching story_arcs' own narrative order.
+    """
+    for arc_id, arc in CAMPAIGN.get("story_arcs", {}).items():
+        if quest_id in arc.get("quests", []):
+            return arc_id, arc
+    return None
+
+
+def _chapter_complete_note(telegram_user_id: int, quest_id: str) -> str:
+    """
+    If completing quest_id just finished every quest in its story arc,
+    return a real "chapter complete" narrative beat -- otherwise "".
+    Uses the character's actual completed_quests, not level, so this
+    fires exactly when the last real quest in an arc is turned in.
+    """
+    arc_info = _story_arc_for_quest(quest_id)
+    if arc_info is None:
+        return ""
+    arc_id, arc = arc_info
+    character = db.get_character(telegram_user_id)
+    if character is None:
+        return ""
+    completed = set(character["completed_quests"])
+    if not set(arc["quests"]).issubset(completed):
+        return ""
+    return f"\n\n🌟 **Chapter complete: \"{arc['title']}\"** — {arc['description']}"
+
+
 async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest_id: str) -> None:
     quest = CAMPAIGN["quests"][quest_id]
     reward_xp = quest.get("reward_xp", 0)
@@ -2863,7 +2912,11 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         reward_parts.append(items_module.get_item(reward_item)["name"])
     reward_text = ", ".join(reward_parts) or "real progress, if nothing material"
 
-    await _safe_send(update_like, f"📜 **Quest complete: {quest['title']}!**\nYou've earned: {reward_text}.")
+    chapter_note = _chapter_complete_note(telegram_user_id, quest_id)
+    await _safe_send(
+        update_like,
+        f"📜 **Quest complete: {quest['title']}!**\nYou've earned: {reward_text}.{chapter_note}",
+    )
 
 
 async def _check_quest_completions_reach_location(update_like, telegram_user_id: int, location_id: str) -> None:
@@ -3166,6 +3219,13 @@ async def _do_check_quests(update: Update) -> None:
         return
 
     lines = ["📖 **Quest journal**"]
+    current_arc = _current_story_arc(character)
+    if current_arc:
+        _, arc = current_arc
+        lines.append(f"\n**Chapter: \"{arc['title']}\"** — {arc['description']}")
+    elif CAMPAIGN.get("story_arcs"):
+        lines.append("\n**The story is complete.** Every chapter's quests are behind you.")
+
     if character["active_quests"]:
         lines.append("\n**Active:**")
         for quest_id in character["active_quests"]:

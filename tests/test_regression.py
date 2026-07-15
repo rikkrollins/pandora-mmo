@@ -442,6 +442,51 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id)
         self.assertGreaterEqual(character["inventory"].get("scroll_magic_missile", 0), 1)
 
+    # -- story_arcs (campaign.json) mapped the whole campaign's main
+    #    questline but nothing read it -- wired into quest completion
+    #    and the quest journal (v1.10.5) --------------------------------
+    def test_fresh_character_starts_in_the_first_chapter(self):
+        character = {"completed_quests": []}
+        arc_id, arc = bot._current_story_arc(character)
+        self.assertEqual(arc_id, "arc_1_discovery")
+        self.assertEqual(arc["title"], "Discovery")
+
+    def test_chapter_advances_once_its_quests_are_all_done(self):
+        arc1_quests = bot.CAMPAIGN["story_arcs"]["arc_1_discovery"]["quests"]
+        character = {"completed_quests": list(arc1_quests)}
+        arc_id, _ = bot._current_story_arc(character)
+        self.assertEqual(arc_id, "arc_2_descent")
+
+    def test_chapter_complete_note_fires_on_the_arcs_last_quest(self):
+        use_test_db("tests/tmp/story_arc_test.db")
+        user_id = 888899
+        make_basic_character(user_id, "Arclight", current_location="crossroads_tavern")
+        arc1_quests = bot.CAMPAIGN["story_arcs"]["arc_1_discovery"]["quests"]
+        for q in arc1_quests:  # _complete_quest_and_announce calls db.complete_quest
+            db.complete_quest(user_id, q)  # BEFORE _chapter_complete_note, so this
+            # test mirrors that real ordering rather than checking a
+            # state that would never actually occur mid-flow.
+        note = bot._chapter_complete_note(user_id, arc1_quests[-1])
+        self.assertIn("Chapter complete", note)
+        self.assertIn("Discovery", note)
+
+    def test_no_chapter_complete_note_mid_chapter(self):
+        use_test_db("tests/tmp/story_arc_test2.db")
+        user_id = 888900
+        make_basic_character(user_id, "Arclight", current_location="crossroads_tavern")
+        arc1_quests = bot.CAMPAIGN["story_arcs"]["arc_1_discovery"]["quests"]
+        db.complete_quest(user_id, arc1_quests[0])  # only the first of several
+        note = bot._chapter_complete_note(user_id, arc1_quests[0])
+        self.assertEqual(note, "")
+
+    async def test_check_quests_shows_current_chapter(self):
+        use_test_db("tests/tmp/story_arc_test3.db")
+        user_id = 888901
+        make_basic_character(user_id, "Arclight", current_location="crossroads_tavern")
+        sink = []
+        await bot._do_check_quests(FakeUpdate(user_id, "check my quests", sink))
+        self.assertTrue(any("Discovery" in msg for msg in sink))
+
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
     """
