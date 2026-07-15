@@ -487,6 +487,64 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_check_quests(FakeUpdate(user_id, "check my quests", sink))
         self.assertTrue(any("Discovery" in msg for msg in sink))
 
+    # -- Player-to-player item trading (v1.10.7 backlog item) ----------
+    def test_give_item_phrasing_classified_correctly(self):
+        result = _keyword_fallback("give my healing potion to Sera", [])
+        self.assertEqual(result["action"], "give_item")
+
+    def test_give_me_a_clue_not_shadowed_by_give_item(self):
+        self.assertEqual(_keyword_fallback("give me a clue", [])["action"], "ask_clue")
+        self.assertEqual(_keyword_fallback("give me a hint about this quest", [])["action"], "ask_clue")
+
+    async def test_give_item_transfers_between_characters_at_the_same_location(self):
+        use_test_db("tests/tmp/give_item_test.db")
+        giver_id, recipient_id = 900001, 900002
+        make_basic_character(giver_id, "Giver", current_location="crossroads_tavern")
+        make_basic_character(recipient_id, "Receiver", current_location="crossroads_tavern")
+        db.add_item(giver_id, "healing_potion", 2)
+
+        sink = []
+        await bot._do_give_item(
+            FakeUpdate(giver_id, "give my healing potion to Receiver", sink),
+            "give my healing potion to Receiver",
+        )
+        combined = " ".join(sink)
+        self.assertIn("Receiver", combined)
+
+        giver = db.get_character(giver_id)
+        recipient = db.get_character(recipient_id)
+        self.assertEqual(giver["inventory"].get("healing_potion", 0), 1)
+        self.assertEqual(recipient["inventory"].get("healing_potion", 0), 1)
+
+    async def test_give_item_rejects_recipient_at_a_different_location(self):
+        use_test_db("tests/tmp/give_item_test2.db")
+        giver_id, elsewhere_id = 900003, 900004
+        make_basic_character(giver_id, "Giver2", current_location="crossroads_tavern")
+        make_basic_character(elsewhere_id, "Farflung", current_location="whispering_wood")
+        db.add_item(giver_id, "healing_potion", 1)
+
+        sink = []
+        await bot._do_give_item(
+            FakeUpdate(giver_id, "give my healing potion to Farflung", sink),
+            "give my healing potion to Farflung",
+        )
+        giver = db.get_character(giver_id)
+        self.assertEqual(giver["inventory"].get("healing_potion", 0), 1)  # nothing transferred
+
+    async def test_give_item_rejects_item_the_giver_doesnt_have(self):
+        use_test_db("tests/tmp/give_item_test3.db")
+        giver_id, recipient_id = 900005, 900006
+        make_basic_character(giver_id, "Giver3", current_location="crossroads_tavern")
+        make_basic_character(recipient_id, "Receiver3", current_location="crossroads_tavern")
+
+        sink = []
+        await bot._do_give_item(
+            FakeUpdate(giver_id, "give my healing potion to Receiver3", sink),
+            "give my healing potion to Receiver3",
+        )
+        recipient = db.get_character(recipient_id)
+        self.assertEqual(recipient["inventory"].get("healing_potion", 0), 0)
+
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
     """

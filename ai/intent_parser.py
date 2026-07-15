@@ -106,6 +106,8 @@ getting caught, with real consequences, not the same as "buy".
 - "accept_party_invite" is for accepting a pending party invite.
 - "leave_party" is for leaving a party the character is currently in.
 - "find_merchant" is for asking where to get supplies or find the nearest shop/merchant.
+- "give_item" is for handing/giving/trading a carried item to another real player or AI companion, \
+not a shop transaction (e.g. "give my healing potion to Sera", "hand Borin the torch"). Set "target" to the recipient's name.
 - "second_wind" is specifically a Fighter's real class feature: a bonus action to catch their breath and \
 recover some HP outside of resting (e.g. "I use second wind", "catch my breath", "second wind").
 - "rage" is specifically a Barbarian's real class feature: entering a rage before or during a fight for \
@@ -402,6 +404,16 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                                     "what's the clue", "need a hint", "give me a hint",
                                     "ask for a hint", "what clues"]):
         return {**base, "action": "ask_clue"}
+
+    # give_item (player-to-player trading, 2026-07-15): checked after
+    # ask_clue above so "give me a clue/hint" is never shadowed -- this
+    # only fires on "give"/"hand"/"trade" phrasing that also names a
+    # recipient via "to" or "them"/a name, distinct from ask_clue's
+    # "give me a ..." pattern (which never involves handing off to
+    # someone else).
+    if (any(w in lowered for w in ["give ", "hand ", "trade "])
+            and " to " in lowered and "give me a" not in lowered):
+        return {**base, "action": "give_item"}
 
     if any(w in lowered for w in ["i accept", "i'll do it", "ill do it", "count me in", "i'll help",
                                     "ill help", "i'll take the job", "i'll take it on"]):
@@ -724,7 +736,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
                 "answer_puzzle", "gamble", "chat", "examine", "flee", "resolve_choice",
                 "invite_to_party", "accept_party_invite", "leave_party", "find_merchant",
                 "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "arcane_recovery",
-                "make_campfire",
+                "make_campfire", "give_item",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

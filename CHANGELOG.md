@@ -2,6 +2,17 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.10.7] — Player-to-player item trading
+
+New feature (backlog item): "give my healing potion to Sera" now
+really transfers the item between characters, not just NPC shop
+buy/sell. Scoped to whoever's actually active at the giver's own
+location — the same "physically present" rule already used for who
+can join a fight — not restricted to a formed party, since handing
+something to anyone standing in the same room is the natural reading
+of "give X to Y". Rejects cleanly if the recipient isn't there or the
+giver doesn't actually have the item.
+
 ## [1.10.6] — Bosses finally fight like bosses
 
 Seventh finding from the reverse-playthrough sweep: both bosses

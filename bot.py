@@ -4704,6 +4704,63 @@ async def _do_find_merchant(update: Update) -> None:
     await _safe_send(update, line)
 
 
+async def _do_give_item(update: Update, text: str) -> None:
+    """
+    Player-to-player item trading (2026-07-15 backlog item): hand a
+    carried item to another real player or AI companion. Scoped to
+    whoever's actually active at the giver's own current_location, same
+    "physically present" convention already used for who can join a
+    fight (_get_combat_eligible_party_members) -- not restricted to a
+    formed party, since trading with anyone standing in the same room
+    is the more natural reading of "give my potion to X".
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    candidates = [
+        p for p in _get_combat_eligible_party_members(character["current_location"])
+        if p["telegram_user_id"] != character["telegram_user_id"]
+    ]
+    lowered = text.lower()
+    recipient = next((p for p in candidates if p["name"].lower() in lowered), None)
+    if recipient is None:
+        await update.effective_chat.send_message(
+            "Give it to whom? Name someone real who's actually here with you.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    item_id = items_module.find_item_mentioned_in_text(text, candidate_ids=list(character["inventory"].keys()))
+    if item_id is None:
+        await update.effective_chat.send_message(
+            f"Give {recipient['name']} what, exactly? Name something you're actually carrying.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    quantity = _extract_quantity(text)
+    removed, _ = db.remove_item(update.effective_user.id, item_id, quantity)
+    if not removed:
+        have = character["inventory"].get(item_id, 0)
+        await update.effective_chat.send_message(
+            f"You don't have {quantity}x {items_module.get_item(item_id)['name']} to give"
+            f" — you only have {have}.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    db.add_item(recipient["telegram_user_id"], item_id, quantity)
+    item_name = items_module.get_item(item_id)["name"]
+    await _safe_send(
+        update,
+        f"🤝 **{character['name']}** gives {quantity}x {item_name} to **{recipient['name']}**.",
+    )
+
+
 _QUANTITY_WORDS = {
     "one": 1, "couple": 2, "two": 2, "three": 3, "four": 4,
     "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
@@ -5688,6 +5745,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_leave_party(update)
     elif action == "find_merchant":
         await _do_find_merchant(update)
+    elif action == "give_item":
+        await _do_give_item(update, intent.get("raw_text", text))
     elif action == "show_map":
         await _do_show_map(update)
     elif action == "gather":
