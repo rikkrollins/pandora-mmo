@@ -18,6 +18,7 @@ import db
 import spells
 from ai.intent_parser import _keyword_fallback
 from ai.support_agent import _deterministic_inventory_answer
+from rules.combat import resolve_attack
 from rules.crafting import RECIPES
 from tests.helpers import DummyContext, FakeUpdate, make_basic_character, use_test_db
 
@@ -212,7 +213,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot._maybe_speak(update, "The goblin attacks!", None)
             self.assertEqual(sink, ["/tts The goblin attacks!"])
             self.assertFalse(update.effective_chat.last_sent_message.deleted)
-            await __import__("asyncio").sleep(2.5)
+            # Poll instead of a single fixed sleep -- under heavy system
+            # load (this box regularly sees asyncio scheduling delays of
+            # 10+ seconds while Ollama holds the CPU) a flat 2.5s sleep
+            # occasionally loses the race against the cleanup task's own
+            # 2s internal sleep, flaking a test that isn't actually
+            # broken. Polling up to 15s gives real headroom either way.
+            asyncio = __import__("asyncio")
+            for _ in range(30):
+                if update.effective_chat.last_sent_message.deleted:
+                    break
+                await asyncio.sleep(0.5)
             self.assertTrue(update.effective_chat.last_sent_message.deleted)
         finally:
             db.set_setting("tts_enabled", "0")
@@ -377,6 +388,59 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         target = {"name": "Ally", "hp_current": 1, "hp_max": 100}
         result = spells.resolve_heal_spell("cure_wounds", wizard, target)
         self.assertLessEqual(result["healing_done"], 11)  # 1d8+2 max, no bonus
+
+    # -- Guild membership benefits were data-only; bonus_spell_scroll and
+    #    bonus_damage_vs_undead had nothing checking them (v1.10.4) ------
+    def test_silver_wardens_bonus_damage_vs_undead(self):
+        # AC 1 guarantees a hit on any roll except a natural 1 (5E
+        # auto-miss regardless of AC) or natural 20 (crit, which would
+        # double the weapon die and complicate the exact-damage check) --
+        # retry until a plain hit so those ~10% of rolls don't make this
+        # test flaky.
+        attacker = {
+            "name": "Warden", "dexterity": 14, "strength": 16, "armor_class": 15,
+            "hp_current": 20, "hp_max": 20, "char_class": "Fighter", "guild": "silver_wardens",
+        }
+        weapon = {"ability": "strength", "damage_dice": "1d1", "damage_bonus": 0}
+        for _ in range(20):
+            defender = {
+                "name": "Shadow Wisp", "dexterity": 18, "armor_class": 1,
+                "hp_current": 100, "hp_max": 100, "monster_key": "shadow_wisp",
+            }
+            result = resolve_attack(attacker, defender, weapon)
+            if result["hit"] and not result["critical_hit"]:
+                self.assertEqual(result["damage_dealt"], 3)  # 1 (die) + 2 (warden bonus)
+                return
+        self.fail("no plain (non-crit) hit landed in 20 tries at AC 1 -- suspiciously unlucky or broken")
+
+    def test_no_warden_bonus_against_non_undead_or_non_member(self):
+        warden_vs_goblin = {
+            "name": "Warden", "dexterity": 14, "strength": 16, "armor_class": 15,
+            "hp_current": 20, "hp_max": 20, "char_class": "Fighter", "guild": "silver_wardens",
+        }
+        weapon = {"ability": "strength", "damage_dice": "1d1", "damage_bonus": 0}
+        for _ in range(20):
+            defender = {
+                "name": "Goblin", "dexterity": 14, "armor_class": 1,
+                "hp_current": 100, "hp_max": 100, "monster_key": "goblin",
+            }
+            result = resolve_attack(warden_vs_goblin, defender, weapon)
+            if result["hit"] and not result["critical_hit"]:
+                self.assertEqual(result["damage_dealt"], 1)  # no bonus vs. non-undead
+                return
+        self.fail("no plain (non-crit) hit landed in 20 tries at AC 1 -- suspiciously unlucky or broken")
+
+    async def test_arcane_circle_join_grants_a_real_scroll(self):
+        use_test_db("tests/tmp/guild_benefit_test.db")
+        user_id = 777777
+        character = make_basic_character(
+            user_id, "Elowen", char_class="Wizard", current_location="crossroads_tavern",
+        )
+        db.update_character(user_id, level=3)
+        sink = []
+        await bot._do_join_guild(FakeUpdate(user_id, "join the arcane circle", sink), "join the arcane circle")
+        character = db.get_character(user_id)
+        self.assertGreaterEqual(character["inventory"].get("scroll_magic_missile", 0), 1)
 
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):

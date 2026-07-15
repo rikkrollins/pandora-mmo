@@ -5081,7 +5081,16 @@ async def _do_join_guild(update: Update, text: str) -> None:
         return
 
     db.join_guild(update.effective_user.id, guild_id)
-    await _safe_send(update, f"🏛️ You've joined {GUILDS[guild_id]['name']}!")
+    join_note = ""
+    # Arcane Circle's bonus_spell_scroll benefit (guilds.py) was flavor
+    # text with nothing checking it -- a real, immediate welcome gift is
+    # the simplest honest reading of "bonus spell scroll" for a
+    # membership benefit, same spirit as Silver Wardens' combat bonus
+    # and Cleric's Disciple of Life being real rather than described.
+    if "bonus_spell_scroll" in GUILDS[guild_id]["benefits"]:
+        db.add_item(update.effective_user.id, "scroll_magic_missile", 1)
+        join_note = " They welcome you with a free Scroll of Magic Missile."
+    await _safe_send(update, f"🏛️ You've joined {GUILDS[guild_id]['name']}!{join_note}")
 
 
 # ---------------------------------------------------------------------

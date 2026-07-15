@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.10.4] — Guild membership benefits are finally real, not just a database flag
+
+Fifth finding from the reverse-playthrough sweep: `guilds.py` defined
+per-guild `benefits` lists, but nothing in `bot.py`/`rules/combat.py`
+ever checked two of the three (the shop discount was already real —
+`shop.py`'s `buy_item` applies it correctly). Joining the Arcane
+Circle or the Silver Wardens changed nothing except a database column.
+
+- **Arcane Circle's `bonus_spell_scroll`**: joining now grants a real
+  Scroll of Magic Missile on the spot.
+- **Silver Wardens' `bonus_damage_vs_undead`**: `resolve_attack` now
+  adds +2 damage against this campaign's undead-flavored monsters
+  (currently Shadow Wisp — the one spectral enemy in the roster; the
+  set is easy to extend if more undead are added later).
+
+Also fixed, while hardening the test suite under this session's severe
+Ollama contention: `test_tts_trigger_message_gets_cleaned_up` raced a
+fixed 2.5s sleep against a 2s background cleanup task and could flake
+under heavy load (confirmed passing in isolation, unrelated to any
+change here) — now polls up to 15s instead of a single fixed wait.
+
 ## [1.10.3] — Spellcasting actually keeps growing past level 6, and Clerics get their Domain back
 
 Fourth finding from the reverse-playthrough sweep: the level-up system

@@ -7,6 +7,14 @@ results computed here, never decides them.
 """
 from rules.dice import roll_d20, roll_attack, roll_damage, ability_modifier
 
+# Monsters this campaign treats as undead for the Silver Wardens guild's
+# bonus_damage_vs_undead benefit (guilds.py) -- no monster template field
+# for creature type exists in this game, so, same convention as Ranger's
+# Favored Enemy matching on monster_key prefix, this is a fixed set of
+# monster_keys rather than a new schema field. Shadow Wisp is this
+# campaign's one spectral/undead-flavored monster.
+UNDEAD_MONSTER_KEYS = {"shadow_wisp"}
+
 
 def start_combat(participants: list[dict]) -> list[dict]:
     """
@@ -102,9 +110,16 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         savage_attacks_die = 1 if (attacker.get("race") == "Half-Orc" and attack_result["critical_hit"]) else 0
         sneak_attack_die = 1 if (attacker.get("char_class") == "Rogue" and advantage) else 0
         rage_bonus = 2 if attacker.get("raging") else 0
+        # Silver Wardens guild benefit (bonus_damage_vs_undead, guilds.py):
+        # +2 damage against this campaign's undead-flavored monsters.
+        warden_bonus = (
+            2 if (attacker.get("guild") == "silver_wardens"
+                  and defender.get("monster_key") in UNDEAD_MONSTER_KEYS)
+            else 0
+        )
         dmg = roll_damage(
             weapon["damage_dice"],
-            modifier=weapon.get("damage_bonus", 0) + rage_bonus,
+            modifier=weapon.get("damage_bonus", 0) + rage_bonus + warden_bonus,
             critical=attack_result["critical_hit"],
             extra_dice=savage_attacks_die,
         )
