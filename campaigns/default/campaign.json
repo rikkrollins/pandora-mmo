@@ -719,7 +719,9 @@
         "rations",
         "torch",
         "scroll_magic_missile",
-        "iron_ore"
+        "iron_ore",
+        "greater_healing_potion",
+        "silvered_dagger"
       ]
     },
     "vanes_curiosities": {
@@ -734,7 +736,8 @@
         "lantern_of_true_sight",
         "ring_of_the_undertow",
         "scroll_summon_spirit",
-        "scroll_revivify"
+        "scroll_revivify",
+        "scroll_fireball"
       ]
     },
     "grimsbys_tavern": {
@@ -834,6 +837,7 @@
       "giver_npc": "vesh_nightglass",
       "reward_xp": 100,
       "reward_gold": 30,
+      "reward_item": "boots_of_the_winterlands",
       "trigger": {
         "type": "reach_location",
         "location": "crossroads_tavern"
@@ -859,6 +863,7 @@
       "location": "goblin_warrens",
       "reward_xp": 300,
       "reward_gold": 200,
+      "reward_item": "ring_of_protection",
       "trigger": {
         "type": "defeat_monster",
         "monster": "goblin_boss"
@@ -884,6 +889,7 @@
       "location": "the_hush_below",
       "reward_xp": 750,
       "reward_gold": 400,
+      "reward_item": "cloak_of_elvenkind",
       "trigger": {
         "type": "reach_location",
         "location": "the_hush_below"
@@ -926,6 +932,7 @@
       },
       "reward_xp": 200,
       "reward_gold": 75,
+      "reward_item": "amulet_of_health",
       "clue": "The riddle carved into the lid reads: \"I have cities, but no houses; forests, but no trees; rivers, but no water. What am I?\""
     },
     "the_weeping_wells_secret": {

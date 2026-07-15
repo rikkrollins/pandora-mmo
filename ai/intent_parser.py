@@ -381,6 +381,17 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # player who just echoes the game's own quoted suggested answer back
     # (with or without an "I choose"/"I've decided" wrapper) is always
     # caught here, before "collect" ever gets a chance to misfire as gather.
+    # Checked BEFORE resolve_choice below: "I have decided the answer to
+    # the riddle is a map" -- a genuine puzzle answer -- contains "i have
+    # decided", which resolve_choice's own broadened trigger (added
+    # 2026-07-13 for branching board-quest choices) would otherwise catch
+    # first, since it's checked earlier in this function. "riddle"/
+    # "puzzle"/"the answer to" are distinctive enough to unambiguously
+    # mean a puzzle answer, not a quest-branch decision, regardless of
+    # what decision-framing words surround them.
+    if any(w in lowered for w in ["riddle", "puzzle", "the answer to"]):
+        return {**base, "action": "answer_puzzle"}
+
     if any(w in lowered for w in ["i choose", "i decide to", "i decided to", "i've decided", "ive decided",
                                     "i have decided", "i'll go with", "ill go with",
                                     "my choice is", "i'll take the", "ill take the",

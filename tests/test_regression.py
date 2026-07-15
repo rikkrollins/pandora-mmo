@@ -17,6 +17,7 @@ import bot
 import db
 from ai.intent_parser import _keyword_fallback
 from ai.support_agent import _deterministic_inventory_answer
+from rules.crafting import RECIPES
 from tests.helpers import DummyContext, FakeUpdate, make_basic_character, use_test_db
 
 
@@ -287,6 +288,50 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             q.get("giver_npc") for q in bot.CAMPAIGN["quests"].values() if q.get("giver_npc")
         }
         self.assertEqual(real_givers, expected_givers)
+
+    # -- "I have decided the answer to the riddle is X" (v1.9.2) -------
+    def test_puzzle_answer_not_shadowed_by_resolve_choice(self):
+        """
+        resolve_choice's "i have decided" trigger is checked before
+        answer_puzzle's own triggers, so a natural puzzle answer that
+        happens to open with decision-framing words ("I have decided
+        the answer to the riddle is a map") was misclassified as
+        resolve_choice and answer_puzzle never ran. "riddle"/"puzzle"/
+        "the answer to" are unambiguous puzzle-answer signals, so they
+        must win regardless of surrounding decision phrasing.
+        """
+        result = _keyword_fallback("I have decided the answer to the riddle is a map", [])
+        self.assertEqual(result["action"], "answer_puzzle")
+
+    def test_resolve_choice_still_works_without_puzzle_language(self):
+        result = _keyword_fallback("I choose to spare the bandit", [])
+        self.assertEqual(result["action"], "resolve_choice")
+
+    # -- 7 previously-orphaned magic items now have a real acquisition
+    #    path (shops or quest rewards) (v1.9.2) ------------------------
+    def test_no_orphaned_items_remain_in_shops_or_quest_rewards(self):
+        acquirable = set()
+        for shop in bot.CAMPAIGN.get("shops", {}).values():
+            acquirable.update(shop.get("inventory", []))
+        for quest in bot.CAMPAIGN["quests"].values():
+            if quest.get("reward_item"):
+                acquirable.add(quest["reward_item"])
+        for region in bot.CAMPAIGN.get("locations", {}).values():
+            for location in region.values():
+                for node in location.get("resource_nodes", []) or []:
+                    acquirable.update(node.get("materials", []) or [])
+        for recipe in RECIPES.values():
+            acquirable.update(recipe.get("materials", {}).keys())
+            if recipe.get("result_item"):
+                acquirable.add(recipe["result_item"])
+
+        previously_orphaned = {
+            "greater_healing_potion", "silvered_dagger", "scroll_fireball",
+            "ring_of_protection", "cloak_of_elvenkind", "amulet_of_health",
+            "boots_of_the_winterlands",
+        }
+        missing = previously_orphaned - acquirable
+        self.assertEqual(missing, set(), f"still orphaned: {missing}")
 
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):

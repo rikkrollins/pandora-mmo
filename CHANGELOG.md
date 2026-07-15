@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.10.2] — Seven previously-unobtainable magic items are now real, and puzzle answers work again
+
+Third finding from the reverse-playthrough sweep: an "orphaned items"
+cross-reference (every item in `items.py` checked against shop
+inventories, quest rewards, NPC kits, resource nodes, and crafting
+recipes) found 7 magic items with no acquisition path anywhere in the
+campaign — Greater Healing Potion, Silvered Dagger, Scroll of Fireball,
+Ring of Protection, Cloak of Elvenkind, Amulet of Health, and Boots of
+the Winterlands. Wired the potions/scrolls/dagger into Maren's and
+Vane's shop inventories, and the four rings/cloaks/boots/amulet into
+existing quest rewards (Clear the Warrens, The Hush, Maren's Locked
+Ledger, Vesh's Way Back) so they're earned, not just sold.
+
+Verifying the Locked Ledger reward live surfaced a second, unrelated
+real bug: "I have decided the answer to the riddle is a map" — a
+completely natural way to answer a puzzle — was misclassified as
+`resolve_choice` instead of `answer_puzzle`, because resolve_choice's
+"i have decided" trigger (broadened earlier for board-quest branching
+choices) is checked first in `_keyword_fallback` and returned before
+answer_puzzle's own checks ever ran. Fixed by checking for
+unambiguous puzzle-language ("riddle", "puzzle", "the answer to")
+before resolve_choice's more generic decision-framing check, so puzzle
+answers win regardless of which decision-phrasing happens to open the
+sentence. Both the shop/reward wiring and the classification fix were
+verified with real handler calls end to end (buy, accept quest, answer
+puzzle, reward lands in inventory), plus permanent regression tests
+for both.
+
 ## [1.10.1] — The Unmoored Isle finally has something waiting for you
 
 Second finding from the reverse-playthrough sweep: The First City and
