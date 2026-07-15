@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.9.2] — TTS coverage audit completed for every action
+
+Finishes the audit started in 1.9.0: every action handler's primary
+reply now routes through `_safe_send` (the only place TTS is hooked),
+confirmed by script — zero handlers left with no TTS coverage at all.
+Covers buying, selling, casting every spell effect type (damage, heal,
+resurrect, summon, and the no-mechanical-effect-yet fallback), joining
+a guild, fast travel, and gambling. Also fixed `scripts/announce_deploy.py`
+permanently: it broke on a bare underscore in the message text twice
+live this session (Telegram's Markdown parser reads it as an unmatched
+italic marker) — now escapes Markdown special characters automatically
+instead of relying on remembering to avoid them.
+
+All 23 fast regression tests pass.
+
 ## [1.9.1] — accept_quest now honors the specific quest you actually name
 
 Real regression from the same day's companion-quest feature (1.8.0):

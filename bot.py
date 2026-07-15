@@ -3315,10 +3315,10 @@ async def _do_gamble(update: Update, text: str) -> None:
 
     banner = "🎉 **You win!**" if won else "💸 **You lose.**"
     change = f"+{amount}" if won else f"-{amount}"
-    await update.effective_chat.send_message(
+    await _safe_send(
+        update,
         f"{banner} You roll {dice_roll[0]} + {dice_roll[1]} = **{total}** "
         f"(need {GAMBLE_WIN_THRESHOLD}+). Gold: {change} → **{new_gold}**.",
-        message_thread_id=config.TOPIC_ADVENTURE_ID,
     )
 
 
@@ -4532,10 +4532,7 @@ async def _do_fast_travel(update: Update, text: str) -> None:
         return
 
     db.move_character(telegram_user_id, destination_id)
-    await update.effective_chat.send_message(
-        f"🌀 You fast-travel to **{destination['name']}**.\n{destination['description']}",
-        message_thread_id=config.TOPIC_ADVENTURE_ID,
-    )
+    await _safe_send(update, f"🌀 You fast-travel to **{destination['name']}**.\n{destination['description']}")
 
     updated_character = db.get_character(telegram_user_id)
     await _maybe_trigger_npc_encounter(update, updated_character, destination)
@@ -4662,7 +4659,7 @@ async def _do_buy(update: Update, text: str) -> None:
 
     quantity = _extract_quantity(text)
     ok, msg = shop_module.buy_item(update.effective_user.id, shop_data, item_id, quantity)
-    await update.effective_chat.send_message(msg, message_thread_id=config.TOPIC_ADVENTURE_ID)
+    await _safe_send(update, msg)
 
 
 async def _do_sell(update: Update, text: str) -> None:
@@ -4682,7 +4679,7 @@ async def _do_sell(update: Update, text: str) -> None:
 
     quantity = _extract_quantity(text)
     ok, msg = shop_module.sell_item(update.effective_user.id, item_id, quantity)
-    await update.effective_chat.send_message(msg, message_thread_id=config.TOPIC_ADVENTURE_ID)
+    await _safe_send(update, msg)
 
 
 async def _do_steal(update: Update, text: str) -> None:
@@ -4939,10 +4936,10 @@ async def _do_cast_spell(update: Update, text: str) -> None:
         is_self = target_character["telegram_user_id"] == character["telegram_user_id"]
         target_note = "" if is_self else f" on **{target_character['name']}**"
         inactive_note = " (resting)" if target_character.get("is_inactive") else ""
-        await update.effective_chat.send_message(
+        await _safe_send(
+            update,
             f"✨ **{character['name']}** casts {spell['name']}{target_note}{inactive_note} and heals {result['healing_done']} HP "
             f"({result['hp_current']}/{result['hp_max']}).",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
 
     elif spell["effect"] == "resurrect":
@@ -4978,10 +4975,10 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             target_character["telegram_user_id"], is_dead=0, hp_current=1,
             death_save_successes=0, death_save_failures=0,
         )
-        await update.effective_chat.send_message(
+        await _safe_send(
+            update,
             f"✨ **{character['name']}** casts {spell['name']} on **{target_character['name']}** — "
             f"breath returns, and they gasp back to life at 1 HP.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
 
     elif spell["effect"] == "summon":
@@ -5024,10 +5021,10 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             session.sides[synthetic_id] = "party"
             session.log_event(f"{character['name']} summons {summon['name']} to fight alongside the party!")
 
-        await update.effective_chat.send_message(
+        await _safe_send(
+            update,
             f"🌀 **{character['name']}** casts {spell['name']} — **{summon['name']}** answers the call and joins the fight "
             f"(HP: {summon['hp_max']}, AC: {summon['armor_class']}). It vanishes once combat ends.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
 
     else:
@@ -5044,11 +5041,11 @@ async def _do_cast_spell(update: Update, text: str) -> None:
         _consume_scroll_if_any()
         buff_target = _find_party_target_by_name(text)
         target_note = f" on **{buff_target['name']}**" if buff_target else ""
-        await update.effective_chat.send_message(
+        await _safe_send(
+            update,
             f"✨ **{character['name']}** casts {spell['name']}{target_note}. (Note: this spell's flavor is real, but it "
             f"doesn't yet apply a mechanical effect in this build — that's a known "
             f"limitation, not a bug.)",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
 
 
@@ -5084,10 +5081,7 @@ async def _do_join_guild(update: Update, text: str) -> None:
         return
 
     db.join_guild(update.effective_user.id, guild_id)
-    await update.effective_chat.send_message(
-        f"🏛️ You've joined {GUILDS[guild_id]['name']}!",
-        message_thread_id=config.TOPIC_ADVENTURE_ID,
-    )
+    await _safe_send(update, f"🏛️ You've joined {GUILDS[guild_id]['name']}!")
 
 
 # ---------------------------------------------------------------------
