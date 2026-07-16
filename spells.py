@@ -5,6 +5,7 @@ spell damage/healing numbers are rolled through rules/dice.py — the AI
 narrates what a spell looked like, but never decides its numeric effect.
 """
 from rules.dice import roll_damage, roll_d20, ability_modifier
+from rules.leveling import is_proficient_in_save
 
 # Which ability a class casts spells with — needed to calculate a real
 # 5E spell save DC (8 + proficiency bonus + spellcasting ability modifier).
@@ -342,6 +343,30 @@ def get_spell(spell_id: str) -> dict | None:
     return SPELLS.get(spell_id)
 
 
+def _save_bonus(target: dict, save_ability: str) -> int:
+    """
+    Saving throw proficiency (2026-07-16 audit): confirmed via grep this
+    was never applied anywhere -- every save previously only ever added
+    the raw ability modifier, even for a class real 5E says is
+    proficient in that specific save (e.g. a Fighter resisting a
+    Constitution-based spell should add their proficiency bonus too).
+    """
+    bonus = ability_modifier(target.get(save_ability, 10))
+    if is_proficient_in_save(target.get("char_class"), save_ability):
+        bonus += target.get("proficiency_bonus", 2)
+    return bonus
+
+
+def _gnome_cunning_advantage(target: dict, save_ability: str) -> bool:
+    """
+    Gnome Cunning (races.py racial trait, 2026-07-16 audit): advantage
+    on Intelligence/Wisdom/Charisma saving throws against magic. The
+    closest existing hook for "against magic" is a spell's own save,
+    since this engine has no separate magic-vs-mundane save distinction.
+    """
+    return target.get("race") == "Gnome" and save_ability in ("intelligence", "wisdom", "charisma")
+
+
 def resolve_damage_spell(spell_id: str, caster: dict, target: dict | None = None) -> dict:
     """
     Roll a damage spell's effect. Returns a structured result, not prose.
@@ -364,8 +389,8 @@ def resolve_damage_spell(spell_id: str, caster: dict, target: dict | None = None
     save_ability = spell.get("save_ability")
     if save_ability and target is not None:
         dc = spell_save_dc(caster)
-        save_roll = roll_d20()
-        save_total = save_roll + ability_modifier(target.get(save_ability, 10))
+        save_roll = roll_d20(advantage=_gnome_cunning_advantage(target, save_ability))
+        save_total = save_roll + _save_bonus(target, save_ability)
         save_success = save_total >= dc
         if save_success:
             total = total // 2

@@ -6,6 +6,7 @@ structured data; the AI layer (ai/dm_agent.py) only ever narrates the
 results computed here, never decides them.
 """
 from rules.dice import roll_d20, roll_attack, roll_damage, ability_modifier
+from rules.leveling import sneak_attack_dice_count, rage_damage_bonus
 
 # Monsters this campaign treats as undead for the Silver Wardens guild's
 # bonus_damage_vs_undead benefit (guilds.py) -- no monster template field
@@ -147,7 +148,7 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     if attack_result["hit"]:
         savage_attacks_die = 1 if (attacker.get("race") == "Half-Orc" and attack_result["critical_hit"]) else 0
         sneak_attack_die = 1 if (attacker.get("char_class") == "Rogue" and advantage) else 0
-        rage_bonus = 2 if attacker.get("raging") else 0
+        rage_bonus = rage_damage_bonus(attacker.get("level", 1)) if attacker.get("raging") else 0
         # Silver Wardens guild benefit (bonus_damage_vs_undead, guilds.py):
         # +2 damage against this campaign's undead-flavored monsters.
         warden_bonus = (
@@ -163,7 +164,11 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         )
         damage_dealt = max(dmg["total"], 0)
         if sneak_attack_die:
-            sneak_dmg = roll_damage("1d6", critical=attack_result["critical_hit"])
+            # Real 5E scales Sneak Attack's die count with Rogue level
+            # (1d6 at 1-2, up to 10d6 at 19-20) -- found frozen at a flat
+            # 1d6 regardless of level (2026-07-16 audit).
+            extra_sneak_dice = sneak_attack_dice_count(attacker.get("level", 1)) - 1
+            sneak_dmg = roll_damage("1d6", critical=attack_result["critical_hit"], extra_dice=extra_sneak_dice)
             damage_dealt += sneak_dmg["total"]
         if defender.get("raging"):
             damage_dealt = damage_dealt // 2

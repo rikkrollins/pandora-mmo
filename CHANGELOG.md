@@ -2,6 +2,58 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.10.12] — Extra Attack, racial traits, saving throw proficiency, real climax bosses for Arc 2/3, TTS delay fix
+
+Biggest single rules-completeness pass this project has had. Found by
+reading the actual 5E rules against what this engine does, the same
+"reverse playthrough" audit method as previous sessions.
+
+**Extra Attack.** Confirmed via grep this was completely absent —
+arguably THE single biggest DPS feature every 5E martial class gets,
+missing from every class (not even mentioned as flavor text). Fighter,
+Barbarian, Paladin, Ranger, and Monk now get a real second attack per
+turn at level 5; Fighter gets a third at 11, a fourth at 20. Applies to
+a human player's own attacks and to AI-controlled party members alike.
+
+**Racial traits were inert for 5 of 6 live characters** — only
+Half-Orc's traits were ever mechanically wired; every other race's
+signature traits were pure flavor text. Added: Dwarven Resilience
+(Dwarves are now immune to the poisoned condition), Fey Ancestry (Elves
+and Half-Elves are immune to paralyzed), and Dragonborn's Breath
+Weapon — its own trait text called this "a real, usable action" but it
+never existed; it's now a real combat action, damage scaling with
+level, once per rest, a saving throw for half damage.
+
+**Saving throw proficiency bonus was never applied, anywhere.**
+Confirmed every save-based spell (Fireball, Insect Plague, etc.) only
+ever added the raw ability modifier, never a proficiency bonus, even
+for a class that's proficient in that specific save — the class/save
+proficiency table didn't exist yet to look one up in. Added it, plus
+Gnome Cunning (advantage on Intelligence/Wisdom/Charisma saves).
+
+**Sneak Attack and Rage were frozen at their level-1 values.** Sneak
+Attack always rolled a flat 1d6 regardless of level (real 5E scales to
+10d6 by level 20); Barbarian Rage's bonus damage was always a flat +2
+(real 5E scales to +4). Both now scale correctly.
+
+**Cleric's Channel Divinity** (level 2+, Turn Undead) and **Ranger's
+Natural Explorer** (advantage on tracking/survival checks) — two more
+real class/racial features that existed only as flavor text or not at
+all, now mechanically real.
+
+**Arc 2 and Arc 3 had no real climax.** Of the campaign's 4 story
+arcs, only Arc 1 and Arc 4 ended in an actual fight — "Into the Hush"
+and "The First City" both completed just by walking into the location,
+despite their own text clearly building to something. Added two new
+bosses matching each location's established atmosphere: The Unspoken
+(the Hush Below, silences you on a hit) and The Waking Ember (the First
+City, drains life to keep its "still, somehow, faintly warm" spire
+burning).
+
+**Fixed: the TTS trigger message vanished too fast to actually tap it
+and generate the audio** (real feedback from Coffee) — the auto-delete
+delay was a flat 2 seconds; bumped to 20.
+
 ## [1.10.11] — Rings/amulets/wondrous items, Sera wander-lock fix, auto-equip shadowing fix, dead-message resilience
 
 **Rings, amulets, and wondrous items actually work now (they never

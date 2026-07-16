@@ -126,6 +126,10 @@ help their next roll (e.g. "I give X bardic inspiration", "inspire my ally"). Se
 pool of divine healing (e.g. "I use lay on hands on X", "I lay hands on myself"). Set "target" to who it's for.
 - "arcane_recovery" is specifically a Wizard's real class feature: recovering expended spell slots once per \
 rest without fully resting (e.g. "I use arcane recovery", "recover a spell slot", "recover my spell slots").
+- "breath_weapon" is specifically a Dragonborn's real racial trait: a damaging breath attack usable once per \
+rest, replacing a normal attack in combat (e.g. "I use my breath weapon", "breathe fire", "unleash my breath").
+- "channel_divinity" is specifically a Cleric's real class feature (level 2+): Turn Undead, forcing an undead \
+creature to become frightened, usable once per rest (e.g. "I channel divinity", "I turn undead", "turn the undead").
 - "chat" is for anything else — general roleplay talk with no clear game action.
 Output ONLY the JSON object, nothing else."""
 
@@ -459,6 +463,12 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                                     "recover spell slots"]):
         return {**base, "action": "arcane_recovery"}
 
+    if any(w in lowered for w in ["breath weapon", "breathe fire", "unleash my breath", "use my breath"]):
+        return {**base, "action": "breath_weapon"}
+
+    if any(w in lowered for w in ["channel divinity", "turn undead", "turn the undead"]):
+        return {**base, "action": "channel_divinity"}
+
     # Checked BEFORE check_sheet below: "my characters" (plural, roster) is
     # a substring-superset of check_sheet's "my character" (singular) —
     # confirmed live to otherwise get shadowed and misread as check_sheet,
@@ -777,7 +787,8 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
                 "answer_puzzle", "gamble", "chat", "examine", "flee", "resolve_choice",
                 "invite_to_party", "accept_party_invite", "leave_party", "find_merchant",
                 "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "arcane_recovery",
-                "make_campfire", "give_item", "use_item", "equip_item", "auto_equip",
+                "make_campfire", "give_item", "use_item", "equip_item", "auto_equip", "breath_weapon",
+                "channel_divinity",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

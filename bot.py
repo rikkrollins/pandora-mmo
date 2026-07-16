@@ -62,11 +62,11 @@ from models import (
     STARTING_GOLD,
     BASE_ARMOR_CLASS,
 )
-from rules.combat import resolve_attack, resolve_death_save
+from rules.combat import resolve_attack, resolve_death_save, UNDEAD_MONSTER_KEYS
 from rules.crafting import RECIPES, get_recipe, has_materials, resolve_craft
 from rules.dice import roll, roll_damage, ability_modifier, roll_ability_check, roll_d20
 from rules.item_generator import generate_item
-from rules.leveling import CLASS_HIT_DICE, scaled_enemy_count
+from rules.leveling import CLASS_HIT_DICE, scaled_enemy_count, breath_weapon_dice_count
 from rules.proficiency import practiced_bonus
 
 logging.basicConfig(
@@ -100,6 +100,34 @@ def _weapon_for_attacker(attacker: dict) -> dict:
                 "damage_bonus": item.get("damage_bonus", 0),
             }
     return DEFAULT_WEAPON
+
+
+EXTRA_ATTACK_CLASSES = {"fighter", "barbarian", "paladin", "ranger", "monk"}
+
+
+def _attacks_per_turn(character: dict) -> int:
+    """
+    Real 5E Extra Attack (2026-07-16 audit): confirmed via grep this was
+    completely absent -- not implemented, not even mentioned as flavor
+    text anywhere -- despite being arguably THE single biggest DPS
+    feature every 5E martial class gets. Boss Multiattack (task #58)
+    gave monsters a 2nd attack; players never got the real equivalent.
+    Fighter/Barbarian/Paladin/Ranger/Monk get a 2nd attack at level 5;
+    Fighter alone gets a 3rd at level 11 and (real 5E, included for
+    completeness) a 4th at level 20. Doesn't apply to spellcasting
+    classes or Rogue, matching real 5E exactly -- Rogue's damage scaling
+    is Sneak Attack (see rules/combat.py), not more attacks.
+    """
+    char_class = (character.get("char_class") or "").lower()
+    if char_class not in EXTRA_ATTACK_CLASSES:
+        return 1
+    level = character.get("level", 1)
+    if char_class == "fighter":
+        if level >= 20:
+            return 4
+        if level >= 11:
+            return 3
+    return 2 if level >= 5 else 1
 
 # Maps a resource node's gathering ability to the one class whose
 # training lets them naturally pick that kind of material out of a
@@ -1190,6 +1218,12 @@ async def _safe_send(update: Update, text: str, thread_id: int | None = None) ->
                 logger.warning(f"[message] send failed again, giving up: {e!r}")
 
 
+# Real live feedback (2026-07-16, Coffee): the old flat 2s delete delay
+# was too fast to actually tap the "/tts <text>" message and generate
+# the audio before it vanished. Bumped to a real, comfortable window.
+TTS_TRIGGER_DELETE_DELAY_SECONDS = 20
+
+
 async def _maybe_speak(update: Update, text: str, thread_id: int | None) -> None:
     """
     Optional TTS narration via @TextTSBot, already added to this group
@@ -1235,7 +1269,7 @@ async def _maybe_speak(update: Update, text: str, thread_id: int | None) -> None
     # safety margin against @TextTSBot's own polling interval, not
     # something the caller needs to wait on.
     async def _delete_trigger_after_delay():
-        await asyncio.sleep(2)
+        await asyncio.sleep(TTS_TRIGGER_DELETE_DELAY_SECONDS)
         try:
             await trigger_message.delete()
         except TelegramError as e:
@@ -1620,15 +1654,18 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
             continue
         consecutive_noop_turns = 0
 
-        # Boss Multiattack (2026-07-15, boss-specific abilities finding
-        # from the reverse-playthrough sweep): every is_boss monster
-        # previously fought exactly like a regular monster, just with a
-        # bigger stat block -- real 5E boss-tier stat blocks almost
-        # universally get Multiattack (2 attacks/turn). Loops the same
-        # single-attack resolution below either once or twice; breaks
-        # early if a mid-turn kill leaves no target for the 2nd attack,
-        # or if combat itself ends mid-multiattack.
-        attack_count = 2 if current.get("is_boss") else 1
+        # Boss Multiattack (2026-07-15) / Extra Attack (2026-07-16): every
+        # is_boss monster gets 2 attacks/turn; separately, an AI-controlled
+        # PARTY member (a recruited companion or autonomous AI player, real
+        # character with class/level) gets the real 5E Extra Attack scaling
+        # from _attacks_per_turn once they're a high enough level martial
+        # class -- this is the same feature _do_attack gives a human player,
+        # just applied here since AI-controlled combatants take their turn
+        # through this function instead. Loops the same single-attack
+        # resolution below either once or several times; breaks early if a
+        # mid-turn kill leaves no target for the next attack, or if combat
+        # itself ends mid-sequence.
+        attack_count = 2 if current.get("is_boss") else _attacks_per_turn(current)
         combat_ended_mid_turn = False
         for attack_num in range(attack_count):
             opposing = session.living_on_side(session.opposing_side(current["telegram_user_id"]))
@@ -1649,12 +1686,16 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
                 await _announce_reaction(update, target, result)
 
             applied_condition = None
+            resisted_condition = None
             if result["hit"] and current.get("on_hit_condition"):
                 condition = current["on_hit_condition"]
-                target.setdefault("conditions", [])
-                if condition not in target["conditions"]:
-                    target["conditions"].append(condition)
-                    applied_condition = condition
+                if _racially_immune_to_condition(target, condition):
+                    resisted_condition = condition
+                else:
+                    target.setdefault("conditions", [])
+                    if condition not in target["conditions"]:
+                        target["conditions"].append(condition)
+                        applied_condition = condition
 
             # Life Drain (The Waiting Shape's boss-specific ability, set
             # via campaign.json's life_drain flag): heals itself for half
@@ -1675,6 +1716,9 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
             await _post_narrated(update, current, attack_label, result, session)
             if applied_condition:
                 await _safe_send(update, f"☠️ **{target['name']} is now {applied_condition.upper()}!**")
+            if resisted_condition:
+                trait = "Dwarven Resilience" if resisted_condition == "poisoned" else "Fey Ancestry"
+                await _safe_send(update, f"🛡️ **{target['name']}'s {trait} shrugs off the {resisted_condition}!**")
             if drain_amount > 0:
                 await _safe_send(
                     update,
@@ -2059,33 +2103,48 @@ async def _do_attack(update: Update, action_text: str) -> None:
                 "No valid targets remain.", message_thread_id=config.TOPIC_ADVENTURE_ID
             )
             return
-        target = _pick_target(action_text, opposing)
 
-        adv, disadv = _attack_advantage_disadvantage(attacker, target)
-        _refresh_real_player_spell_slots(target)
-        result = resolve_attack(
-            attacker, target, _weapon_for_attacker(attacker), advantage=adv, disadvantage=disadv,
-            defender_relentless_endurance_available=_relentless_endurance_available(target),
-            round_number=session.round_number,
-        )
-        if result["relentless_endurance_triggered"]:
-            db.use_feature(target["telegram_user_id"], "relentless_endurance")
-        _sync_player_to_db(target)
-        if result["shield_reaction_triggered"] or result["uncanny_dodge_triggered"]:
-            await _announce_reaction(update, target, result)
-        await _post_narrated(update, attacker, action_text, result, session)
+        # Extra Attack (2026-07-16): real 5E martial classes (Fighter/
+        # Barbarian/Paladin/Ranger/Monk, level 5+) get more than one
+        # attack per turn -- see _attacks_per_turn. Loops the same
+        # single-attack resolution either once or several times, same
+        # shape as boss Multiattack in _resolve_ai_turns; breaks early
+        # if a mid-sequence kill leaves no target for the next attack.
+        attack_count = _attacks_per_turn(attacker)
+        for attack_num in range(attack_count):
+            opposing = session.living_on_side(session.opposing_side(user_id))
+            if not opposing:
+                break
+            target = _pick_target(action_text, opposing)
 
-        removed = session.remove_defeated()
-        await _announce_defeats(update, session, removed)
+            adv, disadv = _attack_advantage_disadvantage(attacker, target)
+            _refresh_real_player_spell_slots(target)
+            result = resolve_attack(
+                attacker, target, _weapon_for_attacker(attacker), advantage=adv, disadvantage=disadv,
+                defender_relentless_endurance_available=_relentless_endurance_available(target),
+                round_number=session.round_number,
+            )
+            if result["relentless_endurance_triggered"]:
+                db.use_feature(target["telegram_user_id"], "relentless_endurance")
+            _sync_player_to_db(target)
+            if result["shield_reaction_triggered"] or result["uncanny_dodge_triggered"]:
+                await _announce_reaction(update, target, result)
+            attack_label = (
+                action_text if attack_count == 1 else f"{action_text} ({attack_num + 1}/{attack_count})"
+            )
+            await _post_narrated(update, attacker, attack_label, result, session)
 
-        if session.is_combat_over():
-            winner = _determine_winner(session)
-            xp_summary = _award_victory_xp(session) if winner == "party" else ""
-            if winner == "party":
-                await _check_quest_completions_defeat_monster(update, session)
-            await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
-            sessions.end_session(chat_id)
-            return
+            removed = session.remove_defeated()
+            await _announce_defeats(update, session, removed)
+
+            if session.is_combat_over():
+                winner = _determine_winner(session)
+                xp_summary = _award_victory_xp(session) if winner == "party" else ""
+                if winner == "party":
+                    await _check_quest_completions_defeat_monster(update, session)
+                await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
+                sessions.end_session(chat_id)
+                return
 
         session.advance_turn()
         await _resolve_ai_turns(update, session)
@@ -2297,6 +2356,29 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
     await _safe_send(update, message)
 
 
+def _racially_immune_to_condition(character: dict, condition: str) -> bool:
+    """
+    Racial traits audit (2026-07-16): most races' signature traits were
+    pure flavor text in races.py with zero mechanical hook -- confirmed
+    via grep, only Half-Orc's traits were ever read anywhere. Adapts two
+    of them onto the one hook this engine actually has (on_hit_condition
+    is a flat apply-on-hit, no save roll to resist): Dwarven Resilience
+    (real 5E: advantage on poison saves + resistance to poison damage)
+    becomes flat immunity to the 'poisoned' condition; Fey Ancestry
+    (real 5E: advantage vs. charmed, immune to magical sleep) becomes
+    flat immunity to 'paralyzed', the closest existing condition to a
+    full magical incapacitation -- there's no separate charm/sleep
+    mechanic in this engine to hook the literal trait text onto more
+    exactly, same kind of adaptation already used for Ranger's Favored
+    Enemy and Monk's Martial Arts.
+    """
+    race = character.get("race")
+    return (
+        (condition == "poisoned" and race == "Dwarf")
+        or (condition == "paralyzed" and race in ("Elf", "Half-Elf"))
+    )
+
+
 def _cloak_of_elvenkind_grants_advantage(character: dict, ability: str, action_text: str) -> bool:
     """
     Real 5E grants Cloak of Elvenkind's advantage specifically on
@@ -2314,6 +2396,26 @@ def _cloak_of_elvenkind_grants_advantage(character: dict, ability: str, action_t
     )
 
 
+def _ranger_natural_explorer_grants_advantage(character: dict, ability: str, action_text: str) -> bool:
+    """
+    Ranger's Natural Explorer (class_features.py, 2026-07-16 audit):
+    real 5E grants expertise navigating/surviving in a chosen favored
+    terrain. This game has no terrain-choice mechanism (same "fixed
+    default instead of a real choice" convention already used for
+    Sorcerer's Draconic Bloodline/Warlock's Fiend patron), so every
+    Ranger's favored terrain is forest, matching this campaign's
+    woodland setting -- advantage on Wisdom checks that read as
+    tracking/foraging/navigating/surviving in the wild.
+    """
+    survival_words = ("track", "forage", "navigate", "find shelter", "find food",
+                       "hunt", "survive", "find water", "read the trail", "follow the trail")
+    return (
+        character.get("char_class") == "Ranger"
+        and ability == "wisdom"
+        and any(w in action_text.lower() for w in survival_words)
+    )
+
+
 async def _do_skill_check(update: Update, ability: str, action_text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -2328,7 +2430,10 @@ async def _do_skill_check(update: Update, ability: str, action_text: str) -> Non
         await _do_lockpick(update, character, lockable, action_text)
         return
 
-    has_advantage = _cloak_of_elvenkind_grants_advantage(character, ability, action_text)
+    has_advantage = (
+        _cloak_of_elvenkind_grants_advantage(character, ability, action_text)
+        or _ranger_natural_explorer_grants_advantage(character, ability, action_text)
+    )
     result = roll_ability_check(character, ability, proficient=False, advantage=has_advantage)
     bonus = _practiced_bonus_for(update.effective_user.id, ability)
     result["total"] += bonus
@@ -4205,6 +4310,171 @@ async def _do_rage(update: Update) -> None:
         update,
         f"😡 **{character['name']}** flies into a rage — bonus damage and resistance to "
         f"physical harm for the rest of this fight!",
+    )
+
+
+async def _do_breath_weapon(update: Update) -> None:
+    """
+    Real Dragonborn racial trait (2026-07-16 racial traits audit): races.py's
+    own trait text called this "a real, usable action" but nothing anywhere
+    ever implemented it -- confirmed by grep before this fix. Real 5E scaling
+    (rules.leveling.breath_weapon_dice_count), once per rest, same feature_uses
+    convention as Second Wind/Rage. Unlike a normal attack this doesn't roll to
+    hit -- the target makes a saving throw for half damage instead (same
+    save-or-half shape as spells.py's resolve_damage_spell), simplified to
+    single-target since this combat engine has no area-of-effect modeling at
+    all. Consumes the turn's action (unlike Rage/Second Wind, real 5E bonus
+    actions), so it needs the same turn-order check as a normal attack.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if character.get("race") != "Dragonborn":
+        await update.effective_chat.send_message(
+            "Breath Weapon is a real Dragonborn racial trait — your race doesn't have it.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    if db.get_feature_uses(update.effective_user.id, "breath_weapon") >= 1:
+        await update.effective_chat.send_message(
+            "You've already used your Breath Weapon since your last rest.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    chat_id = update.effective_chat.id
+    async with sessions.get_lock(chat_id):
+        session = sessions.get_session(chat_id)
+        if session is None:
+            await update.effective_chat.send_message(
+                "You can only use your Breath Weapon in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            )
+            return
+        user_id = update.effective_user.id
+        if session.current_participant_id() != user_id:
+            current_name = session.current_participant()["name"]
+            await update.effective_chat.send_message(
+                f"It's not your turn — it's **{current_name}**'s turn.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+
+        attacker = session.current_participant()
+        if attacker["hp_current"] <= 0:
+            await update.effective_chat.send_message(
+                "You're unconscious (0 HP) and can't act until healed.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+
+        opposing = session.living_on_side(session.opposing_side(user_id))
+        if not opposing:
+            await update.effective_chat.send_message(
+                "No valid targets remain.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            )
+            return
+        target = opposing[0]
+
+        dice_count = breath_weapon_dice_count(character["level"])
+        dmg = roll_damage(f"{dice_count}d6")
+        save_dc = 8 + character["proficiency_bonus"] + ability_modifier(character["constitution"])
+        save_roll = roll_d20() + ability_modifier(target.get("dexterity", 10))
+        save_success = save_roll >= save_dc
+        damage_dealt = dmg["total"] // 2 if save_success else dmg["total"]
+        target["hp_current"] = max(target["hp_current"] - damage_dealt, 0)
+        _sync_player_to_db(target)
+        db.use_feature(update.effective_user.id, "breath_weapon")
+
+        save_text = "succeeds, taking half damage" if save_success else "fails"
+        await _safe_send(
+            update,
+            f"🔥 **{attacker['name']}** unleashes their Breath Weapon at **{target['name']}** "
+            f"({dice_count}d6 → {dmg['total']})! {target['name']}'s save {save_text} — "
+            f"**{damage_dealt} damage** ({target['hp_current']}/{target.get('hp_max', target['hp_current'])} HP).",
+        )
+
+        removed = session.remove_defeated()
+        await _announce_defeats(update, session, removed)
+
+        if session.is_combat_over():
+            winner = _determine_winner(session)
+            xp_summary = _award_victory_xp(session) if winner == "party" else ""
+            if winner == "party":
+                await _check_quest_completions_defeat_monster(update, session)
+            await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
+            sessions.end_session(chat_id)
+            return
+
+        session.advance_turn()
+        await _resolve_ai_turns(update, session)
+
+
+async def _do_channel_divinity(update: Update) -> None:
+    """
+    Real Cleric class feature (level 2+, 2026-07-16 class-features
+    audit): Channel Divinity's universal Turn Undead option, forcing an
+    undead creature to become frightened. Once per rest, same
+    feature_uses convention as every other limited class feature.
+    Simplified to this game's one undead-flavored monster type
+    (rules.combat.UNDEAD_MONSTER_KEYS, currently just Shadow Wisp) and
+    single-target (no area-of-effect modeling in this engine). Real 5E
+    also grants a Divine Domain-specific 2nd Channel Divinity option --
+    not modeled here, since Life Domain's real benefit (Disciple of
+    Life, task #60) is already a different, always-on passive rather
+    than its own Channel Divinity use.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if character["char_class"] != "Cleric":
+        await update.effective_chat.send_message(
+            "Channel Divinity is a real Cleric class feature — your class doesn't have it.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    if character["level"] < 2:
+        await update.effective_chat.send_message(
+            "Channel Divinity is a Cleric feature starting at level 2 — you're not there yet.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    if db.get_feature_uses(update.effective_user.id, "channel_divinity") >= 1:
+        await update.effective_chat.send_message(
+            "You've already used Channel Divinity since your last rest.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    session = sessions.get_session(update.effective_chat.id)
+    if session is None:
+        await update.effective_chat.send_message(
+            "You can only Turn Undead in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    opposing = session.living_on_side(session.opposing_side(update.effective_user.id))
+    undead_targets = [p for p in opposing if p.get("monster_key") in UNDEAD_MONSTER_KEYS]
+    if not undead_targets:
+        await update.effective_chat.send_message(
+            "There's no undead here to turn.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    target = undead_targets[0]
+    target.setdefault("conditions", [])
+    if "frightened" not in target["conditions"]:
+        target["conditions"].append("frightened")
+    db.use_feature(update.effective_user.id, "channel_divinity")
+
+    await _safe_send(
+        update,
+        f"✨ **{character['name']}** channels divine power at **{target['name']}** — "
+        f"it recoils, **FRIGHTENED**!",
     )
 
 
@@ -6108,6 +6378,10 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_lay_on_hands(update, intent.get("target") or text)
     elif action == "arcane_recovery":
         await _do_arcane_recovery(update)
+    elif action == "breath_weapon":
+        await _do_breath_weapon(update)
+    elif action == "channel_divinity":
+        await _do_channel_divinity(update)
     elif action == "list_characters":
         await _do_list_characters(update)
     elif action == "switch_character":

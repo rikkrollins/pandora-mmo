@@ -218,12 +218,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(update.effective_chat.last_sent_message.deleted)
             # Poll instead of a single fixed sleep -- under heavy system
             # load (this box regularly sees asyncio scheduling delays of
-            # 10+ seconds while Ollama holds the CPU) a flat 2.5s sleep
+            # 10+ seconds while Ollama holds the CPU) a flat sleep
             # occasionally loses the race against the cleanup task's own
-            # 2s internal sleep, flaking a test that isn't actually
-            # broken. Polling up to 15s gives real headroom either way.
+            # internal sleep, flaking a test that isn't actually broken.
+            # TTS_TRIGGER_DELETE_DELAY_SECONDS is 20s (bumped 2026-07-16,
+            # real live feedback that 2s was too fast to actually tap the
+            # message) -- poll well past that for real headroom.
             asyncio = __import__("asyncio")
-            for _ in range(30):
+            for _ in range(70):
                 if update.effective_chat.last_sent_message.deleted:
                     break
                 await asyncio.sleep(0.5)
@@ -1014,6 +1016,95 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             bot._cloak_of_elvenkind_grants_advantage(character, "dexterity", "I try to sneak past the guard")
         )
 
+    # -- Ranger's Natural Explorer (2026-07-16 audit): listed in
+    #    class_features.py's Ranger flavor text but confirmed via grep
+    #    to have zero mechanical hook anywhere. Fixed-default terrain
+    #    (forest), advantage on Wisdom checks that read as tracking/
+    #    surviving in the wild. ------------------------------------------
+    def test_ranger_natural_explorer_grants_advantage_on_survival_checks(self):
+        ranger = {"char_class": "Ranger"}
+        for text in ("I track the wolf's trail", "I forage for food", "I try to navigate the forest",
+                     "I hunt for something to eat", "I follow the trail"):
+            self.assertTrue(
+                bot._ranger_natural_explorer_grants_advantage(ranger, "wisdom", text), text
+            )
+
+    def test_ranger_natural_explorer_doesnt_buff_unrelated_wisdom_checks(self):
+        ranger = {"char_class": "Ranger"}
+        self.assertFalse(bot._ranger_natural_explorer_grants_advantage(ranger, "wisdom", "I listen at the door"))
+        self.assertFalse(bot._ranger_natural_explorer_grants_advantage(ranger, "dexterity", "I track the wolf"))
+
+    def test_natural_explorer_is_ranger_only(self):
+        non_ranger = {"char_class": "Fighter"}
+        self.assertFalse(bot._ranger_natural_explorer_grants_advantage(non_ranger, "wisdom", "I track the wolf"))
+
+    # -- Cleric's Channel Divinity (2026-07-16 class-features audit):
+    #    real 5E level-2 feature, listed nowhere (not even as flavor
+    #    text) and completely unimplemented before this. Turn Undead,
+    #    once per rest, single-target (this game's one undead-flavored
+    #    monster type). ----------------------------------------------
+    async def test_channel_divinity_rejects_non_cleric(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900450
+        make_basic_character(user_id, "Plainfolk", char_class="Fighter")
+        sink = []
+        await bot._do_channel_divinity(FakeUpdate(user_id, "channel divinity", sink))
+        self.assertTrue(any("doesn't have it" in m for m in sink))
+
+    async def test_channel_divinity_rejects_below_level_2(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900451
+        make_basic_character(user_id, "Acolyte", char_class="Cleric")
+        sink = []
+        await bot._do_channel_divinity(FakeUpdate(user_id, "channel divinity", sink))
+        self.assertTrue(any("level 2" in m for m in sink))
+
+    async def test_channel_divinity_rejects_with_no_undead_present(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900452
+        make_basic_character(user_id, "Chaplain", char_class="Cleric", current_location="crossroads_tavern")
+        db.update_character(user_id, level=2)
+
+        enemy_id = -2_500_040
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "dexterity": 10, "monster_key": "goblin"}
+        session = sessions.start_session(-999, [enemy], {enemy_id: "enemy", user_id: "party"})
+
+        sink = []
+        await bot._do_channel_divinity(FakeUpdate(user_id, "channel divinity", sink))
+        self.assertTrue(any("no undead" in m for m in sink))
+        sessions.end_session(-999)
+
+    async def test_channel_divinity_frightens_undead_and_is_once_per_rest(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900453
+        make_basic_character(user_id, "Chaplain", char_class="Cleric", current_location="crossroads_tavern")
+        db.update_character(user_id, level=2)
+
+        undead_id = -2_500_041
+        undead = {
+            "telegram_user_id": undead_id, "name": "Shadow Wisp", "dexterity": 18,
+            "monster_key": "shadow_wisp", "conditions": [],
+        }
+        session = sessions.start_session(-999, [undead], {undead_id: "enemy", user_id: "party"})
+
+        sink = []
+        await bot._do_channel_divinity(FakeUpdate(user_id, "channel divinity", sink))
+        self.assertIn("frightened", undead["conditions"])
+        self.assertEqual(db.get_feature_uses(user_id, "channel_divinity"), 1)
+
+        sink2 = []
+        await bot._do_channel_divinity(FakeUpdate(user_id, "channel divinity", sink2))
+        self.assertTrue(any("already used" in m for m in sink2))
+        sessions.end_session(-999)
+
+    def test_channel_divinity_phrasing_classified_correctly(self):
+        for text in ("I channel divinity", "I turn undead", "turn the undead", "channel divinity"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "channel_divinity", text)
+
     # -- Dev-topic video handling (2026-07-15, per Coffee): videos had NO
     #    handler at all before this (only TEXT/PHOTO/Document.ALL were
     #    registered) -- same silent-failure gap photos had before
@@ -1084,6 +1175,246 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             result = _keyword_fallback(text, [])
             self.assertEqual(result["action"], "skill_check", text)
             self.assertEqual(result["ability"], "wisdom", text)
+
+    # -- Arc 2 and Arc 3 had no real climax (2026-07-16 reverse-
+    #    playthrough, reading the actual story_arcs/quests data): both
+    #    "the_hush" and "the_first_city_quest" completed on a bare
+    #    reach_location trigger, no fight at all, despite each location's
+    #    own flavor text clearly building to a real threat. Added two
+    #    new is_boss monsters (the_unspoken, the_waking_ember) and
+    #    switched both quests' triggers to defeat_monster. This doesn't
+    #    need SlowLiveTests/Ollama -- _check_quest_completions_defeat_monster
+    #    and _safe_send with FakeUpdate are both narration-free here. ---
+    async def test_the_hush_quest_requires_defeating_the_unspoken(self):
+        import sessions
+        sessions.end_session(-999)
+
+        player_id = 999910
+        make_basic_character(player_id, "Listener", current_location="the_hush_below")
+        db.accept_quest(player_id, "the_hush")
+
+        boss_id = -2_500_010
+        boss = {
+            "telegram_user_id": boss_id, "name": "The Unspoken", "dexterity": 16,
+            "is_ai": 1, "monster_key": "the_unspoken",
+        }
+        session = sessions.start_session(-999, [boss], {boss_id: "enemy", player_id: "party"})
+        session.turn_order = [boss_id, player_id]
+
+        sink = []
+        await bot._check_quest_completions_defeat_monster(FakeUpdate(player_id, "irrelevant", sink), session)
+
+        character = db.get_character(player_id)
+        self.assertIn("the_hush", character["completed_quests"])
+        self.assertNotIn("the_hush", character["active_quests"])
+        sessions.end_session(-999)
+
+    async def test_the_first_city_quest_requires_defeating_the_waking_ember(self):
+        import sessions
+        sessions.end_session(-999)
+
+        player_id = 999911
+        make_basic_character(player_id, "Delver", current_location="the_first_city")
+        db.accept_quest(player_id, "the_first_city_quest")
+
+        boss_id = -2_500_011
+        boss = {
+            "telegram_user_id": boss_id, "name": "The Waking Ember", "dexterity": 12,
+            "is_ai": 1, "monster_key": "the_waking_ember",
+        }
+        session = sessions.start_session(-999, [boss], {boss_id: "enemy", player_id: "party"})
+        session.turn_order = [boss_id, player_id]
+
+        sink = []
+        await bot._check_quest_completions_defeat_monster(FakeUpdate(player_id, "irrelevant", sink), session)
+
+        character = db.get_character(player_id)
+        self.assertIn("the_first_city_quest", character["completed_quests"])
+        self.assertNotIn("the_first_city_quest", character["active_quests"])
+        sessions.end_session(-999)
+
+    def test_new_story_bosses_are_placed_at_their_real_locations(self):
+        locs = {}
+        for region in bot.CAMPAIGN["locations"].values():
+            locs.update(region)
+        self.assertIn("the_unspoken", locs["the_hush_below"]["monsters"])
+        self.assertIn("the_waking_ember", locs["the_first_city"]["monsters"])
+        self.assertTrue(bot.CAMPAIGN["monsters"]["the_unspoken"]["is_boss"])
+        self.assertTrue(bot.CAMPAIGN["monsters"]["the_waking_ember"]["is_boss"])
+
+    # -- Racial traits audit (2026-07-16): only Half-Orc's traits were
+    #    ever mechanically wired; every other race's signature traits
+    #    were pure flavor text in races.py, confirmed inert by grep.
+    #    Added Dwarven Resilience (immune to poisoned) and Fey Ancestry
+    #    (immune to paralyzed, the closest existing condition to
+    #    "magical sleep") via a new _racially_immune_to_condition
+    #    helper. ---------------------------------------------------------
+    def test_dwarf_is_immune_to_poisoned(self):
+        self.assertTrue(bot._racially_immune_to_condition({"race": "Dwarf"}, "poisoned"))
+        self.assertFalse(bot._racially_immune_to_condition({"race": "Human"}, "poisoned"))
+
+    def test_elf_and_half_elf_are_immune_to_paralyzed(self):
+        self.assertTrue(bot._racially_immune_to_condition({"race": "Elf"}, "paralyzed"))
+        self.assertTrue(bot._racially_immune_to_condition({"race": "Half-Elf"}, "paralyzed"))
+        self.assertFalse(bot._racially_immune_to_condition({"race": "Human"}, "paralyzed"))
+
+    def test_racial_immunity_is_condition_specific_not_blanket(self):
+        # A Dwarf's immunity is to poison specifically, not every
+        # condition -- shouldn't also block paralyzed/blinded/etc.
+        self.assertFalse(bot._racially_immune_to_condition({"race": "Dwarf"}, "paralyzed"))
+        self.assertFalse(bot._racially_immune_to_condition({"race": "Elf"}, "poisoned"))
+
+    # -- Dragonborn Breath Weapon (2026-07-16): races.py's own trait text
+    #    called this "a real, usable action" but nothing ever implemented
+    #    it. Real 5E damage scaling + a real combat action, gated to
+    #    once per rest via the existing feature_uses convention. --------
+    def test_breath_weapon_damage_scales_with_level(self):
+        from rules.leveling import breath_weapon_dice_count
+        self.assertEqual(breath_weapon_dice_count(1), 2)
+        self.assertEqual(breath_weapon_dice_count(5), 2)
+        self.assertEqual(breath_weapon_dice_count(6), 3)
+        self.assertEqual(breath_weapon_dice_count(10), 3)
+        self.assertEqual(breath_weapon_dice_count(11), 4)
+        self.assertEqual(breath_weapon_dice_count(15), 4)
+        self.assertEqual(breath_weapon_dice_count(16), 5)
+        self.assertEqual(breath_weapon_dice_count(20), 5)
+
+    async def test_breath_weapon_rejects_non_dragonborn(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 999920
+        make_basic_character(user_id, "Plainfolk", race="Human")
+        sink = []
+        await bot._do_breath_weapon(FakeUpdate(user_id, "breath weapon", sink))
+        self.assertTrue(any("doesn't have it" in m for m in sink))
+
+    async def test_breath_weapon_deals_real_damage_and_is_once_per_rest(self):
+        import sessions
+        sessions.end_session(-999)
+
+        user_id = 999921
+        player = make_basic_character(user_id, "Scaleborn", race="Dragonborn", current_location="crossroads_tavern")
+        db.update_character(user_id, level=6)  # 3d6 tier
+        player = db.get_character(user_id)
+        player["telegram_user_id"] = user_id
+
+        enemy_id = -2_500_020
+        enemy = {
+            "telegram_user_id": enemy_id, "name": "Target Dummy", "dexterity": 10, "strength": 10,
+            "armor_class": 10, "proficiency_bonus": 2,
+            "hp_current": 100, "hp_max": 100, "is_ai": 1, "monster_key": "goblin",
+        }
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", enemy_id: "enemy"})
+        session.turn_order = [user_id, enemy_id]
+        session.current_turn_index = 0
+
+        sink = []
+        await bot._do_breath_weapon(FakeUpdate(user_id, "breath weapon", sink))
+        self.assertLess(enemy["hp_current"], 100, "breath weapon should have dealt real damage")
+        self.assertEqual(db.get_feature_uses(user_id, "breath_weapon"), 1)
+
+        # Second use this same rest should be rejected.
+        sink2 = []
+        await bot._do_breath_weapon(FakeUpdate(user_id, "breath weapon", sink2))
+        self.assertTrue(any("already used" in m for m in sink2))
+        sessions.end_session(-999)
+
+    def test_breath_weapon_phrasing_classified_correctly(self):
+        for text in ("I use my breath weapon", "breathe fire", "unleash my breath", "breath weapon"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "breath_weapon", text)
+
+    # -- Saving throw proficiency (2026-07-16 audit): confirmed via grep
+    #    every save-based spell only ever added the raw ability modifier,
+    #    never a proficiency bonus, even for a class real 5E says is
+    #    proficient in that specific save -- and no CLASS_SAVE_
+    #    PROFICIENCIES table existed anywhere to look one up in. -------
+    def test_class_save_proficiencies_match_real_5e(self):
+        from rules.leveling import is_proficient_in_save
+        self.assertTrue(is_proficient_in_save("Fighter", "strength"))
+        self.assertTrue(is_proficient_in_save("Fighter", "constitution"))
+        self.assertFalse(is_proficient_in_save("Fighter", "wisdom"))
+        self.assertTrue(is_proficient_in_save("wizard", "intelligence"))
+        self.assertFalse(is_proficient_in_save("wizard", "strength"))
+        self.assertFalse(is_proficient_in_save(None, "strength"))
+
+    def test_save_bonus_adds_proficiency_when_the_class_is_proficient(self):
+        from spells import _save_bonus
+        proficient_target = {"char_class": "Fighter", "constitution": 14, "proficiency_bonus": 3}
+        non_proficient_target = {"char_class": "Wizard", "constitution": 14, "proficiency_bonus": 3}
+        # +2 CON modifier either way; Fighter is proficient in CON saves, Wizard isn't.
+        self.assertEqual(_save_bonus(proficient_target, "constitution"), 2 + 3)
+        self.assertEqual(_save_bonus(non_proficient_target, "constitution"), 2)
+
+    def test_gnome_cunning_grants_advantage_on_mental_saves_only(self):
+        from spells import _gnome_cunning_advantage
+        gnome = {"race": "Gnome"}
+        self.assertTrue(_gnome_cunning_advantage(gnome, "intelligence"))
+        self.assertTrue(_gnome_cunning_advantage(gnome, "wisdom"))
+        self.assertTrue(_gnome_cunning_advantage(gnome, "charisma"))
+        self.assertFalse(_gnome_cunning_advantage(gnome, "dexterity"), "Gnome Cunning doesn't cover physical saves")
+        self.assertFalse(_gnome_cunning_advantage({"race": "Human"}, "wisdom"))
+
+    # -- Extra Attack (2026-07-16 audit): confirmed via grep this was
+    #    completely absent -- not even mentioned as flavor text -- despite
+    #    being the single biggest DPS feature every 5E martial class gets
+    #    at level 5. Boss Multiattack (task #58) existed for monsters;
+    #    players never got the real equivalent. ---------------------------
+    def test_extra_attack_kicks_in_at_level_5_for_martial_classes(self):
+        for char_class in ("Fighter", "Barbarian", "Paladin", "Ranger", "Monk"):
+            self.assertEqual(bot._attacks_per_turn({"char_class": char_class, "level": 1}), 1, char_class)
+            self.assertEqual(bot._attacks_per_turn({"char_class": char_class, "level": 4}), 1, char_class)
+            self.assertEqual(bot._attacks_per_turn({"char_class": char_class, "level": 5}), 2, char_class)
+            self.assertEqual(bot._attacks_per_turn({"char_class": char_class, "level": 10}), 2, char_class)
+
+    def test_fighter_gets_a_third_and_fourth_attack(self):
+        self.assertEqual(bot._attacks_per_turn({"char_class": "Fighter", "level": 10}), 2)
+        self.assertEqual(bot._attacks_per_turn({"char_class": "Fighter", "level": 11}), 3)
+        self.assertEqual(bot._attacks_per_turn({"char_class": "Fighter", "level": 19}), 3)
+        self.assertEqual(bot._attacks_per_turn({"char_class": "Fighter", "level": 20}), 4)
+
+    def test_non_martial_classes_never_get_extra_attack(self):
+        for char_class in ("Wizard", "Sorcerer", "Warlock", "Cleric", "Druid", "Bard", "Rogue"):
+            self.assertEqual(bot._attacks_per_turn({"char_class": char_class, "level": 20}), 1, char_class)
+
+    # -- Sneak Attack / Rage level scaling (2026-07-16 audit): both
+    #    features existed but were frozen at their level-1 values --
+    #    Sneak Attack always rolled exactly 1d6 regardless of level,
+    #    Rage's bonus damage was always a flat +2. --------------------
+    def test_sneak_attack_dice_scale_with_rogue_level(self):
+        from rules.leveling import sneak_attack_dice_count
+        self.assertEqual(sneak_attack_dice_count(1), 1)
+        self.assertEqual(sneak_attack_dice_count(2), 1)
+        self.assertEqual(sneak_attack_dice_count(3), 2)
+        self.assertEqual(sneak_attack_dice_count(10), 5)
+        self.assertEqual(sneak_attack_dice_count(19), 10)
+        self.assertEqual(sneak_attack_dice_count(20), 10)
+
+    def test_rage_bonus_scales_with_barbarian_level(self):
+        from rules.leveling import rage_damage_bonus
+        self.assertEqual(rage_damage_bonus(1), 2)
+        self.assertEqual(rage_damage_bonus(8), 2)
+        self.assertEqual(rage_damage_bonus(9), 3)
+        self.assertEqual(rage_damage_bonus(15), 3)
+        self.assertEqual(rage_damage_bonus(16), 4)
+        self.assertEqual(rage_damage_bonus(20), 4)
+
+    def test_sneak_attack_damage_scales_with_level_in_a_real_attack(self):
+        from unittest.mock import patch
+        attacker_low = {
+            "name": "Lowbie", "char_class": "Rogue", "level": 1, "strength": 10, "dexterity": 10,
+        }
+        attacker_high = {
+            "name": "Highroller", "char_class": "Rogue", "level": 10, "strength": 10, "dexterity": 10,
+        }
+        weapon = {"ability": "strength", "damage_dice": "1d8", "damage_bonus": 0}
+        with patch("rules.dice.random.randint", return_value=4):
+            defender_low = {"name": "Target", "armor_class": 1, "hp_current": 200}
+            result_low = resolve_attack(attacker_low, defender_low, weapon, advantage=True)
+            defender_high = {"name": "Target", "armor_class": 1, "hp_current": 200}
+            result_high = resolve_attack(attacker_high, defender_high, weapon, advantage=True)
+        # Fixed die value 4: level 1 = 1 sneak die (4), level 10 = 5 sneak dice (20) -- a +16 delta,
+        # with everything else (weapon roll, ability mod, hit/crit) identical between the two calls.
+        self.assertEqual(result_high["damage_dealt"] - result_low["damage_dealt"], 16)
 
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
@@ -1193,6 +1524,41 @@ class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
             boss["hp_current"], boss_hp_before,
             "Life Drain should have healed the boss after landing a hit",
         )
+        sessions.end_session(-999)
+
+    # -- Extra Attack (2026-07-16): confirmed live that a level 5+
+    #    Fighter's own _do_attack call resolves the real handler path,
+    #    not just the isolated _attacks_per_turn helper. -----------------
+    async def test_level_5_fighter_gets_two_real_attacks_via_do_attack(self):
+        import sessions
+        sessions.end_session(-999)
+
+        player_id = 999930
+        make_basic_character(
+            player_id, "Twinstrike", char_class="Fighter", current_location="crossroads_tavern",
+            hp_max=50, armor_class=18,
+        )
+        db.update_character(player_id, level=5)
+        player = db.get_character(player_id)
+        player["telegram_user_id"] = player_id
+        player["hp_current"] = 50
+
+        enemy_id = -2_500_030
+        enemy = {
+            "telegram_user_id": enemy_id, "name": "Straw Dummy", "dexterity": 10, "strength": 10,
+            "armor_class": 1,  # guaranteed hits so the attack count is deterministic
+            "hp_current": 200, "hp_max": 200, "is_ai": 1, "monster_key": "goblin",
+        }
+        session = sessions.start_session(-999, [player, enemy], {player_id: "party", enemy_id: "enemy"})
+        session.turn_order = [player_id, enemy_id]
+        session.current_turn_index = 0
+
+        events_before = len(session.event_log)
+        sink = []
+        await bot._do_attack(FakeUpdate(player_id, "I attack the straw dummy", sink), "I attack the straw dummy")
+
+        new_events = len(session.event_log) - events_before
+        self.assertGreaterEqual(new_events, 2, "level 5 Fighter should get 2 real attacks per turn")
         sessions.end_session(-999)
 
 

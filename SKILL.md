@@ -57,6 +57,10 @@ classifies far more reliably than creative or indirect phrasing:
 | *"I make a campfire"* | Consumes 1 wood, a real (small) HP heal, allowed outside combat any time |
 | *"Rest for now"* / *"take a rest"* | Go inactive until you return (only out of combat) — real-time-scaled healing, not an instant full heal |
 | *"cancel"* | Back out of anything you've started (not a way out of combat — see flee) |
+| *"Equip my longsword"* / *"auto equip"* | Wear/wield carried gear — armor, weapons, shields, rings, amulets — or just say "auto equip" and it picks your best carried gear automatically |
+| *"I drink the healing potion"* | Use a consumable item from your inventory |
+| *"Give my healing potion to [name]"* | Hand a carried item to another character standing with you |
+| *"Second wind"* / *"I rage"* / *"lay on hands"* / *"arcane recovery"* / *"bardic inspiration"* / *"channel divinity"* / *"breathe fire"* | Class/racial features with real limited uses per rest (Fighter, Barbarian, Paladin, Wizard, Bard, Cleric, Dragonborn respectively) |
 
 ### Gathering professions
 
@@ -73,7 +77,17 @@ Beyond prone and poisoned, this game models blinded, silenced,
 paralyzed, and frightened — each with a real mechanical effect (extra
 attack risk, blocked spellcasting, or a skipped turn), not just flavor
 text. These come from specific enemies' attacks, not something your
-own character chooses.
+own character chooses. Some races resist specific ones for real:
+Dwarves shrug off poisoned, Elves and Half-Elves shrug off paralyzed.
+
+### Combat scaling with level
+
+Fighter, Barbarian, Paladin, Ranger, and Monk get a real second attack
+per turn at level 5 (Fighter gets a third at 11, a fourth at 20). A
+Rogue's Sneak Attack die count and a Barbarian's Rage damage bonus both
+scale up with level too, not fixed at their level-1 values. Saving
+throws now add a real proficiency bonus when your class is proficient
+in that specific save, matching the 5E rules.
 
 ### Death is real, and reversible
 

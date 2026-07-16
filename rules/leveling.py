@@ -68,6 +68,43 @@ CLASS_HIT_DICE = {
     "wizard": 6,
 }
 
+def breath_weapon_dice_count(level: int) -> int:
+    """
+    Real 5E Dragonborn Breath Weapon damage scaling: 2d6 at levels
+    1-5, 3d6 at 6-10, 4d6 at 11-15, 5d6 at 16-20.
+    """
+    if level >= 16:
+        return 5
+    if level >= 11:
+        return 4
+    if level >= 6:
+        return 3
+    return 2
+
+
+def sneak_attack_dice_count(level: int) -> int:
+    """
+    Real 5E Rogue Sneak Attack scaling: 1d6 at levels 1-2, up to 10d6
+    at 19-20, gaining a die every 2 levels. Found frozen at a flat 1d6
+    regardless of level (2026-07-16 audit) -- rules/combat.py's Sneak
+    Attack always rolled exactly one extra d6.
+    """
+    return (level + 1) // 2
+
+
+def rage_damage_bonus(level: int) -> int:
+    """
+    Real 5E Barbarian Rage bonus damage: +2 at levels 1-8, +3 at 9-15,
+    +4 at 16-20. Found frozen at a flat +2 regardless of level
+    (2026-07-16 audit) -- rules/combat.py always added exactly +2.
+    """
+    if level >= 16:
+        return 4
+    if level >= 9:
+        return 3
+    return 2
+
+
 # Real 5E: Ability Score Improvements are available at these levels.
 # In the real game, a player CHOOSES which score(s) to raise (or takes a
 # feat instead). This build has no interactive choice mechanism yet, so
@@ -83,6 +120,29 @@ CLASS_PRIMARY_ABILITY = {
     "cleric": "wisdom", "druid": "wisdom",
     "bard": "charisma", "sorcerer": "charisma", "warlock": "charisma",
 }
+
+# Real 5E: every class is proficient in exactly 2 saving throws. Found
+# unused (2026-07-16 audit) -- spells.py's save-roll code only ever
+# added the raw ability modifier, never a proficiency bonus, because
+# this table didn't exist yet to look one up in.
+CLASS_SAVE_PROFICIENCIES = {
+    "barbarian": ("strength", "constitution"),
+    "fighter": ("strength", "constitution"),
+    "paladin": ("wisdom", "charisma"),
+    "ranger": ("strength", "dexterity"),
+    "rogue": ("dexterity", "intelligence"),
+    "monk": ("strength", "dexterity"),
+    "bard": ("dexterity", "charisma"),
+    "cleric": ("wisdom", "charisma"),
+    "druid": ("intelligence", "wisdom"),
+    "sorcerer": ("constitution", "charisma"),
+    "warlock": ("wisdom", "charisma"),
+    "wizard": ("intelligence", "wisdom"),
+}
+
+
+def is_proficient_in_save(char_class: str, ability: str) -> bool:
+    return ability in CLASS_SAVE_PROFICIENCIES.get((char_class or "").lower(), ())
 
 
 def hp_gain_for_level(char_class: str, constitution_modifier: int) -> int:

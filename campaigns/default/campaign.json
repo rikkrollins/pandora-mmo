@@ -420,7 +420,8 @@
           "the_first_city"
         ],
         "monsters": [
-          "shadow_wisp"
+          "shadow_wisp",
+          "the_unspoken"
         ],
         "hidden": true,
         "min_level": 5,
@@ -445,6 +446,9 @@
         "ascends_to": "the_unmoored_isle",
         "hidden": true,
         "min_level": 7,
+        "monsters": [
+          "the_waking_ember"
+        ],
         "quest_items": [
           "brass_key_no_lock"
         ],
@@ -885,27 +889,27 @@
     },
     "the_hush": {
       "title": "Into the Hush",
-      "description": "Few who go into the Hush Below come back describing the same thing twice.",
+      "description": "Few who go into the Hush Below come back describing the same thing twice \u2014 and something down there has started describing YOU back, in a voice that isn't quite a voice.",
       "location": "the_hush_below",
       "reward_xp": 750,
       "reward_gold": 400,
       "reward_item": "cloak_of_elvenkind",
       "trigger": {
-        "type": "reach_location",
-        "location": "the_hush_below"
+        "type": "defeat_monster",
+        "monster": "the_unspoken"
       },
       "clue": "No two accounts of what's past Glimmerdeep Grotto agree \u2014 that alone is worth noting."
     },
     "the_first_city_quest": {
       "title": "The First City",
-      "description": "Beneath everything, something predates the goblins, the roots, and the crystals.",
+      "description": "Beneath everything, something predates the goblins, the roots, and the crystals \u2014 and the spire's slow, warm breathing has just changed rhythm.",
       "location": "the_first_city",
       "reward_xp": 1500,
       "reward_gold": 1000,
       "reward_item": "brass_key_no_lock",
       "trigger": {
-        "type": "reach_location",
-        "location": "the_first_city"
+        "type": "defeat_monster",
+        "monster": "the_waking_ember"
       },
       "clue": "Everything so far has felt like the edge of something older, further down."
     },
@@ -1056,6 +1060,29 @@
       "proficiency_bonus": 3,
       "xp_reward": 150,
       "on_hit_condition": "blinded"
+    },
+    "the_unspoken": {
+      "name": "The Unspoken",
+      "dexterity": 16,
+      "strength": 14,
+      "armor_class": 16,
+      "hp_max": 42,
+      "proficiency_bonus": 3,
+      "xp_reward": 350,
+      "is_boss": true,
+      "on_hit_condition": "silenced"
+    },
+    "the_waking_ember": {
+      "name": "The Waking Ember",
+      "dexterity": 12,
+      "strength": 18,
+      "armor_class": 18,
+      "hp_max": 58,
+      "proficiency_bonus": 4,
+      "xp_reward": 450,
+      "is_boss": true,
+      "on_hit_condition": "paralyzed",
+      "life_drain": true
     },
     "the_waiting_shape": {
       "name": "The Waiting Shape",
