@@ -78,6 +78,26 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     def test_leave_the_party_not_hijacked_by_move(self):
         self.assertEqual(_keyword_fallback("Leave the party", [])["action"], "leave_party")
 
+    # -- "Return to X" recognized as move (2026-07-16, task #88) -------
+    def test_return_to_phrasing_classified_as_move(self):
+        for text in ("Return to the crossroads tavern", "Head back to town", "I go back to the tavern"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "move", text)
+
+    # -- "Check quests" bare phrase (2026-07-16, task #92) --------------
+    def test_bare_check_quests_phrasing_classified_correctly(self):
+        for text in ("Check quests", "check my quests please", "list quests"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "check_quests", text)
+
+    # -- Typo tolerance for "accept" (2026-07-16, task #89) -------------
+    def test_accept_quest_typo_tolerance(self):
+        for text in ("I accepet the quest", "Accepet this quest"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "accept_quest", text)
+
+    def test_typo_tolerance_doesnt_break_unrelated_words(self):
+        # Guards against the typo-normalizer being too aggressive.
+        self.assertEqual(_keyword_fallback("I attack the goblin", [])["action"], "attack")
+        self.assertEqual(_keyword_fallback("give my potion to Sera", [])["action"], "give_item")
+
     async def test_player_can_actually_leave_tavern_upstairs(self):
         user_id = 222222
         make_basic_character(user_id, current_location="tavern_upstairs")
@@ -748,13 +768,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "name": "Dodger", "dexterity": 10, "armor_class": 1,
             "hp_current": 50, "hp_max": 50, "char_class": "Rogue", "level": 5,
         }
-        for _ in range(20):
-            result = resolve_attack(dict(attacker), defender, weapon, round_number=1)
-            if result["hit"] and not result["critical_hit"]:
-                self.assertTrue(result["uncanny_dodge_triggered"])
-                self.assertEqual(result["damage_dealt"], 4)
-                return
-        self.fail("no plain hit landed in 20 tries at AC 1")
+        # forced_roll=10 guarantees a plain (non-crit) hit on the first try --
+        # the old 20-attempt retry loop reused the same defender dict and a
+        # fixed round_number=1 across every attempt without resetting
+        # reaction_used_round, so an earlier natural 20 (which is also a
+        # "hit" and also enters the reaction block) could burn the round-1
+        # reaction before the loop ever reached a plain hit to assert on.
+        # Confirmed live 2026-07-16: failed under real random rolls in an
+        # otherwise-clean full suite run for exactly this reason.
+        result = resolve_attack(attacker, defender, weapon, round_number=1, forced_roll=10)
+        self.assertTrue(result["hit"])
+        self.assertFalse(result["critical_hit"])
+        self.assertTrue(result["uncanny_dodge_triggered"])
+        self.assertEqual(result["damage_dealt"], 4)
 
     def test_uncanny_dodge_doesnt_fire_below_level_5(self):
         weapon = {"ability": "strength", "damage_dice": "8d1", "damage_bonus": 0}
@@ -1069,7 +1095,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         db.update_character(user_id, level=2)
 
         enemy_id = -2_500_040
-        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "dexterity": 10, "monster_key": "goblin"}
+        enemy = {
+            "telegram_user_id": enemy_id, "name": "Goblin", "dexterity": 10,
+            "hp_current": 7, "monster_key": "goblin",
+        }
         session = sessions.start_session(-999, [enemy], {enemy_id: "enemy", user_id: "party"})
 
         sink = []
@@ -1087,7 +1116,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         undead_id = -2_500_041
         undead = {
             "telegram_user_id": undead_id, "name": "Shadow Wisp", "dexterity": 18,
-            "monster_key": "shadow_wisp", "conditions": [],
+            "hp_current": 22, "monster_key": "shadow_wisp", "conditions": [],
         }
         session = sessions.start_session(-999, [undead], {undead_id: "enemy", user_id: "party"})
 
@@ -1104,6 +1133,397 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     def test_channel_divinity_phrasing_classified_correctly(self):
         for text in ("I channel divinity", "I turn undead", "turn the undead", "channel divinity"):
             self.assertEqual(_keyword_fallback(text, [])["action"], "channel_divinity", text)
+
+    # -- Gathering tools (2026-07-16, per Coffee): fishing needs a
+    #    fishing pole + bait, lumberjacking needs an axe, mining needs a
+    #    pickaxe -- herbalism needs no tool at all, but owning Shears
+    #    lets an herbalist gather up to 3 per success instead of 1. ----
+    async def test_fishing_rejected_without_pole_and_bait(self):
+        user_id = 900460
+        make_basic_character(user_id, "Angler", current_location="stonearch_bridge")
+        sink = []
+        await bot._do_gather(FakeUpdate(user_id, "I go fishing", sink), "I go fishing")
+        self.assertTrue(any("Fishing Pole" in m for m in sink))
+        character = db.get_character(user_id)
+        self.assertEqual(character["inventory"].get("raw_fish", 0), 0)
+
+    async def test_fishing_works_with_pole_and_bait(self):
+        user_id = 900461
+        make_basic_character(user_id, "Angler", current_location="stonearch_bridge")
+        db.add_item(user_id, "fishing_pole", 1)
+        db.add_item(user_id, "bait", 1)
+        sink = []
+        await bot._do_gather(FakeUpdate(user_id, "I go fishing", sink), "I go fishing")
+        self.assertFalse(any("Fishing Pole" in m for m in sink))
+
+    async def test_lumberjacking_rejected_without_axe(self):
+        user_id = 900462
+        make_basic_character(user_id, "Chopper", current_location="whispering_wood")
+        sink = []
+        await bot._do_gather(FakeUpdate(user_id, "I chop wood", sink), "I chop wood")
+        self.assertTrue(any("Woodcutter's Axe" in m for m in sink))
+
+    async def test_mining_rejected_without_pickaxe(self):
+        user_id = 900463
+        make_basic_character(user_id, "Digger", current_location="sunken_root_caverns")
+        sink = []
+        await bot._do_gather(FakeUpdate(user_id, "I mine for sulfur", sink), "I mine for sulfur")
+        self.assertTrue(any("Pickaxe" in m for m in sink))
+
+    async def test_herbalism_needs_no_tool(self):
+        user_id = 900464
+        make_basic_character(user_id, "Herbalist", current_location="whispering_wood")
+        sink = []
+        await bot._do_gather(FakeUpdate(user_id, "I gather herbs", sink), "I gather herbs")
+        self.assertFalse(any("need" in m and "Shears" in m for m in sink))
+
+    def test_shears_boost_herbalism_quantity_up_to_3(self):
+        character = {"inventory": {"shears": 1}}
+        for _ in range(20):
+            qty = bot._gather_quantity(character, "herbalism", practiced_bonus=0)
+            self.assertIn(qty, (1, 2, 3))
+
+    def test_no_shears_means_flat_quantity_of_1(self):
+        character = {"inventory": {}}
+        for _ in range(20):
+            self.assertEqual(bot._gather_quantity(character, "herbalism", practiced_bonus=0), 1)
+
+    def test_shears_dont_affect_other_gathering_skills(self):
+        character = {"inventory": {"shears": 1}}
+        for _ in range(10):
+            self.assertEqual(bot._gather_quantity(character, "mining", practiced_bonus=0), 1)
+
+    def test_gathering_tools_stocked_at_marens_wares(self):
+        shop = bot.CAMPAIGN["shops"]["marens_wares"]
+        for tool_id in ("fishing_pole", "bait", "woodcutters_axe", "pickaxe", "shears"):
+            self.assertIn(tool_id, shop["inventory"], tool_id)
+
+    # -- Level 2-10 class features batch (2026-07-16, per Coffee): Action
+    #    Surge, Reckless Attack, Divine Smite, Flurry of Blows. ----------
+    async def test_action_surge_rejects_non_fighter(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900470
+        make_basic_character(user_id, "Plainfolk", char_class="Wizard")
+        sink = []
+        await bot._do_action_surge(FakeUpdate(user_id, "action surge", sink))
+        self.assertTrue(any("doesn't have it" in m for m in sink))
+
+    async def test_action_surge_rejects_below_level_2(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900471
+        make_basic_character(user_id, "Recruit", char_class="Fighter")
+        sink = []
+        await bot._do_action_surge(FakeUpdate(user_id, "action surge", sink))
+        self.assertTrue(any("level 2" in m for m in sink))
+
+    async def test_action_surge_doubles_attack_count_once_per_rest(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900472
+        make_basic_character(user_id, "Twinstrike", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, level=2)
+
+        enemy_id = -2_500_050
+        enemy = {"telegram_user_id": enemy_id, "name": "Dummy", "dexterity": 10, "hp_current": 100}
+        player = db.get_character(user_id)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {enemy_id: "enemy", user_id: "party"})
+
+        sink = []
+        await bot._do_action_surge(FakeUpdate(user_id, "action surge", sink))
+        participant = next(p for p in session.participants if p["telegram_user_id"] == user_id)
+        self.assertTrue(participant.get("action_surge_active"))
+        self.assertEqual(db.get_feature_uses(user_id, "action_surge"), 1)
+
+        sink2 = []
+        await bot._do_action_surge(FakeUpdate(user_id, "action surge", sink2))
+        self.assertTrue(any("already used" in m for m in sink2))
+        sessions.end_session(-999)
+
+    def test_reckless_attack_grants_advantage_and_is_consumed(self):
+        attacker = {"reckless_active": True, "race": "Human", "char_class": "Barbarian"}
+        defender = {}
+        adv, disadv = bot._attack_advantage_disadvantage(attacker, defender)
+        self.assertTrue(adv)
+        self.assertFalse(attacker.get("reckless_active"))
+        # Second call with the flag already consumed shouldn't grant it again.
+        adv2, _ = bot._attack_advantage_disadvantage(attacker, defender)
+        self.assertFalse(adv2)
+
+    async def test_reckless_attack_rejects_non_barbarian(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900473
+        make_basic_character(user_id, "Plainfolk", char_class="Fighter")
+        sink = []
+        await bot._do_reckless_attack(FakeUpdate(user_id, "reckless attack", sink))
+        self.assertTrue(any("doesn't have it" in m for m in sink))
+
+    async def test_divine_smite_rejects_non_paladin(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900474
+        make_basic_character(user_id, "Plainfolk", char_class="Fighter")
+        sink = []
+        await bot._do_divine_smite(FakeUpdate(user_id, "divine smite", sink))
+        self.assertTrue(any("doesn't have it" in m for m in sink))
+
+    async def test_divine_smite_rejects_below_level_2(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900475
+        make_basic_character(user_id, "Squire", char_class="Paladin")
+        db.update_character(user_id, spell_slots_max=2, spell_slots_current=2)
+        sink = []
+        await bot._do_divine_smite(FakeUpdate(user_id, "divine smite", sink))
+        self.assertTrue(any("level 2" in m for m in sink))
+
+    async def test_divine_smite_rejects_with_no_spell_slot(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900476
+        make_basic_character(user_id, "Squire", char_class="Paladin")
+        db.update_character(user_id, level=2, spell_slots_max=2, spell_slots_current=0)
+        sink = []
+        await bot._do_divine_smite(FakeUpdate(user_id, "divine smite", sink))
+        self.assertTrue(any("spell slot" in m for m in sink))
+
+    async def test_divine_smite_adds_bonus_damage_and_spends_a_slot_only_on_hit(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900477
+        make_basic_character(
+            user_id, "Smiter", char_class="Paladin", current_location="crossroads_tavern",
+            armor_class=18,
+        )
+        db.update_character(user_id, level=2, spell_slots_max=2, spell_slots_current=2)
+
+        enemy_id = -2_500_051
+        enemy = {
+            "telegram_user_id": enemy_id, "name": "Dummy", "dexterity": 10, "strength": 10,
+            "armor_class": 1, "proficiency_bonus": 2,  # guaranteed hits
+            "hp_current": 200, "hp_max": 200, "is_ai": 1, "monster_key": "goblin",
+        }
+        player = db.get_character(user_id)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", enemy_id: "enemy"})
+        session.turn_order = [user_id, enemy_id]
+        session.current_turn_index = 0
+
+        sink = []
+        await bot._do_divine_smite(FakeUpdate(user_id, "divine smite", sink))
+        sink2 = []
+        # Forced roll of 20 guarantees a hit -- without this, a natural 1
+        # (1/20 chance, an automatic miss in 5E regardless of AC) made
+        # this test genuinely flaky (confirmed live 2026-07-16: failed
+        # under real random rolls in an otherwise-clean full suite run).
+        await bot._do_attack(
+            FakeUpdate(user_id, "I attack the dummy", sink2), "I attack the dummy", forced_roll=20
+        )
+
+        self.assertLess(enemy["hp_current"], 200)
+        self.assertEqual(db.get_character(user_id)["spell_slots_current"], 1)
+        sessions.end_session(-999)
+
+    async def test_flurry_of_blows_rejects_non_monk(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900478
+        make_basic_character(user_id, "Plainfolk", char_class="Fighter")
+        sink = []
+        await bot._do_flurry_of_blows(FakeUpdate(user_id, "flurry of blows", sink))
+        self.assertTrue(any("doesn't have it" in m for m in sink))
+
+    async def test_flurry_of_blows_ki_pool_scales_with_level_and_adds_two_attacks(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900479
+        make_basic_character(user_id, "Fistfighter", char_class="Monk", current_location="crossroads_tavern")
+        db.update_character(user_id, level=2)
+
+        enemy_id = -2_500_052
+        enemy = {"telegram_user_id": enemy_id, "name": "Dummy", "dexterity": 10, "hp_current": 100}
+        player = db.get_character(user_id)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {enemy_id: "enemy", user_id: "party"})
+
+        sink = []
+        await bot._do_flurry_of_blows(FakeUpdate(user_id, "flurry of blows", sink))
+        participant = next(p for p in session.participants if p["telegram_user_id"] == user_id)
+        self.assertEqual(participant.get("flurry_bonus_attacks"), 2)
+        self.assertEqual(db.get_feature_uses(user_id, "ki"), 1)
+
+        # A level 2 Monk only has 2 ki points -- second use ok, third rejected.
+        participant.pop("flurry_bonus_attacks", None)
+        sink2 = []
+        await bot._do_flurry_of_blows(FakeUpdate(user_id, "flurry of blows", sink2))
+        self.assertEqual(db.get_feature_uses(user_id, "ki"), 2)
+        participant.pop("flurry_bonus_attacks", None)
+        sink3 = []
+        await bot._do_flurry_of_blows(FakeUpdate(user_id, "flurry of blows", sink3))
+        self.assertTrue(any("out of ki" in m for m in sink3))
+        sessions.end_session(-999)
+
+    def test_new_class_feature_phrasing_classified_correctly(self):
+        for text, expected in (
+            ("action surge", "action_surge"),
+            ("I go reckless", "reckless_attack"),
+            ("divine smite", "divine_smite"),
+            ("flurry of blows", "flurry_of_blows"),
+        ):
+            self.assertEqual(_keyword_fallback(text, [])["action"], expected, text)
+
+    # -- Physical dice mode (2026-07-16, per Coffee) -------------------
+    def test_manual_dice_toggle_phrasing_classified_correctly(self):
+        for text in ("use my own dice", "roll my own dice", "let the game roll for me",
+                     "dice on", "dice off"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "toggle_manual_dice", text)
+
+    async def test_toggle_manual_dice_turns_on_and_off(self):
+        user_id = 900480
+        make_basic_character(user_id, "Roller")
+        sink = []
+        await bot._do_toggle_manual_dice(FakeUpdate(user_id, "use my own dice", sink), "use my own dice")
+        self.assertEqual(db.get_character(user_id)["manual_dice_enabled"], 1)
+        self.assertTrue(any("now **ON**" in m for m in sink))
+
+        sink2 = []
+        await bot._do_toggle_manual_dice(FakeUpdate(user_id, "let the game roll for me", sink2), "let the game roll for me")
+        self.assertEqual(db.get_character(user_id)["manual_dice_enabled"], 0)
+        self.assertTrue(any("now **OFF**" in m for m in sink2))
+
+    async def test_skill_check_prompts_for_manual_roll_and_resumes_with_it(self):
+        user_id = 900481
+        make_basic_character(user_id, "Sharpeyes", current_location="crossroads_tavern")
+        db.update_character(user_id, manual_dice_enabled=1)
+        bot._PENDING_DICE_ROLLS.pop(user_id, None)
+
+        sink = []
+        await bot._do_skill_check(FakeUpdate(user_id, "I listen at the door", sink), "wisdom", "I listen at the door")
+        self.assertTrue(any("Roll a d20" in m for m in sink))
+        self.assertIn(user_id, bot._PENDING_DICE_ROLLS)
+        self.assertEqual(bot._PENDING_DICE_ROLLS[user_id]["kind"], "skill_check")
+
+        sink2 = []
+        pending = bot._PENDING_DICE_ROLLS.pop(user_id)
+        await bot._do_skill_check(
+            FakeUpdate(user_id, "20", sink2), pending["ability"], pending["action_text"], forced_roll=20
+        )
+        self.assertTrue(any("raw" in m.lower() or "20" in m for m in sink2))
+
+    def test_extract_manual_roll_parses_free_text(self):
+        self.assertEqual(bot._extract_manual_roll("14"), 14)
+        self.assertEqual(bot._extract_manual_roll("I rolled a 17"), 17)
+        self.assertEqual(bot._extract_manual_roll("natural 20"), 20)
+        self.assertIsNone(bot._extract_manual_roll("no numbers here"))
+        self.assertIsNone(bot._extract_manual_roll("I rolled a 47"))  # out of d20 range
+
+    # -- Real live bug (2026-07-16, Coffee, Support topic): "On my
+    #    character sheet, I noticed there are spell slots. What are
+    #    they used for?" matched the sheet-lookup shortcut on "my
+    #    character sheet" and just dumped his own sheet, ignoring the
+    #    real question -- exactly the kind of genuine how-to-play
+    #    question Support is supposed to explain (Coffee's "make
+    #    Support a wiki" goal). -----------------------------------------
+    def test_sheet_mention_with_a_real_question_skips_the_sheet_dump(self):
+        for question in (
+            "On my character sheet, I noticed there are spell slots. What are they used for?",
+            "What is my character sheet's AC used for?",
+            "How do spell slots on my sheet work?",
+        ):
+            self.assertEqual(bot._wants_sheet_names(question), [], question)
+
+    def test_genuine_sheet_requests_still_work(self):
+        self.assertEqual(bot._wants_sheet_names("show me my character sheet"), ["my"])
+        self.assertEqual(bot._wants_sheet_names("Sera's character sheet"), ["sera"])
+
+    async def test_attack_forced_roll_determines_hit_or_miss(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900482
+        make_basic_character(user_id, "Roller", current_location="crossroads_tavern")
+        enemy_id = -2_500_053
+        enemy = {
+            "telegram_user_id": enemy_id, "name": "Dummy", "strength": 10, "dexterity": 10,
+            "armor_class": 15, "hp_current": 100, "hp_max": 100, "is_ai": 1, "monster_key": "goblin",
+        }
+        player = db.get_character(user_id)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", enemy_id: "enemy"})
+        session.turn_order = [user_id, enemy_id]
+        session.current_turn_index = 0
+
+        sink = []
+        # A forced natural 1 should always miss (critical fail). The
+        # dummy still needs a real "strength" score of its own -- after
+        # the player's forced miss, _resolve_ai_turns takes the dummy's
+        # own turn and resolves its unarmed attack back, which needs it.
+        await bot._do_attack(FakeUpdate(user_id, "I attack the dummy", sink), "I attack the dummy", forced_roll=1)
+        self.assertEqual(enemy["hp_current"], 100, "a forced natural 1 should never hit")
+        sessions.end_session(-999)
+
+    # -- Inactive party members' XP share (2026-07-16, per Coffee) ----
+    async def test_absent_party_member_gets_partial_xp_share(self):
+        import sessions
+        sessions.end_session(-999)
+
+        fighter_id = 900483
+        absent_id = 900484
+        make_basic_character(fighter_id, "Fighter", current_location="crossroads_tavern")
+        make_basic_character(absent_id, "Homebody", current_location="crossroads_tavern")
+        party_id = db.create_party(fighter_id)
+        db.update_character(absent_id, party_id=party_id)
+
+        enemy_id = -2_500_054
+        enemy = {
+            "telegram_user_id": enemy_id, "name": "Goblin", "dexterity": 10, "xp_reward": 100,
+        }
+        fighter = db.get_character(fighter_id)
+        fighter["telegram_user_id"] = fighter_id
+        session = sessions.start_session(-999, [fighter, enemy], {enemy_id: "enemy", fighter_id: "party"})
+        session.turn_order = [fighter_id, enemy_id]
+
+        before_absent = db.get_character(absent_id)["xp"]
+        before_fighter = db.get_character(fighter_id)["xp"]
+        bot._award_victory_xp(session)
+        after_absent = db.get_character(absent_id)["xp"]
+        after_fighter = db.get_character(fighter_id)["xp"]
+
+        self.assertEqual(after_fighter - before_fighter, 100)
+        self.assertEqual(after_absent - before_absent, 10)  # 10% of the 100 xp_each fighters earned
+        sessions.end_session(-999)
+
+    async def test_ai_companions_never_get_the_absent_party_bonus(self):
+        import sessions
+        sessions.end_session(-999)
+
+        fighter_id = 900485
+        make_basic_character(fighter_id, "Fighter", current_location="crossroads_tavern")
+        party_id = db.create_party(fighter_id)
+        companion = db.create_ai_companion(
+            "Buddy", "Human", "Fighter",
+            ability_scores={"strength": 15, "dexterity": 14, "constitution": 13,
+                             "intelligence": 10, "wisdom": 10, "charisma": 10},
+            hp_max=12, armor_class=15, gold=10, inventory={},
+        )
+        db.add_ai_companion_to_party(companion["telegram_user_id"], party_id)
+
+        enemy_id = -2_500_055
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "dexterity": 10, "xp_reward": 50}
+        fighter = db.get_character(fighter_id)
+        fighter["telegram_user_id"] = fighter_id
+        session = sessions.start_session(-999, [fighter, enemy], {enemy_id: "enemy", fighter_id: "party"})
+        session.turn_order = [fighter_id, enemy_id]
+
+        # Should not raise even if an AI companion shares the party, and
+        # the companion (is_ai) must never receive the absent-member bonus.
+        companion_xp_before = companion["xp"]
+        bot._award_victory_xp(session)
+        companion_xp_after = db.get_character(companion["telegram_user_id"])["xp"]
+        self.assertEqual(companion_xp_after, companion_xp_before)
+        sessions.end_session(-999)
 
     # -- Dev-topic video handling (2026-07-15, per Coffee): videos had NO
     #    handler at all before this (only TEXT/PHOTO/Document.ALL were
@@ -1415,6 +1835,164 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # Fixed die value 4: level 1 = 1 sneak die (4), level 10 = 5 sneak dice (20) -- a +16 delta,
         # with everything else (weapon roll, ability mod, hit/crit) identical between the two calls.
         self.assertEqual(result_high["damage_dealt"] - result_low["damage_dealt"], 16)
+
+    # -- Board quest completion bugs (2026-07-16, task #93) -------------
+    def test_completed_board_quest_frees_a_slot_for_a_fresh_one(self):
+        import board_quests as board_quests_module
+        location_id = "stonearch_bridge"
+        # Simulate a full day already posted, with one already completed --
+        # previously this permanently occupied a slot for the rest of the
+        # day instead of a fresh quest ever being generated to replace it.
+        stale = db.create_board_quest(
+            location_id, board_quests_module._day_key(), "Old bounty", "...", None,
+            "defeat_monster", "goblin", 2, 50, 20,
+        )
+        db.complete_board_quest(stale["board_quest_id"])
+
+        active = board_quests_module.get_or_generate_board_quests(bot.CAMPAIGN, location_id)
+        self.assertEqual(len(active), board_quests_module.DAILY_BOARD_QUEST_COUNT)
+        self.assertTrue(all(not q.get("completed_at") for q in active),
+                         "a completed quest should never be returned for display")
+
+    def test_board_quests_completed_counter_increments(self):
+        user_id = 900490
+        make_basic_character(user_id, "Bountyhunter")
+        self.assertEqual(db.get_character(user_id)["board_quests_completed"], 0)
+        db.increment_board_quests_completed(user_id)
+        db.increment_board_quests_completed(user_id)
+        self.assertEqual(db.get_character(user_id)["board_quests_completed"], 2)
+
+    async def test_check_quests_shows_board_quest_completion_count(self):
+        user_id = 900491
+        make_basic_character(user_id, "Bountyhunter2")
+        db.increment_board_quests_completed(user_id)
+        sink = []
+        await bot._do_check_quests(FakeUpdate(user_id, "check quests", sink))
+        self.assertIn("Board quests completed", " ".join(sink))
+
+    # -- Real player-driven ASI level-up (2026-07-16, per Coffee) -------
+    def test_level_up_phrasing_classified_correctly(self):
+        for text in ("level up", "I want to level up", "Level up!"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "level_up", text)
+
+    async def test_add_xp_banks_asi_points_instead_of_auto_applying(self):
+        user_id = 900492
+        make_basic_character(user_id, "Leveler")
+        before_strength = db.get_character(user_id)["strength"]
+        after = db.add_xp(user_id, 2700)  # crosses level 4, a real ASI level
+        self.assertEqual(after["level"], 4)
+        self.assertEqual(after["strength"], before_strength, "ASI should no longer auto-apply")
+        self.assertEqual(after["pending_asi_points"], 2)
+
+    async def test_level_up_with_no_pending_points_says_so(self):
+        user_id = 900493
+        make_basic_character(user_id, "Leveler2")
+        sink = []
+        await bot._do_level_up(FakeUpdate(user_id, "level up", sink), "level up")
+        self.assertIn("No ability score improvements", " ".join(sink))
+
+    async def test_level_up_prompts_then_resolves_with_named_ability(self):
+        user_id = 900494
+        make_basic_character(user_id, "Leveler3")
+        db.update_character(user_id, pending_asi_points=2)
+        sink = []
+        await bot._do_level_up(FakeUpdate(user_id, "level up", sink), "level up")
+        self.assertIn(user_id, bot._PENDING_ASI_CHOICE)
+        self.assertTrue(any("Which ability" in m for m in sink))
+
+        before_con = db.get_character(user_id)["constitution"]
+        sink2 = []
+        await bot._do_level_up(FakeUpdate(user_id, "constitution", sink2), "constitution")
+        after = db.get_character(user_id)
+        self.assertEqual(after["constitution"], before_con + 2)
+        self.assertEqual(after["pending_asi_points"], 0)
+        self.assertNotIn(user_id, bot._PENDING_ASI_CHOICE)
+
+    async def test_level_up_auto_assigns_to_class_primary_ability(self):
+        user_id = 900495
+        make_basic_character(user_id, "Leveler4")  # Fighter -> primary ability strength
+        db.update_character(user_id, pending_asi_points=4)
+        before_strength = db.get_character(user_id)["strength"]
+        sink = []
+        await bot._do_level_up(FakeUpdate(user_id, "level up, auto", sink), "level up, auto")
+        after = db.get_character(user_id)
+        self.assertEqual(after["strength"], before_strength + 4)
+        self.assertEqual(after["pending_asi_points"], 0)
+        self.assertNotIn(user_id, bot._PENDING_ASI_CHOICE)
+
+    async def test_level_up_single_ability_choice_caps_at_two_and_keeps_remainder(self):
+        user_id = 900496
+        make_basic_character(user_id, "Leveler5")
+        db.update_character(user_id, pending_asi_points=4)
+        before_wis = db.get_character(user_id)["wisdom"]
+        sink = []
+        await bot._do_level_up(FakeUpdate(user_id, "wisdom", sink), "wisdom")
+        after = db.get_character(user_id)
+        self.assertEqual(after["wisdom"], before_wis + 2)
+        self.assertEqual(after["pending_asi_points"], 2)
+        self.assertTrue(any("still have 2" in m for m in sink))
+
+    async def test_check_sheet_shows_pending_asi_points(self):
+        user_id = 900497
+        make_basic_character(user_id, "Leveler6")
+        db.update_character(user_id, pending_asi_points=2)
+        sink = []
+        await bot._do_check_sheet(FakeUpdate(user_id, "check my sheet", sink))
+        self.assertTrue(any("ability point(s) waiting" in m for m in sink))
+
+    # -- Auto-assign ability scores at character creation (2026-07-16, per Coffee) --
+    def test_auto_assign_ability_scores_uses_each_rolled_value_once(self):
+        rolled = [15, 14, 13, 12, 10, 8]
+        for char_class in ("Fighter", "Wizard", "Rogue", "Cleric", "Paladin", "Monk"):
+            assigned = bot._auto_assign_ability_scores(char_class, rolled)
+            self.assertEqual(sorted(assigned), sorted(rolled), char_class)
+
+    def test_auto_assign_gives_highest_roll_to_class_primary_ability(self):
+        rolled = [15, 14, 13, 12, 10, 8]
+        cases = {"Fighter": "strength", "Wizard": "intelligence", "Rogue": "dexterity", "Cleric": "wisdom"}
+        for char_class, primary in cases.items():
+            assigned = dict(zip(bot._ABILITY_ORDER, bot._auto_assign_ability_scores(char_class, rolled)))
+            self.assertEqual(assigned[primary], max(rolled), char_class)
+
+    async def test_character_creation_auto_assigns_scores_on_request(self):
+        user_id = 900498
+        sink = []
+        ctx = DummyContext()
+        await bot.adventure_master_handler(FakeUpdate(user_id, "I want to create a character", sink), ctx)
+        sink.clear()
+        await bot.adventure_master_handler(FakeUpdate(user_id, "Autobot", sink), ctx)
+        sink.clear()
+        await bot.adventure_master_handler(FakeUpdate(user_id, "Human", sink), ctx)
+        sink.clear()
+        await bot.adventure_master_handler(FakeUpdate(user_id, "Fighter", sink), ctx)
+        rolled = ctx.user_data["creation"]["rolled_scores"]
+
+        sink.clear()
+        await bot.adventure_master_handler(FakeUpdate(user_id, "do it for me", sink), ctx)
+        self.assertEqual(ctx.user_data["creation"]["step"], "dice_preference")
+        assigned = ctx.user_data["creation"]["assigned_scores"]
+        self.assertEqual(sorted(assigned), sorted(rolled))
+
+    # -- Quest hints on "look around" (2026-07-16, per Coffee) ---------
+    async def test_look_hints_at_an_offerable_story_quest(self):
+        user_id = 900499
+        make_basic_character(user_id, "Looker", current_location="crossroads_tavern")
+        sink = []
+        await bot._do_look(FakeUpdate(user_id, "look around", sink))
+        combined = " ".join(sink)
+        self.assertIn("could use your help", combined)
+        self.assertIn("Grimsby", combined)
+
+    async def test_look_hints_at_an_unclaimed_board_quest(self):
+        import board_quests as board_quests_module
+        location_id = "stonearch_bridge"
+        board_quests_module.get_or_generate_board_quests(bot.CAMPAIGN, location_id)
+        user_id = 900500
+        make_basic_character(user_id, "Looker2", current_location=location_id)
+        sink = []
+        await bot._do_look(FakeUpdate(user_id, "look around", sink))
+        combined = " ".join(sink)
+        self.assertIn("bounty posted on the board", combined)
 
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):

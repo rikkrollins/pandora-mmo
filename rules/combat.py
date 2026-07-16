@@ -33,7 +33,7 @@ def start_combat(participants: list[dict]) -> list[dict]:
 def resolve_attack(attacker: dict, defender: dict, weapon: dict,
                     advantage: bool = False, disadvantage: bool = False,
                     defender_relentless_endurance_available: bool = False,
-                    round_number: int = 0) -> dict:
+                    round_number: int = 0, forced_roll: int | None = None) -> dict:
     """
     Resolve one attack. `weapon` is a dict like:
         {"ability": "strength", "damage_dice": "1d8", "damage_bonus": 0}
@@ -127,6 +127,7 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         proficient=True,
         advantage=advantage,
         disadvantage=disadvantage,
+        forced_roll=forced_roll,
     )
 
     shield_reaction_triggered = False

@@ -225,27 +225,38 @@ def _generate_branching_quest_for_location(campaign_data: dict, location_id: str
 
 def get_or_generate_board_quests(campaign_data: dict, location_id: str) -> list[dict]:
     """
-    Today's full board for this location — tops up to
+    Today's ACTIVE board for this location — tops up to
     DAILY_BOARD_QUEST_COUNT if under. The first quest generated for a
     location each day is always attempted as a branching (moral-choice)
     quest; the rest are simple bounties, for a mix of both.
-    """
-    existing = get_todays_board_quests(location_id)
-    avoid = {(q["objective_type"], q["objective_target"]) for q in existing}
 
-    if not existing:
+    Completed quests are deliberately excluded from both the count and
+    the returned list (2026-07-16, per Coffee): they used to count
+    toward DAILY_BOARD_QUEST_COUNT forever, so finishing every quest
+    posted for the day permanently occupied every slot with a "already
+    completed" placeholder for the rest of that day instead of freeing
+    it up for a fresh one, and completed bounties kept cluttering the
+    board listing indefinitely. `avoid` still considers every quest
+    generated today (including completed ones) so a replacement isn't
+    just a repeat of what was already cleared.
+    """
+    all_today = get_todays_board_quests(location_id)
+    avoid = {(q["objective_type"], q["objective_target"]) for q in all_today}
+    active = [q for q in all_today if not q.get("completed_at")]
+
+    if not all_today:
         branching = _generate_branching_quest_for_location(campaign_data, location_id, avoid)
         if branching:
-            existing.append(branching)
+            active.append(branching)
             avoid.add((branching["objective_type"], branching["objective_target"]))
 
-    while len(existing) < DAILY_BOARD_QUEST_COUNT:
+    while len(active) < DAILY_BOARD_QUEST_COUNT:
         new_quest = _generate_for_location(campaign_data, location_id, avoid)
         if new_quest is None:
             break
-        existing.append(new_quest)
+        active.append(new_quest)
         avoid.add((new_quest["objective_type"], new_quest["objective_target"]))
-    return existing
+    return active
 
 
 def get_todays_board_quests(location_id: str) -> list[dict]:

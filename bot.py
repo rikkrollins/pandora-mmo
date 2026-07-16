@@ -66,8 +66,11 @@ from rules.combat import resolve_attack, resolve_death_save, UNDEAD_MONSTER_KEYS
 from rules.crafting import RECIPES, get_recipe, has_materials, resolve_craft
 from rules.dice import roll, roll_damage, ability_modifier, roll_ability_check, roll_d20
 from rules.item_generator import generate_item
-from rules.leveling import CLASS_HIT_DICE, scaled_enemy_count, breath_weapon_dice_count
-from rules.proficiency import practiced_bonus
+from rules.leveling import (
+    CLASS_HIT_DICE, scaled_enemy_count, breath_weapon_dice_count,
+    CLASS_PRIMARY_ABILITY, CLASS_SAVE_PROFICIENCIES,
+)
+from rules.proficiency import practiced_bonus, MAX_PRACTICE_BONUS
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -224,6 +227,32 @@ _LAST_KNOWN_CHAT_ID: int | None = getattr(config, "TELEGRAM_CHAT_ID", None)
 # low odds / long minimum gaps specifically so they can never compete
 # with a real player's request for the same CPU-bound Ollama instance.
 # ---------------------------------------------------------------------
+# Physical-dice mode (2026-07-16, per Coffee): a player who's opted in
+# (character.manual_dice_enabled, asked at character creation, toggle-
+# able any time -- see _do_toggle_manual_dice) rolls their own physical
+# dice for the PRIMARY roll of an action (attack roll, skill check) --
+# damage and other secondary rolls stay automatic. In-memory only, keyed
+# by telegram_user_id, same convention as _NPC_LOCATIONS below: when a
+# roll is requested, the pending action is stashed here and the
+# function returns without resolving anything yet; adventure_master_
+# handler checks this dict on every incoming message BEFORE normal
+# intent parsing, and if a number can be read out of the reply, re-
+# invokes the stashed action with that forced roll. Deliberately does
+# NOT persist across a restart (same as combat sessions) -- a player
+# mid-prompt when the bot restarts just gets asked again next action.
+_PENDING_DICE_ROLLS: dict[int, dict] = {}
+
+# Real player-driven Ability Score Improvements (2026-07-16, per
+# Coffee): a character with pending_asi_points > 0 who says "level up"
+# with no ability/auto keyword already in that message gets prompted
+# and added here; adventure_master_handler checks this set on the next
+# message the same way it checks _PENDING_DICE_ROLLS, so a stray later
+# message (normal gameplay) is never misread as a stat choice.
+_PENDING_ASI_CHOICE: set[int] = set()
+
+_ABILITY_NAMES = ("strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma")
+_ASI_AUTO_WORDS = ("auto", "automatically", "assign", "distribute", "do it for me")
+
 _NPC_LOCATIONS: dict[str, str] = {}
 NPC_WANDER_CHANCE_PER_CYCLE = 0.15
 WORLD_HEARTBEAT_IDLE_THRESHOLD_SECONDS = 1200  # 20 real minutes with no player activity at all
@@ -893,6 +922,39 @@ async def _begin_character_creation(update: Update, context: ContextTypes.DEFAUL
     )
 
 
+_ABILITY_ORDER = ("strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma")
+
+
+def _auto_assign_ability_scores(char_class: str, rolled_scores: list[int]) -> list[int]:
+    """
+    Sensible default distribution when a player wants the game to assign
+    their rolled scores instead of choosing manually (2026-07-16, per
+    Coffee). Reuses the same real tables leveling already leans on: the
+    class's primary ability (CLASS_PRIMARY_ABILITY) gets the highest
+    roll, its other save-proficient ability (CLASS_SAVE_PROFICIENCIES)
+    gets the second highest, constitution gets priority after that (HP
+    matters for every class), and whatever's left fills the remaining
+    abilities in descending order. Returns scores in the canonical
+    STR DEX CON INT WIS CHA order the manual-assign step already uses.
+    """
+    lowered_class = char_class.lower()
+    primary = CLASS_PRIMARY_ABILITY.get(lowered_class, "strength")
+    saves = CLASS_SAVE_PROFICIENCIES.get(lowered_class, (primary, "constitution"))
+    secondary = next((a for a in saves if a != primary), saves[0])
+
+    priority = [primary]
+    for ability in (secondary, "constitution"):
+        if ability not in priority:
+            priority.append(ability)
+    for ability in _ABILITY_ORDER:
+        if ability not in priority:
+            priority.append(ability)
+
+    sorted_rolls = sorted(rolled_scores, reverse=True)
+    assignment = dict(zip(priority, sorted_rolls))
+    return [assignment[ability] for ability in _ABILITY_ORDER]
+
+
 async def _continue_character_creation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     creation = context.user_data["creation"]
     step = creation["step"]
@@ -958,27 +1020,46 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
             f"Your rolled ability scores are: {scores_str}\n\n"
             f"Now assign them to STR, DEX, CON, INT, WIS, CHA — reply with 6 "
             f"numbers in that order, using each rolled value exactly once "
-            f"(e.g. '15 14 13 12 10 8').",
+            f"(e.g. '15 14 13 12 10 8'), or say \"assign them automatically\" / "
+            f"\"do it for me\" to let the game pick a sensible spread for your class.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
 
     if step == "assign_scores":
-        try:
-            assigned = [int(x) for x in text.split()]
-        except ValueError:
-            assigned = []
-
         rolled = creation["rolled_scores"]
-        if len(assigned) != 6 or sorted(assigned) != sorted(rolled):
-            await update.effective_chat.send_message(
-                f"That doesn't match your rolled scores ({', '.join(map(str, rolled))}). "
-                f"Please reply with all 6 values, each used exactly once, in "
-                f"STR DEX CON INT WIS CHA order.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
-            )
-            return
 
+        if any(w in text.lower() for w in _ASI_AUTO_WORDS):
+            assigned = _auto_assign_ability_scores(creation["char_class"], rolled)
+        else:
+            try:
+                assigned = [int(x) for x in text.split()]
+            except ValueError:
+                assigned = []
+
+            if len(assigned) != 6 or sorted(assigned) != sorted(rolled):
+                await update.effective_chat.send_message(
+                    f"That doesn't match your rolled scores ({', '.join(map(str, rolled))}). "
+                    f"Please reply with all 6 values, each used exactly once, in "
+                    f"STR DEX CON INT WIS CHA order, or say \"do it for me\" to auto-assign.",
+                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                )
+                return
+
+        creation["assigned_scores"] = assigned
+        creation["step"] = "dice_preference"
+        await update.effective_chat.send_message(
+            "One last thing: would you like to roll your own physical dice for key moments "
+            "(attack rolls, skill checks, saving throws) instead of the game rolling for you? "
+            "You can change this any time later by saying \"use my own dice\" or \"let the game "
+            "roll for me\". (yes/no)",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    if step == "dice_preference":
+        wants_manual_dice = any(w in text.lower() for w in ("yes", "yeah", "yep", "sure", "own dice"))
+        assigned = creation["assigned_scores"]
         ability_scores = {
             "strength": assigned[0], "dexterity": assigned[1], "constitution": assigned[2],
             "intelligence": assigned[3], "wisdom": assigned[4], "charisma": assigned[5],
@@ -1025,6 +1106,8 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
             gold=STARTING_GOLD[char_class], inventory=dict(STARTING_EQUIPMENT[char_class]),
             spell_slots_max=spells_module.starting_spell_slots_for_class(char_class),
         )
+        if wants_manual_dice:
+            db.update_character(update.effective_user.id, manual_dice_enabled=1)
 
         # Auto-equip starting gear (2026-07-15, per Coffee): whatever
         # weapon/armor/shield STARTING_EQUIPMENT just granted is
@@ -1080,7 +1163,9 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
             f"{spell_line}"
             f"{traits_line}"
             f"{features_line}"
-            f"Inventory: {', '.join(items_module.get_item(i)['name'] for i in character['inventory'])}"
+            f"Inventory: {', '.join(items_module.get_item(i)['name'] for i in character['inventory'])}\n"
+            f"🎲 Physical dice mode: {'ON' if wants_manual_dice else 'OFF'} (say \"use my own dice\" or "
+            f"\"let the game roll for me\" any time to change it)"
         )
         await update.effective_chat.send_message(sheet, message_thread_id=config.TOPIC_ADVENTURE_ID)
         del context.user_data["creation"]
@@ -1369,6 +1454,19 @@ def _sync_player_to_db(character: dict) -> None:
     )
 
 
+INACTIVE_PARTY_XP_SHARE = 0.10  # per Coffee (2026-07-16): 5-10% for absent party members
+
+
+def _level_up_note(before: dict, after: dict) -> str:
+    note = (
+        f"🎉 {after['name']} leveled up to {after['level']}! "
+        f"(HP max: {before['hp_max']} → {after['hp_max']})"
+    )
+    if after.get("pending_asi_points"):
+        note += f"\nYou have {after['pending_asi_points']} ability point(s) to spend — say \"level up\" whenever you're ready."
+    return note
+
+
 def _award_victory_xp(session: sessions.Session) -> str:
     """
     Awards real XP (from the defeated monster's real 5E-sourced XP value)
@@ -1417,11 +1515,36 @@ def _award_victory_xp(session: sessions.Session) -> str:
         after = db.add_xp(pid, xp_each)
         event_location = event_location or after.get("current_location")
         if after["level"] > before["level"]:
-            level_up_notes.append(
-                f"🎉 {after['name']} leveled up to {after['level']}! "
-                f"(HP max: {before['hp_max']} → {after['hp_max']})"
-            )
+            level_up_notes.append(_level_up_note(before, after))
             _log_world_event(event_location, f"{after['name']} reached level {after['level']}.")
+
+    # Inactive party members' cut (2026-07-16, per Coffee): "inactive
+    # party members shud get a small % of exp for their parties tasks
+    # ... this will incentivize party members to grind for the party."
+    # A real formal party (character.party_id, db.get_party_members_by_id)
+    # can have members who aren't in THIS fight -- off resting, at a
+    # shop, gathering elsewhere -- who still get INACTIVE_PARTY_XP_SHARE
+    # (10%, the top of Coffee's stated 5-10% range) of the full xp_each
+    # a fighter earned, once per real absent member, never doubled if
+    # they happen to be in more than one active fighter's party (a
+    # player can only be in one party at a time anyway).
+    absent_bonus_recipients: set[int] = set()
+    for fighter_pid in real_party_ids:
+        fighter = db.get_character(fighter_pid)
+        party_id = fighter.get("party_id") if fighter else None
+        if not party_id:
+            continue
+        for member in db.get_party_members_by_id(party_id):
+            member_pid = member["telegram_user_id"]
+            if member.get("is_ai") or member_pid in real_party_ids or member_pid in absent_bonus_recipients:
+                continue
+            absent_bonus_recipients.add(member_pid)
+            bonus_xp = max(int(xp_each * INACTIVE_PARTY_XP_SHARE), 1)
+            before = db.get_character(member_pid)
+            after = db.add_xp(member_pid, bonus_xp)
+            if after["level"] > before["level"]:
+                level_up_notes.append(_level_up_note(before, after))
+                _log_world_event(event_location, f"{after['name']} reached level {after['level']}.")
 
     enemy_names = [
         p["name"] for p in session.participants
@@ -1458,6 +1581,7 @@ def _award_victory_xp(session: sessions.Session) -> str:
                         db.add_xp(pid, updated["reward_xp"])
                         character = db.get_character(pid)
                         db.update_character(pid, gold=character["gold"] + updated["reward_gold"])
+                        db.increment_board_quests_completed(pid)
                     board_notes.append(
                         f"\n📜 **Board quest complete: {updated['title']}!** "
                         f"Party earns {updated['reward_xp']} XP, {updated['reward_gold']} gold each."
@@ -1487,11 +1611,89 @@ def _award_victory_xp(session: sessions.Session) -> str:
     )
 
     summary = f"\n✨ Party gains {xp_each} XP each ({enemy_xp_total} total)."
+    if absent_bonus_recipients:
+        bonus_xp = max(int(xp_each * INACTIVE_PARTY_XP_SHARE), 1)
+        summary += (
+            f" Absent party member(s) still earn {bonus_xp} XP each "
+            f"({int(INACTIVE_PARTY_XP_SHARE * 100)}% share) for the party's efforts."
+        )
     summary += loot_line
     summary += "".join(board_notes)
     if level_up_notes:
         summary += "\n" + "\n".join(level_up_notes)
     return summary
+
+
+def _apply_asi_choice(character: dict, text: str) -> str | None:
+    """
+    Tries to resolve character's pending_asi_points from free text --
+    either a named ability ("put it into constitution") or an auto/
+    "do it for me" phrase (falls back to the class's old fixed primary
+    ability, same stat the pre-2026-07-16 silent system always used).
+    Returns the confirmation message, or None if the text named
+    neither, so the caller knows to prompt and wait instead.
+    """
+    pending = character.get("pending_asi_points", 0)
+    if pending <= 0:
+        return None
+    lowered = text.lower()
+
+    if any(w in lowered for w in _ASI_AUTO_WORDS):
+        ability = CLASS_PRIMARY_ABILITY.get(character["char_class"].lower(), "strength")
+        spend = pending
+    else:
+        ability = next((a for a in _ABILITY_NAMES if a in lowered), None)
+        if ability is None:
+            return None
+        spend = min(pending, 2)  # real 5E: at most +2 into a single ability per ASI
+
+    before_value = character[ability]
+    after_value = min(before_value + spend, 20)
+    updated = db.update_character(
+        character["telegram_user_id"],
+        **{ability: after_value},
+        pending_asi_points=pending - spend,
+    )
+    note = f"📈 {ability.capitalize()} increased from {before_value} to {after_value}."
+    if updated["pending_asi_points"] > 0:
+        note += f" You still have {updated['pending_asi_points']} point(s) left to spend — say \"level up\" again."
+    return note
+
+
+async def _do_level_up(update: Update, text: str) -> None:
+    """
+    Real player-driven Ability Score Improvement (2026-07-16, per
+    Coffee): replaces the old silent auto-apply-to-a-fixed-stat
+    behavior. A character banks pending_asi_points at ASI levels
+    (4/8/12/16/19, see db.add_xp) and spends them here, on their own
+    schedule -- there's no expiry, matching real 5E's own "you can
+    always defer an ASI" convention.
+    """
+    user_id = update.effective_user.id
+    character = db.get_character(user_id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    if character.get("pending_asi_points", 0) <= 0:
+        await _safe_send(update, "No ability score improvements waiting to be spent right now.")
+        return
+
+    resolved = _apply_asi_choice(character, text)
+    if resolved:
+        _PENDING_ASI_CHOICE.discard(user_id)
+        await _safe_send(update, resolved)
+        return
+
+    _PENDING_ASI_CHOICE.add(user_id)
+    await _safe_send(
+        update,
+        f"You have {character['pending_asi_points']} ability point(s) to spend. Which ability would you "
+        f"like to raise — Strength, Dexterity, Constitution, Intelligence, Wisdom, or Charisma? "
+        f"(Say \"auto\" or \"do it for me\" to let the game choose.)",
+    )
 
 
 def _determine_winner(session: sessions.Session) -> str:
@@ -2040,7 +2242,7 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
             await _safe_send(update, f"💬 **{npc_data['name']}:** {line}")
 
 
-async def _do_attack(update: Update, action_text: str) -> None:
+async def _do_attack(update: Update, action_text: str, forced_roll: int | None = None) -> None:
     chat_id = update.effective_chat.id
 
     # Auto-start combat when no fight is running yet but the player is
@@ -2104,6 +2306,21 @@ async def _do_attack(update: Update, action_text: str) -> None:
             )
             return
 
+        # Physical-dice mode (2026-07-16, per Coffee): only the FIRST
+        # attack of a turn's sequence gets a manual-roll prompt -- an
+        # Extra Attack/Action Surge sequence's additional swings stay
+        # automatic, a deliberate scope limit (no live character has
+        # Extra Attack yet, and pausing mid-sequence for each swing
+        # would need much more state than a single pending-roll slot).
+        if forced_roll is None and attacker.get("manual_dice_enabled") and not attacker.get("is_ai"):
+            _PENDING_DICE_ROLLS[user_id] = {"kind": "attack", "action_text": action_text}
+            await update.effective_chat.send_message(
+                "🎲 Roll a d20 for your attack (account for advantage/disadvantage yourself "
+                "if it applies) and tell me the result.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+
         # Extra Attack (2026-07-16): real 5E martial classes (Fighter/
         # Barbarian/Paladin/Ranger/Monk, level 5+) get more than one
         # attack per turn -- see _attacks_per_turn. Loops the same
@@ -2111,6 +2328,18 @@ async def _do_attack(update: Update, action_text: str) -> None:
         # shape as boss Multiattack in _resolve_ai_turns; breaks early
         # if a mid-sequence kill leaves no target for the next attack.
         attack_count = _attacks_per_turn(attacker)
+        # Action Surge (Fighter, level 2+, 2026-07-16): real 5E grants an
+        # entire extra action -- for a Fighter with Extra Attack, that
+        # means their full attack sequence again, not just one more
+        # swing. Consumed here (popped, not just read) so it only
+        # doubles the very next attack sequence this Fighter makes, not
+        # every turn for the rest of combat.
+        if attacker.pop("action_surge_active", False):
+            attack_count *= 2
+        # Flurry of Blows (Monk, level 2+, 2026-07-16): adds 2 bonus
+        # unarmed strikes to this turn, consumed the same way as
+        # Action Surge above.
+        attack_count += attacker.pop("flurry_bonus_attacks", 0)
         for attack_num in range(attack_count):
             opposing = session.living_on_side(session.opposing_side(user_id))
             if not opposing:
@@ -2123,9 +2352,26 @@ async def _do_attack(update: Update, action_text: str) -> None:
                 attacker, target, _weapon_for_attacker(attacker), advantage=adv, disadvantage=disadv,
                 defender_relentless_endurance_available=_relentless_endurance_available(target),
                 round_number=session.round_number,
+                forced_roll=forced_roll if attack_num == 0 else None,
             )
             if result["relentless_endurance_triggered"]:
                 db.use_feature(target["telegram_user_id"], "relentless_endurance")
+
+            # Divine Smite (Paladin, level 2+, 2026-07-16): primed via
+            # _do_divine_smite before this attack; only consumed (and
+            # only spends the spell slot) on an actual confirmed hit --
+            # a miss leaves smite_active armed for the next swing.
+            if result["hit"] and attacker.pop("smite_active", False):
+                smite_dmg = roll_damage(
+                    DIVINE_SMITE_DICE_BY_SLOT_LEVEL[1], critical=result["critical_hit"]
+                )["total"]
+                result["damage_dealt"] += smite_dmg
+                target["hp_current"] = max(target["hp_current"] - smite_dmg, 0)
+                result["defender_hp_remaining"] = target["hp_current"]
+                smiter = db.get_character(update.effective_user.id)
+                db.update_character(
+                    update.effective_user.id, spell_slots_current=smiter["spell_slots_current"] - 1
+                )
             _sync_player_to_db(target)
             if result["shield_reaction_triggered"] or result["uncanny_dodge_triggered"]:
                 await _announce_reaction(update, target, result)
@@ -2416,7 +2662,22 @@ def _ranger_natural_explorer_grants_advantage(character: dict, ability: str, act
     )
 
 
-async def _do_skill_check(update: Update, ability: str, action_text: str) -> None:
+def _extract_manual_roll(text: str) -> int | None:
+    """
+    Pulls a d20 result (1-20) out of a player's free-text reply to a
+    physical-dice prompt -- "14", "I rolled a 17", "natural 20", "got a
+    3" all work. Takes the FIRST number found; returns None if nothing
+    in range 1-20 is present so the caller can ask again rather than
+    guessing.
+    """
+    for match in re.finditer(r"\d+", text):
+        value = int(match.group())
+        if 1 <= value <= 20:
+            return value
+    return None
+
+
+async def _do_skill_check(update: Update, ability: str, action_text: str, forced_roll: int | None = None) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
@@ -2430,11 +2691,22 @@ async def _do_skill_check(update: Update, ability: str, action_text: str) -> Non
         await _do_lockpick(update, character, lockable, action_text)
         return
 
+    if forced_roll is None and character.get("manual_dice_enabled"):
+        _PENDING_DICE_ROLLS[update.effective_user.id] = {
+            "kind": "skill_check", "ability": ability, "action_text": action_text,
+        }
+        await update.effective_chat.send_message(
+            f"🎲 Roll a d20 for this {ability} check (account for advantage/disadvantage yourself "
+            f"if it applies) and tell me the result.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
     has_advantage = (
         _cloak_of_elvenkind_grants_advantage(character, ability, action_text)
         or _ranger_natural_explorer_grants_advantage(character, ability, action_text)
     )
-    result = roll_ability_check(character, ability, proficient=False, advantage=has_advantage)
+    result = roll_ability_check(character, ability, proficient=False, advantage=has_advantage, forced_roll=forced_roll)
     bonus = _practiced_bonus_for(update.effective_user.id, ability)
     result["total"] += bonus
     result["practiced_bonus"] = bonus
@@ -2525,9 +2797,17 @@ def _attack_advantage_disadvantage(attacker: dict, defender: dict) -> tuple[bool
     )
     favored_enemy = (attacker.get("char_class") == "Ranger"
                       and defender.get("monster_key", "").startswith("goblin"))
+    # Reckless Attack (Barbarian, 2026-07-16 level-2-10 audit): advantage
+    # on your own attacks this turn once declared. Real 5E's downside
+    # (attacks against you also get advantage until your next turn) is
+    # deliberately NOT modeled -- this engine has no clean "start of your
+    # next turn" hook outside the turn-order loop itself, and bolting
+    # one on just for this would be a bigger, riskier change than the
+    # value of one more (documented) simplification justifies.
+    reckless = attacker.pop("reckless_active", False)
     advantage = (
         "prone" in defender_conditions or "blinded" in defender_conditions
-        or "paralyzed" in defender_conditions or favored_enemy
+        or "paralyzed" in defender_conditions or favored_enemy or reckless
     )
     return advantage, disadvantage
 
@@ -3214,6 +3494,7 @@ async def _check_board_quest_turnin(update_like, telegram_user_id: int, location
         db.add_xp(telegram_user_id, board_quest["reward_xp"])
         character = db.get_character(telegram_user_id)
         db.update_character(telegram_user_id, gold=character["gold"] + board_quest["reward_gold"])
+        db.increment_board_quests_completed(telegram_user_id)
         await _safe_send(
             update_like,
             f"📜 **Board quest complete: {board_quest['title']}!** "
@@ -3405,6 +3686,7 @@ async def _do_resolve_quest_choice(update: Update, text: str) -> None:
 
     chosen = branch["choices"][choice_key]
     db.resolve_board_quest_branch(quest["board_quest_id"], choice_key)
+    db.increment_board_quests_completed(telegram_user_id)
     db.add_xp(telegram_user_id, chosen["reward_xp"])
     fresh = db.get_character(telegram_user_id)
     db.update_character(telegram_user_id, gold=fresh["gold"] + chosen["reward_gold"])
@@ -3501,6 +3783,14 @@ async def _do_check_quests(update: Update) -> None:
     if character["completed_quests"]:
         titles = [CAMPAIGN["quests"][q]["title"] for q in character["completed_quests"] if q in CAMPAIGN["quests"]]
         lines.append(f"\n**Completed ({len(titles)}):** {', '.join(titles)}")
+
+    # Board quests are randomly generated (not worth naming individually
+    # the way story quests are) and track their own completion entirely
+    # separately from completed_quests above -- this running count is
+    # the only place that history was ever surfaced to the player at all
+    # before 2026-07-16 (per Coffee).
+    if character.get("board_quests_completed"):
+        lines.append(f"\n**Board quests completed:** {character['board_quests_completed']}")
 
     # Confirmed live 2026-07-14 (Coffee): accepted a board quest, then
     # asked to look at his active quests -- it never showed up. This
@@ -3894,6 +4184,12 @@ def _format_character_sheet(character: dict) -> str:
         if uses > 0
     ]
     skills_line = f"Skills: {', '.join(skill_lines) if skill_lines else 'None practiced yet'}\n"
+    asi_line = ""
+    if character.get("pending_asi_points"):
+        asi_line = (
+            f"📈 {character['pending_asi_points']} ability point(s) waiting to be spent — "
+            f"say \"level up\" to choose.\n"
+        )
     name_line = f"**{character['name']}**" + (" *(AI companion)*" if character.get("is_ai") else "")
     equipped_line = _format_equipped_line(character)
     carried_gear_line = _format_carried_gear_line(character)
@@ -3910,6 +4206,7 @@ def _format_character_sheet(character: dict) -> str:
         f"Class features: {'; '.join(features) if features else 'None'}\n"
         f"{feature_use_line}"
         f"{skills_line}"
+        f"{asi_line}"
         f"Location: {cl.get_location(CAMPAIGN, character['current_location'])['name']}"
     )
 
@@ -4004,6 +4301,52 @@ def _find_resource_node(location: dict, action_text: str) -> dict | None:
     return None
 
 
+def _missing_tools_for_gathering(character: dict, skill_key: str) -> list[str]:
+    """
+    Real tool requirements (2026-07-16, per Coffee): fishing needs a
+    fishing pole AND bait; lumberjacking needs a woodcutter's axe;
+    mining needs a pickaxe. Herbalism deliberately needs no tool at all
+    (picking a plant by hand is free) -- items.py's "required_for" field
+    is the single source of truth, so a new tool-gated skill only ever
+    needs a new items.py entry, not a bot.py code change. Returns the
+    display names of any REQUIRED tools the character doesn't currently
+    carry (empty list if fully equipped or the skill needs no tool).
+    """
+    required_items = [
+        item for item in items_module.ITEMS.values()
+        if item.get("required_for") == skill_key
+    ]
+    return [
+        item["name"] for item in required_items
+        if character["inventory"].get(_item_id_for(item), 0) <= 0
+    ]
+
+
+def _item_id_for(item: dict) -> str:
+    return next(iid for iid, i in items_module.ITEMS.items() if i is item)
+
+
+def _gather_quantity(character: dict, skill_key: str, practiced_bonus: int) -> int:
+    """
+    Real quantity bonus (2026-07-16, per Coffee): base gather is always
+    1. Herbalism is the one tool-free skill, but owning Shears lets you
+    harvest up to 3 per success (a dice roll, not a flat bonus) --
+    Shears use "boosts_quantity_for" (items.py) since they're optional,
+    unlike the required tools above. Separately, real practiced skill
+    (the same practiced_bonus that already improves the success roll,
+    see _practiced_bonus_for) has a small chance at one extra material
+    on ANY gathering skill once it's capped out, rewarding repeated use
+    beyond just a better roll target.
+    """
+    quantity = 1
+    has_shears = character["inventory"].get("shears", 0) > 0
+    if skill_key == "herbalism" and has_shears:
+        quantity = roll(1, 3)[0]
+    if practiced_bonus >= MAX_PRACTICE_BONUS and roll_d20() >= 15:
+        quantity += 1
+    return quantity
+
+
 async def _do_gather(update: Update, action_text: str) -> None:
     """
     Gathering a raw material from a location's resource node — a real
@@ -4039,16 +4382,27 @@ async def _do_gather(update: Update, action_text: str) -> None:
     # ability. Falls back to the ability name for any node without an
     # explicit "skill" (keeps old behavior for anything not yet tagged).
     skill_key = node.get("skill", node["ability"])
+
+    missing_tools = _missing_tools_for_gathering(character, skill_key)
+    if missing_tools:
+        await update.effective_chat.send_message(
+            f"🌿 You need {' and '.join(missing_tools)} to do that — you don't have "
+            f"{'them' if len(missing_tools) > 1 else 'one'} yet. Check a shop.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
     result = roll_ability_check(character, node["ability"], proficient=False)
     bonus = _practiced_bonus_for(update.effective_user.id, skill_key)
     result["total"] += bonus
     result["practiced_bonus"] = bonus
     success = result["total"] >= SKILL_CHECK_DC
     material = items_module.get_item(node["material"])
+    quantity = _gather_quantity(character, skill_key, bonus) if success else 0
 
     if success:
         db.record_skill_use(update.effective_user.id, skill_key)
-        db.add_item(update.effective_user.id, node["material"], 1)
+        db.add_item(update.effective_user.id, node["material"], quantity)
 
     flavor = await asyncio.to_thread(
         narrate_skill_check, character, action_text, node["ability"],
@@ -4056,14 +4410,14 @@ async def _do_gather(update: Update, action_text: str) -> None:
     )
     message = _format_skill_check_result(flavor, result, node["ability"], SKILL_CHECK_DC, success)
     if success:
-        message += f"\n🌿 **{character['name']}** gathers **1x {material['name']}**."
+        message += f"\n🌿 **{character['name']}** gathers **{quantity}x {material['name']}**."
 
         for board_quest in board_quests_module.get_todays_board_quests(character["current_location"]):
             if not (board_quest.get("accepted_by") and not board_quest.get("completed_at")
                     and board_quest["objective_type"] == "gather_material"
                     and board_quest["objective_target"] == node["material"]):
                 continue
-            updated = db.record_board_quest_progress(board_quest["board_quest_id"], 1)
+            updated = db.record_board_quest_progress(board_quest["board_quest_id"], quantity)
             if updated["progress_count"] >= updated["objective_count"]:
                 if updated.get("branch_data"):
                     message += (
@@ -4311,6 +4665,296 @@ async def _do_rage(update: Update) -> None:
         f"😡 **{character['name']}** flies into a rage — bonus damage and resistance to "
         f"physical harm for the rest of this fight!",
     )
+
+
+async def _do_action_surge(update: Update) -> None:
+    """
+    Real Fighter class feature (level 2+, 2026-07-16 level-2-10 audit):
+    take an additional action on your turn, once per rest. Adapted to
+    this engine's turn structure as doubling this turn's full attack
+    sequence (real 5E: a Fighter with Extra Attack gets their WHOLE
+    attack sequence again, not just one more swing) -- a flag on the
+    live combat participant dict, same convention as `raging`, consumed
+    (popped, not just read) by _do_attack's own attack_count
+    calculation the very next time this Fighter attacks, so it can only
+    ever double one attack sequence per use.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if character["char_class"] != "Fighter":
+        await update.effective_chat.send_message(
+            "Action Surge is a real Fighter class feature — your class doesn't have it.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    if character["level"] < 2:
+        await update.effective_chat.send_message(
+            "Action Surge is a Fighter feature starting at level 2 — you're not there yet.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    if db.get_feature_uses(update.effective_user.id, "action_surge") >= 1:
+        await update.effective_chat.send_message(
+            "You've already used Action Surge since your last rest.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    session = sessions.get_session(update.effective_chat.id)
+    if session is None:
+        await update.effective_chat.send_message(
+            "You can only use Action Surge in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    participant = next(
+        (p for p in session.participants if p["telegram_user_id"] == update.effective_user.id), None
+    )
+    if participant is None:
+        await update.effective_chat.send_message(
+            "You're not part of the current fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if participant.get("action_surge_active"):
+        await update.effective_chat.send_message(
+            "Action Surge is already active for your next attack.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    participant["action_surge_active"] = True
+    db.use_feature(update.effective_user.id, "action_surge")
+
+    await _safe_send(
+        update,
+        f"⚡ **{character['name']}** surges with action — their next attack this turn "
+        f"comes as a full extra sequence!",
+    )
+
+
+async def _do_reckless_attack(update: Update) -> None:
+    """
+    Real Barbarian class feature (level 1, 2026-07-16 level-2-10 audit):
+    attacking recklessly grants advantage on your attack rolls this
+    turn. No per-rest limit in real 5E (usable every turn), so no
+    feature_uses gating here -- just a one-shot `reckless_active` flag
+    on the live combat participant dict, consumed by
+    _attack_advantage_disadvantage the next time this Barbarian
+    attacks. Real 5E's downside (attacks against you also get advantage
+    until your next turn) is deliberately not modeled -- see the
+    comment at _attack_advantage_disadvantage's reckless check.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if character["char_class"] != "Barbarian":
+        await update.effective_chat.send_message(
+            "Reckless Attack is a real Barbarian class feature — your class doesn't have it.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    session = sessions.get_session(update.effective_chat.id)
+    if session is None:
+        await update.effective_chat.send_message(
+            "You can only attack recklessly in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    participant = next(
+        (p for p in session.participants if p["telegram_user_id"] == update.effective_user.id), None
+    )
+    if participant is None:
+        await update.effective_chat.send_message(
+            "You're not part of the current fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    participant["reckless_active"] = True
+    await _safe_send(
+        update,
+        f"💥 **{character['name']}** attacks recklessly — advantage on their next attack this turn!",
+    )
+
+
+DIVINE_SMITE_DICE_BY_SLOT_LEVEL = {1: "2d8", 2: "3d8", 3: "4d8", 4: "5d8", 5: "5d8"}
+
+
+async def _do_divine_smite(update: Update) -> None:
+    """
+    Real Paladin class feature (level 2+, 2026-07-16 level-2-10 audit):
+    spending a spell slot on a hit for bonus radiant damage -- real 5E
+    scaling by slot level (2d8 for a 1st-level slot, +1d8 per slot level
+    above 1st, capped at 5d8). This engine's spell slots are a flat
+    count with no per-level tracking (same simplification used
+    everywhere else in this build -- see Arcane Recovery's own
+    comment), so this always spends at "1st-level slot" scaling (2d8)
+    rather than letting a higher slot be spent for more damage --
+    there's no per-level slot data here to spend a "higher" one from.
+    Declared BEFORE the attack (a `smite_active` flag, consumed on the
+    Paladin's next hit), not decided after seeing the roll like real
+    5E allows -- this engine's attack resolution doesn't have a
+    post-hit decision point to hook a "spend it now or not" choice into.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if character["char_class"] != "Paladin":
+        await update.effective_chat.send_message(
+            "Divine Smite is a real Paladin class feature — your class doesn't have it.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    if character["level"] < 2:
+        await update.effective_chat.send_message(
+            "Divine Smite is a Paladin feature starting at level 2 — you're not there yet.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    if character["spell_slots_current"] < 1:
+        await update.effective_chat.send_message(
+            "You don't have a spell slot left to smite with.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    session = sessions.get_session(update.effective_chat.id)
+    if session is None:
+        await update.effective_chat.send_message(
+            "You can only smite in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    participant = next(
+        (p for p in session.participants if p["telegram_user_id"] == update.effective_user.id), None
+    )
+    if participant is None:
+        await update.effective_chat.send_message(
+            "You're not part of the current fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if participant.get("smite_active"):
+        await update.effective_chat.send_message(
+            "Divine Smite is already primed for your next hit.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    participant["smite_active"] = True
+    await _safe_send(
+        update,
+        f"🌟 **{character['name']}** channels divine wrath — their next hit will smite for bonus radiant damage!",
+    )
+
+
+async def _do_flurry_of_blows(update: Update) -> None:
+    """
+    Real Monk class feature (level 2+, 2026-07-16 level-2-10 audit): a
+    ki point spent for two bonus unarmed strikes. Real 5E's ki pool
+    size equals monk level, refreshing on a short rest -- this engine
+    only has one rest granularity, so "ki" resets the same way every
+    other limited feature does, on a full rest, capped at the
+    character's own level (checked directly against feature_uses rather
+    than a fixed constant like RAGE_MAX_USES, since the cap scales with
+    level here). Adds 2 extra attacks to THIS turn via a participant
+    flag, same mechanism as Action Surge -- consumed (popped) the next
+    time this Monk attacks.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if character["char_class"] != "Monk":
+        await update.effective_chat.send_message(
+            "Flurry of Blows is a real Monk class feature — your class doesn't have it.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    if character["level"] < 2:
+        await update.effective_chat.send_message(
+            "Flurry of Blows is a Monk feature starting at level 2 — you're not there yet.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    if db.get_feature_uses(update.effective_user.id, "ki") >= character["level"]:
+        await update.effective_chat.send_message(
+            "You're out of ki points until your next rest.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    session = sessions.get_session(update.effective_chat.id)
+    if session is None:
+        await update.effective_chat.send_message(
+            "You can only use Flurry of Blows in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    participant = next(
+        (p for p in session.participants if p["telegram_user_id"] == update.effective_user.id), None
+    )
+    if participant is None:
+        await update.effective_chat.send_message(
+            "You're not part of the current fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if participant.get("flurry_bonus_attacks"):
+        await update.effective_chat.send_message(
+            "Flurry of Blows is already primed for your next attack.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    participant["flurry_bonus_attacks"] = 2
+    db.use_feature(update.effective_user.id, "ki")
+
+    await _safe_send(
+        update,
+        f"👊 **{character['name']}** spends a ki point — their next attack this turn comes with "
+        f"2 bonus unarmed strikes!",
+    )
+
+
+async def _do_toggle_manual_dice(update: Update, action_text: str, thread_id: int | None = None) -> None:
+    """
+    Real per-player toggle (2026-07-16, per Coffee): switches physical-
+    dice mode on/off any time, not just at character creation -- works
+    from Adventure (via intent_parser's normal routing) or Support (see
+    support_topic_handler's own direct intercept, same convention as
+    Development's tts on/off command). "on" phrasing wins if a message
+    somehow says both (shouldn't happen in practice given intent_
+    parser's own distinct trigger phrases, but keeps this function's
+    own logic unambiguous either way).
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=thread_id or config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    lowered = action_text.lower()
+    turning_on = any(w in lowered for w in ("own dice", "own physical dice", "dice on", "turn on"))
+    turning_off = any(w in lowered for w in ("let the game roll", "dice off", "turn off"))
+    new_value = 1 if turning_on and not turning_off else 0
+    db.update_character(update.effective_user.id, manual_dice_enabled=new_value)
+
+    if new_value:
+        await _safe_send(
+            update,
+            f"🎲 Physical dice mode is now **ON** for {character['name']}. When it's time for a key "
+            f"roll (attack, skill check), I'll ask you to roll a d20 and tell me the result.",
+            thread_id=thread_id,
+        )
+    else:
+        await _safe_send(
+            update,
+            f"🎲 Physical dice mode is now **OFF** for {character['name']}. The game will roll for you again.",
+            thread_id=thread_id,
+        )
 
 
 async def _do_breath_weapon(update: Update) -> None:
@@ -4683,6 +5327,28 @@ async def _do_look(update: Update) -> None:
                 f"Your {character['char_class']} training picks {sensed_materials} out "
                 f"at a glance — most people would walk right past it."
             )
+
+    # Quest hints on "look around" (2026-07-16, per Coffee): a location
+    # with a quest tied to it, or a board quest posted, used to give no
+    # sign of either -- players had to separately think to ask "check
+    # quests" even at a place clearly meant to offer one. Story quests
+    # have no structured NPC field in campaign.json (see
+    # _npc_quest_facts's own comment on this), so any NPC actually
+    # present is the approximation used to point players at someone to
+    # talk to. Board quests are generated here too (not just shown),
+    # matching check_quests's own behavior, so the FIRST person to look
+    # around a location each day is the one who reveals what's posted.
+    story_offer = _offerable_quest_at_location(character, character["current_location"])
+    if story_offer:
+        if npcs_here:
+            lines.append(f"📜 {npc_names[0]} looks like they could use your help with something.")
+        else:
+            lines.append("📜 There's a task tied to this place, though no one's here to ask about it right now.")
+
+    board_quests_here = board_quests_module.get_or_generate_board_quests(CAMPAIGN, character["current_location"])
+    unclaimed_board_quests = [q for q in board_quests_here if not q.get("accepted_by")]
+    if unclaimed_board_quests:
+        lines.append("📋 There's a bounty posted on the board here — say \"check quests\" to see it.")
 
     # Confirmed live 2026-07-14 (Coffee): TTS was silently skipped for
     # "look around" -- this reply went straight to
@@ -6006,7 +6672,7 @@ def setup_default_npcs() -> None:
 UNIVERSAL_ESCAPE_PHRASES = {"cancel", "start over", "nevermind", "never mind", "stop", "reset"}
 
 
-def _clear_all_stateful_flows(context: ContextTypes.DEFAULT_TYPE) -> bool:
+def _clear_all_stateful_flows(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bool:
     """
     Clears any in-progress multi-step conversation state for this user —
     character creation today, and any future stateful flows (trading,
@@ -6018,6 +6684,11 @@ def _clear_all_stateful_flows(context: ContextTypes.DEFAULT_TYPE) -> bool:
         if key in context.user_data:
             del context.user_data[key]
             cleared = True
+    if _PENDING_DICE_ROLLS.pop(user_id, None) is not None:
+        cleared = True
+    if user_id in _PENDING_ASI_CHOICE:
+        _PENDING_ASI_CHOICE.discard(user_id)
+        cleared = True
     return cleared
 
 
@@ -6044,7 +6715,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # "I reset the trap" is never misread as a cancel command.
     text_exact = update.message.text.strip().lower()
     if text_exact in UNIVERSAL_ESCAPE_PHRASES:
-        had_active_state = _clear_all_stateful_flows(context)
+        had_active_state = _clear_all_stateful_flows(context, update.effective_user.id)
 
         chat_id = update.effective_chat.id
         session_active = sessions.get_session(chat_id) is not None
@@ -6083,6 +6754,38 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # If this user is mid-character-creation, that flow owns their next message.
     if "creation" in context.user_data:
         await _continue_character_creation(update, context)
+        return
+
+    # Physical-dice mode (2026-07-16): if this user was just asked to
+    # roll their own d20, their next message owns resuming that action
+    # with the real number they report, rather than going through
+    # normal intent parsing. Waits indefinitely (per Coffee) -- no
+    # timeout falls back to an automatic roll.
+    pending_roll = _PENDING_DICE_ROLLS.get(update.effective_user.id)
+    if pending_roll is not None:
+        manual_value = _extract_manual_roll(update.message.text)
+        if manual_value is None:
+            await update.effective_chat.send_message(
+                "I didn't catch a number 1-20 in that — what did you roll?",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+        del _PENDING_DICE_ROLLS[update.effective_user.id]
+        if pending_roll["kind"] == "attack":
+            await _do_attack(update, pending_roll["action_text"], forced_roll=manual_value)
+        elif pending_roll["kind"] == "skill_check":
+            await _do_skill_check(
+                update, pending_roll["ability"], pending_roll["action_text"], forced_roll=manual_value
+            )
+        return
+
+    # Real player-driven ASI (2026-07-16): resume a pending "which
+    # ability" prompt the same way the dice-roll flow above resumes --
+    # checked here, before normal intent parsing, so an unrelated later
+    # message is never misread as a stat choice; only asked once, and
+    # only while pending_asi_points is genuinely still unspent.
+    if update.effective_user.id in _PENDING_ASI_CHOICE:
+        await _do_level_up(update, update.message.text)
         return
 
     text = update.message.text.strip()
@@ -6382,6 +7085,18 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_breath_weapon(update)
     elif action == "channel_divinity":
         await _do_channel_divinity(update)
+    elif action == "action_surge":
+        await _do_action_surge(update)
+    elif action == "reckless_attack":
+        await _do_reckless_attack(update)
+    elif action == "divine_smite":
+        await _do_divine_smite(update)
+    elif action == "flurry_of_blows":
+        await _do_flurry_of_blows(update)
+    elif action == "toggle_manual_dice":
+        await _do_toggle_manual_dice(update, intent.get("raw_text", text))
+    elif action == "level_up":
+        await _do_level_up(update, intent.get("raw_text", text))
     elif action == "list_characters":
         await _do_list_characters(update)
     elif action == "switch_character":
@@ -6777,12 +7492,23 @@ async def dev_topic_video_handler(update: Update, context: ContextTypes.DEFAULT_
         )
         return
 
+    # Per Coffee (2026-07-16): delete the raw video once its frames are
+    # safely extracted -- the frames are what a live session actually
+    # reads, and raw video files add up fast on disk. Only removed on a
+    # confirmed-successful extraction (the failure branch above keeps
+    # the raw file, since there'd be nothing else to fall back on).
+    try:
+        os.remove(video_path)
+    except OSError as e:
+        logger.warning(f"[dev_topic_video] couldn't remove {video_path!r} after extraction: {e!r}")
+
     await _safe_send(
         update,
-        f"🎥 Got it — saved at `{video_path}`, and extracted {frame_count} frame(s) "
-        f"(one every {VIDEO_FRAME_INTERVAL_SECONDS}s) to `{frames_dir}` for a live Claude Code session "
-        f"to read page by page. I can't see it from here myself (no video capability in this running "
-        f"process) — same as screenshots, it's ready for a live session to look at directly.",
+        f"🎥 Got it — extracted {frame_count} frame(s) (one every {VIDEO_FRAME_INTERVAL_SECONDS}s) "
+        f"to `{frames_dir}` for a live Claude Code session to read page by page (the raw video itself "
+        f"was deleted afterward to save disk space). I can't see it from here myself (no video "
+        f"capability in this running process) — same as screenshots, the frames are ready for a live "
+        f"session to look at directly.",
         thread_id=config.TOPIC_DEVELOPMENT_ID,
     )
 
@@ -6826,10 +7552,47 @@ def _extract_video_frames(video_path: str) -> tuple[int, str, str | None]:
 
 _NAMED_SHEET_EXCLUDED_WORDS = ("the", "a", "an", "her", "his", "their", "your", "our")
 _SELF_SHEET_WORDS = ("my", "mine", "myself")
+# Real live bug (2026-07-16, Coffee): "On my character sheet, I noticed
+# there are spell slots. What are they used for?" matched the sheet-
+# lookup regex below on "my character sheet" and just dumped his own
+# sheet, completely ignoring the real question -- exactly the kind of
+# genuine how-to-play question Support is supposed to actually explain,
+# per Coffee's "make Support a wiki" goal. Any of these phrases means
+# the player is asking what something MEANS, not asking to see the
+# sheet itself, even if the message happens to mention "sheet" in
+# passing -- skip the sheet-dump shortcut entirely and let it fall
+# through to the real grounded Q&A model instead.
+_SHEET_EXPLANATION_OVERRIDE_WORDS = (
+    "what are", "what is", "what does", "what's", "used for", "how do", "how does", "why",
+)
+
+
+def _wants_sheet_names(question: str) -> list[str]:
+    """
+    Extracts any "<name>'s sheet"/"my sheet" references from a real
+    Support-topic question -- empty if the question is really asking
+    what something MEANS (see _SHEET_EXPLANATION_OVERRIDE_WORDS), even
+    if it happens to mention "sheet" in passing.
+    """
+    lowered = question.lower()
+    if any(w in lowered for w in _SHEET_EXPLANATION_OVERRIDE_WORDS):
+        return []
+    return re.findall(r"(\w+)(?:'s)? (?:character )?sheet", lowered)
 
 
 async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     question = update.message.text.strip()
+
+    # Physical-dice mode toggle (2026-07-16, per Coffee: "toggle in
+    # support topic"), checked before anything else so it's a real
+    # state change, not routed through the general Q&A model.
+    lowered_question = question.lower()
+    if any(w in lowered_question for w in ("own dice", "own physical dice", "dice on", "dice off",
+                                             "let the game roll", "turn on manual dice", "turn off manual dice",
+                                             "turn on physical dice", "turn off physical dice")):
+        await _do_toggle_manual_dice(update, question, thread_id=config.TOPIC_SUPPORT_ID)
+        return
+
     character = db.get_character(update.effective_user.id)
     # 2026-07-14, per Coffee: "Is Sera in my current party?" and "Show
     # me my party character sheets" both had nothing real to answer from
@@ -6855,7 +7618,7 @@ async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TY
     # Fixed with re.findall (every match, not just the first) and a
     # real per-name lookup for each one, never handing ANY of it to the
     # model once at least one real name resolves.
-    sheet_names = re.findall(r"(\w+)(?:'s)? (?:character )?sheet", question.lower())
+    sheet_names = _wants_sheet_names(question)
     if sheet_names:
         seen = set()
         replies = []

@@ -2,6 +2,74 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.10.13] — Physical dice mode, real ASI level-ups, 4 new class features, gathering tools, and a batch of live-reported bugfixes
+
+**Physical dice mode.** Players can now opt (asked at character
+creation, toggleable any time by saying "use my own dice" or "let the
+game roll for me") to roll their own physical d20 for the primary roll
+of an attack or skill check instead of the game rolling for them — the
+game asks, waits indefinitely for a number 1-20, and resolves with
+that real roll. Damage and other secondary rolls stay automatic.
+
+**Real player-driven Ability Score Improvements, replacing a silent
+auto-apply.** ASI levels (4/8/12/16/19) used to auto-add +2 to a fixed
+stat per class with zero player input or even a mention on the level-up
+message. Now those points are banked (`pending_asi_points`) and the
+player spends them on their own schedule by saying "level up" —
+naming a specific ability (capped at +2 per ability per real 5E rule,
+any remainder stays pending) or saying "auto"/"do it for me" to apply
+them all to the class's traditional primary stat. Shows as a reminder
+on the level-up message and the character sheet until spent. Character
+creation's ability-score assignment step got the same auto-assign
+option — say "assign them automatically"/"do it for me" and the game
+picks a sensible spread (primary ability highest, then the class's
+other save-proficient ability, then Constitution, then the rest).
+
+**Four new level 2+ class features:** Fighter's Action Surge (double
+attacks this turn, once per rest), Barbarian's Reckless Attack
+(advantage on your own attacks), Paladin's Divine Smite (spend a spell
+slot on a confirmed hit for real bonus radiant damage), and Monk's
+Flurry of Blows (spend a ki point for two extra unarmed strikes,
+ki pool scaling with level).
+
+**Gathering now requires real tools**, per the profession fantasy
+Coffee asked for: fishing needs a fishing pole and bait, lumberjacking
+needs a woodcutter's axe, mining needs a pickaxe — all now stocked at
+Maren's Wares. Herbalism alone needs no tool, but buying Shears lets a
+character gather up to 3 herbs at once (a real dice roll decides how
+many), and a separately-tracked proficiency bonus can add a bonus
+herbalism roll at any gathering skill once practiced enough.
+
+**Inactive party members now earn a small XP share** (10%) for a
+party's victories even when off doing something else, to reward
+sticking together as a real party instead of only whoever's actively
+fighting.
+
+**Board quests had three real bugs, all fixed together:** a completed
+quest permanently occupied its daily slot instead of a fresh one
+generating to replace it, completed quests kept showing on the board
+listing indefinitely, and completing one was never credited anywhere
+on the character — there's now a real "Board quests completed" count
+on the sheet and in the quest journal.
+
+**"Look around" now hints at quests available where you're standing**
+— it never used to give any sign a location had a story quest tied to
+it or a bounty posted, so players had to already know to separately
+check. Now it names someone worth talking to, or points at the board.
+
+**A batch of small, live-reported classification bugs, fixed
+together:** "Return to X" wasn't recognized as travel; a bare "Check
+quests" fell through to silent chat instead of showing the quest
+journal; and a typo'd "accepet the quest" silently failed to accept
+anything (now tolerant of small single-letter typos on "accept"
+specifically). Also fixed: Support's sheet-lookup shortcut swallowing
+a genuine question like "what are spell slots used for?" just because
+it contained the words "my character sheet."
+
+**Dev-topic video uploads now delete the raw file after extracting
+frames**, instead of accumulating indefinitely on a laptop with
+limited disk space.
+
 ## [1.10.12] — Extra Attack, racial traits, saving throw proficiency, real climax bosses for Arc 2/3, TTS delay fix
 
 Biggest single rules-completeness pass this project has had. Found by

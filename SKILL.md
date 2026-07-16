@@ -71,6 +71,13 @@ only come from the right resource node at the right location (e.g.
 fishing needs actual water nearby); asking to gather something that
 isn't there just tells you what actually is.
 
+Fishing, mining, and lumberjacking each require owning the real tool
+for that trade — a fishing pole and bait, a pickaxe, a woodcutter's
+axe respectively (buy them from a shop) — and won't work without it.
+Herbalism is the one exception: picking a plant needs no tool at all,
+but owning a pair of Shears lets an herbalist harvest up to 3 plants
+per success instead of 1.
+
 ### Status conditions
 
 Beyond prone and poisoned, this game models blinded, silenced,
@@ -88,6 +95,30 @@ Rogue's Sneak Attack die count and a Barbarian's Rage damage bonus both
 scale up with level too, not fixed at their level-1 values. Saving
 throws now add a real proficiency bonus when your class is proficient
 in that specific save, matching the 5E rules.
+
+At level 2, four classes unlock a real, usable combat feature: say
+"action surge" (Fighter) to double your attacks this turn once per
+rest, "attack recklessly" (Barbarian) for advantage on your own
+attacks, "divine smite" (Paladin) to spend a spell slot on a confirmed
+hit for bonus radiant damage, or "flurry of blows" (Monk) to spend a ki
+point for two extra unarmed strikes.
+
+### Leveling up and ability score improvements
+
+At levels 4, 8, 12, 16, and 19, your character earns real ability
+score points instead of them being silently spent for you — you'll be
+told how many, and can spend them whenever you want by saying "level
+up." Name an ability to raise it (up to +2 at a time), or say
+"auto"/"do it for me" to let the game pick a sensible one for your
+class. There's no rush — the points just wait until you're ready.
+
+### Physical dice mode
+
+If you'd rather roll your own real dice instead of the game rolling
+for you, say "use my own dice" any time (or answer that way when asked
+at character creation). Once on, the game will ask you to report the
+number whenever an attack or skill check needs a d20 roll, and use
+exactly what you rolled. Say "let the game roll for me" to switch back.
 
 ### Death is real, and reversible
 

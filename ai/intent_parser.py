@@ -10,6 +10,7 @@ If the model is unreachable or returns something unparseable, a plain
 keyword-based fallback takes over so the game never hard-fails just
 because a natural-language interpretation didn't come back cleanly.
 """
+import difflib
 import json
 import re
 
@@ -130,6 +131,19 @@ rest without fully resting (e.g. "I use arcane recovery", "recover a spell slot"
 rest, replacing a normal attack in combat (e.g. "I use my breath weapon", "breathe fire", "unleash my breath").
 - "channel_divinity" is specifically a Cleric's real class feature (level 2+): Turn Undead, forcing an undead \
 creature to become frightened, usable once per rest (e.g. "I channel divinity", "I turn undead", "turn the undead").
+- "action_surge" is specifically a Fighter's real class feature (level 2+): take an extra action, once per rest \
+(e.g. "I use action surge", "action surge", "I surge").
+- "reckless_attack" is specifically a Barbarian's real class feature: attacking recklessly for advantage on your \
+attacks this turn, at the cost of attacks against you also having advantage until your next turn \
+(e.g. "I attack recklessly", "reckless attack", "I go reckless").
+- "divine_smite" is specifically a Paladin's real class feature (level 2+): spending a spell slot on your next \
+hit for bonus radiant damage (e.g. "I smite", "divine smite", "I use divine smite").
+- "flurry_of_blows" is specifically a Monk's real class feature (level 2+): spending a ki point for a bonus \
+unarmed strike (e.g. "flurry of blows", "I use flurry of blows", "I flurry").
+- "toggle_manual_dice" is for turning physical-dice mode on or off (e.g. "use my own dice", "roll my own dice", \
+"let the game roll for me", "dice on", "dice off", "turn off manual dice").
+- "level_up" is for spending a pending Ability Score Improvement -- saying "level up", naming which ability to \
+raise, or asking the game to pick automatically ("auto", "do it for me").
 - "chat" is for anything else — general roleplay talk with no clear game action.
 Output ONLY the JSON object, nothing else."""
 
@@ -154,6 +168,31 @@ def _extract_json(text: str) -> dict | None:
     return None
 
 
+# Words whose misspelling is common enough (and consequential enough --
+# accept_quest silently failing on "accepet" was reported live) to be
+# worth correcting before the exact-substring checks below run. Keyed
+# by the correct spelling; only words of similar length get checked
+# against it, so this can't accidentally rewrite unrelated words.
+_TYPO_TOLERANT_WORDS = ["accept"]
+
+
+def _normalize_common_typos(lowered: str) -> str:
+    """Rewrites near-miss misspellings of a small set of key trigger
+    words back to their correct spelling (e.g. 'accepet' -> 'accept'),
+    so the exact-substring keyword checks below still fire. Confirmed
+    live: this typo silently dropped accept_quest with no reply at all."""
+    words = lowered.split()
+    for i, word in enumerate(words):
+        stripped = word.strip(".,!?;:'\"")
+        if stripped in _TYPO_TOLERANT_WORDS:
+            continue
+        for target in _TYPO_TOLERANT_WORDS:
+            if abs(len(stripped) - len(target)) <= 1 and difflib.SequenceMatcher(None, stripped, target).ratio() >= 0.8:
+                words[i] = word.replace(stripped, target)
+                break
+    return " ".join(words)
+
+
 def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     """
     Plain keyword-based classification used when the model is unreachable
@@ -162,6 +201,7 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     at a game action.
     """
     lowered = text.lower()
+    lowered = _normalize_common_typos(lowered)
     base = {"action": "chat", "target": None, "npc_name": None, "ability": None,
             "item_name": None, "spell_name": None, "quantity": 1, "raw_text": text}
 
@@ -192,7 +232,8 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in ["my quests", "quest journal", "quest log", "my quest log",
                                     "quest board", "the board", "what's on the board",
                                     "quest details", "current quest", "my quest", "what quest",
-                                    "what's my quest", "whats my quest", "active quest"]):
+                                    "what's my quest", "whats my quest", "active quest",
+                                    "check quest", "check my quest", "show quest", "list quest"]):
         return {**base, "action": "check_quests"}
 
     # Checked BEFORE "buy" below: "where can I buy potions" is asking
@@ -469,6 +510,27 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in ["channel divinity", "turn undead", "turn the undead"]):
         return {**base, "action": "channel_divinity"}
 
+    if any(w in lowered for w in ["action surge", "i surge"]):
+        return {**base, "action": "action_surge"}
+
+    if any(w in lowered for w in ["attack recklessly", "reckless attack", "i go reckless", "attack rashly"]):
+        return {**base, "action": "reckless_attack"}
+
+    if any(w in lowered for w in ["divine smite", "i smite", "use divine smite"]):
+        return {**base, "action": "divine_smite"}
+
+    if any(w in lowered for w in ["flurry of blows", "i flurry"]):
+        return {**base, "action": "flurry_of_blows"}
+
+    if any(w in lowered for w in ["use my own dice", "roll my own dice", "own physical dice",
+                                    "let the game roll for me", "dice on", "dice off",
+                                    "turn on manual dice", "turn off manual dice",
+                                    "turn on physical dice", "turn off physical dice"]):
+        return {**base, "action": "toggle_manual_dice"}
+
+    if "level up" in lowered:
+        return {**base, "action": "level_up"}
+
     # Checked BEFORE check_sheet below: "my characters" (plural, roster) is
     # a substring-superset of check_sheet's "my character" (singular) —
     # confirmed live to otherwise get shadowed and misread as check_sheet,
@@ -565,7 +627,8 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     move_words = ["go to", "goto", "head to", "walk to", "travel to", "move to", "enter the", "descend", "ascend",
                   "climb down", "climb up", "leave the ", "leave this", "leave here", "go back",
                   "go downstairs", "go upstairs", "head downstairs", "head upstairs",
-                  "downstairs", "upstairs", "exit this", "exit the", "step out", "walk out"]
+                  "downstairs", "upstairs", "exit this", "exit the", "step out", "walk out",
+                  "return to", "head back to", "back to the"]
     if any(w in lowered for w in move_words):
         return {**base, "action": "move"}
 
@@ -788,7 +851,8 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
                 "invite_to_party", "accept_party_invite", "leave_party", "find_merchant",
                 "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "arcane_recovery",
                 "make_campfire", "give_item", "use_item", "equip_item", "auto_equip", "breath_weapon",
-                "channel_divinity",
+                "channel_divinity", "action_surge", "reckless_attack", "divine_smite",
+                "flurry_of_blows", "toggle_manual_dice", "level_up",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

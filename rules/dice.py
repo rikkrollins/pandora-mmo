@@ -13,13 +13,27 @@ def roll(num_dice: int, sides: int) -> list[int]:
     return [random.randint(1, sides) for _ in range(num_dice)]
 
 
-def roll_d20(advantage: bool = False, disadvantage: bool = False) -> int:
+def roll_d20(advantage: bool = False, disadvantage: bool = False, forced_roll: int | None = None) -> int:
     """
     Roll a d20, handling 5E advantage/disadvantage:
     - advantage: roll twice, take the higher
     - disadvantage: roll twice, take the lower
     - both True: they cancel out, roll normally (5E rule)
+
+    `forced_roll` (2026-07-16, physical-dice mode): when a player has
+    opted to roll their own physical dice instead of letting the game
+    roll for them (see bot.py's manual_dice_enabled flow), the real
+    number they reported is substituted here instead of a random roll
+    -- this is still the one place a d20 "roll" happens, so every
+    downstream caller (roll_attack, roll_ability_check) gets a forced
+    value for free without needing its own separate override. Bypasses
+    advantage/disadvantage entirely: there's no way to verify a second
+    physical roll, so the player is expected to already account for
+    advantage/disadvantage themselves before reporting their one final
+    number (the prompt that asks for it says as much).
     """
+    if forced_roll is not None:
+        return forced_roll
     if advantage and disadvantage:
         return random.randint(1, 20)
     if advantage:
@@ -35,16 +49,18 @@ def ability_modifier(score: int) -> int:
 
 
 def roll_ability_check(character: dict, ability: str, proficient: bool = False,
-                        advantage: bool = False, disadvantage: bool = False) -> dict:
+                        advantage: bool = False, disadvantage: bool = False,
+                        forced_roll: int | None = None) -> dict:
     """
     Roll an ability check for a character dict (expects keys like
     'strength', 'dexterity', etc. and 'proficiency_bonus').
     Returns a dict with the raw roll, modifier, and total.
+    `forced_roll`: see roll_d20's own docstring (physical-dice mode).
     """
     score = character[ability.lower()]
     mod = ability_modifier(score)
     prof = character.get("proficiency_bonus", 0) if proficient else 0
-    raw = roll_d20(advantage=advantage, disadvantage=disadvantage)
+    raw = roll_d20(advantage=advantage, disadvantage=disadvantage, forced_roll=forced_roll)
     total = raw + mod + prof
     return {
         "raw_roll": raw,
@@ -56,15 +72,16 @@ def roll_ability_check(character: dict, ability: str, proficient: bool = False,
 
 def roll_attack(character: dict, target_ac: int, ability: str = "strength",
                  proficient: bool = True, advantage: bool = False,
-                 disadvantage: bool = False) -> dict:
+                 disadvantage: bool = False, forced_roll: int | None = None) -> dict:
     """
     Roll an attack for a character against a target AC.
     Returns hit/miss, whether it was a critical hit/fail, and the roll details.
+    `forced_roll`: see roll_d20's own docstring (physical-dice mode).
     """
     score = character[ability.lower()]
     mod = ability_modifier(score)
     prof = character.get("proficiency_bonus", 0) if proficient else 0
-    raw = roll_d20(advantage=advantage, disadvantage=disadvantage)
+    raw = roll_d20(advantage=advantage, disadvantage=disadvantage, forced_roll=forced_roll)
 
     critical_hit = raw == 20
     critical_fail = raw == 1

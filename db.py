@@ -21,7 +21,7 @@ import items as items_module
 from rules.dice import ability_modifier, average_damage
 from rules.leveling import (
     level_for_xp, proficiency_bonus_for_level,
-    hp_gain_for_level, ASI_LEVELS, CLASS_PRIMARY_ABILITY,
+    hp_gain_for_level, ASI_LEVELS,
 )
 import spells as spells_module
 
@@ -244,6 +244,12 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN equipped_shield TEXT")
         if "equipped_accessories" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN equipped_accessories TEXT NOT NULL DEFAULT '[]'")
+        if "manual_dice_enabled" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN manual_dice_enabled INTEGER NOT NULL DEFAULT 0")
+        if "board_quests_completed" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN board_quests_completed INTEGER NOT NULL DEFAULT 0")
+        if "pending_asi_points" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN pending_asi_points INTEGER NOT NULL DEFAULT 0")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -766,10 +772,11 @@ def add_xp(telegram_user_id: int, amount: int) -> dict | None:
 
         asi_count = sum(1 for lvl in range(old_level + 1, new_level + 1) if lvl in ASI_LEVELS)
         if asi_count:
-            primary_ability = CLASS_PRIMARY_ABILITY.get(character["char_class"].lower())
-            if primary_ability:
-                current_value = character[primary_ability]
-                updates[primary_ability] = min(current_value + 2 * asi_count, 20)
+            # Banked, not auto-applied (2026-07-16, per Coffee): the
+            # player spends these whenever they want by saying "level
+            # up" -- see bot.py's _do_level_up. Real 5E lets you defer
+            # ASIs indefinitely too, so this has no expiry.
+            updates["pending_asi_points"] = character.get("pending_asi_points", 0) + 2 * asi_count
 
         newly_unlocked = spells_module.spells_unlocked_at_level(character["char_class"], new_level)
         newly_learned = [s for s in newly_unlocked if s not in character["known_spells"]]
@@ -1117,6 +1124,24 @@ def resolve_board_quest_branch(board_quest_id: int, choice_key: str) -> dict | N
             (json.dumps(branch_data), datetime.now(timezone.utc).isoformat(), board_quest_id),
         )
     return branch_data
+
+
+def increment_board_quests_completed(telegram_user_id: int) -> None:
+    """
+    Board quests track their own completion (board_quests.completed_at)
+    entirely separately from a character's story-quest completed_quests
+    log, so a player's board-quest history never showed up anywhere on
+    their own character (2026-07-16, per Coffee). This is a simple
+    running count, not a title list -- board quests are randomly
+    generated and not worth naming individually the way story quests
+    are, but "how many bounties has this character finished" is real,
+    persistent progress worth showing.
+    """
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE characters SET board_quests_completed = board_quests_completed + 1 WHERE telegram_user_id = ?",
+            (telegram_user_id,),
+        )
 
 
 def get_accepted_board_quests_for_user(telegram_user_id: int) -> list[dict]:

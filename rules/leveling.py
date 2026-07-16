@@ -106,11 +106,12 @@ def rage_damage_bonus(level: int) -> int:
 
 
 # Real 5E: Ability Score Improvements are available at these levels.
-# In the real game, a player CHOOSES which score(s) to raise (or takes a
-# feat instead). This build has no interactive choice mechanism yet, so
-# it auto-applies +2 to the class's primary ability (capped at 20) — a
-# reasonable, documented simplification, not a substitute for the real
-# player choice a table would normally make.
+# Crossing one of these no longer auto-applies +2 to a fixed stat
+# (2026-07-16, per Coffee) -- it banks 2 points per level crossed on
+# character["pending_asi_points"] instead, and the player spends them
+# whenever they want by saying "level up" (or immediately, via CLASS_
+# PRIMARY_ABILITY, if they say "auto"/"do it for me"). See db.add_xp
+# and bot.py's _do_level_up.
 ASI_LEVELS = {4, 8, 12, 16, 19}
 
 CLASS_PRIMARY_ABILITY = {

@@ -725,7 +725,12 @@
         "scroll_magic_missile",
         "iron_ore",
         "greater_healing_potion",
-        "silvered_dagger"
+        "silvered_dagger",
+        "fishing_pole",
+        "bait",
+        "woodcutters_axe",
+        "pickaxe",
+        "shears"
       ]
     },
     "vanes_curiosities": {

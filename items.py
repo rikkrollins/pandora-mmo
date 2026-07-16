@@ -172,6 +172,19 @@ ITEMS = {
         "name": "Cooked Fish", "type": "consumable", "rarity": "common",
         "price": 8, "weight": 0.3, "effect": "heal", "heal_dice": "1d4+1",
     },
+
+    # --- Gathering tools (2026-07-16, per Coffee): fishing/lumberjacking/
+    # mining each require owning the real tool for that trade -- herbalism
+    # deliberately doesn't (picking a plant needs no tool), but Shears let
+    # an herbalist harvest more than one plant per success. "required_for"
+    # is the gathering skill this tool gates (see bot.py's _do_gather);
+    # Shears instead uses "boosts_quantity_for" since it's optional, not
+    # gating access at all.
+    "fishing_pole": {"name": "Fishing Pole", "type": "tool", "rarity": "common", "price": 8, "weight": 2, "required_for": "fishing"},
+    "bait": {"name": "Bait", "type": "tool", "rarity": "common", "price": 2, "weight": 0.1, "required_for": "fishing"},
+    "woodcutters_axe": {"name": "Woodcutter's Axe", "type": "tool", "rarity": "common", "price": 10, "weight": 4, "required_for": "lumberjacking"},
+    "pickaxe": {"name": "Pickaxe", "type": "tool", "rarity": "common", "price": 10, "weight": 5, "required_for": "mining"},
+    "shears": {"name": "Shears", "type": "tool", "rarity": "common", "price": 6, "weight": 0.5, "boosts_quantity_for": "herbalism"},
 }
 
 
