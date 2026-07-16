@@ -78,12 +78,37 @@ true by construction, not by a prompt telling the model to behave:
 
 ## Deployment
 
+**The live bot runs under a systemd user service**, discovered
+2026-07-16 the hard way: `pandora-mmo-bot.service`
+(`~/.config/systemd/user/pandora-mmo-bot.service`), `Restart=on-failure`,
+`RestartSec=5`, `ExecStart=/usr/bin/python3 bot.py`,
+`WorkingDirectory=~/pandora_mmo`, logs appended to `bot_live_tmp.log`
+same as before. This did NOT exist when the manual pkill/nohup
+procedure below was originally written, and manually killing the
+process now just makes systemd relaunch it 5 seconds later — worse,
+`pkill -f '^python3 bot\.py'` (anchored) does NOT match systemd's
+`/usr/bin/python3 bot.py` full-path invocation, so the OLD manual
+"atomic restart" procedure silently failed to kill the real process
+while a second one started, causing duplicate processes and a
+`telegram.error.Conflict: terminated by other getUpdates request` loop
+until both stray PIDs were hunted down and `kill -9`'d one at a time.
+
+**Redeploy the correct way now:**
 ```bash
-pkill -9 -f "python3 bot.py"
 cd ~/pandora_mmo
-git pull                    # once this repo is the live source
-python3 bot.py
+git pull                              # once this repo is the live source
+systemctl --user restart pandora-mmo-bot.service
+sleep 3
+systemctl --user status pandora-mmo-bot.service --no-pager
+pgrep -fac "python3 bot.py"           # must be exactly 1
+tail -5 bot_live_tmp.log              # confirm getUpdates flowing, no Conflict
 ```
+No pkill, no nohup, no disown, no `run_in_background` needed — systemd
+owns the process lifecycle now. If you ever see MORE than one
+`python3 bot.py` process (e.g. from a stray manual start), find and
+`kill -9` the extra PID(s) individually rather than any broad pkill,
+then let `systemctl --user status` confirm systemd's own instance is
+the one still standing.
 
 **Standing authorization (from Coffee, 2026-07-09):** Claude Code may
 git pull, commit, and push to this repo's `origin` (rikkrollins/
@@ -153,15 +178,15 @@ throwaway `.py` script and the `.db`/`.db-journal` files when done,
 same as any other `*_tmp.py`.
 
 **Deploy safety, live production bot:**
-- Redeploys must always be one atomic stop-and-restart command
-  (`pkill -f "python3 bot.py"; sleep 1; cd ~/pandora_mmo && nohup
-  python3 bot.py >> bot_live_tmp.log 2>&1 & disown; sleep 4; ps aux |
-  grep "python3 bot.py"`) — note `>>` (append), not `>`, so restarting
-  doesn't erase log history needed to answer "did you see the message
-  I sent?" Never split the kill and the restart into separate tool
-  calls; if the atomic command's exit code looks wrong, immediately
-  check `ps aux` and restart standalone if the bot is actually down —
-  real players may be active.
+- Redeploys go through `systemctl --user restart pandora-mmo-bot.service`
+  (see Deployment section above) — NOT a manual pkill/nohup, now that a
+  systemd user service owns the process. Log file is still
+  `bot_live_tmp.log`, still append-mode (systemd's own
+  `StandardOutput=append:...` config), so history needed to answer "did
+  you see the message I sent?" is preserved across restarts same as
+  before. After restarting, always verify exactly one `python3 bot.py`
+  process (`pgrep -fac`) and check the log tail for a clean `getUpdates`
+  200 (not a `Conflict` loop) before considering the deploy done.
 - Before a redeploy, post a heads-up to the group (Development topic)
   that an update is coming with a rough ETA, via
   `scripts/announce_deploy.py`, so players aren't caught by a silent
