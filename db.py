@@ -242,6 +242,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN equipped_armor TEXT")
         if "equipped_shield" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN equipped_shield TEXT")
+        if "equipped_accessories" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN equipped_accessories TEXT NOT NULL DEFAULT '[]'")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -253,6 +255,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     d["skill_uses"] = json.loads(d["skill_uses"])
     d["active_quests"] = json.loads(d["active_quests"])
     d["feature_uses"] = json.loads(d["feature_uses"])
+    d["equipped_accessories"] = json.loads(d["equipped_accessories"])
     return d
 
 
@@ -361,7 +364,7 @@ def update_character(telegram_user_id: int, **fields) -> dict | None:
     if not fields:
         return get_character(telegram_user_id)
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -410,23 +413,43 @@ def remove_item(telegram_user_id: int, item_id: str, quantity: int = 1) -> tuple
     return True, updated
 
 
+def _equipped_ring_ac_bonus(character: dict) -> int:
+    """Sum of ac_bonus from every currently-equipped ring (e.g. Ring of Protection)."""
+    total = 0
+    for acc_id in character.get("equipped_accessories", []):
+        acc = items_module.get_item(acc_id)
+        if acc and acc.get("type") == "ring":
+            total += acc.get("ac_bonus", 0)
+    return total
+
+
 def equip_item(telegram_user_id: int, item_id: str) -> tuple[bool, str, dict | None]:
     """
-    Equip a weapon, armor, or shield item the character is actually
-    carrying. Returns (success, message, updated_character). Real bug
-    fixed 2026-07-15: items.py's weapon (damage_dice/ability), armor
-    (ac_base), and shield (ac_bonus) fields existed the whole time but
-    nothing ever equipped anything or read them in combat -- every
-    attack used one hardcoded default weapon regardless of what was
-    bought/found, and armor_class never changed after character
-    creation. Equipping armor recomputes armor_class the same way
-    character creation does (ac_base + DEX modifier) -- a deliberate
-    simplification (no heavy-armor-caps-DEX nuance) consistent with
-    this build's existing style elsewhere. A shield is a real 5E
-    SEPARATE slot from armor (worn in addition to it, not instead),
-    so its ac_bonus is added on top of whatever armor_class already
-    is, rather than replacing it -- and correctly re-added if armor is
-    equipped/changed afterward while a shield is already worn.
+    Equip a weapon, armor, shield, ring, amulet, or wondrous item the
+    character is actually carrying. Returns (success, message,
+    updated_character). Real bug fixed 2026-07-15: items.py's weapon
+    (damage_dice/ability), armor (ac_base), and shield (ac_bonus)
+    fields existed the whole time but nothing ever equipped anything or
+    read them in combat -- every attack used one hardcoded default
+    weapon regardless of what was bought/found, and armor_class never
+    changed after character creation. Equipping armor recomputes
+    armor_class the same way character creation does (ac_base + DEX
+    modifier) -- a deliberate simplification (no heavy-armor-caps-DEX
+    nuance) consistent with this build's existing style elsewhere. A
+    shield is a real 5E SEPARATE slot from armor (worn in addition to
+    it, not instead), so its ac_bonus is added on top of whatever
+    armor_class already is, rather than replacing it -- and correctly
+    re-added if armor is equipped/changed afterward while a shield is
+    already worn.
+
+    Rings/amulets/wondrous items (2026-07-15, second reverse-
+    playthrough finding same night: Ring of Protection, Ring of the
+    Undertow, Amulet of Health, and Cloak of Elvenkind all had real
+    mechanical fields -- ac_bonus, constitution_set, stealth_advantage
+    -- that nothing ever read either) go into equipped_accessories, a
+    list rather than one named slot each, since real 5E allows wearing
+    several of these at once (e.g. two rings). Armor/shield equips
+    re-sum every currently-worn ring's ac_bonus so order never matters.
     """
     character = get_character(telegram_user_id)
     if character is None:
@@ -435,7 +458,7 @@ def equip_item(telegram_user_id: int, item_id: str) -> tuple[bool, str, dict | N
         return False, "You don't have that to equip.", character
 
     item = items_module.get_item(item_id)
-    if item is None or item.get("type") not in ("weapon", "armor", "shield"):
+    if item is None or item.get("type") not in ("weapon", "armor", "shield", "ring", "amulet", "wondrous"):
         return False, f"{item['name'] if item else item_id} isn't something you can equip.", character
 
     if item["type"] == "weapon":
@@ -447,18 +470,40 @@ def equip_item(telegram_user_id: int, item_id: str) -> tuple[bool, str, dict | N
         current_shield = items_module.get_item(character["equipped_shield"])
         if current_shield:
             current_shield_bonus = current_shield.get("ac_bonus", 0)
+    ring_bonus = _equipped_ring_ac_bonus(character)
 
     if item["type"] == "armor":
         dex_mod = ability_modifier(character["dexterity"])
-        new_ac = item["ac_base"] + dex_mod + current_shield_bonus
+        new_ac = item["ac_base"] + dex_mod + current_shield_bonus + ring_bonus
         updated = update_character(telegram_user_id, equipped_armor=item_id, armor_class=new_ac)
         return True, f"You put on the {item['name']} (AC {new_ac}).", updated
 
-    # Shield: additive on top of current AC, swapping out any
-    # previously-equipped shield's bonus first rather than stacking both.
-    new_ac = character["armor_class"] - current_shield_bonus + item["ac_bonus"]
-    updated = update_character(telegram_user_id, equipped_shield=item_id, armor_class=new_ac)
-    return True, f"You raise the {item['name']} (AC {new_ac}).", updated
+    if item["type"] == "shield":
+        # Additive on top of current AC, swapping out any previously-
+        # equipped shield's bonus first rather than stacking both.
+        new_ac = character["armor_class"] - current_shield_bonus + item["ac_bonus"]
+        updated = update_character(telegram_user_id, equipped_shield=item_id, armor_class=new_ac)
+        return True, f"You raise the {item['name']} (AC {new_ac}).", updated
+
+    # Ring / amulet / wondrous: added to the accessories list (worn
+    # alongside weapon/armor/shield, not instead of them).
+    accessories = character["equipped_accessories"]
+    if item_id in accessories:
+        return False, f"You're already wearing the {item['name']}.", character
+    accessories = accessories + [item_id]
+    updates = {"equipped_accessories": accessories}
+    note_parts = [f"You put on the {item['name']}."]
+
+    if item.get("ac_bonus"):
+        new_ac = character["armor_class"] + item["ac_bonus"]
+        updates["armor_class"] = new_ac
+        note_parts.append(f"AC is now {new_ac}.")
+    if item.get("constitution_set") and item["constitution_set"] > character["constitution"]:
+        updates["constitution"] = item["constitution_set"]
+        note_parts.append(f"Constitution is now {item['constitution_set']}.")
+
+    updated = update_character(telegram_user_id, **updates)
+    return True, " ".join(note_parts), updated
 
 
 def auto_equip_best_gear(telegram_user_id: int) -> tuple[str, dict | None]:
@@ -512,6 +557,20 @@ def auto_equip_best_gear(telegram_user_id: int) -> tuple[str, dict | None]:
         best_shield = max(shield_ids, key=lambda i: items_module.get_item(i)["ac_bonus"])
         _, msg, character = equip_item(telegram_user_id, best_shield)
         messages.append(msg)
+
+    # Rings/amulets/wondrous items (2026-07-15): unlike weapon/armor/
+    # shield, these aren't "pick the single best one" -- real 5E lets a
+    # character wear several accessories at once (e.g. two rings), so
+    # auto_equip puts on every one currently carried but not yet worn.
+    accessory_ids = [
+        item_id for item_id, qty in character["inventory"].items()
+        if qty > 0 and (items_module.get_item(item_id) or {}).get("type") in ("ring", "amulet", "wondrous")
+        and item_id not in character["equipped_accessories"]
+    ]
+    for accessory_id in accessory_ids:
+        success, msg, character = equip_item(telegram_user_id, accessory_id)
+        if success:
+            messages.append(msg)
 
     return " ".join(messages), character
 

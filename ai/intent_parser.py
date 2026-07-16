@@ -358,9 +358,16 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in ["create a character", "make a character", "new character", "join the game"]):
         return {**base, "action": "create_character"}
 
-    if any(w in lowered for w in ["my backpack", "my bag", "my inventory", "what am i carrying", "what do i have",
-                                    "check inventory", "show inventory", "view inventory", "what items", "my items",
-                                    "what weapons", "check my equipment", "my equipment"]):
+    # Real live bug (2026-07-15): "auto equip my equipment" contains "my
+    # equipment", which otherwise matches here and never reaches
+    # auto_equip's own check further down -- same shadowing shape as
+    # "my characters name" above. "auto"/"automatically" alongside
+    # "equip" is an unambiguous signal this is the auto_equip action,
+    # not a request to see what's carried.
+    if (any(w in lowered for w in ["my backpack", "my bag", "my inventory", "what am i carrying", "what do i have",
+                                     "check inventory", "show inventory", "view inventory", "what items", "my items",
+                                     "what weapons", "check my equipment", "my equipment"])
+            and not ("auto" in lowered and "equip" in lowered)):
         return {**base, "action": "check_inventory"}
 
     # Confirmed live 2026-07-14 (Coffee): "Who is in my current party?"

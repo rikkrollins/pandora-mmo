@@ -2,6 +2,42 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.10.11] — Rings/amulets/wondrous items, Sera wander-lock fix, auto-equip shadowing fix, dead-message resilience
+
+**Rings, amulets, and wondrous items actually work now (they never
+did).** Same "reverse playthrough" pattern as potions/equipment before
+them: Ring of Protection, Ring of the Undertow, Amulet of Health, and
+Cloak of Elvenkind all had real mechanical fields (`ac_bonus`,
+`constitution_set`, `stealth_advantage`) that nothing anywhere ever
+read. Added a real `equipped_accessories` slot (a list, not a single
+slot like weapon/armor/shield, since 5E genuinely lets you wear
+multiple rings at once) — rings/amulets stack their AC bonus, Amulet
+of Health sets Constitution to 19 (never lowering a higher score), and
+Cloak of Elvenkind grants advantage on Dexterity checks made while
+sneaking/hiding. `auto_equip` now also puts on every carried-but-unworn
+ring/amulet/wondrous item, not just the single best weapon and armor.
+
+**Fixed: "auto equip my equipment" did nothing.** Real live bug Coffee
+reported. `check_inventory`'s "my equipment" keyword trigger was firing
+before `auto_equip`'s own check was ever reached. Added an exclusion so
+"auto"+"equip" together always routes to auto-equip; "check my
+equipment"/"my equipment" alone still correctly shows the inventory.
+
+**Fixed: Sera wasn't at her starting location to be recruited.** Real
+live bug Coffee reported ("recruitable shud be location locked and
+only move with the party when they recruit them"). Sera is both
+`can_wander` and `recruitable` in campaign.json, so the living-world
+wander tick was relocating her like any other NPC. Recruitable now
+always overrides wanderable — a normal restart puts her back at her
+canonical location (the in-memory wander state resets on restart
+anyway).
+
+**Fixed: a real player's death message could go missing.** One call
+site for "you're dead and can't act" used a raw, non-resilient send
+instead of the game's normal retry-safe send helper — a transient
+Telegram timeout silently ate the message for a live player. Switched
+to the same resilient helper every other message already uses.
+
 ## [1.10.10] — Reactions, shields, auto-equip, video support, and two live bug fixes
 
 **Reactions** (per Coffee, "tackle the reactions system next" — the one

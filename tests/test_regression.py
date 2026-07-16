@@ -304,6 +304,27 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         }
         self.assertEqual(real_givers, expected_givers)
 
+    # -- Real live bug (2026-07-15): Sera (sera_wanderer) is both
+    #    can_wander AND recruitable, so the living-world wander tick
+    #    relocated her randomly, making her genuinely unfindable at the
+    #    location a player would look for her to recruit. -------------
+    def test_no_recruitable_npc_wanders(self):
+        for npc_id, npc in bot.CAMPAIGN["npcs"].items():
+            if npc.get("recruitable"):
+                self.assertFalse(bot._npc_currently_wanders(npc_id), npc_id)
+
+    def test_sera_is_a_static_npc_at_her_campaign_location(self):
+        bot._NPC_LOCATIONS.clear()
+        bot._seed_npc_locations()
+        self.assertNotIn("sera_wanderer", bot._NPC_LOCATIONS)
+        found_at = [
+            loc_id for region in bot.CAMPAIGN["locations"].values()
+            for loc_id, loc in region.items()
+            if "sera_wanderer" in loc.get("npcs", [])
+        ]
+        self.assertEqual(len(found_at), 1, "Sera should be listed at exactly one real location")
+        self.assertIn("sera_wanderer", bot._npcs_at_location(found_at[0]))
+
     # -- "I have decided the answer to the riddle is X" (v1.9.2) -------
     def test_puzzle_answer_not_shadowed_by_resolve_choice(self):
         """
@@ -821,6 +842,23 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         for text in ["auto equip my character", "put on my gear automatically", "help me equip my player"]:
             self.assertEqual(_keyword_fallback(text, [])["action"], "auto_equip", text)
 
+    # -- Real live bug (2026-07-15): "auto equip my equipment" contains
+    #    "my equipment", which matched check_inventory's trigger (checked
+    #    much earlier in the fallback chain) before auto_equip's own
+    #    check was ever reached. --------------------------------------
+    def test_auto_equip_my_equipment_not_shadowed_by_check_inventory(self):
+        self.assertEqual(_keyword_fallback("auto equip my equipment", [])["action"], "auto_equip")
+
+    def test_check_inventory_still_works_for_real_equipment_checks(self):
+        for text in ["check my equipment", "my equipment", "my inventory", "what am I carrying"]:
+            self.assertEqual(_keyword_fallback(text, [])["action"], "check_inventory", text)
+
+    # -- Per Coffee (2026-07-15): bare "auto equip" alone, with no other
+    #    words, should be enough to trigger it. ------------------------
+    def test_bare_auto_equip_is_enough_to_trigger(self):
+        for text in ["auto equip", "auto-equip", "auto equip me"]:
+            self.assertEqual(_keyword_fallback(text, [])["action"], "auto_equip", text)
+
     def test_my_sheet_still_classified_as_check_sheet(self):
         for text in ["my sheet", "my character", "my stats", "my class"]:
             self.assertEqual(_keyword_fallback(text, [])["action"], "check_sheet", text)
@@ -855,6 +893,126 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sheet = bot._format_character_sheet(character)
         self.assertIn("Equipped: Longsword", sheet)
         self.assertIn("Carried but not equipped: Shortsword", sheet)
+
+    # -- Rings/amulets/wondrous items were completely non-functional too
+    #    (same shape as potions/equipment): Ring of Protection, Ring of
+    #    the Undertow, Amulet of Health, Cloak of Elvenkind all had real
+    #    mechanical fields nothing ever read (v1.10.11) ------------------
+    def test_equipping_a_ring_adds_its_ac_bonus(self):
+        use_test_db("tests/tmp/ring_test.db")
+        user_id = 900401
+        make_basic_character(user_id, "RingBearer", current_location="crossroads_tavern", armor_class=15)
+        db.add_item(user_id, "ring_of_protection", 1)
+        success, message, updated = db.equip_item(user_id, "ring_of_protection")
+        self.assertTrue(success)
+        self.assertEqual(updated["armor_class"], 16)
+        self.assertIn("ring_of_protection", updated["equipped_accessories"])
+
+    def test_two_rings_stack_their_ac_bonus(self):
+        use_test_db("tests/tmp/ring_test2.db")
+        user_id = 900402
+        make_basic_character(user_id, "TwoRings", current_location="crossroads_tavern", armor_class=15)
+        db.add_item(user_id, "ring_of_protection", 1)
+        db.add_item(user_id, "ring_of_the_undertow", 1)
+        db.equip_item(user_id, "ring_of_protection")
+        success, message, updated = db.equip_item(user_id, "ring_of_the_undertow")
+        self.assertTrue(success)
+        self.assertEqual(updated["armor_class"], 17)
+
+    def test_equipping_armor_after_rings_preserves_ring_bonus(self):
+        use_test_db("tests/tmp/ring_test3.db")
+        user_id = 900403
+        character = make_basic_character(user_id, "RingThenArmor", current_location="crossroads_tavern")
+        db.add_item(user_id, "ring_of_protection", 1)
+        db.add_item(user_id, "chain_mail", 1)
+        db.equip_item(user_id, "ring_of_protection")
+        success, message, updated = db.equip_item(user_id, "chain_mail")
+        self.assertTrue(success)
+        from rules.dice import ability_modifier
+        expected = 16 + ability_modifier(character["dexterity"]) + 1  # chain_mail + dex + ring
+        self.assertEqual(updated["armor_class"], expected)
+
+    def test_amulet_of_health_sets_constitution(self):
+        use_test_db("tests/tmp/amulet_test.db")
+        user_id = 900404
+        make_basic_character(user_id, "Amuleted", current_location="crossroads_tavern")
+        db.add_item(user_id, "amulet_of_health", 1)
+        success, message, updated = db.equip_item(user_id, "amulet_of_health")
+        self.assertTrue(success)
+        self.assertEqual(updated["constitution"], 19)
+
+    def test_amulet_of_health_never_lowers_a_higher_constitution(self):
+        use_test_db("tests/tmp/amulet_test2.db")
+        user_id = 900405
+        make_basic_character(
+            user_id, "AlreadyStrong", current_location="crossroads_tavern",
+            ability_scores={"strength": 10, "dexterity": 10, "constitution": 20,
+                             "intelligence": 10, "wisdom": 10, "charisma": 10},
+        )
+        db.add_item(user_id, "amulet_of_health", 1)
+        success, message, updated = db.equip_item(user_id, "amulet_of_health")
+        self.assertTrue(success)
+        self.assertEqual(updated["constitution"], 20)
+
+    def test_cannot_equip_the_same_ring_twice(self):
+        use_test_db("tests/tmp/ring_test4.db")
+        user_id = 900406
+        make_basic_character(user_id, "Careful", current_location="crossroads_tavern")
+        db.add_item(user_id, "ring_of_protection", 1)
+        db.equip_item(user_id, "ring_of_protection")
+        success, message, _ = db.equip_item(user_id, "ring_of_protection")
+        self.assertFalse(success)
+
+    def test_auto_equip_wears_every_carried_ring_and_amulet(self):
+        use_test_db("tests/tmp/auto_equip_accessories_test.db")
+        user_id = 900407
+        make_basic_character(user_id, "AutoAccessory", current_location="crossroads_tavern")
+        db.add_item(user_id, "ring_of_protection", 1)
+        db.add_item(user_id, "ring_of_the_undertow", 1)
+        db.add_item(user_id, "amulet_of_health", 1)
+        summary, character = db.auto_equip_best_gear(user_id)
+        self.assertIn("ring_of_protection", character["equipped_accessories"])
+        self.assertIn("ring_of_the_undertow", character["equipped_accessories"])
+        self.assertIn("amulet_of_health", character["equipped_accessories"])
+
+    def test_equip_item_rejects_non_equippable_types_still(self):
+        use_test_db("tests/tmp/ring_test5.db")
+        user_id = 900408
+        make_basic_character(user_id, "StillChecked", current_location="crossroads_tavern")
+        db.add_item(user_id, "waterlogged_journal", 1)
+        success, message, _ = db.equip_item(user_id, "waterlogged_journal")
+        self.assertFalse(success)
+
+    def test_cloak_of_elvenkind_grants_advantage_on_sneak_checks(self):
+        use_test_db("tests/tmp/cloak_test.db")
+        user_id = 900409
+        make_basic_character(user_id, "Sneaky", current_location="crossroads_tavern")
+        db.add_item(user_id, "cloak_of_elvenkind", 1)
+        db.equip_item(user_id, "cloak_of_elvenkind")
+        character = db.get_character(user_id)
+        self.assertTrue(
+            bot._cloak_of_elvenkind_grants_advantage(character, "dexterity", "I try to sneak past the guard")
+        )
+
+    def test_cloak_of_elvenkind_doesnt_buff_non_stealth_dex_checks(self):
+        use_test_db("tests/tmp/cloak_test2.db")
+        user_id = 900410
+        make_basic_character(user_id, "Climber", current_location="crossroads_tavern")
+        db.add_item(user_id, "cloak_of_elvenkind", 1)
+        db.equip_item(user_id, "cloak_of_elvenkind")
+        character = db.get_character(user_id)
+        self.assertFalse(
+            bot._cloak_of_elvenkind_grants_advantage(character, "dexterity", "I try to climb the wall")
+        )
+
+    def test_no_advantage_without_the_cloak(self):
+        use_test_db("tests/tmp/cloak_test3.db")
+        user_id = 900411
+        make_basic_character(user_id, "NoCloak", current_location="crossroads_tavern")
+        character = db.get_character(user_id)
+        self.assertFalse(
+            bot._cloak_of_elvenkind_grants_advantage(character, "dexterity", "I try to sneak past the guard")
+        )
 
     # -- Dev-topic video handling (2026-07-15, per Coffee): videos had NO
     #    handler at all before this (only TEXT/PHOTO/Document.ALL were

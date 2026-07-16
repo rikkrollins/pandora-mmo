@@ -255,8 +255,25 @@ def _log_world_event(location_id: str | None, text: str) -> None:
     _RECENT_WORLD_EVENTS[:] = [e for e in _RECENT_WORLD_EVENTS if e[0].timestamp() >= cutoff]
 
 
+def _npc_currently_wanders(npc_id: str) -> bool:
+    """
+    Real bug fixed 2026-07-15 (Coffee): Sera (sera_wanderer) is both
+    `can_wander` AND `recruitable` in campaign.json, so the living-
+    world wander tick was relocating her randomly around the map --
+    exactly like any other wanderer -- making her genuinely unfindable
+    at the location a player would look for her to recruit. A
+    recruitable NPC needs to be reliably findable until recruited, so
+    recruitable always wins over can_wander here: once actually
+    recruited, an NPC becomes a real AI companion character that moves
+    with the party through normal travel, not the wander system, so
+    this exclusion only ever matters pre-recruitment anyway.
+    """
+    data = CAMPAIGN["npcs"].get(npc_id, {})
+    return bool(data.get("can_wander")) and not data.get("recruitable")
+
+
 def _wanderable_npc_ids() -> list[str]:
-    return [npc_id for npc_id, data in CAMPAIGN["npcs"].items() if data.get("can_wander")]
+    return [npc_id for npc_id in CAMPAIGN["npcs"] if _npc_currently_wanders(npc_id)]
 
 
 def _seed_npc_locations() -> None:
@@ -278,7 +295,7 @@ def _npcs_at_location(location_id: str) -> list[str]:
     location = cl.get_location(CAMPAIGN, location_id)
     static_npcs = [
         n for n in (location.get("npcs", []) if location else [])
-        if not CAMPAIGN["npcs"].get(n, {}).get("can_wander")
+        if not _npc_currently_wanders(n)
     ]
     wandering_here = [npc_id for npc_id, loc_id in _NPC_LOCATIONS.items() if loc_id == location_id]
     return static_npcs + wandering_here
@@ -2280,6 +2297,23 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
     await _safe_send(update, message)
 
 
+def _cloak_of_elvenkind_grants_advantage(character: dict, ability: str, action_text: str) -> bool:
+    """
+    Real 5E grants Cloak of Elvenkind's advantage specifically on
+    Stealth checks, not every DEX check this game buckets together
+    (climbing/balancing/lockpicking share the same "dexterity" ability
+    here but aren't stealth) -- only applies when the action text
+    itself reads as a stealth attempt. Real bug fixed 2026-07-15: the
+    cloak's stealth_advantage field existed but nothing ever read it.
+    """
+    stealth_words = ("sneak", "hide", "tiptoe", "conceal", "sneaking", "hiding")
+    return (
+        ability == "dexterity"
+        and any(w in action_text.lower() for w in stealth_words)
+        and "cloak_of_elvenkind" in (character.get("equipped_accessories") or [])
+    )
+
+
 async def _do_skill_check(update: Update, ability: str, action_text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -2294,7 +2328,8 @@ async def _do_skill_check(update: Update, ability: str, action_text: str) -> Non
         await _do_lockpick(update, character, lockable, action_text)
         return
 
-    result = roll_ability_check(character, ability, proficient=False)
+    has_advantage = _cloak_of_elvenkind_grants_advantage(character, ability, action_text)
+    result = roll_ability_check(character, ability, proficient=False, advantage=has_advantage)
     bonus = _practiced_bonus_for(update.effective_user.id, ability)
     result["total"] += bonus
     result["practiced_bonus"] = bonus
@@ -3696,6 +3731,10 @@ def _format_equipped_line(character: dict) -> str:
              armor_item["name"] if armor_item else "no armor"]
     if shield_item:
         parts.append(shield_item["name"])
+    for acc_id in character.get("equipped_accessories") or []:
+        acc_item = items_module.get_item(acc_id)
+        if acc_item:
+            parts.append(acc_item["name"])
     return f"Equipped: {', '.join(parts)}\n"
 
 
@@ -3708,13 +3747,13 @@ def _format_carried_gear_line(character: dict) -> str:
     all) if nothing equippable is being carried unequipped.
     """
     equipped_ids = {character.get("equipped_weapon"), character.get("equipped_armor"),
-                    character.get("equipped_shield")}
+                    character.get("equipped_shield"), *(character.get("equipped_accessories") or [])}
     carried_names = []
     for item_id, qty in (character.get("inventory") or {}).items():
         if qty <= 0 or item_id in equipped_ids:
             continue
         item = items_module.get_item(item_id)
-        if item and item.get("type") in ("weapon", "armor", "shield"):
+        if item and item.get("type") in ("weapon", "armor", "shield", "ring", "amulet", "wondrous"):
             carried_names.append(item["name"])
     if not carried_names:
         return ""
@@ -5003,13 +5042,14 @@ async def _do_equip_item(update: Update, text: str) -> None:
 
     equippable_ids = [
         item_id for item_id in target["inventory"]
-        if (items_module.get_item(item_id) or {}).get("type") in ("weapon", "armor", "shield")
+        if (items_module.get_item(item_id) or {}).get("type") in ("weapon", "armor", "shield", "ring", "amulet", "wondrous")
     ]
     item_id = items_module.find_item_mentioned_in_text(text, candidate_ids=equippable_ids)
     if item_id is None:
         who = "you" if target is character else target["name"]
         await update.effective_chat.send_message(
-            f"Equip what, exactly? Name a weapon, armor, or shield {who} actually {'are' if who == 'you' else 'is'} carrying.",
+            f"Equip what, exactly? Name a weapon, armor, shield, ring, amulet, or wondrous item "
+            f"{who} actually {'are' if who == 'you' else 'is'} carrying.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
@@ -5830,11 +5870,16 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
             "create_character", "delete_character", "chat",
         )
         if not is_status_check:
-            await update.effective_chat.send_message(
+            # Real live incident (2026-07-15): a bare telegram.error.
+            # TimedOut on this exact direct send silently ate the
+            # message for a real player -- switched to _safe_send, same
+            # resilience convention every other important reply in this
+            # file already follows.
+            await _safe_send(
+                update,
                 f"💀 **{character['name']}** is dead and can't act or be moved until revived — "
                 f"staying right where they died. Say \"switch to <character>\" to play someone else, "
                 f"or \"I want to create a character\" to start fresh.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
             return
 
