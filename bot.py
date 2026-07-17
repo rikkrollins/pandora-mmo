@@ -5731,6 +5731,44 @@ def _find_interactable(location: dict, text: str) -> tuple[str, dict] | None:
     return None
 
 
+def _plural_forms(word: str) -> list[str]:
+    """
+    Cheap English pluralization for matching a monster's singular
+    template name against a player's naturally-plural phrasing ("the
+    wolves") -- confirmed live 2026-07-17 (Coffee): a plain substring
+    check against "Wolf" never matches "wolves" at all (not a simple
+    "+s" plural), so the very first live use of this monster-matching
+    fix silently failed the exact case it was built for. Covers regular
+    "+s"/"+es" and the common f/fe -> ves irregular (wolf -> wolves).
+    """
+    forms = [word, word + "s", word + "es"]
+    if word.endswith("f"):
+        forms.append(word[:-1] + "ves")
+    elif word.endswith("fe"):
+        forms.append(word[:-2] + "ves")
+    return forms
+
+
+def _find_monster_mentioned_in_text(location: dict, text: str) -> tuple[str, dict] | None:
+    """
+    Matches a real monster type actually present at this location
+    (location["monsters"], a list of monster_keys) against free text --
+    same real-substring-match philosophy as _find_interactable, just
+    for a different real fact source (task from Coffee, 2026-07-17).
+    """
+    lowered = text.strip().lower()
+    monster_keys = location.get("monsters", [])
+    templates = [(key, cl.get_monster_template(CAMPAIGN, key)) for key in monster_keys]
+    templates = [(key, t) for key, t in templates if t is not None]
+    templates.sort(key=lambda kt: -len(kt[1]["name"]))
+    for monster_key, template in templates:
+        name = template["name"].lower()
+        candidates = _plural_forms(name) + _plural_forms(monster_key.replace("_", " "))
+        if any(re.search(r"\b" + re.escape(c) + r"\b", lowered) for c in candidates):
+            return monster_key, template
+    return None
+
+
 async def _do_examine(update: Update, target_text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -5763,6 +5801,34 @@ async def _do_examine(update: Update, target_text: str) -> None:
 
     found = _find_interactable(location, target_text)
     if found is None:
+        # Real bug, caught live 2026-07-17 (Coffee): "Look at the wolves
+        # in the whispering wood - give me detail about them" got "Ravenloft
+        # doesn't spot anything like that here" even though wolves are a
+        # real, active threat at this exact location (location["monsters"]
+        # and the "Trouble with Wolves" board quest both confirm it) --
+        # examine only ever checked interactables, never real monsters
+        # present. Fixed: match against location["monsters"] too, and
+        # give real bestiary stats if already fought, or an honest
+        # "here, but not yet known" line if not -- same fog-of-war
+        # boundary the bestiary itself already keeps, never inventing
+        # stats the player hasn't actually earned by fighting it.
+        monster_match = _find_monster_mentioned_in_text(location, target_text)
+        if monster_match:
+            monster_key, template = monster_match
+            if monster_key in (character.get("known_monsters") or []):
+                await _safe_send(
+                    update,
+                    f"🔍 **{character['name']}** studies the {template['name'].lower()} here, "
+                    f"drawing on what they already know:\n{_format_bestiary_entry(monster_key, template)}",
+                )
+            else:
+                await _safe_send(
+                    update,
+                    f"🔍 **{character['name']}** spots a real threat here — a {template['name'].lower()} — "
+                    f"but hasn't fought one yet to know more. Check the bestiary once you have.",
+                )
+            return
+
         names = [i["name"] for i in interactables.values()]
         hint = f" Things worth a closer look here: {', '.join(names)}" if names else ""
         await update.effective_chat.send_message(
@@ -5867,6 +5933,33 @@ async def _do_bestiary(update: Update) -> None:
         if template is None:
             continue
         lines.append(_format_bestiary_entry(monster_key, template))
+
+    await _safe_send(update, "\n".join(lines))
+
+
+async def _do_leaderboard(update: Update) -> None:
+    """
+    Hall of Fame (2026-07-17, per Coffee, task #74): real XP ranking
+    across every player's currently-active character -- see
+    db.get_leaderboard's own docstring for why is_autonomous (the
+    AI-played party) counts the same as anyone else, but is_ai=1
+    (combat-only companions) doesn't.
+    """
+    ranked = db.get_leaderboard(limit=10)
+    if not ranked:
+        await update.effective_chat.send_message(
+            "Nobody's made it onto the board yet.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    medals = {0: "🥇", 1: "🥈", 2: "🥉"}
+    lines = ["🏆 **Hall of Fame**"]
+    for i, character in enumerate(ranked):
+        rank_marker = medals.get(i, f"{i + 1}.")
+        lines.append(
+            f"{rank_marker} **{character['name']}** — Level {character['level']} "
+            f"{character['race']} {character['char_class']} ({character['xp']} XP)"
+        )
 
     await _safe_send(update, "\n".join(lines))
 
@@ -7642,6 +7735,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_set_pronouns(update, intent.get("raw_text", text))
     elif action == "bestiary":
         await _do_bestiary(update)
+    elif action == "leaderboard":
+        await _do_leaderboard(update)
     elif action == "list_shop":
         await _do_list_shop(update)
     elif action == "list_characters":
@@ -7705,6 +7800,13 @@ async def map_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await _do_show_map(update)
 
 
+async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/leaderboard (2026-07-17, per Coffee, task #74) -- slash-command shortcut for _do_leaderboard."""
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    await _do_leaderboard(update)
+
+
 async def version_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_chat.send_message(
         f"Pandora MMO v{version.get_version()} — powered by Pandora AI",
@@ -7759,7 +7861,7 @@ Almost everything here is plain English, typed straight into Adventure -- no com
 **Character**
 • "Level up" -- once you have XP to spend
 • "Set my description to ..."
-• /sheet, /newcharacter, /map, /version, /changelog
+• /sheet, /newcharacter, /map, /leaderboard, /version, /changelog
 
 Stuck? /hint suggests real things to try here, no spoilers. Reply to any narration with /help to get it explained. Stuck on something specific? Ask in Support -- it's grounded in this game's real items/spells/guilds, not general D&D trivia."""
 
@@ -9351,6 +9453,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("endturn", endturn_command))
     application.add_handler(CommandHandler("sheet", sheet_command))
     application.add_handler(CommandHandler("map", map_command))
+    application.add_handler(CommandHandler("leaderboard", leaderboard_command))
     application.add_handler(CommandHandler("version", version_command))
     application.add_handler(CommandHandler("changelog", changelog_command))
     application.add_handler(CommandHandler("redo", redo_command))

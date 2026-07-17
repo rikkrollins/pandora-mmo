@@ -728,6 +728,32 @@ def list_characters(telegram_user_id: int) -> list[dict]:
     return [_row_to_dict(r) for r in rows]
 
 
+def get_leaderboard(limit: int = 10) -> list[dict]:
+    """
+    Real Hall of Fame ranking (task #74, 2026-07-17): every player's
+    currently-ACTIVE character (same active_characters join as
+    get_character, so an abandoned/inactive alt slot never clutters the
+    board), ranked by real XP earned. Excludes is_ai=1 (combat-only
+    companions with no independent existence) but deliberately does NOT
+    exclude is_autonomous=1 -- the autonomous AI-played party plays
+    through the exact same real pipeline as any human (see CLAUDE.md's
+    design philosophy: "AI-driven players sit at the same table under
+    the same rules"), so their real XP counts exactly the same.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT c.* FROM characters c
+            JOIN active_characters a ON a.character_id = c.character_id
+            WHERE c.is_deleted = 0 AND c.is_ai = 0
+            ORDER BY c.xp DESC, c.level DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
 def find_character_by_name(name: str) -> dict | None:
     """
     Finds any non-deleted character (human or AI, active or a player's

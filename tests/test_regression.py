@@ -2638,6 +2638,66 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Things you might try here", reply)
         self.assertIn("Gather", reply)
 
+    # -- Leaderboard / Hall of Fame (2026-07-17, per Coffee, task #74) --
+    async def test_leaderboard_ranks_by_xp_and_excludes_combat_companions(self):
+        make_basic_character(900940, "TopDog", gold=10)
+        db.add_xp(900940, 500)
+        make_basic_character(900941, "LastPlace", gold=10)
+        db.add_xp(900941, 50)
+        db.create_ai_companion(
+            name="CombatOnly", race="Human", char_class="Fighter",
+            ability_scores={"strength": 15, "dexterity": 14, "constitution": 13,
+                             "intelligence": 10, "wisdom": 10, "charisma": 10},
+            hp_max=12, armor_class=15, gold=0, inventory={},
+        )
+        ranked = db.get_leaderboard(limit=10)
+        names = [c["name"] for c in ranked]
+        self.assertLess(names.index("TopDog"), names.index("LastPlace"))
+        self.assertNotIn("CombatOnly", names)
+
+    def test_leaderboard_trigger_recognized(self):
+        from ai.intent_parser import _keyword_fallback
+        for text in ("show me the leaderboard", "who's the best"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "leaderboard", text)
+
+    async def test_do_leaderboard_produces_a_real_reply(self):
+        make_basic_character(900942, "Ranked", gold=10)
+        db.add_xp(900942, 300)
+        sink = []
+        await bot._do_leaderboard(FakeUpdate(900942, "", sink))
+        self.assertIn("Hall of Fame", sink[-1])
+
+    # -- "Examine" a real monster present at the location, not just
+    #    interactable objects (2026-07-17, Coffee, caught via live
+    #    gameplay monitoring: "Look at the wolves ... give me detail
+    #    about them" got "doesn't spot anything like that here" even
+    #    though wolves are a real threat at that exact location). ------
+    def test_find_monster_mentioned_in_text_handles_plurals(self):
+        location = bot.cl.get_location(bot.CAMPAIGN, "whispering_wood")
+        found = bot._find_monster_mentioned_in_text(location, "the wolves in the whispering wood")
+        self.assertIsNotNone(found)
+        self.assertEqual(found[0], "wolf")
+
+    async def test_examine_unknown_monster_acknowledges_threat_without_stats(self):
+        user_id = 900943
+        make_basic_character(user_id, "Ravenloft", current_location="whispering_wood")
+        sink = []
+        await bot._do_examine(FakeUpdate(user_id, "", sink), "the wolves in the whispering wood")
+        reply = sink[-1]
+        self.assertNotIn("doesn't spot anything", reply)
+        self.assertIn("wolf", reply.lower())
+        self.assertIn("hasn't fought", reply)
+
+    async def test_examine_known_monster_shows_real_bestiary_stats(self):
+        user_id = 900944
+        make_basic_character(user_id, "Veteran", current_location="whispering_wood")
+        db.update_character(user_id, known_monsters=["wolf"])
+        sink = []
+        await bot._do_examine(FakeUpdate(user_id, "", sink), "the wolves")
+        reply = sink[-1]
+        self.assertIn("HP", reply)
+        self.assertIn("AC", reply)
+
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
     """

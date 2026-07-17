@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.9] — Hall of Fame, and "examine" now recognizes real monsters
+
+**New: /leaderboard / "Hall of Fame" (task #74), per Coffee.** Real XP
+ranking across every player's currently-active character. Combat-only
+companions (is_ai=1) are excluded; the autonomous AI-played party
+counts the same as any human, since it plays through the exact same
+real pipeline.
+
+**Real bug fixed, caught live (Coffee):** "Look at the wolves in the
+whispering wood - give me detail about them" answered "doesn't spot
+anything like that here" even though wolves are a real, active threat
+at that exact location (and the subject of an active board quest).
+`examine` only ever checked registered interactable objects, never
+real monsters present. Now matches against `location["monsters"]`
+too — shows real bestiary stats if already fought, or an honest
+"here, but not yet known" line if not, keeping the same fog-of-war
+boundary the bestiary already respects. Also handles irregular
+plurals (wolf → wolves), which the first attempt at this fix missed
+and a real test caught before it shipped.
+
 ## [1.11.8] — Pronouns field, "touch X" misclassification, description-flow bug, Pandora AI branding
 
 **New: character pronouns (task #117), per Coffee** ("no gender/pronoun
