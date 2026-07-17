@@ -13,6 +13,7 @@ mean "my currently active character."
 """
 import json
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -157,15 +158,44 @@ CREATE TABLE IF NOT EXISTS game_settings (
 PARTY_MAX_MEMBERS = config.PARTY_MAX_MEMBERS  # moved to config.py 2026-07-14, now .env-configurable
 
 
+# Real fix (2026-07-17, task #148): live log showed repeated
+# `sqlite3.OperationalError: database is locked` -- several independent
+# asyncio loops (adventure_master_handler, ai_party autonomous companion
+# turns, the idle_check background loop, the world_tick heartbeat) each
+# open their own synchronous connection to the same file, and the bare
+# sqlite3.connect() default (a 5s busy wait, rollback-journal locking
+# that blocks ALL readers behind any writer) was too easily exceeded
+# under real concurrent load -- confirmed live: one occurrence crashed
+# an AI companion's turn outright, another produced a ~22s delay on a
+# real player's "Level up"/"my character" messages while idle_check and
+# world_tick were independently failing on the same lock.
+#
+# `timeout=` + WAL mode (see get_connection below) cut this down
+# enormously but didn't fully eliminate it under a deliberately
+# aggressive stress test (8 threads tight-looping writes/reads) -- and
+# every one of the real contenders above (the handler, ai_party,
+# idle_check, world_tick) all run as asyncio tasks/threads *within this
+# same single bot process*, not separate processes, so a plain
+# in-process lock fully serializes them with zero risk of a locked
+# error between them, at the cost of some serialization overhead that's
+# negligible next to the actual write sizes here. Kept alongside
+# timeout=/WAL (not instead of) as defense-in-depth for the remaining
+# case this doesn't cover: a genuinely separate process (e.g. one of
+# the scripts/*.py one-off tools) touching the same file concurrently.
+_DB_LOCK = threading.Lock()
+
+
 @contextmanager
 def get_connection():
-    conn = sqlite3.connect(config.DB_PATH)
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
+    with _DB_LOCK:
+        conn = sqlite3.connect(config.DB_PATH, timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
 
 
 def _existing_columns(conn, table: str) -> set[str]:

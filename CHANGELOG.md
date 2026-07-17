@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.3] — Fix "database is locked" errors under concurrent load
+
+**Real live bug fixed (task #148):** `bot_live_tmp.log` showed 5 real
+`OperationalError('database is locked')` occurrences, including one that
+crashed an AI companion's autonomous turn outright and two that caused a
+~22-second reply delay on an ordinary "Level up"/"my character" message
+while the idle-check and world-tick background loops were also hitting
+the same lock. Root cause: `db.get_connection()` used a bare
+`sqlite3.connect(config.DB_PATH)` — no `timeout=`, no WAL mode — while
+the adventure handler, AI-party autonomous turns, idle-check loop, and
+world-tick heartbeat all hit the same SQLite file concurrently from
+within the same process.
+
+Fixed in two layers: `get_connection()` now opens with `timeout=30.0` and
+sets `PRAGMA journal_mode=WAL` (lets readers proceed alongside a writer);
+on top of that, a module-level `threading.Lock()` now serializes the
+entire connection lifetime, since the real contenders are all
+in-process threads/tasks, not separate OS processes, so true
+serialization removes the race entirely rather than just reducing its
+odds. Verified: an 8-thread/3-second concurrent read+write stress test
+against a real WAL-mode DB produced 0 errors (a first pass with only
+timeout+WAL still produced 1 error under the same test). Also confirmed
+no reentrancy risk — every db.py function that calls another
+connection-opening function does so only after its own `with
+get_connection()` block has already closed, so the non-reentrant `Lock`
+can't self-deadlock.
+
 ## [1.11.2] — Multi-item shop/give commands, event-loop blocking fix, unnamed replies
 
 **Real live bug fixed (task #147):** "Buy 10 torches, 1 shears, 1 pickaxe,
