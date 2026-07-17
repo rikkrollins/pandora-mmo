@@ -792,6 +792,14 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                                     "who has the most xp", "rankings"]):
         return {**base, "action": "leaderboard"}
 
+    if any(w in lowered for w in ["my achievements", "check achievements", "my titles",
+                                    "what titles", "unlocked achievements"]):
+        return {**base, "action": "check_achievements"}
+
+    if "title" in lowered and any(w in lowered for w in ["set my title", "change my title",
+                                                            "wear the title", "use the title"]):
+        return {**base, "action": "set_title"}
+
     if any(w in lowered for w in ["make a campfire", "build a campfire", "start a campfire",
                                     "light a campfire", "make camp", "set up camp"]):
         return {**base, "action": "make_campfire"}
@@ -973,7 +981,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "make_campfire", "give_item", "use_item", "equip_item", "auto_equip", "breath_weapon",
                 "channel_divinity", "action_surge", "reckless_attack", "divine_smite",
                 "flurry_of_blows", "toggle_manual_dice", "level_up", "set_description", "set_pronouns",
-                "bestiary", "list_shop", "leaderboard",
+                "bestiary", "list_shop", "leaderboard", "check_achievements", "set_title",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

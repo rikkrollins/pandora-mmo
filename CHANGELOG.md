@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.12] — Titles & Achievements (task #73)
+
+New `achievements.py` catalog of 10 real achievements, each checked
+against data that already existed on the character (level, gold,
+known_monsters, completed_quests, board_quests_completed, guild,
+equipped gear) -- no new counters invented for this. Unlocked at the
+real moment they become true: combat victory, quest/board-quest
+turn-in, guild join, or equip -- never on a timer.
+
+Unlocking one grants a real title (`/title <title>` to wear it, or
+"set my title to ..."; `/title clear` to remove). `/achievements` (or
+"check my achievements") lists what's unlocked and what's still
+locked. Active title shows next to your name on your character sheet
+and the Hall of Fame leaderboard.
+
 ## [1.11.11] — Presence system (task #144) + recruited companions now actually follow you
 
 **New: presence/status (task #144).** Real, derived player status --

@@ -294,6 +294,10 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN do_not_disturb INTEGER NOT NULL DEFAULT 0")
         if "status_note" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN status_note TEXT")
+        if "achievements" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN achievements TEXT NOT NULL DEFAULT '[]'")
+        if "active_title" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN active_title TEXT")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -307,6 +311,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     d["feature_uses"] = json.loads(d["feature_uses"])
     d["equipped_accessories"] = json.loads(d["equipped_accessories"])
     d["known_monsters"] = json.loads(d["known_monsters"])
+    d["achievements"] = json.loads(d["achievements"])
     return d
 
 
@@ -415,7 +420,7 @@ def update_character(telegram_user_id: int, **fields) -> dict | None:
     if not fields:
         return get_character(telegram_user_id)
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "achievements")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -1101,6 +1106,21 @@ def set_do_not_disturb(telegram_user_id: int, enabled: bool) -> dict | None:
 
 def set_status_note(telegram_user_id: int, note: str | None) -> dict | None:
     return update_character(telegram_user_id, status_note=note)
+
+
+def unlock_achievement(telegram_user_id: int, achievement_id: str) -> dict | None:
+    """Idempotent -- adding an already-unlocked achievement again is a no-op."""
+    character = get_character(telegram_user_id)
+    if character is None:
+        return None
+    if achievement_id in character["achievements"]:
+        return character
+    character["achievements"].append(achievement_id)
+    return update_character(telegram_user_id, achievements=character["achievements"])
+
+
+def set_active_title(telegram_user_id: int, title: str | None) -> dict | None:
+    return update_character(telegram_user_id, active_title=title)
 
 
 def get_idle_real_characters() -> list[dict]:

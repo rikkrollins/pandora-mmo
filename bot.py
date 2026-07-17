@@ -43,6 +43,7 @@ import shop as shop_module
 import spells as spells_module
 import races as races_module
 import class_features as class_features_module
+import achievements as achievements_module
 import moltbook
 import topics
 from ai.autonomous_player import choose_next_action
@@ -2057,6 +2058,23 @@ async def note_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await _do_set_status_note(update, text)
 
 
+async def achievements_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _do_check_achievements(update)
+
+
+async def title_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/title <text> (task #73): reliable slash-command path alongside the NL "set my title to ..." trigger."""
+    text = " ".join(context.args) if context.args else ""
+    if not text:
+        await _safe_send(
+            update,
+            "Say \"/title <title>\" to wear an unlocked title, or \"/title clear\" to remove it. "
+            "\"/achievements\" lists what you've earned.",
+        )
+        return
+    await _do_set_title(update, text)
+
+
 def _determine_winner(session: sessions.Session) -> str:
     """
     Returns 'party' or 'enemy' based on which side still has any member
@@ -2310,6 +2328,7 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
         xp_summary = _award_victory_xp(session) if winner == "party" else ""
         if winner == "party":
             await _check_quest_completions_defeat_monster(update, session)
+            await _check_achievements_for_combat_party(update, session)
         await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
         sessions.end_session(session.chat_id)
 
@@ -2770,6 +2789,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                 xp_summary = _award_victory_xp(session) if winner == "party" else ""
                 if winner == "party":
                     await _check_quest_completions_defeat_monster(update, session)
+                    await _check_achievements_for_combat_party(update, session)
                 await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
                 sessions.end_session(chat_id)
                 return
@@ -3896,6 +3916,7 @@ async def _check_quest_completions_reach_location(update_like, telegram_user_id:
         trigger = quest.get("trigger", {})
         if trigger.get("type") == "reach_location" and trigger.get("location") == location_id:
             await _complete_quest_and_announce(update_like, telegram_user_id, quest_id)
+    await _check_and_award_achievements(update_like, db.get_character(telegram_user_id))
 
 
 async def _check_board_quest_turnin(update_like, telegram_user_id: int, location_id: str) -> None:
@@ -3925,6 +3946,7 @@ async def _check_board_quest_turnin(update_like, telegram_user_id: int, location
             f"📜 **Board quest complete: {board_quest['title']}!** "
             f"You earn {board_quest['reward_xp']} XP, {board_quest['reward_gold']} gold.",
         )
+        await _check_and_award_achievements(update_like, db.get_character(telegram_user_id))
 
 
 async def _check_quest_completions_defeat_monster(update_like, session: sessions.Session) -> None:
@@ -4631,7 +4653,8 @@ def _format_character_sheet(character: dict) -> str:
             f"📈 {character['pending_asi_points']} ability point(s) waiting to be spent — "
             f"say \"level up\" to choose.\n"
         )
-    name_line = f"**{character['name']}**" + (" *(AI companion)*" if character.get("is_ai") else "")
+    title_suffix = f" \"{character['active_title']}\"" if character.get("active_title") else ""
+    name_line = f"**{character['name']}**{title_suffix}" + (" *(AI companion)*" if character.get("is_ai") else "")
     equipped_line = _format_equipped_line(character)
     carried_gear_line = _format_carried_gear_line(character)
     pronouns_line = f"Pronouns: {character['pronouns']}\n" if character.get("pronouns") else ""
@@ -5536,6 +5559,7 @@ async def _do_breath_weapon(update: Update) -> None:
             xp_summary = _award_victory_xp(session) if winner == "party" else ""
             if winner == "party":
                 await _check_quest_completions_defeat_monster(update, session)
+                await _check_achievements_for_combat_party(update, session)
             await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
             sessions.end_session(chat_id)
             return
@@ -6121,6 +6145,153 @@ async def _do_bestiary(update: Update) -> None:
     await _safe_send(update, "\n".join(lines))
 
 
+def _achievement_condition_met(character: dict, check: dict) -> bool:
+    """
+    Titles & Achievements (task #73): every check type here reads a
+    real, already-existing field on the character dict -- no new
+    counter was invented just to support this feature. See
+    achievements.py's module docstring for the full list of types.
+    """
+    check_type = check["type"]
+    if check_type == "min_level":
+        return character.get("level", 1) >= check["value"]
+    if check_type == "min_gold":
+        return character.get("gold", 0) >= check["value"]
+    if check_type == "min_known_monsters":
+        return len(character.get("known_monsters") or []) >= check["value"]
+    if check_type == "min_completed_quests":
+        return len(character.get("completed_quests") or []) >= check["value"]
+    if check_type == "min_board_quests_completed":
+        return character.get("board_quests_completed", 0) >= check["value"]
+    if check_type == "has_guild":
+        return bool(character.get("guild"))
+    if check_type == "well_equipped":
+        return bool(character.get("equipped_weapon")) and bool(
+            character.get("equipped_armor") or character.get("equipped_shield")
+        )
+    return False
+
+
+async def _check_achievements_for_combat_party(update: Update, session: sessions.Session) -> None:
+    """Re-fetches each real party-side combatant fresh from the DB (post-XP-award) and checks them."""
+    for pid in session.turn_order:
+        if session.sides.get(pid) != "party":
+            continue
+        character = db.get_character(pid)
+        if character is not None:
+            await _check_and_award_achievements(update, character)
+
+
+async def _check_and_award_achievements(update: Update, character: dict | None) -> None:
+    """
+    Called at natural real-progress checkpoints (combat victory, quest
+    turn-in, level-up, guild join, equip) -- never on a timer or a
+    generic per-message hook, so it only ever fires right when a real
+    condition could have just become true. Silently no-ops for AI
+    characters (companions/autonomous party) -- achievements are a
+    real-player feature. character may be None (a caller re-fetching
+    after a mutation found nothing) -- also a silent no-op.
+    """
+    if character is None or character.get("is_ai"):
+        return
+    already = set(character.get("achievements") or [])
+    for achievement_id, data in achievements_module.ACHIEVEMENTS.items():
+        if achievement_id in already:
+            continue
+        if _achievement_condition_met(character, data["check"]):
+            db.unlock_achievement(character["telegram_user_id"], achievement_id)
+            await _safe_send(
+                update,
+                f"🏅 **Achievement unlocked: {data['name']}**\n{data['description']}\n"
+                f"Title earned: \"{data['title']}\" — say \"set my title to {data['title']}\" to wear it.",
+            )
+
+
+async def _do_check_achievements(update: Update) -> None:
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await _safe_send(update, "You don't have a character yet!")
+        return
+    unlocked = character.get("achievements") or []
+    if not unlocked:
+        await _safe_send(
+            update,
+            "No achievements unlocked yet. Say \"check achievements\" any time to see your progress "
+            "as you play — nothing's spoiled here, they unlock naturally as you go.",
+        )
+        return
+    lines = ["🏅 **Your achievements:**"]
+    for achievement_id in unlocked:
+        data = achievements_module.get_achievement(achievement_id)
+        if data is None:
+            continue
+        marker = " *(active title)*" if character.get("active_title") == data["title"] else ""
+        lines.append(f"• **{data['name']}** — \"{data['title']}\"{marker}")
+    if character.get("active_title"):
+        lines.append(f"\nCurrent title: \"{character['active_title']}\"")
+    else:
+        lines.append("\nNo title set — say \"set my title to <title>\" to wear one you've earned.")
+    await _safe_send(update, "\n".join(lines))
+
+
+_INLINE_TITLE_RE = re.compile(r"title\s+to\s+(.+)|title[^:]*:\s*(.+)", re.IGNORECASE)
+
+
+def _extract_inline_title(text: str) -> str | None:
+    """
+    Handles "set my title to the Battle-Tested" and "title: the Wealthy".
+    "clear"/"remove my title" phrasing is recognized directly so it
+    reaches _do_set_title's real clear branch rather than being
+    misread as a title with no content.
+    """
+    lowered = text.lower()
+    if any(w in lowered for w in ["clear my title", "remove my title", "no title"]):
+        return "clear"
+    match = _INLINE_TITLE_RE.search(text)
+    if match:
+        candidate = (match.group(1) or match.group(2) or "").strip()
+        return candidate or None
+    return None
+
+
+async def _do_set_title(update: Update, title_text: str) -> None:
+    user_id = update.effective_user.id
+    character = db.get_character(user_id)
+    if character is None:
+        await _safe_send(update, "You don't have a character yet!")
+        return
+
+    clean = title_text.strip().strip("\"")
+    if not clean or clean.lower() in ("clear", "none", "remove"):
+        db.set_active_title(user_id, None)
+        await _safe_send(update, "Title cleared.")
+        return
+
+    unlocked = character.get("achievements") or []
+    earned_titles = {
+        achievements_module.get_achievement(a)["title"].lower()
+        for a in unlocked
+        if achievements_module.get_achievement(a)
+    }
+    if clean.lower() not in earned_titles:
+        await _safe_send(
+            update,
+            f"You haven't earned the title \"{clean}\" yet. Say \"check achievements\" to see "
+            "which titles you've unlocked.",
+        )
+        return
+
+    # Store the title with its real canonical casing, not whatever
+    # casing the player happened to type.
+    canonical = next(
+        achievements_module.get_achievement(a)["title"]
+        for a in unlocked
+        if achievements_module.get_achievement(a) and achievements_module.get_achievement(a)["title"].lower() == clean.lower()
+    )
+    db.set_active_title(user_id, canonical)
+    await _safe_send(update, f"✅ Title set: \"{canonical}\"")
+
+
 async def _do_leaderboard(update: Update) -> None:
     """
     Hall of Fame (2026-07-17, per Coffee, task #74): real XP ranking
@@ -6140,8 +6311,9 @@ async def _do_leaderboard(update: Update) -> None:
     lines = ["🏆 **Hall of Fame**"]
     for i, character in enumerate(ranked):
         rank_marker = medals.get(i, f"{i + 1}.")
+        title_suffix = f" \"{character['active_title']}\"" if character.get("active_title") else ""
         lines.append(
-            f"{rank_marker} **{character['name']}** — Level {character['level']} "
+            f"{rank_marker} **{character['name']}**{title_suffix} — Level {character['level']} "
             f"{character['race']} {character['char_class']} ({character['xp']} XP)"
         )
 
@@ -6653,6 +6825,7 @@ async def _do_equip_item(update: Update, text: str) -> None:
         success, message, _ = db.equip_item(target["telegram_user_id"], item_id)
         lines.append(f"⚔️ {prefix}{message}" if success else message)
     await _safe_send(update, "\n".join(lines))
+    await _check_and_award_achievements(update, db.get_character(target["telegram_user_id"]))
 
 
 async def _do_auto_equip_gear(update: Update, text: str) -> None:
@@ -6684,6 +6857,7 @@ async def _do_auto_equip_gear(update: Update, text: str) -> None:
     summary, _ = db.auto_equip_best_gear(target["telegram_user_id"])
     prefix = "" if target is character else f"**{target['name']}**: "
     await _safe_send(update, f"⚔️ {prefix}{summary}")
+    await _check_and_award_achievements(update, db.get_character(target["telegram_user_id"]))
 
 
 _QUANTITY_WORDS = {
@@ -7102,6 +7276,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                 xp_summary = _award_victory_xp(session) if winner == "party" else ""
                 if winner == "party":
                     await _check_quest_completions_defeat_monster(update, session)
+                    await _check_achievements_for_combat_party(update, session)
                 await update.effective_chat.send_message(
                     f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}",
                     message_thread_id=config.TOPIC_ADVENTURE_ID,
@@ -7295,6 +7470,7 @@ async def _do_join_guild(update: Update, text: str) -> None:
         db.add_item(update.effective_user.id, "scroll_magic_missile", 1)
         join_note = " They welcome you with a free Scroll of Magic Missile."
     await _safe_send(update, f"🏛️ You've joined {GUILDS[guild_id]['name']}!{join_note}")
+    await _check_and_award_achievements(update, db.get_character(update.effective_user.id))
 
 
 # ---------------------------------------------------------------------
@@ -7935,6 +8111,18 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_bestiary(update)
     elif action == "leaderboard":
         await _do_leaderboard(update)
+    elif action == "check_achievements":
+        await _do_check_achievements(update)
+    elif action == "set_title":
+        title_arg = _extract_inline_title(intent.get("raw_text", text))
+        if title_arg is None:
+            await _safe_send(
+                update,
+                "Which title would you like to wear? Say \"check achievements\" to see "
+                "which ones you've unlocked, then \"set my title to <title>\".",
+            )
+        else:
+            await _do_set_title(update, title_arg)
     elif action == "list_shop":
         await _do_list_shop(update)
     elif action == "list_characters":
@@ -8062,6 +8250,7 @@ Almost everything here is plain English, typed straight into Adventure -- no com
 • /sheet, /newcharacter, /map, /leaderboard, /version, /changelog
 • /donotdisturb -- toggle DND so you're skipped for join-a-fight nudges
 • /note <text> -- set a short status note party members can see ("/note clear" removes it)
+• /achievements -- see what you've unlocked; /title <title> to wear one you've earned
 
 Stuck? /hint suggests real things to try here, no spoilers. Reply to any narration with /help to get it explained. Stuck on something specific? Ask in Support -- it's grounded in this game's real items/spells/guilds, not general D&D trivia."""
 
@@ -9656,6 +9845,8 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("leaderboard", leaderboard_command))
     application.add_handler(CommandHandler("donotdisturb", donotdisturb_command))
     application.add_handler(CommandHandler("note", note_command))
+    application.add_handler(CommandHandler("achievements", achievements_command))
+    application.add_handler(CommandHandler("title", title_command))
     application.add_handler(CommandHandler("version", version_command))
     application.add_handler(CommandHandler("changelog", changelog_command))
     application.add_handler(CommandHandler("redo", redo_command))
