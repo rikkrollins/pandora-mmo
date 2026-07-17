@@ -2,6 +2,17 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.1] — Hotfix: AI companions' autonomous turns were crashing
+
+Caught live within minutes of 1.11.0 shipping: the new
+`update_telegram_username` call added for `@username` player-targeting
+crashed every AI companion's autonomous turn with `AttributeError` --
+the synthetic Update used to route those turns through
+`adventure_master_handler` only gives its stand-in user an `.id`, no
+`.username` at all. Fixed with a safe `getattr` instead of a bare
+attribute access. Verified via a direct reproduction of the AI-player
+update path before shipping this fix.
+
 ## [1.11.0] — The big speed fix, plus a real admin/moderation system
 
 **The main speed fix.** `ai/intent_parser.py`'s `parse_intent()` was calling
