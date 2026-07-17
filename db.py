@@ -256,6 +256,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN description TEXT")
         if "known_monsters" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN known_monsters TEXT NOT NULL DEFAULT '[]'")
+        if "telegram_username" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN telegram_username TEXT")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -710,6 +712,48 @@ def find_character_by_name(name: str) -> dict | None:
     return _row_to_dict(row) if row else None
 
 
+def find_character_by_telegram_username(username: str) -> dict | None:
+    """
+    Resolves a real Telegram @username (2026-07-17, per Coffee: "give
+    (item) to (telegram user/playername)" and /msg's target should
+    accept a tagged Telegram user, not just a character name) to
+    whichever non-deleted character that account currently has active.
+    Case-insensitive since Telegram usernames aren't case-sensitive.
+    Only matches telegram_username values already captured via
+    update_telegram_username (set opportunistically on real incoming
+    messages) -- a player who has never sent a message since this
+    column existed simply won't resolve this way yet, same as any
+    other freshly-added, backfill-free column in this file.
+    """
+    username = username.lstrip("@")
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM characters WHERE is_deleted = 0 AND LOWER(telegram_username) = LOWER(?) "
+            "ORDER BY character_id LIMIT 1",
+            (username,),
+        ).fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def update_telegram_username(telegram_user_id: int, username: str | None) -> None:
+    """
+    Keeps a character's telegram_username fresh from the real incoming
+    Update on every message (Telegram usernames can change, and are
+    None for accounts that don't have one set) -- a no-op if this user
+    has no active character yet, since there's nothing to attach it to.
+    """
+    if not username:
+        return
+    with get_connection() as conn:
+        character_id = _active_character_id(telegram_user_id, conn)
+        if character_id is None:
+            return
+        conn.execute(
+            "UPDATE characters SET telegram_username = ? WHERE character_id = ?",
+            (username, character_id),
+        )
+
+
 def switch_character(telegram_user_id: int, character_id: int) -> dict | None:
     """
     Makes character_id the active character for telegram_user_id, if it
@@ -1025,6 +1069,108 @@ def set_setting(key: str, value: str) -> None:
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (key, value),
         )
+
+
+# --- Trusted-dev allowlist (2026-07-17, per Coffee: a genuine second
+# dev like Sugar needs Development-topic access without being made a
+# real Telegram group admin, which grants far more than intended --
+# deleting messages, banning members, etc. Managed via bot.py's
+# /add_admin and /remove_admin, gated to whoever already has Dev-topic
+# access.) ---
+
+def get_trusted_dev_ids() -> list[int]:
+    raw = get_setting("trusted_dev_ids", "[]")
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+
+
+def add_trusted_dev_id(telegram_user_id: int) -> None:
+    ids = set(get_trusted_dev_ids())
+    ids.add(telegram_user_id)
+    set_setting("trusted_dev_ids", json.dumps(sorted(ids)))
+
+
+def remove_trusted_dev_id(telegram_user_id: int) -> None:
+    ids = set(get_trusted_dev_ids())
+    ids.discard(telegram_user_id)
+    set_setting("trusted_dev_ids", json.dumps(sorted(ids)))
+
+
+# --- Player bans (2026-07-17, per Coffee: admins/devs can ban
+# malicious players outright) ---
+
+def is_banned(telegram_user_id: int) -> bool:
+    return telegram_user_id in _get_banned_ids()
+
+
+def _get_banned_ids() -> list[int]:
+    raw = get_setting("banned_user_ids", "[]")
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+
+
+def ban_user(telegram_user_id: int) -> None:
+    ids = set(_get_banned_ids())
+    ids.add(telegram_user_id)
+    set_setting("banned_user_ids", json.dumps(sorted(ids)))
+
+
+def unban_user(telegram_user_id: int) -> None:
+    ids = set(_get_banned_ids())
+    ids.discard(telegram_user_id)
+    set_setting("banned_user_ids", json.dumps(sorted(ids)))
+
+
+def list_banned_user_ids() -> list[int]:
+    """Public wrapper for /ban_list -- _get_banned_ids stays private since it's an internal storage detail."""
+    return _get_banned_ids()
+
+
+# --- Warnings / infractions (2026-07-17, per Coffee: "/warning system
+# admins can use to reply to users that are out-of-line... 3
+# infractions results in a ban") ---
+
+def _get_all_infractions() -> dict:
+    raw = get_setting("infractions", "{}")
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+
+
+def get_infractions(telegram_user_id: int) -> list[dict]:
+    return _get_all_infractions().get(str(telegram_user_id), [])
+
+
+def get_all_infractions() -> dict:
+    """{telegram_user_id_str: [{"reason", "issued_by", "timestamp"}, ...]} -- for /warning_list."""
+    return _get_all_infractions()
+
+
+def add_infraction(telegram_user_id: int, reason: str, issued_by: int) -> int:
+    """Records a new infraction and returns this user's new total count."""
+    all_infractions = _get_all_infractions()
+    key = str(telegram_user_id)
+    records = all_infractions.get(key, [])
+    records.append({
+        "reason": reason,
+        "issued_by": issued_by,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+    all_infractions[key] = records
+    set_setting("infractions", json.dumps(all_infractions))
+    return len(records)
+
+
+def clear_infractions(telegram_user_id: int) -> None:
+    """Used when reversing an auto-ban -- gives the player a clean slate rather than an immediate re-ban risk."""
+    all_infractions = _get_all_infractions()
+    all_infractions.pop(str(telegram_user_id), None)
+    set_setting("infractions", json.dumps(all_infractions))
 
 
 # --- Area quest board ---

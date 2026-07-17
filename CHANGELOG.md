@@ -2,6 +2,58 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.0] — The big speed fix, plus a real admin/moderation system
+
+**The main speed fix.** `ai/intent_parser.py`'s `parse_intent()` was calling
+the local Ollama model to classify EVERY message, even though its own
+logic already threw the model's answer away whenever the fast,
+deterministic keyword classifier already had a confident (non-"chat")
+opinion. Every dispatch branch in `bot.py` was audited to confirm the
+keyword fallback already sets everything a handler needs — so skipping
+the model call for these messages changes nothing about the result,
+only the latency: confirmed via direct timing, confidently-classified
+actions now resolve in under a hundredth of a second instead of
+15–160+ seconds. Genuinely ambiguous messages (where the keyword
+classifier has no real opinion) still get the model's help, same as
+before. Also capped `num_predict` on every remaining Ollama call
+(narration, support, the now-rarer intent-classification fallback) to
+bound worst-case generation time, and fixed a real bug this surfaced:
+a capped generation can end mid-thought before the model closes its
+`<think>` tag, and the old stripping logic required a matching close
+tag to work at all — so a truncated response could leak raw internal
+reasoning straight to a player. Fixed to strip an unclosed `<think>`
+block too.
+
+**New: `/redo`.** Group admins/owner can reply to a message with
+`/redo` to re-run it through a fresh, independent model read (not just
+the same deterministic keyword pass) — useful right after a
+misclassification bug gets fixed, without asking the player to retype
+anything.
+
+**New: a real admin/moderation system.** `/add_admin` and
+`/remove_admin` (reply to grant/revoke Development-topic access to a
+trusted second dev, without making them a full Telegram group admin).
+`/ban` and `/unban`. `/report` (any player can flag something straight
+to the admins, no auto-detection gate). `/warning` (reply to an
+out-of-line message; 3 warnings auto-bans and reports it to
+Development for reversal). `/warning_list` and `/ban_list` to see the
+current record.
+
+**New: `/map`.** A slash-command shortcut for the existing real
+fog-of-war map — shows only where a character has actually been.
+
+**Player targeting now understands @mentions.** `give <item> to
+<@username>` resolves a real tagged Telegram user, not just a
+character name spelled out.
+
+**A visible "typing…" indicator** now shows during any reply that
+involves a real AI call, so players see something's happening instead
+of staring at silence during the (normal, documented) 30–160s wait.
+
+**Fixed:** the gather-tool-check message ("You need a Woodcutter's
+Axe...") and several other deterministic replies didn't name the
+acting character — first of a batch of these being tracked down.
+
 ## [1.10.18] — Narration-naming regression fix (from tonight's own 1.10.17 batch)
 
 Caught within the hour: the narration-naming fix shipped in 1.10.17

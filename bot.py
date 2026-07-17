@@ -9,6 +9,7 @@ rules engine still never trusts the AI to decide outcomes — only to
 route intent and narrate results.
 """
 import asyncio
+import contextlib
 import logging
 import os
 import random
@@ -19,6 +20,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from telegram import Update
+from telegram.constants import ChatAction
 from telegram.error import TelegramError
 from telegram.ext import (
     Application,
@@ -213,6 +215,18 @@ _IDLE_WARNED: set[int] = set()
 # looked like it wasn't working at all, when really it just never had
 # a chat_id to post to.
 _LAST_KNOWN_CHAT_ID: int | None = getattr(config, "TELEGRAM_CHAT_ID", None)
+
+# "/redo" (2026-07-17, per Coffee): lets a group admin/owner replay the
+# last real message in a topic, in case it was misclassified or
+# mishandled -- keyed by (chat_id, thread_id) so each topic (Adventure,
+# Support) tracks its own last message independently. Holds a live
+# reference to the ORIGINAL Update/context so redo re-enters the exact
+# same code path as if the message had just been received again
+# (picking up any fix shipped since) acting as the original player who
+# sent it, not the admin/owner who typed /redo. In-memory only, same as
+# every other piece of session/ambient state in this file -- resets on
+# restart, which is fine since there's nothing to redo right after one.
+_LAST_TOPIC_MESSAGE: dict[tuple[int, int], dict] = {}
 
 # ---------------------------------------------------------------------
 # Living world — NPCs tagged "can_wander" in campaign.json (currently
@@ -1335,6 +1349,39 @@ async def _safe_send(update: Update, text: str, thread_id: int | None = None) ->
                 await asyncio.sleep(2)
             else:
                 logger.warning(f"[message] send failed again, giving up: {e!r}")
+
+
+@contextlib.asynccontextmanager
+async def _keep_typing(chat, thread_id: int | None):
+    """
+    Shows Telegram's "typing..." indicator for as long as the wrapped
+    block runs (2026-07-17, per Coffee: "when pandorammo bot is loading
+    can it show that it is typing?? so players know there is something
+    processing"). Telegram only displays the indicator for ~5s per
+    call, so this refreshes it in a background task every 4s until the
+    block exits -- covers the genuinely long, 30-160s+ real Ollama
+    narration/classification calls documented in CLAUDE.md, where a
+    player would otherwise stare at silence with no sign anything is
+    happening. Purely cosmetic: any failure to send the indicator
+    (including chat objects in tests that don't implement
+    send_chat_action at all) is swallowed so it can never affect the
+    real work being wrapped.
+    """
+    async def _loop():
+        while True:
+            try:
+                await chat.send_chat_action(ChatAction.TYPING, message_thread_id=thread_id)
+            except Exception:
+                pass
+            await asyncio.sleep(4)
+
+    task = asyncio.create_task(_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 # Real live feedback (2026-07-16, Coffee): the old flat 2s delete delay
@@ -6027,7 +6074,18 @@ async def _do_give_item(update: Update, text: str) -> None:
         if p["telegram_user_id"] != character["telegram_user_id"]
     ]
     lowered = text.lower()
-    recipient = next((p for p in candidates if p["name"].lower() in lowered), None)
+    # Real Telegram @username tag (2026-07-17, per Coffee: "we may have
+    # LOTS of players so make sure players can use telegram user tags in
+    # messages and prompts") is tried FIRST -- unambiguous by
+    # construction, unlike matching on a character's display name,
+    # which could theoretically collide between two different players'
+    # characters. Falls back to the existing name-substring match for
+    # players without a recorded username (db.update_telegram_username
+    # only ever captures one once they've sent a real message).
+    recipient = next(
+        (p for p in candidates if p.get("telegram_username") and f"@{p['telegram_username'].lower()}" in lowered),
+        None,
+    ) or next((p for p in candidates if p["name"].lower() in lowered), None)
     if recipient is None:
         await update.effective_chat.send_message(
             "Give it to whom? Name someone real who's actually here with you.",
@@ -6972,10 +7030,17 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         return
     if not topics.is_adventure(update.message.message_thread_id or 0):
         return
+    # Banned players (2026-07-17, per Coffee: "admins can absolutely ban
+    # malicious players") get zero engagement -- checked before any
+    # other processing, including touch_last_active, so a ban is a real
+    # dead end, not just a quieter version of playing.
+    if db.is_banned(update.effective_user.id):
+        return
 
     global _LAST_KNOWN_CHAT_ID
     _LAST_KNOWN_CHAT_ID = update.effective_chat.id
     db.touch_last_active(update.effective_user.id)
+    db.update_telegram_username(update.effective_user.id, update.effective_user.username)
     _IDLE_WARNED.discard(update.effective_user.id)
 
     # Universal escape hatch, checked FIRST, before any stateful flow gets
@@ -7063,6 +7128,14 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         return
 
     text = update.message.text.strip()
+    _LAST_TOPIC_MESSAGE[(update.effective_chat.id, config.TOPIC_ADVENTURE_ID)] = {
+        "kind": "adventure",
+        "update": update,
+        "context": context,
+        "text": text,
+        "user_id": update.effective_user.id,
+        "timestamp": datetime.now(timezone.utc),
+    }
     known_npcs = [data["name"] for data in CAMPAIGN["npcs"].values()]
     # A genuinely compound message ("recruit Sera, look at the quest
     # board, and leave the tavern") returns more than one intent here --
@@ -7183,14 +7256,16 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         # update.effective_chat in place.
         chat_proxy = _BufferingChatProxy(update.effective_chat)
         proxied_update = _EffectiveChatOverride(update, chat_proxy)
-        for i in intents:
-            await _dispatch_intent(proxied_update, context, i, text)
+        async with _keep_typing(update.effective_chat, config.TOPIC_ADVENTURE_ID):
+            for i in intents:
+                await _dispatch_intent(proxied_update, context, i, text)
         if chat_proxy.buffered:
             await _safe_send(update, "\n\n".join(chat_proxy.buffered))
         return
 
-    for i in intents:
-        await _dispatch_intent(update, context, i, text)
+    async with _keep_typing(update.effective_chat, config.TOPIC_ADVENTURE_ID):
+        for i in intents:
+            await _dispatch_intent(update, context, i, text)
 
 
 class _BufferingChatProxy:
@@ -7424,6 +7499,20 @@ async def sheet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await _do_check_sheet(update)
 
 
+async def map_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /map (2026-07-17, per Coffee) -- same real fog-of-war map _do_show_map
+    already builds from a character's actual visited_locations (only
+    places they've really been show by name; unexplored connections
+    show as unexplored, never revealing what's actually there). This is
+    just a slash-command shortcut for the exact same function "show me
+    the map" already calls -- no new logic, no separate map system.
+    """
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    await _do_show_map(update)
+
+
 async def version_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_chat.send_message(
         f"Pandora MMO v{version.get_version()}",
@@ -7472,8 +7561,432 @@ async def _is_group_owner(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return None
 
 
+async def _is_group_admin_or_owner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool | None:
+    """
+    Same shape and same live-Bot-API approach as _is_group_owner above,
+    but also accepts Telegram "administrator" status, not just
+    "creator" -- for /redo (2026-07-17, per Coffee: "for tg group admin
+    and owners and me"), which is meant to be usable by anyone the group
+    owner has trusted with admin rights, not only the single creator
+    account. Returns None (not False) on a verification failure, same
+    reasoning as _is_group_owner: indistinguishable-from-denial is worse
+    than a distinct "couldn't check, try again."
+    """
+    try:
+        member = await asyncio.wait_for(
+            context.bot.get_chat_member(update.effective_chat.id, update.effective_user.id),
+            timeout=10,
+        )
+        return member.status in ("creator", "administrator")
+    except Exception as e:
+        logger.warning(f"[dev_access] admin check failed (treated as unverified, not denied): {e!r}")
+        return None
+
+
+async def _is_dev_topic_authorized(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool | None:
+    """
+    Gates the Development topic itself (2026-07-17, per Coffee: a
+    genuine second dev, "Sugar", needs real Dev-topic access -- but as
+    a dedicated bot-managed allowlist via /add_admin and /remove_admin,
+    NOT by making her a real Telegram group admin, which grants far
+    more than intended (deleting messages, banning members, etc, none
+    of which this game needs). Deliberately separate from
+    _is_group_admin_or_owner above, which is about actual Telegram
+    admin status for /redo -- this is its own trust boundary. True for
+    the real group owner OR anyone in db.get_trusted_dev_ids(). Checks
+    the (free, instant, no network call) allowlist first so a trusted
+    dev never pays for a live Telegram API round trip just to use the
+    Dev topic. Returns None (not False) only when the OWNER check
+    itself fails to verify -- same "unverified isn't denied" reasoning
+    as _is_group_owner.
+    """
+    if update.effective_user.id in db.get_trusted_dev_ids():
+        return True
+    return await _is_group_owner(update, context)
+
+
+def _resolve_telegram_target(update: Update, context: ContextTypes.DEFAULT_TYPE) -> tuple[int | None, str]:
+    """
+    Resolves the target Telegram user for /add_admin, /remove_admin,
+    /ban, and /unban -- all security-sensitive permission changes, so
+    deliberately NOT a fuzzy name/@username match (this game has no
+    general username directory outside of registered characters, and
+    even if it did, guessing wrong here would be a real access-control
+    bug, not just a misfired narration). Two ways to specify a target:
+    1. Reply to that person's own message with the command -- Telegram
+       hands back a real User object directly, zero ambiguity.
+    2. Pass their raw numeric Telegram user ID as the command argument.
+    """
+    reply = update.message.reply_to_message
+    if reply is not None and reply.from_user is not None:
+        user = reply.from_user
+        label = f"{user.full_name} (@{user.username})" if user.username else user.full_name
+        return user.id, label
+    if context.args:
+        try:
+            target_id = int(context.args[0])
+            return target_id, f"user {target_id}"
+        except ValueError:
+            pass
+    return None, ""
+
+
+_NO_TARGET_MESSAGE = (
+    "Reply to that person's message with this command, or use it with their numeric "
+    "Telegram user ID as the argument."
+)
+
+
+async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Grants Development-topic access to another real person -- e.g.
+    Sugar, a genuine second dev (2026-07-17, per Coffee) -- WITHOUT
+    making them a real Telegram group admin (which would grant far
+    more than intended: deleting messages, banning members, etc, none
+    of which this game needs). Gated the same way the Dev topic itself
+    is (owner OR an existing trusted dev), per Coffee's explicit "only
+    a DEV or admin can use those commands" -- deliberately not
+    owner-only, so an existing trusted dev can onboard another one.
+    """
+    if update.message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
+        return
+    is_authorized = await _is_dev_topic_authorized(update, context)
+    if is_authorized is None:
+        await _safe_send(
+            update,
+            "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
+            thread_id=config.TOPIC_DEVELOPMENT_ID,
+        )
+        return
+    if not is_authorized:
+        await _safe_send(update, "Only a Dev-topic admin can grant this.", thread_id=config.TOPIC_DEVELOPMENT_ID)
+        return
+
+    target_id, target_label = _resolve_telegram_target(update, context)
+    if target_id is None:
+        await _safe_send(update, _NO_TARGET_MESSAGE, thread_id=config.TOPIC_DEVELOPMENT_ID)
+        return
+    db.add_trusted_dev_id(target_id)
+    await _safe_send(
+        update, f"✅ {target_label} now has Development-topic access.", thread_id=config.TOPIC_DEVELOPMENT_ID
+    )
+
+
+async def remove_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
+        return
+    is_authorized = await _is_dev_topic_authorized(update, context)
+    if is_authorized is None:
+        await _safe_send(
+            update,
+            "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
+            thread_id=config.TOPIC_DEVELOPMENT_ID,
+        )
+        return
+    if not is_authorized:
+        await _safe_send(update, "Only a Dev-topic admin can revoke this.", thread_id=config.TOPIC_DEVELOPMENT_ID)
+        return
+
+    target_id, target_label = _resolve_telegram_target(update, context)
+    if target_id is None:
+        await _safe_send(update, _NO_TARGET_MESSAGE, thread_id=config.TOPIC_DEVELOPMENT_ID)
+        return
+    db.remove_trusted_dev_id(target_id)
+    await _safe_send(
+        update, f"✅ {target_label} no longer has Development-topic access.", thread_id=config.TOPIC_DEVELOPMENT_ID
+    )
+
+
+async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Bans a malicious player from playing at all (2026-07-17, per
+    Coffee: "admins can absolutely ban malicious players"). A banned
+    telegram_user_id is checked at the very top of
+    adventure_master_handler/support_topic_handler, before any other
+    processing -- see db.is_banned. Gated the same as the rest of the
+    Dev-topic admin surface (owner or a trusted dev), and restricted to
+    the Development topic so this can never be triggered from
+    Adventure/Support by an ordinary player.
+    """
+    if update.message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
+        return
+    is_authorized = await _is_dev_topic_authorized(update, context)
+    if is_authorized is None:
+        await _safe_send(
+            update,
+            "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
+            thread_id=config.TOPIC_DEVELOPMENT_ID,
+        )
+        return
+    if not is_authorized:
+        await _safe_send(update, "Only a Dev-topic admin can ban a player.", thread_id=config.TOPIC_DEVELOPMENT_ID)
+        return
+
+    target_id, target_label = _resolve_telegram_target(update, context)
+    if target_id is None:
+        await _safe_send(update, _NO_TARGET_MESSAGE, thread_id=config.TOPIC_DEVELOPMENT_ID)
+        return
+    db.ban_user(target_id)
+    await _safe_send(
+        update, f"🚫 {target_label} is now banned — they can no longer play.", thread_id=config.TOPIC_DEVELOPMENT_ID
+    )
+
+
+async def unban_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
+        return
+    is_authorized = await _is_dev_topic_authorized(update, context)
+    if is_authorized is None:
+        await _safe_send(
+            update,
+            "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
+            thread_id=config.TOPIC_DEVELOPMENT_ID,
+        )
+        return
+    if not is_authorized:
+        await _safe_send(update, "Only a Dev-topic admin can unban a player.", thread_id=config.TOPIC_DEVELOPMENT_ID)
+        return
+
+    target_id, target_label = _resolve_telegram_target(update, context)
+    if target_id is None:
+        await _safe_send(update, _NO_TARGET_MESSAGE, thread_id=config.TOPIC_DEVELOPMENT_ID)
+        return
+    db.unban_user(target_id)
+    # Clean slate on reversal (2026-07-17) -- an auto-ban from 3
+    # infractions reversed by a dev shouldn't leave them one warning
+    # away from being auto-banned again immediately; unbanning is
+    # meant to be a real second chance, not a temporary reprieve.
+    db.clear_infractions(target_id)
+    await _safe_send(
+        update, f"✅ {target_label} is unbanned and their infraction record is cleared.",
+        thread_id=config.TOPIC_DEVELOPMENT_ID,
+    )
+
+
+async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Lets ANY player report something to the admins directly, with a
+    reason (2026-07-17, per Coffee: "create a /report (give reasons or
+    description or why) and send to admin -- do no flag if system
+    doesnt flag it. jus send to admins"). Deliberately separate from
+    the planned auto-flag system (task #128, still just a design doc)
+    -- /report has NO detection/heuristic logic at all. Whatever the
+    player writes goes straight to the Development topic for a human
+    admin to judge, every single time, unconditionally -- no gate, no
+    keyword matching, no "is this actually reportable" judgment call.
+    Usable by any player from any topic, since anyone might need to
+    flag something regardless of where it happened.
+    """
+    reason = " ".join(context.args) if context.args else ""
+    if not reason.strip():
+        await update.effective_chat.send_message(
+            "Use /report followed by what you'd like to report, e.g. "
+            '"/report Player X is harassing others in Adventure" -- it goes straight to the admins.',
+            message_thread_id=update.message.message_thread_id,
+        )
+        return
+
+    reporter = update.effective_user
+    reporter_label = f"{reporter.full_name} (@{reporter.username})" if reporter.username else reporter.full_name
+    topic_name = topics.get_topic_name(update.message.message_thread_id or 0)
+    report_text = (
+        f"🚩 **Player report** from {reporter_label} (id {reporter.id}) in {topic_name}:\n{reason.strip()}"
+    )
+    await _safe_send(update, report_text, thread_id=config.TOPIC_DEVELOPMENT_ID)
+    await update.effective_chat.send_message(
+        "Thanks — this has been sent to the admins for review.",
+        message_thread_id=update.message.message_thread_id,
+    )
+
+
+async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Admin-issued warning (2026-07-17, per Coffee: "a /warning system
+    admins can use to reply to users that are out-of-line and the
+    comment gets flagged - a prompt reply warns them and the serve
+    documents the infraction. 3 infreactions results in a ban. all ban
+    repots must be send to DEV so dev can reverse if needed"). Used by
+    replying to the offending message with /warning [reason] -- works
+    from wherever the bad behavior happened (Adventure/Support/Main),
+    not restricted to the Development topic, since that's where an
+    admin would actually be when they see it. The warning reply posts
+    in that SAME topic (public, in context) rather than being hidden in
+    Development. At 3 infractions, auto-bans and ALWAYS reports it to
+    Development regardless of where the warning was issued, specifically
+    so a dev can reverse it with /unban if it was a mistake.
+    """
+    is_authorized = await _is_dev_topic_authorized(update, context)
+    if is_authorized is None:
+        await update.effective_chat.send_message(
+            "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
+            message_thread_id=update.message.message_thread_id,
+        )
+        return
+    if not is_authorized:
+        await update.effective_chat.send_message(
+            "Only a Dev-topic admin can issue a warning.", message_thread_id=update.message.message_thread_id
+        )
+        return
+
+    target_id, target_label = _resolve_telegram_target(update, context)
+    if target_id is None:
+        await update.effective_chat.send_message(
+            "Reply to the out-of-line message with /warning [reason].",
+            message_thread_id=update.message.message_thread_id,
+        )
+        return
+
+    reason = " ".join(context.args) if context.args else "(no reason given)"
+    count = db.add_infraction(target_id, reason, issued_by=update.effective_user.id)
+    await update.effective_chat.send_message(
+        f"⚠️ {target_label}, that's a warning ({count}/3): {reason}",
+        message_thread_id=update.message.message_thread_id,
+    )
+    if count >= 3:
+        db.ban_user(target_id)
+        await _safe_send(
+            update,
+            f"🚫 **Auto-ban**: {target_label} reached 3 infractions and has been banned. "
+            f"Reply with /unban (replying to one of their messages, or /unban {target_id}) to reverse this if it was a mistake.",
+            thread_id=config.TOPIC_DEVELOPMENT_ID,
+        )
+
+
+async def warninglist_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/warning_list -- current warnings on record, for admins."""
+    is_authorized = await _is_dev_topic_authorized(update, context)
+    if is_authorized is None:
+        await update.effective_chat.send_message(
+            "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
+            message_thread_id=update.message.message_thread_id,
+        )
+        return
+    if not is_authorized:
+        await update.effective_chat.send_message(
+            "Only a Dev-topic admin can view the warning list.", message_thread_id=update.message.message_thread_id
+        )
+        return
+
+    all_infractions = db.get_all_infractions()
+    if not all_infractions:
+        await update.effective_chat.send_message(
+            "No warnings on record.", message_thread_id=update.message.message_thread_id
+        )
+        return
+    lines = ["⚠️ **Current warnings:**"]
+    for user_id_str, records in all_infractions.items():
+        latest = records[-1]
+        lines.append(f"- user {user_id_str}: {len(records)}/3 — most recent: {latest['reason']}")
+    await update.effective_chat.send_message("\n".join(lines), message_thread_id=update.message.message_thread_id)
+
+
+async def banlist_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/ban_list -- currently banned players, for admins."""
+    is_authorized = await _is_dev_topic_authorized(update, context)
+    if is_authorized is None:
+        await update.effective_chat.send_message(
+            "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
+            message_thread_id=update.message.message_thread_id,
+        )
+        return
+    if not is_authorized:
+        await update.effective_chat.send_message(
+            "Only a Dev-topic admin can view the ban list.", message_thread_id=update.message.message_thread_id
+        )
+        return
+
+    banned_ids = db.list_banned_user_ids()
+    if not banned_ids:
+        await update.effective_chat.send_message(
+            "No players currently banned.", message_thread_id=update.message.message_thread_id
+        )
+        return
+    lines = ["🚫 **Currently banned:**"] + [f"- user {uid}" for uid in banned_ids]
+    await update.effective_chat.send_message("\n".join(lines), message_thread_id=update.message.message_thread_id)
+
+
+async def redo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Owner/admin-only: replays the last real message THIS bot saw in the
+    same topic /redo was typed in, in case it was misclassified or
+    otherwise mishandled -- e.g. a bug just got fixed and the admin
+    wants the player's original message re-run without asking them to
+    retype it. Re-enters the exact same code path (parse_intents +
+    dispatch, or the Support answer function) using the ORIGINAL
+    stored Update, so it acts as whoever actually sent the message, not
+    the admin who typed /redo -- redo never lets an admin puppet a
+    different player's character, only re-run what they already said.
+    """
+    thread_id = update.message.message_thread_id or 0
+    is_allowed = await _is_group_admin_or_owner(update, context)
+    if is_allowed is None:
+        await update.effective_chat.send_message(
+            "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
+            message_thread_id=update.message.message_thread_id,
+        )
+        return
+    if not is_allowed:
+        await update.effective_chat.send_message(
+            "/redo is restricted to group admins and the owner.",
+            message_thread_id=update.message.message_thread_id,
+        )
+        return
+
+    entry = _LAST_TOPIC_MESSAGE.get((update.effective_chat.id, thread_id))
+    if entry is None:
+        await update.effective_chat.send_message(
+            "Nothing to redo in this topic yet.",
+            message_thread_id=update.message.message_thread_id,
+        )
+        return
+
+    stored_update = entry["update"]
+    stored_context = entry["context"]
+    stored_text = entry["text"]
+    await update.effective_chat.send_message(
+        f"🔄 Redoing the last message here (asking the AI for a fresh, independent read — can take up "
+        f"to ~2 minutes on this hardware): \"{stored_text}\"",
+        message_thread_id=update.message.message_thread_id,
+    )
+    async with _keep_typing(update.effective_chat, update.message.message_thread_id):
+        if entry["kind"] == "support":
+            character = db.get_character(entry["user_id"])
+            party_members = _get_party_members() if character else None
+            reply = await asyncio.to_thread(answer_support_question, stored_text, character, party_members)
+            logger.info(f"[redo] support user={entry['user_id']} text={stored_text!r} reply={reply!r}")
+            await _safe_send(stored_update, reply, thread_id=config.TOPIC_SUPPORT_ID)
+            return
+
+        # kind == "adventure": re-parse fresh (picks up any fix shipped
+        # since the original message) and re-dispatch, same combined-reply
+        # shape a genuinely compound message already gets.
+        known_npcs = [data["name"] for data in CAMPAIGN["npcs"].values()]
+        # force_model=True (2026-07-17, per Coffee: "make it so /redo
+        # actually tries to handle it differently") -- re-running the plain
+        # deterministic keyword fallback on the exact same text would
+        # always reproduce the exact same (possibly wrong) classification,
+        # defeating the point of a manual redo. Forcing a real model call
+        # here gives it a genuinely independent second read instead.
+        intents = await asyncio.to_thread(
+            parse_intents, stored_text, known_npc_names=known_npcs, force_model=True
+        )
+        for i in intents:
+            logger.info(f"[redo] user={entry['user_id']} action={i['action']!r} text={i['raw_text']!r}")
+        chat_proxy = _BufferingChatProxy(stored_update.effective_chat)
+        proxied_update = _EffectiveChatOverride(stored_update, chat_proxy)
+        for i in intents:
+            await _dispatch_intent(proxied_update, stored_context, i, stored_text)
+        if chat_proxy.buffered:
+            await _safe_send(stored_update, "\n\n".join(chat_proxy.buffered))
+        else:
+            await update.effective_chat.send_message(
+                "(Redo produced no reply — this was likely ordinary chat, not a game action.)",
+                message_thread_id=update.message.message_thread_id,
+            )
+
+
 async def development_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    is_owner = await _is_group_owner(update, context)
+    is_owner = await _is_dev_topic_authorized(update, context)
     if is_owner is None:
         await update.effective_chat.send_message(
             "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
@@ -7606,7 +8119,7 @@ async def dev_topic_photo_handler(update: Update, context: ContextTypes.DEFAULT_
     if update.message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
         return
 
-    is_owner = await _is_group_owner(update, context)
+    is_owner = await _is_dev_topic_authorized(update, context)
     if is_owner is None:
         await _safe_send(
             update,
@@ -7679,7 +8192,7 @@ async def dev_topic_document_handler(update: Update, context: ContextTypes.DEFAU
     if update.message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
         return
 
-    is_owner = await _is_group_owner(update, context)
+    is_owner = await _is_dev_topic_authorized(update, context)
     if is_owner is None:
         await _safe_send(
             update,
@@ -7739,7 +8252,7 @@ async def dev_topic_video_handler(update: Update, context: ContextTypes.DEFAULT_
     if update.message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
         return
 
-    is_owner = await _is_group_owner(update, context)
+    is_owner = await _is_dev_topic_authorized(update, context)
     if is_owner is None:
         await _safe_send(
             update,
@@ -7861,7 +8374,17 @@ def _wants_sheet_names(question: str) -> list[str]:
 
 
 async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if db.is_banned(update.effective_user.id):
+        return
     question = update.message.text.strip()
+    _LAST_TOPIC_MESSAGE[(update.effective_chat.id, config.TOPIC_SUPPORT_ID)] = {
+        "kind": "support",
+        "update": update,
+        "context": context,
+        "text": question,
+        "user_id": update.effective_user.id,
+        "timestamp": datetime.now(timezone.utc),
+    }
 
     # Physical-dice mode toggle (2026-07-16, per Coffee: "toggle in
     # support topic"), checked before anything else so it's a real
@@ -7927,7 +8450,8 @@ async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TY
             await _safe_send(update, reply, thread_id=config.TOPIC_SUPPORT_ID)
             return
 
-    reply = await asyncio.to_thread(answer_support_question, question, character, party_members)
+    async with _keep_typing(update.effective_chat, config.TOPIC_SUPPORT_ID):
+        reply = await asyncio.to_thread(answer_support_question, question, character, party_members)
     logger.info(f"[support] user={update.effective_user.id} text={question!r} reply={reply!r}")
     await _safe_send(update, reply, thread_id=config.TOPIC_SUPPORT_ID)
 
@@ -8491,8 +9015,18 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("attack", attack_command))
     application.add_handler(CommandHandler("endturn", endturn_command))
     application.add_handler(CommandHandler("sheet", sheet_command))
+    application.add_handler(CommandHandler("map", map_command))
     application.add_handler(CommandHandler("version", version_command))
     application.add_handler(CommandHandler("changelog", changelog_command))
+    application.add_handler(CommandHandler("redo", redo_command))
+    application.add_handler(CommandHandler("report", report_command))
+    application.add_handler(CommandHandler("warning", warning_command))
+    application.add_handler(CommandHandler("warning_list", warninglist_command))
+    application.add_handler(CommandHandler("ban_list", banlist_command))
+    application.add_handler(CommandHandler("add_admin", add_admin_command))
+    application.add_handler(CommandHandler("remove_admin", remove_admin_command))
+    application.add_handler(CommandHandler("ban", ban_command))
+    application.add_handler(CommandHandler("unban", unban_command))
 
     # Single unified router for all plain text messages, across topics.
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message_router))

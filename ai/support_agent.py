@@ -487,6 +487,10 @@ def answer_support_question(
                     "model": config.DM_NARRATION_MODEL,
                     "prompt": prompt,
                     "stream": False,
+                    # Real perf fix (2026-07-17): bounds worst-case
+                    # generation time -- see ai/dm_agent.py's
+                    # _NARRATION_OPTIONS for the full reasoning.
+                    "options": {"num_predict": 600},
                 },
                 timeout=200,
             )

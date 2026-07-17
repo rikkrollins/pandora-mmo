@@ -852,14 +852,55 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     return base
 
 
-def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
+def parse_intent(text: str, known_npc_names: list[str] | None = None, force_model: bool = False) -> dict:
     """
     Classify free text into a structured intent dict. Uses the build
     model (better at structured/JSON output) rather than the narration
     model. Falls back to keyword matching on any failure.
+
+    force_model (2026-07-17, per Coffee, for bot.py's /redo command:
+    "make it so when u hit /redo it actually tries to handle it
+    differently"): the deterministic keyword fallback is, well,
+    deterministic -- re-running it on the exact same text an admin is
+    redoing would produce the IDENTICAL classification every time,
+    which defeats the entire point of asking for a second attempt.
+    force_model=True skips the normal fast-path shortcut below (which
+    returns a confident fallback without ever calling Ollama) and
+    always asks the model for its own independent read of the message,
+    even when the keyword fallback is confident. The valid_actions
+    allowlist and the start_combat/pass_turn anti-hallucination guards
+    further down still apply unconditionally either way -- those exist
+    to catch real, previously-confirmed model hallucination patterns,
+    not to prefer the fallback on principle, so a manual redo is not a
+    safe place to relax them. The one thing force_model DOES relax is
+    the general "fallback disagrees with the model, trust the
+    fallback" rule -- that rule is exactly what would otherwise hand
+    back the same answer as the very first attempt.
     """
     known_npc_names = known_npc_names or []
     fallback = _keyword_fallback(text, known_npc_names)
+
+    # Real perf fix (2026-07-17, per Coffee -- investigated after a
+    # night of watching real Ollama latency firsthand): every dispatch
+    # branch in bot.py's adventure_master_handler reads either
+    # intent["raw_text"] (always identical to fallback's own raw_text,
+    # since _keyword_fallback's base dict sets it to the same `text`)
+    # or a field (target/npc_name/ability) that _keyword_fallback
+    # already sets correctly whenever it confidently matches that exact
+    # action -- audited every branch to confirm this, not assumed.
+    # Combined with the fact that the rest of this function ALREADY
+    # discards the model's own answer whenever it disagrees with a
+    # confident (non-"chat") fallback (see the check below), calling
+    # Ollama at all in that case was pure wasted latency -- 15-160s+ on
+    # this CPU-only box, for an answer that was never going to be used
+    # either way. Skipping the call here changes nothing about the
+    # RESULT (still exactly what a confident fallback already produces
+    # today), it just stops paying for work already known to be
+    # discarded. Only genuinely ambiguous messages (fallback says
+    # "chat", meaning it has no real opinion) still need the model's
+    # actual language understanding below.
+    if fallback["action"] != "chat" and not force_model:
+        return fallback
 
     try:
         response = requests.post(
@@ -869,6 +910,12 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
                 "prompt": f"{INTENT_SYSTEM_PROMPT}\n\nKnown NPCs: {known_npc_names}\n\nPlayer message: {text}",
                 "stream": False,
                 "format": "json",
+                # Real perf fix (2026-07-17): bounds worst-case
+                # generation time, same reasoning as ai/dm_agent.py's
+                # _NARRATION_OPTIONS -- smaller here since the actual
+                # answer needed is just one short JSON object, not
+                # multi-sentence prose.
+                "options": {"num_predict": 400},
             },
             timeout=200,
         )
@@ -921,7 +968,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
             # otherwise) — so whenever it has ANY non-default opinion,
             # that opinion is trusted over the model's, rather than
             # special-casing just the newest action types.
-            if fallback["action"] != "chat" and parsed["action"] != fallback["action"]:
+            if fallback["action"] != "chat" and parsed["action"] != fallback["action"] and not force_model:
                 return fallback
             # Extra, narrower safeguard on top of the general rule above:
             # "start_combat" specifically is never trusted from the model
@@ -992,7 +1039,7 @@ def _split_compound_message(text: str) -> list[str]:
     return cleaned
 
 
-def parse_intents(text: str, known_npc_names: list[str] | None = None) -> list[dict]:
+def parse_intents(text: str, known_npc_names: list[str] | None = None, force_model: bool = False) -> list[dict]:
     """
     Like parse_intent, but detects genuinely compound player messages
     ("recruit Sera, look at the quest board, and leave the tavern") and
@@ -1044,4 +1091,4 @@ def parse_intents(text: str, known_npc_names: list[str] | None = None) -> list[d
         if len(real_segment_intents) >= 2:
             return real_segment_intents
 
-    return [parse_intent(text, known_npc_names)]
+    return [parse_intent(text, known_npc_names, force_model=force_model)]

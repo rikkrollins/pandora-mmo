@@ -1,8 +1,8 @@
 # 🌒 Pandora MMO
 
-*A persistent Dungeons & Dragons 5E world, played entirely through natural conversation in a Telegram group.*
+*A persistent text-based MMORPG, inspired by classic 5th-edition-style tabletop role-playing, played entirely through natural conversation in a Telegram group.*
 
-No dice app. No character sheet software. No slash commands to memorize. You simply speak, and the world answers — an AI Dungeon Master narrates what unfolds, real 5E rules decide what actually happens, and other travelers walk the same roads you do.
+No dice app. No character sheet software. No slash commands to memorize. You simply speak, and the world answers — an AI narrator narrates what unfolds, real 5E-style rules decide what actually happens, and other travelers walk the same roads you do.
 
 ---
 
@@ -65,7 +65,7 @@ You'll choose a name, a race, a class, and the dice will hand you six numbers to
 
 ## What kind of game is this?
 
-Underneath the surface, it's real 5E: ability scores, proficiency bonuses, initiative, hit points, death saves, spell slots — nothing here is decided on a whim. Every attack roll, every point of damage, every success and failure comes from an actual die, every time. The AI's job is only to describe it well — never to decide it.
+Underneath the surface, it's real 5th-edition-style rules: ability scores, proficiency bonuses, initiative, hit points, death saves, spell slots — nothing here is decided on a whim. Every attack roll, every point of damage, every success and failure comes from an actual die, every time. The AI's job is only to describe it well — never to decide it.
 
 The land itself is layered — what you can see from the road is only the beginning. There are things below that don't officially exist above ground, and things above that don't officially exist at all. Guilds have their own reasons for who they let in. Merchants know things they don't put in their ledgers. And somewhere in all of it, something the realm would very much prefer you didn't go looking for.
 
@@ -82,6 +82,12 @@ That openness has a hard boundary around it, though: the AI running the game its
 ## Contributing / Extending
 
 The entire world — locations, quests, monsters, shops, the story itself — is defined in a single data file per campaign (`campaigns/default/campaign.json`), completely separate from the game's code. Building your own campaign, or extending this one, doesn't require touching a line of Python. Details are in `SETUP_GUIDE.md`.
+
+---
+
+## Credits
+
+Developed and Modeled by ClaudeCode and coffee1333 aka RikkRollins.
 
 ---
 

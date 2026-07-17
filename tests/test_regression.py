@@ -21,6 +21,7 @@ import items as items_module
 import spells
 from ai.intent_parser import _keyword_fallback, parse_intents
 from ai.support_agent import _deterministic_inventory_answer
+from ai.text_cleanup import strip_think_tags
 from rules.combat import resolve_attack
 from rules.crafting import RECIPES
 from tests.helpers import DummyContext, FakeUpdate, make_basic_character, use_test_db
@@ -958,6 +959,25 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 "I'll take a mug, ale!!! how are you doing old buddy?", []
             )
         self.assertEqual(result["action"], "chat")
+
+    # -- Real live bug (2026-07-17): capping num_predict for speed
+    #    (ai/dm_agent.py, ai/support_agent.py, ai/intent_parser.py) can
+    #    truncate generation mid-thought, before the model ever emits
+    #    </think> -- caught live via a /redo test hitting the real
+    #    model: the ENTIRE raw chain-of-thought leaked to a real
+    #    player instead of being stripped, since the paired regex
+    #    requires a closing tag to match at all. ------------------------
+    def test_strip_think_tags_handles_a_truncated_unclosed_block(self):
+        truncated = "<think> Okay, let's tackle this. The user wants me to answer..."
+        self.assertEqual(strip_think_tags(truncated), "")
+
+    def test_strip_think_tags_still_handles_a_normal_closed_block(self):
+        normal = "<think>internal reasoning here</think>The actual answer."
+        self.assertEqual(strip_think_tags(normal), "The actual answer.")
+
+    def test_strip_think_tags_handles_closed_block_then_truncated_second_one(self):
+        mixed = "<think>reasoning</think>partial answer <think>more reasoning that never closes"
+        self.assertEqual(strip_think_tags(mixed), "partial answer")
 
     # -- Real live bug (2026-07-16): a compound message repeating the
     #    SAME action type ("go to X, then go to Y") only ever executed

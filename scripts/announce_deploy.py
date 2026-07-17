@@ -13,6 +13,16 @@ so it can't conflict with the live poller.
 Usage:
     python3 scripts/announce_deploy.py "v1.1.0 deployed: lockpicking, crafting, ..."
     python3 scripts/announce_deploy.py --warn "~2 minutes"
+    python3 scripts/announce_deploy.py --pin "catchy player-facing update text"
+
+--pin (2026-07-17, per Coffee: "write a pinned post... make it catchy
+and enticing... make this part of the update/upgrade system") posts a
+player-facing, enticing summary to Main and pins it there, replacing
+whatever was pinned before -- meant to be run as a normal step of
+every real update from now on, not a one-off. Requires the bot to have
+"pin messages" admin rights in the group; if it doesn't, this fails
+loudly rather than silently doing nothing, so the missing permission
+gets noticed immediately.
 """
 import os
 import sys
@@ -22,6 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import requests
 
 import config
+import db
 
 REQUIRED_ENV = "TELEGRAM_CHAT_ID"
 
@@ -71,13 +82,67 @@ def warn(eta: str) -> None:
     _send(f"🛠️ **Update coming soon** — the bot will restart shortly (ETA: {_escape_markdown(eta)}). Back momentarily.")
 
 
+_PINNED_MESSAGE_ID_SETTING = "pinned_update_message_id"
+
+
+def pin_update(catchy_text: str) -> None:
+    """
+    Posts a player-facing, enticing update summary to Main and pins it,
+    unpinning whatever this same mechanism pinned last time (tracked in
+    game_settings via db.py, same pattern as every other small piece of
+    persistent state in this project). Meant to run as a normal part of
+    every real update going forward, not a one-off -- see module
+    docstring.
+    """
+    chat_id = getattr(config, "TELEGRAM_CHAT_ID", None)
+    if not chat_id:
+        raise RuntimeError(
+            f"{REQUIRED_ENV} isn't set in .env — add it (the group's chat id, "
+            "usually a negative number) before this script can post anything."
+        )
+
+    resp = requests.post(
+        f"https://api.telegram.org/bot{config.BOT_TOKEN}/sendMessage",
+        json={"chat_id": chat_id, "text": catchy_text, "parse_mode": "Markdown"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    new_message_id = resp.json()["result"]["message_id"]
+
+    old_message_id = db.get_setting(_PINNED_MESSAGE_ID_SETTING)
+    if old_message_id:
+        # Best-effort -- an already-deleted or already-unpinned old
+        # message shouldn't stop the new one from getting pinned.
+        try:
+            requests.post(
+                f"https://api.telegram.org/bot{config.BOT_TOKEN}/unpinChatMessage",
+                json={"chat_id": chat_id, "message_id": int(old_message_id)},
+                timeout=30,
+            )
+        except requests.RequestException:
+            pass
+
+    pin_resp = requests.post(
+        f"https://api.telegram.org/bot{config.BOT_TOKEN}/pinChatMessage",
+        json={"chat_id": chat_id, "message_id": new_message_id, "disable_notification": False},
+        timeout=30,
+    )
+    pin_resp.raise_for_status()
+    db.set_setting(_PINNED_MESSAGE_ID_SETTING, str(new_message_id))
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python3 scripts/announce_deploy.py \"message text\"", file=sys.stderr)
         print("       python3 scripts/announce_deploy.py --warn \"ETA text\"", file=sys.stderr)
+        print("       python3 scripts/announce_deploy.py --pin \"catchy player-facing text\"", file=sys.stderr)
         sys.exit(1)
     if sys.argv[1] == "--warn":
         warn(sys.argv[2] if len(sys.argv) > 2 else "a couple minutes")
+        print("Posted to Development topic.")
+    elif sys.argv[1] == "--pin":
+        pin_update(sys.argv[2])
+        print("Posted and pinned to Main.")
     else:
         announce(sys.argv[1])
-    print("Posted to Development topic.")
+        print("Posted to Development topic.")

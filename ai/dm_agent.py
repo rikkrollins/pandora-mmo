@@ -14,6 +14,22 @@ import config
 from ai.story_mode import scaled_sentences, style_directive
 from ai.text_cleanup import strip_think_tags
 
+# Real perf fix (2026-07-17, per Coffee): no call anywhere in this
+# module capped how many tokens the model could generate -- confirmed
+# live tonight this let a handful of calls run unusually long (107s,
+# 142s, 159s) even under otherwise-idle conditions, almost certainly
+# from the model over-generating (this is a "thinking" model, so
+# <think>...</think> reasoning tokens count against this cap too, not
+# just the visible narration). Per Coffee's explicit direction right
+# after this fix ("I want the storyline to feel long and entertaining
+# but I want the code to execute like lightning"): the speed win here
+# should come from bounding pathological runaway generation, NOT from
+# shortening genuinely rich prose -- so this is deliberately generous,
+# sized to comfortably fit even STORY_MODE 10's longest requested
+# narration (up to ~19 sentences, see ai/story_mode.py's _FACTORS) plus
+# real thinking overhead, not tuned down toward the typical case.
+_NARRATION_OPTIONS = {"num_predict": 1200}
+
 # Real live feedback (2026-07-16, Coffee, via Development-topic
 # screenshot): "please say who is doing the action -- for example if it
 # is Zara asking to chop wood, it says '[player] attempts to [action]'
@@ -104,6 +120,7 @@ def narrate_skill_check(character: dict, action_text: str, ability: str, mechani
                 "model": config.DM_NARRATION_MODEL,
                 "prompt": prompt,
                 "stream": False,
+                "options": _NARRATION_OPTIONS,
             },
             timeout=200,
         )
@@ -257,6 +274,7 @@ def narrate_action(character: dict, action_text: str, mechanical_result: dict,
                 "model": config.DM_NARRATION_MODEL,
                 "prompt": prompt,
                 "stream": False,
+                "options": _NARRATION_OPTIONS,
             },
             timeout=200,
         )
@@ -348,6 +366,7 @@ def narrate_welcome(character: dict, location: dict, party_summary: str) -> str:
                 "model": config.DM_NARRATION_MODEL,
                 "prompt": prompt,
                 "stream": False,
+                "options": _NARRATION_OPTIONS,
             },
             timeout=200,
         )
@@ -422,7 +441,7 @@ def narrate_hourly_update(location_name: str, recent_events: list[str], activity
     try:
         response = requests.post(
             f"{config.OLLAMA_BASE_URL}/api/generate",
-            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False},
+            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False, "options": _NARRATION_OPTIONS},
             timeout=200,
         )
         response.raise_for_status()
@@ -484,7 +503,7 @@ def narrate_examine(character: dict, location_name: str, object_name: str, objec
     try:
         response = requests.post(
             f"{config.OLLAMA_BASE_URL}/api/generate",
-            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False},
+            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False, "options": _NARRATION_OPTIONS},
             timeout=200,
         )
         response.raise_for_status()
@@ -543,7 +562,7 @@ def narrate_branching_quest_setup(location_name: str, npc_name: str | None,
     try:
         response = requests.post(
             f"{config.OLLAMA_BASE_URL}/api/generate",
-            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False},
+            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False, "options": _NARRATION_OPTIONS},
             timeout=200,
         )
         response.raise_for_status()
@@ -577,7 +596,7 @@ def narrate_branching_choice_outcome(location_name: str, choice_label: str, outc
     try:
         response = requests.post(
             f"{config.OLLAMA_BASE_URL}/api/generate",
-            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False},
+            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False, "options": _NARRATION_OPTIONS},
             timeout=200,
         )
         response.raise_for_status()

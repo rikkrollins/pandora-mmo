@@ -9,11 +9,25 @@ rather than duplicating the same regex in every ai/*.py file.
 import re
 
 _THINK_TAG_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+_UNCLOSED_THINK_RE = re.compile(r"<think>.*", re.DOTALL | re.IGNORECASE)
 
 
 def strip_think_tags(text: str) -> str:
-    """Remove any <think>...</think> block(s) and surrounding whitespace."""
+    """
+    Remove any <think>...</think> block(s) and surrounding whitespace.
+
+    Also strips a truncated block that's missing its closing tag --
+    confirmed live 2026-07-17: capping num_predict for speed (see
+    ai/dm_agent.py's _NARRATION_OPTIONS, ai/support_agent.py,
+    ai/intent_parser.py) can cut generation off mid-thought, before the
+    model ever emits </think>. The paired regex above requires a
+    closing tag to match at all, so without this fallback the ENTIRE
+    raw chain-of-thought leaked straight to a real player instead of
+    being stripped -- caught via a live-Ollama test run of an
+    unrelated feature (/redo), not something anyone was looking for.
+    """
     cleaned = _THINK_TAG_RE.sub("", text)
+    cleaned = _UNCLOSED_THINK_RE.sub("", cleaned)
     return cleaned.strip()
 
 

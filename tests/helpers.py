@@ -36,9 +36,10 @@ def use_test_db(path: str) -> None:
 
 
 class FakeMessage:
-    def __init__(self, text, thread_id=None):
+    def __init__(self, text, thread_id=None, reply_to_message=None):
         self.text = text
         self.message_thread_id = thread_id if thread_id is not None else config.TOPIC_ADVENTURE_ID
+        self.reply_to_message = reply_to_message
 
 
 class FakeSentMessage:
@@ -65,8 +66,10 @@ class FakeChat:
 
 
 class FakeUser:
-    def __init__(self, user_id):
+    def __init__(self, user_id, username=None, full_name=None):
         self.id = user_id
+        self.username = username
+        self.full_name = full_name if full_name is not None else f"User{user_id}"
 
 
 class FakeUpdate:
@@ -74,18 +77,48 @@ class FakeUpdate:
     A minimal stand-in for python-telegram-bot's Update, real enough to
     drive bot.py's actual handlers (adventure_master_handler,
     support_topic_handler, etc.) end-to-end. `sink` collects every
-    message the handler sends, in order.
+    message the handler sends, in order. `reply_to_message` should be
+    another FakeUpdate (or anything with an effective_user) when a test
+    needs to simulate replying to someone else's message (e.g.
+    /add_admin, /ban).
     """
-    def __init__(self, user_id, text, sink, thread_id=None):
+    def __init__(self, user_id, text, sink, thread_id=None, reply_to_message=None):
         self.effective_user = FakeUser(user_id)
         self.effective_chat = FakeChat(sink)
-        self.message = FakeMessage(text, thread_id)
+        self.message = FakeMessage(text, thread_id, reply_to_message=reply_to_message)
         self.effective_message = self.message
 
 
+class DummyMessage:
+    """Bare reply_to_message target -- just enough for reply.from_user resolution."""
+    def __init__(self, user_id, username=None, full_name=None):
+        self.from_user = FakeUser(user_id, username=username, full_name=full_name)
+
+
+class FakeChatMember:
+    def __init__(self, status):
+        self.status = status
+
+
+class FakeBot:
+    """
+    Minimal stand-in for python-telegram-bot's Bot, just enough to
+    drive code paths that call context.bot.get_chat_member (e.g.
+    _is_group_owner/_is_group_admin_or_owner in bot.py). `status`
+    controls what every get_chat_member call reports back.
+    """
+    def __init__(self, status="creator"):
+        self.status = status
+
+    async def get_chat_member(self, chat_id, user_id):
+        return FakeChatMember(self.status)
+
+
 class DummyContext:
-    def __init__(self):
+    def __init__(self, bot=None, args=None):
         self.user_data = {}
+        self.bot = bot if bot is not None else FakeBot()
+        self.args = args if args is not None else []
 
 
 def make_basic_character(user_id: int, name: str = "Elduinn", **overrides) -> dict:
