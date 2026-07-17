@@ -2,6 +2,16 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.10.15] — Support's "model unreachable" fallback is now specific, not generic onboarding
+
+Live-observed 2026-07-16: when the Support topic's Ollama call fails or
+times out (this genuinely happens under real CPU contention on this
+box), the fallback used to say "just talk naturally in Adventure... try
+'I want to create a character'... check the pinned message" — generic
+onboarding tips with no connection to whatever the player actually
+asked. Now says the game's local AI is busy and to try asking again in
+a moment, which is both accurate and support-specific.
+
 ## [1.10.14] — Real skill-check proficiency, 5 more class features, character descriptions, a bestiary, and 3 live-reported misclassification fixes
 
 **Skill checks now apply proficiency bonus, for real.** Every skill

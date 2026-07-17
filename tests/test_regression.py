@@ -901,6 +901,25 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                      "what weapons do i have"]:
             self.assertEqual(_keyword_fallback(text, [])["action"], "check_inventory", text)
 
+    # -- Real live incident (2026-07-16): a Support question failed when
+    #    Ollama was transiently unreachable (contention from concurrent
+    #    dev-side model calls), and the fallback reply was generic
+    #    onboarding boilerplate unrelated to the actual question asked --
+    #    "just talk naturally in Adventure... check the pinned message".
+    #    Now says the AI is busy and to try again, which is both accurate
+    #    and support-specific. -------------------------------------------
+    def test_support_model_unreachable_fallback_is_specific_not_generic_onboarding(self):
+        import ai.support_agent as support_agent_module
+        from unittest.mock import patch
+        import requests
+
+        with patch("ai.support_agent.requests.post", side_effect=requests.RequestException("boom")), \
+             patch("ai.support_agent.time.sleep"):
+            answer = support_agent_module.answer_support_question("Where can I find a woodcutters axe?")
+        self.assertIn("busy", answer.lower())
+        self.assertIn("try asking again", answer.lower())
+        self.assertNotIn("pinned message", answer.lower())
+
     # -- Real live bug (2026-07-16): this model has a documented bias
     #    toward guessing "pass_turn" for phrasing it doesn't recognize --
     #    "I'll take a mug, ale!!! how are you doing old buddy?" (ordinary

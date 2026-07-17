@@ -501,7 +501,7 @@ def answer_support_question(
                 time.sleep(5)
 
     return (
-        "I couldn't reach the local model just now. In the meantime: just "
-        "talk naturally in Adventure — try 'I want to create a character' "
-        "to get started, or check the pinned message for more examples."
+        "The game's local AI is busy right now and couldn't answer that in "
+        "time — this happens under heavy load, not because anything's "
+        "broken. Please try asking again in a moment."
     )
