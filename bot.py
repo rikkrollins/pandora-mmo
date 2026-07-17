@@ -283,6 +283,12 @@ MAX_CHARACTER_DESCRIPTION_LENGTH = 500
 _PENDING_PRONOUNS: set[int] = set()
 MAX_PRONOUNS_LENGTH = 30
 
+# Presence/status note (task #144) -- unlike description/pronouns this
+# is always slash-command-driven (/note <text>), so it needs no pending-
+# prompt set: a bare /note with no args just shows the current note
+# instead of prompting for one.
+MAX_STATUS_NOTE_LENGTH = 60
+
 _ABILITY_NAMES = ("strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma")
 _ASI_AUTO_WORDS = ("auto", "automatically", "assign", "distribute", "do it for me")
 
@@ -863,6 +869,58 @@ def _get_combat_eligible_party_members(location_id: str) -> list[dict]:
         p for p in _get_party_members()
         if p["current_location"] == location_id and not p.get("is_inactive")
     ]
+
+
+def _presence_status(character: dict, now: datetime | None = None) -> str:
+    """
+    Derived presence (task #144), never stored as its own field -- it's
+    computed fresh from real state every time so it can never drift out
+    of sync with what actually governs it. Precedence: resting
+    (is_inactive) is a real mechanical state (see natural healing) and
+    wins over everything; do_not_disturb is the player's own explicit
+    choice and shows next; otherwise online/away is judged against
+    IDLE_WARNING_SECONDS -- the SAME threshold that already triggers
+    this game's idle warning (_check_idle_characters), so "still online"
+    here always agrees with what the idle system itself believes,
+    rather than inventing a second, possibly-contradictory threshold.
+    AI companions/NPCs have no real presence of their own; callers
+    should only ever call this for real (is_ai=0) characters.
+    """
+    if character.get("is_inactive"):
+        return "😴 Resting"
+    if character.get("do_not_disturb"):
+        return "🔕 Do Not Disturb"
+    last_active_at = character.get("last_active_at")
+    if not last_active_at:
+        return "🌙 Away"
+    try:
+        last_active = datetime.fromisoformat(last_active_at)
+    except (TypeError, ValueError):
+        return "🌙 Away"
+    now = now or datetime.now(timezone.utc)
+    idle_seconds = (now - last_active).total_seconds()
+    return "🟢 Online" if idle_seconds < IDLE_WARNING_SECONDS else "🌙 Away"
+
+
+def _online_party_members_elsewhere(location_id: str, exclude_ids: set[int]) -> list[dict]:
+    """
+    Real (non-AI) party members who are currently online (see
+    _presence_status), haven't opted into Do Not Disturb, and are
+    somewhere OTHER than location_id -- used by _do_start_combat's
+    join-a-fight nudge (task #144). Deliberately excludes resting
+    players even at other locations: resting is a real, chosen state,
+    not something a fight elsewhere should interrupt.
+    """
+    now = datetime.now(timezone.utc)
+    others = []
+    for p in _get_party_members():
+        if p.get("is_ai") or p["telegram_user_id"] in exclude_ids:
+            continue
+        if p["current_location"] == location_id or p.get("is_inactive") or p.get("do_not_disturb"):
+            continue
+        if _presence_status(p, now) == "🟢 Online":
+            others.append(p)
+    return others
 
 
 def _format_party_names(party: list[dict]) -> str:
@@ -1922,6 +1980,83 @@ async def _do_set_pronouns(update: Update, text: str, *, from_prompt: bool = Fal
     await _safe_send(update, f"✅ Pronouns saved for {character['name']}: {clean}")
 
 
+async def donotdisturb_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /donotdisturb (task #144): a real player-set flag, distinct from the
+    automatic online/away presence -- see _presence_status. With DND on,
+    a player's real online-ness is still tracked the same as ever, but
+    they're skipped by the combat-join nudge in _do_start_combat.
+    Bare command toggles; "/donotdisturb on"/"off" sets it explicitly.
+    """
+    user_id = update.effective_user.id
+    character = db.get_character(user_id)
+    if character is None:
+        await _safe_send(update, "You don't have a character yet!")
+        return
+
+    arg = context.args[0].lower() if context.args else None
+    if arg in ("on", "enable", "true"):
+        new_state = True
+    elif arg in ("off", "disable", "false"):
+        new_state = False
+    else:
+        new_state = not character.get("do_not_disturb")
+
+    db.set_do_not_disturb(user_id, new_state)
+    if new_state:
+        await _safe_send(update, "🔕 Do Not Disturb is now ON — you'll be skipped for join-a-fight nudges.")
+    else:
+        await _safe_send(update, "🔔 Do Not Disturb is now OFF.")
+
+
+async def _do_set_status_note(update: Update, note_text: str) -> None:
+    user_id = update.effective_user.id
+    character = db.get_character(user_id)
+    if character is None:
+        await _safe_send(update, "You don't have a character yet!")
+        return
+
+    clean = note_text.strip()
+    if not clean or clean.lower() in ("clear", "none", "remove", "delete"):
+        db.set_status_note(user_id, None)
+        await _safe_send(update, "Status note cleared.")
+        return
+
+    clean = " ".join(clean.split())[:MAX_STATUS_NOTE_LENGTH]
+    db.set_status_note(user_id, clean)
+    await _safe_send(update, f"✅ Status note set: \"{clean}\"")
+
+
+async def note_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /note <text> (task #144): a short, player-set status line shown
+    alongside presence in the party roster and character sheet (e.g.
+    "grinding the mines, back in 20"). Bare /note shows the current one
+    instead of prompting -- there's nothing to prompt for, this command
+    always carries its own argument.
+    """
+    text = " ".join(context.args) if context.args else ""
+    if not text:
+        character = db.get_character(update.effective_user.id)
+        if character is None:
+            await _safe_send(update, "You don't have a character yet!")
+            return
+        if character.get("status_note"):
+            await _safe_send(
+                update,
+                f"Your current status note: \"{character['status_note']}\"\n"
+                "Say \"/note clear\" to remove it, or \"/note <text>\" to change it.",
+            )
+        else:
+            await _safe_send(
+                update,
+                "You don't have a status note set. Use \"/note <text>\" to set one, "
+                "e.g. \"/note grinding the mines, back soon\".",
+            )
+        return
+    await _do_set_status_note(update, text)
+
+
 def _determine_winner(session: sessions.Session) -> str:
     """
     Returns 'party' or 'enemy' based on which side still has any member
@@ -2336,6 +2471,19 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             f"🎯 **Initiative order:** {initiative_line}\n\n"
             + _turn_announcement(session)
         )
+        # Combat-join nudge (task #144): real players elsewhere who are
+        # currently online and haven't opted into Do Not Disturb get
+        # named here so they know a fight just started and can travel
+        # in -- this is what presence actually feeds, per Coffee's
+        # backlog description. Resting players and anyone already in
+        # this fight are deliberately left out, same as DND.
+        nudge_targets = _online_party_members_elsewhere(
+            requester["current_location"], {p["telegram_user_id"] for p in party}
+        )
+        if nudge_targets:
+            names = ", ".join(p["name"] for p in nudge_targets)
+            location_name = cl.get_location(CAMPAIGN, requester["current_location"])["name"]
+            header += f"\n\n📢 {names} — a fight just broke out at **{location_name}**, come join if you can!"
         await _safe_send(update, header)
         await _resolve_ai_turns(update, session)
 
@@ -2680,12 +2828,31 @@ async def _do_recruit_npc(update: Update, npc_name: str) -> None:
         "constitution": stats["constitution"], "intelligence": stats["intelligence"],
         "wisdom": stats["wisdom"], "charisma": stats["charisma"],
     }
-    db.create_ai_companion(
+    companion = db.create_ai_companion(
         name=npc["name"], race=stats["race"], char_class=stats["char_class"],
         ability_scores=ability_scores, hp_max=stats["hp_max"],
         armor_class=stats["armor_class"], gold=stats["gold"],
         inventory=dict(stats["inventory"]),
     )
+
+    # Real bug found live (2026-07-17, Coffee: "if she is recruited she
+    # shud follow the party?"): a recruited companion was never actually
+    # attached to the recruiter's party_id, so _do_move (which only ever
+    # moves the acting player) silently left them behind at wherever
+    # create_ai_companion's schema default put them -- they'd stand
+    # still forever unless someone recruited them again. Attaching them
+    # to a real party_id here, plus the matching move-along block in
+    # _do_move below, is what actually makes "joins your party" true.
+    # Also moves them to the recruiter's CURRENT location immediately,
+    # since create_character's schema default location has nothing to
+    # do with where they were actually just recruited.
+    recruiter = db.get_character(update.effective_user.id)
+    if recruiter is not None:
+        party_id = recruiter.get("party_id")
+        if not party_id:
+            party_id = db.create_party(update.effective_user.id)
+        db.add_ai_companion_to_party(companion["telegram_user_id"], party_id)
+        db.move_character(companion["telegram_user_id"], recruiter["current_location"])
 
     await _safe_send(update, f"🤝 {npc['name']} joins your party! {_party_summary_text()}")
 
@@ -4227,7 +4394,17 @@ async def _do_check_party(update: Update, text: str = "") -> None:
         party_id = character.get("party_id")
         if party_id:
             members = db.get_party_members_by_id(party_id)
-            names = [f"{m['name']} (AI)" if m.get("is_ai") else m["name"] for m in members]
+            # Presence (task #144): real players show a live derived
+            # status + their own status note, if set; AI companions have
+            # no presence of their own, so they just get the plain "(AI)"
+            # tag they always had.
+            names = []
+            for m in members:
+                if m.get("is_ai"):
+                    names.append(f"{m['name']} (AI)")
+                    continue
+                note_suffix = f" — \"{m['status_note']}\"" if m.get("status_note") else ""
+                names.append(f"{m['name']} ({_presence_status(m)}){note_suffix}")
             lines.append(
                 f"\n🎗️ Your formed party ({len(members)}/{db.PARTY_MAX_MEMBERS}): {', '.join(names)}"
             )
@@ -4459,6 +4636,12 @@ def _format_character_sheet(character: dict) -> str:
     carried_gear_line = _format_carried_gear_line(character)
     pronouns_line = f"Pronouns: {character['pronouns']}\n" if character.get("pronouns") else ""
     description_line = f"\"{character['description']}\"\n" if character.get("description") else ""
+    # Presence (task #144): only real players have a meaningful status;
+    # AI companions/NPCs have no presence of their own.
+    presence_line = ""
+    if not character.get("is_ai"):
+        note_suffix = f" — \"{character['status_note']}\"" if character.get("status_note") else ""
+        presence_line = f"Status: {_presence_status(character)}{note_suffix}\n"
     # Real live bug (2026-07-16, Coffee): ability scores were only ever
     # shown once, in the one-off creation sheet -- this shared sheet
     # (used by every later "check my sheet"/Support/party-sheet lookup)
@@ -4471,6 +4654,7 @@ def _format_character_sheet(character: dict) -> str:
     return (
         f"{name_line} — {character['race']} {character['char_class']}\n"
         f"{pronouns_line}"
+        f"{presence_line}"
         f"{description_line}"
         f"Level {character['level']} | XP {character['xp']}\n"
         f"HP {character['hp_current']}/{character['hp_max']} | AC {character['armor_class']}\n"
@@ -6097,6 +6281,20 @@ async def _do_move(update: Update, text: str) -> None:
 
     db.move_character(update.effective_user.id, destination_id)
     db.mark_visited(update.effective_user.id, destination_id)
+
+    # Real bug found live (2026-07-17, Coffee): recruited companions
+    # (is_ai=1, is_autonomous=0) are supposed to be traveling WITH
+    # whoever recruited them, but this only ever moved the acting
+    # player -- companions just stood still forever. Only moves real
+    # recruited companions sharing this player's party_id; the
+    # hardcoded autonomous AI-played party (is_autonomous=1) roams and
+    # acts entirely on its own and must never be dragged around by a
+    # human's movement.
+    if character.get("party_id"):
+        for member in db.get_party_members_by_id(character["party_id"]):
+            if member.get("is_ai") and not member.get("is_autonomous") and member["telegram_user_id"] != update.effective_user.id:
+                db.move_character(member["telegram_user_id"], destination_id)
+
     # Per Coffee (2026-07-14): TTS coverage audit -- _do_move's primary
     # reply never went through _safe_send, so this (one of the most
     # common actions in the game) always silently skipped TTS.
@@ -7832,8 +8030,8 @@ Almost everything here is plain English, typed straight into Adventure -- no com
 • "Show me the map" (or /map)
 
 **Talking & people**
-• "Talk to Grimsby" / "Say hello to Sera" -- NPC conversation
-• "Recruit Sera to my party" -- add a real companion
+• "Talk to Grimsby" / "Say hello to Sarah" -- NPC conversation
+• "Recruit Sarah to my party" -- add a real companion
 • "Invite <player> to my party" / "Accept the invite" / "Leave the party"
 • "Join the Arcane Circle" (or whichever guild)
 
@@ -7862,6 +8060,8 @@ Almost everything here is plain English, typed straight into Adventure -- no com
 • "Level up" -- once you have XP to spend
 • "Set my description to ..."
 • /sheet, /newcharacter, /map, /leaderboard, /version, /changelog
+• /donotdisturb -- toggle DND so you're skipped for join-a-fight nudges
+• /note <text> -- set a short status note party members can see ("/note clear" removes it)
 
 Stuck? /hint suggests real things to try here, no spoilers. Reply to any narration with /help to get it explained. Stuck on something specific? Ask in Support -- it's grounded in this game's real items/spells/guilds, not general D&D trivia."""
 
@@ -9454,6 +9654,8 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("sheet", sheet_command))
     application.add_handler(CommandHandler("map", map_command))
     application.add_handler(CommandHandler("leaderboard", leaderboard_command))
+    application.add_handler(CommandHandler("donotdisturb", donotdisturb_command))
+    application.add_handler(CommandHandler("note", note_command))
     application.add_handler(CommandHandler("version", version_command))
     application.add_handler(CommandHandler("changelog", changelog_command))
     application.add_handler(CommandHandler("redo", redo_command))

@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.11] — Presence system (task #144) + recruited companions now actually follow you
+
+**New: presence/status (task #144).** Real, derived player status --
+🟢 Online / 🌙 Away / 😴 Resting / 🔕 Do Not Disturb -- shown in your
+party roster and character sheet. Resting (already a real mechanical
+state) always wins; Do Not Disturb is your own explicit choice
+(`/donotdisturb`, toggle or `on`/`off`); otherwise online/away uses the
+SAME 30-minute threshold that already drives this game's idle warning,
+so presence never contradicts what the idle system believes. `/note
+<text>` sets a short status line party members can see ("grinding the
+mines, back soon"); `/note clear` removes it; bare `/note` shows your
+current one.
+
+**New: combat-join nudge.** When a fight starts, real party members who
+are online elsewhere (not resting, not DND) are named in the combat
+header so they know to come join -- this is what presence actually
+feeds, per the original ask.
+
+**Real bug fixed, caught live (Coffee: "if she is recruited she shud
+follow the party?"):** recruiting a companion (e.g. Sarah) never
+actually attached them to the recruiter's real party_id, so `_do_move`
+-- which only ever moved the acting player -- silently left them
+standing wherever `create_ai_companion`'s schema default put them
+forever. Recruiting now attaches the companion to a real party and
+moves them to the recruiter's current location immediately; moving now
+brings along any real recruited companion (is_ai, NOT is_autonomous)
+sharing that party. The separate hardcoded autonomous AI-played party
+still roams entirely on its own, untouched.
+
 ## [1.11.10] — NPC rename: Sera -> Sarah
 
 Per Coffee (voice-to-text couldn't reliably say "Sera"): renamed the

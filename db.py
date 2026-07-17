@@ -290,6 +290,10 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN telegram_username TEXT")
         if "pronouns" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN pronouns TEXT")
+        if "do_not_disturb" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN do_not_disturb INTEGER NOT NULL DEFAULT 0")
+        if "status_note" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN status_note TEXT")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -1089,6 +1093,14 @@ def mark_inactive(telegram_user_id: int) -> dict | None:
 
 def mark_active(telegram_user_id: int) -> dict | None:
     return update_character(telegram_user_id, is_inactive=0)
+
+
+def set_do_not_disturb(telegram_user_id: int, enabled: bool) -> dict | None:
+    return update_character(telegram_user_id, do_not_disturb=1 if enabled else 0)
+
+
+def set_status_note(telegram_user_id: int, note: str | None) -> dict | None:
+    return update_character(telegram_user_id, status_note=note)
 
 
 def get_idle_real_characters() -> list[dict]:
