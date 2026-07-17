@@ -2264,6 +2264,37 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sheet = bot._format_character_sheet(character)
         self.assertNotIn('""', sheet)
 
+    # -- Real live bug (2026-07-16, Coffee): ability scores were only
+    #    ever shown once, on the one-off creation sheet -- the shared
+    #    sheet used by every later "check my sheet"/Support/party-sheet
+    #    lookup never included them at all. --------------------------
+    def test_character_sheet_shows_ability_scores(self):
+        user_id = 900515
+        character = make_basic_character(user_id, "Statted")
+        sheet = bot._format_character_sheet(character)
+        self.assertIn("STR 15", sheet)
+        self.assertIn("DEX 14", sheet)
+        self.assertIn("CON 13", sheet)
+        self.assertIn("WIS 10", sheet)
+        self.assertIn("CHA 10", sheet)
+
+    # -- Per Coffee (2026-07-16): pending ASI points should be flagged at
+    #    the BOTTOM of the sheet, so a player who missed the level-up
+    #    prompt still sees it waiting every time they check their sheet.
+    def test_character_sheet_shows_pending_asi_points_at_the_bottom(self):
+        user_id = 900516
+        make_basic_character(user_id, "Leveled")
+        character = db.update_character(user_id, pending_asi_points=2)
+        sheet = bot._format_character_sheet(character)
+        lines = [line for line in sheet.split("\n") if line.strip()]
+        self.assertIn("ability point(s) waiting to be spent", lines[-1])
+
+    def test_character_sheet_no_asi_line_when_nothing_pending(self):
+        user_id = 900517
+        character = make_basic_character(user_id, "NotLeveled")
+        sheet = bot._format_character_sheet(character)
+        self.assertNotIn("ability point(s) waiting to be spent", sheet)
+
     # -- Bestiary / monster compendium (2026-07-16, per Coffee's backlog) --
     async def test_bestiary_is_empty_before_any_fight(self):
         user_id = 900513

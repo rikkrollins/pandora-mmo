@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.10.16] — Character sheet: ability scores were missing, pending level-up now flagged at the bottom
+
+Live-reported by Coffee: ability scores (STR/DEX/CON/INT/WIS/CHA) were
+only ever shown once, on the one-off sheet printed right after
+character creation — every later "check my sheet" (and Support's
+character-sheet lookup, and party-sheet views) used a different,
+shared formatter that never included them at all. Now shown on every
+sheet view. Also, per Coffee's request: a character with unspent
+Ability Score Improvement points (banked at levels 4/8/12/16/19) now
+gets that flagged as the LAST line of their sheet rather than buried
+mid-sheet, so a player who missed the original level-up prompt still
+sees it waiting every single time they check their sheet.
+
 ## [1.10.15] — Support's "model unreachable" fallback is now specific, not generic onboarding
 
 Live-observed 2026-07-16: when the Support topic's Ollama call fails or

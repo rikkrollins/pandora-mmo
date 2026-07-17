@@ -4322,11 +4322,21 @@ def _format_character_sheet(character: dict) -> str:
     equipped_line = _format_equipped_line(character)
     carried_gear_line = _format_carried_gear_line(character)
     description_line = f"\"{character['description']}\"\n" if character.get("description") else ""
+    # Real live bug (2026-07-16, Coffee): ability scores were only ever
+    # shown once, in the one-off creation sheet -- this shared sheet
+    # (used by every later "check my sheet"/Support/party-sheet lookup)
+    # never included them at all.
+    ability_line = (
+        f"STR {character['strength']} DEX {character['dexterity']} "
+        f"CON {character['constitution']} INT {character['intelligence']} "
+        f"WIS {character['wisdom']} CHA {character['charisma']}\n"
+    )
     return (
         f"{name_line} — {character['race']} {character['char_class']}\n"
         f"{description_line}"
         f"Level {character['level']} | XP {character['xp']}\n"
         f"HP {character['hp_current']}/{character['hp_max']} | AC {character['armor_class']}\n"
+        f"{ability_line}"
         f"Gold: {character['gold']} | Guild: {character.get('guild') or 'None'}\n"
         f"{equipped_line}"
         f"{carried_gear_line}"
@@ -4336,9 +4346,12 @@ def _format_character_sheet(character: dict) -> str:
         f"Class features: {'; '.join(features) if features else 'None'}\n"
         f"{feature_use_line}"
         f"{skills_line}"
+        f"Location: {cl.get_location(CAMPAIGN, character['current_location'])['name']}\n"
+        # Per Coffee (2026-07-16): pending ASI points shown last, so a
+        # player who missed the level-up prompt still sees it waiting
+        # every time they check their sheet, not just buried mid-sheet.
         f"{asi_line}"
-        f"Location: {cl.get_location(CAMPAIGN, character['current_location'])['name']}"
-    )
+    ).rstrip("\n")
 
 
 async def _do_check_sheet(update: Update, target_name: str | None = None) -> None:
