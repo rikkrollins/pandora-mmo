@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.4] — Board quests stuck across a calendar-day boundary
+
+**Real live bugs fixed (tasks #149, #150), reported by Coffee with a
+screenshot showing "A supply run for Wood — 0/4" despite having
+gathered the right amount.** Confirmed via a read-only query on the
+live DB: the quest was accepted the night before (day_key from the
+previous calendar day) and was still within its real 24h `expires_at`
+window, but every crediting/turn-in call site
+(`_do_gather`, combat's `defeat_monster` crediting,
+`_check_board_quest_turnin`) matched against
+`board_quests_module.get_todays_board_quests(location_id)`, which
+filters strictly by *today's* day_key -- so a quest accepted on a
+previous day silently dropped out of the set anything could credit
+against, even though `check_quests` correctly still showed it as
+accepted (a separate, non-day-scoped query). All three call sites now
+match against the player's (or, for combat, the location's) real
+accepted-quest list instead, so a quest stays creditable for its whole
+real 24h window regardless of calendar-day rollover. Added
+`db.get_accepted_board_quests_at_location` for the location-scoped
+combat case.
+
+**Second bug on the same report:** once a board quest was accepted,
+its description disappeared from every view -- `check_quests` and
+`format_board_listing` only ever showed a title and a bare progress
+fraction, never what to actually do. That's why "read the quest
+details for wood" came back empty. Both listings now keep showing the
+description after acceptance.
+
+Verified end-to-end through the real handlers (`_do_gather`,
+`_do_check_quests`): a quest reconstructed with yesterday's day_key
+now gets credited, its description shows up, and
+`get_accepted_board_quests_at_location` correctly scopes by location
+(excludes completed quests, doesn't leak across locations).
+
 ## [1.11.3] — Fix "database is locked" errors under concurrent load
 
 **Real live bug fixed (task #148):** `bot_live_tmp.log` showed 5 real

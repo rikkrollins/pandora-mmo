@@ -1352,6 +1352,29 @@ def get_accepted_board_quests_for_user(telegram_user_id: int) -> list[dict]:
     return [_board_quest_row_to_dict(r) for r in rows]
 
 
+def get_accepted_board_quests_at_location(location_id: str) -> list[dict]:
+    """
+    Every currently-accepted, not-yet-completed board quest at this
+    location, regardless of which day it was posted/accepted (task #149,
+    2026-07-17: get_active_board_quests's day_key filter meant a quest
+    accepted yesterday but still within its real 24h expires_at window
+    silently dropped out of crediting once the calendar day rolled over
+    -- gathering/killing had nothing left to match against even though
+    the quest was still legitimately accepted and shown to the player).
+    Unlike get_accepted_board_quests_for_user, scoped by location instead
+    of by player, since combat crediting isn't tied to one specific
+    acceptor -- any accepted quest at the party's location can be fed by
+    the kill.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM board_quests WHERE location_id = ? "
+            "AND accepted_by IS NOT NULL AND completed_at IS NULL",
+            (location_id,),
+        ).fetchall()
+    return [_board_quest_row_to_dict(r) for r in rows]
+
+
 def expire_stale_board_quests() -> list[dict]:
     """
     Releases any accepted-but-not-completed board quest whose 24h

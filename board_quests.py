@@ -315,10 +315,14 @@ def format_board_listing(board_quest: dict) -> str:
         return f"📜 **{board_quest['title']}**\n{setup}\nPossible rewards: {choice_rewards}.{giver_line}"
 
     if board_quest.get("accepted_by"):
+        # Task #150, 2026-07-17: this used to drop the description
+        # entirely once accepted -- the one place a player would look
+        # for "what do I actually need to do" went blank right after
+        # accepting, exactly when they'd need it most.
         progress = f"{board_quest['progress_count']}/{board_quest['objective_count']}"
         return (
-            f"📜 **{board_quest['title']}** ({progress}) — already accepted by a party, "
-            f"expires within 24h if not finished."
+            f"📜 **{board_quest['title']}** ({progress})\n{board_quest['description']}\n"
+            f"Already accepted by a party, expires within 24h if not finished."
         )
     giver_line = f" Ask at: {board_quest['giver_npc'].replace('_', ' ').title()}." if board_quest.get("giver_npc") else ""
     return (

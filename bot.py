@@ -1636,9 +1636,10 @@ def _award_victory_xp(session: sessions.Session) -> str:
 
     board_notes = []
     if event_location:
-        for board_quest in board_quests_module.get_todays_board_quests(event_location):
-            if not (board_quest.get("accepted_by") and not board_quest.get("completed_at")
-                    and board_quest["objective_type"] == "defeat_monster"):
+        # Location-scoped, not day_key-scoped (task #149, 2026-07-17) --
+        # see get_accepted_board_quests_at_location's docstring.
+        for board_quest in db.get_accepted_board_quests_at_location(event_location):
+            if board_quest["objective_type"] != "defeat_monster":
                 continue
             defeated_matching = sum(
                 1 for p in session.participants
@@ -3661,9 +3662,11 @@ async def _check_board_quest_turnin(update_like, telegram_user_id: int, location
     Deliberately skips branch_data quests: those are resolved through
     the separate _do_resolve_quest_choice flow, not a location arrival.
     """
-    for board_quest in board_quests_module.get_todays_board_quests(location_id):
-        if not (board_quest.get("accepted_by") == telegram_user_id
-                and not board_quest.get("completed_at")
+    # Player-scoped, not day_key-scoped (task #149, 2026-07-17) -- a
+    # quest accepted on a previous calendar day but still inside its
+    # real 24h expires_at window must still be turn-in-able.
+    for board_quest in db.get_accepted_board_quests_for_user(telegram_user_id):
+        if not (board_quest["location_id"] == location_id
                 and not board_quest.get("branch_data")
                 and board_quest["progress_count"] >= board_quest["objective_count"]):
             continue
@@ -3987,8 +3990,14 @@ async def _do_check_quests(update: Update) -> None:
             if bq.get("branch_data") and bq["progress_count"] >= bq["objective_count"]:
                 lines.append(f"• {bq['title']} ({bq_location_name}) — ready to decide, say which choice you want")
             else:
+                # Task #150, 2026-07-17: this line used to be the ONLY
+                # place a player saw an accepted board quest, and it
+                # never showed what the quest actually asked for --
+                # just a title and a bare progress fraction. Showing
+                # the description here is exactly what "what do I need
+                # to do for this quest" needs.
                 progress = f"{bq['progress_count']}/{bq['objective_count']}"
-                lines.append(f"• {bq['title']} ({bq_location_name}) — {progress}")
+                lines.append(f"• {bq['title']} ({bq_location_name}) — {progress}\n  {bq['description']}")
 
     location_id = character["current_location"]
     location = cl.get_location(CAMPAIGN, location_id)
@@ -4609,8 +4618,13 @@ async def _do_gather(update: Update, action_text: str) -> None:
     if success:
         message += f"\n🌿 **{character['name']}** gathers **{quantity}x {material['name']}**."
 
-        for board_quest in board_quests_module.get_todays_board_quests(character["current_location"]):
-            if not (board_quest.get("accepted_by") and not board_quest.get("completed_at")
+        # Matches against this player's own accepted board quests (task
+        # #149, 2026-07-17), not get_todays_board_quests -- a quest
+        # accepted on a previous calendar day but still inside its real
+        # 24h expires_at window must still be creditable; day_key is
+        # only about what's currently postable, not what's still valid.
+        for board_quest in db.get_accepted_board_quests_for_user(update.effective_user.id):
+            if not (board_quest["location_id"] == character["current_location"]
                     and board_quest["objective_type"] == "gather_material"
                     and board_quest["objective_target"] == node["material"]):
                 continue
