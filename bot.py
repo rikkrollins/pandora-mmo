@@ -4583,7 +4583,7 @@ async def _do_gather(update: Update, action_text: str) -> None:
     missing_tools = _missing_tools_for_gathering(character, skill_key)
     if missing_tools:
         await update.effective_chat.send_message(
-            f"🌿 You need {' and '.join(missing_tools)} to do that — you don't have "
+            f"🌿 **{character['name']}** needs {' and '.join(missing_tools)} to do that — doesn't have "
             f"{'them' if len(missing_tools) > 1 else 'one'} yet. Check a shop.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
@@ -5481,14 +5481,19 @@ async def _do_look(update: Update) -> None:
     location = cl.get_location(CAMPAIGN, character["current_location"])
     if location is None:
         await update.effective_chat.send_message(
-            "You seem to be nowhere in particular. That's... concerning.",
+            f"**{character['name']}** seems to be nowhere in particular. That's... concerning.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
 
     db.mark_visited(update.effective_user.id, character["current_location"])
 
-    lines = [f"📍 **{location['name']}** ({location['layer']})", location["description"]]
+    # Names the looker (task #139, 2026-07-17): in a shared chat, a bare
+    # "📍 Location Name" reply doesn't say WHO just looked around --
+    # same ambiguous-actor problem already fixed for combat/skill-check
+    # narration (#107/#115), just never applied to this deterministic
+    # (non-AI) reply path.
+    lines = [f"👁️ **{character['name']}** looks around.", f"📍 **{location['name']}** ({location['layer']})", location["description"]]
     npcs_here = _npcs_at_location(character["current_location"])
     if npcs_here:
         npc_names = [cl.get_npc(CAMPAIGN, n)["name"] for n in npcs_here if cl.get_npc(CAMPAIGN, n)]
@@ -5629,7 +5634,7 @@ async def _do_examine(update: Update, target_text: str) -> None:
     location = cl.get_location(CAMPAIGN, character["current_location"])
     if location is None:
         await update.effective_chat.send_message(
-            "You seem to be nowhere in particular. That's... concerning.",
+            f"**{character['name']}** seems to be nowhere in particular. That's... concerning.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
@@ -5859,7 +5864,7 @@ async def _do_move(update: Update, text: str) -> None:
             return
         reachable_names = ", ".join(cl.get_location(CAMPAIGN, r)["name"] for r in reachable)
         await update.effective_chat.send_message(
-            f"You can't get there directly from {current['name']}. "
+            f"**{character['name']}** can't get there directly from {current['name']}. "
             f"From here you can reach: {reachable_names}",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
@@ -5868,7 +5873,7 @@ async def _do_move(update: Update, text: str) -> None:
     destination = cl.get_location(CAMPAIGN, destination_id)
     if destination.get("requires_item") and destination["requires_item"] not in character["inventory"]:
         await update.effective_chat.send_message(
-            "Something stops you from going any further — you're missing something you'd need first.",
+            f"Something stops **{character['name']}** from going any further — missing something needed first.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
@@ -6088,36 +6093,31 @@ async def _do_give_item(update: Update, text: str) -> None:
     ) or next((p for p in candidates if p["name"].lower() in lowered), None)
     if recipient is None:
         await update.effective_chat.send_message(
-            "Give it to whom? Name someone real who's actually here with you.",
+            f"**{character['name']}**: give it to whom? Name someone real who's actually here with you.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
 
-    item_id = items_module.find_item_mentioned_in_text(text, candidate_ids=list(character["inventory"].keys()))
-    if item_id is None:
+    items_wanted = _extract_item_list(text, list(character["inventory"].keys()))
+    if not items_wanted:
         await update.effective_chat.send_message(
             f"Give {recipient['name']} what, exactly? Name something you're actually carrying.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
 
-    quantity = _extract_quantity(text)
-    removed, _ = db.remove_item(update.effective_user.id, item_id, quantity)
-    if not removed:
-        have = character["inventory"].get(item_id, 0)
-        await update.effective_chat.send_message(
-            f"You don't have {quantity}x {items_module.get_item(item_id)['name']} to give"
-            f" — you only have {have}.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
-        )
-        return
+    given = []
+    for item_id, quantity in items_wanted:
+        removed, _ = db.remove_item(update.effective_user.id, item_id, quantity)
+        item_name = items_module.get_item(item_id)["name"]
+        if not removed:
+            have = character["inventory"].get(item_id, 0)
+            given.append(f"You don't have {quantity}x {item_name} to give — you only have {have}.")
+            continue
+        db.add_item(recipient["telegram_user_id"], item_id, quantity)
+        given.append(f"🤝 **{character['name']}** gives {quantity}x {item_name} to **{recipient['name']}**.")
 
-    db.add_item(recipient["telegram_user_id"], item_id, quantity)
-    item_name = items_module.get_item(item_id)["name"]
-    await _safe_send(
-        update,
-        f"🤝 **{character['name']}** gives {quantity}x {item_name} to **{recipient['name']}**.",
-    )
+    await _safe_send(update, "\n".join(given))
 
 
 async def _do_use_item(update: Update, text: str) -> None:
@@ -6239,8 +6239,8 @@ async def _do_equip_item(update: Update, text: str) -> None:
         item_id for item_id in target["inventory"]
         if (items_module.get_item(item_id) or {}).get("type") in ("weapon", "armor", "shield", "ring", "amulet", "wondrous")
     ]
-    item_id = items_module.find_item_mentioned_in_text(text, candidate_ids=equippable_ids)
-    if item_id is None:
+    items_wanted = _extract_item_list(text, equippable_ids)
+    if not items_wanted:
         who = "you" if target is character else target["name"]
         await update.effective_chat.send_message(
             f"Equip what, exactly? Name a weapon, armor, shield, ring, amulet, or wondrous item "
@@ -6249,12 +6249,12 @@ async def _do_equip_item(update: Update, text: str) -> None:
         )
         return
 
-    success, message, _ = db.equip_item(target["telegram_user_id"], item_id)
-    if not success:
-        await update.effective_chat.send_message(message, message_thread_id=config.TOPIC_ADVENTURE_ID)
-        return
     prefix = "" if target is character else f"**{target['name']}**: "
-    await _safe_send(update, f"⚔️ {prefix}{message}")
+    lines = []
+    for item_id, _quantity in items_wanted:
+        success, message, _ = db.equip_item(target["telegram_user_id"], item_id)
+        lines.append(f"⚔️ {prefix}{message}" if success else message)
+    await _safe_send(update, "\n".join(lines))
 
 
 async def _do_auto_equip_gear(update: Update, text: str) -> None:
@@ -6292,6 +6292,37 @@ _QUANTITY_WORDS = {
     "one": 1, "couple": 2, "two": 2, "three": 3, "four": 4,
     "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
 }
+
+
+_ITEM_LIST_SPLIT_PATTERN = re.compile(r",\s*(?:and\s+)?|\s+and\s+")
+
+
+def _extract_item_list(text: str, candidate_ids: list[str]) -> list[tuple[str, int]]:
+    """
+    Real fix for task #147 (2026-07-17, live-confirmed by Coffee):
+    "Buy 10 torches, 1 shears, 1 pickaxe, 1 fishing pole, 5 bait." used
+    to only ever buy the torches -- find_item_mentioned_in_text and
+    _extract_quantity each only ever resolve ONE match for a whole
+    message, and ai/intent_parser.py's compound-message splitter used
+    to mis-route the other bare "<qty> <item>" segments into unrelated
+    actions (one even misfired as "gather" -- "1 pickaxe" contains
+    "pick"). parse_intents now keeps a shopping-list message as ONE
+    action instead of splitting it; this is the other half -- splitting
+    the raw text into per-item phrases the same way a shopping list
+    reads, and resolving each phrase's own item + quantity independently
+    so every item actually named gets processed, not just the first.
+    A plain single-item message (no comma/"and") is one "phrase" and
+    behaves exactly as before.
+    """
+    phrases = [p.strip() for p in _ITEM_LIST_SPLIT_PATTERN.split(text) if p.strip()]
+    pairs: list[tuple[str, int]] = []
+    for phrase in phrases:
+        item_id = items_module.find_item_mentioned_in_text(phrase, candidate_ids=candidate_ids)
+        if item_id is None:
+            continue
+        quantity = _extract_quantity(phrase)
+        pairs.append((item_id, quantity))
+    return pairs
 
 
 def _extract_quantity(text: str) -> int:
@@ -6367,17 +6398,30 @@ async def _do_buy(update: Update, text: str) -> None:
         return
     shop_data = cl.get_shop(CAMPAIGN, shop_id)
 
-    item_id = items_module.find_item_mentioned_in_text(text, candidate_ids=shop_data["inventory"])
-    if item_id is None:
+    items_wanted = _extract_item_list(text, shop_data["inventory"])
+    if not items_wanted:
         await update.effective_chat.send_message(
             "Not sure what item you mean — try naming it more directly.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
 
-    quantity = _extract_quantity(text)
-    ok, msg = shop_module.buy_item(update.effective_user.id, shop_data, item_id, quantity)
-    await _safe_send(update, msg)
+    # Names the buyer explicitly (task #139, 2026-07-17, per Coffee):
+    # "Bought 10x Torch for 10 gold" reads fine in a 1:1 test but is
+    # genuinely ambiguous the moment more than one player is shopping in
+    # the same busy chat -- same "who does 'you' mean" problem already
+    # fixed for combat/skill-check narration (#107/#115).
+    if len(items_wanted) == 1:
+        item_id, quantity = items_wanted[0]
+        ok, msg = shop_module.buy_item(update.effective_user.id, shop_data, item_id, quantity)
+        await _safe_send(update, f"🛒 **{character['name']}**: {msg}")
+        return
+
+    lines = []
+    for item_id, quantity in items_wanted:
+        ok, msg = shop_module.buy_item(update.effective_user.id, shop_data, item_id, quantity)
+        lines.append(msg)
+    await _safe_send(update, f"🛒 **{character['name']}**:\n" + "\n".join(lines))
 
 
 async def _do_sell(update: Update, text: str) -> None:
@@ -6388,16 +6432,25 @@ async def _do_sell(update: Update, text: str) -> None:
         )
         return
 
-    item_id = items_module.find_item_mentioned_in_text(text, candidate_ids=list(character["inventory"].keys()))
-    if item_id is None or item_id not in character["inventory"]:
+    items_wanted = _extract_item_list(text, list(character["inventory"].keys()))
+    items_wanted = [(item_id, qty) for item_id, qty in items_wanted if item_id in character["inventory"]]
+    if not items_wanted:
         await update.effective_chat.send_message(
             "You're not carrying anything by that name.", message_thread_id=config.TOPIC_ADVENTURE_ID
         )
         return
 
-    quantity = _extract_quantity(text)
-    ok, msg = shop_module.sell_item(update.effective_user.id, item_id, quantity)
-    await _safe_send(update, msg)
+    if len(items_wanted) == 1:
+        item_id, quantity = items_wanted[0]
+        ok, msg = shop_module.sell_item(update.effective_user.id, item_id, quantity)
+        await _safe_send(update, f"🛒 **{character['name']}**: {msg}")
+        return
+
+    lines = []
+    for item_id, quantity in items_wanted:
+        ok, msg = shop_module.sell_item(update.effective_user.id, item_id, quantity)
+        lines.append(msg)
+    await _safe_send(update, f"🛒 **{character['name']}**:\n" + "\n".join(lines))
 
 
 async def _do_steal(update: Update, text: str) -> None:
@@ -7034,12 +7087,19 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # malicious players") get zero engagement -- checked before any
     # other processing, including touch_last_active, so a ban is a real
     # dead end, not just a quieter version of playing.
-    if db.is_banned(update.effective_user.id):
+    if await asyncio.to_thread(db.is_banned, update.effective_user.id):
         return
 
     global _LAST_KNOWN_CHAT_ID
     _LAST_KNOWN_CHAT_ID = update.effective_chat.id
-    db.touch_last_active(update.effective_user.id)
+    # asyncio.to_thread (2026-07-17, task #146): db.py's sqlite calls are
+    # all synchronous, and this is a single-threaded asyncio event loop --
+    # a slow disk write here used to freeze EVERY handler for every
+    # player, not just this one. Confirmed live: an ordinary "look
+    # around" took ~14s post-deploy with zero getUpdates logged during
+    # the gap, i.e. the whole loop was blocked on these two writes, not
+    # on anything AI/classification-related.
+    await asyncio.to_thread(db.touch_last_active, update.effective_user.id)
     # getattr, not .username directly (2026-07-17, real live bug just
     # caught): AI companions' autonomous turns route through this exact
     # handler via a synthetic _AiPlayerUpdate whose _User stand-in only
@@ -7047,7 +7107,9 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # every AI companion's turn with AttributeError the moment this
     # line shipped, confirmed live ("Zara Windrift's autonomous turn
     # raised: AttributeError").
-    db.update_telegram_username(update.effective_user.id, getattr(update.effective_user, "username", None))
+    await asyncio.to_thread(
+        db.update_telegram_username, update.effective_user.id, getattr(update.effective_user, "username", None)
+    )
     _IDLE_WARNED.discard(update.effective_user.id)
 
     # Universal escape hatch, checked FIRST, before any stateful flow gets
@@ -8381,7 +8443,7 @@ def _wants_sheet_names(question: str) -> list[str]:
 
 
 async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if db.is_banned(update.effective_user.id):
+    if await asyncio.to_thread(db.is_banned, update.effective_user.id):
         return
     question = update.message.text.strip()
     _LAST_TOPIC_MESSAGE[(update.effective_chat.id, config.TOPIC_SUPPORT_ID)] = {

@@ -133,42 +133,34 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         for text in ("Who's in my party?", "who is in my party", "party members"):
             self.assertEqual(_keyword_fallback(text, [])["action"], "check_party", text)
 
-    # -- Combat scoped to the fight's real location (post-1.8.3) -------
-    async def test_combat_excludes_characters_at_a_different_location(self):
-        import sessions
-        sessions.end_session(-999)  # tests share chat_id -999 -- don't inherit another test's session
+    # -- Combat-scoping logic (post-1.8.3), tested WITHOUT starting a
+    #    real combat session (see SlowLiveTests for that version) -------
+    #    Real live bug (2026-07-17, task #145): these two used to call
+    #    bot.adventure_master_handler with "Let's start a fight", which
+    #    genuinely starts combat and triggers a real Ollama narration
+    #    call -- a real live suite run measured this single test at
+    #    290s, despite this class's own docstring promising "no Ollama
+    #    calls." Moved the full-handler version of both to SlowLiveTests
+    #    (test_combat_excludes_characters_at_a_different_location_full,
+    #    test_combat_excludes_resting_characters_full); these two now
+    #    exercise the exact same location/rest filtering logic directly
+    #    against _get_combat_eligible_party_members, so the FastRegressionTests
+    #    guarantee holds again without losing coverage of the filter itself.
+    def test_combat_excludes_characters_at_a_different_location(self):
         tavern_id, wood_id = 444444, 555555
         make_basic_character(tavern_id, "Elduinn", current_location="crossroads_tavern")
         make_basic_character(wood_id, "Roric", current_location="whispering_wood")
+        eligible_ids = {p["telegram_user_id"] for p in bot._get_combat_eligible_party_members("whispering_wood")}
+        self.assertIn(wood_id, eligible_ids)
+        self.assertNotIn(tavern_id, eligible_ids)
 
-        sink = []
-        await bot.adventure_master_handler(
-            FakeUpdate(wood_id, "Let's start a fight", sink), DummyContext())
-
-        session = sessions.get_session(-999)
-        self.assertIsNotNone(session)
-        participant_ids = {p["telegram_user_id"] for p in session.participants}
-        self.assertIn(wood_id, participant_ids)
-        self.assertNotIn(tavern_id, participant_ids)
-        sessions.end_session(-999)
-
-    async def test_combat_excludes_resting_characters(self):
-        import sessions
-        sessions.end_session(-999)
+    def test_combat_excludes_resting_characters(self):
         wood_id, resting_id = 666666, 777777
         make_basic_character(wood_id, "Roric2", current_location="whispering_wood")
         make_basic_character(resting_id, "Snorri", current_location="whispering_wood")
         db.update_character(resting_id, is_inactive=1)
-
-        sink = []
-        await bot.adventure_master_handler(
-            FakeUpdate(wood_id, "Let's start a fight", sink), DummyContext())
-
-        session = sessions.get_session(-999)
-        self.assertIsNotNone(session)
-        participant_ids = {p["telegram_user_id"] for p in session.participants}
-        self.assertNotIn(resting_id, participant_ids)
-        sessions.end_session(-999)
+        eligible_ids = {p["telegram_user_id"] for p in bot._get_combat_eligible_party_members("whispering_wood")}
+        self.assertNotIn(resting_id, eligible_ids)
 
     # -- Gathering verb coverage (v1.7.6) ------------------------------
     def test_gather_covers_every_skill_verb(self):
@@ -2459,6 +2451,51 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("player's own character", sink[-1])
         self.assertNotIn("Player'S", sink[-1])
 
+    # -- Real live bug (2026-07-17, Coffee, task #147): "Buy 10 torches,
+    #    1 shears, 1 pickaxe, 1 fishing pole, 5 bait." only ever bought
+    #    the torches -- every item after the first either fell through
+    #    to "chat" or, worse, false-fired on unrelated vocabulary ("1
+    #    pickaxe" contains "pick", matching the gather fallback's bare-
+    #    "pick" rule). Fixed in ai/intent_parser.py's parse_intents
+    #    (keeps a shopping-list message as ONE action) and bot.py's new
+    #    _extract_item_list (resolves every item + its own quantity).
+    async def test_multi_item_buy_purchases_every_item_not_just_the_first(self):
+        user_id = 900521
+        make_basic_character(user_id, "Ravenloft", current_location="market_row", gold=500)
+        sink = []
+        await bot._do_buy(
+            FakeUpdate(user_id, "", sink),
+            "Buy 10 torches, 1 shears, 1 pickaxe, 1 fishing pole, 5 bait.",
+        )
+        char = db.get_character(user_id)
+        self.assertEqual(char["inventory"].get("torch"), 10)
+        self.assertEqual(char["inventory"].get("shears"), 1)
+        self.assertEqual(char["inventory"].get("pickaxe"), 1)
+        self.assertEqual(char["inventory"].get("fishing_pole"), 1)
+        self.assertEqual(char["inventory"].get("bait"), 5)
+
+    async def test_single_item_buy_still_works_after_the_multi_item_fix(self):
+        user_id = 900522
+        make_basic_character(user_id, "Solo", current_location="market_row", gold=100)
+        sink = []
+        await bot._do_buy(FakeUpdate(user_id, "", sink), "buy a healing potion")
+        char = db.get_character(user_id)
+        self.assertEqual(char["inventory"].get("healing_potion"), 1)
+
+    async def test_multi_item_give_hands_over_every_named_item(self):
+        giver_id, recipient_id = 900523, 900524
+        make_basic_character(giver_id, "Giver", current_location="market_row")
+        make_basic_character(recipient_id, "Receiver", current_location="market_row")
+        db.add_item(giver_id, "torch", 5)
+        db.add_item(giver_id, "shears", 2)
+        sink = []
+        await bot._do_give_item(FakeUpdate(giver_id, "", sink), "give 3 torches and 2 shears to Receiver")
+        giver = db.get_character(giver_id)
+        recipient = db.get_character(recipient_id)
+        self.assertEqual(giver["inventory"].get("torch"), 2)
+        self.assertEqual(recipient["inventory"].get("torch"), 3)
+        self.assertEqual(recipient["inventory"].get("shears"), 2)
+
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
     """
@@ -2471,6 +2508,42 @@ class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         use_test_db("tests/tmp/regression_slow.db")
+
+    async def test_combat_excludes_characters_at_a_different_location_full(self):
+        import sessions
+        sessions.end_session(-999)  # tests share chat_id -999 -- don't inherit another test's session
+        tavern_id, wood_id = 444445, 555556
+        make_basic_character(tavern_id, "Elduinn2", current_location="crossroads_tavern")
+        make_basic_character(wood_id, "Roric3", current_location="whispering_wood")
+
+        sink = []
+        await bot.adventure_master_handler(
+            FakeUpdate(wood_id, "Let's start a fight", sink), DummyContext())
+
+        session = sessions.get_session(-999)
+        self.assertIsNotNone(session)
+        participant_ids = {p["telegram_user_id"] for p in session.participants}
+        self.assertIn(wood_id, participant_ids)
+        self.assertNotIn(tavern_id, participant_ids)
+        sessions.end_session(-999)
+
+    async def test_combat_excludes_resting_characters_full(self):
+        import sessions
+        sessions.end_session(-999)
+        wood_id, resting_id = 666667, 777778
+        make_basic_character(wood_id, "Roric4", current_location="whispering_wood")
+        make_basic_character(resting_id, "Snorri2", current_location="whispering_wood")
+        db.update_character(resting_id, is_inactive=1)
+
+        sink = []
+        await bot.adventure_master_handler(
+            FakeUpdate(wood_id, "Let's start a fight", sink), DummyContext())
+
+        session = sessions.get_session(-999)
+        self.assertIsNotNone(session)
+        participant_ids = {p["telegram_user_id"] for p in session.participants}
+        self.assertNotIn(resting_id, participant_ids)
+        sessions.end_session(-999)
 
     async def test_attack_auto_starts_combat_against_a_real_monster(self):
         user_id = 111111

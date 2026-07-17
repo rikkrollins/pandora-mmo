@@ -2,6 +2,49 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.2] — Multi-item shop/give commands, event-loop blocking fix, unnamed replies
+
+**Real live bug fixed (task #147):** "Buy 10 torches, 1 shears, 1 pickaxe,
+1 fishing pole, 5 bait." only ever bought the torches — every item after
+the first either silently dropped or, worse, false-fired as an unrelated
+action ("1 pickaxe" contains "pick", matching the gather fallback's bare-
+"pick" rule meant for "pick the herbs"). `ai/intent_parser.py`'s
+`parse_intents` now recognizes a shopping-list-style message (buy, sell,
+give, or equip followed by a comma/"and"-separated item list) and keeps
+it as ONE action instead of splitting it into several; a new
+`_extract_item_list` in `bot.py` resolves every item and its own quantity
+from the combined text. `_do_buy`, `_do_sell`, `_do_give_item`, and
+`_do_equip_item` all now process every item named, not just the first.
+Verified live-reported case exactly, plus single-item purchases
+(unaffected) and existing multi-action compound messages (still split
+correctly).
+
+**Event-loop blocking fix (task #146):** every message in Adventure was
+paying for two synchronous SQLite writes (`db.touch_last_active`,
+`db.update_telegram_username`) and a read (`db.is_banned`) directly on
+the single-threaded asyncio event loop — under real disk contention this
+froze the ENTIRE bot for EVERY player, not just the one who triggered it
+(confirmed live: an ordinary "look around" took ~14s post-1.11.0 deploy
+with zero `getUpdates` logged during the gap). Wrapped all three in
+`asyncio.to_thread` in both `adventure_master_handler` and
+`support_topic_handler`.
+
+**Several deterministic replies now name the acting character** (task
+#139), matching the same "who does 'you' mean" fix already shipped for
+combat/skill-check narration (#107/#115): gathering without the right
+tool, "look"/"examine" at an undefined location, a rejected move, buying/
+selling (now also correctly attributed per-buyer in a busy shared chat),
+and give's "give it to whom?" fallback.
+
+**Test suite fix (task #145):** `test_combat_excludes_characters_at_a_
+different_location` and `test_combat_excludes_resting_characters` were
+miscategorized under `FastRegressionTests` (whose docstring promises no
+Ollama calls) but actually started a real combat session end-to-end,
+triggering real combat-start narration — one real run measured this at
+290s. Split each into a fast version (tests the location/rest filter
+directly, no Ollama) and moved the full end-to-end version to
+`SlowLiveTests` where it belongs.
+
 ## [1.11.1] — Hotfix: AI companions' autonomous turns were crashing
 
 Caught live within minutes of 1.11.0 shipping: the new

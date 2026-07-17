@@ -1000,6 +1000,13 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
 
 _COMPOUND_SPLIT_PATTERN = re.compile(r",\s*(?:and\s+)?|\s+and then\s+|\s+then\s+|\s+and\s+|;\s*")
 
+# Actions where a player commonly lists several items in one message
+# ("buy 10 torches, 1 pickaxe, 5 bait") -- see parse_intents below.
+_SHOPPING_LIST_ACTIONS = {"buy", "sell", "give_item", "equip_item"}
+# What a bare "<qty> <item>" segment (no verb of its own) tends to
+# misclassify as, once split away from the verb that gave it context.
+_BARE_ITEM_MISFIRES = {"chat", "gather", "craft"}
+
 
 def _split_compound_message(text: str) -> list[str]:
     """
@@ -1087,6 +1094,32 @@ def parse_intents(text: str, known_npc_names: list[str] | None = None, force_mod
     segments = _split_compound_message(text)
     if len(segments) > 1:
         segment_intents = [_keyword_fallback(seg, known_npc_names) for seg in segments]
+
+        # Real live bug (2026-07-17, Coffee): "Buy 10 torches, 1 shears,
+        # 1 pickaxe, 1 fishing pole, 5 bait." only ever bought the
+        # torches. Only the FIRST segment carries the "buy" verb --
+        # every segment after it is a bare "<qty> <item>" phrase with no
+        # verb of its own, so the per-segment keyword fallback either
+        # shrugs (chat) or, worse, false-fires on unrelated over-eager
+        # vocabulary ("1 pickaxe" contains the substring "pick", which
+        # the gather fallback's bare-"pick" rule -- meant for "pick the
+        # herbs" -- happily matches). Splitting into separate actions
+        # here would drop every item after the first, or invent bogus
+        # actions for them. Detected generally, not just for "buy":
+        # if the FIRST segment is a shopping-list-style action (buy,
+        # sell, give_item, equip_item) and every OTHER segment either
+        # repeats that same action or is one of the known bare-noun-
+        # phrase misfires, treat the WHOLE message as ONE action instead
+        # of splitting -- the handler (_do_buy/_do_sell/_do_give_item/
+        # _do_equip_item) is responsible for finding every item
+        # mentioned across the full text, not just the first.
+        first_action = segment_intents[0]["action"]
+        if first_action in _SHOPPING_LIST_ACTIONS and all(
+            i["action"] == first_action or i["action"] in _BARE_ITEM_MISFIRES
+            for i in segment_intents[1:]
+        ):
+            return [parse_intent(text, known_npc_names, force_model=force_model)]
+
         real_segment_intents = [i for i in segment_intents if i["action"] != "chat"]
         if len(real_segment_intents) >= 2:
             return real_segment_intents
