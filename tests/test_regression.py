@@ -71,6 +71,25 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         for text in ("I am already tired", "I want some bread", "lets spread out"):
             self.assertNotEqual(_keyword_fallback(text, [])["action"], "examine", text)
 
+    # -- "Peer into" silently dropped to chat (2026-07-17, task #151) --
+    def test_peer_into_classified_as_examine_not_silent_chat(self):
+        for text in ("Peer into the murky water", "Peer at the strange markings",
+                      "Peered into the well"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "examine", text)
+
+    def test_peer_typo_still_classified_as_examine(self):
+        # Coffee's exact live report: "Perr" (typo for "Peer") fell all
+        # the way through to the silent 'chat' default with zero reply.
+        result = _keyword_fallback(
+            "Perr into the face of the wide-boled tree and say hello", []
+        )
+        self.assertEqual(result["action"], "examine")
+
+    def test_peer_still_yields_to_a_known_npc_mention(self):
+        self.assertEqual(
+            _keyword_fallback("Say hello to Sera", ["Sera"])["action"], "talk_npc"
+        )
+
     # -- Stuck-location bug (v1.7.4) -----------------------------------
     def test_move_covers_generic_leave_phrasing(self):
         for text in ("Go downstairs", "Leave this area", "Leave this room", "Head upstairs"):

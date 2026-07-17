@@ -696,9 +696,19 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # substring in the list above) specifically because bare "read" is
     # a substring of ordinary words like "already"/"bread"/"spread",
     # which a naive substring check would misfire on.
+    # "peered? at" alone missed "peer into"/"peer in" -- confirmed live
+    # 2026-07-17: "Perr into the face of the wide-boled tree and say
+    # hello" fell all the way through to the silent 'chat' default (no
+    # reply at all) because neither this examine block nor any known-NPC
+    # match ever fired for a non-NPC target like a tree. "perr" (typo for
+    # "peer") is included directly rather than widened via
+    # _normalize_common_typos's fuzzy threshold -- its similarity ratio
+    # to "peer" (0.75) sits just under that mechanism's 0.8 cutoff, and
+    # lowering the shared threshold risks new false positives on the
+    # unrelated "accept" typo-tolerance it already covers.
     examine_verb_match = re.search(
         r"\b(?:read|observed|examined|inspected|searched|checked out|"
-        r"looked (?:at|closer at)|peered? at|glanced? at)\b\s+"
+        r"looked (?:at|closer at)|(?:peer|perr)(?:ed)? (?:at|into|in)|glanced? at)\b\s+"
         r"(?:the |a |an )?(.+)",
         lowered,
     )

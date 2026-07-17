@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.5] — "Peer into" fell through to a silent, replyless chat
+
+**Real bug fixed (task #151), found via routine Adventure-topic
+monitoring:** "Perr into the face of the wide-boled tree and say
+hello" (a typo for "Peer") produced zero reply. Root cause:
+`ai/intent_parser.py`'s `examine_verb_match` regex already covered
+"peered? at" but not "peer(ed)? into"/"peer(ed)? in" -- the exact
+phrasing used -- so it fell through every other classifier branch
+(there's no registered NPC named "tree" to reclassify "say hello"
+against, since that reclassification only fires for a known NPC) all
+the way to the silent `chat` default, which by design never sends a
+reply. Extended the regex to also cover "peer(ed)? (at|into|in)", plus
+the specific "perr" misspelling directly (its similarity to "peer",
+0.75, sits just under the existing fuzzy typo-tolerance threshold of
+0.8, and lowering that shared threshold risked new false positives on
+the unrelated "accept" typo-tolerance it already covers). Verified via
+5 real tests: the exact reported typo, the correctly-spelled phrasing,
+the pre-existing "peer at" wording, and confirmed a known NPC mention
+still correctly wins over the object match (no regression).
+
 ## [1.11.4] — Board quests stuck across a calendar-day boundary
 
 **Real live bugs fixed (tasks #149, #150), reported by Coffee with a
