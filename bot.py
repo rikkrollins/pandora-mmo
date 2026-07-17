@@ -7040,7 +7040,14 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     global _LAST_KNOWN_CHAT_ID
     _LAST_KNOWN_CHAT_ID = update.effective_chat.id
     db.touch_last_active(update.effective_user.id)
-    db.update_telegram_username(update.effective_user.id, update.effective_user.username)
+    # getattr, not .username directly (2026-07-17, real live bug just
+    # caught): AI companions' autonomous turns route through this exact
+    # handler via a synthetic _AiPlayerUpdate whose _User stand-in only
+    # has .id, no .username at all -- a bare attribute access crashed
+    # every AI companion's turn with AttributeError the moment this
+    # line shipped, confirmed live ("Zara Windrift's autonomous turn
+    # raised: AttributeError").
+    db.update_telegram_username(update.effective_user.id, getattr(update.effective_user, "username", None))
     _IDLE_WARNED.discard(update.effective_user.id)
 
     # Universal escape hatch, checked FIRST, before any stateful flow gets
