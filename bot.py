@@ -7665,14 +7665,103 @@ Almost everything here is plain English, typed straight into Adventure -- no com
 • "Set my description to ..."
 • /sheet, /newcharacter, /map, /version, /changelog
 
-Stuck on something specific? Ask in Support -- it's grounded in this game's real items/spells/guilds, not general D&D trivia."""
+Stuck? /hint suggests real things to try here, no spoilers. Reply to any narration with /help to get it explained. Stuck on something specific? Ask in Support -- it's grounded in this game's real items/spells/guilds, not general D&D trivia."""
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.effective_chat.send_message(
-        _HELP_TEXT,
-        message_thread_id=update.message.message_thread_id,
-    )
+    """
+    Bare /help sends the static reference below. Used as a reply to
+    another message (2026-07-17, per Coffee: "can i use /help to reply
+    to a narration or prompt and get help on it"), it instead forwards
+    that message's real text to the Support agent -- grounded in this
+    game's actual items/spells/guilds, same as every other Support
+    answer -- so "what does this mean?" gets a real, specific answer
+    instead of the generic command list.
+    """
+    replied = update.message.reply_to_message
+    replied_text = replied.text if replied else None
+    if not replied_text or not replied_text.strip():
+        await update.effective_chat.send_message(
+            _HELP_TEXT,
+            message_thread_id=update.message.message_thread_id,
+        )
+        return
+
+    character = db.get_character(update.effective_user.id)
+    party_members = _get_party_members() if character else None
+    question = f"Can you explain this: {replied_text.strip()}"
+    async with _keep_typing(update.effective_chat, update.message.message_thread_id):
+        reply = await asyncio.to_thread(answer_support_question, question, character, party_members)
+    await update.effective_chat.send_message(reply, message_thread_id=update.message.message_thread_id)
+
+
+async def hint_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /hint (2026-07-17, per Coffee: "give ideas on actions characters may
+    perform or how to do what they maybe tryin to do... dont spoil").
+    Deterministic and grounded entirely in this location's real data --
+    same fields _do_look already reads (NPCs, resource nodes,
+    interactables, connections, quests) -- just reframed as suggested
+    ACTIONS rather than a description. Never invents anything and never
+    reveals a puzzle's answer, a quest's outcome, or a hidden reward --
+    only that something is here and the verb to try on it, exactly the
+    same non-spoiler boundary _do_ask_clue's quest clues already keep.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=update.message.message_thread_id
+        )
+        return
+    location = cl.get_location(CAMPAIGN, character["current_location"])
+    if location is None:
+        await update.effective_chat.send_message(
+            f"**{character['name']}** seems to be nowhere in particular. That's... concerning.",
+            message_thread_id=update.message.message_thread_id,
+        )
+        return
+
+    lines = ["💡 **Things you might try here:**"]
+
+    npcs_here = _npcs_at_location(character["current_location"])
+    for npc_id in npcs_here:
+        npc = cl.get_npc(CAMPAIGN, npc_id)
+        if npc:
+            lines.append(f"• Talk to **{npc['name']}** — say \"talk to {npc['name']}\"")
+
+    for node in location.get("resource_nodes", []):
+        material = items_module.get_item(node["material"])
+        skill_key = node.get("skill", node["ability"])
+        missing = _missing_tools_for_gathering(character, skill_key)
+        tool_note = f" (needs {' and '.join(missing)})" if missing else ""
+        lines.append(f"• Gather {material['name']} from {node['name']}{tool_note} — say \"gather {material['name'].lower()}\"")
+
+    for obj in location.get("interactables", {}).values():
+        lines.append(f"• Take a closer look at {obj['name']} — say \"examine {obj['name']}\"")
+
+    connections = location.get("connections", [])
+    if connections:
+        conn_names = ", ".join(cl.get_location(CAMPAIGN, c)["name"] for c in connections)
+        lines.append(f"• Travel onward — you can reach {conn_names} from here")
+
+    story_offer = _offerable_quest_at_location(character, character["current_location"])
+    if story_offer:
+        lines.append("• Someone here looks like they need help with something — try talking to them")
+
+    board_quests_here = board_quests_module.get_or_generate_board_quests(CAMPAIGN, character["current_location"])
+    if any(not q.get("accepted_by") and not q.get("completed_at") for q in board_quests_here):
+        lines.append("• There's a bounty posted on the board — say \"check quests\" to see it")
+
+    if character["active_quests"]:
+        for quest_id in character["active_quests"]:
+            quest = CAMPAIGN["quests"].get(quest_id)
+            if quest and quest.get("clue"):
+                lines.append(f"• On *{quest['title']}*: {quest['clue']}")
+
+    if len(lines) == 1:
+        lines.append("Nothing obvious jumps out — try looking around, or moving on to somewhere new.")
+
+    await _safe_send(update, "\n".join(lines))
 
 
 # ---------------------------------------------------------------------
@@ -9159,6 +9248,7 @@ def build_application() -> Application:
 
     # Optional slash-command shortcuts.
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("hint", hint_command))
     application.add_handler(CommandHandler("newcharacter", newcharacter_command))
     application.add_handler(CommandHandler("startcombat", startcombat_command))
     application.add_handler(CommandHandler("attack", attack_command))

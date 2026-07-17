@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.7] — /help reply-to-narration, and a new /hint command
+
+Per Coffee: **/help used as a reply** to any message now forwards
+that message's real text to the Support agent (grounded in this
+game's actual items/spells/guilds) and returns its explanation,
+instead of the generic reference list. Bare /help is unchanged.
+
+**New: /hint** -- deterministic, no Ollama call, grounded entirely in
+the character's current real location data (NPCs present, resource
+nodes, interactables, connections, offerable quests, active-quest
+clues) -- same fields `_do_look` already reads, reframed as suggested
+actions ("Gather Wood... say 'gather wood'") rather than a
+description. Never reveals a puzzle's answer or a quest's outcome,
+same non-spoiler boundary `_do_ask_clue` already keeps.
+
+Also fixed `scripts/announce_deploy.py`: it silently accepted
+unrecognized flags (including `--version`/`--summary`, which don't
+exist) and fell through to posting the literal flag text as the
+message -- four deploys tonight (v1.11.3-1.11.6) went out broken this
+way before it was caught. Now supports `--version`/`--summary` for
+real, and any other unrecognized flag errors loudly instead of
+silently posting garbage.
+
 ## [1.11.6] — Gather-quest turn-in soft-lock, plus a real /help command
 
 **Real bug fixed (task #152):** Coffee reported a completed board quest

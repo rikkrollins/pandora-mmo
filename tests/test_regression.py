@@ -24,7 +24,7 @@ from ai.support_agent import _deterministic_inventory_answer
 from ai.text_cleanup import strip_think_tags
 from rules.combat import resolve_attack
 from rules.crafting import RECIPES
-from tests.helpers import DummyContext, FakeUpdate, make_basic_character, use_test_db
+from tests.helpers import DummyContext, DummyMessage, FakeUpdate, make_basic_character, use_test_db
 
 
 class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
@@ -2543,6 +2543,32 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(updated["completed_at"])
         self.assertEqual(db.get_character(user_id)["gold"], 70)
         self.assertTrue(any("Board quest complete" in msg for msg in sink))
+
+    # -- /help + /hint (2026-07-17, per Coffee) -------------------------
+    async def test_bare_help_sends_static_reference_text(self):
+        sink = []
+        await bot.help_command(FakeUpdate(900526, "/help", sink), None)
+        self.assertIn("Look around", sink[-1])
+
+    async def test_help_as_a_reply_forwards_to_support_agent(self):
+        from unittest.mock import patch
+
+        sink = []
+        replied_to = DummyMessage(900527)
+        replied_to.text = "The Whispering Wood hums beneath the dusk's hush."
+        update = FakeUpdate(900527, "/help", sink, reply_to_message=replied_to)
+        with patch("bot.answer_support_question", return_value="That's flavor narration."):
+            await bot.help_command(update, None)
+        self.assertEqual(sink, ["That's flavor narration."])
+
+    async def test_hint_gives_grounded_non_spoiler_suggestions(self):
+        user_id = 900528
+        make_basic_character(user_id, "Hinter", current_location="whispering_wood")
+        sink = []
+        await bot.hint_command(FakeUpdate(user_id, "/hint", sink), None)
+        reply = sink[-1]
+        self.assertIn("Things you might try here", reply)
+        self.assertIn("Gather", reply)
 
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):

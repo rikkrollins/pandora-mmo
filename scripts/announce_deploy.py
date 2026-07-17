@@ -132,10 +132,14 @@ def pin_update(catchy_text: str) -> None:
 
 
 if __name__ == "__main__":
+    usage_lines = [
+        "Usage: python3 scripts/announce_deploy.py \"message text\"",
+        "       python3 scripts/announce_deploy.py --version X --summary \"...\"",
+        "       python3 scripts/announce_deploy.py --warn \"ETA text\"",
+        "       python3 scripts/announce_deploy.py --pin \"catchy player-facing text\"",
+    ]
     if len(sys.argv) < 2:
-        print("Usage: python3 scripts/announce_deploy.py \"message text\"", file=sys.stderr)
-        print("       python3 scripts/announce_deploy.py --warn \"ETA text\"", file=sys.stderr)
-        print("       python3 scripts/announce_deploy.py --pin \"catchy player-facing text\"", file=sys.stderr)
+        print("\n".join(usage_lines), file=sys.stderr)
         sys.exit(1)
     if sys.argv[1] == "--warn":
         warn(sys.argv[2] if len(sys.argv) > 2 else "a couple minutes")
@@ -143,6 +147,30 @@ if __name__ == "__main__":
     elif sys.argv[1] == "--pin":
         pin_update(sys.argv[2])
         print("Posted and pinned to Main.")
+    elif sys.argv[1] == "--version":
+        # 2026-07-17: added after this exact interface was called with
+        # --version/--summary flags that silently didn't exist -- the
+        # old code fell through to the plain-message branch and posted
+        # the literal string "--version" to Development four deploys in
+        # a row before anyone noticed, since the script still printed
+        # "Posted to Development topic." either way. Supporting the
+        # interface for real, rather than just documenting it, is the
+        # actual fix; an unrecognized flag now errors loudly (below)
+        # instead of silently posting garbage.
+        try:
+            version_idx = sys.argv.index("--version") + 1
+            summary_idx = sys.argv.index("--summary") + 1
+            version_text = sys.argv[version_idx]
+            summary_text = sys.argv[summary_idx]
+        except (ValueError, IndexError):
+            print("--version requires both --version X and --summary \"...\"", file=sys.stderr)
+            sys.exit(1)
+        announce(f"v{version_text} deployed\n\n{summary_text}")
+        print("Posted to Development topic.")
+    elif sys.argv[1].startswith("--"):
+        print(f"Unrecognized flag: {sys.argv[1]}", file=sys.stderr)
+        print("\n".join(usage_lines), file=sys.stderr)
+        sys.exit(1)
     else:
         announce(sys.argv[1])
         print("Posted to Development topic.")
