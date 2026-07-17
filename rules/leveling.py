@@ -146,6 +146,67 @@ def is_proficient_in_save(char_class: str, ability: str) -> bool:
     return ability in CLASS_SAVE_PROFICIENCIES.get((char_class or "").lower(), ())
 
 
+# Skill checks in this engine are ability-based, not the 18 named 5E
+# skills (see ai/intent_parser.py's skill_check description) -- there's
+# no per-character skill selection to look a real proficiency up in.
+# This is a deliberate, fixed simplification (2026-07-16, audit found
+# skill checks NEVER applied a proficiency bonus at all, for any class):
+# each class gets proficiency on the two abilities its real 5E skill
+# list leans on hardest, picked by flavor rather than reused from
+# CLASS_SAVE_PROFICIENCIES (which doesn't line up for every class --
+# Ranger's real skill list is Wisdom-heavy for tracking/perception/
+# survival, matching Natural Explorer's own advantage bonus, not the
+# Strength/Dexterity its saves happen to use).
+CLASS_SKILL_ABILITIES = {
+    "barbarian": ("strength", "wisdom"),
+    "fighter": ("strength", "wisdom"),
+    "paladin": ("wisdom", "charisma"),
+    "ranger": ("wisdom", "dexterity"),
+    "rogue": ("dexterity", "intelligence"),
+    "monk": ("dexterity", "strength"),
+    "bard": ("charisma", "dexterity"),
+    "cleric": ("wisdom", "charisma"),
+    "druid": ("wisdom", "intelligence"),
+    "sorcerer": ("charisma", "wisdom"),
+    "warlock": ("charisma", "intelligence"),
+    "wizard": ("intelligence", "wisdom"),
+}
+
+
+def is_proficient_in_skill(char_class: str, ability: str) -> bool:
+    return ability in CLASS_SKILL_ABILITIES.get((char_class or "").lower(), ())
+
+
+# Real 5E class-table levels these unlock at.
+ROGUE_EXPERTISE_LEVEL = 1
+BARD_JACK_OF_ALL_TRADES_LEVEL = 2
+BARD_EXPERTISE_LEVEL = 3
+
+
+def skill_check_proficiency_bonus(char_class: str, level: int, ability: str, proficiency_bonus: int) -> int:
+    """
+    Real proficiency-bonus contribution to a skill check on `ability`,
+    including Rogue/Bard Expertise (double proficiency, once unlocked)
+    and Bard's Jack of All Trades (half proficiency, rounded down, on
+    abilities the Bard ISN'T otherwise proficient in) -- both previously
+    pure flavor text in class_features.py (2026-07-16). Simplifies away
+    real 5E's "choose 2 skills" mechanic the same way
+    is_proficient_in_skill already does: Expertise applies to BOTH of
+    the class's fixed proficient abilities at once, not 2 separately
+    chosen ones.
+    """
+    lowered_class = (char_class or "").lower()
+    if is_proficient_in_skill(char_class, ability):
+        if lowered_class == "rogue" and level >= ROGUE_EXPERTISE_LEVEL:
+            return proficiency_bonus * 2
+        if lowered_class == "bard" and level >= BARD_EXPERTISE_LEVEL:
+            return proficiency_bonus * 2
+        return proficiency_bonus
+    if lowered_class == "bard" and level >= BARD_JACK_OF_ALL_TRADES_LEVEL:
+        return proficiency_bonus // 2
+    return 0
+
+
 def hp_gain_for_level(char_class: str, constitution_modifier: int) -> int:
     """
     Real 5E average-HP-per-level rule (the PHB explicitly allows using

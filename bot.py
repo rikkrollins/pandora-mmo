@@ -68,7 +68,8 @@ from rules.dice import roll, roll_damage, ability_modifier, roll_ability_check, 
 from rules.item_generator import generate_item
 from rules.leveling import (
     CLASS_HIT_DICE, scaled_enemy_count, breath_weapon_dice_count,
-    CLASS_PRIMARY_ABILITY, CLASS_SAVE_PROFICIENCIES,
+    CLASS_PRIMARY_ABILITY, CLASS_SAVE_PROFICIENCIES, is_proficient_in_skill,
+    skill_check_proficiency_bonus,
 )
 from rules.proficiency import practiced_bonus, MAX_PRACTICE_BONUS
 
@@ -249,6 +250,15 @@ _PENDING_DICE_ROLLS: dict[int, dict] = {}
 # message the same way it checks _PENDING_DICE_ROLLS, so a stray later
 # message (normal gameplay) is never misread as a stat choice.
 _PENDING_ASI_CHOICE: set[int] = set()
+
+# Character description (2026-07-16, per Coffee): "add a description to my
+# character" asks what the description should be rather than trying to
+# extract free-form biography text out of the SAME message an intent
+# classifier just matched a keyword trigger in -- same pending-prompt
+# pattern as _PENDING_ASI_CHOICE above, checked on the user's next message
+# before normal intent parsing.
+_PENDING_DESCRIPTION: set[int] = set()
+MAX_CHARACTER_DESCRIPTION_LENGTH = 500
 
 _ABILITY_NAMES = ("strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma")
 _ASI_AUTO_WORDS = ("auto", "automatically", "assign", "distribute", "do it for me")
@@ -1058,7 +1068,24 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
         return
 
     if step == "dice_preference":
-        wants_manual_dice = any(w in text.lower() for w in ("yes", "yeah", "yep", "sure", "own dice"))
+        creation["wants_manual_dice"] = any(w in text.lower() for w in ("yes", "yeah", "yep", "sure", "own dice"))
+        creation["step"] = "description"
+        await update.effective_chat.send_message(
+            "Last thing: want to add a short description of your character? Backstory, "
+            "appearance, personality — whatever helps other players and NPCs get a sense of "
+            "who they are. Reply with a description, or say \"skip\" to leave it blank — you "
+            "can always add one later by asking.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    if step == "description":
+        wants_manual_dice = creation["wants_manual_dice"]
+        description_text = text.strip()
+        if description_text.lower() in ("skip", "none", "no", "n/a", "nothing"):
+            description_text = None
+        else:
+            description_text = " ".join(description_text.split())[:MAX_CHARACTER_DESCRIPTION_LENGTH] or None
         assigned = creation["assigned_scores"]
         ability_scores = {
             "strength": assigned[0], "dexterity": assigned[1], "constitution": assigned[2],
@@ -1108,6 +1135,8 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
         )
         if wants_manual_dice:
             db.update_character(update.effective_user.id, manual_dice_enabled=1)
+        if description_text:
+            db.update_character(update.effective_user.id, description=description_text)
 
         # Auto-equip starting gear (2026-07-15, per Coffee): whatever
         # weapon/armor/shield STARTING_EQUIPMENT just granted is
@@ -1150,9 +1179,12 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
         if features:
             features_line = f"Class features: {'; '.join(features)}\n"
 
+        description_line = f"\"{character['description']}\"\n\n" if character.get("description") else ""
+
         sheet = (
             f"✅ Character created!\n\n"
             f"**{character['name']}** — {character['race']} {character['char_class']}\n"
+            f"{description_line}"
             f"Level {character['level']} | XP {character['xp']}\n"
             f"HP {character['hp_current']}/{character['hp_max']} | AC {character['armor_class']}\n"
             f"STR {character['strength']} DEX {character['dexterity']} "
@@ -1696,6 +1728,72 @@ async def _do_level_up(update: Update, text: str) -> None:
     )
 
 
+_INLINE_DESCRIPTION_RE = re.compile(
+    r"description[^:]*:\s*(.+)", re.IGNORECASE
+)
+
+
+def _extract_inline_description(text: str) -> str | None:
+    """
+    A player asking to add a description usually just states intent with
+    no content yet ("I'd like to add a character description to my
+    player") -- but if they DID include the actual text in the same
+    message ("set my description to: A grizzled dwarf who never
+    smiles"), pull it out rather than prompting for something already
+    given. Real bug caught by an isolated live test (2026-07-16): an
+    earlier version of this regex matched on the bare words "to"/"is"/
+    "as" with no colon required, so Coffee's own example phrasing --
+    "I'd like to add a character description to my player", which has
+    NO actual content in it -- got misread as content="my player" and
+    silently saved as the description instead of prompting for one. A
+    real, unambiguous colon is now required as the content separator,
+    so bare trigger phrasing always falls through to the prompt.
+    """
+    match = _INLINE_DESCRIPTION_RE.search(text)
+    if match:
+        candidate = match.group(1).strip()
+        return candidate or None
+    return None
+
+
+async def _do_set_description(update: Update, text: str, *, from_prompt: bool = False) -> None:
+    """
+    Character description (2026-07-16, per Coffee): freeform biography/
+    appearance/personality text, settable at creation or any time after
+    by asking ("I'd like to add a character description to my player").
+    Shown on the character sheet once set.
+    """
+    user_id = update.effective_user.id
+    character = db.get_character(user_id)
+    if character is None:
+        await _safe_send(update, "You don't have a character yet!")
+        return
+
+    description_text = text.strip() if from_prompt else _extract_inline_description(text)
+    if description_text is None:
+        _PENDING_DESCRIPTION.add(user_id)
+        await _safe_send(
+            update,
+            "Sure — what would you like your character's description to be? (backstory, "
+            "appearance, personality — whatever helps other players and NPCs get a sense of "
+            "who they are.) Say \"skip\" to leave it blank.",
+        )
+        return
+
+    if description_text.lower() in ("skip", "none", "no", "n/a", "nothing", "never mind"):
+        await _safe_send(update, "No problem — you can add a description any time by asking.")
+        return
+
+    clean = " ".join(description_text.split())[:MAX_CHARACTER_DESCRIPTION_LENGTH]
+    if not clean:
+        _PENDING_DESCRIPTION.add(user_id)
+        await _safe_send(update, "That didn't look like a description — try again?")
+        return
+
+    db.update_character(user_id, description=clean)
+    await _safe_send(update, f"✅ Description saved for {character['name']}:\n\n{clean}")
+
+
 def _determine_winner(session: sessions.Session) -> str:
     """
     Returns 'party' or 'enemy' based on which side still has any member
@@ -2088,6 +2186,14 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             sides[enemy["telegram_user_id"]] = "enemy"
 
         session = sessions.start_session(chat_id, party + enemies, sides=sides)
+        # Bestiary discovery (2026-07-16, per Coffee): every real human
+        # party member fighting this monster type learns it -- same
+        # fog-of-war convention as visited_locations, so "show me the
+        # bestiary" only ever lists monsters actually encountered, not
+        # every monster in the campaign.
+        for p in party:
+            if not p.get("is_ai"):
+                db.mark_known_monster(p["telegram_user_id"], monster_key)
         initiative_line = ", ".join(
             f"{p['name']} ({p['initiative']})" for p in session.participants
         )
@@ -2707,6 +2813,9 @@ async def _do_skill_check(update: Update, ability: str, action_text: str, forced
         or _ranger_natural_explorer_grants_advantage(character, ability, action_text)
     )
     result = roll_ability_check(character, ability, proficient=False, advantage=has_advantage, forced_roll=forced_roll)
+    result["total"] += skill_check_proficiency_bonus(
+        character["char_class"], character.get("level", 1), ability, character.get("proficiency_bonus", 0)
+    )
     bonus = _practiced_bonus_for(update.effective_user.id, ability)
     result["total"] += bonus
     result["practiced_bonus"] = bonus
@@ -3050,6 +3159,23 @@ WARLOCK_PACT_MAGIC_REST_HOURS = NATURAL_HEALING_FULL_REST_HOURS / 8
 # as every other class).
 
 
+def _song_of_rest_bonus(character: dict) -> int:
+    """
+    Bard's Song of Rest (real 5E, level 2+, previously pure flavor
+    text): resting alongside a Bard heals everyone a bit extra,
+    including the Bard themselves. Real 5E ties this to hit-dice
+    spending during a short rest; this engine's own rest model is
+    proportional-to-real-time instead of hit-dice-based, so the
+    closest honest analogue is the rule's own base die (1d6) added on
+    top of whatever the normal rest already recovered, rather than
+    inventing a percentage bonus with no basis in the actual rule.
+    """
+    party_id = character.get("party_id")
+    party = db.get_party_members_by_id(party_id) if party_id else [character]
+    has_bard = any(m.get("char_class") == "Bard" and m.get("level", 1) >= 2 for m in party)
+    return roll(1, 6)[0] if has_bard else 0
+
+
 def _apply_natural_healing(telegram_user_id: int, character: dict, elapsed_seconds: float) -> tuple[int, int]:
     """
     Heals a resting character in proportion to how much real-world time
@@ -3070,6 +3196,8 @@ def _apply_natural_healing(telegram_user_id: int, character: dict, elapsed_secon
     missing_slots = character["spell_slots_max"] - character["spell_slots_current"]
     hp_gain = min(missing_hp, round(missing_hp * fraction))
     slot_gain = min(missing_slots, round(missing_slots * slot_fraction))
+    if hp_gain > 0:
+        hp_gain = min(missing_hp, hp_gain + _song_of_rest_bonus(character))
     if hp_gain > 0 or slot_gain > 0:
         db.update_character(
             telegram_user_id,
@@ -4193,8 +4321,10 @@ def _format_character_sheet(character: dict) -> str:
     name_line = f"**{character['name']}**" + (" *(AI companion)*" if character.get("is_ai") else "")
     equipped_line = _format_equipped_line(character)
     carried_gear_line = _format_carried_gear_line(character)
+    description_line = f"\"{character['description']}\"\n" if character.get("description") else ""
     return (
         f"{name_line} — {character['race']} {character['char_class']}\n"
+        f"{description_line}"
         f"Level {character['level']} | XP {character['xp']}\n"
         f"HP {character['hp_current']}/{character['hp_max']} | AC {character['armor_class']}\n"
         f"Gold: {character['gold']} | Guild: {character.get('guild') or 'None'}\n"
@@ -5511,6 +5641,57 @@ async def _do_show_map(update: Update) -> None:
     await _safe_send(update, "\n".join(lines))
 
 
+def _format_bestiary_entry(monster_key: str, template: dict) -> str:
+    tags = []
+    if template.get("is_boss"):
+        tags.append("boss")
+    if template.get("on_hit_condition"):
+        tags.append(f"inflicts {template['on_hit_condition']} on hit")
+    if template.get("life_drain"):
+        tags.append("drains life on hit")
+    tag_text = f" ({', '.join(tags)})" if tags else ""
+    return (
+        f"**{template['name']}**{tag_text}\n"
+        f"  HP {template['hp_max']} | AC {template['armor_class']} | "
+        f"STR {template['strength']} DEX {template['dexterity']} | "
+        f"XP {template.get('xp_reward', 0)}"
+    )
+
+
+async def _do_bestiary(update: Update) -> None:
+    """
+    Bestiary / monster compendium (2026-07-16, per Coffee's backlog):
+    fog-of-war discovery, same convention as the map above -- only
+    monster types this character has actually fought (known_monsters,
+    see db.mark_known_monster, set from _do_start_combat) are shown,
+    with their REAL stats pulled straight from the campaign's monster
+    templates, not invented flavor text.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    known = character.get("known_monsters") or []
+    if not known:
+        await update.effective_chat.send_message(
+            "Your bestiary is empty — fight something to start learning about it.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    lines = ["📖 **Bestiary**"]
+    for monster_key in known:
+        template = cl.get_monster_template(CAMPAIGN, monster_key)
+        if template is None:
+            continue
+        lines.append(_format_bestiary_entry(monster_key, template))
+
+    await _safe_send(update, "\n".join(lines))
+
+
 def _find_location_by_name_fragment(fragment: str) -> str | None:
     lowered = fragment.strip().lower()
     for loc_id in cl.get_all_location_ids(CAMPAIGN):
@@ -6183,6 +6364,40 @@ async def _do_steal(update: Update, text: str) -> None:
     await _safe_send(update, message)
 
 
+EMPOWERED_SPELL_MAX_USES = 1
+
+
+def _apply_empowered_spell(telegram_user_id: int, character: dict, spell: dict, result: dict) -> dict:
+    """
+    Sorcerer's Metamagic: Empowered Spell (real 5E, level 3+, previously
+    pure flavor text in class_features.py) -- automatically rerolls any
+    1s and 2s among a damage spell's dice once per rest, keeping the
+    new roll ("the roll is already decided, this refines it before
+    it's ever reported" -- the same rules-then-narration order every
+    other outcome in this game follows). Real 5E spends a Sorcery Point
+    (a resource this engine has no equivalent of) and lets the caster
+    choose which dice to reroll and whether to use it at all;
+    simplified to the same once-per-rest feature_uses economy every
+    other class feature already shares, applied automatically to the
+    first damage spell a Sorcerer casts each rest rather than adding a
+    whole separate opt-in command just for this one choice.
+    """
+    if character.get("char_class") != "Sorcerer" or character.get("level", 1) < 3:
+        return result
+    if db.get_feature_uses(telegram_user_id, "empowered_spell") >= EMPOWERED_SPELL_MAX_USES:
+        return result
+    match = re.match(r"(\d+)d(\d+)", spell.get("damage_dice", ""))
+    if not match:
+        return result
+    sides = int(match.group(2))
+    old_rolls = result["rolls"]
+    new_rolls = [r if r > 2 else roll(1, sides)[0] for r in old_rolls]
+    if new_rolls == old_rolls:
+        return result
+    db.use_feature(telegram_user_id, "empowered_spell")
+    return {**result, "rolls": new_rolls, "damage_dealt": result["damage_dealt"] + (sum(new_rolls) - sum(old_rolls))}
+
+
 async def _do_cast_spell(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -6307,6 +6522,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
 
             target = _pick_target(text, opposing)
             result = spells_module.resolve_damage_spell(spell_id, character, target)
+            result = _apply_empowered_spell(update.effective_user.id, character, spell, result)
             target["hp_current"] = max(target["hp_current"] - result["damage_dealt"], 0)
             _sync_player_to_db(target)
             full_result = {
@@ -6788,6 +7004,11 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         await _do_level_up(update, update.message.text)
         return
 
+    if update.effective_user.id in _PENDING_DESCRIPTION:
+        _PENDING_DESCRIPTION.discard(update.effective_user.id)
+        await _do_set_description(update, update.message.text)
+        return
+
     text = update.message.text.strip()
     known_npcs = [data["name"] for data in CAMPAIGN["npcs"].values()]
     # A genuinely compound message ("recruit Sera, look at the quest
@@ -7097,6 +7318,10 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_toggle_manual_dice(update, intent.get("raw_text", text))
     elif action == "level_up":
         await _do_level_up(update, intent.get("raw_text", text))
+    elif action == "set_description":
+        await _do_set_description(update, intent.get("raw_text", text))
+    elif action == "bestiary":
+        await _do_bestiary(update)
     elif action == "list_characters":
         await _do_list_characters(update)
     elif action == "switch_character":

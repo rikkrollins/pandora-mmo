@@ -403,6 +403,21 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in ["create a character", "make a character", "new character", "join the game"]):
         return {**base, "action": "create_character"}
 
+    # Checked BEFORE check_inventory below: "what items do you have for
+    # sale" is asking about a SHOP's or NPC's stock, not the player's own
+    # backpack -- real live bug (2026-07-16), this got shadowed by
+    # check_inventory's own "what items"/"what do i have" triggers (meant
+    # for the player's OWN items) since "have" phrasing overlaps, and
+    # check_inventory's handler shows the ASKER's inventory, answering a
+    # question about a shop's wares with completely unrelated data.
+    # Third-party "for sale"/"to sell"/"you have" framing routes to "buy"
+    # instead, which is location/shop-aware and at worst says "there's no
+    # shop here" -- strictly more correct than the asker's own backpack.
+    if any(w in lowered for w in ["for sale", "to sell", "what do you have", "what does he have",
+                                    "what does she have", "you got for sale", "you have for sale",
+                                    "what's for sale", "whats for sale"]):
+        return {**base, "action": "buy"}
+
     # Real live bug (2026-07-15): "auto equip my equipment" contains "my
     # equipment", which otherwise matches here and never reaches
     # auto_equip's own check further down -- same shadowing shape as
@@ -560,6 +575,15 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
         if trigger in lowered:
             name = text[lowered.index(trigger) + len(trigger):].strip()
             return {**base, "action": "delete_character", "target": name or None}
+
+    # Checked BEFORE check_sheet below: "add a description to my
+    # character" contains "my character" as a substring and would
+    # otherwise be shadowed by check_sheet's broad trigger for that phrase.
+    if any(w in lowered for w in ["character description", "add a description", "add description",
+                                    "set my description", "describe my character", "character bio",
+                                    "add a bio", "set a description", "update my description",
+                                    "change my description"]):
+        return {**base, "action": "set_description"}
 
     # Checked BEFORE check_sheet below: "auto equip my character"/"equip
     # my player" would otherwise match check_sheet's broad "my
@@ -719,6 +743,12 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                                     "my map", "show map"]):
         return {**base, "action": "show_map"}
 
+    if any(w in lowered for w in ["bestiary", "monster compendium", "monster book",
+                                    "monsters have i fought", "monsters i've fought",
+                                    "monsters have i encountered", "monsters i've encountered",
+                                    "what monsters"]):
+        return {**base, "action": "bestiary"}
+
     if any(w in lowered for w in ["make a campfire", "build a campfire", "start a campfire",
                                     "light a campfire", "make camp", "set up camp"]):
         return {**base, "action": "make_campfire"}
@@ -852,7 +882,8 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
                 "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "arcane_recovery",
                 "make_campfire", "give_item", "use_item", "equip_item", "auto_equip", "breath_weapon",
                 "channel_divinity", "action_surge", "reckless_attack", "divine_smite",
-                "flurry_of_blows", "toggle_manual_dice", "level_up",
+                "flurry_of_blows", "toggle_manual_dice", "level_up", "set_description",
+                "bestiary",
             )
             if parsed["action"] not in valid_actions:
                 return fallback
@@ -886,6 +917,18 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
             # back" started a fight). Falls through to the keyword
             # fallback's own (safe) classification instead.
             if parsed["action"] == "start_combat" and not any(w in text.lower() for w in COMBAT_START_WORDS):
+                return fallback
+            # Same defensive pattern as start_combat above: this model has
+            # a documented bias toward guessing "pass_turn" for phrasing
+            # it doesn't recognize (see the "pick a silverleaf herb" case
+            # further up) -- confirmed live again 2026-07-16, "I'll take a
+            # mug, ale!!! how are you doing old buddy?" (ordinary tavern
+            # small talk, no active turn to pass) came back as pass_turn
+            # and produced a confusing "There's no active turn to pass
+            # right now" reply. Never trusted from the model alone unless
+            # the keyword fallback independently agrees -- it already
+            # would have been returned by the general rule above if so.
+            if parsed["action"] == "pass_turn":
                 return fallback
             return parsed
     except (requests.RequestException, ValueError) as e:
@@ -954,18 +997,37 @@ def parse_intents(text: str, known_npc_names: list[str] | None = None) -> list[d
     1. Split the text on explicit multi-clause separators only.
     2. Classify EACH segment with the free, instant keyword fallback.
     3. Only treat this as a genuine multi-action message if at least
-       TWO segments independently produce DIFFERENT, non-chat actions
-       -- a weak or ambiguous split (a stray comma in an otherwise
-       single action, "attack the goblin and the wolf") falls through
-       to the existing single-message classification unchanged, exactly
-       as before this feature existed.
+       TWO segments independently produce a real, non-chat action --
+       a weak or ambiguous split (a stray comma in an otherwise single
+       action, "attack the goblin and the wolf") falls through to the
+       existing single-message classification unchanged, exactly as
+       before this feature existed, since only ONE segment there
+       ("attack the goblin") ever produces a real action -- "the wolf"
+       alone classifies as chat and is filtered out either way.
+
+       Real live bug (2026-07-16): this used to also require the two
+       real actions be of DIFFERENT types (`len({...actions...}) >= 2`),
+       which correctly handled "recruit X, look at Y, leave Z" (three
+       different action types) but silently broke the equally common
+       same-action-repeated compound -- "Go to the crossroads Tavern,
+       and then go to the whispering wood" split into two segments that
+       BOTH independently and explicitly matched "go to" (two real
+       "move" actions), but since they were the same action type, the
+       old distinctness check saw only 1 distinct action and fell
+       through to single-message parsing, which only ever acted on the
+       first destination and silently dropped the second. Segments are
+       independently classified by the same deliberately-conservative
+       keyword fallback either way, so requiring 2+ REAL segments
+       (rather than 2+ DISTINCT action types) is no less safe -- it
+       just also catches genuine multi-step requests that happen to
+       repeat the same verb.
     """
     known_npc_names = known_npc_names or []
     segments = _split_compound_message(text)
     if len(segments) > 1:
         segment_intents = [_keyword_fallback(seg, known_npc_names) for seg in segments]
-        distinct_real_actions = {i["action"] for i in segment_intents if i["action"] != "chat"}
-        if len(distinct_real_actions) >= 2:
-            return [i for i in segment_intents if i["action"] != "chat"]
+        real_segment_intents = [i for i in segment_intents if i["action"] != "chat"]
+        if len(real_segment_intents) >= 2:
+            return real_segment_intents
 
     return [parse_intent(text, known_npc_names)]

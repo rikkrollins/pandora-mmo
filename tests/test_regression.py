@@ -19,7 +19,7 @@ import bot
 import db
 import items as items_module
 import spells
-from ai.intent_parser import _keyword_fallback
+from ai.intent_parser import _keyword_fallback, parse_intents
 from ai.support_agent import _deterministic_inventory_answer
 from rules.combat import resolve_attack
 from rules.crafting import RECIPES
@@ -886,6 +886,76 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     def test_bare_auto_equip_is_enough_to_trigger(self):
         for text in ["auto equip", "auto-equip", "auto equip me"]:
             self.assertEqual(_keyword_fallback(text, [])["action"], "auto_equip", text)
+
+    # -- Real live bug (2026-07-16): "what items do you have for sale?"
+    #    matched check_inventory's own "what items" trigger and showed the
+    #    ASKER's own backpack instead of answering a question about a
+    #    shop's/NPC's stock. -------------------------------------------
+    def test_what_do_you_have_for_sale_routes_to_buy_not_check_inventory(self):
+        for text in ["what items do you have for sale?", "what do you have for sale",
+                     "what items are for sale here", "what's for sale"]:
+            self.assertEqual(_keyword_fallback(text, [])["action"], "buy", text)
+
+    def test_check_inventory_first_person_phrasing_still_unaffected(self):
+        for text in ["what items do I have", "what do i have in my backpack",
+                     "what weapons do i have"]:
+            self.assertEqual(_keyword_fallback(text, [])["action"], "check_inventory", text)
+
+    # -- Real live bug (2026-07-16): this model has a documented bias
+    #    toward guessing "pass_turn" for phrasing it doesn't recognize --
+    #    "I'll take a mug, ale!!! how are you doing old buddy?" (ordinary
+    #    tavern small talk, no active turn to pass) came back from the
+    #    RAW MODEL as pass_turn, and since _keyword_fallback correctly
+    #    says "chat" for it (no pass-turn phrase present), the model's
+    #    ungrounded guess was trusted instead of the deterministic
+    #    fallback, producing a confusing "There's no active turn to pass
+    #    right now" reply to ordinary chatter. Mirrors the pre-existing
+    #    start_combat guard's same defensive shape. -------------------
+    def test_model_guessing_pass_turn_is_never_trusted_over_keyword_fallback(self):
+        from unittest.mock import patch
+        import ai.intent_parser as intent_parser_module
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": '{"action": "pass_turn"}'}
+
+        with patch("ai.intent_parser.requests.post", return_value=FakeResponse()):
+            result = intent_parser_module.parse_intent(
+                "I'll take a mug, ale!!! how are you doing old buddy?", []
+            )
+        self.assertEqual(result["action"], "chat")
+
+    # -- Real live bug (2026-07-16): a compound message repeating the
+    #    SAME action type ("go to X, then go to Y") only ever executed
+    #    the first step and silently dropped the rest, because
+    #    parse_intents used to require 2+ segments to independently
+    #    produce DIFFERENT action types before treating a message as
+    #    genuinely compound. --------------------------------------------
+    def test_compound_same_action_repeated_now_produces_both_intents(self):
+        intents = parse_intents(
+            "Go to the crossroads Tavern, and then go to the whispering wood", []
+        )
+        self.assertEqual([i["action"] for i in intents], ["move", "move"])
+        self.assertIn("Tavern", intents[0]["raw_text"])
+        self.assertIn("whispering wood", intents[1]["raw_text"])
+
+    def test_compound_different_actions_still_works(self):
+        intents = parse_intents(
+            "recruit Sera to my party, look at the quest board, and leave the tavern", []
+        )
+        self.assertEqual([i["action"] for i in intents], ["recruit_npc", "check_quests", "move"])
+
+    def test_compound_false_positive_guard_still_holds(self):
+        # "attack the goblin and the wolf" must NOT become two separate
+        # attack intents against an implicit shared target -- only ONE
+        # segment ("attack the goblin") ever produces a real action,
+        # "the wolf" alone classifies as chat and is filtered out.
+        intents = parse_intents("attack the goblin and the wolf", [])
+        self.assertEqual(len(intents), 1)
+        self.assertEqual(intents[0]["action"], "attack")
 
     def test_my_sheet_still_classified_as_check_sheet(self):
         for text in ["my sheet", "my character", "my stats", "my class"]:
@@ -1765,6 +1835,71 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_save_bonus(proficient_target, "constitution"), 2 + 3)
         self.assertEqual(_save_bonus(non_proficient_target, "constitution"), 2)
 
+    # -- Skill checks never applied a proficiency bonus at all (2026-07-16 audit) --
+    def test_skill_check_proficiency_bonus_applies_for_a_proficient_class(self):
+        from rules.dice import roll_ability_check
+        from rules.leveling import is_proficient_in_skill
+        rogue = {"dexterity": 14, "proficiency_bonus": 3}
+        self.assertTrue(is_proficient_in_skill("Rogue", "dexterity"))
+        result = roll_ability_check(rogue, "dexterity", proficient=True, forced_roll=10)
+        self.assertEqual(result["total"], 10 + 2 + 3)  # roll + dex mod + proficiency
+
+    def test_skill_check_proficiency_bonus_withheld_for_a_non_proficient_class(self):
+        from rules.leveling import is_proficient_in_skill
+        self.assertFalse(is_proficient_in_skill("Rogue", "charisma"))
+        self.assertFalse(is_proficient_in_skill("Wizard", "strength"))
+
+    async def test_skill_check_handler_applies_proficiency_for_the_right_class(self):
+        user_id = 900501
+        make_basic_character(user_id, "Sneaky", char_class="Rogue", current_location="crossroads_tavern")
+        sink = []
+        # forced_roll=10: 10 + dex mod(14->+2) + Rogue Expertise on a
+        # proficient ability at level 1 (2 x proficiency_bonus 2 = 4) = 16.
+        await bot._do_skill_check(FakeUpdate(user_id, "I sneak past the guard", sink), "dexterity", "I sneak past the guard", forced_roll=10)
+        combined = " ".join(sink)
+        self.assertIn("16", combined)
+
+    # -- Rogue/Bard Expertise + Bard Jack of All Trades (2026-07-16) ----
+    def test_rogue_expertise_doubles_proficiency_from_level_1(self):
+        from rules.leveling import skill_check_proficiency_bonus
+        self.assertEqual(skill_check_proficiency_bonus("Rogue", 1, "dexterity", 2), 4)
+        self.assertEqual(skill_check_proficiency_bonus("Rogue", 1, "charisma", 2), 0, "not a proficient ability")
+
+    def test_bard_expertise_only_unlocks_at_level_3(self):
+        from rules.leveling import skill_check_proficiency_bonus
+        self.assertEqual(skill_check_proficiency_bonus("Bard", 1, "charisma", 2), 2, "proficient, but no Expertise yet")
+        self.assertEqual(skill_check_proficiency_bonus("Bard", 3, "charisma", 2), 4, "Expertise unlocked")
+
+    def test_bard_jack_of_all_trades_adds_half_proficiency_from_level_2(self):
+        from rules.leveling import skill_check_proficiency_bonus
+        self.assertEqual(skill_check_proficiency_bonus("Bard", 1, "strength", 2), 0, "not yet unlocked")
+        self.assertEqual(skill_check_proficiency_bonus("Bard", 2, "strength", 3), 1, "half of 3, rounded down")
+        self.assertEqual(skill_check_proficiency_bonus("Wizard", 2, "strength", 3), 0, "only Bard gets Jack of All Trades")
+
+    # -- Bard's Song of Rest (2026-07-16) --------------------------------
+    def test_song_of_rest_grants_a_die_when_a_bard_is_in_the_party(self):
+        from unittest.mock import patch
+        bard = {"char_class": "Bard", "level": 2, "party_id": None}
+        with patch("bot.roll", return_value=[4]):
+            self.assertEqual(bot._song_of_rest_bonus(bard), 4)
+
+    def test_song_of_rest_nothing_without_a_bard(self):
+        fighter = {"char_class": "Fighter", "level": 5, "party_id": None}
+        self.assertEqual(bot._song_of_rest_bonus(fighter), 0)
+
+    def test_song_of_rest_checks_the_whole_party_not_just_self(self):
+        user_id = 900502
+        bard_id = 900503
+        make_basic_character(user_id, "Fighty", char_class="Fighter")
+        make_basic_character(bard_id, "Songful", char_class="Bard")
+        db.update_character(bard_id, level=2)
+        party_id = db.create_party(user_id)
+        db.update_character(bard_id, party_id=party_id)
+        fighter = db.get_character(user_id)
+        from unittest.mock import patch
+        with patch("bot.roll", return_value=[6]):
+            self.assertEqual(bot._song_of_rest_bonus(fighter), 6)
+
     def test_gnome_cunning_grants_advantage_on_mental_saves_only(self):
         from spells import _gnome_cunning_advantage
         gnome = {"race": "Gnome"}
@@ -1773,6 +1908,58 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(_gnome_cunning_advantage(gnome, "charisma"))
         self.assertFalse(_gnome_cunning_advantage(gnome, "dexterity"), "Gnome Cunning doesn't cover physical saves")
         self.assertFalse(_gnome_cunning_advantage({"race": "Human"}, "wisdom"))
+
+    # -- Ranger's Danger Sense (2026-07-16) ------------------------------
+    def test_ranger_danger_sense_grants_advantage_on_dex_saves_from_level_2(self):
+        from spells import _ranger_danger_sense_advantage
+        ranger = {"char_class": "Ranger", "level": 2}
+        self.assertTrue(_ranger_danger_sense_advantage(ranger, "dexterity"))
+        self.assertFalse(_ranger_danger_sense_advantage(ranger, "constitution"), "only covers Dexterity saves")
+        self.assertFalse(_ranger_danger_sense_advantage({"char_class": "Ranger", "level": 1}, "dexterity"),
+                          "not unlocked until level 2")
+        self.assertFalse(_ranger_danger_sense_advantage({"char_class": "Fighter", "level": 5}, "dexterity"))
+
+    # -- Sorcerer's Metamagic: Empowered Spell (2026-07-16) --------------
+    def test_empowered_spell_rerolls_ones_and_twos(self):
+        from unittest.mock import patch
+        user_id = 900504
+        make_basic_character(user_id, "Sparky", char_class="Sorcerer")
+        db.update_character(user_id, level=3)
+        character = db.get_character(user_id)
+        spell = {"damage_dice": "3d6"}
+        result = {"rolls": [1, 2, 6], "damage_dealt": 9}
+        with patch("bot.roll", return_value=[5]):
+            new_result = bot._apply_empowered_spell(user_id, character, spell, result)
+        self.assertEqual(new_result["rolls"], [5, 5, 6])
+        self.assertEqual(new_result["damage_dealt"], 9 + (5 - 1) + (5 - 2))
+
+    def test_empowered_spell_only_once_per_rest(self):
+        user_id = 900505
+        make_basic_character(user_id, "Sparky2", char_class="Sorcerer")
+        db.update_character(user_id, level=3)
+        character = db.get_character(user_id)
+        spell = {"damage_dice": "3d6"}
+        result = {"rolls": [1, 1, 1], "damage_dealt": 3}
+        first = bot._apply_empowered_spell(user_id, character, spell, result)
+        self.assertNotEqual(first["rolls"], [1, 1, 1])
+        second = bot._apply_empowered_spell(user_id, character, spell, dict(result))
+        self.assertEqual(second["rolls"], [1, 1, 1], "already used this rest")
+
+    def test_empowered_spell_requires_sorcerer_level_3(self):
+        user_id = 900506
+        make_basic_character(user_id, "Lowbie", char_class="Sorcerer")
+        character = db.get_character(user_id)
+        spell = {"damage_dice": "3d6"}
+        result = {"rolls": [1, 1, 1], "damage_dealt": 3}
+        unchanged = bot._apply_empowered_spell(user_id, character, spell, result)
+        self.assertEqual(unchanged["rolls"], [1, 1, 1])
+
+        user_id2 = 900507
+        make_basic_character(user_id2, "WrongClass", char_class="Fighter")
+        db.update_character(user_id2, level=5)
+        character2 = db.get_character(user_id2)
+        unchanged2 = bot._apply_empowered_spell(user_id2, character2, spell, dict(result))
+        self.assertEqual(unchanged2["rolls"], [1, 1, 1])
 
     # -- Extra Attack (2026-07-16 audit): confirmed via grep this was
     #    completely absent -- not even mentioned as flavor text -- despite
@@ -1993,6 +2180,127 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_look(FakeUpdate(user_id, "look around", sink))
         combined = " ".join(sink)
         self.assertIn("bounty posted on the board", combined)
+
+    # -- Character description field (2026-07-16, per Coffee) ----------
+    async def test_set_description_inline_extraction_saves_directly(self):
+        user_id = 900508
+        make_basic_character(user_id, "Thrain")
+        sink = []
+        await bot._do_set_description(
+            FakeUpdate(user_id, "set my description to: A grizzled dwarf who never smiles", sink),
+            "set my description to: A grizzled dwarf who never smiles",
+        )
+        character = db.get_character(user_id)
+        self.assertEqual(character["description"], "A grizzled dwarf who never smiles")
+
+    async def test_set_description_with_no_content_prompts_then_saves_on_next_message(self):
+        user_id = 900509
+        make_basic_character(user_id, "Sable")
+        sink = []
+        await bot._do_set_description(
+            FakeUpdate(user_id, "I'd like to add a character description to my player", sink),
+            "I'd like to add a character description to my player",
+        )
+        self.assertIsNone(db.get_character(user_id)["description"])
+        self.assertIn(user_id, bot._PENDING_DESCRIPTION)
+        self.assertIn("what would you like your character's description", sink[-1])
+
+        sink2 = []
+        await bot._do_set_description(
+            FakeUpdate(user_id, "A quiet elven ranger who speaks rarely but shoots true.", sink2),
+            "A quiet elven ranger who speaks rarely but shoots true.",
+            from_prompt=True,
+        )
+        self.assertEqual(
+            db.get_character(user_id)["description"],
+            "A quiet elven ranger who speaks rarely but shoots true.",
+        )
+
+    async def test_set_description_skip_leaves_it_blank(self):
+        user_id = 900510
+        make_basic_character(user_id, "Skippy")
+        sink = []
+        await bot._do_set_description(FakeUpdate(user_id, "skip", sink), "skip", from_prompt=True)
+        self.assertIsNone(db.get_character(user_id)["description"])
+
+    async def test_set_description_trigger_recognized_over_check_sheet(self):
+        # "add a description to my character" contains "my character" as a
+        # substring, which is check_sheet's own broad trigger -- confirmed
+        # this doesn't get shadowed the way "auto equip my character" once
+        # would have been, since set_description is checked first.
+        from ai.intent_parser import _keyword_fallback
+        result = _keyword_fallback("add a description to my character", known_npc_names=[])
+        self.assertEqual(result["action"], "set_description")
+
+    def test_character_sheet_shows_description_when_present(self):
+        user_id = 900511
+        make_basic_character(user_id, "Described")
+        character = db.update_character(user_id, description="A former sellsword.")
+        sheet = bot._format_character_sheet(character)
+        self.assertIn("A former sellsword.", sheet)
+
+    def test_character_sheet_omits_description_line_when_absent(self):
+        user_id = 900512
+        character = make_basic_character(user_id, "Undescribed")
+        sheet = bot._format_character_sheet(character)
+        self.assertNotIn('""', sheet)
+
+    # -- Bestiary / monster compendium (2026-07-16, per Coffee's backlog) --
+    async def test_bestiary_is_empty_before_any_fight(self):
+        user_id = 900513
+        make_basic_character(user_id, "Fresh")
+        sink = []
+        await bot._do_bestiary(FakeUpdate(user_id, "bestiary", sink))
+        self.assertIn("empty", sink[-1])
+
+    async def test_starting_combat_marks_the_monster_known_and_bestiary_lists_it(self):
+        from unittest.mock import patch
+        import sessions
+        user_id = 900514
+        character = make_basic_character(user_id, "Fighter1", current_location="crossroads_tavern")
+        sessions.end_session(-999)  # tests share chat_id -999 -- don't inherit another test's session
+        sink = []
+        # _get_combat_eligible_party_members returns every active character
+        # sharing this location globally -- patched to just this one
+        # character so the test isn't at the mercy of what other tests
+        # happen to have left standing at the same default location.
+        with patch("bot._get_combat_eligible_party_members", return_value=[character]):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight a goblin", sink), monster_key="goblin", count=1)
+        updated = db.get_character(user_id)
+        self.assertIn("goblin", updated["known_monsters"])
+        sessions.end_session(-999)
+
+        sink2 = []
+        await bot._do_bestiary(FakeUpdate(user_id, "bestiary", sink2))
+        combined = " ".join(sink2)
+        self.assertIn("Goblin", combined)
+        self.assertIn("HP", combined)
+        self.assertIn("XP", combined)
+
+    async def test_ai_companions_never_learn_monsters_for_the_human(self):
+        # mark_known_monster is only ever called for non-AI party members
+        # in _do_start_combat -- an AI companion in the same fight must
+        # not somehow cause the monster to show up on ITS OWN row (it has
+        # no bestiary of its own to check, but this guards the loop's
+        # is_ai filter against a future regression).
+        ai_companion = db.create_ai_companion(
+            "Buddy", "Human", "Fighter",
+            {"strength": 15, "dexterity": 14, "constitution": 13, "intelligence": 10, "wisdom": 10, "charisma": 10},
+            hp_max=12, armor_class=15, gold=0, inventory={},
+        )
+        result = db.mark_known_monster(ai_companion["telegram_user_id"], "goblin")
+        # Just confirms the helper itself is generic/safe to call on any
+        # character row -- the actual exclusion lives in _do_start_combat's
+        # `if not p.get("is_ai")` filter, exercised by the test above.
+        self.assertIn("goblin", result["known_monsters"])
+
+    def test_bestiary_entry_formats_boss_and_condition_tags(self):
+        template = {"name": "Goblin Boss", "hp_max": 21, "armor_class": 15, "strength": 12,
+                    "dexterity": 15, "xp_reward": 200, "is_boss": True, "on_hit_condition": "paralyzed"}
+        entry = bot._format_bestiary_entry("goblin_boss", template)
+        self.assertIn("boss", entry)
+        self.assertIn("paralyzed", entry)
+        self.assertIn("HP 21", entry)
 
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):

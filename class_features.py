@@ -98,6 +98,12 @@ CLASS_FEATURES_LEVEL_1 = {
         "Bardic Inspiration: bonus action, give an ally a d6 to add to one "
         "attack roll, ability check, or saving throw",
         "Spellcasting: casts bard spells using Charisma",
+        "Jack of All Trades (level 2+): add half your proficiency bonus "
+        "(rounded down) to skill checks you're not otherwise proficient in",
+        "Song of Rest (level 2+): resting near you heals the whole party "
+        "(including you) a bit extra",
+        "Expertise (level 3+): double proficiency bonus on your two "
+        "proficient skill-check abilities",
     ],
     "Cleric": [
         "Spellcasting: casts cleric spells using Wisdom",
@@ -125,6 +131,7 @@ CLASS_FEATURES_LEVEL_1 = {
         "Favored Enemy: Goblinoids — advantage on attack rolls against goblins, "
         "goblin shamans, and goblin bosses",
         "Natural Explorer: expertise navigating and surviving in a chosen terrain type",
+        "Danger Sense (level 2+): advantage on Dexterity saving throws",
     ],
     "Rogue": [
         "Sneak Attack: extra 1d6 damage once per turn when you have advantage "
@@ -136,6 +143,8 @@ CLASS_FEATURES_LEVEL_1 = {
         "Spellcasting: casts sorcerer spells using Charisma",
         "Sorcerous Origin: Draconic Bloodline — Draconic Resilience grants "
         "AC = 13 + DEX modifier when unarmored and +1 HP at level 1",
+        "Metamagic: Empowered Spell (level 3+) — once per rest, automatically "
+        "rerolls any 1s and 2s on your next damage spell's dice",
     ],
     "Warlock": [
         "Otherworldly Patron: The Fiend — Dark One's Blessing grants "

@@ -367,6 +367,18 @@ def _gnome_cunning_advantage(target: dict, save_ability: str) -> bool:
     return target.get("race") == "Gnome" and save_ability in ("intelligence", "wisdom", "charisma")
 
 
+def _ranger_danger_sense_advantage(target: dict, save_ability: str) -> bool:
+    """
+    Ranger's Danger Sense (real 5E, level 2+, previously pure flavor
+    text in class_features.py): advantage on Dexterity saving throws
+    against effects you can see coming. This engine has no "can you see
+    it" distinction on a spell's own save -- same simplification as
+    Gnome Cunning above -- so it applies to every Dexterity save a
+    level 2+ Ranger makes.
+    """
+    return target.get("char_class") == "Ranger" and target.get("level", 1) >= 2 and save_ability == "dexterity"
+
+
 def resolve_damage_spell(spell_id: str, caster: dict, target: dict | None = None) -> dict:
     """
     Roll a damage spell's effect. Returns a structured result, not prose.
@@ -389,7 +401,10 @@ def resolve_damage_spell(spell_id: str, caster: dict, target: dict | None = None
     save_ability = spell.get("save_ability")
     if save_ability and target is not None:
         dc = spell_save_dc(caster)
-        save_roll = roll_d20(advantage=_gnome_cunning_advantage(target, save_ability))
+        save_roll = roll_d20(
+            advantage=_gnome_cunning_advantage(target, save_ability)
+            or _ranger_danger_sense_advantage(target, save_ability)
+        )
         save_total = save_roll + _save_bonus(target, save_ability)
         save_success = save_total >= dc
         if save_success:

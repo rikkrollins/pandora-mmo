@@ -61,7 +61,9 @@ CREATE TABLE IF NOT EXISTS characters (
     is_inactive INTEGER NOT NULL DEFAULT 0,
     last_active_at TEXT,
     active_quests TEXT NOT NULL DEFAULT '{}',
-    feature_uses TEXT NOT NULL DEFAULT '{}'
+    feature_uses TEXT NOT NULL DEFAULT '{}',
+    description TEXT,
+    known_monsters TEXT NOT NULL DEFAULT '[]'
 );
 """
 
@@ -250,6 +252,10 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN board_quests_completed INTEGER NOT NULL DEFAULT 0")
         if "pending_asi_points" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN pending_asi_points INTEGER NOT NULL DEFAULT 0")
+        if "description" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN description TEXT")
+        if "known_monsters" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN known_monsters TEXT NOT NULL DEFAULT '[]'")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -262,6 +268,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     d["active_quests"] = json.loads(d["active_quests"])
     d["feature_uses"] = json.loads(d["feature_uses"])
     d["equipped_accessories"] = json.loads(d["equipped_accessories"])
+    d["known_monsters"] = json.loads(d["known_monsters"])
     return d
 
 
@@ -370,7 +377,7 @@ def update_character(telegram_user_id: int, **fields) -> dict | None:
     if not fields:
         return get_character(telegram_user_id)
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -594,6 +601,21 @@ def mark_visited(telegram_user_id: int, location_id: str) -> dict | None:
         return character
     character["visited_locations"].append(location_id)
     return update_character(telegram_user_id, visited_locations=character["visited_locations"])
+
+
+def mark_known_monster(telegram_user_id: int, monster_key: str) -> dict | None:
+    """
+    Adds monster_key to this character's known_monsters (bestiary
+    discovery), if new -- same fog-of-war pattern as mark_visited above,
+    called once a character has actually fought a given monster type.
+    """
+    character = get_character(telegram_user_id)
+    if character is None:
+        return None
+    if monster_key in character["known_monsters"]:
+        return character
+    character["known_monsters"].append(monster_key)
+    return update_character(telegram_user_id, known_monsters=character["known_monsters"])
 
 
 def learn_spell(telegram_user_id: int, spell_id: str) -> dict | None:

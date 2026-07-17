@@ -2,6 +2,64 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.10.14] — Real skill-check proficiency, 5 more class features, character descriptions, a bestiary, and 3 live-reported misclassification fixes
+
+**Skill checks now apply proficiency bonus, for real.** Every skill
+check (`_do_skill_check`) used to roll flat, with no proficiency bonus
+applied at all regardless of class — bigger than it sounds, since it
+silently made every class equally (un)skilled at everything. A new
+`CLASS_SKILL_ABILITIES` table (2 abilities per class, purpose-built for
+skill checks rather than reusing the save-proficiency table, which
+mismatches badly for classes like Ranger) now grants real proficiency
+where it should apply.
+
+**Five more level 2-3+ class features, genuinely mechanical:** Bard's
+Jack of All Trades (half proficiency on skills you're not otherwise
+proficient in, level 2+), Song of Rest (extra healing for the whole
+party when resting near a Bard, level 2+), and Expertise (double
+proficiency on your two skill-check abilities, level 3+); Ranger's
+Danger Sense (advantage on Dexterity saves, level 2+); Sorcerer's
+Metamagic: Empowered Spell (once per rest, automatically rerolls 1s
+and 2s on your next damage spell, level 3+).
+
+**Character descriptions.** Add a short backstory/appearance/
+personality blurb to your character — asked at creation (skippable),
+or any time after by saying something like "I'd like to add a
+character description to my player." Shows up on your character
+sheet once set.
+
+**A real bestiary.** Say "bestiary" (or "what monsters have I fought")
+to see every monster type you've actually fought, with its real stats
+(HP, AC, STR/DEX, XP reward, boss/condition tags) — fog-of-war
+discovery, same convention as the map: only monsters you've genuinely
+encountered in combat show up, nothing pre-revealed.
+
+**Three more live-reported misclassification fixes**, following the
+same pattern as every other one this project has fixed the same way —
+found via the live activity monitor, reproduced, root-caused, and
+regression-tested:
+- "What items do you have for sale?" was answered with the ASKER's own
+  backpack contents instead of a shop's stock — a bare "what items"
+  trigger shadowed the intent before it could reach anything
+  shop-aware. Now routes to a real, location-grounded purchase check.
+- This build's small local model has a documented bias toward
+  guessing "pass_turn" for phrasing it doesn't recognize — confirmed
+  again live when ordinary tavern chatter ("I'll take a mug, ale!!!
+  how are you doing old buddy?") got the confusing "There's no active
+  turn to pass right now" reply. The model's own pass_turn guess is
+  never trusted anymore unless the deterministic keyword fallback
+  independently agrees — same defensive pattern already used for
+  start_combat.
+- A compound message repeating the same action type ("Go to the
+  crossroads Tavern, and then go to the whispering wood") only ever
+  executed the first step and silently dropped the rest, since the
+  compound-detection logic required two DIFFERENT action types before
+  treating a message as genuinely multi-step. Now requires two REAL
+  (non-chat) segments instead, regardless of whether they're the same
+  action repeated — confirmed this doesn't regress the original
+  false-positive guard ("attack the goblin and the wolf" still
+  correctly stays a single action).
+
 ## [1.10.13] — Physical dice mode, real ASI level-ups, 4 new class features, gathering tools, and a batch of live-reported bugfixes
 
 **Physical dice mode.** Players can now opt (asked at character

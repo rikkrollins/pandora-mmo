@@ -103,6 +103,17 @@ attacks, "divine smite" (Paladin) to spend a spell slot on a confirmed
 hit for bonus radiant damage, or "flurry of blows" (Monk) to spend a ki
 point for two extra unarmed strikes.
 
+Skill checks (sneaking, persuading, climbing, and the rest) now apply
+a real proficiency bonus when your class is proficient in the ability
+being tested, same as saving throws. Bards also get Jack of All Trades
+(half proficiency on skills you're not otherwise proficient in, level
+2+), Song of Rest (extra healing for the whole party when resting near
+you, level 2+), and Expertise (double proficiency on your two
+skill-check abilities, level 3+); Rangers get Danger Sense (advantage
+on Dexterity saves, level 2+); Sorcerers get Metamagic: Empowered
+Spell (once per rest, automatically rerolls 1s and 2s on your next
+damage spell, level 3+).
+
 ### Leveling up and ability score improvements
 
 At levels 4, 8, 12, 16, and 19, your character earns real ability
@@ -119,6 +130,22 @@ for you, say "use my own dice" any time (or answer that way when asked
 at character creation). Once on, the game will ask you to report the
 number whenever an attack or skill check needs a d20 roll, and use
 exactly what you rolled. Say "let the game roll for me" to switch back.
+
+### Character descriptions
+
+Give your character a short backstory, appearance, or personality
+blurb — you'll be asked at creation (say "skip" to leave it blank), or
+add one any time after by saying something like "I'd like to add a
+character description to my player." Shows up on your character sheet
+once set.
+
+### Bestiary
+
+Say "bestiary" (or "what monsters have I fought") to see every monster
+type you've actually fought, with its real stats — HP, AC, STR/DEX, XP
+reward, and any boss or special-condition tags. Fog-of-war discovery,
+same idea as the map: only monsters you've genuinely encountered in
+combat show up.
 
 ### Death is real, and reversible
 
