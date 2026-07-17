@@ -188,8 +188,10 @@ AMBIENT_NPC_ENCOUNTER_CHANCE = 0.4
 # (healing/buffs/cures — never damage), and their owner can freely
 # switch to and play a different character in the meantime (character
 # slots already support this with no changes needed here).
-IDLE_WARNING_SECONDS = 900
-IDLE_TIMEOUT_SECONDS = 1800
+# Doubled 2026-07-16 (Coffee's live feedback: "the inactivity came too
+# soon") -- was 900/1800 (15/30 min).
+IDLE_WARNING_SECONDS = 1800
+IDLE_TIMEOUT_SECONDS = 3600
 IDLE_CHECK_INTERVAL_SECONDS = 60
 SAFE_LOCATION_FALLBACK = "crossroads_tavern"
 
@@ -4375,8 +4377,13 @@ async def _do_check_sheet(update: Update, target_name: str | None = None) -> Non
         if npc is not None:
             await _safe_send(update, _format_npc_basic_info(npc))
             return
+        # Real live bug (2026-07-16, Coffee): .title() on a hallucinated,
+        # non-name target (the model can invent one when there's no real
+        # action for a message to match -- see task #110/#112) mangled
+        # ordinary text into nonsense like "Player'S Own Character".
+        # target_name is echoed as given rather than reformatted.
         await update.effective_chat.send_message(
-            f"Nobody named {target_name.title()} is playing right now — can't show a sheet for them.",
+            f"Nobody named {target_name} is playing right now — can't show a sheet for them.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
@@ -6253,6 +6260,39 @@ def _extract_quantity(text: str) -> int:
     return 1
 
 
+async def _do_list_shop(update: Update) -> None:
+    """
+    Real shop-browse action (2026-07-16, per Coffee): lists a shop's
+    ACTUAL stocked items (real names/prices from items.py), grounded,
+    not invented -- confirmed live the same night that with no such
+    action to reach for, "I want to shop" was silently swallowed as
+    chat and "I want to see the items in the shop" got guessed by the
+    raw model as check_sheet with a hallucinated target name. buy_item
+    still handles purchasing a SPECIFIC named item; this just answers
+    "what do you even have."
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    location = cl.get_location(CAMPAIGN, character["current_location"])
+    shop_id = location.get("shop") if location else None
+    if not shop_id:
+        await update.effective_chat.send_message(
+            "There's no shop here.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    shop_data = cl.get_shop(CAMPAIGN, shop_id)
+    lines = [f"🛒 **{cl.get_location(CAMPAIGN, character['current_location'])['name']}**"]
+    for item_id in shop_data["inventory"]:
+        item = items_module.get_item(item_id)
+        if item:
+            lines.append(f"{item['name']} — {item['price']} gold")
+    await _safe_send(update, "\n".join(lines))
+
+
 async def _do_buy(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -7335,6 +7375,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_set_description(update, intent.get("raw_text", text))
     elif action == "bestiary":
         await _do_bestiary(update)
+    elif action == "list_shop":
+        await _do_list_shop(update)
     elif action == "list_characters":
         await _do_list_characters(update)
     elif action == "switch_character":

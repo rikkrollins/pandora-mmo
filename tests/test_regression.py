@@ -890,11 +890,23 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     # -- Real live bug (2026-07-16): "what items do you have for sale?"
     #    matched check_inventory's own "what items" trigger and showed the
     #    ASKER's own backpack instead of answering a question about a
-    #    shop's/NPC's stock. -------------------------------------------
-    def test_what_do_you_have_for_sale_routes_to_buy_not_check_inventory(self):
+    #    shop's/NPC's stock. Originally routed to "buy" (no better than
+    #    silence with no item named); now routes to the real list_shop
+    #    action instead, once it existed (task #110). ------------------
+    def test_what_do_you_have_for_sale_routes_to_list_shop(self):
         for text in ["what items do you have for sale?", "what do you have for sale",
                      "what items are for sale here", "what's for sale"]:
-            self.assertEqual(_keyword_fallback(text, [])["action"], "buy", text)
+            self.assertEqual(_keyword_fallback(text, [])["action"], "list_shop", text)
+
+    # -- Real live bugs (2026-07-16, Coffee): with no real "browse a
+    #    shop" action to reach for, "I want to shop" was silently
+    #    swallowed as chat, and "I want to see the items in the shop"
+    #    got guessed by the raw model as check_sheet with a garbled
+    #    target name. Both now route to the real list_shop action. -----
+    def test_shop_browsing_phrasing_routes_to_list_shop(self):
+        for text in ["I want to shop", "let's shop", "items in the shop",
+                     "browse the shop", "what's in the shop"]:
+            self.assertEqual(_keyword_fallback(text, [])["action"], "list_shop", text)
 
     def test_check_inventory_first_person_phrasing_still_unaffected(self):
         for text in ["what items do I have", "what do i have in my backpack",
@@ -2351,6 +2363,81 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("boss", entry)
         self.assertIn("paralyzed", entry)
         self.assertIn("HP 21", entry)
+
+    # -- Real live bug (2026-07-16, Coffee): "Look for a shop to buy an
+    #    axe" failed to match Woodcutter's Axe because the fallback
+    #    category-word matcher required 4+ letter words, excluding
+    #    short-but-unambiguous item nouns like "axe" (3 letters). ------
+    def test_short_item_word_now_matches(self):
+        candidates = ["rusty_dagger", "shortsword", "longsword", "longbow", "leather_armor",
+                      "chain_shirt", "wooden_shield", "healing_potion", "antitoxin", "rations",
+                      "torch", "iron_ore", "woodcutters_axe", "pickaxe", "shears"]
+        self.assertEqual(
+            items_module.find_item_mentioned_in_text("Look for a shop to buy an axe", candidates),
+            "woodcutters_axe",
+        )
+
+    def test_potions_fallback_still_works_after_the_axe_fix(self):
+        self.assertEqual(
+            items_module.find_item_mentioned_in_text("buy two potions from Grimsby", ["healing_potion"]),
+            "healing_potion",
+        )
+
+    def test_stopword_the_does_not_falsely_match_of_the_x_items(self):
+        # "the" appears as a real word in 3 different item names (Boots
+        # of the Winterlands, Bracers of the Steady Hand, Ring of the
+        # Undertow) -- a message that only says "the" (not any real
+        # item) must not match any of them, now that "the" is an
+        # explicit stopword rather than merely excluded by length.
+        candidates = ["boots_of_the_winterlands", "bracers_of_the_steady_hand", "ring_of_the_undertow"]
+        self.assertIsNone(items_module.find_item_mentioned_in_text("give me the thing", candidates))
+
+    def test_item_word_match_respects_word_boundaries_not_bare_substring(self):
+        # "ore" (iron_ore) must not match inside an unrelated longer
+        # word like "before" -- confirms the fix uses real word
+        # membership, not a bare substring check.
+        self.assertIsNone(items_module.find_item_mentioned_in_text("I was here before you", ["iron_ore"]))
+        self.assertEqual(items_module.find_item_mentioned_in_text("I mined some ore", ["iron_ore"]), "iron_ore")
+
+    # -- Real live feedback (2026-07-16, Coffee): narrations should
+    #    always name the acting character, not default to ambiguous
+    #    "you"/pronoun framing, since this is a shared group chat. -----
+    def test_narration_preambles_instruct_naming_the_character(self):
+        import ai.dm_agent as dm_agent_module
+        for preamble_fn in (dm_agent_module._skill_check_preamble,
+                             dm_agent_module._combat_preamble,
+                             dm_agent_module._examine_preamble):
+            text = preamble_fn()
+            self.assertIn("actual given name", text, preamble_fn.__name__)
+
+    # -- Real shop-browse action (2026-07-16, per Coffee, task #110) ---
+    async def test_list_shop_shows_real_stocked_items_and_prices(self):
+        user_id = 900518
+        make_basic_character(user_id, "Shopper", current_location="crossroads_tavern")
+        sink = []
+        await bot._do_list_shop(FakeUpdate(user_id, "I want to shop", sink))
+        combined = " ".join(sink)
+        self.assertIn("Rations", combined)
+        self.assertIn("Healing Potion", combined)
+        self.assertIn("gold", combined)
+
+    async def test_list_shop_says_no_shop_when_none_here(self):
+        user_id = 900519
+        make_basic_character(user_id, "Wanderer", current_location="whispering_wood")
+        sink = []
+        await bot._do_list_shop(FakeUpdate(user_id, "I want to shop", sink))
+        self.assertIn("no shop here", sink[-1])
+
+    # -- Real live bug (2026-07-16, Coffee): .title() on a hallucinated
+    #    non-name target mangled ordinary text into nonsense like
+    #    "Player'S Own Character". ---------------------------------
+    async def test_check_sheet_unknown_target_is_not_mangled_by_title_case(self):
+        user_id = 900520
+        make_basic_character(user_id, "Asker")
+        sink = []
+        await bot._do_check_sheet(FakeUpdate(user_id, "check sheet", sink), "player's own character")
+        self.assertIn("player's own character", sink[-1])
+        self.assertNotIn("Player'S", sink[-1])
 
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):

@@ -7,6 +7,7 @@ touching bot.py or the rules engine.
 Item categories: weapon, armor, shield, consumable, scroll, ring,
 amulet, wondrous, quest_item, material.
 """
+import re
 
 ITEMS = {
     # --- Weapons ---
@@ -233,14 +234,31 @@ def find_item_mentioned_in_text(text: str, candidate_ids: list[str] | None = Non
     # Potion") when it unambiguously picks out exactly one candidate --
     # confirmed live 2026-07-12 via a real screenshot: "buy two potions
     # from Grimsby" never says the full item name, just the general
-    # kind, and this shop only sells one real potion. Word length >= 4
-    # guards against trivial words ("of", "the") in longer item names
-    # causing false matches.
+    # kind, and this shop only sells one real potion.
+    #
+    # Real live bug (2026-07-16, Coffee): "Look for a shop to buy an
+    # axe" failed ("not sure what item you mean") even though the shop
+    # sold exactly one axe (Woodcutter's Axe) -- the word-length >= 4
+    # guard here, meant to keep trivial connector words ("of", "the")
+    # from causing false matches, ALSO excluded genuinely short,
+    # unambiguous item nouns like "axe" (3 letters). Fixed by explicitly
+    # excluding a real stopword list instead of using a blanket length
+    # cutoff, and by matching whole WORDS of the input (word membership)
+    # rather than a bare substring check -- the old substring check
+    # could also have matched a short word inside an unrelated longer
+    # word (e.g. "ore" inside "before"), a latent risk this removes too.
+    stopwords = {"the", "of", "an", "a", "on", "in", "to", "for", "and", "no"}
+    # A plain .split() would leave punctuation stuck to words ("axe!!!"
+    # never equals "axe") -- \w+(?:'\w+)? keeps a real internal
+    # apostrophe (e.g. "woodcutter's") but strips trailing punctuation.
+    lowered_words = set(re.findall(r"\w+(?:'\w+)?", lowered))
     matches = set()
     for item_id in search_space:
         for word in ITEMS[item_id]["name"].lower().split():
             singular = word[:-1] if word.endswith("s") else word
-            if len(singular) >= 4 and (singular in lowered or f"{singular}s" in lowered):
+            if singular in stopwords or len(singular) < 3:
+                continue
+            if singular in lowered_words or f"{singular}s" in lowered_words:
                 matches.add(item_id)
                 break
     if len(matches) == 1:

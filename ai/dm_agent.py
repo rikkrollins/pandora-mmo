@@ -14,6 +14,23 @@ import config
 from ai.story_mode import scaled_sentences, style_directive
 from ai.text_cleanup import strip_think_tags
 
+# Real live feedback (2026-07-16, Coffee, via Development-topic
+# screenshot): "please say who is doing the action -- for example if it
+# is Zara asking to chop wood, it says '[player] attempts to [action]'
+# ... so people know who was doing what actions." This is a shared
+# group chat where several human/AI characters act in the same feed --
+# a narration that defaults to second-person "you" framing (fine solo)
+# is genuinely ambiguous about who just acted. Every preamble already
+# hands the model the character's real name as context, but none of
+# them previously told it to actually USE that name in the prose it
+# writes, so the model was free to default to ambiguous phrasing.
+_NAMING_INSTRUCTION = (
+    "Always refer to the acting character by their actual given name "
+    "(never a generic 'you' or unnamed pronoun as the subject) so "
+    "readers can tell who is acting -- this narration is read by a "
+    "shared group, not just this one player."
+)
+
 
 def _skill_check_preamble() -> str:
     return (
@@ -29,7 +46,8 @@ def _skill_check_preamble() -> str:
         "the physical scene: what the character sees, hears, and feels in "
         "this exact moment. Mention the actual raw d20 number rolled "
         "somewhere in your narration, and calibrate how dramatic your prose "
-        f"is to how good or bad that roll actually was. {style_directive()}"
+        f"is to how good or bad that roll actually was. {_NAMING_INSTRUCTION} "
+        f"{style_directive()}"
     )
 
 
@@ -118,7 +136,8 @@ def _combat_preamble() -> str:
         "beyond them. "
         "Mention the actual raw d20 number rolled somewhere in your narration "
         "(e.g. 'rolling a 17...'), and calibrate how dramatic or restrained "
-        f"your prose is to how good or bad that roll actually was. {style_directive()}"
+        f"your prose is to how good or bad that roll actually was. {_NAMING_INSTRUCTION} "
+        f"{style_directive()}"
     )
 
 
@@ -421,7 +440,8 @@ def _examine_preamble() -> str:
         "welcome; inventing a new object, a hidden mechanism, a secret "
         "passage, or ANY fact beyond what's given is not. Never resolve or "
         "explain what's strange about it — if it's presented as mysterious, "
-        f"it must stay exactly as mysterious after your narration as before. {style_directive()}"
+        f"it must stay exactly as mysterious after your narration as before. {_NAMING_INSTRUCTION} "
+        f"{style_directive()}"
     )
 
 

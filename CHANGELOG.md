@@ -2,6 +2,46 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.10.17] — A real shop-browse action, plus a batch of live-reported fixes from tonight's screenshots
+
+**A real "browse the shop" action.** Say "I want to shop", "what's in
+the shop", "what do you have for sale", or similar, and get the shop's
+actual stocked items and prices — grounded in real data, not invented.
+Previously there was no such action at all: "I want to shop" was
+silently swallowed as chat, "I want to see the items in the shop" got
+guessed by the small local model as a character-sheet lookup with a
+garbled, made-up name, and "what do you have for sale" only routed to
+`buy` (which needs a specific item already named).
+
+**Fixed:** short-but-unambiguous item words like "axe" (3 letters)
+failed to match item names ("Look for a shop to buy an axe" said "not
+sure what item you mean" even though the shop sold exactly one axe) —
+the matching fallback's word-length guard, meant to exclude trivial
+connector words, was excluding real short item nouns too. Now uses an
+explicit stopword list plus real word-boundary matching instead of a
+blanket length cutoff (also closes a latent risk where a short word
+could have matched inside an unrelated longer word).
+
+**Fixed:** "The Tavern Cellar" was mistakenly tagged as a safe rest
+location in the campaign data, so a character idle in the cellar
+stayed there instead of being redirected to the actual Crossroads
+Tavern.
+
+**Fixed:** narration now consistently names the acting character
+instead of defaulting to ambiguous "you" framing — genuinely confusing
+in a shared multiplayer chat where several characters act in the same
+feed. Applies to skill checks (including gathering), combat, and
+examine narration.
+
+**Fixed:** check_sheet's "nobody named X" fallback no longer mangles
+an unrecognized target through `.title()` (a hallucinated name like
+"player's own character" used to come back as the nonsensical "Player'S
+Own Character").
+
+**Tuned:** the idle/inactivity warning and auto-rest timers were
+doubled (15→30 min warning, 30→60 min until auto-rest) — live feedback
+that the old timing felt too fast.
+
 ## [1.10.16] — Character sheet: ability scores were missing, pending level-up now flagged at the bottom
 
 Live-reported by Coffee: ability scores (STR/DEX/CON/INT/WIS/CHA) were

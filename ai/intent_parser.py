@@ -410,13 +410,27 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # for the player's OWN items) since "have" phrasing overlaps, and
     # check_inventory's handler shows the ASKER's inventory, answering a
     # question about a shop's wares with completely unrelated data.
-    # Third-party "for sale"/"to sell"/"you have" framing routes to "buy"
-    # instead, which is location/shop-aware and at worst says "there's no
-    # shop here" -- strictly more correct than the asker's own backpack.
+    #
+    # Originally routed to "buy" (2026-07-16), but that only resolves a
+    # SPECIFIC named item -- with none named, it just says "not sure
+    # what item you mean," no better than silence. Real live bugs the
+    # same night confirmed there was no actual "browse a shop" action to
+    # reach for at all: "I want to shop" fell all the way to silent
+    # chat, and "I want to see the items in the shop" got guessed by the
+    # raw model as check_sheet with a hallucinated, garbled target name.
+    # Now a real list_shop action -- see bot.py's _do_list_shop -- shows
+    # the shop's ACTUAL stocked items (real names/prices), grounded, not
+    # invented, same as every other real-data lookup in this game.
     if any(w in lowered for w in ["for sale", "to sell", "what do you have", "what does he have",
                                     "what does she have", "you got for sale", "you have for sale",
-                                    "what's for sale", "whats for sale"]):
-        return {**base, "action": "buy"}
+                                    "what's for sale", "whats for sale", "i want to shop",
+                                    "id like to shop", "i'd like to shop", "let me shop",
+                                    "let's shop", "lets shop", "time to shop", "go shopping",
+                                    "items in the shop", "items in his shop", "items in her shop",
+                                    "shop items", "browse the shop", "see the shop",
+                                    "what's in the shop", "whats in the shop", "look at the shop",
+                                    "what's in his shop", "what's in her shop"]):
+        return {**base, "action": "list_shop"}
 
     # Real live bug (2026-07-15): "auto equip my equipment" contains "my
     # equipment", which otherwise matches here and never reaches
@@ -883,7 +897,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None) -> dict:
                 "make_campfire", "give_item", "use_item", "equip_item", "auto_equip", "breath_weapon",
                 "channel_divinity", "action_surge", "reckless_attack", "divine_smite",
                 "flurry_of_blows", "toggle_manual_dice", "level_up", "set_description",
-                "bestiary",
+                "bestiary", "list_shop",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

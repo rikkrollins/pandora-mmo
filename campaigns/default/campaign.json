@@ -250,7 +250,6 @@
         "connections": [
           "crossroads_tavern"
         ],
-        "safe": true,
         "resource_nodes": [
           {
             "id": "cellar_mushroom_patch",

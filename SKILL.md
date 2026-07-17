@@ -147,6 +147,12 @@ reward, and any boss or special-condition tags. Fog-of-war discovery,
 same idea as the map: only monsters you've genuinely encountered in
 combat show up.
 
+### Browsing a shop
+
+Say "I want to shop" or "what's in the shop" at a real shop location to
+see everything it actually stocks and how much it costs. Say "buy
+<item>" to actually purchase something once you know what you want.
+
 ### Death is real, and reversible
 
 3 failed death saves means your character is genuinely dead — they

@@ -14,6 +14,7 @@ Usage:
         # advance the cursor once you've handled everything up to (and
         # including) that log timestamp, so it isn't reprocessed next time
 """
+import ast
 import json
 import re
 import sys
@@ -26,6 +27,19 @@ LOG_PATH = REPO_ROOT / "bot_live_tmp.log"
 LINE_RE = re.compile(
     r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) \[INFO\] pandora_mmo: "
     r"\[dev_topic\] user=(?P<user>\d+) text=(?P<text>.*)$"
+)
+
+# Real live gap (2026-07-16): a screenshot sent to the Development topic
+# with a real, actionable caption ("please make narrations say who is
+# doing the action") is logged under a DIFFERENT tag (dev_topic_image,
+# see bot.py's dev_topic_image_handler) than plain text commands
+# (dev_topic) -- this script only ever matched the latter, so an
+# image-with-caption request was completely invisible to every
+# unattended monitoring cycle. path/caption are logged via Python's
+# !r (repr), so ast.literal_eval is the correct inverse parse.
+IMAGE_LINE_RE = re.compile(
+    r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) \[INFO\] pandora_mmo: "
+    r"\[dev_topic_image\] user=(?P<user>\d+) path=(?P<path>.*?) caption=(?P<caption>.*)$"
 )
 
 
@@ -53,11 +67,27 @@ def list_new_commands() -> list[dict]:
     commands = []
     for line in LOG_PATH.read_text(errors="replace").splitlines():
         m = LINE_RE.match(line)
-        if not m:
+        if m:
+            if m["ts"] <= cursor:
+                continue
+            commands.append({"timestamp": m["ts"], "user": m["user"], "text": m["text"]})
             continue
-        if m["ts"] <= cursor:
-            continue
-        commands.append({"timestamp": m["ts"], "user": m["user"], "text": m["text"]})
+        m = IMAGE_LINE_RE.match(line)
+        if m:
+            if m["ts"] <= cursor:
+                continue
+            try:
+                path = ast.literal_eval(m["path"])
+                caption = ast.literal_eval(m["caption"])
+            except (ValueError, SyntaxError):
+                continue
+            if not caption:
+                continue  # no caption, nothing actionable to surface
+            commands.append({
+                "timestamp": m["ts"], "user": m["user"],
+                "text": f"[image attached at {path}] {caption}",
+            })
+    commands.sort(key=lambda c: c["timestamp"])
     return commands
 
 
