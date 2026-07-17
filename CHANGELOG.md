@@ -2,6 +2,16 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.10] — NPC rename: Sera -> Sarah
+
+Per Coffee (voice-to-text couldn't reliably say "Sera"): renamed the
+recruitable wandering-ranger NPC's display name from "Sera" to "Sarah"
+across the campaign data (NPC record, both her quests' titles/
+descriptions/clues) and updated her already-recruited live character
+row (character_id 24) to match. Internal ID (`sera_wanderer`) is
+unchanged, so nothing that references her by ID (quest giver_npc,
+relationships) is affected — only the name players see and say.
+
 ## [1.11.9] — Hall of Fame, and "examine" now recognizes real monsters
 
 **New: /leaderboard / "Hall of Fame" (task #74), per Coffee.** Real XP

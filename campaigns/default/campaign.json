@@ -506,7 +506,7 @@
       "disposition": "friendly"
     },
     "sera_wanderer": {
-      "name": "Sera",
+      "name": "Sarah",
       "role": "wandering_adventurer",
       "personality": "a quiet, capable ranger passing through, sizing up anyone who might be worth traveling with",
       "goals": "looking for a group heading somewhere interesting",
@@ -774,8 +774,8 @@
       "clue": "Grimsby says the wrongness he's felt seems to trail off toward the treeline west of the tavern."
     },
     "seras_safer_crossing": {
-      "title": "Sera's Safer Crossing",
-      "description": "Sera's been sizing up the Stonearch Bridge crossing, uneasy about who else might be using it to move unseen -- she'd rather have a second set of eyes before trusting the route.",
+      "title": "Sarah's Safer Crossing",
+      "description": "Sarah's been sizing up the Stonearch Bridge crossing, uneasy about who else might be using it to move unseen -- she'd rather have a second set of eyes before trusting the route.",
       "objective_location": "stonearch_bridge",
       "giver_npc": "sera_wanderer",
       "reward_xp": 100,
@@ -784,7 +784,7 @@
         "type": "reach_location",
         "location": "stonearch_bridge"
       },
-      "clue": "Sera says she'll feel better about the bridge once someone's actually walked it with her."
+      "clue": "Sarah says she'll feel better about the bridge once someone's actually walked it with her."
     },
     "borins_vouching_task": {
       "title": "A Name Worth Vouching For",
@@ -945,7 +945,7 @@
     },
     "the_weeping_wells_secret": {
       "title": "The Weeping Well's Secret",
-      "description": "Sera thinks the well's strange warmth isn't natural, and that whatever's behind it is worth finding, not just noting.",
+      "description": "Sarah thinks the well's strange warmth isn't natural, and that whatever's behind it is worth finding, not just noting.",
       "location": "the_weeping_well",
       "trigger": {
         "type": "reach_location",
@@ -954,7 +954,7 @@
       "reward_xp": 250,
       "reward_gold": 100,
       "reward_item": "moonpetal",
-      "clue": "Sera says the sealed door low in the well's wall is the only part of it that isn't carved from ordinary stone."
+      "clue": "Sarah says the sealed door low in the well's wall is the only part of it that isn't carved from ordinary stone."
     }
   },
   "story_arcs": {
