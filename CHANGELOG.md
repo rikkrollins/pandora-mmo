@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.10.18] — Narration-naming regression fix (from tonight's own 1.10.17 batch)
+
+Caught within the hour: the narration-naming fix shipped in 1.10.17
+(#107) told the model to name the acting character, but didn't say
+WHICH name to use if another name got mentioned along the way. A
+compound message ("Hey Bram, are you here on a quest also?! And then
+I chop some lumber" — Bram isn't even a real NPC) got narrated as
+"Bram's hands clenched around the chisel..." instead of naming the
+real character who rolled the check. The instruction now explicitly
+says the acting character's name is whatever's on the "Character:"
+line — any other name mentioned within the attempted action itself is
+never the narration's subject. Verified live against the exact
+reported scenario.
+
 ## [1.10.17] — A real shop-browse action, plus a batch of live-reported fixes from tonight's screenshots
 
 **A real "browse the shop" action.** Say "I want to shop", "what's in

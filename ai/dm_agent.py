@@ -24,11 +24,29 @@ from ai.text_cleanup import strip_think_tags
 # hands the model the character's real name as context, but none of
 # them previously told it to actually USE that name in the prose it
 # writes, so the model was free to default to ambiguous phrasing.
+#
+# Real live regression (2026-07-16, same night, caught within the hour):
+# the first version of this instruction just said "use the acting
+# character's real name" with no disambiguation -- and a compound
+# message ("Hey Bram, are you here on a quest also?! And then I chop
+# some lumber", where "Bram" isn't even a real NPC) got narrated as
+# "Bram's hands clenched around the chisel..." instead of naming
+# Ravenloft, the character who actually rolled the check. The prompt
+# always puts the real actor's name on its own "Character: <name>"
+# line, separate from the attempted-action text -- but the action text
+# can legitimately contain OTHER names the player mentioned (someone
+# they just spoke to), and the small model latched onto whichever name
+# it saw first rather than the one on the Character: line. Now
+# explicit about which name is authoritative.
 _NAMING_INSTRUCTION = (
     "Always refer to the acting character by their actual given name "
     "(never a generic 'you' or unnamed pronoun as the subject) so "
     "readers can tell who is acting -- this narration is read by a "
-    "shared group, not just this one player."
+    "shared group, not just this one player. The acting character's "
+    "name is EXACTLY whatever is given on the 'Character:' line above "
+    "-- if the attempted action mentions a different name (someone "
+    "they spoke to, referenced, or addressed), that other name is "
+    "NEVER the subject of your narration; only the Character: name is."
 )
 
 
