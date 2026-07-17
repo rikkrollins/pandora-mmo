@@ -4656,6 +4656,19 @@ async def _do_gather(update: Update, action_text: str) -> None:
             break
 
     await _safe_send(update, message)
+    # Task #152, 2026-07-17: gathering always happens AT the quest's own
+    # location (the crediting match above requires it), so a player who
+    # completes the objective without ever having left never gets an
+    # "arrival" event to trigger _check_board_quest_turnin's reward --
+    # confirmed live, Coffee's "supply run for wood" sat at 4/4 with
+    # completed_at still null because he was already standing in the
+    # Whispering Wood the whole time. Checking turn-in right here (not
+    # instead of the move-triggered checks, which still cover a player
+    # who leaves and comes back later) closes that soft-lock without
+    # changing the "come back to collect" framing for quests that
+    # genuinely are fought/gathered somewhere else first.
+    if success:
+        await _check_board_quest_turnin(update, update.effective_user.id, character["current_location"])
 
 
 async def _do_craft(update: Update, text: str) -> None:
@@ -7610,6 +7623,58 @@ async def changelog_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     )
 
 
+_HELP_TEXT = """📖 **How to play Pandora MMO**
+
+Almost everything here is plain English, typed straight into Adventure -- no commands to memorize. Just say what your character does.
+
+**Getting around**
+• "Look around" / "Where am I?" -- describes the area
+• "Examine the old barrel" -- inspect one specific thing
+• "Go to the tavern" / "Head upstairs" -- move somewhere
+• "Show me the map" (or /map)
+
+**Talking & people**
+• "Talk to Grimsby" / "Say hello to Sera" -- NPC conversation
+• "Recruit Sera to my party" -- add a real companion
+• "Invite <player> to my party" / "Accept the invite" / "Leave the party"
+• "Join the Arcane Circle" (or whichever guild)
+
+**Combat**
+• "Attack the goblin" -- once combat's started
+• "Flee" / "Pass my turn"
+• Class abilities work by name too: "Rage", "Second Wind", "Action Surge", "Channel Divinity", "Cast fireball", etc.
+
+**Items & shops**
+• "What's in my inventory?" / "Check my sheet"
+• "Buy 3 torches" / "Sell my old sword" / "What do you have for sale?"
+• "Equip the longsword" / "Use a healing potion" / "Give the rope to <player>"
+• "Where's the nearest merchant?"
+
+**Gathering & crafting**
+• "Chop wood" / "Gather herbs" / "Go fishing" -- needs the right tool for some
+• "Craft a healing potion"
+• "Make camp" / "Rest" to recover over time
+
+**Quests**
+• "Check my quests" -- your quest journal AND the local quest board
+• "Accept this quest" (names it if more than one's posted)
+• "Ask for a clue" if you're stuck
+
+**Character**
+• "Level up" -- once you have XP to spend
+• "Set my description to ..."
+• /sheet, /newcharacter, /map, /version, /changelog
+
+Stuck on something specific? Ask in Support -- it's grounded in this game's real items/spells/guilds, not general D&D trivia."""
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.effective_chat.send_message(
+        _HELP_TEXT,
+        message_thread_id=update.message.message_thread_id,
+    )
+
+
 # ---------------------------------------------------------------------
 # Development topic: conversational troubleshooting/build assistant.
 # Support topic: conversational how-to-play assistant.
@@ -9093,6 +9158,7 @@ def build_application() -> Application:
     )
 
     # Optional slash-command shortcuts.
+    application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("newcharacter", newcharacter_command))
     application.add_handler(CommandHandler("startcombat", startcombat_command))
     application.add_handler(CommandHandler("attack", attack_command))

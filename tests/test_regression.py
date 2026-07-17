@@ -2515,6 +2515,35 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(recipient["inventory"].get("torch"), 3)
         self.assertEqual(recipient["inventory"].get("shears"), 2)
 
+    # -- Real live bug (2026-07-17, Coffee, task #152): a gather_material
+    #    board quest hit 4/4 but completed_at stayed null forever --
+    #    "Return to X to collect your reward" is meaningless when
+    #    gathering only ever happens AT that same location, so the
+    #    move-triggered turn-in check never got an "arrival" event to
+    #    fire on. Fixed by checking turn-in immediately in _do_gather.
+    async def test_gather_completed_quest_turns_in_without_a_move_event(self):
+        from unittest.mock import patch
+
+        user_id = 900525
+        make_basic_character(user_id, "Standfast", current_location="whispering_wood", gold=50)
+        db.add_item(user_id, "woodcutters_axe", 1)
+        bq = db.create_board_quest(
+            "whispering_wood", "2026-07-17", "A supply run for Wood",
+            "Bring wood back to the board.", None, "gather_material", "wood", 1, 50, 20,
+        )
+        db.accept_board_quest(bq["board_quest_id"], user_id)
+
+        sink = []
+        with patch("bot.roll_ability_check", return_value={
+            "raw_roll": 20, "modifier": 0, "proficiency": 0, "total": 20,
+        }), patch("bot.narrate_skill_check", return_value="You chop the timber cleanly."):
+            await bot._do_gather(FakeUpdate(user_id, "", sink), "Use my axe and chop lumber")
+
+        updated = db.get_active_board_quest("whispering_wood", "2026-07-17")
+        self.assertIsNotNone(updated["completed_at"])
+        self.assertEqual(db.get_character(user_id)["gold"], 70)
+        self.assertTrue(any("Board quest complete" in msg for msg in sink))
+
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
     """

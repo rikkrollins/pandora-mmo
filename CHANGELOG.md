@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.6] — Gather-quest turn-in soft-lock, plus a real /help command
+
+**Real bug fixed (task #152):** Coffee reported a completed board quest
+("A supply run for Wood") stuck at 4/4 with no reward, saying "I am
+already in the whispering wood." Confirmed via the live DB
+(progress_count=4, objective_count=4, completed_at=None).
+`_do_gather`'s objective-complete message told the player to "return to
+X to collect your reward," but the actual hand-out only fires on a
+move/arrival event -- and gathering can only ever happen AT the
+quest's own location (the crediting match requires it), so a player
+who never left never generated an arrival event anywhere. Soft-locked
+out of the reward through normal play. Fixed by checking turn-in
+immediately after a successful gather, in addition to the existing
+move-triggered checks (still correct for a player who leaves and comes
+back later). Combat's `defeat_monster` crediting path was checked and
+already grants rewards immediately with no such gap. Verified via a
+real repro through `_do_gather`: a quest completes and pays out in the
+same reply, no move event required.
+
+**New: a real `/help` command (task #121)** -- there wasn't one. Lists
+real, grounded example phrasings for movement, NPCs, combat, shops,
+gathering/crafting, and quests, plus the handful of real slash
+commands, since almost everything in this game is natural language
+rather than commands.
+
 ## [1.11.5] — "Peer into" fell through to a silent, replyless chat
 
 **Real bug fixed (task #151), found via routine Adventure-topic
