@@ -599,6 +599,13 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                                     "change my description"]):
         return {**base, "action": "set_description"}
 
+    # Same reasoning/position as set_description above (task #117,
+    # 2026-07-17): checked before check_sheet's broad "my character"
+    # trigger, since "set my pronouns" also contains that phrase.
+    if any(w in lowered for w in ["my pronouns", "set pronouns", "character pronouns",
+                                    "update my pronouns", "change my pronouns"]):
+        return {**base, "action": "set_pronouns"}
+
     # Checked BEFORE check_sheet below: "auto equip my character"/"equip
     # my player" would otherwise match check_sheet's broad "my
     # character" trigger first and never reach a more specific check.
@@ -706,8 +713,15 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # to "peer" (0.75) sits just under that mechanism's 0.8 cutoff, and
     # lowering the shared threshold risks new false positives on the
     # unrelated "accept" typo-tolerance it already covers.
+    #
+    # "touch(ed)?" added 2026-07-17 (Coffee, live): "I touch the tree"
+    # wasn't covered by any keyword trigger, fell through to the
+    # low-confidence 'chat' default, and the model call that followed
+    # picked 'look' (whole-area) over 'examine' (the specific object
+    # actually named) -- a real but non-silent misclassification, since
+    # "look" still replies, just with the wrong, generic content.
     examine_verb_match = re.search(
-        r"\b(?:read|observed|examined|inspected|searched|checked out|"
+        r"\b(?:read|observed|examined|inspected|searched|checked out|touch(?:ed)?|"
         r"looked (?:at|closer at)|(?:peer|perr)(?:ed)? (?:at|into|in)|glanced? at)\b\s+"
         r"(?:the |a |an )?(.+)",
         lowered,
@@ -953,7 +967,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "arcane_recovery",
                 "make_campfire", "give_item", "use_item", "equip_item", "auto_equip", "breath_weapon",
                 "channel_divinity", "action_surge", "reckless_attack", "divine_smite",
-                "flurry_of_blows", "toggle_manual_dice", "level_up", "set_description",
+                "flurry_of_blows", "toggle_manual_dice", "level_up", "set_description", "set_pronouns",
                 "bestiary", "list_shop",
             )
             if parsed["action"] not in valid_actions:

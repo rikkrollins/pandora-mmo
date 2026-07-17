@@ -66,6 +66,20 @@ _NAMING_INSTRUCTION = (
 )
 
 
+def _pronoun_line(character: dict) -> str:
+    """
+    Real pronoun fact for any SECONDARY reference to the character
+    within the same narration (task #117, 2026-07-17, per Coffee: "no
+    gender/pronoun field -- narration guesses pronouns with no real
+    data, can guess wrong"). The subject itself is already covered by
+    _NAMING_INSTRUCTION's real-name rule; this only matters for a
+    follow-up pronoun later in the same sentence/paragraph. Falls back
+    to they/them when the player never set one -- never guessed.
+    """
+    pronouns = character.get("pronouns") or "they/them"
+    return f"If a pronoun is needed for {character.get('name')}, use: {pronouns}."
+
+
 def _skill_check_preamble() -> str:
     return (
         "You are the Dungeon Master narrating the outcome of a NON-COMBAT "
@@ -95,7 +109,8 @@ def _build_skill_check_prompt(character: dict, action_text: str, ability: str,
     )
     return (
         f"{_skill_check_preamble()}\n\n"
-        f"Character: {character.get('name')} ({character.get('char_class')})\n\n"
+        f"Character: {character.get('name')} ({character.get('char_class')})\n"
+        f"{_pronoun_line(character)}\n\n"
         f"Attempted action: {action_text}\n"
         f"Ability used: {ability.title()}\n\n"
         f"Mechanical result (already decided, narrate faithfully): {mechanical_result}\n\n"
@@ -238,7 +253,8 @@ def _build_prompt(character: dict, action_text: str, mechanical_result: dict,
     return (
         f"{_combat_preamble()}\n\n"
         f"Character: {character.get('name')} ({character.get('char_class')}), "
-        f"HP: {character.get('hp_current')}/{character.get('hp_max')}\n\n"
+        f"HP: {character.get('hp_current')}/{character.get('hp_max')}\n"
+        f"{_pronoun_line(character)}\n\n"
         f"{personality_line}"
         f"{environment_line}"
         f"Player action: {action_text}\n\n"
@@ -486,6 +502,7 @@ def _build_examine_prompt(character: dict, location_name: str, object_name: str,
     return (
         f"{_examine_preamble()}\n\n"
         f"Character: {character['name']}, a {character['race']} {character['char_class']}\n"
+        f"{_pronoun_line(character)}\n"
         f"Location: {location_name}\n"
         f"Object being examined: {object_name}\n"
         f"Real facts about it (narrate ONLY these, faithfully): {object_description}\n\n"

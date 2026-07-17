@@ -276,6 +276,13 @@ _PENDING_ASI_CHOICE: set[int] = set()
 _PENDING_DESCRIPTION: set[int] = set()
 MAX_CHARACTER_DESCRIPTION_LENGTH = 500
 
+# Character pronouns (2026-07-17, per Coffee: "no gender/pronoun field --
+# narration guesses pronouns with no real data, can guess wrong"). Same
+# pending-prompt pattern as description above. Narration falls back to
+# they/them when unset -- never guesses -- see ai/dm_agent.py.
+_PENDING_PRONOUNS: set[int] = set()
+MAX_PRONOUNS_LENGTH = 30
+
 _ABILITY_NAMES = ("strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma")
 _ASI_AUTO_WORDS = ("auto", "automatically", "assign", "distribute", "do it for me")
 
@@ -1085,6 +1092,21 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
 
     if step == "dice_preference":
         creation["wants_manual_dice"] = any(w in text.lower() for w in ("yes", "yeah", "yep", "sure", "own dice"))
+        creation["step"] = "pronouns"
+        await update.effective_chat.send_message(
+            "What pronouns should the narration use for your character — he/him, she/her, "
+            "they/them, or something else? Say \"skip\" to leave it unset (narration defaults "
+            "to they/them) — you can always set this later by asking.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    if step == "pronouns":
+        pronouns_text = text.strip()
+        if pronouns_text.lower() in ("skip", "none", "no", "n/a", "nothing"):
+            creation["pronouns"] = None
+        else:
+            creation["pronouns"] = " ".join(pronouns_text.split())[:MAX_PRONOUNS_LENGTH] or None
         creation["step"] = "description"
         await update.effective_chat.send_message(
             "Last thing: want to add a short description of your character? Backstory, "
@@ -1153,6 +1175,8 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
             db.update_character(update.effective_user.id, manual_dice_enabled=1)
         if description_text:
             db.update_character(update.effective_user.id, description=description_text)
+        if creation.get("pronouns"):
+            db.update_character(update.effective_user.id, pronouns=creation["pronouns"])
 
         # Auto-equip starting gear (2026-07-15, per Coffee): whatever
         # weapon/armor/shield STARTING_EQUIPMENT just granted is
@@ -1842,6 +1866,60 @@ async def _do_set_description(update: Update, text: str, *, from_prompt: bool = 
 
     db.update_character(user_id, description=clean)
     await _safe_send(update, f"✅ Description saved for {character['name']}:\n\n{clean}")
+
+
+_INLINE_PRONOUNS_RE = re.compile(
+    r"pronouns?[^:]*:\s*(.+)", re.IGNORECASE
+)
+
+
+def _extract_inline_pronouns(text: str) -> str | None:
+    """Same reasoning as _extract_inline_description: a real colon is required
+    so a bare trigger phrase with no content ("set my pronouns") always falls
+    through to the prompt instead of misreading trailing words as the answer."""
+    match = _INLINE_PRONOUNS_RE.search(text)
+    if match:
+        candidate = match.group(1).strip()
+        return candidate or None
+    return None
+
+
+async def _do_set_pronouns(update: Update, text: str, *, from_prompt: bool = False) -> None:
+    """
+    Character pronouns (2026-07-17, per Coffee, task #117): settable at
+    creation or any time after. Narration reads this real fact instead
+    of guessing (see ai/dm_agent.py's _pronoun_line) -- falls back to
+    they/them when unset, never invented.
+    """
+    user_id = update.effective_user.id
+    character = db.get_character(user_id)
+    if character is None:
+        await _safe_send(update, "You don't have a character yet!")
+        return
+
+    pronouns_text = text.strip() if from_prompt else _extract_inline_pronouns(text)
+    if pronouns_text is None:
+        _PENDING_PRONOUNS.add(user_id)
+        await _safe_send(
+            update,
+            "Sure — what pronouns should the narration use for your character (he/him, "
+            "she/her, they/them, or something else)? Say \"skip\" to leave it unset "
+            "(defaults to they/them).",
+        )
+        return
+
+    if pronouns_text.lower() in ("skip", "none", "no", "n/a", "nothing", "never mind"):
+        await _safe_send(update, "No problem — narration will default to they/them. You can set this any time by asking.")
+        return
+
+    clean = " ".join(pronouns_text.split())[:MAX_PRONOUNS_LENGTH]
+    if not clean:
+        _PENDING_PRONOUNS.add(user_id)
+        await _safe_send(update, "That didn't look like pronouns — try again?")
+        return
+
+    db.update_character(user_id, pronouns=clean)
+    await _safe_send(update, f"✅ Pronouns saved for {character['name']}: {clean}")
 
 
 def _determine_winner(session: sessions.Session) -> str:
@@ -4379,6 +4457,7 @@ def _format_character_sheet(character: dict) -> str:
     name_line = f"**{character['name']}**" + (" *(AI companion)*" if character.get("is_ai") else "")
     equipped_line = _format_equipped_line(character)
     carried_gear_line = _format_carried_gear_line(character)
+    pronouns_line = f"Pronouns: {character['pronouns']}\n" if character.get("pronouns") else ""
     description_line = f"\"{character['description']}\"\n" if character.get("description") else ""
     # Real live bug (2026-07-16, Coffee): ability scores were only ever
     # shown once, in the one-off creation sheet -- this shared sheet
@@ -4391,6 +4470,7 @@ def _format_character_sheet(character: dict) -> str:
     )
     return (
         f"{name_line} — {character['race']} {character['char_class']}\n"
+        f"{pronouns_line}"
         f"{description_line}"
         f"Level {character['level']} | XP {character['xp']}\n"
         f"HP {character['hp_current']}/{character['hp_max']} | AC {character['armor_class']}\n"
@@ -7220,7 +7300,21 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
 
     if update.effective_user.id in _PENDING_DESCRIPTION:
         _PENDING_DESCRIPTION.discard(update.effective_user.id)
-        await _do_set_description(update, update.message.text)
+        # Real bug found 2026-07-17 (incidentally, while building the
+        # pronouns feature): from_prompt was never passed here, so a
+        # plain reply to "what would you like your description to be?"
+        # (no literal "description: ..." colon) failed
+        # _extract_inline_description, came back None, and silently
+        # re-asked the SAME question forever instead of saving the
+        # answer -- the only path that ever worked was a test calling
+        # _do_set_description directly with from_prompt=True, which
+        # never exercises this real dispatch line.
+        await _do_set_description(update, update.message.text, from_prompt=True)
+        return
+
+    if update.effective_user.id in _PENDING_PRONOUNS:
+        _PENDING_PRONOUNS.discard(update.effective_user.id)
+        await _do_set_pronouns(update, update.message.text, from_prompt=True)
         return
 
     text = update.message.text.strip()
@@ -7544,6 +7638,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_level_up(update, intent.get("raw_text", text))
     elif action == "set_description":
         await _do_set_description(update, intent.get("raw_text", text))
+    elif action == "set_pronouns":
+        await _do_set_pronouns(update, intent.get("raw_text", text))
     elif action == "bestiary":
         await _do_bestiary(update)
     elif action == "list_shop":
@@ -7611,7 +7707,7 @@ async def map_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def version_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_chat.send_message(
-        f"Pandora MMO v{version.get_version()}",
+        f"Pandora MMO v{version.get_version()} — powered by Pandora AI",
         message_thread_id=update.message.message_thread_id,
     )
 

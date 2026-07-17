@@ -288,6 +288,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN known_monsters TEXT NOT NULL DEFAULT '[]'")
         if "telegram_username" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN telegram_username TEXT")
+        if "pronouns" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN pronouns TEXT")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:

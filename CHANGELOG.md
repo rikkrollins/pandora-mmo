@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.8] — Pronouns field, "touch X" misclassification, description-flow bug, Pandora AI branding
+
+**New: character pronouns (task #117), per Coffee** ("no gender/pronoun
+field — narration guesses pronouns with no real data, can guess
+wrong"). Settable at creation or any time after ("set my pronouns to
+she/her"); shown on the character sheet when set. Narration now reads
+this real fact for any secondary pronoun reference instead of
+guessing — defaults to they/them when unset, never invented.
+
+**Real bug fixed, found while building the above:** the description
+add-anytime flow's resume path never passed `from_prompt=True`, so
+replying to "what would you like your description to be?" with
+ordinary text (no literal "description: ..." colon) silently failed
+extraction and re-asked the same question forever instead of saving
+the answer. Fixed.
+
+**Real misclassification fixed, caught via live gameplay monitoring
+(Coffee):** "I touch the tree" wasn't covered by any keyword trigger,
+fell through to the model, which picked `look` (whole-area) over
+`examine` (the object actually named) — not silent, just the wrong,
+generic reply. `touch(ed)?` added to the examine-verb regex.
+
+**Branding (task #138):** the AI pipeline now has a real, consistent
+name ("Pandora AI") in the two safe, meta/technical spots where it's
+appropriate to say so out loud — `/version` and the Support agent's
+"busy right now" fallback — never in Adventure/narrative text, per
+this project's design philosophy of never announcing AI-ness
+in-fiction.
+
 ## [1.11.7] — /help reply-to-narration, and a new /hint command
 
 Per Coffee: **/help used as a reply** to any message now forwards

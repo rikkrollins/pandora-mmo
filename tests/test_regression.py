@@ -90,6 +90,16 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             _keyword_fallback("Say hello to Sera", ["Sera"])["action"], "talk_npc"
         )
 
+    # -- "Touch X" misclassified as look, not examine (2026-07-17, Coffee,
+    #    caught via live gameplay monitoring) ---------------------------
+    def test_touch_classified_as_examine(self):
+        for text in ("I touch the tree", "I touched the ancient stone"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "examine", text)
+
+    def test_touch_substring_doesnt_misfire(self):
+        for text in ("I am out of touch with my party", "lets keep in touch"):
+            self.assertNotEqual(_keyword_fallback(text, [])["action"], "examine", text)
+
     # -- Stuck-location bug (v1.7.4) -----------------------------------
     def test_move_covers_generic_leave_phrasing(self):
         for text in ("Go downstairs", "Leave this area", "Leave this room", "Head upstairs"):
@@ -2306,6 +2316,64 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = make_basic_character(user_id, "Undescribed")
         sheet = bot._format_character_sheet(character)
         self.assertNotIn('""', sheet)
+
+    # -- Pronouns (2026-07-17, per Coffee, task #117): "no gender/pronoun
+    #    field -- narration guesses pronouns with no real data, can guess
+    #    wrong". Same settable-at-creation-or-anytime pattern as
+    #    description above; narration falls back to they/them, never
+    #    guesses (see ai/dm_agent.py's _pronoun_line). ------------------
+    async def test_set_pronouns_inline_extraction_saves_directly(self):
+        user_id = 900530
+        make_basic_character(user_id, "Nyx")
+        sink = []
+        await bot._do_set_pronouns(FakeUpdate(user_id, "", sink), "set my pronouns to: she/her")
+        self.assertEqual(db.get_character(user_id)["pronouns"], "she/her")
+
+    async def test_set_pronouns_with_no_content_prompts_then_saves_on_resume(self):
+        user_id = 900531
+        make_basic_character(user_id, "Vex")
+        sink = []
+        await bot._do_set_pronouns(FakeUpdate(user_id, "I'd like to set my pronouns", sink), "I'd like to set my pronouns")
+        self.assertIsNone(db.get_character(user_id)["pronouns"])
+        self.assertIn(user_id, bot._PENDING_PRONOUNS)
+
+        sink2 = []
+        await bot._do_set_pronouns(FakeUpdate(user_id, "he/him", sink2), "he/him", from_prompt=True)
+        self.assertEqual(db.get_character(user_id)["pronouns"], "he/him")
+
+    async def test_set_pronouns_skip_leaves_it_unset(self):
+        user_id = 900532
+        make_basic_character(user_id, "Ambiguous")
+        sink = []
+        await bot._do_set_pronouns(FakeUpdate(user_id, "skip", sink), "skip", from_prompt=True)
+        self.assertIsNone(db.get_character(user_id)["pronouns"])
+
+    def test_set_pronouns_trigger_recognized(self):
+        from ai.intent_parser import _keyword_fallback
+        result = _keyword_fallback("set my pronouns to she/her", known_npc_names=[])
+        self.assertEqual(result["action"], "set_pronouns")
+
+    def test_character_sheet_shows_pronouns_when_present(self):
+        user_id = 900533
+        make_basic_character(user_id, "Told")
+        character = db.update_character(user_id, pronouns="they/them")
+        sheet = bot._format_character_sheet(character)
+        self.assertIn("they/them", sheet)
+
+    def test_narration_prompt_uses_real_pronouns_not_a_guess(self):
+        from ai.dm_agent import _build_skill_check_prompt
+        user_id = 900534
+        make_basic_character(user_id, "Set")
+        character = db.update_character(user_id, pronouns="he/him")
+        prompt = _build_skill_check_prompt(character, "climb the wall", "strength", {"raw_roll": 15, "total": 18})
+        self.assertIn("he/him", prompt)
+
+    def test_narration_prompt_defaults_to_they_them_when_unset(self):
+        from ai.dm_agent import _build_skill_check_prompt
+        user_id = 900535
+        character = make_basic_character(user_id, "Unset")
+        prompt = _build_skill_check_prompt(character, "climb the wall", "strength", {"raw_roll": 15, "total": 18})
+        self.assertIn("they/them", prompt)
 
     # -- Real live bug (2026-07-16, Coffee): ability scores were only
     #    ever shown once, on the one-off creation sheet -- the shared

@@ -505,7 +505,7 @@ def answer_support_question(
                 time.sleep(5)
 
     return (
-        "The game's local AI is busy right now and couldn't answer that in "
+        "Pandora AI is busy right now and couldn't answer that in "
         "time — this happens under heavy load, not because anything's "
         "broken. Please try asking again in a moment."
     )
