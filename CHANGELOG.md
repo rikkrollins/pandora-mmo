@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.32] — Main-topic game notifications (task #172) + a real @username intent-parser gap (task #180)
+
+**Main topic now surfaces the big moments, per Coffee: "the main chat can
+be used for all game notifications for the player to free up clutter in
+the Adventure topic."** A new `_notify_main_topic` helper posts a short
+one-line ping to Main -- ALONGSIDE, never instead of, the full narration
+that still goes to Adventure as always -- for the 5 events named
+explicitly: level up, quest accepted, guild joined, a real player's
+death, and entering battle. `_award_victory_xp` now returns
+`(summary, level_up_notes)` instead of just a string so its 4 call
+sites can post each level-up to Main too. Verified end-to-end with 4
+real scenario tests (quest accept, guild join, combat start, and a real
+player's 3rd-failed-death-save) -- all correctly posted to Main, with
+combat start's narration surviving two real Ollama timeouts via the
+existing fallback-template path.
+
+**Real live bug, caught by the topic-activity monitor mid-session:**
+Coffee's own message "Give @ShesAQueen_78 a Woodcutters Axe" was
+misclassified as `chat` and silently dropped -- AFTER the @username-
+targeting work in v1.11.29 already shipped. Root cause: that work fixed
+how a recipient gets *resolved* once give_item is dispatched, but
+ai/intent_parser.py's give_item *detection* regex (task #164, "give X a
+Y" with no "to") only ever matched a capitalized plain word right after
+the verb, which can never match an "@username" tag. Fixed by adding
+`@\w+` as an explicit alternative in that regex, verified against the
+exact failing message, the original capitalized case, both idiom
+false-positives it must keep excluding ("give it a hand"/"give it a
+try"), the already-working "to"-based @-mention variant, and
+`ask_clue`'s "give me a clue" -- all 6 correct.
+
 ## [1.11.31] — Combat sessions survive a bot restart (task #159)
 
 The real incident that started this whole line of fixes: a deploy

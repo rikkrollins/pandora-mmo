@@ -1761,6 +1761,21 @@ async def _safe_send(
                 logger.warning(f"[message] send failed again, giving up: {e!r}")
 
 
+async def _notify_main_topic(update: Update, text: str) -> None:
+    """
+    Task #172, per Coffee: "the main chat can be used for all game
+    notifications for the player to free up clutter in the Adventure
+    topic" -- player leveled up, accepted a quest, joined a guild, died,
+    or entered battle. A short one-line ping to Main, alongside (never
+    instead of) the full narration that still goes to Adventure as
+    normal -- this never replaces or gates the real Adventure-topic
+    message, it's purely an additional heads-up so players who only
+    watch Main don't miss the big moments. Routed through the same
+    _safe_send retry/entity-mention machinery as every other message.
+    """
+    await _safe_send(update, text, thread_id=config.TOPIC_MAIN_ID)
+
+
 @contextlib.asynccontextmanager
 async def _keep_typing(chat, thread_id: int | None):
     """
@@ -1995,12 +2010,16 @@ def _level_up_note(before: dict, after: dict) -> str:
     return note
 
 
-def _award_victory_xp(session: sessions.Session) -> str:
+def _award_victory_xp(session: sessions.Session) -> tuple[str, list[str]]:
     """
     Awards real XP (from the defeated monster's real 5E-sourced XP value)
     to every real (non-AI) party member still in the fight, split evenly
-    per standard 5E group-XP conventions. Returns a summary string to
-    append to the victory message, or an empty string if nothing to award.
+    per standard 5E group-XP conventions. Returns (summary, level_up_notes)
+    -- summary is a string to append to the victory message (empty if
+    nothing to award); level_up_notes is the same level-up lines already
+    folded into summary, returned separately too so callers can also post
+    each one to Main (task #172, per Coffee: level-ups are one of the
+    events that should surface there, not just buried in Adventure).
     Only ever called when the party won, so any enemy participant tagged
     with source_npc_id (a named hostile world-NPC, not a generic monster)
     is genuinely defeated here — permanently removed from future ambient
@@ -2029,11 +2048,11 @@ def _award_victory_xp(session: sessions.Session) -> str:
         if session.sides.get(p["telegram_user_id"]) == "enemy"
     )
     if enemy_xp_total <= 0:
-        return ""
+        return "", []
 
     real_party_ids = real_party_ids_all
     if not real_party_ids:
-        return ""
+        return "", []
 
     xp_each = max(enemy_xp_total // len(real_party_ids), 1)
     level_up_notes = []
@@ -2150,7 +2169,7 @@ def _award_victory_xp(session: sessions.Session) -> str:
     summary += "".join(board_notes)
     if level_up_notes:
         summary += "\n" + "\n".join(level_up_notes)
-    return summary
+    return summary, level_up_notes
 
 
 def _apply_asi_choice(character: dict, text: str) -> str | None:
@@ -2521,6 +2540,8 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
                     f"3rd failed death save. {current['name']} has died.** "
                     f"They can't act or be moved until revived — you can play another character in the meantime.",
                 )
+                if not current.get("is_ai"):
+                    await _notify_main_topic(update, f"💀 **{current['name']}** has died.")
                 session.remove_dead_player(current["telegram_user_id"])
             elif death_result["outcome"] == "stable":
                 session.stabilized_ids.add(current["telegram_user_id"])
@@ -2693,12 +2714,14 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
 
     if session.is_combat_over():
         winner = _determine_winner(session)
-        xp_summary = _award_victory_xp(session) if winner == "party" else ""
+        xp_summary, level_up_notes = _award_victory_xp(session) if winner == "party" else ("", [])
         if winner == "party":
             await _check_quest_completions_defeat_monster(update, session)
             await _check_achievements_for_combat_party(update, session)
             await _check_guild_quest_completion(update, session)
         await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
+        for note in level_up_notes:
+            await _notify_main_topic(update, note)
         sessions.end_session(session.chat_id)
 
 
@@ -2903,6 +2926,7 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             location_name = cl.get_location(CAMPAIGN, requester["current_location"])["name"]
             header += f"\n\n📢 {names} — a fight just broke out at **{location_name}**, come join if you can!"
         await _safe_send(update, header, reply_markup=_battle_menu_keyboard(session))
+        await _notify_main_topic(update, f"⚔️ {_format_party_names(party)} entered battle against {enemy_description}!")
         await _resolve_ai_turns(update, session)
 
 
@@ -3018,6 +3042,7 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
                 + _turn_announcement(session)
             )
             await _safe_send(update, header, reply_markup=_battle_menu_keyboard(session))
+            await _notify_main_topic(update, f"⚔️ {_format_party_names(party)} entered battle against **{npc_data['name']}**!")
             await _resolve_ai_turns(update, session)
     elif len(npc_ids) >= 2 and random.random() < 0.5:
         # Catch two NPCs mid-conversation rather than one reacting to the
@@ -3186,12 +3211,14 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
 
             if session.is_combat_over():
                 winner = _determine_winner(session)
-                xp_summary = _award_victory_xp(session) if winner == "party" else ""
+                xp_summary, level_up_notes = _award_victory_xp(session) if winner == "party" else ("", [])
                 if winner == "party":
                     await _check_quest_completions_defeat_monster(update, session)
                     await _check_achievements_for_combat_party(update, session)
                     await _check_guild_quest_completion(update, session)
                 await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
+                for note in level_up_notes:
+                    await _notify_main_topic(update, note)
                 sessions.end_session(chat_id)
                 return
 
@@ -4516,6 +4543,7 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
         if not names_something_else:
             db.accept_quest(telegram_user_id, quest_id)
             await _safe_send(update, f"📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}")
+            await _notify_main_topic(update, f"📜 **{character['name']}** accepted a quest: {quest['title']}")
             return
 
     # No story quest on offer here — try the area's board quest(s) instead.
@@ -4538,6 +4566,7 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
         if not names_something_else:
             db.accept_quest(telegram_user_id, quest_id)
             await _safe_send(update, f"📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}")
+            await _notify_main_topic(update, f"📜 **{character['name']}** accepted a quest: {quest['title']}")
             return
     if not available:
         if all_quests:
@@ -4611,6 +4640,7 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
             f"{board_quest['branch_data']['setup_narration']}\n\n"
             f"What you earn depends on the choice you make once it's done. Expires in 24h if not finished.",
         )
+        await _notify_main_topic(update, f"📜 **{character['name']}** accepted a quest: {board_quest['title']}")
         return
     await _safe_send(
         update,
@@ -4618,6 +4648,7 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
         f"Reward: {board_quest['reward_xp']} XP, {board_quest['reward_gold']} gold. "
         f"Expires in 24h if not finished.",
     )
+    await _notify_main_topic(update, f"📜 **{character['name']}** accepted a quest: {board_quest['title']}")
     # Same-location counterpart to the arrival-triggered check in
     # _do_move/_do_fast_travel -- if the retroactive credit above (or an
     # objective_count of 0) already finished it, the player is standing
@@ -6110,12 +6141,14 @@ async def _do_breath_weapon(update: Update) -> None:
 
         if session.is_combat_over():
             winner = _determine_winner(session)
-            xp_summary = _award_victory_xp(session) if winner == "party" else ""
+            xp_summary, level_up_notes = _award_victory_xp(session) if winner == "party" else ("", [])
             if winner == "party":
                 await _check_quest_completions_defeat_monster(update, session)
                 await _check_achievements_for_combat_party(update, session)
                 await _check_guild_quest_completion(update, session)
             await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
+            for note in level_up_notes:
+                await _notify_main_topic(update, note)
             sessions.end_session(chat_id)
             return
 
@@ -7976,7 +8009,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
 
             if session.is_combat_over():
                 winner = _determine_winner(session)
-                xp_summary = _award_victory_xp(session) if winner == "party" else ""
+                xp_summary, level_up_notes = _award_victory_xp(session) if winner == "party" else ("", [])
                 if winner == "party":
                     await _check_quest_completions_defeat_monster(update, session)
                     await _check_achievements_for_combat_party(update, session)
@@ -7985,6 +8018,8 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                     f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}",
                     message_thread_id=config.TOPIC_ADVENTURE_ID,
                 )
+                for note in level_up_notes:
+                    await _notify_main_topic(update, note)
                 sessions.end_session(chat_id)
                 return
             session.advance_turn()
@@ -8175,6 +8210,7 @@ async def _do_join_guild(update: Update, text: str) -> None:
         join_note = " They welcome you with a free Scroll of Magic Missile."
     topic_note = " Check the guild's own topic for member-only chat and today's guild quest." if config.GUILD_TOPIC_IDS.get(guild_id) else ""
     await _safe_send(update, f"🏛️ You've joined {GUILDS[guild_id]['name']}!{join_note}{topic_note}")
+    await _notify_main_topic(update, f"🏛️ **{character['name']}** joined {GUILDS[guild_id]['name']}!")
     await _check_and_award_achievements(update, db.get_character(update.effective_user.id))
 
 

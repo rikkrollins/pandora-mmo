@@ -530,7 +530,17 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # those don't require any real item at all. A lowercase pronoun
     # ("it"/"her"/"him"/"them") right after the verb is exactly what
     # this excludes.
-    if re.search(r"\b(?:[Gg]ive|[Hh]and|[Tt]rade)\s+[A-Z]\w+\s+(?:a|an|the|some)\b", text):
+    # Real live bug (2026-07-18, confirmed live: Coffee's "Give
+    # @ShesAQueen_78 a Woodcutters Axe" fell through to silent chat):
+    # the capitalized-word check above never matches a real Telegram
+    # @username tag, since it starts with "@", not an uppercase letter
+    # -- exactly the same dative construction as the fix right above it,
+    # just with an @-tag recipient instead of a capitalized name. An
+    # @-tag is unambiguous regardless of case (unlike a bare capitalized
+    # word, which still needs the idiom-exclusion reasoning above), so
+    # this is checked as its own alternative rather than loosening the
+    # existing pattern.
+    if re.search(r"\b(?:[Gg]ive|[Hh]and|[Tt]rade)\s+(?:[A-Z]\w+|@\w+)\s+(?:a|an|the|some)\b", text):
         return {**base, "action": "give_item"}
 
     if any(w in lowered for w in ["i accept", "i'll do it", "ill do it", "count me in", "i'll help",
