@@ -2,6 +2,43 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.30] — Combined action+roll messages, and Dev-topic stops hallucinating on statements
+
+**Combine an action and its manual dice roll in one message (task #177,
+per Coffee's dev-topic screenshot report: "Add support so I can give an
+action and then I can say what my dice roll was in the system will
+understand that").** Physical-dice mode previously always required two
+messages -- the action, then a separate reply once prompted for the
+roll. All 6 manual-dice call sites (attack, skill_check, shove, flee,
+gather, steal) now also check the action message ITSELF for a real
+roll declaration ("Chop for lumber - i rolled a 9", "shove the ogre,
+got a 12", "natural 20") via a new `_extract_combined_roll` helper, and
+resolve immediately if one's there -- no prompt-and-wait needed.
+Deliberately requires an explicit roll WORD near the number (not just
+any number in range 1-20, unlike the existing prompt-reply matcher),
+so it can't misfire on an unrelated number already in the action text
+(a target suffix like "attack goblin 2", a quantity, etc.). Verified
+with 9 real unit cases (correct extractions + confirmed non-matches)
+and one full end-to-end gather test that resolved directly from a
+combined message with no roll prompt.
+
+**Dev topic no longer hallucinates an "answer" to a plain statement.**
+Real live bug (dev-topic screenshot, "The Dev topic is acting a little
+wonky"): Coffee sent a STATEMENT ("The support topic is incredibly
+important and it needs to function as a usable wiki for the players"),
+not a question, but development_topic_handler forced it through
+ai/dev_agent.py's answer_dev_question anyway, which always tries to
+produce SOME answer -- with nothing real to respond to, the model
+hallucinated disconnected nonsense ("Configure ai/ for item
+application permissions..."). Added a deterministic gate: a message
+only reaches the model if it's actually shaped like a question (ends
+in "?", or opens with a real question word/ask-phrase) -- a plain
+statement/directive now gets a short, honest "📝 Noted — saved for a
+live Claude Code session to review" instead. Verified with 4 real
+scenarios (a real statement, a real "?"-question, a question-word
+message with no "?", and a real directive from this session's own
+history) -- only the two real questions ever reach the model.
+
 ## [1.11.29] — @username targeting everywhere + Support never dead-ends
 
 Two real dev-topic reports, both fixed:

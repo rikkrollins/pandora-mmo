@@ -3113,6 +3113,8 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
         # Extra Attack yet, and pausing mid-sequence for each swing
         # would need much more state than a single pending-roll slot).
         if forced_roll is None and attacker.get("manual_dice_enabled") and not attacker.get("is_ai"):
+            forced_roll = _extract_combined_roll(action_text)
+        if forced_roll is None and attacker.get("manual_dice_enabled") and not attacker.get("is_ai"):
             _PENDING_DICE_ROLLS[user_id] = {"kind": "attack", "action_text": action_text}
             await update.effective_chat.send_message(
                 "🎲 Roll a d20 for your attack and tell me the result.",
@@ -3501,6 +3503,40 @@ def _extract_manual_roll(text: str) -> int | None:
     return None
 
 
+# A roll combined into the SAME message as the action (task #177, per
+# Coffee's dev-topic report: "Add support so I can give an action and
+# then I can say what my dice roll was in the system will understand
+# that", e.g. "Chop for lumber - i rolled a 9") requires an explicit
+# roll-declaration phrase near the number, unlike _extract_manual_roll's
+# bare "first number 1-20" -- that's safe for a reply to a roll PROMPT
+# (nothing else could be in that message), but not safe against the
+# action text itself, which can contain unrelated numbers (a target
+# suffix like "attack goblin 2", a quantity, part of an item/location
+# name). Requiring a real roll word keeps those from ever misfiring.
+_ROLL_DECLARATION_RE = re.compile(
+    r"\b(?:i\s+)?roll(?:ed|ing)?(?:\s+(?:a|an|of))?\s+(?:a\s+)?(\d{1,2})\b"
+    r"|\bgot\s+an?\s+(\d{1,2})\b"
+    r"|\bnatural\s+(\d{1,2})\b",
+    re.IGNORECASE,
+)
+
+
+def _extract_combined_roll(text: str) -> int | None:
+    """
+    Finds a manual d20 roll declared INSIDE an action message itself
+    (see _ROLL_DECLARATION_RE above for why this needs a real
+    roll-word, unlike _extract_manual_roll's bare-number match used for
+    a dedicated roll-prompt reply). Returns None if no roll-shaped
+    phrase with a value in 1-20 is present, letting the caller fall
+    back to the normal prompt-and-wait flow.
+    """
+    match = _ROLL_DECLARATION_RE.search(text)
+    if not match:
+        return None
+    value = int(next(g for g in match.groups() if g is not None))
+    return value if 1 <= value <= 20 else None
+
+
 async def _do_skill_check(update: Update, ability: str, action_text: str, forced_roll: int | None = None) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -3521,6 +3557,8 @@ async def _do_skill_check(update: Update, ability: str, action_text: str, forced
     # alone is enough to re-derive the same lockable on the resolving
     # call, so this reuses the existing "skill_check" pending-roll kind
     # rather than needing a separate one.
+    if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
+        forced_roll = _extract_combined_roll(action_text)
     if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
         _PENDING_DICE_ROLLS[update.effective_user.id] = {
             "kind": "skill_check", "ability": ability, "action_text": action_text,
@@ -3722,6 +3760,8 @@ async def _do_shove(update: Update, action_text: str, forced_roll: int | None = 
         target = _pick_target(action_text, opposing)
 
         if forced_roll is None and attacker.get("manual_dice_enabled") and not attacker.get("is_ai"):
+            forced_roll = _extract_combined_roll(action_text)
+        if forced_roll is None and attacker.get("manual_dice_enabled") and not attacker.get("is_ai"):
             _PENDING_DICE_ROLLS[user_id] = {"kind": "shove", "action_text": action_text}
             await update.effective_chat.send_message(
                 "🎲 Roll a d20 for your shove and tell me the result.",
@@ -3812,6 +3852,8 @@ async def _do_flee(update: Update, action_text: str, forced_roll: int | None = N
             )
             return
 
+        if forced_roll is None and fleeing.get("manual_dice_enabled") and not fleeing.get("is_ai"):
+            forced_roll = _extract_combined_roll(action_text)
         if forced_roll is None and fleeing.get("manual_dice_enabled") and not fleeing.get("is_ai"):
             _PENDING_DICE_ROLLS[user_id] = {"kind": "flee", "action_text": action_text}
             await update.effective_chat.send_message(
@@ -5387,6 +5429,8 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
         )
         return
 
+    if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
+        forced_roll = _extract_combined_roll(action_text)
     if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
         _PENDING_DICE_ROLLS[update.effective_user.id] = {"kind": "gather", "action_text": action_text}
         await update.effective_chat.send_message(
@@ -7717,6 +7761,8 @@ async def _do_steal(update: Update, text: str, forced_roll: int | None = None) -
     item = items_module.get_item(item_id)
 
     if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
+        forced_roll = _extract_combined_roll(text)
+    if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
         _PENDING_DICE_ROLLS[telegram_user_id] = {"kind": "steal", "action_text": text}
         await update.effective_chat.send_message(
             "🎲 Roll a d20 for your theft attempt and tell me the result.",
@@ -9749,7 +9795,33 @@ async def development_topic_handler(update: Update, context: ContextTypes.DEFAUL
     # here; this is so a future one is actually traceable.
     logger.info(f"[dev_topic] user={update.effective_user.id} text={question!r}")
 
-    reply = await asyncio.to_thread(answer_dev_question, question, history)
+    # Real live bug (dev-topic screenshot, 2026-07-18, "The Dev topic is
+    # acting a little wonky"): a plain STATEMENT/directive ("The support
+    # topic is incredibly important and it needs to function as a usable
+    # wiki for the players") has nothing to actually answer, but every
+    # message that reaches this point used to be forced through
+    # answer_dev_question anyway -- which always tries to produce SOME
+    # answer via a single-shot, ungrounded model call. With nothing real
+    # to say, the model hallucinated disconnected-sounding nonsense
+    # ("Configure ai/ for item application permissions..."). ai/dev_agent.py
+    # has no equivalent grounding to ai/support_agent.py's catalog-grounded
+    # answers, so the fix here is a deterministic gate instead: a message
+    # only goes to the model if it's actually shaped like a question
+    # (ends in "?", or opens with a real question word/ask-phrase).
+    # Everything else is a statement Coffee is recording for a future
+    # live Claude Code session to read (same spirit as the screenshot/
+    # link handlers just above, which already skip the model entirely)
+    # -- it gets a short, honest acknowledgment instead of a fabricated
+    # "answer" to something nobody asked.
+    is_question = "?" in question or bool(re.match(
+        r"^\s*(why|how|what|when|where|who|which|can|could|should|would|"
+        r"is|are|do|does|did|will|explain|tell me|show me)\b",
+        lowered_question,
+    ))
+    if not is_question:
+        reply = "📝 Noted — saved for a live Claude Code session to review."
+    else:
+        reply = await asyncio.to_thread(answer_dev_question, question, history)
 
     history.append(f"Developer: {question}")
     history.append(f"Assistant: {reply}")
