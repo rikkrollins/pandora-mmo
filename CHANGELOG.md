@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.31] — Combat sessions survive a bot restart (task #159)
+
+The real incident that started this whole line of fixes: a deploy
+restart mid-combat (2026-07-18) wiped an active fight outright --
+turn order, both goblins' HP, everything -- because sessions.py was
+(deliberately, at the time) 100% in-memory with zero persistence.
+Coffee: "that was not fair to players." This was the one piece of that
+incident that hadn't been fixed yet (the rest -- restart discipline,
+hourly-update/combat conflicts, use_item turn-awareness -- shipped in
+earlier versions this session).
+
+sessions.py now has a real (best-effort, not a redesign of the live
+in-memory system) JSON snapshot/restore: every `start_session`/
+`end_session` snapshots immediately, and a new periodic ~60s tick
+(piggybacking on the existing idle-check background loop) snapshots
+any other in-progress change, so a restart loses at most ~60 seconds
+of combat progress instead of the entire encounter. On startup, any
+restorable session (skipped if the snapshot is older than 2 hours --
+an abandoned fight silently reappearing later would be worse than not
+restoring it) is loaded back into memory AND announced in Adventure
+("The bot just restarted, but this fight wasn't lost..."), so players
+aren't left confused about what happened the way Sugar was last time.
+
+Verified with 2 real tests: a full save/load round-trip confirming
+turn order, round number, `sides`, `stabilized_ids`, and even
+per-participant conditions all survive intact, plus staleness-cutoff
+and missing-file handling; and an end-to-end `_on_startup` test
+confirming a restored session gets announced in the correct chat with
+the correct current-turn name.
+
 ## [1.11.30] — Combined action+roll messages, and Dev-topic stops hallucinating on statements
 
 **Combine an action and its manual dice roll in one message (task #177,

@@ -15,9 +15,27 @@ session that never resolves). Every handler that touches a session
 MUST acquire this lock first.
 """
 import asyncio
+import json
+import os
+import time
 from dataclasses import dataclass, field
 
 from rules.combat import start_combat
+
+# Real live incident (2026-07-18): a deploy restart mid-combat wiped
+# Sugar's in-progress fight entirely (turn order, both goblins' HP) since
+# this module's whole design is in-memory-only -- Coffee: "that was not
+# fair to players." Filed as task #159. This is a snapshot-to-disk safety
+# net, NOT a redesign: sessions are still the live source of truth in
+# memory during normal operation; this only exists so an unplanned or
+# necessary restart doesn't erase an active encounter outright. A
+# snapshot older than this is treated as too stale to resurrect (an
+# abandoned encounter silently reappearing hours later would be more
+# confusing than just starting fresh) -- matches the existing
+# NATURAL_HEALING_FULL_REST_HOURS-style "how old is too old" convention
+# already used elsewhere in this project.
+SNAPSHOT_PATH = "sessions_snapshot.json"
+SNAPSHOT_MAX_AGE_SECONDS = 2 * 60 * 60
 
 
 @dataclass
@@ -134,6 +152,38 @@ class Session:
         enemy_remains = any(self.sides.get(pid) == "enemy" for pid in self.turn_order)
         return not party_remains or not enemy_remains
 
+    def to_json_dict(self) -> dict:
+        """
+        Plain-JSON-safe representation for the disk snapshot -- `sides`'
+        int keys become strings (JSON has no int keys) and `stabilized_ids`
+        (a set) becomes a list; both are converted back in from_json_dict.
+        """
+        return {
+            "chat_id": self.chat_id,
+            "participants": self.participants,
+            "turn_order": self.turn_order,
+            "sides": {str(k): v for k, v in self.sides.items()},
+            "current_turn_index": self.current_turn_index,
+            "round_number": self.round_number,
+            "event_log": self.event_log,
+            "active": self.active,
+            "stabilized_ids": list(self.stabilized_ids),
+        }
+
+    @classmethod
+    def from_json_dict(cls, data: dict) -> "Session":
+        return cls(
+            chat_id=data["chat_id"],
+            participants=data["participants"],
+            turn_order=data["turn_order"],
+            sides={int(k): v for k, v in data["sides"].items()},
+            current_turn_index=data["current_turn_index"],
+            round_number=data["round_number"],
+            event_log=data["event_log"],
+            active=data["active"],
+            stabilized_ids=set(data["stabilized_ids"]),
+        )
+
 
 # chat_id -> Session
 _ACTIVE_SESSIONS: dict[int, Session] = {}
@@ -174,8 +224,61 @@ def start_session(chat_id: int, participants: list, sides: dict) -> Session:
         + ", ".join(f"{p['name']} ({p['initiative']})" for p in ordered)
     )
     _ACTIVE_SESSIONS[chat_id] = session
+    save_snapshot()
     return session
 
 
 def end_session(chat_id: int) -> None:
     _ACTIVE_SESSIONS.pop(chat_id, None)
+    save_snapshot()
+
+
+def save_snapshot() -> None:
+    """
+    Writes every active session to disk (task #159 -- see the module
+    docstring note above for why). Best-effort: a failure to write here
+    should never break the actual game action that triggered it, so any
+    exception is swallowed after logging. Written via a temp file +
+    os.replace so a crash mid-write can never leave a half-written,
+    unparseable snapshot behind for the next startup to choke on.
+    """
+    try:
+        payload = {
+            "saved_at": time.time(),
+            "sessions": [s.to_json_dict() for s in _ACTIVE_SESSIONS.values()],
+        }
+        tmp_path = SNAPSHOT_PATH + ".tmp"
+        with open(tmp_path, "w") as f:
+            json.dump(payload, f)
+        os.replace(tmp_path, SNAPSHOT_PATH)
+    except Exception as e:  # noqa: BLE001 -- best-effort, never fatal to the caller
+        print(f"[sessions] failed to save snapshot: {e}")
+
+
+def load_snapshot() -> int:
+    """
+    Restores active sessions from disk at startup (task #159). Returns
+    how many sessions were actually restored, so the caller can log/
+    announce it. A snapshot older than SNAPSHOT_MAX_AGE_SECONDS is
+    deliberately ignored (see module docstring) -- an old, abandoned
+    encounter silently reappearing would be worse than just not
+    restoring it. Missing or corrupt files are treated the same as "no
+    snapshot" rather than crashing bot startup.
+    """
+    if not os.path.exists(SNAPSHOT_PATH):
+        return 0
+    try:
+        with open(SNAPSHOT_PATH) as f:
+            payload = json.load(f)
+        if time.time() - payload.get("saved_at", 0) > SNAPSHOT_MAX_AGE_SECONDS:
+            os.remove(SNAPSHOT_PATH)
+            return 0
+        restored = 0
+        for data in payload.get("sessions", []):
+            session = Session.from_json_dict(data)
+            _ACTIVE_SESSIONS[session.chat_id] = session
+            restored += 1
+        return restored
+    except Exception as e:  # noqa: BLE001 -- corrupt/partial file must not block startup
+        print(f"[sessions] failed to load snapshot, starting with no active sessions: {e}")
+        return 0

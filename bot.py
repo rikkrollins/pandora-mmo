@@ -10723,12 +10723,46 @@ async def _idle_inactivity_loop(application: Application) -> None:
             await _maybe_run_moltbook_social_tick(application.bot)
         except Exception as e:
             logger.error(f"[moltbook_social] tick failed this cycle: {e!r}")
+        try:
+            # Task #159 combat-persistence safety net (see sessions.py's
+            # module docstring): a periodic snapshot rather than one on
+            # every single mutation, so a redeploy loses at most ~60s of
+            # combat progress instead of the WHOLE encounter (the real
+            # 2026-07-18 incident this fixes). start_session/end_session
+            # also snapshot immediately on their own.
+            if sessions._ACTIVE_SESSIONS:
+                sessions.save_snapshot()
+        except Exception as e:
+            logger.error(f"[sessions] periodic snapshot failed this cycle: {e!r}")
 
 
 async def _on_startup(application: Application) -> None:
     # Application.create_task ties this loop's lifecycle to the
     # application, so it's cancelled cleanly on shutdown.
     application.create_task(_idle_inactivity_loop(application))
+
+    # Task #159 (real live incident, 2026-07-18): restore any combat
+    # session(s) that were active when the bot last stopped, instead of
+    # silently wiping them the way the old fully-in-memory design always
+    # did. See sessions.py's save_snapshot/load_snapshot for the actual
+    # persistence; this just tells anyone still mid-fight that their
+    # combat survived the restart, since Coffee was rightly upset last
+    # time this happened silently.
+    restored = sessions.load_snapshot()
+    if restored:
+        logger.info(f"[sessions] restored {restored} active combat session(s) from snapshot")
+        for chat_id, session in list(sessions._ACTIVE_SESSIONS.items()):
+            try:
+                current_name = session.current_participant()["name"] if session.turn_order else "?"
+                await application.bot.send_message(
+                    chat_id,
+                    f"🔄 The bot just restarted, but this fight wasn't lost — "
+                    f"combat resumes right where it left off. It's **{current_name}**'s turn.",
+                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                    parse_mode="Markdown",
+                )
+            except Exception as e:
+                logger.error(f"[sessions] failed to announce restored session for chat {chat_id}: {e!r}")
 
 
 def build_application() -> Application:
@@ -10746,8 +10780,13 @@ def build_application() -> Application:
     # generic 'chat' with no creation step to route them into) to an
     # ordinary redeploy landing between two of their messages. Restarts
     # are routine here (see CLAUDE.md's Deployment section), so this
-    # needs to survive them, unlike combat sessions/conditions, which are
-    # deliberately NOT persisted (see CLAUDE.md).
+    # needs to survive them. Combat sessions used to be the other half of
+    # this same class of bug (a real 2026-07-18 restart-mid-combat
+    # incident wiped an active fight outright) -- task #159 fixed that
+    # via sessions.py's own separate JSON snapshot/restore (see
+    # save_snapshot/load_snapshot there and _on_startup above), since
+    # sessions live in a plain module dict, not in this
+    # PicklePersistence-backed user_data/bot_data at all.
     persistence = PicklePersistence(filepath="bot_persistence.pickle")
     application = (
         ApplicationBuilder()
