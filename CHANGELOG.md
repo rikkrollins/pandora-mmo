@@ -2,6 +2,45 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.29] — @username targeting everywhere + Support never dead-ends
+
+Two real dev-topic reports, both fixed:
+
+**@username targeting, extended everywhere (per Coffee: "attack
+@tagged_player with my sword... Revive @Tagged_player... use it for
+everything we may need to do").** `_do_give_item` got real Telegram
+`@username` tagging support 2026-07-17, but every OTHER "name a party
+member in free text" spot still only matched a character's in-game
+display name. Centralized all of it into one shared helper,
+`_match_member_by_name_or_username`, so a single fix now covers every
+call site: use_item (heal/cure_poison on `@user`), give_item, equip_item
++ auto-equip ("equip @user with..."), every heal/buff/summon/revivify
+spell target, AND `_pick_target` (combat targeting) for the day a real
+player ever ends up on an opposing side. "Go with @user to X" already
+worked without changes -- move parsing only ever looks for the
+destination name and ignores the rest of the sentence. Verified with 6
+real scenario tests (use_item, give_item, equip_item, revivify, combat
+target-pick, and move-with-extra-text all correctly resolving/ignoring
+the `@username` tag).
+
+**Support topic no longer dead-ends a slow question.** Real live bug
+(dev-topic screenshot): two genuine player questions ("how do I start a
+battle?", "how do I join Ravenloft's quest?") both hit
+`answer_support_question`'s old 2-attempt retry limit, got the generic
+"couldn't answer in time" apology, and were NEVER actually answered --
+no further retry, no interim heads-up, nothing. Per Coffee: "The
+support topic ... needs to function as a usable wiki for the players"
++ "if it takes time to process a support message - tell them - then do
+it." Fixed both halves: (1) an explicit "⏳ Looking that up now..."
+message is now sent immediately, before the potentially multi-minute
+Ollama call starts, not just the ambient typing indicator; (2) retries
+bumped from 2 to 5 attempts with real backoff (5s/10s/20s/30s), so a
+transient busy period on this box's single shared Ollama slot gets
+enough real chances to clear before giving up. Verified with 2 real
+tests: recovers correctly after simulated transient failures, and still
+bounded (5 attempts, not infinite) with a clearer message pointing to
+admin `/redo` if the model is genuinely down.
+
 ## [1.11.28] — RPG-style battle menu (Fight/Skills/Items/Run)
 
 Coffee's request: "create an RPG style battle menu for battles... allow

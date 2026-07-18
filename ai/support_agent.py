@@ -498,15 +498,25 @@ def answer_support_question(
 
     prompt = _build_prompt(question, character, party_members)
 
-    # Confirmed live 2026-07-12: a Support question ("What can I use
-    # silverleaf herb for?") hit the static fallback below on the very
-    # first attempt, with no retry at all -- under real system load
-    # (this CPU-only box's single Ollama model genuinely can queue up
-    # behind other in-flight calls), one attempt timing out doesn't mean
-    # the model is actually unreachable, just busy. One retry after a
-    # short pause catches that transient case without meaningfully
-    # changing the worst-case wait for a genuinely dead model.
-    for attempt in range(2):
+    # Real live bug (dev-topic screenshot, 2026-07-18): two genuine
+    # player questions ("how do I start a battle?", "How do I join
+    # Ravenloft on his quest") both hit the static apology below and
+    # were NEVER actually answered -- the old 2-attempt loop (confirmed
+    # live 2026-07-12 to help with transient contention) still gives up
+    # far too easily under this box's real, documented 30-160s+ single-
+    # Ollama-slot contention (see CLAUDE.md). Per Coffee (2026-07-18):
+    # "The support topic is incredibly important and it needs to
+    # function as a usable wiki for the players" + "if it takes time to
+    # process a support message - tell them - then do it" -- i.e. a
+    # slow answer is fine, but a DROPPED one is not. Bumped from 2 to 5
+    # attempts with backoff (5s/10s/20s/30s) so a real transient busy
+    # period (this box routinely queues the live bot's own narration
+    # calls behind a Support question on the same shared model slot)
+    # gets enough real chances to clear before giving up -- worst case
+    # ~1065s (~18min) of retrying, vs. giving up for good after ~405s.
+    delays = [5, 10, 20, 30]
+    attempts = len(delays) + 1
+    for attempt in range(attempts):
         try:
             response = requests.post(
                 f"{config.OLLAMA_BASE_URL}/api/generate",
@@ -529,12 +539,13 @@ def answer_support_question(
                     text = _correct_own_class_hallucination(text, character)
                 return text
         except (requests.RequestException, ValueError) as e:
-            print(f"[support_agent] model call failed (attempt {attempt + 1}/2): {e}")
-            if attempt == 0:
-                time.sleep(5)
+            print(f"[support_agent] model call failed (attempt {attempt + 1}/{attempts}): {e}")
+            if attempt < len(delays):
+                time.sleep(delays[attempt])
 
     return (
-        "Pandora AI is busy right now and couldn't answer that in "
-        "time — this happens under heavy load, not because anything's "
-        "broken. Please try asking again in a moment."
+        "Pandora AI is genuinely overloaded right now and couldn't get "
+        "an answer through after several real attempts — this is rare. "
+        "Please ask again, or ping an admin to run /redo on this exact "
+        "message so it doesn't need to be retyped."
     )

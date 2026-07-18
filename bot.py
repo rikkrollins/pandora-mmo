@@ -973,6 +973,36 @@ def _party_summary_text() -> str:
     return _format_party_names(_get_party_members())
 
 
+def _match_member_by_name_or_username(text: str, members: list[dict]) -> dict | None:
+    """
+    Shared match logic behind every "name a party member in free text"
+    lookup in this file (support-spell/use_item targeting, give/equip/
+    auto-equip, and combat target picking). Real Telegram @username tag
+    (2026-07-18, per Coffee: "use a potion on @ShesAQueen_78", "attack
+    @tagged_player", "Revive @Tagged_player" -- wants this to "work for
+    everything") is tried FIRST -- unambiguous by construction, unlike
+    matching on a character's DISPLAY name, which could theoretically
+    collide between two different players' characters. Falls back to
+    the display-name substring match for players without a recorded
+    username (db.update_telegram_username only ever captures one once
+    they've sent a real message). Centralized here (instead of each
+    call site rolling its own, as _do_give_item originally did on
+    2026-07-17) so every future targeting call site gets @username
+    support for free.
+    """
+    lowered = text.lower()
+    tagged = next(
+        (m for m in members if m.get("telegram_username") and f"@{m['telegram_username'].lower()}" in lowered),
+        None,
+    )
+    if tagged is not None:
+        return tagged
+    for member in members:
+        if member["name"].lower() in lowered:
+            return member
+    return None
+
+
 def _find_party_target_by_name(text: str) -> dict | None:
     """
     Finds a party member (real player, AI companion, or a currently
@@ -980,11 +1010,7 @@ def _find_party_target_by_name(text: str) -> dict | None:
     named in free text, for support-spell targeting. Returns None if no
     party member's name appears, letting the caller default to self.
     """
-    lowered = text.lower()
-    for member in _get_party_members():
-        if member["name"].lower() in lowered:
-            return member
-    return None
+    return _match_member_by_name_or_username(text, _get_party_members())
 
 
 async def _send_welcome_narration(update: Update, character: dict) -> None:
@@ -3554,7 +3580,17 @@ def _pick_target(action_text: str, opposing: list[dict]) -> dict:
     "Goblin 2"), that one is used; otherwise defaults to the first
     living opposing participant — a reasonable, simple default rather
     than requiring exact targeting syntax for single-enemy fights.
+
+    Also tries a real Telegram @username tag first (2026-07-18, per
+    Coffee's "attack @tagged_player" example) via the same shared
+    helper every other targeting call site uses -- opposing participants
+    are monsters today (no PvP yet, see task #82), so this is a no-op
+    now, but means combat targeting won't need a separate fix the day
+    a real player ever ends up on an opposing side.
     """
+    tagged = _match_member_by_name_or_username(action_text, opposing)
+    if tagged is not None:
+        return tagged
     lowered = action_text.lower()
     for candidate in opposing:
         if candidate["name"].lower() in lowered:
@@ -7249,19 +7285,7 @@ async def _do_give_item(update: Update, text: str) -> None:
         p for p in _get_combat_eligible_party_members(character["current_location"])
         if p["telegram_user_id"] != character["telegram_user_id"]
     ]
-    lowered = text.lower()
-    # Real Telegram @username tag (2026-07-17, per Coffee: "we may have
-    # LOTS of players so make sure players can use telegram user tags in
-    # messages and prompts") is tried FIRST -- unambiguous by
-    # construction, unlike matching on a character's display name,
-    # which could theoretically collide between two different players'
-    # characters. Falls back to the existing name-substring match for
-    # players without a recorded username (db.update_telegram_username
-    # only ever captures one once they've sent a real message).
-    recipient = next(
-        (p for p in candidates if p.get("telegram_username") and f"@{p['telegram_username'].lower()}" in lowered),
-        None,
-    ) or next((p for p in candidates if p["name"].lower() in lowered), None)
+    recipient = _match_member_by_name_or_username(text, candidates)
     if recipient is None:
         await update.effective_chat.send_message(
             f"**{character['name']}**: give it to whom? Name someone real who's actually here with you.",
@@ -7427,8 +7451,7 @@ async def _do_equip_item(update: Update, text: str) -> None:
         p for p in _get_combat_eligible_party_members(character["current_location"])
         if p["telegram_user_id"] != character["telegram_user_id"]
     ]
-    lowered = text.lower()
-    named_other = next((p for p in others if p["name"].lower() in lowered), None)
+    named_other = _match_member_by_name_or_username(text, others)
     if named_other is not None:
         target = named_other
 
@@ -7476,8 +7499,7 @@ async def _do_auto_equip_gear(update: Update, text: str) -> None:
         p for p in _get_combat_eligible_party_members(character["current_location"])
         if p["telegram_user_id"] != character["telegram_user_id"]
     ]
-    lowered = text.lower()
-    named_other = next((p for p in others if p["name"].lower() in lowered), None)
+    named_other = _match_member_by_name_or_username(text, others)
     if named_other is not None:
         target = named_other
 
@@ -10087,6 +10109,19 @@ async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TY
             await _safe_send(update, reply, thread_id=config.TOPIC_SUPPORT_ID)
             return
 
+    # Real "tell them, then do it" fix (2026-07-18, per Coffee, after a
+    # live dev-topic report of two genuine Support questions getting a
+    # dead-end "couldn't answer in time" apology): everything past this
+    # point genuinely can take minutes on this hardware (see
+    # answer_support_question's retry loop) -- the typing indicator
+    # alone wasn't a strong enough signal, so an explicit heads-up is
+    # sent up front, before the long call starts, not just shown as an
+    # ambient animation.
+    await _safe_send(
+        update,
+        "⏳ Looking that up now — this can take a minute or two under load. I'll reply here as soon as I have it.",
+        thread_id=config.TOPIC_SUPPORT_ID,
+    )
     async with _keep_typing(update.effective_chat, config.TOPIC_SUPPORT_ID):
         reply = await asyncio.to_thread(answer_support_question, question, character, party_members)
     logger.info(f"[support] user={update.effective_user.id} text={question!r} reply={reply!r}")
