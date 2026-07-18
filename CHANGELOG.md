@@ -2,6 +2,48 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.19] — Fixed resting/waking sending players to the wrong safe location (task #155)
+
+Real bug, reported live by Coffee: he rested in The Whispering Wood
+expecting to wake at The Crossroads Tavern, but woke at Market Row
+instead. Root cause was in `db.mark_visited()`: revisiting a location
+already in `visited_locations` was a silent no-op, so the list's order
+only ever reflected each location's FIRST-ever visit, never its most
+recent one. `_nearest_safe_waypoint` (bot.py) scans this list in
+reverse specifically to find the most-recently-visited safe location
+to wake a resting character at — for any character who visited a shop
+before their first-ever trip through the tavern (true for most
+characters, since the tavern is the starting location and gets
+revisited constantly thereafter), the tavern's one early list position
+never advanced past the shop's, no matter how many times they'd since
+walked back through it. `mark_visited` now moves an already-present
+location to the end of the list on every revisit, making the order a
+genuine recency order. Verified live by reproducing Coffee's exact
+sequence (tavern → market → tavern revisited several times →
+whispering wood) — now correctly resolves to the tavern.
+
+## [1.11.18] — Local Piper TTS backend (task #97)
+
+Added a second TTS backend alongside the existing @TextTSBot
+integration: `ai/tts_piper.py` synthesizes narration locally via Piper
+(a small neural TTS model, confirmed via a live POC to add only ~2.6s
+of compute for an 8s line -- no meaningful contention with Ollama's
+single generation slot on this CPU-only box) and sends it as a real
+audio attachment via `send_audio`, with no third-party bot dependency.
+Toggle with "use piper for tts" / "use textbot for tts" in the
+Development topic (independent of the existing "turn on/off tts"
+switch). Sends WAV rather than OGG/Opus deliberately: Telegram only
+renders its compact voice-note bubble for genuine OGG/Opus, and
+re-encoding to that format would mean shelling out to ffmpeg -- a
+subprocess call this project's security boundary explicitly forbids
+adding anywhere in this codebase. The voice model (~60MB) downloads
+once on first use into the gitignored `voice_models/` directory rather
+than being committed.
+
+Verified live: piper backend produces a real WAV via send_audio,
+textbot backend still triggers its `/tts` message unchanged, and
+tts_enabled=0 suppresses both.
+
 ## [1.11.17] — Two real bugs fixed (tasks #153, #154)
 
 **Fixed: Support hallucinated the player's own class.** A real Warlock

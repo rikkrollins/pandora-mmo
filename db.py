@@ -642,14 +642,32 @@ def move_character(telegram_user_id: int, new_location: str) -> dict | None:
 
 
 def mark_visited(telegram_user_id: int, location_id: str) -> dict | None:
-    """Adds location_id to this character's visited_locations, if new."""
+    """
+    Adds location_id to this character's visited_locations, moving it to
+    the end if already present. Real bug, reported live 2026-07-18: a
+    player who rested in The Whispering Wood expected to wake at The
+    Crossroads Tavern but woke at Market Row instead. Root cause was
+    here -- a revisit used to be a silent no-op, so the list's order
+    only ever reflected each location's FIRST-ever visit, not its most
+    recent one. _nearest_safe_waypoint (bot.py) scans this list in
+    reverse specifically to find the most-recently-visited safe
+    location, so for any character who visited a shop (Market Row,
+    itself a safe location) before their very first trip to the tavern
+    -- true for most characters, since the tavern is the starting
+    location and gets visited constantly thereafter -- the tavern's one
+    early list position never advanced past the shop's, even after
+    dozens of later tavern visits. Moving the entry to the end on every
+    revisit makes the list a genuine recency order, matching what
+    _nearest_safe_waypoint's docstring already claimed it did.
+    """
     character = get_character(telegram_user_id)
     if character is None:
         return None
-    if location_id in character["visited_locations"]:
-        return character
-    character["visited_locations"].append(location_id)
-    return update_character(telegram_user_id, visited_locations=character["visited_locations"])
+    visited = character["visited_locations"]
+    if location_id in visited:
+        visited.remove(location_id)
+    visited.append(location_id)
+    return update_character(telegram_user_id, visited_locations=visited)
 
 
 def mark_known_monster(telegram_user_id: int, monster_key: str) -> dict | None:

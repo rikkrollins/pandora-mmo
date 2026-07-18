@@ -58,6 +58,7 @@ from ai.intent_parser import parse_intents
 from ai.npc_agent import register_npc, talk_to_npc, generate_ambient_line, _NPCS
 from ai.support_agent import answer_support_question
 from ai.text_cleanup import to_speakable_text
+from ai import tts_piper
 from guilds import GUILDS, eligible_for_guild, GUILD_QUESTS
 from models import (
     VALID_CLASSES,
@@ -1487,25 +1488,36 @@ TTS_TRIGGER_DELETE_DELAY_SECONDS = 20
 
 async def _maybe_speak(update: Update, text: str, thread_id: int | None) -> None:
     """
-    Optional TTS narration via @TextTSBot, already added to this group
-    (2026-07-14) -- confirmed live it responds to another bot's own
-    /tts command, not just a real player's, and Coffee picked a voice
-    (Alan, Australian) he likes for the group. Off by default, toggled
-    via db.get_setting("tts_enabled") (see the Development-topic
-    "turn on/off tts" command). Deliberately one shared voice, not
-    distinct per-NPC voices -- @TextTSBot's voice is one account-wide
-    setting, not something safe to switch per-message -- so this is
-    the "read narration aloud" slice Coffee asked to try as an on/off
-    option, not the full per-character-voice item still on the
-    backlog. Skipped during a compound-message's buffered sub-sends
-    (see adventure_master_handler) so a multi-action message triggers
-    exactly one /tts call on the final combined text, not one per
-    sub-action.
+    Optional TTS narration, off by default, toggled via
+    db.get_setting("tts_enabled") (see the Development-topic
+    "turn on/off tts" command). Two interchangeable backends, selected
+    via db.get_setting("tts_backend") ("textbot", the original and
+    still the default, or "piper", added 2026-07-18 -- see
+    ai/tts_piper.py):
+
+    - "textbot": @TextTSBot, already added to this group (2026-07-14)
+      -- confirmed live it responds to another bot's own /tts command,
+      not just a real player's, and Coffee picked a voice (Alan,
+      Australian) he likes for the group. One shared voice,
+      account-wide, not something safe to switch per-message.
+    - "piper": a real local voice-note, no third-party bot dependency,
+      via a small on-CPU neural TTS model (see the POC that confirmed
+      this doesn't meaningfully contend with Ollama's single
+      generation slot on this box).
+
+    Either way this is the "read narration aloud" slice, not the full
+    per-character-voice item still on the backlog. Skipped during a
+    compound-message's buffered sub-sends (see adventure_master_handler)
+    so a multi-action message triggers exactly one narrated voice, not
+    one per sub-action.
     """
     if db.get_setting("tts_enabled") != "1":
         return
     speakable = to_speakable_text(text)
     if not speakable:
+        return
+    if db.get_setting("tts_backend", "textbot") == "piper":
+        await _speak_via_piper(update, speakable, thread_id)
         return
     try:
         trigger_message = await update.effective_chat.send_message(
@@ -1537,6 +1549,32 @@ async def _maybe_speak(update: Update, text: str, thread_id: int | None) -> None
             logger.warning(f"[tts] couldn't delete the trigger message afterward: {e!r}")
 
     asyncio.create_task(_delete_trigger_after_delay())
+
+
+async def _speak_via_piper(update: Update, speakable: str, thread_id: int | None) -> None:
+    """
+    Local TTS backend (2026-07-18) -- see ai/tts_piper.py. Synthesis is
+    CPU-bound, same asyncio.to_thread convention as every other
+    Ollama/AI call in this codebase so it doesn't block the event loop.
+    Sent via send_audio, not send_voice: Telegram only renders the
+    compact voice-note bubble for genuine OGG/Opus, and re-encoding to
+    that format would require shelling out to ffmpeg -- a subprocess
+    call this project's CLAUDE.md explicitly forbids adding anywhere in
+    this codebase. A plain WAV audio attachment still plays natively in
+    every Telegram client, just as a music-style bubble instead.
+    """
+    wav_bytes = await asyncio.to_thread(tts_piper.synthesize_to_wav_bytes, speakable)
+    if wav_bytes is None:
+        return
+    try:
+        await update.effective_chat.send_audio(
+            audio=wav_bytes,
+            filename="narration.wav",
+            title="Pandora MMO narration",
+            message_thread_id=thread_id if thread_id is not None else config.TOPIC_ADVENTURE_ID,
+        )
+    except TelegramError as e:
+        logger.warning(f"[tts] piper send_audio failed: {e!r}")
 
 
 def _personality_for_character_name(name: str) -> str | None:
@@ -9026,6 +9064,24 @@ async def development_topic_handler(update: Update, context: ContextTypes.DEFAUL
     if any(w in lowered_question for w in ("turn off tts", "disable tts", "turn tts off")):
         db.set_setting("tts_enabled", "0")
         await _safe_send(update, "🔇 TTS narration is now **OFF**.", thread_id=config.TOPIC_DEVELOPMENT_ID)
+        return
+
+    # TTS backend switch (2026-07-18) -- see ai/tts_piper.py. Independent
+    # of the on/off toggle above: switching backends while TTS is off is
+    # harmless (nothing speaks either way), and this stays a separate
+    # setting instead of overloading tts_enabled with a 3-way value, so
+    # the on/off toggle's existing "1"/"0" contract never has to change.
+    if any(w in lowered_question for w in ("use piper for tts", "switch tts to piper", "piper tts")):
+        db.set_setting("tts_backend", "piper")
+        await _safe_send(
+            update,
+            "🔊 TTS backend switched to **Piper** (local, no @TextTSBot dependency).",
+            thread_id=config.TOPIC_DEVELOPMENT_ID,
+        )
+        return
+    if any(w in lowered_question for w in ("use textbot for tts", "switch tts to textbot", "textbot tts")):
+        db.set_setting("tts_backend", "textbot")
+        await _safe_send(update, "🔊 TTS backend switched back to **@TextTSBot**.", thread_id=config.TOPIC_DEVELOPMENT_ID)
         return
 
     # Live narration-length override (2026-07-14) -- "set story mode to N"
