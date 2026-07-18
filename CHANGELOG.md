@@ -2,6 +2,17 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.13] — Login streak rewards (task #78)
+
+Real consecutive-real-calendar-day tracking, checked from the same
+per-message activity checkpoint as presence -- your streak increments
+once per real day you play, resets on a missed day, and never double-
+counts multiple messages in the same day. Milestones (3/7/14/30 days)
+award real gold + XP and announce in Adventure. Shows on your
+character sheet. Daily quests already existed via the board-quest
+system (one new bounty per location per real day) -- this fills in
+just the streak-reward half of the original ask.
+
 ## [1.11.12] — Titles & Achievements (task #73)
 
 New `achievements.py` catalog of 10 real achievements, each checked

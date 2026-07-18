@@ -298,6 +298,10 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN achievements TEXT NOT NULL DEFAULT '[]'")
         if "active_title" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN active_title TEXT")
+        if "login_streak_days" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN login_streak_days INTEGER NOT NULL DEFAULT 0")
+        if "last_login_date" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN last_login_date TEXT")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -1090,6 +1094,39 @@ def touch_last_active(telegram_user_id: int) -> None:
             "UPDATE characters SET last_active_at = ? WHERE character_id = ?",
             (datetime.now(timezone.utc).isoformat(), character_id),
         )
+
+
+def update_login_streak(telegram_user_id: int) -> tuple[int, bool] | None:
+    """
+    Login streak (task #78): a real consecutive-real-calendar-day
+    counter, checked from the SAME real-activity checkpoint as
+    touch_last_active. Returns (current_streak_days, is_new_day) --
+    is_new_day is False if this player already had today counted (so
+    the caller doesn't re-announce/re-reward on every message), or
+    None entirely for AI characters (companions/autonomous party),
+    which don't have a real login of their own.
+    """
+    character = get_character(telegram_user_id)
+    if character is None or character.get("is_ai"):
+        return None
+
+    today = datetime.now(timezone.utc).date()
+    streak = character.get("login_streak_days", 0)
+    last_login_date = character.get("last_login_date")
+
+    if last_login_date == today.isoformat():
+        return streak, False
+
+    last_date = None
+    if last_login_date:
+        try:
+            last_date = datetime.fromisoformat(last_login_date).date()
+        except ValueError:
+            last_date = None
+
+    streak = streak + 1 if last_date is not None and (today - last_date).days == 1 else 1
+    update_character(telegram_user_id, login_streak_days=streak, last_login_date=today.isoformat())
+    return streak, True
 
 
 def mark_inactive(telegram_user_id: int) -> dict | None:

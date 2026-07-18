@@ -4665,6 +4665,10 @@ def _format_character_sheet(character: dict) -> str:
     if not character.get("is_ai"):
         note_suffix = f" — \"{character['status_note']}\"" if character.get("status_note") else ""
         presence_line = f"Status: {_presence_status(character)}{note_suffix}\n"
+    streak_line = ""
+    if not character.get("is_ai") and character.get("login_streak_days", 0) > 0:
+        days = character["login_streak_days"]
+        streak_line = f"🔥 Login streak: {days} day{'s' if days != 1 else ''}\n"
     # Real live bug (2026-07-16, Coffee): ability scores were only ever
     # shown once, in the one-off creation sheet -- this shared sheet
     # (used by every later "check my sheet"/Support/party-sheet lookup)
@@ -4678,6 +4682,7 @@ def _format_character_sheet(character: dict) -> str:
         f"{name_line} — {character['race']} {character['char_class']}\n"
         f"{pronouns_line}"
         f"{presence_line}"
+        f"{streak_line}"
         f"{description_line}"
         f"Level {character['level']} | XP {character['xp']}\n"
         f"HP {character['hp_current']}/{character['hp_max']} | AC {character['armor_class']}\n"
@@ -6170,6 +6175,32 @@ def _achievement_condition_met(character: dict, check: dict) -> bool:
             character.get("equipped_armor") or character.get("equipped_shield")
         )
     return False
+
+
+# Login streak rewards (task #78) -- days played in a row -> (gold, XP).
+# Board quests already provide a real repeatable daily quest per
+# location (see CLAUDE.md/campaign design), so this is deliberately
+# scoped to just the streak-reward half of the original ask.
+_STREAK_MILESTONES = {3: (30, 15), 7: (75, 40), 14: (150, 80), 30: (350, 200)}
+
+
+async def _maybe_award_streak_bonus(update: Update, streak_days: int) -> None:
+    reward = _STREAK_MILESTONES.get(streak_days)
+    if reward is None:
+        return
+    gold, xp = reward
+    telegram_user_id = update.effective_user.id
+    character = db.get_character(telegram_user_id)
+    if character is None:
+        return
+    db.update_character(telegram_user_id, gold=character["gold"] + gold)
+    db.add_xp(telegram_user_id, xp)
+    await _safe_send(
+        update,
+        f"🔥 **{streak_days}-day login streak!** {character['name']} earns {gold} gold and {xp} XP "
+        f"for playing {streak_days} days in a row.",
+    )
+    await _check_and_award_achievements(update, db.get_character(telegram_user_id))
 
 
 async def _check_achievements_for_combat_party(update: Update, session: sessions.Session) -> None:
@@ -7674,6 +7705,13 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # the gap, i.e. the whole loop was blocked on these two writes, not
     # on anything AI/classification-related.
     await asyncio.to_thread(db.touch_last_active, update.effective_user.id)
+    # Login streak (task #78): checked from this same real-activity
+    # checkpoint, once per real calendar day -- db.update_login_streak
+    # itself no-ops for AI characters and for a player already counted
+    # today, so this is safe to call unconditionally on every message.
+    streak_result = await asyncio.to_thread(db.update_login_streak, update.effective_user.id)
+    if streak_result and streak_result[1]:
+        await _maybe_award_streak_bonus(update, streak_result[0])
     # getattr, not .username directly (2026-07-17, real live bug just
     # caught): AI companions' autonomous turns route through this exact
     # handler via a synthetic _AiPlayerUpdate whose _User stand-in only
