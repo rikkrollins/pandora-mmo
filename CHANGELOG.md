@@ -2,6 +2,51 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.25] — Two confirmed blockers on the wolf quest: "wolves" never matched "wolf", and a taken quest silently swapped for the wrong one
+
+Coffee, after Sugar (now a real second trusted dev, added via /add_admin)
+couldn't make any progress on "Clear out the Wolves" no matter how she
+phrased it: "we have been tryin to get into battles with those damn
+wolves for awhile." Found TWO real, independent, confirmed bugs, both
+live-reproduced:
+
+**1. "wolf" is not a substring of "wolves".** Every monster-name match
+in bot.py (`_do_attack`'s auto-start-combat, the explicit `start_combat`
+dispatch, and `_parse_enemy_count`'s plural-hint guess) only ever did a
+plain substring check against the monster's singular key. That's fine
+for regular plurals ("goblins" contains "goblin" for free), but English
+pluralizes "wolf" irregularly (f -> v: wolf -> wolves), so "Attack
+wolves using longbow" and "let's fight the wolves" NEVER matched the
+one real monster key ("wolf") in this campaign that has this quirk --
+combat never auto-started, no matter how the player phrased it. Fixed
+with a general `_text_mentions_monster()`/`_monster_plural()` helper
+(handles any f/fe-ending monster name, not just this one case) used at
+all three call sites.
+
+**2. Accepting an already-taken quest silently substituted a different
+one.** Confirmed via the live DB: Coffee accepted "Clear out the
+Wolves" at 12:33:59; 50 seconds later Sugar said the exact same "I
+accept the quest to clear out the wolves" and got silently signed up
+for "A Quiet Word About the Goblins" instead -- the only OTHER quest
+still open on that board. `find_board_quest_by_name` correctly only
+searches still-available quests, so her named quest (already taken)
+correctly found no match -- but the code then blindly defaulted to
+"the one other quest still open" instead of telling her hers was
+unavailable. Fixed: now checks ALL of today's board quests for a name
+match first, so an already-taken/completed quest gets its own honest
+"already taken by someone else" / "already been completed" reply
+instead of a wrong substitution.
+
+Verified the monster-matching fix with a real unit-level test
+(`_text_mentions_monster` against "wolf"/"wolves"/"goblin" cases, all
+correct, no regression on real move phrasing). The quest-acceptance fix
+was verified by manual trace against the exact live database state
+that reproduced Coffee's report (board_quest_id 23 vs 24, accepted_by
+mismatch) rather than a live end-to-end run, since Ollama was fully
+saturated by real player traffic at the time (load average 8.5+,
+llama-server at 164% CPU) -- deliberately didn't add more load on top
+of that while Coffee and Sugar were actively mid-session.
+
 ## [1.11.24] — Reverse-playthrough phase begins: "go to rest/sleep/bed" fix (task #160)
 
 Per Coffee's direction to commence a reverse-playthrough/testing phase

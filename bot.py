@@ -2507,6 +2507,37 @@ async def _self_heal_stuck_ai_turn(update: Update, session: sessions.Session) ->
 _NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "a couple of": 2, "a few": 3}
 
 
+def _monster_plural(name: str) -> str:
+    """
+    Best-effort English plural of a monster's display name (spaces, not
+    underscores). Regular plurals were already covered for free by a
+    plain substring check (e.g. "goblins" contains "goblin"), but
+    "wolf" -> "wolves" is NOT a substring match (the f becomes a v) --
+    confirmed live 2026-07-18: two different real players said things
+    like "Attack wolves using longbow" and "let's fight the wolves" and
+    NEVER got combat auto-started, because every monster-name match in
+    this file (_do_attack's auto-start, the explicit start_combat
+    dispatch, and _parse_enemy_count's plural-hint guess below) only
+    ever checked the plain substring or a naively-appended "s". This is
+    the one monster in the current bestiary whose name pluralizes this
+    way; handled generally (any name ending in f/fe) rather than as a
+    one-off "wolf"/"wolves" special case, so a future monster with the
+    same English quirk (elf, dwarf, half-orc pun names, etc.) doesn't
+    silently repeat this exact bug.
+    """
+    if name.endswith("fe"):
+        return name[:-2] + "ves"
+    if name.endswith("f"):
+        return name[:-1] + "ves"
+    return name + "s"
+
+
+def _text_mentions_monster(monster_key: str, lowered_text: str) -> bool:
+    """Real name (regular plural already just a substring) or its irregular plural."""
+    name = monster_key.replace("_", " ")
+    return name in lowered_text or _monster_plural(name) in lowered_text
+
+
 def _parse_enemy_count(lowered_text: str) -> int | None:
     """
     Looks for an explicit count of enemies in natural language ("3
@@ -2528,8 +2559,7 @@ def _parse_enemy_count(lowered_text: str) -> int | None:
     # No explicit number — check for a plain plural monster name (e.g.
     # "goblins" rather than "goblin") as a signal for a small group.
     for key in CAMPAIGN["monsters"]:
-        plural_hint = key.replace("_", " ") + "s"
-        if plural_hint in lowered_text:
+        if _monster_plural(key.replace("_", " ")) in lowered_text:
             return 2
     return None
 
@@ -2815,7 +2845,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
         local_monsters = location.get("monsters", []) if location else []
         lowered = action_text.lower()
         matched_monster = next(
-            (m for m in local_monsters if m.replace("_", " ") in lowered), None
+            (m for m in local_monsters if _text_mentions_monster(m, lowered)), None
         ) or (local_monsters[0] if len(local_monsters) == 1 else None)
         if matched_monster is not None:
             await _do_start_combat(update, monster_key=matched_monster)
@@ -4221,16 +4251,27 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
             await _safe_send(update, f"📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}")
             return
 
-    offer = _offerable_quest_at_location(character, location_id)
-    if offer is not None:
-        quest_id, quest = offer
-        db.accept_quest(telegram_user_id, quest_id)
-        await _safe_send(update, f"📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}")
-        return
-
     # No story quest on offer here — try the area's board quest(s) instead.
     all_quests = board_quests_module.get_or_generate_board_quests(CAMPAIGN, location_id)
     available = [q for q in all_quests if not q.get("accepted_by") and not q.get("completed_at")]
+
+    # Defensive fix (2026-07-18): this location-based story-quest
+    # shortcut used to be unconditional, the same class of mistake
+    # already fixed above for companion_offer on 2026-07-14 -- a
+    # location-tied story quest could otherwise win over a real, clearly
+    # named board quest posted at the same spot. (Confirmed this build's
+    # current campaign has no story quest actually tied to Whispering
+    # Wood, so this specific guard wasn't the cause of the Goblins/Wolves
+    # mixup below -- but the same shortcut-shadowing shape is real and
+    # worth closing here too, same as companion_offer already was.)
+    offer = _offerable_quest_at_location(character, location_id)
+    if offer is not None:
+        quest_id, quest = offer
+        names_something_else = any(q["title"].lower() in text.lower() for q in available)
+        if not names_something_else:
+            db.accept_quest(telegram_user_id, quest_id)
+            await _safe_send(update, f"📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}")
+            return
     if not available:
         if all_quests:
             await update.effective_chat.send_message(
@@ -4245,6 +4286,35 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
 
     board_quest = board_quests_module.find_board_quest_by_name(available, text) if text else None
     if board_quest is None:
+        # Real live bug (2026-07-18, confirmed via the live DB after
+        # Coffee flagged it): find_board_quest_by_name only ever searches
+        # `available` (not-yet-taken) quests, so a player naming a REAL
+        # quest that simply got claimed by someone else moments earlier
+        # correctly finds no match here -- but the code then fell straight
+        # to "if len(available) == 1: use that one," silently enrolling
+        # the player in whatever ELSE was still open instead of telling
+        # them their named quest was unavailable. Confirmed live: Coffee
+        # accepted "Clear out the Wolves" at 12:33:59; Sugar said the
+        # exact same "I accept the quest to clear out the wolves" 50
+        # seconds later and got silently signed up for "A Quiet Word
+        # About the Goblins" instead, the only other quest left on the
+        # board. Now checks ALL of today's board quests (not just the
+        # still-open ones) for a real name match first, so an already-
+        # taken/completed quest gets its own honest, specific reply
+        # instead of a wrong substitution.
+        named_taken_quest = board_quests_module.find_board_quest_by_name(all_quests, text) if text else None
+        if named_taken_quest is not None and named_taken_quest not in available:
+            if named_taken_quest.get("completed_at"):
+                await update.effective_chat.send_message(
+                    f"\"{named_taken_quest['title']}\" has already been completed.",
+                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                )
+            else:
+                await update.effective_chat.send_message(
+                    f"\"{named_taken_quest['title']}\" is already taken by someone else.",
+                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                )
+            return
         if len(available) == 1:
             board_quest = available[0]
         else:
@@ -8363,7 +8433,7 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         monster_key = None
         lowered = text.lower()
         for key in CAMPAIGN["monsters"]:
-            if key.replace("_", " ") in lowered:
+            if _text_mentions_monster(key, lowered):
                 monster_key = key
                 break
         enemy_count = _parse_enemy_count(lowered)
