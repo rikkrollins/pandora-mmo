@@ -682,6 +682,16 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # destination; the classifier just never sent it there, so both
     # commands fell through all the way to pass_turn, leaving the
     # player with no way to leave.
+    # Checked BEFORE move_words: "I go to rest now please" / "going to
+    # sleep" / "go to bed" contain "go to " as a substring and would
+    # otherwise be shadowed as a literal travel command with no real
+    # destination named -- confirmed live during 2026-07-18 varied-
+    # phrasing playthrough testing, same "shadowing" pattern already
+    # fixed for fast_travel above.
+    if any(w in lowered for w in ["go to rest", "going to rest", "go to sleep", "going to sleep",
+                                    "go to bed", "going to bed", "goto rest", "goto sleep", "goto bed"]):
+        return {**base, "action": "rest"}
+
     move_words = ["go to", "goto", "head to", "walk to", "travel to", "move to", "enter the", "descend", "ascend",
                   "climb down", "climb up", "leave the ", "leave this", "leave here", "go back",
                   "go downstairs", "go upstairs", "head downstairs", "head upstairs",

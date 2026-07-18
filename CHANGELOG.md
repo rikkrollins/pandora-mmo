@@ -2,6 +2,24 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.24] — Reverse-playthrough phase begins: "go to rest/sleep/bed" fix (task #160)
+
+Per Coffee's direction to commence a reverse-playthrough/testing phase
+using varied ways of speaking English (dialects, slang, typos, formal
+vs. casual, ESL-style phrasing) so the classifier's real coverage gaps
+surface: ran ~40 such phrasings through the real `_keyword_fallback`.
+Most "misses" were correct by design -- an unconfident fallback
+("chat") is exactly what hands the message to the real Ollama model
+for actual language understanding (task #116). One was a genuine bug:
+`move_words`' bare `"go to"` substring check ran BEFORE any rest
+detection, so "I go to rest now please" / "going to sleep" / "going to
+bed" confidently (and wrongly) classified as `move` -- skipping Ollama
+entirely and producing a nonsense travel attempt instead of resting.
+Fixed with a rest-phrase check ahead of `move_words`, same shadowing
+pattern already used for `fast_travel`. Verified against the new
+phrasing and the 3 existing move-classification regression tests (no
+regression).
+
 ## [1.11.23] — Physical dice mode handles advantage/disadvantage itself (task #91) + full slash-command layer (task #122)
 
 Coffee, dev-topic screenshot: "When I do the dice rolls, I only wanna do
