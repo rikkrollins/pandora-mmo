@@ -2,6 +2,28 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.17] — Two real bugs fixed (tasks #153, #154)
+
+**Fixed: Support hallucinated the player's own class.** A real Warlock
+asked if casting Fire Bolt fit their kit and got told "it aligns with
+your Wizard class ability" — the yes/no judgment was right, but the
+class name was invented even though the correct one was already
+handed to the model verbatim, same failure mode as the earlier
+XP-hallucination bug just for a class name instead of a number.
+`ai/support_agent.py` now deterministically corrects any "your
+&lt;other class&gt;" phrasing back to the character's real class after
+the model responds, rather than trusting free-form generation with a
+fact that has exactly one correct value.
+
+**Fixed: defensive/conditional statements misclassified as an actual
+attack.** "Stand on guard in case the wolves attack" contains the bare
+word "attack" as a substring, so `ai/intent_parser.py`'s keyword
+fallback matched it as a real attack action and could start unwanted
+combat. Conditional/hypothetical markers ("in case", "if", "should
+they", "in the event") now suppress the attack-word match, falling
+through to ordinary silent chat instead — the same as any other
+non-actionable flavor text.
+
 ## [1.11.16] — Guild quests + real guild-only Telegram topics (task #77)
 
 **New: 3 real Telegram forum topics**, one per guild (Adventurers'

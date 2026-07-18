@@ -21,6 +21,7 @@ import races as races_module
 import spells as spells_module
 from ai.text_cleanup import strip_think_tags
 from guilds import GUILDS
+from models import VALID_CLASSES
 from rules.crafting import RECIPES
 from rules.leveling import XP_THRESHOLDS, level_for_xp
 
@@ -436,6 +437,32 @@ def _build_prompt(question: str, character: dict | None = None, party_members: l
     return f"{prompt}\n\nPlayer question: {question}\nAnswer:"
 
 
+def _correct_own_class_hallucination(text: str, character: dict) -> str:
+    """
+    Confirmed live (2026-07-17, task #153): a real Warlock ("Ravenloft")
+    asked whether casting Fire Bolt fit their kit and got told "It aligns
+    with your Wizard class ability" -- the yes/no judgment was right, but
+    the class name was a flat hallucination, even though the correct
+    class was already given verbatim in the prompt. Same failure mode as
+    the XP hallucination above (a small model overriding a fact it was
+    just handed), just for a class name instead of a number. There's
+    exactly one correct class for "your ... class" phrasing about THIS
+    character, so any other class name there is always wrong -- safe to
+    deterministically correct rather than re-prompt. Only rewrites
+    possessive "your <class>" phrasing, so a legitimate answer that
+    discusses a different class in general (e.g. comparing builds) is
+    left alone.
+    """
+    real_class = character.get("char_class")
+    if not real_class:
+        return text
+    for other_class in VALID_CLASSES:
+        if other_class.lower() == real_class.lower():
+            continue
+        text = re.sub(rf"\byour {other_class}\b", f"your {real_class}", text, flags=re.IGNORECASE)
+    return text
+
+
 def answer_support_question(
     question: str, character: dict | None = None, party_members: list[dict] | None = None
 ) -> str:
@@ -498,6 +525,8 @@ def answer_support_question(
             data = response.json()
             text = strip_think_tags(data.get("response", ""))
             if text:
+                if character:
+                    text = _correct_own_class_hallucination(text, character)
                 return text
         except (requests.RequestException, ValueError) as e:
             print(f"[support_agent] model call failed (attempt {attempt + 1}/2): {e}")

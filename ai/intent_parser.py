@@ -393,8 +393,21 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in ["leave the party", "leave my party", "quit the party", "i quit my party"]):
         return {**base, "action": "leave_party"}
 
+    # Checked BEFORE the attack-word match below: a hypothetical/defensive
+    # statement like "Stand on guard in case the wolves attack" contains
+    # the bare word "attack" as a plain substring, which the naive check
+    # below would otherwise match unconditionally -- confirmed live
+    # (task #154) as a real misclassification into an actual attack
+    # action from a sentence that never asked to attack anything. These
+    # conditional markers ("in case", "if", "should they", "in the event")
+    # only ever appear when the player is describing a possible FUTURE
+    # trigger, never an attack they're making right now, so skipping the
+    # attack match entirely here is safe -- it just falls through to
+    # "chat" (ordinary roleplay, no bot response), same as any other
+    # non-actionable flavor text, rather than guessing wrong.
+    conditional_words = ["in case", " if ", "if the", "if they", "should they", "in the event"]
     attack_words = ["attack", "swing", "shoot", "strike", "hit", "stab", "cast at", "fire at"]
-    if any(w in lowered for w in attack_words):
+    if any(w in lowered for w in attack_words) and not any(c in lowered for c in conditional_words):
         return {**base, "action": "attack"}
 
     if any(w in lowered for w in COMBAT_START_WORDS):
