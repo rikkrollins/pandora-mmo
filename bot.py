@@ -1389,10 +1389,30 @@ def _format_combat_result(flavor_text: str, result: dict, actor_label: str, defe
 
 
 def _turn_announcement(session: sessions.Session) -> str:
-    """Always explicitly states whose turn it is and what round it is."""
+    """
+    States whose turn it is, what round it is, and (per Coffee,
+    2026-07-18: "tell them the enemies/players still alive with hp like
+    an RPG style battle... will help the player know which to target")
+    a full roster of everyone still standing on both sides with their
+    real current HP -- so a player doesn't have to scroll back through
+    the combat log to remember who's already down before picking a
+    target.
+    """
     current = session.current_participant()
     label = f"{current['name']} (AI)" if current.get("is_ai") else current["name"]
-    return f"🎲 **Round {session.round_number}** — It's now **{label}**'s turn! What do you do?"
+
+    def roster_line(p: dict) -> str:
+        tag = " (AI)" if p.get("is_ai") else ""
+        return f"{p['name']}{tag}: {p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP"
+
+    party_roster = ", ".join(roster_line(p) for p in session.living_on_side("party")) or "none left standing"
+    enemy_roster = ", ".join(roster_line(p) for p in session.living_on_side("enemy")) or "none left standing"
+
+    return (
+        f"🎲 **Round {session.round_number}** — It's now **{label}**'s turn! What do you do?\n"
+        f"⚔️ Party: {party_roster}\n"
+        f"👹 Enemy: {enemy_roster}"
+    )
 
 
 async def _announce_defeats(update: Update, session: sessions.Session, removed: list[dict]) -> None:
@@ -7127,11 +7147,34 @@ async def _do_use_item(update: Update, text: str) -> None:
     it. Fixed by adding this handler, following the exact same
     rules-decide/bot.py-narrates split as every other outcome (heal
     amount rolled via rules.dice.roll_damage, never invented).
+
+    Combat-turn awareness (2026-07-18, real live incident): this used
+    to have NO idea a combat session existed at all -- confirmed live,
+    a player tried "Eat ration" mid-combat (silently misclassified as
+    chat at the time, see task #166's fix) and, separately, even a
+    real use_item call here would have done nothing to the encounter:
+    no turn-order check, no advance_turn(). Using a consumable is a
+    real action in 5E, so it now blocks out-of-turn the same way
+    _do_attack does, and consumes the actor's turn (advance_turn +
+    resolve AI turns) when it succeeds during active combat -- exactly
+    like finishing an attack. Out of combat, behaves exactly as before.
     """
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
             "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    session = sessions.get_session(chat_id)
+    in_combat = session is not None and user_id in session.turn_order
+    if in_combat and session.current_participant_id() != user_id:
+        current_name = session.current_participant()["name"]
+        await update.effective_chat.send_message(
+            f"It's not your turn — it's **{current_name}**'s turn.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
 
@@ -7166,15 +7209,11 @@ async def _do_use_item(update: Update, text: str) -> None:
         hp_max = target.get("hp_max", hp_before)
         new_hp = min(hp_before + healing["total"], hp_max)
         db.update_character(target["telegram_user_id"], hp_current=new_hp)
-        await _safe_send(
-            update,
+        message = (
             f"🧪 **{character['name']}** uses a {item['name']}{target_note}, "
-            f"healing {new_hp - hp_before} HP ({new_hp}/{hp_max}).",
+            f"healing {new_hp - hp_before} HP ({new_hp}/{hp_max})."
         )
-        return
-
-    if effect == "cure_poison":
-        session = sessions.get_session(update.effective_chat.id)
+    elif effect == "cure_poison":
         cured = False
         if session is not None:
             live_target = next(
@@ -7188,13 +7227,20 @@ async def _do_use_item(update: Update, text: str) -> None:
             if cured else
             f"🧪 **{character['name']}** uses a {item['name']}{target_note}, just in case."
         )
-        await _safe_send(update, message)
-        return
+    else:
+        # Flavor-only consumables (rations, ale, torch, etc.) -- real 5E
+        # items this game has no mechanic for (hunger, light radius), same
+        # honesty convention as every other unmodeled mechanic in this build.
+        message = f"🧺 **{character['name']}** uses a {item['name']}{target_note}."
 
-    # Flavor-only consumables (rations, ale, torch, etc.) -- real 5E
-    # items this game has no mechanic for (hunger, light radius), same
-    # honesty convention as every other unmodeled mechanic in this build.
-    await _safe_send(update, f"🧺 **{character['name']}** uses a {item['name']}{target_note}.")
+    await _safe_send(update, message)
+
+    if in_combat:
+        async with sessions.get_lock(chat_id):
+            session = sessions.get_session(chat_id)
+            if session is not None:
+                session.advance_turn()
+                await _resolve_ai_turns(update, session)
 
 
 async def _do_equip_item(update: Update, text: str) -> None:

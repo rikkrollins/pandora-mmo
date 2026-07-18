@@ -2,6 +2,53 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.27] — Phrasing gaps (give/eat/armour/join-guild), real combat-turn handling for items, and an HP roster on every turn
+
+Batch of fixes found during continued reverse-playthrough testing plus
+two more live reports from Coffee tonight:
+
+- **"Give [person] a [item]" (no "to") fell to silent chat.** Coffee hit
+  this live ("Give Laurienna a Woodcutters Axe" — no reply at all).
+  Fixed with a capitalized-name check right after give/hand/trade
+  (deliberately NOT generic item-name matching, which false-positives
+  on idioms like "give it a hand" matching "Bracers of the Steady
+  Hand").
+- **British "armour" never matched any real armor item** (all are
+  American-spelled: "Leather Armor", "Chain Shirt", "Chain Mail") —
+  confirmed live a player's "Equip my longbow and armour" silently
+  equipped only the longbow. Fixed with a targeted spelling
+  normalization.
+- **"I want to join the hunt for wolves"/"...join Ravenloft on his
+  quest" both misfired as join_guild** — two different real players
+  hit this. The trigger now requires an actual guild (the word "guild"
+  or a real guild's own name) to be mentioned, not just "i want to
+  join" alone.
+- **"Eat ration" wasn't recognized as use_item** — broadened from the
+  old exact-phrase-only "eat my/the rations" to any real "eat"
+  phrasing, using a proper whole-word check (a naive "eat " substring
+  would have false-positived on "repeat"/"retreat"/"great"/"defeat",
+  all containing "eat" followed by a space).
+- **Using/eating an item mid-combat had zero turn awareness** — real
+  incident tonight: a player tried to eat mid-fight, it silently did
+  nothing (see the "Eat ration" fix above) AND didn't advance their
+  turn, stalling the whole encounter until the idle-timeout eventually
+  auto-passed it. use_item now blocks out-of-turn the same way attack
+  does, and properly advances the turn on success.
+- **Turn announcements now show a full HP roster** (per Coffee: "tell
+  them the enemies/players still alive with hp like an RPG style
+  battle... will help the player know which to target") — every
+  "it's your turn" message now lists everyone still standing on both
+  sides with current/max HP, defeated participants excluded
+  automatically.
+
+Verified: all phrasing fixes tested against both the real cases and
+deliberate false-positive probes (idioms, unrelated words containing
+"eat"/"armor"-adjacent substrings); use_item's combat-turn logic
+verified against 3 real scenarios (out-of-turn rejection, in-turn
+consumption+advance, out-of-combat normal behavior) plus the existing
+mid-combat poison-cure regression test, all passing with no
+regressions.
+
 ## [1.11.26] — Hourly ambient update could interrupt active combat mid-fight
 
 Coffee, live: "What is happening here we were in battle?! ... are we

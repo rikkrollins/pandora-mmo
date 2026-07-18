@@ -18,6 +18,7 @@ import requests
 
 import config
 from ai.text_cleanup import strip_think_tags
+from guilds import GUILDS
 
 # Confirmed live, twice, on unrelated inputs ("my characters", "I'm
 # back"): this small model has a real bias toward guessing
@@ -517,6 +518,21 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
             and " to " in lowered and "give me a" not in lowered):
         return {**base, "action": "give_item"}
 
+    # Real live bug (2026-07-18, confirmed live: Coffee's "Give Laurienna
+    # a woodcutting axe" fell through to silent chat): the "to" check
+    # above misses the equally natural English dative construction "give
+    # [recipient] a/an/the/some [item]" -- no "to" at all. Detected here
+    # via a capitalized word right after the verb (a real recipient's
+    # name is always capitalized), NOT via generic item-name matching --
+    # confirmed live that a loose item-name check falsely fires on
+    # idioms like "give it a hand" (matches "Bracers of the Steady
+    # Hand") or "give it a try"/"give her a hand" in general, since
+    # those don't require any real item at all. A lowercase pronoun
+    # ("it"/"her"/"him"/"them") right after the verb is exactly what
+    # this excludes.
+    if re.search(r"\b(?:[Gg]ive|[Hh]and|[Tt]rade)\s+[A-Z]\w+\s+(?:a|an|the|some)\b", text):
+        return {**base, "action": "give_item"}
+
     if any(w in lowered for w in ["i accept", "i'll do it", "ill do it", "count me in", "i'll help",
                                     "ill help", "i'll take the job", "i'll take it on"]):
         return {**base, "action": "accept_quest"}
@@ -763,13 +779,36 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                                     "i equip", "i wield"]):
         return {**base, "action": "equip_item"}
 
-    if any(w in lowered for w in ["drink ", "quaff", "i use my", "i use the", "i use a",
-                                    "eat my rations", "eat the rations"]):
+    # "eat" needs a real word-boundary check (not the bare substring style
+    # used above) -- confirmed live 2026-07-18: a naive "eat " substring
+    # check false-positives on any word ending in those letters followed
+    # by a space ("repeat ", "retreat ", "great ", "seat ", "defeat ",
+    # etc, all genuinely common in ordinary sentences), the same class of
+    # bug already fixed elsewhere in this file for short substrings (see
+    # items.py's "axe"/"ore" fixes). Also broadens the previous
+    # exact-phrase-only "eat my rations"/"eat the rations" (which missed
+    # the equally natural "Eat ration" / "I eat a ration") to any real
+    # eat phrasing.
+    if any(w in lowered for w in ["drink ", "quaff", "i use my", "i use the", "i use a"]) \
+            or re.search(r"\beats?\b", lowered):
         return {**base, "action": "use_item"}
 
-    if any(w in lowered for w in ["join the", "i want to join", "become a member of",
-                                    "join a guild", "guilds can i join", "what guilds",
-                                    "which guilds"]):
+    # Real live bug (2026-07-18, confirmed by two independent players):
+    # "join the"/"i want to join" alone are both too broad -- "I want to
+    # join the hunt for wolves" and "I want to join Ravenloft on his
+    # quest" both got misclassified as join_guild, since neither trigger
+    # required a guild to actually be mentioned. Some real guild names
+    # (Silver Wardens, Arcane Circle) don't contain the word "guild" at
+    # all, so this checks for either the literal word or a real guild's
+    # own name/id, not just "guild" -- genuine phrasing like "I want to
+    # join the Silver Wardens" still works.
+    mentions_a_real_guild = "guild" in lowered or any(
+        gid.replace("_", " ") in lowered or g["name"].lower() in lowered for gid, g in GUILDS.items()
+    )
+    if mentions_a_real_guild and any(w in lowered for w in [
+        "join the", "i want to join", "become a member of", "join a guild",
+        "guilds can i join", "what guilds", "which guilds",
+    ]):
         return {**base, "action": "join_guild"}
 
     pass_words = ["pass", "skip my turn", "i wait", "i'll wait", "ill wait", "wait and see", "hold my action"]

@@ -220,7 +220,19 @@ def find_item_mentioned_in_text(text: str, candidate_ids: list[str] | None = Non
     inside the text, not the other way around. If candidate_ids is
     given, only those items are considered (e.g. a shop's stock list).
     """
-    lowered = text.strip().lower()
+    # Real live bug (2026-07-18, confirmed live: "Equip my longbow and
+    # armour" silently equipped only the longbow): every real armor item
+    # in this game ("Leather Armor", "Chain Shirt", "Chain Mail") is
+    # named with the American spelling, and neither the full-name nor
+    # the word-level fallback match below ever normalized the player's
+    # own British spelling ("armour") to match -- confirmed by direct
+    # repro. A live player retried with the American spelling 52 seconds
+    # later, strongly suggesting they noticed the first attempt silently
+    # failed. Normalizing just this one word (the only real-item-name
+    # collision this game has) rather than a general British/American
+    # dictionary, which would be a much bigger surface for false
+    # positives with no other real payoff here.
+    lowered = text.strip().lower().replace("armour", "armor")
     search_space = candidate_ids if candidate_ids is not None else list(ITEMS.keys())
     # Check longer names first so "greater healing potion" doesn't get
     # shadowed by a shorter partial match like "healing potion".
