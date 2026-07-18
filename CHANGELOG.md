@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.14] — Weather + day/night cycle (task #84)
+
+New `world_clock.py`: real, deterministic time-of-day (Dawn/Day/Dusk/
+Night, from real wall-clock hour) and weather (stable for a whole real
+calendar day, per region) -- computed as ground truth, same philosophy
+as rules/dice.py, never invented by the AI narrator. Underground
+locations honestly report no weather ("just the dark") rather than
+inventing subterranean conditions. Shows on "look around" and via a
+new direct query ("what's the weather like?" or /weather).
+
+Scoped to the deterministic display layer only this round -- AI
+narration prompts (skill checks, combat, examine) aren't yet grounded
+in it, since threading `location` through those call sites is a
+separate, larger change; worth a follow-up if it's wanted.
+
 ## [1.11.13] — Login streak rewards (task #78)
 
 Real consecutive-real-calendar-day tracking, checked from the same

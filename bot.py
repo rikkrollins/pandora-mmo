@@ -44,6 +44,7 @@ import spells as spells_module
 import races as races_module
 import class_features as class_features_module
 import achievements as achievements_module
+import world_clock
 import moltbook
 import topics
 from ai.autonomous_player import choose_next_action
@@ -2073,6 +2074,10 @@ async def title_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
         return
     await _do_set_title(update, text)
+
+
+async def weather_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _do_check_weather(update)
 
 
 def _determine_winner(session: sessions.Session) -> str:
@@ -5814,6 +5819,7 @@ async def _do_look(update: Update) -> None:
     # narration (#107/#115), just never applied to this deterministic
     # (non-AI) reply path.
     lines = [f"👁️ **{character['name']}** looks around.", f"📍 **{location['name']}** ({location['layer']})", location["description"]]
+    lines.append(f"🌤️ {world_clock.conditions_line(location['layer'])}")
     npcs_here = _npcs_at_location(character["current_location"])
     if npcs_here:
         npc_names = [cl.get_npc(CAMPAIGN, n)["name"] for n in npcs_here if cl.get_npc(CAMPAIGN, n)]
@@ -5882,6 +5888,28 @@ async def _do_look(update: Update) -> None:
     # is real player-facing narration and should have gone through
     # _safe_send like every other primary action reply already does.
     await _safe_send(update, "\n".join(lines))
+
+
+async def _do_check_weather(update: Update) -> None:
+    """
+    Weather/day-night (task #84): a direct query ("what's the weather
+    like") separate from a full "look around" -- same real, deterministic
+    world_clock.conditions_line already shown there, just without the
+    rest of the location description.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await _safe_send(update, "You don't have a character yet!")
+        return
+    location = cl.get_location(CAMPAIGN, character["current_location"])
+    if location is None:
+        await _safe_send(update, "Hard to say — you don't seem to be anywhere in particular.")
+        return
+    conditions = world_clock.conditions_line(location["layer"])
+    if location["layer"] == "underground":
+        await _safe_send(update, f"🌤️ {conditions} — no real weather reaches this deep, just the dark.")
+    else:
+        await _safe_send(update, f"🌤️ {conditions} at **{location['name']}**.")
 
 
 def _find_interactable(location: dict, text: str) -> tuple[str, dict] | None:
@@ -8161,6 +8189,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
             )
         else:
             await _do_set_title(update, title_arg)
+    elif action == "check_weather":
+        await _do_check_weather(update)
     elif action == "list_shop":
         await _do_list_shop(update)
     elif action == "list_characters":
@@ -8254,6 +8284,7 @@ Almost everything here is plain English, typed straight into Adventure -- no com
 • "Examine the old barrel" -- inspect one specific thing
 • "Go to the tavern" / "Head upstairs" -- move somewhere
 • "Show me the map" (or /map)
+• "What's the weather like?" (or /weather) -- real time-of-day and conditions
 
 **Talking & people**
 • "Talk to Grimsby" / "Say hello to Sarah" -- NPC conversation
@@ -9885,6 +9916,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("note", note_command))
     application.add_handler(CommandHandler("achievements", achievements_command))
     application.add_handler(CommandHandler("title", title_command))
+    application.add_handler(CommandHandler("weather", weather_command))
     application.add_handler(CommandHandler("version", version_command))
     application.add_handler(CommandHandler("changelog", changelog_command))
     application.add_handler(CommandHandler("redo", redo_command))
