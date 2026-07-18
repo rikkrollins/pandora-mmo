@@ -1529,12 +1529,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink = []
         await bot._do_toggle_manual_dice(FakeUpdate(user_id, "use my own dice", sink), "use my own dice")
         self.assertEqual(db.get_character(user_id)["manual_dice_enabled"], 1)
-        self.assertTrue(any("now **ON**" in m for m in sink))
+        # Task #158 (2026-07-18): _safe_send now strips ** markers into real
+        # Telegram bold entities instead of sending them as literal text.
+        self.assertTrue(any("now ON" in m for m in sink))
 
         sink2 = []
         await bot._do_toggle_manual_dice(FakeUpdate(user_id, "let the game roll for me", sink2), "let the game roll for me")
         self.assertEqual(db.get_character(user_id)["manual_dice_enabled"], 0)
-        self.assertTrue(any("now **OFF**" in m for m in sink2))
+        self.assertTrue(any("now OFF" in m for m in sink2))
 
     async def test_skill_check_prompts_for_manual_roll_and_resumes_with_it(self):
         user_id = 900481

@@ -367,7 +367,7 @@ def _gnome_cunning_advantage(target: dict, save_ability: str) -> bool:
     return target.get("race") == "Gnome" and save_ability in ("intelligence", "wisdom", "charisma")
 
 
-def _ranger_danger_sense_advantage(target: dict, save_ability: str) -> bool:
+def ranger_danger_sense_advantage(target: dict, save_ability: str) -> bool:
     """
     Ranger's Danger Sense (real 5E, level 2+, previously pure flavor
     text in class_features.py): advantage on Dexterity saving throws
@@ -377,6 +377,24 @@ def _ranger_danger_sense_advantage(target: dict, save_ability: str) -> bool:
     level 2+ Ranger makes.
     """
     return target.get("char_class") == "Ranger" and target.get("level", 1) >= 2 and save_ability == "dexterity"
+
+
+def _warlock_agonizing_blast_bonus(spell_id: str, caster: dict) -> int:
+    """
+    Warlock's Agonizing Blast (real 5E Eldritch Invocation, task #91
+    2026-07-18): every level 2+ Warlock defaults to knowing this
+    invocation -- same fixed-default, no-in-game-choice convention as
+    Sorcerous Origin/Otherworldly Patron/Divine Domain elsewhere in
+    this file -- adding their Charisma modifier to Eldritch Blast's
+    damage. Real 5E's invocation system offers many choices; this one
+    is close to universal among real players since Eldritch Blast is a
+    Warlock's core damage cantrip, making it the safe default pick.
+    """
+    if spell_id != "eldritch_blast":
+        return 0
+    if caster.get("char_class") != "Warlock" or caster.get("level", 1) < 2:
+        return 0
+    return max(ability_modifier(caster.get("charisma", 10)), 0)
 
 
 def resolve_damage_spell(spell_id: str, caster: dict, target: dict | None = None) -> dict:
@@ -391,7 +409,7 @@ def resolve_damage_spell(spell_id: str, caster: dict, target: dict | None = None
     if spell["effect"] != "damage":
         raise ValueError(f"{spell_id} is not a damage spell")
     dmg = roll_damage(spell["damage_dice"])
-    total = dmg["total"]
+    total = dmg["total"] + _warlock_agonizing_blast_bonus(spell_id, caster)
 
     result = {
         "spell": spell["name"], "caster": caster.get("name", "Unknown"),
@@ -403,7 +421,7 @@ def resolve_damage_spell(spell_id: str, caster: dict, target: dict | None = None
         dc = spell_save_dc(caster)
         save_roll = roll_d20(
             advantage=_gnome_cunning_advantage(target, save_ability)
-            or _ranger_danger_sense_advantage(target, save_ability)
+            or ranger_danger_sense_advantage(target, save_ability)
         )
         save_total = save_roll + _save_bonus(target, save_ability)
         save_success = save_total >= dc

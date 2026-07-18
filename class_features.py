@@ -151,6 +151,8 @@ CLASS_FEATURES_LEVEL_1 = {
         "temporary HP (CHA modifier + level, minimum 1) whenever you "
         "reduce a hostile creature to 0 HP",
         "Pact Magic: casts warlock spells using Charisma, spell slots recover on a short rest",
+        "Eldritch Invocations (level 2+): Agonizing Blast — adds your "
+        "Charisma modifier to Eldritch Blast's damage",
     ],
     "Wizard": [
         "Spellcasting: casts wizard spells using Intelligence, prepared from a spellbook",

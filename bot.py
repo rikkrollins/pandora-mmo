@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from telegram import Update
+from telegram import MessageEntity, Update, User
 from telegram.constants import ChatAction
 from telegram.error import TelegramError
 from telegram.ext import (
@@ -1398,6 +1398,93 @@ async def _announce_defeats(update: Update, session: sessions.Session, removed: 
             await _safe_send(update, f"💀 **{entry['name']} has been defeated!**")
 
 
+def _utf16_len(s: str) -> int:
+    """
+    Telegram's MessageEntity offset/length are counted in UTF-16 code
+    units, not Python string indices -- most emoji this game narrates
+    with (🏅🎲💨🔥 etc.) sit outside the Basic Multilingual Plane and
+    take 2 UTF-16 units but only 1 Python character, so a naive
+    len()/slice-based offset would silently misplace every entity that
+    comes after one. Encoding to UTF-16LE and halving the byte count is
+    the standard, exact way to get the real count.
+    """
+    return len(s.encode("utf-16-le")) // 2
+
+
+def _build_message_entities(text: str, mentionable_players: list[dict]) -> tuple[str, list[MessageEntity]]:
+    """
+    Converts this game's one hand-authored markup convention --
+    **bold** -- into real Telegram formatting entities, and turns any
+    real player's character name mentioned in the text into a genuine
+    text_mention entity (so Telegram actually notifies that player),
+    instead of ever relying on Telegram's own Markdown parser at all.
+
+    Two real bugs this fixes at once (both found live 2026-07-18):
+    - Task #158: bot.py never set parse_mode anywhere, so every single
+      "**bold**" marker in every narration/achievement/combat message
+      this whole project has ever sent rendered as LITERAL asterisks to
+      real players -- confirmed by re-examining a live screenshot.
+    - Task #118: narration naming a real player was plain text, never
+      a real Telegram mention (no notification, no tap-to-profile).
+
+    Deliberately does NOT just flip on parse_mode=Markdown -- this
+    project already got burned by that once (scripts/announce_deploy.py,
+    2026-07-14: a bare underscore in dynamic text like "talk_npc" reads
+    as an unmatched italic marker to Telegram's parser and returns a 400
+    Bad Request). _safe_send already retries then SILENTLY DROPS a
+    message that fails to send, so naive parse_mode would trade a
+    cosmetic bug for real, silent message loss on any narration
+    containing a bare _, *, `, or [ -- entirely plausible in freeform
+    Ollama prose or an item/NPC name. Pre-computing exact entities here
+    instead means there is nothing left for Telegram to parse or get
+    wrong; this text is always sent as fully literal/plain.
+    """
+    bold_marker_positions = [m.start() for m in re.finditer(r"\*\*", text)]
+    bold_spans_by_pair_count = len(bold_marker_positions) - (len(bold_marker_positions) % 2)
+
+    out_chars: list[str] = []
+    bold_char_spans: list[tuple[int, int]] = []  # (start, length) in the OUTPUT (marker-stripped) text
+    i = 0
+    marker_index = 0
+    open_start = None
+    while i < len(text):
+        if marker_index < bold_spans_by_pair_count and text[i:i + 2] == "**" and bold_marker_positions[marker_index] == i:
+            if open_start is None:
+                open_start = len(out_chars)
+            else:
+                bold_char_spans.append((open_start, len(out_chars) - open_start))
+                open_start = None
+            marker_index += 1
+            i += 2
+            continue
+        out_chars.append(text[i])
+        i += 1
+    clean_text = "".join(out_chars)
+
+    entities: list[MessageEntity] = []
+    for start, length in bold_char_spans:
+        entities.append(MessageEntity(
+            type=MessageEntity.BOLD,
+            offset=_utf16_len(clean_text[:start]),
+            length=_utf16_len(clean_text[start:start + length]),
+        ))
+
+    for player in mentionable_players:
+        name = player.get("name")
+        telegram_user_id = player.get("telegram_user_id")
+        if not name or not telegram_user_id:
+            continue
+        for m in re.finditer(r"\b" + re.escape(name) + r"\b", clean_text):
+            entities.append(MessageEntity(
+                type=MessageEntity.TEXT_MENTION,
+                offset=_utf16_len(clean_text[:m.start()]),
+                length=_utf16_len(name),
+                user=User(id=telegram_user_id, first_name=name[:64], is_bot=False),
+            ))
+
+    return clean_text, entities
+
+
 async def _safe_send(update: Update, text: str, thread_id: int | None = None) -> None:
     """
     Sends a message to a topic (Adventure by default), but never lets a
@@ -1431,12 +1518,24 @@ async def _safe_send(update: Update, text: str, thread_id: int | None = None) ->
     caller's already-decided game state doesn't depend on this send
     succeeding either way, so a short, bounded retry is pure upside.
     """
+    is_buffering = isinstance(update.effective_chat, _BufferingChatProxy)
+    if is_buffering:
+        # A compound-message buffer just collects raw sub-action text to
+        # be joined and re-sent through this same function later (see
+        # adventure_master_handler) -- entities would need recomputing
+        # against the FINAL joined text anyway, so there's nothing to
+        # build yet on this leg.
+        clean_text, entities = text, []
+    else:
+        clean_text, entities = _build_message_entities(text, db.list_all_active_real_players())
+
     for attempt in range(2):
         try:
             await update.effective_chat.send_message(
-                text, message_thread_id=thread_id if thread_id is not None else config.TOPIC_ADVENTURE_ID
+                clean_text, message_thread_id=thread_id if thread_id is not None else config.TOPIC_ADVENTURE_ID,
+                entities=entities or None,
             )
-            if not isinstance(update.effective_chat, _BufferingChatProxy):
+            if not is_buffering:
                 await _maybe_speak(update, text, thread_id)
             return
         except TelegramError as e:
@@ -3470,7 +3569,16 @@ async def _do_flee(update: Update, action_text: str, forced_roll: int | None = N
             )
             return
 
-        result = roll_ability_check(fleeing, "dexterity", proficient=False, forced_roll=forced_roll)
+        # Ranger's Danger Sense (task #91, 2026-07-18): already real for
+        # spell saves (spells.py's ranger_danger_sense_advantage) but
+        # never reached this DEX-based escape roll -- the one other
+        # place in this engine a "Dexterity saving throw" genuinely
+        # happens, so a level 2+ Ranger's own claimed "advantage on
+        # Dexterity saving throws" (class_features.py) was incomplete.
+        has_danger_sense = spells_module.ranger_danger_sense_advantage(fleeing, "dexterity")
+        result = roll_ability_check(
+            fleeing, "dexterity", proficient=False, advantage=has_danger_sense, forced_roll=forced_roll
+        )
         success = result["total"] >= SKILL_CHECK_DC
 
         flavor = await asyncio.to_thread(

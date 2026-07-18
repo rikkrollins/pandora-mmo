@@ -1563,6 +1563,24 @@ def get_party_members_by_id(party_id: int) -> list[dict]:
     return [_row_to_dict(r) for r in rows]
 
 
+def list_all_active_real_players() -> list[dict]:
+    """
+    Every real (non-AI) player's currently active character, across the
+    whole game -- not scoped to one party or session. Used by task
+    #118's text_mention wiring (bot.py's _safe_send): a narration line
+    can name a real player who isn't in the current combat/party at all
+    (e.g. an achievement, a guild-quest announcement), so the candidate
+    list for "does this message name a real player" has to be every
+    real player, not just the ones already in scope.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT c.* FROM characters c JOIN active_characters a ON a.character_id = c.character_id "
+            "WHERE c.is_ai = 0 AND c.is_deleted = 0",
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
 def create_party(telegram_user_id: int) -> int:
     """Creates a new party and immediately puts the creator's active character in it."""
     with get_connection() as conn:

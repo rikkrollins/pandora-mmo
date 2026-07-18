@@ -2,6 +2,47 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.22] — Real bold text + real player mentions (tasks #118, #158) + two more class features (task #91)
+
+**Major find, task #158**: `bot.py` never set `parse_mode` anywhere in
+the live gameplay path, so every single `**bold**` marker in every
+narration/achievement/combat/gather message this project has ever sent
+rendered as literal double-asterisks to real players -- confirmed by
+re-examining a live screenshot mid-session. Fixed properly rather than
+just flipping on `parse_mode=Markdown`: this project already got burned
+once by that (a bare underscore in dynamic text like `talk_npc` reads
+as an unmatched italic marker to Telegram's parser and returns a 400,
+which `_safe_send`'s retry logic would then silently swallow -- trading
+a cosmetic bug for real message loss). Instead, `_safe_send` now computes
+exact Telegram `MessageEntity` objects itself (`_build_message_entities`)
+-- `**word**` becomes a real BOLD entity, with correct UTF-16 offsets
+(most of this game's emoji are surrogate pairs, so a naive character
+count would misplace every entity after one) -- and there is nothing
+left for Telegram's own parser to choke on.
+
+**Task #118**, solved by the same mechanism: any real player's character
+name mentioned in a message now becomes a genuine Telegram `text_mention`
+entity (whole-word matched against every currently-active real player),
+so Telegram actually notifies that player and makes their name
+tap-able, instead of being plain text nobody gets pinged for.
+
+**Task #91** (ongoing, not claimed complete -- 12 classes × ~10 levels
+each is a much bigger audit than one pass): two more real gaps fixed --
+Ranger's Danger Sense (already mechanical for spell saves) now also
+grants advantage on the one other Dexterity-save-equivalent roll in
+this engine, fleeing combat; Warlock's Agonizing Blast (Eldritch
+Invocation, fixed-default convention like every other subclass choice
+in this game) now adds Charisma modifier to Eldritch Blast damage at
+level 2+.
+
+Verified live: bold entities land on the correct UTF-16-correct
+offsets past a leading emoji, an unmatched stray `**` is left as
+literal text rather than silently dropped, a real player's name
+becomes a genuine `text_mention`, whole-word matching avoids
+false-positive substring mentions (e.g. "Sarah" inside "Sarahland"),
+and the full path through `_safe_send` produces both entity types
+correctly on a real message.
+
 ## [1.11.21] — Physical dice mode now covers every real player roll (task #157)
 
 Coffee, after the gather fix: "make sure all rolls goto the player for
