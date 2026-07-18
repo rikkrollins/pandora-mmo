@@ -58,7 +58,7 @@ from ai.intent_parser import parse_intents
 from ai.npc_agent import register_npc, talk_to_npc, generate_ambient_line, _NPCS
 from ai.support_agent import answer_support_question
 from ai.text_cleanup import to_speakable_text
-from guilds import GUILDS, eligible_for_guild
+from guilds import GUILDS, eligible_for_guild, GUILD_QUESTS
 from models import (
     VALID_CLASSES,
     VALID_RACES,
@@ -2345,6 +2345,7 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
         if winner == "party":
             await _check_quest_completions_defeat_monster(update, session)
             await _check_achievements_for_combat_party(update, session)
+            await _check_guild_quest_completion(update, session)
         await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
         sessions.end_session(session.chat_id)
 
@@ -2806,6 +2807,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                 if winner == "party":
                     await _check_quest_completions_defeat_monster(update, session)
                     await _check_achievements_for_combat_party(update, session)
+                    await _check_guild_quest_completion(update, session)
                 await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
                 sessions.end_session(chat_id)
                 return
@@ -5581,6 +5583,7 @@ async def _do_breath_weapon(update: Update) -> None:
             if winner == "party":
                 await _check_quest_completions_defeat_monster(update, session)
                 await _check_achievements_for_combat_party(update, session)
+                await _check_guild_quest_completion(update, session)
             await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
             sessions.end_session(chat_id)
             return
@@ -6250,6 +6253,83 @@ async def _check_achievements_for_combat_party(update: Update, session: sessions
         character = db.get_character(pid)
         if character is not None:
             await _check_and_award_achievements(update, character)
+
+
+async def _check_guild_quest_completion(update: Update, session: sessions.Session) -> None:
+    """
+    Guild quests (task #77): any real guild member wins their guild's
+    quest for the day the moment they win ANY fight, same checkpoint as
+    achievements. Announces into the guild's own real Telegram topic
+    (config.GUILD_TOPIC_IDS), not Adventure -- that's the whole point of
+    having a real guild-only channel. Silently no-ops for AI characters
+    and anyone with no guild.
+    """
+    for pid in session.turn_order:
+        if session.sides.get(pid) != "party":
+            continue
+        character = db.get_character(pid)
+        if character is None or character.get("is_ai") or not character.get("guild"):
+            continue
+        quest = GUILD_QUESTS.get(character["guild"])
+        if quest is None:
+            continue
+        claimed = db.claim_guild_quest_if_unclaimed_today(pid, quest["reward_gold"], quest["reward_xp"])
+        if not claimed:
+            continue
+        topic_id = config.GUILD_TOPIC_IDS.get(character["guild"])
+        if topic_id:
+            await _safe_send(
+                update,
+                f"📜 **{quest['title']} complete!** {character['name']} earns "
+                f"{quest['reward_gold']} gold and {quest['reward_xp']} XP for today.",
+                thread_id=topic_id,
+            )
+
+
+async def _do_check_guild_quest(update: Update, guild_id: str) -> None:
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        return
+    quest = GUILD_QUESTS.get(guild_id)
+    if quest is None:
+        return
+    today = datetime.now(timezone.utc).date().isoformat()
+    claimed_today = character.get("last_guild_quest_date") == today
+    status = "✅ already claimed today" if claimed_today else "not yet claimed today — win any fight to complete it"
+    # Replies in whichever topic asked (Adventure or the guild's own
+    # topic) -- only the completion announcement (_check_guild_quest_
+    # completion) deliberately targets the guild topic specifically.
+    await _safe_send(
+        update,
+        f"📜 **{quest['title']}**\n{quest['description']}\n"
+        f"Reward: {quest['reward_gold']} gold, {quest['reward_xp']} XP\nStatus: {status}",
+        thread_id=update.message.message_thread_id,
+    )
+
+
+async def guild_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, guild_id: str) -> None:
+    """
+    Task #77's real guild-only channel: this topic exists in the group
+    like any other, but the bot only ever engages with someone whose
+    real character['guild'] matches -- a non-member typing here gets a
+    clear, honest redirect instead of the bot pretending the topic is
+    open to everyone. Ordinary chat between real members needs no
+    processing at all (Telegram already delivers it); "check guild
+    quest" is the one real command surfaced here.
+    """
+    character = db.get_character(update.effective_user.id)
+    guild = GUILDS.get(guild_id)
+    if character is None or character.get("guild") != guild_id:
+        await update.effective_chat.send_message(
+            f"This topic is for real {guild['name']} members only — join in Adventure first "
+            f"(\"join {guild['name']}\") if you're eligible.",
+            message_thread_id=update.message.message_thread_id,
+        )
+        return
+
+    lowered = update.message.text.lower()
+    if any(w in lowered for w in ["guild quest", "check quest", "today's quest", "todays quest"]):
+        await _do_check_guild_quest(update, guild_id)
 
 
 async def _check_and_award_achievements(update: Update, character: dict | None) -> None:
@@ -7347,6 +7427,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                 if winner == "party":
                     await _check_quest_completions_defeat_monster(update, session)
                     await _check_achievements_for_combat_party(update, session)
+                    await _check_guild_quest_completion(update, session)
                 await update.effective_chat.send_message(
                     f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}",
                     message_thread_id=config.TOPIC_ADVENTURE_ID,
@@ -7539,7 +7620,8 @@ async def _do_join_guild(update: Update, text: str) -> None:
     if "bonus_spell_scroll" in GUILDS[guild_id]["benefits"]:
         db.add_item(update.effective_user.id, "scroll_magic_missile", 1)
         join_note = " They welcome you with a free Scroll of Magic Missile."
-    await _safe_send(update, f"🏛️ You've joined {GUILDS[guild_id]['name']}!{join_note}")
+    topic_note = " Check the guild's own topic for member-only chat and today's guild quest." if config.GUILD_TOPIC_IDS.get(guild_id) else ""
+    await _safe_send(update, f"🏛️ You've joined {GUILDS[guild_id]['name']}!{join_note}{topic_note}")
     await _check_and_award_achievements(update, db.get_character(update.effective_user.id))
 
 
@@ -8202,6 +8284,12 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
             await _do_set_title(update, title_arg)
     elif action == "check_weather":
         await _do_check_weather(update)
+    elif action == "check_guild_quest":
+        character = db.get_character(update.effective_user.id)
+        if character is None or not character.get("guild"):
+            await _safe_send(update, "You're not in a guild — join one first (\"join the Adventurers' Guild\", etc.).")
+        else:
+            await _do_check_guild_quest(update, character["guild"])
     elif action == "list_shop":
         await _do_list_shop(update)
     elif action == "list_characters":
@@ -8315,7 +8403,8 @@ Almost everything here is plain English, typed straight into Adventure -- no com
 • "Talk to Grimsby" / "Say hello to Sarah" -- NPC conversation
 • "Recruit Sarah to my party" -- add a real companion
 • "Invite <player> to my party" / "Accept the invite" / "Leave the party"
-• "Join the Arcane Circle" (or whichever guild)
+• "Join the Arcane Circle" (or whichever guild) -- gets you into that guild's own real Telegram topic
+• "Check guild quest" -- your guild's daily bounty (win any fight to complete it)
 
 **Combat**
 • "Attack the goblin" -- once combat's started
@@ -9439,6 +9528,11 @@ async def _route_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     if topics.is_support(thread_id):
         await support_topic_handler(update, context)
+        return
+
+    guild_id = topics.guild_id_for_topic(thread_id)
+    if guild_id:
+        await guild_topic_handler(update, context, guild_id)
         return
 
 

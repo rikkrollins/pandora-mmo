@@ -24,6 +24,17 @@ TOPIC_SUPPORT_ID = int(os.getenv("TOPIC_SUPPORT_ID", "22"))
 TOPIC_ADVENTURE_ID = int(os.getenv("TOPIC_ADVENTURE_ID", "23"))
 TOPIC_DEVELOPMENT_ID = int(os.getenv("TOPIC_DEVELOPMENT_ID", "41"))
 
+# Guild topics (task #77) -- created 2026-07-17 via
+# scripts/create_guild_topics.py (a one-time infra script; DO NOT
+# re-run it, it would create duplicates). Maps guild_id -> real
+# Telegram thread id, same style as items.py/guilds.py's other
+# id -> data dicts.
+GUILD_TOPIC_IDS = {
+    "adventurers_guild": int(os.getenv("TOPIC_ADVENTURERS_GUILD_ID", "0")) or None,
+    "arcane_circle": int(os.getenv("TOPIC_ARCANE_CIRCLE_ID", "0")) or None,
+    "silver_wardens": int(os.getenv("TOPIC_SILVER_WARDENS_ID", "0")) or None,
+}
+
 # The group's own chat id (distinct from the topic thread ids above —
 # both are required together to post into a specific topic via the Bot
 # API). Only needed by scripts/announce_deploy.py; unset by default.

@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.16] — Guild quests + real guild-only Telegram topics (task #77)
+
+**New: 3 real Telegram forum topics**, one per guild (Adventurers'
+Guild, The Arcane Circle, Silver Wardens), created via
+`scripts/create_guild_topics.py`. Each is a genuine members-only
+space: the bot only ever engages there with a real member of that
+guild (a non-member gets an honest redirect), ordinary chat needs no
+processing at all, and "check guild quest" (there or in Adventure)
+shows that guild's real daily bounty.
+
+**New: guild quests.** One real, repeatable bounty per guild
+(`guilds.GUILD_QUESTS`), claimed once per real calendar day by winning
+ANY fight while a member — same day-gating idea as login streaks, not
+a new generation/expiry system. Completing it awards real gold + XP
+and announces right in the guild's own topic.
+
+Explainer messages are posted and pinned in each guild topic via
+`scripts/pin_guild_topic_info.py`, per Coffee's direct request.
+
 ## [1.11.15] — Campaign-loading infra (task #56)
 
 `campaign_loader.py` already supported loading any `campaigns/<id>/

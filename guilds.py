@@ -27,6 +27,36 @@ GUILDS = {
     },
 }
 
+# Guild quests (task #77): one real, repeatable bounty per guild,
+# completed once per real calendar day per member by winning any fight
+# while a guild member -- reuses the same day-gating pattern as login
+# streaks (db.update_login_streak) rather than a whole new generation/
+# expiry system, since the objective itself never changes day to day.
+GUILD_QUESTS = {
+    "adventurers_guild": {
+        "title": "Clear the Roads",
+        "description": "The Guild always has paid work for anyone willing to clear out a real threat.",
+        "reward_gold": 25,
+        "reward_xp": 20,
+    },
+    "arcane_circle": {
+        "title": "Field Research",
+        "description": "The Circle wants firsthand accounts of real battles -- prove yourself in one.",
+        "reward_gold": 20,
+        "reward_xp": 30,
+    },
+    "silver_wardens": {
+        "title": "Warden's Watch",
+        "description": "Every real threat put down is one less the Wardens have to worry about later.",
+        "reward_gold": 30,
+        "reward_xp": 25,
+    },
+}
+
+
+def get_guild_quest(guild_id: str) -> dict | None:
+    return GUILD_QUESTS.get(guild_id)
+
 
 def get_guild(guild_id: str) -> dict | None:
     return GUILDS.get(guild_id)

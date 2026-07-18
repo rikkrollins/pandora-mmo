@@ -302,6 +302,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN login_streak_days INTEGER NOT NULL DEFAULT 0")
         if "last_login_date" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN last_login_date TEXT")
+        if "last_guild_quest_date" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN last_guild_quest_date TEXT")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -1127,6 +1129,31 @@ def update_login_streak(telegram_user_id: int) -> tuple[int, bool] | None:
     streak = streak + 1 if last_date is not None and (today - last_date).days == 1 else 1
     update_character(telegram_user_id, login_streak_days=streak, last_login_date=today.isoformat())
     return streak, True
+
+
+def claim_guild_quest_if_unclaimed_today(telegram_user_id: int, reward_gold: int, reward_xp: int) -> bool:
+    """
+    Guild quests (task #77): same real-day-gating idea as
+    update_login_streak, but a flat "claimed or not today" flag rather
+    than a growing streak, since the guild quest's objective doesn't
+    accumulate -- it's won once per real day. Returns True (and applies
+    the reward) only the first time this is called for a given
+    character on a given real day; every later call that same day is a
+    silent no-op, so combat victories after the first won't double-pay.
+    """
+    character = get_character(telegram_user_id)
+    if character is None:
+        return False
+    today = datetime.now(timezone.utc).date().isoformat()
+    if character.get("last_guild_quest_date") == today:
+        return False
+    update_character(
+        telegram_user_id,
+        last_guild_quest_date=today,
+        gold=character["gold"] + reward_gold,
+    )
+    add_xp(telegram_user_id, reward_xp)
+    return True
 
 
 def mark_inactive(telegram_user_id: int) -> dict | None:

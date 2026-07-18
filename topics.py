@@ -42,6 +42,16 @@ def is_support(message_thread_id: int) -> bool:
     return message_thread_id == config.TOPIC_SUPPORT_ID
 
 
+_GUILD_TOPIC_TO_ID = {v: k for k, v in config.GUILD_TOPIC_IDS.items() if v is not None}
+
+
+def guild_id_for_topic(message_thread_id: int | None) -> str | None:
+    """Returns the real guild_id this topic belongs to (task #77), or None if it isn't a guild topic."""
+    if message_thread_id is None:
+        return None
+    return _GUILD_TOPIC_TO_ID.get(message_thread_id)
+
+
 def is_main(message_thread_id: int | None) -> bool:
     """
     True if this message came from the Main topic. Telegram's General
