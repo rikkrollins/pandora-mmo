@@ -2,6 +2,32 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.21] — Physical dice mode now covers every real player roll (task #157)
+
+Coffee, after the gather fix: "make sure all rolls goto the player for
+everything." Full audit of every dice-roll call site in bot.py found
+manual_dice_enabled (physical dice mode) was only ever honored by
+attacks and generic skill checks. Four more real gaps found and fixed,
+all genuine player-only rolls (never a monster's, an AI companion's,
+or an opposing combatant's roll — a player can't physically roll for
+those):
+
+- **Lockpicking** — used to dispatch straight to the DEX check before
+  _do_skill_check's manual-dice branch ever ran, so it always
+  auto-rolled even with physical dice on for every other check.
+- **Shove** — the attacker's own contested STR check now prompts; the
+  target's defensive roll stays internal, same as it already did.
+- **Flee** — the fleeing character's own DEX check now prompts.
+- **Steal** — the DC-15 theft check now prompts.
+
+Deliberately left alone: the hidden bonus-quantity roll on a maxed-out
+gathering skill (never surfaced to the player as a "roll a d20" moment
+at all — a background chance mechanic, not a primary decision point).
+
+Verified live: all four now correctly prompt for a manual roll instead
+of silently auto-rolling, and resolve correctly once a real result is
+given.
+
 ## [1.11.20] — Achievement announcements now name who earned them (task #156)
 
 Real bug, reported live by Coffee with a screenshot: in the shared

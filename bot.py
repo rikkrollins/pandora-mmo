@@ -3028,12 +3028,16 @@ def _find_lockable(location: dict, action_text: str) -> dict | None:
     return None
 
 
-async def _do_lockpick(update: Update, character: dict, lockable: dict, action_text: str) -> None:
+async def _do_lockpick(update: Update, character: dict, lockable: dict, action_text: str,
+                        forced_roll: int | None = None) -> None:
     """
     Real DC-13 DEX check to pick a chest/door lock — deterministic outcome
     computed here (rules layer), the AI only narrates it. Success on a
     chest grants its real loot/gold; success on a door permanently opens
     that shortcut connection (see _do_move's locked_connections check).
+    Physical-dice mode (manual_dice_enabled) is handled by the caller,
+    _do_skill_check, before this is ever dispatched to -- forced_roll
+    just threads that already-collected value through to the actual roll.
     """
     if lockable["id"] in _UNLOCKED:
         await update.effective_chat.send_message(
@@ -3042,7 +3046,7 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
         )
         return
 
-    result = roll_ability_check(character, "dexterity", proficient=False)
+    result = roll_ability_check(character, "dexterity", proficient=False, forced_roll=forced_roll)
     bonus = _practiced_bonus_for(update.effective_user.id, "dexterity")
     result["total"] += bonus
     result["practiced_bonus"] = bonus
@@ -3164,11 +3168,17 @@ async def _do_skill_check(update: Update, ability: str, action_text: str, forced
 
     location = cl.get_location(CAMPAIGN, character["current_location"])
     lockable = _find_lockable(location, action_text) if location else None
-    if lockable is not None:
-        await _do_lockpick(update, character, lockable, action_text)
-        return
 
-    if forced_roll is None and character.get("manual_dice_enabled"):
+    # Physical-dice mode checked here, BEFORE branching into lockpicking
+    # vs. an ordinary ability check -- real bug found live 2026-07-18
+    # (Coffee: "make sure all rolls goto the player for everything"):
+    # lockpicking used to dispatch to _do_lockpick immediately above,
+    # completely bypassing this check even when manual dice mode
+    # otherwise worked fine for every other skill check. action_text
+    # alone is enough to re-derive the same lockable on the resolving
+    # call, so this reuses the existing "skill_check" pending-roll kind
+    # rather than needing a separate one.
+    if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
         _PENDING_DICE_ROLLS[update.effective_user.id] = {
             "kind": "skill_check", "ability": ability, "action_text": action_text,
         }
@@ -3177,6 +3187,10 @@ async def _do_skill_check(update: Update, ability: str, action_text: str, forced
             f"if it applies) and tell me the result.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
+        return
+
+    if lockable is not None:
+        await _do_lockpick(update, character, lockable, action_text, forced_roll=forced_roll)
         return
 
     has_advantage = (
@@ -3302,11 +3316,15 @@ def _condition_tags(character: dict) -> str:
     return "".join(icons.get(c, "") for c in conditions)
 
 
-async def _do_shove(update: Update, action_text: str) -> None:
+async def _do_shove(update: Update, action_text: str, forced_roll: int | None = None) -> None:
     """
     A contested STR (Athletics) check to knock an enemy prone — a real
     5E combat action, using your turn's action, per the rules (not a
     free action). Success applies the 'prone' condition to the target.
+    Physical-dice mode (2026-07-18) only ever prompts for the ATTACKER's
+    own roll -- the target's contest roll stays internal, same as every
+    other roll made on behalf of an opposing combatant a player can't
+    physically roll for themselves.
     """
     chat_id = update.effective_chat.id
     async with sessions.get_lock(chat_id):
@@ -3351,7 +3369,16 @@ async def _do_shove(update: Update, action_text: str) -> None:
             return
         target = _pick_target(action_text, opposing)
 
-        attacker_result = roll_ability_check(attacker, "strength", proficient=True)
+        if forced_roll is None and attacker.get("manual_dice_enabled") and not attacker.get("is_ai"):
+            _PENDING_DICE_ROLLS[user_id] = {"kind": "shove", "action_text": action_text}
+            await update.effective_chat.send_message(
+                "🎲 Roll a d20 for your shove (account for advantage/disadvantage yourself "
+                "if it applies) and tell me the result.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+
+        attacker_result = roll_ability_check(attacker, "strength", proficient=True, forced_roll=forced_roll)
         target_raw = roll_d20()
         target_mod = max(ability_modifier(target.get("strength", 10)), ability_modifier(target.get("dexterity", 10)))
         target_total = target_raw + target_mod
@@ -3381,7 +3408,7 @@ async def _do_shove(update: Update, action_text: str) -> None:
         await _resolve_ai_turns(update, session)
 
 
-async def _do_flee(update: Update, action_text: str) -> None:
+async def _do_flee(update: Update, action_text: str, forced_roll: int | None = None) -> None:
     """
     A real dice roll to escape an active fight — "cancel" no longer
     force-ends combat for ordinary players (see adventure_master_handler's
@@ -3434,7 +3461,16 @@ async def _do_flee(update: Update, action_text: str) -> None:
             )
             return
 
-        result = roll_ability_check(fleeing, "dexterity", proficient=False)
+        if forced_roll is None and fleeing.get("manual_dice_enabled") and not fleeing.get("is_ai"):
+            _PENDING_DICE_ROLLS[user_id] = {"kind": "flee", "action_text": action_text}
+            await update.effective_chat.send_message(
+                "🎲 Roll a d20 for your escape attempt (account for advantage/disadvantage yourself "
+                "if it applies) and tell me the result.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+
+        result = roll_ability_check(fleeing, "dexterity", proficient=False, forced_roll=forced_roll)
         success = result["total"] >= SKILL_CHECK_DC
 
         flavor = await asyncio.to_thread(
@@ -4901,11 +4937,17 @@ def _gather_quantity(character: dict, skill_key: str, practiced_bonus: int) -> i
     return quantity
 
 
-async def _do_gather(update: Update, action_text: str) -> None:
+async def _do_gather(update: Update, action_text: str, forced_roll: int | None = None) -> None:
     """
     Gathering a raw material from a location's resource node — a real
     ability check (rules layer) decides success, matching every other
-    outcome in this game; the AI only narrates it.
+    outcome in this game; the AI only narrates it. Honors physical-dice
+    mode (character.manual_dice_enabled) the same way _do_attack and
+    _do_skill_check do -- real bug found live 2026-07-18 (Coffee: "if i
+    have dice on shudnt i be rolling my own dice?"): this was the one
+    outcome-deciding roll in the game that never checked
+    manual_dice_enabled at all, silently always rolling internally
+    regardless of the player's own preference.
     """
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -4946,7 +4988,16 @@ async def _do_gather(update: Update, action_text: str) -> None:
         )
         return
 
-    result = roll_ability_check(character, node["ability"], proficient=False)
+    if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
+        _PENDING_DICE_ROLLS[update.effective_user.id] = {"kind": "gather", "action_text": action_text}
+        await update.effective_chat.send_message(
+            f"🎲 Roll a d20 for this {node['ability']} check (account for advantage/disadvantage "
+            f"yourself if it applies) and tell me the result.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    result = roll_ability_check(character, node["ability"], proficient=False, forced_roll=forced_roll)
     bonus = _practiced_bonus_for(update.effective_user.id, skill_key)
     result["total"] += bonus
     result["practiced_bonus"] = bonus
@@ -7213,7 +7264,7 @@ async def _do_sell(update: Update, text: str) -> None:
     await _safe_send(update, f"🛒 **{character['name']}**:\n" + "\n".join(lines))
 
 
-async def _do_steal(update: Update, text: str) -> None:
+async def _do_steal(update: Update, text: str, forced_roll: int | None = None) -> None:
     """
     A real, dice-resolved theft attempt (DC 15 — harder than an ordinary
     skill check) with a genuine, persistent consequence on failure: the
@@ -7255,7 +7306,16 @@ async def _do_steal(update: Update, text: str) -> None:
         item_id = min(shop_data["inventory"], key=lambda i: items_module.get_item(i).get("price", 0))
     item = items_module.get_item(item_id)
 
-    result = roll_ability_check(character, "dexterity", proficient=False)
+    if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
+        _PENDING_DICE_ROLLS[telegram_user_id] = {"kind": "steal", "action_text": text}
+        await update.effective_chat.send_message(
+            "🎲 Roll a d20 for your theft attempt (account for advantage/disadvantage yourself "
+            "if it applies) and tell me the result.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    result = roll_ability_check(character, "dexterity", proficient=False, forced_roll=forced_roll)
     bonus = _practiced_bonus_for(telegram_user_id, "dexterity")
     result["total"] += bonus
     result["practiced_bonus"] = bonus
@@ -7951,6 +8011,14 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
             await _do_skill_check(
                 update, pending_roll["ability"], pending_roll["action_text"], forced_roll=manual_value
             )
+        elif pending_roll["kind"] == "gather":
+            await _do_gather(update, pending_roll["action_text"], forced_roll=manual_value)
+        elif pending_roll["kind"] == "shove":
+            await _do_shove(update, pending_roll["action_text"], forced_roll=manual_value)
+        elif pending_roll["kind"] == "flee":
+            await _do_flee(update, pending_roll["action_text"], forced_roll=manual_value)
+        elif pending_roll["kind"] == "steal":
+            await _do_steal(update, pending_roll["action_text"], forced_roll=manual_value)
         return
 
     # Real player-driven ASI (2026-07-16): resume a pending "which
