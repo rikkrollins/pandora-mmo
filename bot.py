@@ -2870,8 +2870,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
         if forced_roll is None and attacker.get("manual_dice_enabled") and not attacker.get("is_ai"):
             _PENDING_DICE_ROLLS[user_id] = {"kind": "attack", "action_text": action_text}
             await update.effective_chat.send_message(
-                "🎲 Roll a d20 for your attack (account for advantage/disadvantage yourself "
-                "if it applies) and tell me the result.",
+                "🎲 Roll a d20 for your attack and tell me the result.",
                 message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
             return
@@ -3282,8 +3281,7 @@ async def _do_skill_check(update: Update, ability: str, action_text: str, forced
             "kind": "skill_check", "ability": ability, "action_text": action_text,
         }
         await update.effective_chat.send_message(
-            f"🎲 Roll a d20 for this {ability} check (account for advantage/disadvantage yourself "
-            f"if it applies) and tell me the result.",
+            f"🎲 Roll a d20 for this {ability} check and tell me the result.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
@@ -3471,8 +3469,7 @@ async def _do_shove(update: Update, action_text: str, forced_roll: int | None = 
         if forced_roll is None and attacker.get("manual_dice_enabled") and not attacker.get("is_ai"):
             _PENDING_DICE_ROLLS[user_id] = {"kind": "shove", "action_text": action_text}
             await update.effective_chat.send_message(
-                "🎲 Roll a d20 for your shove (account for advantage/disadvantage yourself "
-                "if it applies) and tell me the result.",
+                "🎲 Roll a d20 for your shove and tell me the result.",
                 message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
             return
@@ -3563,8 +3560,7 @@ async def _do_flee(update: Update, action_text: str, forced_roll: int | None = N
         if forced_roll is None and fleeing.get("manual_dice_enabled") and not fleeing.get("is_ai"):
             _PENDING_DICE_ROLLS[user_id] = {"kind": "flee", "action_text": action_text}
             await update.effective_chat.send_message(
-                "🎲 Roll a d20 for your escape attempt (account for advantage/disadvantage yourself "
-                "if it applies) and tell me the result.",
+                "🎲 Roll a d20 for your escape attempt and tell me the result.",
                 message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
             return
@@ -5099,8 +5095,7 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
     if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
         _PENDING_DICE_ROLLS[update.effective_user.id] = {"kind": "gather", "action_text": action_text}
         await update.effective_chat.send_message(
-            f"🎲 Roll a d20 for this {node['ability']} check (account for advantage/disadvantage "
-            f"yourself if it applies) and tell me the result.",
+            f"🎲 Roll a d20 for this {node['ability']} check and tell me the result.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
@@ -7417,8 +7412,7 @@ async def _do_steal(update: Update, text: str, forced_roll: int | None = None) -
     if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
         _PENDING_DICE_ROLLS[telegram_user_id] = {"kind": "steal", "action_text": text}
         await update.effective_chat.send_message(
-            "🎲 Roll a d20 for your theft attempt (account for advantage/disadvantage yourself "
-            "if it applies) and tell me the result.",
+            "🎲 Roll a d20 for your theft attempt and tell me the result.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
@@ -8104,6 +8098,26 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # normal intent parsing. Waits indefinitely (per Coffee) -- no
     # timeout falls back to an automatic roll.
     pending_roll = _PENDING_DICE_ROLLS.get(update.effective_user.id)
+    if pending_roll is None:
+        # Observability for a real gap found live 2026-07-18 (Coffee: "i
+        # did my roll of 9 and didnt get a reply"): _PENDING_DICE_ROLLS is
+        # in-memory only, so a bot restart landing between the roll
+        # prompt and the player's reply silently wipes it -- their next
+        # message (just a bare number) then falls through to normal
+        # intent parsing, which has nothing sensible to do with "9" and
+        # can end up silent. There was previously no log line at all for
+        # this, so check_topic_activity.py's monitoring had no way to
+        # ever see it. This doesn't fix the underlying fragility (that
+        # would mean persisting pending state across restarts), but it
+        # at least makes a dropped reply traceable after the fact.
+        possible_orphaned_roll = _extract_manual_roll(update.message.text) is not None
+        if possible_orphaned_roll and len(update.message.text.strip()) <= 4:
+            logger.warning(
+                f"[dice] user={update.effective_user.id} sent a bare number "
+                f"({update.message.text.strip()!r}) with no pending roll on file -- "
+                f"likely a manual-dice reply orphaned by a restart between the "
+                f"prompt and this message."
+            )
     if pending_roll is not None:
         manual_value = _extract_manual_roll(update.message.text)
         if manual_value is None:
@@ -8113,6 +8127,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
             )
             return
         del _PENDING_DICE_ROLLS[update.effective_user.id]
+        logger.info(f"[dice] user={update.effective_user.id} resolved pending {pending_roll['kind']} roll with {manual_value}")
         if pending_roll["kind"] == "attack":
             await _do_attack(update, pending_roll["action_text"], forced_roll=manual_value)
         elif pending_roll["kind"] == "skill_check":
@@ -8574,6 +8589,87 @@ async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     await _do_leaderboard(update)
 
 
+async def quests_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/quests (task #122) -- slash-command shortcut for _do_check_quests, same as "check my quests" in NL."""
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    await _do_check_quests(update)
+
+
+async def party_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/party (task #122), optionally "/party sheet" for the full-sheet variant -- shortcut for _do_check_party."""
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    await _do_check_party(update, " ".join(context.args))
+
+
+async def inventory_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/inventory (task #122) -- slash-command shortcut for _do_check_inventory."""
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    await _do_check_inventory(update)
+
+
+async def shop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/shop (task #122) -- slash-command shortcut for _do_list_shop, same as "what's for sale" in NL."""
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    await _do_list_shop(update)
+
+
+async def buy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/buy <item> (task #122) -- slash-command shortcut for _do_buy."""
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    if not context.args:
+        await _safe_send(update, "Buy what? e.g. \"/buy healing potion\".")
+        return
+    await _do_buy(update, " ".join(context.args))
+
+
+async def sell_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/sell <item> (task #122) -- slash-command shortcut for _do_sell."""
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    if not context.args:
+        await _safe_send(update, "Sell what? e.g. \"/sell rusty dagger\".")
+        return
+    await _do_sell(update, " ".join(context.args))
+
+
+async def cast_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /cast <spell> [target] (task #122) -- this game had NO slash-command
+    path for casting at all before this; every spell had to be cast via
+    natural language ("I cast fireball on the goblin"). Shortcut for the
+    exact same _do_cast_spell already used by that NL path.
+    """
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    if not context.args:
+        await _safe_send(update, "Cast what? e.g. \"/cast fire bolt\" or \"/cast cure wounds on Ravenloft\".")
+        return
+    await _do_cast_spell(update, " ".join(context.args))
+
+
+async def rest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/rest (task #122) -- slash-command shortcut for _do_rest, same as "I rest"/"heal up" in NL."""
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    await _do_rest(update)
+
+
+async def guild_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/guild (task #122) -- today's guild quest status for whichever real guild this character belongs to."""
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    character = db.get_character(update.effective_user.id)
+    if character is None or not character.get("guild"):
+        await _safe_send(update, "You're not in a guild — join one first (\"join the Adventurers' Guild\", etc.).")
+        return
+    await _do_check_guild_quest(update, character["guild"])
+
+
 async def version_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_chat.send_message(
         f"Pandora MMO v{version.get_version()} — powered by Pandora AI",
@@ -8610,15 +8706,13 @@ Almost everything here is plain English, typed straight into Adventure -- no com
 • "Look around" / "Where am I?" -- describes the area
 • "Examine the old barrel" -- inspect one specific thing
 • "Go to the tavern" / "Head upstairs" -- move somewhere
-• "Show me the map" (or /map)
-• "What's the weather like?" (or /weather) -- real time-of-day and conditions
+• "What's the weather like?" -- real time-of-day and conditions
 
 **Talking & people**
 • "Talk to Grimsby" / "Say hello to Sarah" -- NPC conversation
 • "Recruit Sarah to my party" -- add a real companion
 • "Invite <player> to my party" / "Accept the invite" / "Leave the party"
 • "Join the Arcane Circle" (or whichever guild) -- gets you into that guild's own real Telegram topic
-• "Check guild quest" -- your guild's daily bounty (win any fight to complete it)
 
 **Combat**
 • "Attack the goblin" -- once combat's started
@@ -8644,10 +8738,29 @@ Almost everything here is plain English, typed straight into Adventure -- no com
 **Character**
 • "Level up" -- once you have XP to spend
 • "Set my description to ..."
-• /sheet, /newcharacter, /map, /leaderboard, /version, /changelog
+
+**Slash commands** (alphabetical -- every one of these also works as a plain sentence above; these are just the shortcuts)
+• /achievements -- see what you've unlocked
+• /buy <item>
+• /cast <spell> [target]
+• /changelog
 • /donotdisturb -- toggle DND so you're skipped for join-a-fight nudges
-• /note <text> -- set a short status note party members can see ("/note clear" removes it)
-• /achievements -- see what you've unlocked; /title <title> to wear one you've earned
+• /guild -- today's guild quest status
+• /hint -- real things to try here, no spoilers
+• /inventory
+• /leaderboard
+• /map
+• /newcharacter
+• /note <text> -- a short status note party members can see ("/note clear" removes it)
+• /party [sheet] -- your party at a glance, or full sheets with "sheet"
+• /quests
+• /rest
+• /sell <item>
+• /sheet
+• /shop -- what's for sale here
+• /title <title> -- wear a title you've earned
+• /version
+• /weather
 
 Stuck? /hint suggests real things to try here, no spoilers. Reply to any narration with /help to get it explained. Stuck on something specific? Ask in Support -- it's grounded in this game's real items/spells/guilds, not general D&D trivia."""
 
@@ -10254,32 +10367,44 @@ def build_application() -> Application:
     )
 
     # Optional slash-command shortcuts.
+    # Alphabetical by command name (task #122, per Coffee: "the /
+    # commands are an incoherent mess") -- purely a registration-order
+    # cleanup, doesn't change behavior at all.
+    application.add_handler(CommandHandler("achievements", achievements_command))
+    application.add_handler(CommandHandler("add_admin", add_admin_command))
+    application.add_handler(CommandHandler("attack", attack_command))
+    application.add_handler(CommandHandler("ban", ban_command))
+    application.add_handler(CommandHandler("ban_list", banlist_command))
+    application.add_handler(CommandHandler("buy", buy_command))
+    application.add_handler(CommandHandler("campaigns", campaigns_command))
+    application.add_handler(CommandHandler("cast", cast_command))
+    application.add_handler(CommandHandler("changelog", changelog_command))
+    application.add_handler(CommandHandler("donotdisturb", donotdisturb_command))
+    application.add_handler(CommandHandler("endturn", endturn_command))
+    application.add_handler(CommandHandler("guild", guild_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("hint", hint_command))
-    application.add_handler(CommandHandler("newcharacter", newcharacter_command))
-    application.add_handler(CommandHandler("startcombat", startcombat_command))
-    application.add_handler(CommandHandler("attack", attack_command))
-    application.add_handler(CommandHandler("endturn", endturn_command))
-    application.add_handler(CommandHandler("sheet", sheet_command))
-    application.add_handler(CommandHandler("map", map_command))
+    application.add_handler(CommandHandler("inventory", inventory_command))
     application.add_handler(CommandHandler("leaderboard", leaderboard_command))
-    application.add_handler(CommandHandler("donotdisturb", donotdisturb_command))
+    application.add_handler(CommandHandler("map", map_command))
+    application.add_handler(CommandHandler("newcharacter", newcharacter_command))
     application.add_handler(CommandHandler("note", note_command))
-    application.add_handler(CommandHandler("achievements", achievements_command))
-    application.add_handler(CommandHandler("title", title_command))
-    application.add_handler(CommandHandler("weather", weather_command))
-    application.add_handler(CommandHandler("version", version_command))
-    application.add_handler(CommandHandler("changelog", changelog_command))
-    application.add_handler(CommandHandler("campaigns", campaigns_command))
+    application.add_handler(CommandHandler("party", party_command))
+    application.add_handler(CommandHandler("quests", quests_command))
     application.add_handler(CommandHandler("redo", redo_command))
+    application.add_handler(CommandHandler("remove_admin", remove_admin_command))
     application.add_handler(CommandHandler("report", report_command))
+    application.add_handler(CommandHandler("rest", rest_command))
+    application.add_handler(CommandHandler("sell", sell_command))
+    application.add_handler(CommandHandler("sheet", sheet_command))
+    application.add_handler(CommandHandler("shop", shop_command))
+    application.add_handler(CommandHandler("startcombat", startcombat_command))
+    application.add_handler(CommandHandler("title", title_command))
+    application.add_handler(CommandHandler("unban", unban_command))
+    application.add_handler(CommandHandler("version", version_command))
     application.add_handler(CommandHandler("warning", warning_command))
     application.add_handler(CommandHandler("warning_list", warninglist_command))
-    application.add_handler(CommandHandler("ban_list", banlist_command))
-    application.add_handler(CommandHandler("add_admin", add_admin_command))
-    application.add_handler(CommandHandler("remove_admin", remove_admin_command))
-    application.add_handler(CommandHandler("ban", ban_command))
-    application.add_handler(CommandHandler("unban", unban_command))
+    application.add_handler(CommandHandler("weather", weather_command))
 
     # Single unified router for all plain text messages, across topics.
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message_router))

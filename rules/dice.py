@@ -26,13 +26,27 @@ def roll_d20(advantage: bool = False, disadvantage: bool = False, forced_roll: i
     number they reported is substituted here instead of a random roll
     -- this is still the one place a d20 "roll" happens, so every
     downstream caller (roll_attack, roll_ability_check) gets a forced
-    value for free without needing its own separate override. Bypasses
-    advantage/disadvantage entirely: there's no way to verify a second
-    physical roll, so the player is expected to already account for
-    advantage/disadvantage themselves before reporting their one final
-    number (the prompt that asks for it says as much).
+    value for free without needing its own separate override.
+
+    2026-07-18, per Coffee ("I only wanna do the dice ... you should be
+    adding [modifiers] yourself"): this used to bypass advantage/
+    disadvantage entirely, asking the player to pre-resolve it
+    themselves (roll twice physically, report only the one number they
+    would have used) before the manual-dice prompts were updated to
+    stop asking for that. A physical roller only ever has ONE real die
+    in hand for the number they report, so advantage/disadvantage is
+    now resolved the same way a second dice-app roll would be: this
+    function rolls ONE internal random d20 and combines it with their
+    real reported number (max for advantage, min for disadvantage) --
+    the player's own roll is always genuinely used, never discarded,
+    exactly like a real second physical die would be if they'd had one
+    on hand.
     """
     if forced_roll is not None:
+        if advantage and not disadvantage:
+            return max(forced_roll, random.randint(1, 20))
+        if disadvantage and not advantage:
+            return min(forced_roll, random.randint(1, 20))
         return forced_roll
     if advantage and disadvantage:
         return random.randint(1, 20)

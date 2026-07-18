@@ -2,6 +2,44 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.23] — Physical dice mode handles advantage/disadvantage itself (task #91) + full slash-command layer (task #122)
+
+Coffee, dev-topic screenshot: "When I do the dice rolls, I only wanna do
+the dice. I want you to be able to handle the advantages and
+disadvantages. If there is modifiers, you should be adding them
+yourself." Modifiers were already handled correctly; advantage/
+disadvantage was not -- the manual-dice prompts previously asked the
+player to pre-resolve advantage/disadvantage themselves before
+reporting one number. Fixed in `rules/dice.py`'s `roll_d20`: when a
+physical `forced_roll` is reported and advantage or disadvantage
+applies, the game now rolls one internal supplementary d20 and combines
+it with the player's real reported roll (max for advantage, min for
+disadvantage) -- exactly like a real second physical die would be used
+if the player had one on hand. The player's own roll is always
+genuinely used, never discarded. All 5 roll-prompt strings (attack,
+skill check, gather, shove, flee, steal) had the now-obsolete "(account
+for advantage/disadvantage yourself if it applies)" phrasing removed
+accordingly. Verified with a real throwaway test exercising both
+`roll_d20` directly and through `roll_ability_check`/`roll_attack`.
+
+Also added observability logging around the manual-dice pending-roll
+flow (`_PENDING_DICE_ROLLS`) -- both successful resolution and orphaned
+bare-number replies with no matching pending state now log via
+`logger`, making a repeat of the "I rolled a 9 and didn't get a reply"
+report (root-caused this session to a bot restart landing between the
+prompt and the reply, wiping in-memory state) traceable in
+`bot_live_tmp.log` rather than silent.
+
+**Task #122**: a full slash-command layer -- 9 new commands (`/quests`,
+`/party`, `/inventory`, `/shop`, `/buy`, `/sell`, `/cast`, `/rest`,
+`/guild`), each delegating to the same real handler logic the
+natural-language path already uses. Per Coffee's follow-up request
+("alphabetically organize the / commands please they are an incoherent
+mess lol" / "keep things clean and professional"), the entire
+`CommandHandler` registration block and the `/help` command listing
+were both alphabetized and cleaned up. All 9 new commands verified
+live through the real handlers.
+
 ## [1.11.22] — Real bold text + real player mentions (tasks #118, #158) + two more class features (task #91)
 
 **Major find, task #158**: `bot.py` never set `parse_mode` anywhere in
