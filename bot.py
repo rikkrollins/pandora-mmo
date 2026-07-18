@@ -83,7 +83,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger("pandora_mmo")
 
-ACTIVE_CAMPAIGN_ID = "default"
+ACTIVE_CAMPAIGN_ID = config.ACTIVE_CAMPAIGN
+# Task #56: previously hardcoded to "default" with no way to switch
+# without editing code. Fails loudly and immediately at startup if
+# ACTIVE_CAMPAIGN names a folder that doesn't actually exist, rather
+# than a cryptic FileNotFoundError deep inside whatever handler first
+# touches CAMPAIGN -- listing what IS available makes the fix obvious.
+if ACTIVE_CAMPAIGN_ID not in cl.discover_campaigns():
+    available = ", ".join(cl.discover_campaigns()) or "(none found)"
+    raise RuntimeError(
+        f"config.ACTIVE_CAMPAIGN is set to '{ACTIVE_CAMPAIGN_ID}', but no "
+        f"campaigns/{ACTIVE_CAMPAIGN_ID}/campaign.json exists. Available campaigns: {available}"
+    )
 CAMPAIGN = cl.load_campaign(ACTIVE_CAMPAIGN_ID)
 
 DEFAULT_WEAPON = {"ability": "strength", "damage_dice": "1d8", "damage_bonus": 0}
@@ -8268,6 +8279,20 @@ async def version_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     )
 
 
+async def campaigns_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/campaigns (task #56): lists every campaigns/<id>/campaign.json actually found on disk and which is live."""
+    available = cl.discover_campaigns()
+    lines = ["📚 **Campaigns**"]
+    for campaign_id in available:
+        marker = " *(active)*" if campaign_id == ACTIVE_CAMPAIGN_ID else ""
+        lines.append(f"• {campaign_id}{marker}")
+    if not available:
+        lines.append("(none found)")
+    await update.effective_chat.send_message(
+        "\n".join(lines), message_thread_id=update.message.message_thread_id
+    )
+
+
 async def changelog_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_chat.send_message(
         version.get_changelog(),
@@ -9919,6 +9944,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("weather", weather_command))
     application.add_handler(CommandHandler("version", version_command))
     application.add_handler(CommandHandler("changelog", changelog_command))
+    application.add_handler(CommandHandler("campaigns", campaigns_command))
     application.add_handler(CommandHandler("redo", redo_command))
     application.add_handler(CommandHandler("report", report_command))
     application.add_handler(CommandHandler("warning", warning_command))

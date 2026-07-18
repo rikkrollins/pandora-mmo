@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.15] — Campaign-loading infra (task #56)
+
+`campaign_loader.py` already supported loading any `campaigns/<id>/
+campaign.json` and discovering what's on disk, but bot.py hardcoded
+`ACTIVE_CAMPAIGN_ID = "default"` directly with no way to point at a
+different campaign without editing code, and `discover_campaigns()`
+was never actually called anywhere. Now `config.ACTIVE_CAMPAIGN` (.env-
+overridable, defaults to "default") drives it, startup fails loudly
+and lists what IS available if it names a folder that doesn't exist
+(instead of a cryptic error deep in the first handler that touches
+CAMPAIGN), and a new `/campaigns` command shows what's discovered and
+which is live. Still only one real campaign exists ("default") --
+this is the loading infrastructure, not new campaign content.
+
 ## [1.11.14] — Weather + day/night cycle (task #84)
 
 New `world_clock.py`: real, deterministic time-of-day (Dawn/Day/Dusk/

@@ -70,3 +70,9 @@ NATURAL_HEALING_FULL_REST_HOURS = float(os.getenv("NATURAL_HEALING_FULL_REST_HOU
 # player roster) can grow to. Moved here from db.py 2026-07-14, same
 # reason as SKILL_CHECK_DC.
 PARTY_MAX_MEMBERS = int(os.getenv("PARTY_MAX_MEMBERS", "6"))
+
+# Which campaigns/<id>/campaign.json to load (task #56). Previously
+# hardcoded directly in bot.py with no .env override at all -- moved
+# here so a new campaign folder can actually be activated without a
+# code change, same convention as everything else in this file.
+ACTIVE_CAMPAIGN = os.getenv("ACTIVE_CAMPAIGN", "default")
