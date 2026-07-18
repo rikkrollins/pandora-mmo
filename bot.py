@@ -514,6 +514,21 @@ async def _maybe_post_hourly_status_update(bot) -> None:
     if _LAST_HOURLY_UPDATE_BUCKET == current_hour_bucket:
         return
 
+    # Real live bug (2026-07-18, Coffee: "What is happening here we were
+    # in battle?!"): this used to fire unconditionally at the top of
+    # every real hour with no regard for what was actually happening in
+    # Adventure -- confirmed live it landed mid-combat (two goblins
+    # still alive at 2/7 HP) and posted unrelated ambient flavor plus a
+    # player-count/quest-board readout right in the middle of the fight,
+    # with nothing to indicate combat was still ongoing. Deliberately
+    # does NOT update _LAST_HOURLY_UPDATE_BUCKET when skipping for this
+    # reason (unlike every other skip below, which commits the bucket
+    # regardless) -- this retries every ~60s on the next background-loop
+    # tick until combat actually ends, rather than silently losing that
+    # hour's update entirely.
+    if sessions.get_session(_LAST_KNOWN_CHAT_ID) is not None:
+        return
+
     # Joined through active_characters so a player's old, no-longer-played
     # characters (from the character-slots feature — switching to a new
     # active character never deletes the old one) can't be counted here.

@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.26] — Hourly ambient update could interrupt active combat mid-fight
+
+Coffee, live: "What is happening here we were in battle?! ... are we
+still in it?" -- traced to `_maybe_post_hourly_status_update`, which
+fires unconditionally at the top of every real hour regardless of what
+players are doing, with no check for an active combat encounter.
+Confirmed live it landed mid-fight (two goblins still alive at 2/7 HP
+each) and posted unrelated ambient flavor text plus a player-count/
+quest-board readout right in the middle of the encounter, making it
+look like the fight had just vanished. Fixed with a guard: skips
+posting (without marking that hour's update as done, so it retries
+every ~60s until the fight actually ends) whenever a real combat
+session is active for the group.
+
+(Separately diagnosed, not yet fixed: the actual fight in that
+screenshot was independently stalled because a player tried "Eat
+ration" instead of attacking on their turn -- using/eating an item
+mid-combat doesn't consume a turn or interact with the encounter at
+all yet. Tracked as task #168 for a follow-up session.)
+
 ## [1.11.25] — Two confirmed blockers on the wolf quest: "wolves" never matched "wolf", and a taken quest silently swapped for the wrong one
 
 Coffee, after Sugar (now a real second trusted dev, added via /add_admin)
