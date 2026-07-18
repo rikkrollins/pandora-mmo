@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.20] — Achievement announcements now name who earned them (task #156)
+
+Real bug, reported live by Coffee with a screenshot: in the shared
+Adventure topic, "Achievement unlocked: First Steps"/"Battle-Ready"
+never said which player earned it, leaving everyone else unable to
+tell who it's directed at. `_check_and_award_achievements` (bot.py)
+built the announcement without the character's name, unlike the
+sibling guild-quest-completion announcement right above it which
+already follows this project's actor-naming convention. Now reads
+"🏅 **\<name\>** earns achievement: **\<achievement\>**". Verified live by
+triggering a real achievement (level-up to 2) and confirming the name
+appears.
+
 ## [1.11.19] — Fixed resting/waking sending players to the wrong safe location (task #155)
 
 Real bug, reported live by Coffee: he rested in The Whispering Wood

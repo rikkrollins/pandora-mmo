@@ -6390,7 +6390,7 @@ async def _check_and_award_achievements(update: Update, character: dict | None) 
             db.unlock_achievement(character["telegram_user_id"], achievement_id)
             await _safe_send(
                 update,
-                f"🏅 **Achievement unlocked: {data['name']}**\n{data['description']}\n"
+                f"🏅 **{character['name']}** earns achievement: **{data['name']}**\n{data['description']}\n"
                 f"Title earned: \"{data['title']}\" — say \"set my title to {data['title']}\" to wear it.",
             )
 
