@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.28] — RPG-style battle menu (Fight/Skills/Items/Run)
+
+Coffee's request: "create an RPG style battle menu for battles... allow
+them to pick from prompts too... Fight, Skills/Magic/Abilities
+(depending on Char), Items (backpack), Run." Every "it's your turn"
+message (already showing the HP roster from 1.11.27) now also comes
+with tappable Telegram buttons, per his explicit confirmation that this
+should be an ADDITIONAL affordance alongside free text, never a
+replacement -- typing "attack the goblin" still works exactly as
+before, for both human and AI-driven players, dispatching through the
+exact same `_do_attack`/`_do_cast_spell`/`_do_use_item`/`_do_flee`
+handlers either way (no logic duplicated between the two input paths).
+
+- **Fight**: auto-attacks immediately if there's exactly one living
+  enemy; shows a target-picker submenu (with each enemy's name + HP)
+  if there's more than one.
+- **Skills**: only appears if the acting character actually has real
+  known spells -- a martial class with none never sees an empty,
+  dead-end menu. Tapping a spell casts it.
+- **Items**: only appears if they're actually carrying a real
+  consumable. Tapping one uses it.
+- **Run**: always available, attempts to flee.
+- Every tap is re-verified against the session's actual current turn
+  holder before anything happens (same "it's not your turn" boundary
+  the text commands already enforce), so nobody can act on someone
+  else's turn by tapping their menu.
+
+Verified with 5 real scenario tests: keyboard reflects a real
+character's actual spells/inventory; an out-of-turn tap is rejected
+without touching any state; a single-enemy Fight attacks directly; a
+multi-enemy Fight shows the right target submenu; Run dispatches a
+real flee attempt (including through a real Ollama narration timeout,
+confirming the fallback-template path still works correctly).
+
 ## [1.11.27] — Phrasing gaps (give/eat/armour/join-guild), real combat-turn handling for items, and an HP roster on every turn
 
 Batch of fixes found during continued reverse-playthrough testing plus

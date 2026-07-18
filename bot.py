@@ -19,12 +19,13 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from telegram import MessageEntity, Update, User
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity, Update, User
 from telegram.constants import ChatAction
 from telegram.error import TelegramError
 from telegram.ext import (
     Application,
     ApplicationBuilder,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -1408,11 +1409,161 @@ def _turn_announcement(session: sessions.Session) -> str:
     party_roster = ", ".join(roster_line(p) for p in session.living_on_side("party")) or "none left standing"
     enemy_roster = ", ".join(roster_line(p) for p in session.living_on_side("enemy")) or "none left standing"
 
+    hint = (
+        "\n💡 Tap a button below, or just type what you want to do."
+        if not current.get("is_ai") else ""
+    )
     return (
         f"🎲 **Round {session.round_number}** — It's now **{label}**'s turn! What do you do?\n"
         f"⚔️ Party: {party_roster}\n"
         f"👹 Enemy: {enemy_roster}"
+        f"{hint}"
     )
+
+
+def _battle_menu_keyboard(session: sessions.Session) -> InlineKeyboardMarkup | None:
+    """
+    Top-level RPG-style battle menu (Fight/Skills/Items/Run) for whoever
+    the CURRENT participant is -- per Coffee (2026-07-18): "create an
+    RPG style battle menu for battles... Fight, Skills/Magic/Abilities
+    (depending on Char), Items (backpack), Run." Returns None for an
+    AI's turn (no human there to tap anything) or if the current
+    participant isn't a real character lookup (defensive).
+
+    Skills/Items are only shown if this SPECIFIC character actually has
+    real known spells / carried consumables -- grounded in their own
+    data, never a generic fixed list, so this naturally covers every
+    race/class combination (a martial Fighter with no spells just never
+    sees an empty, dead-end Skills button; a caster with nothing in
+    their backpack never sees an empty Items button) without any
+    per-class special-casing.
+    """
+    current = session.current_participant()
+    if current.get("is_ai"):
+        return None
+    character = db.get_character(current["telegram_user_id"])
+    if character is None:
+        return None
+
+    row = [InlineKeyboardButton("⚔️ Fight", callback_data="bm|fight")]
+    if character.get("known_spells"):
+        row.append(InlineKeyboardButton("✨ Skills", callback_data="bm|skills"))
+    consumable_ids = [
+        item_id for item_id, qty in character.get("inventory", {}).items()
+        if qty > 0 and (items_module.get_item(item_id) or {}).get("type") == "consumable"
+    ]
+    if consumable_ids:
+        row.append(InlineKeyboardButton("🎒 Items", callback_data="bm|items"))
+    row.append(InlineKeyboardButton("🏃 Run", callback_data="bm|run"))
+    return InlineKeyboardMarkup([row])
+
+
+async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Handles taps on the RPG-style battle menu (_battle_menu_keyboard) --
+    per Coffee's request (2026-07-18): "create an RPG style battle menu
+    for battles... Fight, Skills/Magic/Abilities, Items, Run."
+
+    Always re-verifies the tapper is genuinely the session's CURRENT
+    turn participant before doing anything -- same "it's not your turn"
+    boundary _do_attack/_do_flee/etc. already enforce for typed text, so
+    someone else in the group can't act on a player's behalf by tapping
+    their menu. Every actual game action is dispatched through those
+    SAME real handlers (never duplicated here) -- a button tap and the
+    equivalent typed sentence always produce identical results, same
+    rules-decide/narrate split as everywhere else in this game.
+
+    `update.effective_user`/`update.effective_chat` both resolve
+    correctly for a callback_query Update (to the tapper and the
+    group chat respectively) -- confirmed none of _do_attack/_do_flee/
+    _do_use_item/_do_cast_spell ever reference update.message directly,
+    so they work unchanged whether the action came from typed text or
+    a button tap.
+    """
+    query = update.callback_query
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    session = sessions.get_session(chat_id)
+    if session is None or user_id not in session.turn_order or session.current_participant_id() != user_id:
+        await query.answer("It's not your turn right now.", show_alert=True)
+        return
+
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    value = parts[2] if len(parts) > 2 else None
+    await query.answer()
+    character = db.get_character(user_id)
+
+    if action == "menu":
+        await query.edit_message_reply_markup(reply_markup=_battle_menu_keyboard(session))
+        return
+
+    if action == "fight":
+        opposing = session.living_on_side(session.opposing_side(user_id))
+        if len(opposing) <= 1:
+            await query.edit_message_reply_markup(reply_markup=None)
+            if opposing:
+                await _do_attack(update, f"attack {opposing[0]['name']}")
+            else:
+                await update.effective_chat.send_message(
+                    "No valid targets remain.", message_thread_id=config.TOPIC_ADVENTURE_ID,
+                )
+            return
+        buttons = [
+            [InlineKeyboardButton(
+                f"{p['name']} ({p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP)",
+                callback_data=f"bm|target|{p['name']}",
+            )]
+            for p in opposing
+        ]
+        buttons.append([InlineKeyboardButton("« Back", callback_data="bm|menu")])
+        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+        return
+
+    if action == "target":
+        await query.edit_message_reply_markup(reply_markup=None)
+        await _do_attack(update, f"attack {value}")
+        return
+
+    if action == "skills":
+        known = character.get("known_spells", []) if character else []
+        spell_buttons = [
+            [InlineKeyboardButton(spells_module.get_spell(sid)["name"], callback_data=f"bm|cast|{sid}")]
+            for sid in known if spells_module.get_spell(sid)
+        ]
+        spell_buttons.append([InlineKeyboardButton("« Back", callback_data="bm|menu")])
+        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(spell_buttons))
+        return
+
+    if action == "cast":
+        spell = spells_module.get_spell(value)
+        await query.edit_message_reply_markup(reply_markup=None)
+        await _do_cast_spell(update, f"cast {spell['name']}" if spell else f"cast {value}")
+        return
+
+    if action == "items":
+        consumable_ids = [
+            item_id for item_id, qty in (character.get("inventory", {}) if character else {}).items()
+            if qty > 0 and (items_module.get_item(item_id) or {}).get("type") == "consumable"
+        ]
+        item_buttons = [
+            [InlineKeyboardButton(items_module.get_item(iid)["name"], callback_data=f"bm|use|{iid}")]
+            for iid in consumable_ids if items_module.get_item(iid)
+        ]
+        item_buttons.append([InlineKeyboardButton("« Back", callback_data="bm|menu")])
+        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(item_buttons))
+        return
+
+    if action == "use":
+        item = items_module.get_item(value)
+        await query.edit_message_reply_markup(reply_markup=None)
+        await _do_use_item(update, f"use {item['name']}" if item else f"use {value}")
+        return
+
+    if action == "run":
+        await query.edit_message_reply_markup(reply_markup=None)
+        await _do_flee(update, "flee")
+        return
 
 
 async def _announce_defeats(update: Update, session: sessions.Session, removed: list[dict]) -> None:
@@ -1520,7 +1671,10 @@ def _build_message_entities(text: str, mentionable_players: list[dict]) -> tuple
     return clean_text, entities
 
 
-async def _safe_send(update: Update, text: str, thread_id: int | None = None) -> None:
+async def _safe_send(
+    update: Update, text: str, thread_id: int | None = None,
+    reply_markup: InlineKeyboardMarkup | None = None,
+) -> None:
     """
     Sends a message to a topic (Adventure by default), but never lets a
     transient Telegram/network failure escape and abort whatever state
@@ -1568,7 +1722,7 @@ async def _safe_send(update: Update, text: str, thread_id: int | None = None) ->
         try:
             await update.effective_chat.send_message(
                 clean_text, message_thread_id=thread_id if thread_id is not None else config.TOPIC_ADVENTURE_ID,
-                entities=entities or None,
+                entities=entities or None, reply_markup=reply_markup,
             )
             if not is_buffering:
                 await _maybe_speak(update, text, thread_id)
@@ -2407,7 +2561,7 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
             continue
 
         if not current.get("is_ai"):
-            await _safe_send(update, _turn_announcement(session))
+            await _safe_send(update, _turn_announcement(session), reply_markup=_battle_menu_keyboard(session))
             return
 
         opposing = session.living_on_side(session.opposing_side(current["telegram_user_id"]))
@@ -2722,7 +2876,7 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             names = ", ".join(p["name"] for p in nudge_targets)
             location_name = cl.get_location(CAMPAIGN, requester["current_location"])["name"]
             header += f"\n\n📢 {names} — a fight just broke out at **{location_name}**, come join if you can!"
-        await _safe_send(update, header)
+        await _safe_send(update, header, reply_markup=_battle_menu_keyboard(session))
         await _resolve_ai_turns(update, session)
 
 
@@ -2837,7 +2991,7 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
                 f"🎯 **Initiative order:** {initiative_line}\n\n"
                 + _turn_announcement(session)
             )
-            await _safe_send(update, header)
+            await _safe_send(update, header, reply_markup=_battle_menu_keyboard(session))
             await _resolve_ai_turns(update, session)
     elif len(npc_ids) >= 2 and random.random() < 0.5:
         # Catch two NPCs mid-conversation rather than one reacting to the
@@ -3025,7 +3179,7 @@ async def _do_pass_turn(update: Update) -> None:
             await _safe_send(update, "There's no active turn to pass right now.")
             return
         session.advance_turn()
-        await _safe_send(update, _turn_announcement(session))
+        await _safe_send(update, _turn_announcement(session), reply_markup=_battle_menu_keyboard(session))
         await _resolve_ai_turns(update, session)
 
 
@@ -10542,6 +10696,7 @@ def build_application() -> Application:
     application.add_handler(MessageHandler(filters.PHOTO, dev_topic_photo_handler))
     application.add_handler(MessageHandler(filters.Document.ALL, dev_topic_document_handler))
     application.add_handler(MessageHandler(filters.VIDEO, dev_topic_video_handler))
+    application.add_handler(CallbackQueryHandler(battle_menu_callback, pattern=r"^bm\|"))
 
     application.add_error_handler(_log_unhandled_error)
 
