@@ -6244,6 +6244,23 @@ async def _do_toggle_manual_dice(update: Update, action_text: str, thread_id: in
     new_value = 1 if turning_on and not turning_off else 0
     db.update_character(update.effective_user.id, manual_dice_enabled=new_value)
 
+    # Real bug (2026-07-19, per Coffee: "dice mode on doesnt seem to be
+    # working with the battle system"): _do_attack/_do_shove/_do_flee/etc.
+    # all check manual_dice_enabled on the session's IN-MEMORY participant
+    # dict, which is a one-time snapshot taken from the DB when the fight
+    # started (see sessions.start_session <- _get_combat_eligible_party_
+    # members). The line above only ever updated the DB row, so toggling
+    # dice mode while already in an active fight silently had zero effect
+    # on that fight -- it would only apply starting with the NEXT combat.
+    # Patch every active session's copy of this participant in place so a
+    # mid-fight toggle takes effect on the very next roll, not just future
+    # encounters.
+    user_id = update.effective_user.id
+    for session in sessions._ACTIVE_SESSIONS.values():
+        for participant in session.participants:
+            if participant["telegram_user_id"] == user_id:
+                participant["manual_dice_enabled"] = new_value
+
     if new_value:
         await _safe_send(
             update,

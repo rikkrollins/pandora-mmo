@@ -17,6 +17,7 @@ import os
 
 import config
 import db
+import sessions
 
 
 def use_test_db(path: str) -> None:
@@ -25,6 +26,20 @@ def use_test_db(path: str) -> None:
     the live pandora_mmo.db. Safe to call after `import db`/`import
     bot` -- config.DB_PATH is read at call time (see db.get_connection),
     not import time, so mutating it here takes effect immediately.
+
+    Also isolates sessions.py's combat-session state (2026-07-19, real
+    incident found live): sessions.SNAPSHOT_PATH is a bare relative
+    filename ("sessions_snapshot.json"), resolved against the process's
+    cwd at save time -- NOT anything config.DB_PATH controls. A
+    throwaway test script run from ~/pandora_mmo (the same cwd the real
+    bot runs from) that imports sessions and calls start_session() will
+    silently overwrite the LIVE bot's real sessions_snapshot.json with
+    fake test combat data the moment save_snapshot() runs, with no
+    error or warning at all -- this actually happened (a "Ravenloft"
+    vs. two goblins test fixture ended up in the live snapshot file).
+    Redirecting SNAPSHOT_PATH here and resetting the in-memory session
+    dicts makes tests that touch sessions.py safe by default, the same
+    way config.DB_PATH already protects db.py.
     """
     if os.path.exists(path):
         os.remove(path)
@@ -33,6 +48,9 @@ def use_test_db(path: str) -> None:
         os.remove(journal)
     config.DB_PATH = path
     db.init_db()
+    sessions.SNAPSHOT_PATH = path + ".sessions_snapshot.json"
+    sessions._ACTIVE_SESSIONS.clear()
+    sessions._CHAT_LOCKS.clear()
 
 
 class FakeMessage:

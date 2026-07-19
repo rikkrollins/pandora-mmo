@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.39] — Mid-fight physical-dice toggle now actually takes effect
+
+**Real live report (2026-07-19, Coffee: "dice mode on doesnt seem to be
+working with the battle system"):** confirmed by reading the code path
+end-to-end, then reproducing live through the real handlers.
+`_do_attack`/`_do_shove`/`_do_flee`/etc. all check `manual_dice_enabled`
+on the COMBAT SESSION's in-memory participant dict -- a one-time
+snapshot taken from the character's DB row the moment the fight
+started (`sessions.start_session` <- `_get_combat_eligible_party_
+members`). `_do_toggle_manual_dice`, meanwhile, only ever wrote the new
+value to the DB row. So flipping dice mode on (or off) WHILE already in
+a fight silently did nothing for that fight -- the toggle only ever
+took effect starting with the *next* encounter, with no error and no
+indication anything was wrong. Fixed by having the toggle also patch
+every active session's copy of that participant in place, so a
+mid-fight toggle applies to the very next roll. Verified live through
+the real handlers: toggled dice mode on mid-fight, attacked via the
+battle menu, got prompted to roll a d20, typed the result, and the
+attack resolved correctly with a real hit and real damage -- combat
+continued normally into the next round afterward.
+
+Also hardened `tests/helpers.py`'s `use_test_db()` after this fix's own
+verification test accidentally overwrote the LIVE bot's real
+`sessions_snapshot.json` with fake test-fixture combat data:
+`sessions.SNAPSHOT_PATH` is a bare relative filename, resolved against
+whatever the current process's cwd happens to be, not anything
+`config.DB_PATH` controls -- a throwaway test script run from the same
+directory the real bot runs from silently clobbers the production
+snapshot the moment it calls `sessions.start_session()`, with zero
+warning. `use_test_db()` now also redirects `sessions.SNAPSHOT_PATH` to
+a throwaway path and clears the in-memory session/lock dicts, so any
+test using this helper is safe from this by default, the same way
+`config.DB_PATH` already protects `db.py`.
+
 ## [1.11.38] — The v1.11.37 deadlock fix now also checks proactively at startup
 
 v1.11.37's `_try_end_stale_combat` only ran reactively, on the next
