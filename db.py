@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS npc_relationships (
     affinity INTEGER NOT NULL DEFAULT 0,
     memory_events TEXT NOT NULL DEFAULT '[]',
     banned INTEGER NOT NULL DEFAULT 0,
+    resolution TEXT NOT NULL DEFAULT 'unresolved',
     PRIMARY KEY (telegram_user_id, npc_id)
 );
 """
@@ -251,6 +252,10 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN last_active_at TEXT")
         if "active_quests" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN active_quests TEXT NOT NULL DEFAULT '{}'")
+
+        npc_relationship_columns = _existing_columns(conn, "npc_relationships")
+        if "resolution" not in npc_relationship_columns:
+            conn.execute("ALTER TABLE npc_relationships ADD COLUMN resolution TEXT NOT NULL DEFAULT 'unresolved'")
 
         board_quest_columns = _existing_columns(conn, "board_quests")
         if "branch_data" not in board_quest_columns:
@@ -958,7 +963,7 @@ def add_xp(telegram_user_id: int, amount: int) -> dict | None:
 
 MAX_MEMORY_EVENTS = 20  # oldest facts drop off rather than growing forever
 
-_RELATIONSHIP_DEFAULTS = {"affinity": 0, "memory_events": [], "banned": 0}
+_RELATIONSHIP_DEFAULTS = {"affinity": 0, "memory_events": [], "banned": 0, "resolution": "unresolved"}
 
 
 def get_relationship(telegram_user_id: int, npc_id: str) -> dict:
@@ -1017,6 +1022,29 @@ def set_banned_by_npc(telegram_user_id: int, npc_id: str, banned: bool = True) -
 
 def is_banned_by_npc(telegram_user_id: int, npc_id: str) -> bool:
     return bool(get_relationship(telegram_user_id, npc_id)["banned"])
+
+
+def resolve_companion(telegram_user_id: int, npc_id: str, state: str) -> dict:
+    """
+    Writes a companion's final resolution state once, at the moment their
+    quest chain's final stage completes -- e.g. "resolved_loyal",
+    "resolved_distant", "resolved_estranged" depending on which trust
+    band `affinity` was in at that checkpoint. Reuses the existing
+    npc_relationships row (a companion is just an NPC a player has a real
+    relationship with) rather than a new table -- see the full-storyline
+    plan's "extend, don't invent" design.
+    """
+    get_relationship(telegram_user_id, npc_id)  # ensure the row exists
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE npc_relationships SET resolution = ? WHERE telegram_user_id = ? AND npc_id = ?",
+            (state, telegram_user_id, npc_id),
+        )
+    return get_relationship(telegram_user_id, npc_id)
+
+
+def get_companion_resolution(telegram_user_id: int, npc_id: str) -> str:
+    return get_relationship(telegram_user_id, npc_id)["resolution"]
 
 
 # ---------------------------------------------------------------------

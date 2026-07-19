@@ -2,6 +2,45 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.47] — Full-storyline Phase 1 (companion trust, the Arc 2→3 turn) + 2 live bug fixes
+
+Phase 1 of the full multi-path storyline plan (companion trust/branching
+resolutions, the Arc 2→3 mid-story turn), per Coffee's narrative-craft
+research and direct "build the FULL storyline" request:
+- `npc_relationships` gains a `resolution` column (`db.resolve_companion`/
+  `get_companion_resolution`) — reuses the existing `affinity`/
+  `memory_events` columns as the trust variable and flags list, no new
+  parallel state.
+- A new `story_gates` third gate type on location connections
+  (`_do_move` and `_do_fast_travel`, alongside the existing `min_level`/
+  `locked_connections` gates): `the_hush_below` → `the_first_city` now
+  requires `the_unspoken` defeated AND at least one recruited
+  companion's trust ≥ 40, instead of only a level check.
+- Chapter-climax quests (`clear_the_warrens`, `the_first_city_quest`,
+  `the_unmoored_isle_quest`) now get a real AI-narrated flourish at a
+  deeper `story_mode` pass (`ai.dm_agent.narrate_chapter_climax`), on
+  top of the deterministic reward text.
+
+Two real live bugs reported directly by Coffee, fixed and verified via
+throwaway tests:
+- **Level-up notifications never fired outside combat.** Combat XP
+  (`_award_victory_xp`) always compared before/after level and posted
+  to Main, but every non-combat XP source — story quest rewards, board
+  quest turn-ins, branching quest choices, login streak bonuses, and a
+  board-quest-completed-during-combat side case — called `db.add_xp`
+  directly with no level-up check at all. New shared helper
+  `_award_xp_and_announce_level_up` wraps `db.add_xp` with the same
+  check/announcement combat already had; all 5 non-combat XP call sites
+  now use it.
+- **Completing a gather board quest never consumed the gathered
+  material.** `_do_gather` already added the real item to the player's
+  backpack; turning the quest in (`_check_board_quest_turnin`) never
+  removed it, so gathered materials stayed in inventory forever after
+  being "delivered." Also fixed the asymmetric branching "retrieve a
+  moral cost" quest archetype (`_do_resolve_quest_choice`): "keep it"
+  correctly never consumed the material (by design), but "leave it be"
+  didn't consume it either, when it should.
+
 ## [1.11.46] — Manual-dice-roll prompts now retry on a transient timeout (task #187)
 
 Real live incident, 2026-07-19: a `telegram.error.TimedOut` (transient

@@ -55,6 +55,7 @@ from ai.dev_agent import answer_dev_question
 from ai.dm_agent import (
     narrate_action, narrate_welcome, narrate_skill_check, narrate_hourly_update,
     narrate_examine, narrate_branching_choice_outcome, narrate_boss_decision,
+    narrate_story_so_far, narrate_chapter_climax,
 )
 from ai.intent_parser import parse_intents
 from ai.npc_agent import register_npc, talk_to_npc, generate_ambient_line, _NPCS
@@ -326,6 +327,8 @@ WORLD_BOSS_MONSTER_KEYS = ["goblin_boss"]
 WORLD_BOSS_MIN_GAP_SECONDS = 6 * 3600  # at least 6 real hours between spawns
 WORLD_BOSS_SPAWN_CHANCE_PER_TICK = 0.02  # on top of the gap, keeps it rare/non-clockwork
 WORLD_BOSS_BONUS_GOLD = 100  # flat, on top of the same real loot/XP any monster kill already awards
+
+MAP_LOOT_DROP_CHANCE = 0.08  # task #141 (discoverable half): rare map find on any combat victory
 
 # ---------------------------------------------------------------------
 # Moltbook heartbeat — PandoraMMO_Bot's agent profile on Moltbook (the
@@ -2225,6 +2228,30 @@ def _level_up_note(before: dict, after: dict) -> str:
     return note
 
 
+async def _award_xp_and_announce_level_up(update_like, telegram_user_id: int, amount: int) -> dict | None:
+    """
+    Real live bug (2026-07-19, Coffee: "it idnt give a notification on
+    my level up"): _award_victory_xp (combat) has always compared
+    before/after level and posted _level_up_note to Main via
+    _notify_main_topic, but every NON-combat XP source -- story quest
+    rewards (_complete_quest_and_announce), board quest turn-ins
+    (_check_board_quest_turnin), branching quest choices
+    (_do_resolve_quest_choice), and login streak bonuses
+    (_maybe_award_streak_bonus) -- called db.add_xp directly with no
+    level-up check at all, so leveling up from any of those sources
+    produced zero notification, silently. This wraps db.add_xp with the
+    same before/after check + announcement combat already gets, so
+    every XP source behaves identically.
+    """
+    before = db.get_character(telegram_user_id)
+    if before is None:
+        return None
+    after = db.add_xp(telegram_user_id, amount)
+    if after is not None and after["level"] > before["level"]:
+        await _notify_main_topic(update_like, _level_up_note(before, after))
+    return after
+
+
 def _award_victory_xp(session: sessions.Session) -> tuple[str, list[str]]:
     """
     Awards real XP (from the defeated monster's real 5E-sourced XP value)
@@ -2374,7 +2401,15 @@ def _award_victory_xp(session: sessions.Session) -> tuple[str, list[str]]:
                 else:
                     db.complete_board_quest(updated["board_quest_id"])
                     for pid in real_party_ids:
-                        db.add_xp(pid, updated["reward_xp"])
+                        # Same real bug as the other non-combat XP sources
+                        # (2026-07-19, Coffee) -- this board-quest reward
+                        # never checked for a level-up crossing, so it
+                        # never made it into level_up_notes/Main at all.
+                        before = db.get_character(pid)
+                        after = db.add_xp(pid, updated["reward_xp"])
+                        if after["level"] > before["level"]:
+                            level_up_notes.append(_level_up_note(before, after))
+                            _log_world_event(event_location, f"{after['name']} reached level {after['level']}.")
                         character = db.get_character(pid)
                         db.update_character(pid, gold=character["gold"] + updated["reward_gold"])
                         db.increment_board_quests_completed(pid)
@@ -2406,6 +2441,21 @@ def _award_victory_xp(session: sessions.Session) -> tuple[str, list[str]]:
         f"carrying, so it's sold in town for {gold_each} gold each."
     )
 
+    # Task #141 (discoverable half): a rare chance for the fallen to
+    # also be carrying a real map -- the same fixed items.py catalog
+    # items sold at Vane's Curiosities, just found instead of bought
+    # this time. Independent of the gear-loot roll above (both can hit
+    # the same fight). Given to one random real party member since a
+    # map isn't meaningfully split like gold/XP the way loot gold is.
+    map_note = ""
+    if random.random() < MAP_LOOT_DROP_CHANCE:
+        map_item_id = random.choice(["weathered_surface_map", "tattered_underground_chart"])
+        map_item = items_module.get_item(map_item_id)
+        finder_id = random.choice(real_party_ids)
+        db.add_item(finder_id, map_item_id, 1)
+        finder_name = db.get_character(finder_id)["name"]
+        map_note = f"\n🗺️ **{finder_name}** finds a {map_item['name']} tucked away on the fallen!"
+
     summary = f"\n✨ Party gains {xp_each} XP each ({enemy_xp_total} total)."
     if absent_bonus_recipients:
         bonus_xp = max(int(xp_each * INACTIVE_PARTY_XP_SHARE), 1)
@@ -2414,6 +2464,7 @@ def _award_victory_xp(session: sessions.Session) -> tuple[str, list[str]]:
             f"({int(INACTIVE_PARTY_XP_SHARE * 100)}% share) for the party's efforts."
         )
     summary += loot_line
+    summary += map_note
     summary += "".join(board_notes)
     if world_boss_note:
         level_up_notes.append(world_boss_note)
@@ -4756,7 +4807,7 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
 
     db.complete_quest(telegram_user_id, quest_id)
     if reward_xp:
-        db.add_xp(telegram_user_id, reward_xp)
+        await _award_xp_and_announce_level_up(update_like, telegram_user_id, reward_xp)
     if reward_gold:
         character = db.get_character(telegram_user_id)
         db.update_character(telegram_user_id, gold=character["gold"] + reward_gold)
@@ -4773,10 +4824,42 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
     reward_text = ", ".join(reward_parts) or "real progress, if nothing material"
 
     chapter_note = _chapter_complete_note(telegram_user_id, quest_id)
+
+    # Full-storyline plan, Phase 1: quests tagged "weight": "climactic" get
+    # a real AI-narrated flourish, at a deeper story_mode pass, ahead of
+    # the deterministic reward line -- everything narrated is already-
+    # decided fact (the quest's own title/description/reward), never
+    # invented by the model.
+    climax_narration = ""
+    if quest.get("weight") == "climactic":
+        climax_text = await asyncio.to_thread(
+            narrate_chapter_climax, quest["title"], quest["description"], reward_text,
+        )
+        climax_narration = f"{climax_text}\n\n"
+
     await _safe_send(
         update_like,
-        f"📜 **Quest complete: {quest['title']}!**\nYou've earned: {reward_text}.{chapter_note}",
+        f"📜 **Quest complete: {quest['title']}!**\n{climax_narration}You've earned: {reward_text}.{chapter_note}",
     )
+    # Task #172 gap (per Coffee, 2026-07-19): quest ACCEPT already
+    # notifies Main (see _do_accept_quest's own _notify_main_topic
+    # calls), but quest COMPLETION never did -- the exact same class of
+    # "party members not watching Adventure miss the big moments" task
+    # #172 was meant to close, just missed at this specific site.
+    await _notify_main_topic(update_like, f"📜 **{character['name']}** completed a quest: {quest['title']}!")
+    if chapter_note:
+        # A finished STORY ARC is a bigger milestone than any one quest --
+        # per Coffee (2026-07-19): "when players complete a part of the
+        # story create a notification for it in main." Its own distinct,
+        # more prominent post, separate from the routine quest-complete
+        # line above, using the same real arc title/description
+        # _chapter_complete_note already computed (never re-derived here).
+        arc_info = _story_arc_for_quest(quest_id)
+        if arc_info:
+            _, arc = arc_info
+            await _notify_main_topic(
+                update_like, f"🌟 **{character['name']}** completed a chapter: \"{arc['title']}\"!",
+            )
 
 
 async def _check_quest_completions_reach_location(update_like, telegram_user_id: int, location_id: str) -> None:
@@ -4811,7 +4894,15 @@ async def _check_board_quest_turnin(update_like, telegram_user_id: int, location
                 and board_quest["progress_count"] >= board_quest["objective_count"]):
             continue
         db.complete_board_quest(board_quest["board_quest_id"])
-        db.add_xp(telegram_user_id, board_quest["reward_xp"])
+        if board_quest["objective_type"] == "gather_material":
+            # Real bug, Coffee (2026-07-19): "completion of my quests
+            # arent taking the silverleaf herbs?" -- _do_gather already
+            # adds the gathered material to the player's own backpack as
+            # a real, keepable item (db.add_item), so turning in a
+            # gather quest never consumed it -- the herbs just stayed in
+            # inventory forever after being "delivered."
+            db.remove_item(telegram_user_id, board_quest["objective_target"], board_quest["objective_count"])
+        await _award_xp_and_announce_level_up(update_like, telegram_user_id, board_quest["reward_xp"])
         character = db.get_character(telegram_user_id)
         db.update_character(telegram_user_id, gold=character["gold"] + board_quest["reward_gold"])
         db.increment_board_quests_completed(telegram_user_id)
@@ -4819,6 +4910,10 @@ async def _check_board_quest_turnin(update_like, telegram_user_id: int, location
             update_like,
             f"📜 **Board quest complete: {board_quest['title']}!** "
             f"You earn {board_quest['reward_xp']} XP, {board_quest['reward_gold']} gold.",
+        )
+        # Task #172 gap, same fix as _complete_quest_and_announce above.
+        await _notify_main_topic(
+            update_like, f"📜 **{character['name']}** completed a quest: {board_quest['title']}!",
         )
         await _check_and_award_achievements(update_like, db.get_character(telegram_user_id))
 
@@ -5051,8 +5146,14 @@ async def _do_resolve_quest_choice(update: Update, text: str) -> None:
 
     chosen = branch["choices"][choice_key]
     db.resolve_board_quest_branch(quest["board_quest_id"], choice_key)
+    # Same real bug as _check_board_quest_turnin's plain gather quests --
+    # but here it's asymmetric by design: "keep it" means keeping the
+    # gathered material (never remove it), while any other resolution
+    # (e.g. "leave it be instead") means giving it up.
+    if quest["objective_type"] == "gather_material" and choice_key != "keep_it":
+        db.remove_item(telegram_user_id, quest["objective_target"], quest["objective_count"])
     db.increment_board_quests_completed(telegram_user_id)
-    db.add_xp(telegram_user_id, chosen["reward_xp"])
+    await _award_xp_and_announce_level_up(update, telegram_user_id, chosen["reward_xp"])
     fresh = db.get_character(telegram_user_id)
     db.update_character(telegram_user_id, gold=fresh["gold"] + chosen["reward_gold"])
     if chosen.get("faction_id") and chosen.get("faction_delta"):
@@ -5252,7 +5353,10 @@ async def _do_check_quests(update: Update) -> None:
     if story_offer or any(not q.get("accepted_by") and not q.get("completed_at") for q in area_board_quests):
         lines.append("(Say \"I accept this quest\" — name it if more than one's posted — or tap a button below.)")
 
-    await _safe_send(update, "\n".join(lines), reply_markup=_quest_board_keyboard(story_offer, area_board_quests))
+    await _safe_send(
+        update, "\n".join(lines),
+        reply_markup=_with_menu_button(_quest_board_keyboard(story_offer, area_board_quests)),
+    )
 
 
 async def _do_ask_clue(update: Update) -> None:
@@ -5743,7 +5847,9 @@ async def _do_check_sheet(update: Update, target_name: str | None = None) -> Non
     # Task #176: spell-cast buttons only make sense on the ASKER's own
     # sheet (target_name is None here) -- nobody can tap a button to
     # cast someone else's spells.
-    await _safe_send(update, _format_character_sheet(character), reply_markup=_spell_keyboard(character))
+    await _safe_send(
+        update, _format_character_sheet(character), reply_markup=_with_menu_button(_spell_keyboard(character)),
+    )
 
 
 async def _do_check_inventory(update: Update) -> None:
@@ -5763,7 +5869,66 @@ async def _do_check_inventory(update: Update) -> None:
         item = items_module.get_item(item_id)
         name = item["name"] if item else item_id
         lines.append(f"  {name} x{qty}")
-    await _safe_send(update, "🎒 Your backpack:\n" + "\n".join(lines))
+    await _safe_send(
+        update, "🎒 Your backpack:\n" + "\n".join(lines), reply_markup=_with_menu_button(_item_keyboard(character)),
+    )
+
+
+def _item_keyboard(character: dict) -> InlineKeyboardMarkup | None:
+    """
+    Task #176 revision, per Coffee: real usable buttons for the backpack
+    listing too, not just the sheet's spells -- his own stated example
+    ("use a potion or charm a player") was a consumable, not a spell.
+    Grounded in this character's actual carried consumables (qty > 0),
+    same convention _battle_menu_keyboard's Items button already uses.
+    Tapping opens the same shared _target_picker_keyboard as spells.
+    """
+    consumable_ids = [
+        item_id for item_id, qty in character.get("inventory", {}).items()
+        if qty > 0 and (items_module.get_item(item_id) or {}).get("type") == "consumable"
+    ]
+    if not consumable_ids:
+        return None
+    buttons = [
+        [InlineKeyboardButton(f"🧪 {items_module.get_item(i)['name']}", callback_data=f"item|use|{i}")]
+        for i in consumable_ids
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+async def item_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _item_keyboard and its target picker -- see their docstrings."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    await query.answer()
+
+    if action == "use":
+        item_id = parts[2] if len(parts) > 2 else None
+        item = items_module.get_item(item_id) if item_id else None
+        character = db.get_character(update.effective_user.id)
+        if item is None or character is None:
+            return
+        picker = _target_picker_keyboard("item", item_id, character)
+        if picker is None:
+            await _do_use_item(update, f"use {item['name']}")
+            return
+        await query.edit_message_reply_markup(reply_markup=picker)
+        return
+
+    if action == "target":
+        item_id = parts[2] if len(parts) > 2 else None
+        target_token = parts[3] if len(parts) > 3 else None
+        item = items_module.get_item(item_id) if item_id else None
+        if item is None or target_token is None:
+            return
+        if target_token == "self":
+            await _do_use_item(update, f"use {item['name']}")
+            return
+        target_character = db.get_character(int(target_token))
+        if target_character is None:
+            return
+        await _do_use_item(update, f"use {item['name']} on {target_character['name']}")
 
 
 def _find_resource_node(location: dict, action_text: str) -> dict | None:
@@ -7264,7 +7429,7 @@ async def _maybe_award_streak_bonus(update: Update, streak_days: int) -> None:
     if character is None:
         return
     db.update_character(telegram_user_id, gold=character["gold"] + gold)
-    db.add_xp(telegram_user_id, xp)
+    await _award_xp_and_announce_level_up(update, telegram_user_id, xp)
     await _safe_send(
         update,
         f"🔥 **{streak_days}-day login streak!** {character['name']} earns {gold} gold and {xp} XP "
@@ -7629,6 +7794,11 @@ async def _do_move(update: Update, text: str) -> None:
         )
         return
 
+    story_gate_message = _check_story_gate(character, current, destination_id)
+    if story_gate_message:
+        await update.effective_chat.send_message(story_gate_message, message_thread_id=config.TOPIC_ADVENTURE_ID)
+        return
+
     db.move_character(update.effective_user.id, destination_id)
     db.mark_visited(update.effective_user.id, destination_id)
 
@@ -7654,6 +7824,67 @@ async def _do_move(update: Update, text: str) -> None:
     await _maybe_trigger_npc_encounter(update, updated_character, destination)
     await _check_quest_completions_reach_location(update, update.effective_user.id, destination_id)
     await _check_board_quest_turnin(update, update.effective_user.id, destination_id)
+
+
+def _npc_id_for_companion_name(name: str) -> str | None:
+    """Reverse-looks-up a recruited companion's campaign.json npc_id by name -- companion character rows never store it directly (matched by name at recruit time too, see _do_recruit_npc)."""
+    for npc_id, data in CAMPAIGN["npcs"].items():
+        if data["name"] == name:
+            return npc_id
+    return None
+
+
+def _check_story_gate(character: dict, current: dict, destination_id: str) -> str | None:
+    """
+    Full-storyline plan, Phase 1: a third gate type on a location
+    connection, alongside min_level and locked_connections. Checked the
+    same way locked_connections is -- read off the CURRENT location's
+    story_gates dict, keyed by destination id. Returns an in-fiction
+    rejection message if blocked, or None if the gate passes (or there's
+    no story_gates entry at all for this connection). Both conditions,
+    when present, must be met -- this reuses completed_quests (no new
+    "defeated" flag) and the existing npc_relationships.affinity column
+    (no new trust system).
+    """
+    gate = current.get("story_gates", {}).get(destination_id)
+    if not gate:
+        return None
+
+    monster_id = gate.get("requires_defeated_monster")
+    if monster_id:
+        defeating_quest_ids = {
+            quest_id for quest_id, quest in CAMPAIGN["quests"].items()
+            if quest.get("trigger", {}).get("type") == "defeat_monster"
+            and quest["trigger"].get("monster") == monster_id
+        }
+        if not defeating_quest_ids & set(character["completed_quests"]):
+            return (
+                "Something down here isn't done with you yet — you can feel "
+                "it's not safe to go any further until whatever's wrong is dealt with."
+            )
+
+    trust_gate = gate.get("requires_companion_trust")
+    if trust_gate:
+        min_affinity = trust_gate.get("min_affinity", 0)
+        companion_npc_ids = []
+        party_id = character.get("party_id")
+        if party_id:
+            for member in db.get_party_members_by_id(party_id):
+                if member.get("is_ai"):
+                    npc_id = _npc_id_for_companion_name(member["name"])
+                    if npc_id:
+                        companion_npc_ids.append(npc_id)
+        trusted = any(
+            db.get_relationship(character["telegram_user_id"], npc_id)["affinity"] >= min_affinity
+            for npc_id in companion_npc_ids
+        )
+        if not trusted:
+            return (
+                "None of your companions are ready to go any further — whatever "
+                "waits ahead, they need to trust this path (and you) more first."
+            )
+
+    return None
 
 
 def _meets_location_level(character: dict, destination: dict) -> bool:
@@ -7731,6 +7962,12 @@ async def _do_fast_travel(update: Update, text: str) -> None:
     destination = cl.get_location(CAMPAIGN, destination_id)
     if not _meets_location_level(character, destination):
         await _send_level_gate_message(update, destination)
+        return
+
+    current = cl.get_location(CAMPAIGN, character["current_location"])
+    story_gate_message = _check_story_gate(character, current, destination_id)
+    if story_gate_message:
+        await update.effective_chat.send_message(story_gate_message, message_thread_id=config.TOPIC_ADVENTURE_ID)
         return
 
     db.move_character(telegram_user_id, destination_id)
@@ -8401,16 +8638,240 @@ def _apply_empowered_spell(telegram_user_id: int, character: dict, spell: dict, 
     return {**result, "rolls": new_rolls, "damage_dealt": result["damage_dealt"] + (sum(new_rolls) - sum(old_rolls))}
 
 
+def _with_menu_button(keyboard: InlineKeyboardMarkup | None) -> InlineKeyboardMarkup:
+    """
+    Appends a single "📖 Menu" row (callback_data "menu|root") to any
+    existing keyboard, or returns a keyboard with just that row if there
+    wasn't one -- per Coffee: "make it a complete menu system." Used on
+    every real menu section's own reply (sheet/story/quests/inventory/
+    equip) so every screen loops back to the root menu instead of being
+    a dead end, without needing its own separate rendering path.
+    """
+    rows = list(keyboard.inline_keyboard) if keyboard else []
+    rows.append([InlineKeyboardButton("📖 Menu", callback_data="menu|root")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _main_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🧙 Character Sheet", callback_data="menu|sheet")],
+        [InlineKeyboardButton("📖 Story So Far", callback_data="menu|story")],
+        [InlineKeyboardButton("📋 Quests", callback_data="menu|quests")],
+        [InlineKeyboardButton("🎒 Inventory", callback_data="menu|inventory")],
+        [InlineKeyboardButton("⚔️ Equip Gear", callback_data="menu|equip")],
+        [InlineKeyboardButton("📈 Level Up", callback_data="menu|level")],
+    ])
+
+
+async def _do_show_menu(update: Update) -> None:
+    """
+    Task #176 full menu revision, per Coffee (2026-07-19): "show things
+    in menu that are needed for the game - story-so-far - quests -
+    inventory - equip character - make it a complete menu system." Root
+    navigational menu -- every section below dispatches through the
+    SAME real handlers free text already uses (_do_check_sheet,
+    _do_show_story_so_far, _do_check_quests, _do_check_inventory,
+    _do_show_equip_menu), never a separate rendering path, and every
+    section's own reply loops back here via _with_menu_button.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    await _safe_send(update, f"📖 **{character['name']}** — what do you want to check?", reply_markup=_main_menu_keyboard())
+
+
+async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _main_menu_keyboard and every section's own Menu button -- see _do_show_menu's docstring."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    section = parts[1] if len(parts) > 1 else ""
+    await query.answer()
+    if section == "root":
+        await _do_show_menu(update)
+    elif section == "sheet":
+        await _do_check_sheet(update)
+    elif section == "story":
+        await _do_show_story_so_far(update)
+    elif section == "quests":
+        await _do_check_quests(update)
+    elif section == "inventory":
+        await _do_check_inventory(update)
+    elif section == "equip":
+        await _do_show_equip_menu(update)
+    elif section == "level":
+        await _do_show_level_menu(update)
+
+
+async def _do_show_story_so_far(update: Update) -> None:
+    """
+    Task #176 menu revision, per Coffee ("I want that to be like a
+    story/novel with actions and narrations making it a logical story"):
+    a real AI-narrated recap (narrate_story_so_far), grounded strictly
+    in this character's actual completed story arcs, current arc, and
+    completed quests (CAMPAIGN's own story_arcs, in their real narrative
+    order) -- never invented, same rules-decide/AI-narrates split as
+    every other narration in this game. A short structured chapter list
+    follows as an at-a-glance reference, with future chapters shown as
+    "???" rather than spoiling a locked chapter's title, same fog-of-war
+    principle as the map/bestiary.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    completed_ids = set(character["completed_quests"])
+    current = _current_story_arc(character)
+    current_arc_id = current[0] if current else None
+
+    completed_arcs = []
+    chapter_lines = ["**Chapters:**"]
+    for arc_id, arc in CAMPAIGN.get("story_arcs", {}).items():
+        arc_quests = set(arc.get("quests", []))
+        if arc_quests and arc_quests.issubset(completed_ids):
+            completed_arcs.append((arc["title"], arc["description"]))
+            chapter_lines.append(f"✅ {arc['title']}")
+        elif arc_id == current_arc_id:
+            chapter_lines.append(f"▶️ {arc['title']} *(current)*")
+        else:
+            chapter_lines.append("🔒 ???")
+
+    current_arc_pair = (current[1]["title"], current[1]["description"]) if current else None
+    completed_quests = [
+        (CAMPAIGN["quests"][q]["title"], CAMPAIGN["quests"][q]["description"])
+        for q in character["completed_quests"] if q in CAMPAIGN["quests"]
+    ]
+
+    recap = await asyncio.to_thread(
+        narrate_story_so_far, character["name"], completed_arcs, current_arc_pair, completed_quests,
+    )
+
+    await _safe_send(
+        update, f"📖 **Story So Far**\n\n{recap}\n\n" + "\n".join(chapter_lines),
+        reply_markup=_with_menu_button(None),
+    )
+
+
+def _equip_keyboard(character: dict) -> InlineKeyboardMarkup | None:
+    """
+    Task #176 menu revision: real tap-to-equip buttons for gear this
+    character is actually carrying but hasn't equipped yet -- same real
+    inventory/equipped-slot data _format_carried_gear_line already reads
+    (never a generic list). None (not even a Menu-only keyboard) when
+    there's nothing to equip, so _do_show_equip_menu can say so plainly.
+    """
+    equipped_ids = {character.get("equipped_weapon"), character.get("equipped_armor"),
+                    character.get("equipped_shield"), *(character.get("equipped_accessories") or [])}
+    buttons = []
+    for item_id, qty in (character.get("inventory") or {}).items():
+        if qty <= 0 or item_id in equipped_ids:
+            continue
+        item = items_module.get_item(item_id)
+        if item and item.get("type") in ("weapon", "armor", "shield", "ring", "amulet", "wondrous"):
+            buttons.append([InlineKeyboardButton(f"⚔️ {item['name']}", callback_data=f"equip|item|{item_id}")])
+    return InlineKeyboardMarkup(buttons) if buttons else None
+
+
+async def _do_show_equip_menu(update: Update) -> None:
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    keyboard = _equip_keyboard(character)
+    if keyboard is None:
+        await _safe_send(
+            update, "⚔️ Nothing in your backpack is equippable right now.", reply_markup=_with_menu_button(None),
+        )
+        return
+    await _safe_send(
+        update, "⚔️ **Equip Gear** — tap something carried but not yet equipped:",
+        reply_markup=_with_menu_button(keyboard),
+    )
+
+
+async def equip_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _equip_keyboard -- dispatches through the same real _do_equip_item free text already uses."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    await query.answer()
+    if action != "item":
+        return
+    item_id = parts[2] if len(parts) > 2 else None
+    item = items_module.get_item(item_id) if item_id else None
+    if item is None:
+        return
+    await _do_equip_item(update, f"equip {item['name']}")
+
+
+def _level_keyboard() -> InlineKeyboardMarkup:
+    """Real Ability Score Improvement choices -- see _apply_asi_choice, the same real 5E rule this dispatches through."""
+    buttons = [[InlineKeyboardButton(a.capitalize(), callback_data=f"level|asi|{a}")] for a in _ABILITY_NAMES]
+    buttons.append([InlineKeyboardButton("🎲 Auto (let the game choose)", callback_data="level|asi|auto")])
+    return InlineKeyboardMarkup(buttons)
+
+
+async def _do_show_level_menu(update: Update) -> None:
+    """
+    Task #176 menu revision, per Coffee ("leveling up skill trees
+    anything like that - include it in the menu"). This game's real
+    level-up mechanic is XP-driven auto-leveling plus a real player-
+    chosen Ability Score Improvement at ASI levels (_do_level_up,
+    task #94) -- there's no separate skill-tree system yet (that's
+    still backlog task #131), so this surfaces the real thing that
+    exists: current level/XP, and real tap-to-choose ASI buttons
+    whenever points are actually waiting to be spent.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    lines = [f"📈 **Level {character['level']}** — {character['xp']} XP"]
+    pending = character.get("pending_asi_points", 0)
+    if pending:
+        lines.append(f"\nYou have {pending} ability point(s) to spend:")
+        await _safe_send(update, "\n".join(lines), reply_markup=_with_menu_button(_level_keyboard()))
+    else:
+        lines.append("\nNo ability score improvements waiting to be spent right now.")
+        await _safe_send(update, "\n".join(lines), reply_markup=_with_menu_button(None))
+
+
+async def level_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _level_keyboard -- dispatches through the same real _do_level_up free text already uses."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    await query.answer()
+    if action != "asi":
+        return
+    choice = parts[2] if len(parts) > 2 else None
+    if choice is None:
+        return
+    await _do_level_up(update, choice)
+
+
 def _spell_keyboard(character: dict) -> InlineKeyboardMarkup | None:
     """
-    Task #176: out-of-combat spell-casting buttons for a character's own
-    real known_spells (grounded the same way _battle_menu_keyboard's
-    Skills button already is -- no generic fixed list). Tapping dispatches
-    "cast <spell name>" through the same _do_cast_spell handler free text
-    already uses, with no target -- identical to a player typing "cast
-    <spell>" with nobody named, so self/no-target spells work exactly as
-    they do today and targeted spells fail the same honest way they
-    already do without a stated target.
+    Task #176 (revised 2026-07-19 per Coffee's direct feedback: "I am
+    honestly not sure about having the character sheet have these push
+    buttons unless they do something for the player and the party...
+    if they want to use a potion or charm a player, they can select it
+    pick a target and then executed it... We do not need it unless it
+    has a utility") -- out-of-combat spell-casting buttons for a
+    character's own real known_spells. Tapping a spell now opens a real
+    SECOND step (see spell_menu_callback's "target" branch) letting the
+    caster pick themselves or any real party member actually here to
+    aim it at, the exact utility Coffee asked for, instead of always
+    silently self-casting with no way to say who it's for.
     """
     if not character.get("known_spells"):
         return None
@@ -8422,16 +8883,62 @@ def _spell_keyboard(character: dict) -> InlineKeyboardMarkup | None:
     return InlineKeyboardMarkup(buttons) if buttons else None
 
 
+def _target_picker_keyboard(prefix: str, action_id: str, requester: dict) -> InlineKeyboardMarkup | None:
+    """
+    Shared second-step target picker for _spell_keyboard/_item_keyboard
+    (task #176 revision, per Coffee): "Self" plus every other REAL party
+    member actually at this location right now (_get_combat_eligible_
+    party_members -- same real presence/location grounding the combat
+    join-nudge already uses, never a generic/global party list). Only
+    built when there's actually someone else here to pick -- callers
+    skip straight to a self-cast/self-use otherwise, so this never adds
+    an empty, pointless extra tap.
+    """
+    eligible = _get_combat_eligible_party_members(requester["current_location"])
+    others = [p for p in eligible if p["telegram_user_id"] != requester["telegram_user_id"]]
+    if not others:
+        return None
+    buttons = [[InlineKeyboardButton("🧍 Self", callback_data=f"{prefix}|target|{action_id}|self")]]
+    buttons += [
+        [InlineKeyboardButton(p["name"], callback_data=f"{prefix}|target|{action_id}|{p['telegram_user_id']}")]
+        for p in others
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
 async def spell_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles taps on _spell_keyboard -- see its docstring."""
+    """Handles taps on _spell_keyboard and its target picker -- see their docstrings."""
     query = update.callback_query
     parts = (query.data or "").split("|")
-    spell_id = parts[2] if len(parts) > 2 else None
+    action = parts[1] if len(parts) > 1 else ""
     await query.answer()
-    spell = spells_module.get_spell(spell_id) if spell_id else None
-    if spell is None:
+
+    if action == "cast":
+        spell_id = parts[2] if len(parts) > 2 else None
+        spell = spells_module.get_spell(spell_id) if spell_id else None
+        character = db.get_character(update.effective_user.id)
+        if spell is None or character is None:
+            return
+        picker = _target_picker_keyboard("spell", spell_id, character)
+        if picker is None:
+            await _do_cast_spell(update, f"cast {spell['name']}")
+            return
+        await query.edit_message_reply_markup(reply_markup=picker)
         return
-    await _do_cast_spell(update, f"cast {spell['name']}")
+
+    if action == "target":
+        spell_id = parts[2] if len(parts) > 2 else None
+        target_token = parts[3] if len(parts) > 3 else None
+        spell = spells_module.get_spell(spell_id) if spell_id else None
+        if spell is None or target_token is None:
+            return
+        if target_token == "self":
+            await _do_cast_spell(update, f"cast {spell['name']}")
+            return
+        target_character = db.get_character(int(target_token))
+        if target_character is None:
+            return
+        await _do_cast_spell(update, f"cast {spell['name']} on {target_character['name']}")
 
 
 async def _do_cast_spell(update: Update, text: str) -> None:
@@ -9534,6 +10041,20 @@ async def map_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not topics.is_adventure(update.message.message_thread_id or 0):
         return
     await _do_show_map(update)
+
+
+async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /menu -- slash-command shortcut for _do_show_menu, task #176's full
+    menu revision. Per Coffee: usable from both Adventure and Support
+    (unlike most other action commands, which stay Adventure-only) --
+    a player looking something up in Support shouldn't have to switch
+    topics just to peek at their sheet/quests/inventory.
+    """
+    thread_id = update.message.message_thread_id or 0
+    if not (topics.is_adventure(thread_id) or topics.is_support(thread_id)):
+        return
+    await _do_show_menu(update)
 
 
 async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -11483,6 +12004,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("inventory", inventory_command))
     application.add_handler(CommandHandler("leaderboard", leaderboard_command))
     application.add_handler(CommandHandler("map", map_command))
+    application.add_handler(CommandHandler("menu", menu_command))
     application.add_handler(CommandHandler("newcharacter", newcharacter_command))
     application.add_handler(CommandHandler("note", note_command))
     application.add_handler(CommandHandler("party", party_command))
@@ -11514,6 +12036,10 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(shop_menu_callback, pattern=r"^shop\|"))
     application.add_handler(CallbackQueryHandler(spell_menu_callback, pattern=r"^spell\|"))
     application.add_handler(CallbackQueryHandler(quest_menu_callback, pattern=r"^quest\|"))
+    application.add_handler(CallbackQueryHandler(item_menu_callback, pattern=r"^item\|"))
+    application.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu\|"))
+    application.add_handler(CallbackQueryHandler(equip_menu_callback, pattern=r"^equip\|"))
+    application.add_handler(CallbackQueryHandler(level_menu_callback, pattern=r"^level\|"))
 
     application.add_error_handler(_log_unhandled_error)
 

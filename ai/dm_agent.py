@@ -582,6 +582,92 @@ def _fallback_hourly_update(location_name: str, recent_events: list[str], activi
     return " ".join(lines)
 
 
+def _story_so_far_preamble() -> str:
+    return (
+        "You are the Dungeon Master writing a \"story so far\" recap for a "
+        "player of a Dungeons & Dragons 5th Edition game, in the voice of a "
+        "novel's narrator looking back over what this character has "
+        "actually lived through. You are given real facts — their name, "
+        "which chapters of the story they've already completed, which one "
+        "they're in right now, and which real quests they've finished along "
+        "the way — that have ALREADY happened. Write a flowing narrative "
+        f"recap ({scaled_sentences(4, 7)}) that reads like the opening of a "
+        "novel's chapter, weaving these real facts into one coherent "
+        "throughline in the order given, never inventing a person, place, "
+        f"or event beyond what's provided. {_NAMING_INSTRUCTION} "
+        f"{style_directive()} End on a forward-looking note about the "
+        "chapter they're currently in, without revealing or hinting at "
+        "anything from chapters still locked ahead."
+    )
+
+
+def _build_story_so_far_prompt(
+    character_name: str, completed_arcs: list[tuple[str, str]],
+    current_arc: tuple[str, str] | None, completed_quests: list[tuple[str, str]],
+) -> str:
+    completed_arc_text = "; ".join(f"{title}: {desc}" for title, desc in completed_arcs) or "none yet"
+    completed_quest_text = "; ".join(f"{title} ({desc})" for title, desc in completed_quests) or "none yet"
+    current_arc_text = f"{current_arc[0]}: {current_arc[1]}" if current_arc else "the story is complete"
+    facts = (
+        f"Character: {character_name}\n"
+        f"Chapters already completed, in order: {completed_arc_text}\n"
+        f"Current chapter: {current_arc_text}\n"
+        f"Quests completed so far, in order: {completed_quest_text}"
+    )
+    return (
+        f"{_story_so_far_preamble()}\n\n"
+        f"Real facts (narrate ONLY these, faithfully):\n{facts}\n\n"
+        f"Write the recap now:"
+    )
+
+
+def narrate_story_so_far(
+    character_name: str, completed_arcs: list[tuple[str, str]],
+    current_arc: tuple[str, str] | None, completed_quests: list[tuple[str, str]],
+) -> str:
+    """
+    Task #176 menu revision, per Coffee: "I want that to be like a
+    story/novel with actions and narrations making it a logical story" --
+    the Story So Far menu screen's completed chapters/current chapter/
+    completed quests are all real facts already computed by bot.py's
+    _do_show_story_so_far (never invented here); this only turns them
+    into flowing prose, same rules-decide/AI-narrates split as every
+    other narration call in this game.
+    """
+    prompt = _build_story_so_far_prompt(character_name, completed_arcs, current_arc, completed_quests)
+    try:
+        response = requests.post(
+            f"{config.OLLAMA_BASE_URL}/api/generate",
+            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False, "options": _NARRATION_OPTIONS},
+            timeout=200,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = strip_think_tags(data.get("response", ""))
+        if text:
+            return text
+    except (requests.RequestException, ValueError) as e:
+        print(f"[dm_agent] story-so-far narration call failed, falling back to template: {e}")
+    return _fallback_story_so_far(character_name, completed_arcs, current_arc, completed_quests)
+
+
+def _fallback_story_so_far(
+    character_name: str, completed_arcs: list[tuple[str, str]],
+    current_arc: tuple[str, str] | None, completed_quests: list[tuple[str, str]],
+) -> str:
+    """Plain-text fallback if the narration model is unreachable."""
+    lines = [f"{character_name}'s journey so far:"]
+    for title, desc in completed_arcs:
+        lines.append(f"- {title}: {desc}")
+    if current_arc:
+        lines.append(f"Now: {current_arc[0]} — {current_arc[1]}")
+    else:
+        lines.append("The story is complete.")
+    if completed_quests:
+        lines.append("Quests completed: " + ", ".join(title for title, _ in completed_quests))
+    return "\n".join(lines)
+
+
 def _examine_preamble() -> str:
     return (
         "You are the Dungeon Master describing a character taking a closer "
@@ -724,3 +810,54 @@ def narrate_branching_choice_outcome(location_name: str, choice_label: str, outc
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] branching quest outcome narration failed, falling back to plain text: {e}")
     return outcome_facts
+
+
+def _chapter_climax_preamble() -> str:
+    return (
+        "You are the Dungeon Master narrating the resolution of a "
+        "chapter-defining, climactic quest a character just completed -- "
+        "one of the biggest moments in this story so far. You are given "
+        "the quest's real title and what it was actually about; narrate "
+        f"ONLY these facts ({scaled_sentences(4, 6, boost=3)}), never "
+        "inventing a new plot detail, character, or twist beyond what's "
+        f"given. {_NAMING_INSTRUCTION} {style_directive(boost=3)}"
+    )
+
+
+def _build_chapter_climax_prompt(quest_title: str, quest_description: str, reward_text: str) -> str:
+    return (
+        f"{_chapter_climax_preamble()}\n\n"
+        f"Real facts (narrate ONLY these, faithfully):\n"
+        f"Quest just completed: {quest_title}\n"
+        f"What it was about: {quest_description}\n"
+        f"What was earned: {reward_text}\n\n"
+        f"Write the climactic resolution now:"
+    )
+
+
+def narrate_chapter_climax(quest_title: str, quest_description: str, reward_text: str) -> str:
+    """
+    Phase 1 of the full-storyline plan: quests tagged "weight": "climactic"
+    in campaign.json (currently clear_the_warrens, the_first_city_quest,
+    the_unmoored_isle_quest -- The Hush joins this list in Phase 2 once
+    it's split into a staged chain) get a real AI-narrated flourish here,
+    at a deeper story_mode pass than ordinary quest completions -- same
+    rules-decide/AI-narrates split as every other narration call in this
+    game; the quest's title/description/reward are already-decided real
+    facts, never invented here.
+    """
+    prompt = _build_chapter_climax_prompt(quest_title, quest_description, reward_text)
+    try:
+        response = requests.post(
+            f"{config.OLLAMA_BASE_URL}/api/generate",
+            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False, "options": _NARRATION_OPTIONS},
+            timeout=200,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = strip_think_tags(data.get("response", ""))
+        if text:
+            return text
+    except (requests.RequestException, ValueError) as e:
+        print(f"[dm_agent] chapter climax narration failed, falling back to template: {e}")
+    return f"This was a turning point. {quest_description}"

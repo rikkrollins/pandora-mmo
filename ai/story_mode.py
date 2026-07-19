@@ -22,7 +22,7 @@ import db
 _FACTORS = [0.35, 0.5, 0.65, 0.8, 0.95, 1.15, 1.4, 1.7, 2.1, 2.6, 3.2]
 
 
-def _level() -> int:
+def _level(boost: int = 0) -> int:
     """
     A live db.game_settings override (2026-07-14, via the Development-
     topic "set story mode to N" command) takes priority over
@@ -30,26 +30,34 @@ def _level() -> int:
     narration length immediately, without a redeploy, exactly what he
     asked for when testing STORY_MODE=10 earlier. Falls back to the
     .env default if no live override has ever been set.
+
+    `boost` lets one specific narration call ask for a deeper pass than
+    the game's current global level without touching that global level
+    (e.g. a chapter-climax narration -- see ai/dm_agent.py's
+    narrate_chapter_climax) -- everything else keeps using plain
+    _level()/scaled_sentences()/style_directive() unaffected.
     """
     override = db.get_setting("story_mode")
     if override is not None:
         try:
-            return max(0, min(10, int(override)))
+            base = max(0, min(10, int(override)))
         except ValueError:
-            pass
-    return max(0, min(10, getattr(config, "STORY_MODE", 5)))
+            base = max(0, min(10, getattr(config, "STORY_MODE", 5)))
+    else:
+        base = max(0, min(10, getattr(config, "STORY_MODE", 5)))
+    return max(0, min(10, base + boost))
 
 
-def scaled_sentences(base_min: int, base_max: int) -> str:
+def scaled_sentences(base_min: int, base_max: int, boost: int = 0) -> str:
     """e.g. scaled_sentences(4, 6) at STORY_MODE=5 -> '5-7 sentences'."""
-    factor = _FACTORS[_level()]
+    factor = _FACTORS[_level(boost)]
     lo = max(1, round(base_min * factor))
     hi = max(lo + 1, round(base_max * factor))
     return f"{lo}-{hi} sentences"
 
 
-def style_directive() -> str:
-    level = _level()
+def style_directive(boost: int = 0) -> str:
+    level = _level(boost)
     if level <= 1:
         return "Keep the prose minimal and strictly utilitarian — just the essential facts, no embellishment."
     if level <= 3:
