@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.55] — "Buy fishing hooks" silently bought the wrong item
+
+Live-caught while monitoring a real player's session: "Buy fishing
+hooks" (not a real item -- this game only sells a Fishing Pole and
+Bait) got silently resolved to a purchase of the Fishing Pole and
+charged for it, with no indication anything was off. Root cause:
+`items.find_item_mentioned_in_text`'s generic category-word fallback
+(added for "buy an axe"/"buy two potions" -- task #111) matches on ANY
+single overlapping word from an item's name, and "fishing" is a
+name-word of "Fishing Pole" -- the fallback confidently treated that
+lone modifier as a full match even though the sentence's other real
+noun ("hooks") didn't match anything at all.
+
+Fixed by also checking each item's existing `required_for` tag (e.g.
+both `fishing_pole` and `bait` are tagged `required_for: "fishing"`)
+in that same fallback: a bare category word like "fishing" now
+correctly matches BOTH tools this shop stocks for it, making the
+match ambiguous (falls through to "Not sure what item you mean --
+try naming it more directly.") instead of silently guessing one.
+Only fires when the direct name-word check didn't already resolve a
+match, so it can only ever add ambiguity to a previously-wrong single
+match -- verified zero regressions on every item in the game
+self-matching its own name, plus the specific previously-fixed cases
+("buy an axe", "buy two potions from Grimsby", "Equip my armour").
+
 ## [1.11.54] — Vesh's companion arc gets a real trust-banded resolution
 
 Continuing the full-storyline plan's Phase 3: Vesh now has a second

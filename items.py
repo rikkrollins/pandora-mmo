@@ -282,13 +282,33 @@ def find_item_mentioned_in_text(text: str, candidate_ids: list[str] | None = Non
     lowered_words = set(re.findall(r"\w+(?:'\w+)?", lowered))
     matches = set()
     for item_id in search_space:
-        for word in ITEMS[item_id]["name"].lower().split():
+        data = ITEMS[item_id]
+        matched = False
+        for word in data["name"].lower().split():
             singular = word[:-1] if word.endswith("s") else word
             if singular in stopwords or len(singular) < 3:
                 continue
             if singular in lowered_words or f"{singular}s" in lowered_words:
-                matches.add(item_id)
+                matched = True
                 break
+        # Real live bug (2026-07-19, confirmed live: "Buy fishing hooks"
+        # silently bought a Fishing Pole -- "hooks" isn't a real item
+        # anywhere, but "fishing" alone is a name-word of "Fishing Pole"
+        # and word-overlap treated that lone modifier as a confident
+        # match). "fishing" is also a real category this shop stocks TWO
+        # tools for (Fishing Pole and Bait, both required_for="fishing")
+        # -- the fix is to also count a required_for match, so a bare
+        # category word correctly makes this AMBIGUOUS (both items match)
+        # instead of silently guessing the wrong one. Only checked when
+        # the name-word loop didn't already match, so it can only ever
+        # ADD ambiguity/ADD a match, never remove the resolved cases
+        # (axe/potions/armour) already fixed above.
+        if not matched:
+            required_for = data.get("required_for")
+            if required_for and (required_for in lowered_words or f"{required_for}s" in lowered_words):
+                matched = True
+        if matched:
+            matches.add(item_id)
     if len(matches) == 1:
         return matches.pop()
     return None
