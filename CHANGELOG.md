@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.43] — Inline damage-die roll now honored in physical-dice mode (extends task #177)
+
+Task #177 already let a physical-dice player declare their attack roll
+inline ("attack goblin, i rolled 15") in the same message as the
+action. This extends the same convention to the weapon's DAMAGE die:
+"attack goblin, i rolled 15 to hit and 6 for damage" now substitutes
+that real physical roll into the attack's main damage die
+(`rules/dice.py`'s `roll_damage` gained a `forced_roll` param, clamped
+to the die's real range) instead of always auto-rolling it — same "the
+player's own roll is always genuinely used, never discarded" principle
+`forced_roll` already established for the attack roll itself. On a
+crit or Savage Attacks (multiple dice), only substitutes into the
+FIRST die; the rest still roll normally, same as a real tabletop player
+would only have one physical die for their weapon. Purely additive —
+free text with no damage declaration still auto-rolls exactly as
+before. New `_extract_combined_damage_roll` regex in bot.py, wired
+into `_do_attack`'s existing `forced_roll` plumbing. Verified live
+through the real `_do_attack`/`resolve_attack` path (throwaway test):
+a forced attack roll of 20 (crit) with damage forced to 1 correctly
+substituted into the first of the two crit dice, with the second die
+and STR modifier rolling in naturally around it — HP dropped by
+exactly the resulting total, turn order advanced correctly.
+
 ## [1.11.42] — Shop/spell/quest-board browsing gets real tap-to-act buttons (task #176)
 
 Per Coffee's request: extend the RPG-style battle-menu button pattern

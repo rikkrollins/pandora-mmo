@@ -123,7 +123,8 @@ def roll_attack(character: dict, target_ac: int, ability: str = "strength",
 _DICE_NOTATION_RE = re.compile(r"^(\d+)d(\d+)\s*([+-]\s*\d+)?$")
 
 
-def roll_damage(dice_notation: str, modifier: int = 0, critical: bool = False, extra_dice: int = 0) -> dict:
+def roll_damage(dice_notation: str, modifier: int = 0, critical: bool = False, extra_dice: int = 0,
+                 forced_roll: int | None = None) -> dict:
     """
     Parse dice notation like '1d8', '2d6', or '1d8+2' and return damage
     rolled. An explicit `modifier` argument is ADDED to any modifier
@@ -134,6 +135,16 @@ def roll_damage(dice_notation: str, modifier: int = 0, critical: bool = False, e
     hit") adds that many MORE dice of the same size on top of whatever
     `critical` already doubled — distinct from doubling, per the real
     5E wording of that trait.
+
+    `forced_roll` (task #143, physical-dice mode): a player with a real
+    dice set only ever has ONE physical die for their weapon's damage
+    (e.g. one d8 for a longsword) even when the notation calls for
+    several dice (a crit, Savage Attacks) -- substituted into just the
+    FIRST rolled die, same "the player's own roll is always genuinely
+    used, never discarded, the rest fills in around it" convention
+    roll_d20 already established for advantage/disadvantage. Clamped
+    into this die's real range (a physical d8 can't report a 9) rather
+    than trusting free-text extraction blindly.
     """
     match = _DICE_NOTATION_RE.match(dice_notation.strip())
     if not match:
@@ -148,6 +159,8 @@ def roll_damage(dice_notation: str, modifier: int = 0, critical: bool = False, e
     num_dice += extra_dice
 
     rolls = roll(num_dice, sides)
+    if forced_roll is not None and rolls:
+        rolls[0] = min(max(forced_roll, 1), sides)
     total = sum(rolls) + total_modifier
 
     return {

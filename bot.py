@@ -3337,6 +3337,14 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                 message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
             return
+        # Task #143: a real damage-die roll declared alongside the
+        # attack roll in the same message ("attack goblin, i rolled 15
+        # to hit and 6 for damage") -- inline-only, no blocking prompt,
+        # see _extract_combined_damage_roll's own comment for why.
+        forced_damage_roll = (
+            _extract_combined_damage_roll(action_text)
+            if attacker.get("manual_dice_enabled") and not attacker.get("is_ai") else None
+        )
 
         # Extra Attack (2026-07-16): real 5E martial classes (Fighter/
         # Barbarian/Paladin/Ranger/Monk, level 5+) get more than one
@@ -3370,6 +3378,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                 defender_relentless_endurance_available=_relentless_endurance_available(target),
                 round_number=session.round_number,
                 forced_roll=forced_roll if attack_num == 0 else None,
+                forced_damage_roll=forced_damage_roll if attack_num == 0 else None,
             )
             if result["relentless_endurance_triggered"]:
                 db.use_feature(target["telegram_user_id"], "relentless_endurance")
@@ -3753,6 +3762,30 @@ def _extract_combined_roll(text: str) -> int | None:
         return None
     value = int(next(g for g in match.groups() if g is not None))
     return value if 1 <= value <= 20 else None
+
+
+# Task #143: a physical-dice player commonly rolls their attack die AND
+# their weapon's damage die together in one go (real tabletop habit --
+# no need to wait and see if it hit before picking the damage die back
+# up), so this looks for a SEPARATE "for damage"/"damage of N"-shaped
+# declaration in the same message _extract_combined_roll already reads
+# the attack roll from. Deliberately inline-only (no blocking "roll
+# your damage die" follow-up prompt if this comes back None) -- damage
+# just falls back to auto-rolled, same as it already does today, so
+# this is purely additive and never introduces a new wait state.
+_DAMAGE_ROLL_DECLARATION_RE = re.compile(
+    r"\b(\d{1,2})\s+(?:for\s+)?damage\b"
+    r"|\bdamage\s*(?:was|is|roll)?\s*(?:of)?\s*:?\s*(\d{1,2})\b",
+    re.IGNORECASE,
+)
+
+
+def _extract_combined_damage_roll(text: str) -> int | None:
+    """Finds a manual damage-die roll declared inline -- see the comment above."""
+    match = _DAMAGE_ROLL_DECLARATION_RE.search(text)
+    if not match:
+        return None
+    return int(next(g for g in match.groups() if g is not None))
 
 
 async def _do_skill_check(update: Update, ability: str, action_text: str, forced_roll: int | None = None) -> None:

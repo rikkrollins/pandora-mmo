@@ -33,7 +33,8 @@ def start_combat(participants: list[dict]) -> list[dict]:
 def resolve_attack(attacker: dict, defender: dict, weapon: dict,
                     advantage: bool = False, disadvantage: bool = False,
                     defender_relentless_endurance_available: bool = False,
-                    round_number: int = 0, forced_roll: int | None = None) -> dict:
+                    round_number: int = 0, forced_roll: int | None = None,
+                    forced_damage_roll: int | None = None) -> dict:
     """
     Resolve one attack. `weapon` is a dict like:
         {"ability": "strength", "damage_dice": "1d8", "damage_bonus": 0}
@@ -157,11 +158,18 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
                   and defender.get("monster_key") in UNDEAD_MONSTER_KEYS)
             else 0
         )
+        # Task #143: a physical-dice-mode player's own reported damage
+        # roll (see roll_damage's forced_roll docstring) only ever
+        # substitutes into THIS main weapon die -- Sneak Attack's
+        # separate 1d6 below is its own physical die a player would
+        # roll separately, out of scope here same as Extra Attack's
+        # later swings are for the attack-roll forced_roll above.
         dmg = roll_damage(
             weapon["damage_dice"],
             modifier=weapon.get("damage_bonus", 0) + rage_bonus + warden_bonus,
             critical=attack_result["critical_hit"],
             extra_dice=savage_attacks_die,
+            forced_roll=forced_damage_roll,
         )
         damage_dealt = max(dmg["total"], 0)
         if sneak_attack_die:
