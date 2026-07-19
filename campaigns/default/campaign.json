@@ -745,7 +745,9 @@
         "ring_of_the_undertow",
         "scroll_summon_spirit",
         "scroll_revivify",
-        "scroll_fireball"
+        "scroll_fireball",
+        "weathered_surface_map",
+        "tattered_underground_chart"
       ]
     },
     "grimsbys_tavern": {

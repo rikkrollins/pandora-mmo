@@ -7124,6 +7124,14 @@ async def _do_show_map(update: Update) -> None:
     visited (character['visited_locations'], persisted in the DB) are
     shown by name; connections leading to somewhere unvisited are shown
     as an unexplored direction rather than revealing the destination.
+
+    Task #141: map_revealed_locations (a real location NAME purchased/
+    found via a "map" item, see _do_use_item) is a genuinely separate,
+    weaker fog-of-war layer -- rendered with its own marker and NO
+    connection info at all, since connections are the actual spoiler a
+    revealed-but-unvisited location must never leak. Never merged into
+    visited_locations itself; a revealed location still needs to be
+    physically visited to unlock its real connections here.
     """
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -7133,7 +7141,8 @@ async def _do_show_map(update: Update) -> None:
         return
 
     visited = set(character["visited_locations"])
-    if not visited:
+    revealed = set(character["map_revealed_locations"]) - visited
+    if not visited and not revealed:
         await update.effective_chat.send_message(
             "You haven't explored anywhere yet.", message_thread_id=config.TOPIC_ADVENTURE_ID
         )
@@ -7142,7 +7151,8 @@ async def _do_show_map(update: Update) -> None:
     lines = ["🗺️ **Your map**"]
     for layer, layer_locations in CAMPAIGN["locations"].items():
         visited_here = [loc_id for loc_id in layer_locations if loc_id in visited]
-        if not visited_here:
+        revealed_here = [loc_id for loc_id in layer_locations if loc_id in revealed]
+        if not visited_here and not revealed_here:
             continue
         lines.append(f"\n**{layer.title()}**")
         for loc_id in visited_here:
@@ -7156,6 +7166,8 @@ async def _do_show_map(update: Update) -> None:
                 conn_bits.append(f"{unknown_count} unexplored path{'s' if unknown_count != 1 else ''}")
             conn_text = f" → {', '.join(conn_bits)}" if conn_bits else ""
             lines.append(f"{marker} {loc['name']}{conn_text}")
+        for loc_id in revealed_here:
+            lines.append(f"❓ {layer_locations[loc_id]['name']} *(marked on a map, not yet visited)*")
 
     await _safe_send(update, "\n".join(lines))
 
@@ -7888,9 +7900,12 @@ async def _do_use_item(update: Update, text: str) -> None:
         )
         return
 
+    # Task #141: map items (type "map") are usable the same way a
+    # consumable is -- read it, it does its one-time thing, it's gone --
+    # so they share this same dispatch path rather than a separate command.
     consumable_ids = [
         item_id for item_id in character["inventory"]
-        if (items_module.get_item(item_id) or {}).get("type") == "consumable"
+        if (items_module.get_item(item_id) or {}).get("type") in ("consumable", "map")
     ]
     item_id = items_module.find_item_mentioned_in_text(text, candidate_ids=consumable_ids)
     if item_id is None:
@@ -7923,6 +7938,34 @@ async def _do_use_item(update: Update, text: str) -> None:
             f"🧪 **{character['name']}** uses a {item['name']}{target_note}, "
             f"healing {new_hp - hp_before} HP ({new_hp}/{hp_max})."
         )
+    elif item.get("type") == "map":
+        # Task #141: a genuine partial reveal -- adds up to reveals_count
+        # random location NAMES from the item's one real layer to
+        # map_revealed_locations (a separate fog-of-war layer from
+        # visited_locations, see db.py's migration comment), never all of
+        # them at once and never a location already visited/revealed.
+        # _do_show_map renders these distinctly, name only, no connections
+        # -- that's the actual spoiler, and it stays earned by walking there.
+        layer = item.get("reveals_layer")
+        layer_locations = CAMPAIGN["locations"].get(layer, {})
+        already_known = set(character["visited_locations"]) | set(character["map_revealed_locations"])
+        candidates = [loc_id for loc_id in layer_locations if loc_id not in already_known]
+        if not candidates:
+            message = (
+                f"📜 **{character['name']}** unrolls the {item['name']} — but it shows nothing "
+                f"you haven't already found on your own."
+            )
+        else:
+            newly_revealed = random.sample(candidates, min(item.get("reveals_count", 1), len(candidates)))
+            db.update_character(
+                character["telegram_user_id"],
+                map_revealed_locations=character["map_revealed_locations"] + newly_revealed,
+            )
+            revealed_names = ", ".join(layer_locations[loc_id]["name"] for loc_id in newly_revealed)
+            message = (
+                f"📜 **{character['name']}** unrolls the {item['name']} — it marks the rough "
+                f"location of {revealed_names}, though you'll still need to find your own way there."
+            )
     elif effect == "cure_poison":
         cured = False
         if session is not None:

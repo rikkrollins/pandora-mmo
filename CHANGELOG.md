@@ -2,6 +2,43 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.45] — Buyable maps: real, partial-reveal, never a spoiler (task #141, first half)
+
+Per Coffee's backlog: "buyable and secret discoverable maps (partial-
+reveal, never a full spoiler)." This ships the buyable half — the
+discoverable (loot/quest-reward) half is a natural follow-up using the
+same item, not yet wired to any specific quest/board reward, so task
+#141 stays open.
+
+Two new real items.py items (type `"map"`): Weathered Surface Map (35
+gold, reveals 3 surface locations) and Tattered Underground Chart (60
+gold, reveals 3 underground locations) — both sold at Vane's
+Curiosities (The Arcane Nook), a natural home thematically for
+unlabeled oddities of unclear origin. "Use"/"read" a map (routed
+through the same `_do_use_item` dispatch a potion/scroll already uses)
+reveals up to its `reveals_count` real, randomly-chosen location NAMES
+from its one real `reveals_layer` that this character hasn't already
+visited or revealed — a genuine partial reveal, never the whole layer,
+and never a location already known. Grounded entirely in real
+campaign.json location data, same principle as every other fog-of-war
+feature in this game.
+
+New `map_revealed_locations` character field (own DB migration,
+`db.py`) — deliberately kept SEPARATE from `visited_locations`, never
+merged into it: `_do_show_map` renders these with their own marker
+(❓, "not yet visited") and explicitly withholds their connections,
+since that's the actual spoiler a revealed-but-unvisited location must
+never leak — a revealed location still has to be physically walked to
+before its real connections unlock. Verified live through the real
+`_do_buy`/`_do_use_item`/`_do_show_map` functions end-to-end (throwaway
+test): bought a real map from the real shop (gold deducted correctly),
+used it (revealed exactly 3 real not-already-known surface locations,
+correctly excluded the already-visited starting location), confirmed
+the map render shows both the visited location (with connections) and
+the revealed-only ones (name only, no connections, correctly marked),
+then bought and used a second copy and confirmed no duplicate reveals
+across the two uses.
+
 ## [1.11.44] — World events: rare world-boss spawns broadcast server-wide (task #75)
 
 Per Coffee's backlog: a rare, real world event rather than pure ambient

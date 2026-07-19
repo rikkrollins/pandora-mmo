@@ -304,6 +304,14 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN last_login_date TEXT")
         if "last_guild_quest_date" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN last_guild_quest_date TEXT")
+        if "map_revealed_locations" not in columns:
+            # Task #141: buyable/discoverable maps reveal a location's NAME
+            # without the player having actually visited it -- kept as its
+            # own separate fog-of-war layer from visited_locations (never
+            # merged into it), since a revealed-but-unvisited location must
+            # still show up on _do_show_map with no connection details (the
+            # actual spoiler), only the name itself.
+            conn.execute("ALTER TABLE characters ADD COLUMN map_revealed_locations TEXT NOT NULL DEFAULT '[]'")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -318,6 +326,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     d["equipped_accessories"] = json.loads(d["equipped_accessories"])
     d["known_monsters"] = json.loads(d["known_monsters"])
     d["achievements"] = json.loads(d["achievements"])
+    d["map_revealed_locations"] = json.loads(d["map_revealed_locations"])
     return d
 
 
@@ -426,7 +435,7 @@ def update_character(telegram_user_id: int, **fields) -> dict | None:
     if not fields:
         return get_character(telegram_user_id)
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "achievements")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "achievements", "map_revealed_locations")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])

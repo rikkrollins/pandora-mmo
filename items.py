@@ -144,6 +144,22 @@ ITEMS = {
         "note": "Cold as riverwater no matter how long it's worn.",
     },
 
+    # --- Maps (task #141: buyable/discoverable, partial-reveal only --
+    # see bot.py's _do_use_item "map" branch and _do_show_map's
+    # revealed-but-unvisited rendering. reveals_layer/reveals_count are
+    # what makes this a genuine partial reveal: only that many random
+    # not-yet-visited/revealed location NAMES from that one layer, never
+    # the whole map, never connection details -- those stay a real
+    # spoiler you still have to walk to and see for yourself.) ---
+    "weathered_surface_map": {
+        "name": "Weathered Surface Map", "type": "map", "rarity": "uncommon",
+        "price": 35, "weight": 0.2, "reveals_layer": "surface", "reveals_count": 3,
+    },
+    "tattered_underground_chart": {
+        "name": "Tattered Underground Chart", "type": "map", "rarity": "rare",
+        "price": 60, "weight": 0.2, "reveals_layer": "underground", "reveals_count": 3,
+    },
+
     # --- Quest items (never sellable, never have a price) ---
     "waterlogged_journal": {
         "name": "Waterlogged Journal", "type": "quest_item", "rarity": "unique",
