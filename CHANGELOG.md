@@ -2,6 +2,49 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.44] — World events: rare world-boss spawns broadcast server-wide (task #75)
+
+Per Coffee's backlog: a rare, real world event rather than pure ambient
+flavor. `_maybe_spawn_world_boss` runs in the existing background world
+tick alongside the heartbeat/hourly-update checks — gated on BOTH a
+minimum real-time gap (6 hours) since the last spawn AND a low random
+roll on top of that, so it stays rare and non-clockwork, and never
+spawns a second boss while one is still unresolved. Restricted to a new
+`WORLD_BOSS_MONSTER_KEYS` allowlist (currently just Goblin Boss) —
+deliberately excludes the unique arc-climax bosses (The Unspoken, The
+Waking Ember, The Waiting Shape), which are quest-bound story beats,
+not something that should randomly appear mid-story or get farmed.
+Grounded in real campaign.json data throughout: `_find_location_for_
+monster` looks up the boss's own real native location rather than
+inventing one, and the broadcast goes to Main (server-wide, per the
+task's own framing) via the same `_ChatOnlyUpdate`/`_safe_send` pattern
+the existing world-heartbeat already uses.
+
+State is persisted via `db.get_setting`/`set_setting` (a JSON blob
+under `"active_world_boss"`, plus `"world_boss_last_spawn_at"`) rather
+than an in-memory dict, so an active world boss survives a bot restart
+— same reasoning as task #159's persisted-pending-state work. Players
+fight it through the exact same real `_do_start_combat`/attack path any
+other monster already uses (no new combat-trigger code needed — the
+boss is already a real native encounter at its location). Defeating it
+is detected inside `_award_victory_xp` (checking the defeated enemy's
+real `monster_key` against the persisted active-boss state), clears
+the persisted state so a new one can eventually spawn, and hands out a
+real flat bonus (100 gold each, on top of the normal XP/loot every
+monster kill already awards) — folded into the existing `level_up_notes`
+list every one of this function's 5 call sites already loops over and
+posts to Main, so no call-site changes were needed anywhere.
+
+Verified live through the real functions end-to-end (throwaway test):
+forced the spawn roll to confirm it persists state and broadcasts to
+Main (thread_id=None, not Adventure) exactly once — a second spawn
+attempt while one was still active correctly produced no second
+broadcast — then started a real combat session against the spawned
+Goblin Boss, killed it, and confirmed the real `_award_victory_xp` path
+cleared the persisted state, awarded the bonus gold, and produced the
+"World Boss Defeated!" note (gold math confirmed exactly: starting gold
++ the always-random loot-sale gold + the flat 100 world-boss bonus).
+
 ## [1.11.43] — Inline damage-die roll now honored in physical-dice mode (extends task #177)
 
 Task #177 already let a physical-dice player declare their attack roll

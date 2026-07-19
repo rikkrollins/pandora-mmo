@@ -10,6 +10,7 @@ route intent and narrate results.
 """
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import random
@@ -313,6 +314,19 @@ WORLD_HEARTBEAT_IDLE_THRESHOLD_SECONDS = 1200  # 20 real minutes with no player 
 WORLD_HEARTBEAT_MIN_GAP_SECONDS = 900  # never more than once per ~15 real minutes
 _LAST_WORLD_HEARTBEAT_AT: datetime | None = None
 
+# Task #75, per Coffee: "World events: rare world-boss spawns broadcast
+# server-wide." Deliberately restricted to is_boss monsters that are
+# ordinary wandering encounters, NOT the unique arc-climax bosses
+# (the_unspoken, the_waking_ember, the_waiting_shape) -- those are
+# quest-bound story beats, not something that should randomly appear
+# mid-story or be trivialized into a repeatable farm target. Extend
+# this list only with future monsters that are similarly "just a tough
+# fight," never a one-time story encounter.
+WORLD_BOSS_MONSTER_KEYS = ["goblin_boss"]
+WORLD_BOSS_MIN_GAP_SECONDS = 6 * 3600  # at least 6 real hours between spawns
+WORLD_BOSS_SPAWN_CHANCE_PER_TICK = 0.02  # on top of the gap, keeps it rare/non-clockwork
+WORLD_BOSS_BONUS_GOLD = 100  # flat, on top of the same real loot/XP any monster kill already awards
+
 # ---------------------------------------------------------------------
 # Moltbook heartbeat — PandoraMMO_Bot's agent profile on Moltbook (the
 # social network for AI agents) is meant to help other AI agents
@@ -488,6 +502,70 @@ async def _maybe_post_world_heartbeat(bot) -> None:
         return
     _LAST_WORLD_HEARTBEAT_AT = now
     await _safe_send(update_like, f"🕯️ *(meanwhile, at {location_name})*\n💬 **{speaker_name}:** {line}")
+
+
+def _find_location_for_monster(monster_key: str) -> tuple[str, dict] | None:
+    """
+    Real-data grounding for task #75: a world-boss announcement must
+    name a REAL location that monster is actually native to (campaign.
+    json's own location.monsters list), never an invented one --
+    CAMPAIGN["locations"] is layered (surface/underground), so this
+    searches both.
+    """
+    for layer_locations in CAMPAIGN["locations"].values():
+        for location_id, location in layer_locations.items():
+            if monster_key in location.get("monsters", []):
+                return location_id, location
+    return None
+
+
+async def _maybe_spawn_world_boss(bot) -> None:
+    """
+    Task #75, per Coffee: "World events: rare world-boss spawns broadcast
+    server-wide." Persisted via db.get_setting/set_setting (not an
+    in-memory dict) so an active world boss survives a bot restart --
+    same reasoning as task #159's persisted-pending-state work. Gated on
+    BOTH a minimum real-time gap since the last spawn AND a low random
+    roll on top of that, so it stays rare and unpredictable rather than
+    firing like clockwork the instant the gap elapses. Never spawns a
+    second boss while one is still out there unresolved.
+    """
+    if _LAST_KNOWN_CHAT_ID is None:
+        return
+    if db.get_setting("active_world_boss"):
+        return  # one's already out there -- resolve it before another can spawn
+
+    now = datetime.now(timezone.utc)
+    last_spawn_raw = db.get_setting("world_boss_last_spawn_at")
+    if last_spawn_raw:
+        elapsed = (now - datetime.fromisoformat(last_spawn_raw)).total_seconds()
+        if elapsed < WORLD_BOSS_MIN_GAP_SECONDS:
+            return
+    if random.random() >= WORLD_BOSS_SPAWN_CHANCE_PER_TICK:
+        return
+
+    monster_key = random.choice(WORLD_BOSS_MONSTER_KEYS)
+    found = _find_location_for_monster(monster_key)
+    if found is None:
+        return  # defensive -- campaign data changed out from under WORLD_BOSS_MONSTER_KEYS
+    location_id, location = found
+    template = cl.get_monster_template(CAMPAIGN, monster_key)
+    if template is None:
+        return
+
+    db.set_setting("active_world_boss", json.dumps({
+        "monster_key": monster_key, "location_id": location_id, "spawned_at": now.isoformat(),
+    }))
+    db.set_setting("world_boss_last_spawn_at", now.isoformat())
+
+    update_like = _ChatOnlyUpdate(bot, _LAST_KNOWN_CHAT_ID)
+    await _safe_send(
+        update_like,
+        f"🌍 **World Event!** A monstrous **{template['name']}** ({template['hp_max']} HP) has been "
+        f"spotted at **{location['name']}** — head there and attack it to challenge it. "
+        f"Whoever brings it down earns a real bonus on top of the usual spoils!",
+        thread_id=_MAIN_TOPIC_SEND,
+    )
 
 
 async def _maybe_post_hourly_status_update(bot) -> None:
@@ -2237,6 +2315,39 @@ def _award_victory_xp(session: sessions.Session) -> tuple[str, list[str]]:
     if enemy_names:
         _log_world_event(event_location, f"The party defeated {', '.join(enemy_names)}.")
 
+    # Task #75: if this victory just defeated the currently-active world
+    # boss (_maybe_spawn_world_boss, background world tick), clear its
+    # persisted state (db.get_setting/set_setting -- survives restarts,
+    # same convention task #159 established) so a new one can eventually
+    # spawn, hand out a real bonus on top of the loot/XP already above,
+    # and fold the announcement into level_up_notes -- every one of this
+    # function's 5 call sites already loops over level_up_notes and posts
+    # each line to Main via _notify_main_topic, so this needs no new
+    # plumbing at any call site.
+    world_boss_note = None
+    active_world_boss_raw = db.get_setting("active_world_boss")
+    if active_world_boss_raw:
+        try:
+            active_world_boss = json.loads(active_world_boss_raw)
+        except (json.JSONDecodeError, TypeError):
+            active_world_boss = None
+        defeated_boss = next(
+            (p for p in session.participants
+             if session.sides.get(p["telegram_user_id"]) == "enemy"
+             and active_world_boss and p.get("monster_key") == active_world_boss.get("monster_key")),
+            None,
+        )
+        if defeated_boss is not None:
+            db.set_setting("active_world_boss", "")
+            for pid in real_party_ids:
+                character = db.get_character(pid)
+                db.update_character(pid, gold=character["gold"] + WORLD_BOSS_BONUS_GOLD)
+            victor_names = ", ".join(db.get_character(pid)["name"] for pid in real_party_ids)
+            world_boss_note = (
+                f"🌍 **World Boss Defeated!** {victor_names} brought down the {defeated_boss['name']} "
+                f"— {WORLD_BOSS_BONUS_GOLD} bonus gold each! The world breathes easier, for now..."
+            )
+
     board_notes = []
     if event_location:
         # Location-scoped, not day_key-scoped (task #149, 2026-07-17) --
@@ -2304,6 +2415,8 @@ def _award_victory_xp(session: sessions.Session) -> tuple[str, list[str]]:
         )
     summary += loot_line
     summary += "".join(board_notes)
+    if world_boss_note:
+        level_up_notes.append(world_boss_note)
     if level_up_notes:
         summary += "\n" + "\n".join(level_up_notes)
     return summary, level_up_notes
@@ -11152,6 +11265,10 @@ async def _idle_inactivity_loop(application: Application) -> None:
             await _maybe_post_world_heartbeat(application.bot)
         except Exception as e:
             logger.error(f"[world_tick] heartbeat failed this cycle: {e!r}")
+        try:
+            await _maybe_spawn_world_boss(application.bot)
+        except Exception as e:
+            logger.error(f"[world_tick] world boss spawn check failed this cycle: {e!r}")
         try:
             await _maybe_post_hourly_status_update(application.bot)
         except Exception as e:
