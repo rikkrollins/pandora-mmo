@@ -2319,6 +2319,18 @@ def _award_victory_xp(session: sessions.Session) -> tuple[str, list[str]]:
         and not next(p for p in session.participants if p["telegram_user_id"] == pid).get("is_ai")
     ]
 
+    # Task #170, per Coffee: guild membership now requires proving
+    # yourself in real combat first, not an instant join (see
+    # guilds.eligible_for_guild) -- this is the one place a real party
+    # win is already known to have happened, so it's the natural spot to
+    # set that flag, once, the first time it happens.
+    newly_proven_names = []
+    for pid in real_party_ids_all:
+        proving_character = db.get_character(pid)
+        if proving_character and not proving_character.get("proven_in_combat"):
+            db.update_character(pid, proven_in_combat=1)
+            newly_proven_names.append(proving_character["name"])
+
     for p in session.participants:
         if session.sides.get(p["telegram_user_id"]) == "enemy" and p.get("source_npc_id"):
             npc_id = p["source_npc_id"]
@@ -2509,6 +2521,11 @@ def _award_victory_xp(session: sessions.Session) -> tuple[str, list[str]]:
     summary += loot_line
     summary += map_note
     summary += "".join(board_notes)
+    if newly_proven_names:
+        summary += (
+            f"\n🛡️ {', '.join(newly_proven_names)} proved themselves in real combat — "
+            f"eligible to join a guild now."
+        )
     if world_boss_note:
         level_up_notes.append(world_boss_note)
     if level_up_notes:

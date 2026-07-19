@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.51] — Guild membership requires vetting, not an instant join (task #170)
+
+Per Coffee's backlog design item: joining a guild previously just
+checked level/class and let you straight in. Guild membership now also
+requires `proven_in_combat` -- reusing the exact same real proof every
+guild's ongoing quests already demand of members (winning a real
+fight, see `guilds.GUILD_QUESTS`) rather than inventing a guild-specific
+new mechanic. The flag is set the first time a real (non-AI) party
+member wins any real fight (`_award_victory_xp`), with a one-line note
+in that fight's victory summary ("proved themselves in real combat —
+eligible to join a guild now"). `eligible_for_guild` (used both by the
+actual join flow and by check_sheet's "guilds you could join" hint)
+now gates on this the same way it already gates on level/class.
+Verified end-to-end: an unproven character is rejected with a clear
+reason, a real combat win sets the flag and surfaces the note, and the
+now-proven character successfully joins afterward.
+
 ## [1.11.50] — "Check for quests" misclassified as check_sheet (live-caught, Sugar)
 
 Live-caught while monitoring a real player's session: "Check for quests

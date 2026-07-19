@@ -257,6 +257,9 @@ def init_db() -> None:
         if "resolution" not in npc_relationship_columns:
             conn.execute("ALTER TABLE npc_relationships ADD COLUMN resolution TEXT NOT NULL DEFAULT 'unresolved'")
 
+        if "proven_in_combat" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN proven_in_combat INTEGER NOT NULL DEFAULT 0")
+
         board_quest_columns = _existing_columns(conn, "board_quests")
         if "branch_data" not in board_quest_columns:
             conn.execute("ALTER TABLE board_quests ADD COLUMN branch_data TEXT")

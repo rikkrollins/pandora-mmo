@@ -71,6 +71,15 @@ def eligible_for_guild(character: dict, guild_id: str) -> tuple[bool, str]:
     required_classes = guild.get("join_requirement_classes")
     if required_classes and character["char_class"].lower() not in required_classes:
         return False, f"Only open to: {', '.join(required_classes)}."
+    # Task #170, per Coffee: guild membership should require vetting, not
+    # be an instant join. Reuses the exact same real proof every guild
+    # already demands of its ONGOING members (winning a real fight, see
+    # GUILD_QUESTS above) -- a prospective member has to show that same
+    # thing once, first, rather than a guild-specific new mechanic.
+    # `proven_in_combat` is set the moment a real (non-AI) party member
+    # wins any real fight (bot.py's _award_victory_xp).
+    if not character.get("proven_in_combat"):
+        return False, "requires proving yourself in real combat first — win a real fight, then ask again."
     return True, ""
 
 
