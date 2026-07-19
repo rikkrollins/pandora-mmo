@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.33] — Fix Main-topic notifications silently failing every time (task #182)
+
+**Every single `_notify_main_topic` send since v1.11.32 has been silently
+failing.** Caught live via the topic-activity monitor: a player's "attack
+the wolf" started combat, the Adventure-topic "Combat Begins!" message
+sent fine, but the immediately-following Main-topic announcement failed
+twice with `BadRequest('Message thread not found')` and was dropped.
+Root cause: `config.TOPIC_MAIN_ID` is `1`, and `_notify_main_topic`
+passed that literal value as `message_thread_id` -- but Telegram's forum
+API only accepts an OMITTED `message_thread_id` (`None`) for the
+Main/General topic on outgoing sends, not an explicit numeric id, even
+though `1` is the right value for *recognizing* an incoming Main-topic
+message (already documented in CLAUDE.md as exactly this asymmetry --
+nobody had previously noticed it also applies to sends). This means
+level-up notes, quest-accept pings, guild-join confirmations,
+combat-start announcements, and real-player-death notices had all been
+quietly failing since #172 shipped -- the earlier "verified end-to-end"
+tests used a fake chat stub that accepts any `message_thread_id`
+without validating it against Telegram's real forum-topic rules, so
+they couldn't have caught this.
+
+Fixed with a `_MAIN_TOPIC_SEND` sentinel: `_safe_send`'s `thread_id`
+parameter now distinguishes "unspecified, default to Adventure" (`None`,
+unchanged) from "explicitly Main, no thread id" (the new sentinel) --
+previously both cases would have had to collapse to the same value.
+`_notify_main_topic` now passes the sentinel instead of
+`config.TOPIC_MAIN_ID`. The two TTS send paths (`_maybe_speak`,
+`_speak_via_piper`) had the same latent bug in their own thread-id
+fallback logic and are fixed the same way. Verified with a real test
+against a fake chat that actually records the `message_thread_id` it
+receives: `_notify_main_topic` now sends `None`, plain `_safe_send`
+still defaults to Adventure, and explicit thread ids (e.g. Support)
+still pass through unchanged.
+
 ## [1.11.32] — Main-topic game notifications (task #172) + a real @username intent-parser gap (task #180)
 
 **Main topic now surfaces the big moments, per Coffee: "the main chat can

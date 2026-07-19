@@ -1744,14 +1744,31 @@ async def _safe_send(
     else:
         clean_text, entities = _build_message_entities(text, db.list_all_active_real_players())
 
+    # thread_id is None here for TWO different reasons that must NOT
+    # collapse to the same behavior: "caller didn't specify a topic"
+    # (the long-standing convention -- default to Adventure) vs.
+    # "caller explicitly means the Main/General topic," which Telegram's
+    # API only accepts as an OMITTED message_thread_id, never an
+    # explicit numeric id (confirmed live 2026-07-18: passing
+    # config.TOPIC_MAIN_ID caused every _notify_main_topic send to fail
+    # with BadRequest('Message thread not found'), even though that same
+    # id is the right value for RECOGNIZING an incoming Main-topic
+    # message). _MAIN_TOPIC_SEND disambiguates the two at the call site.
+    if thread_id is _MAIN_TOPIC_SEND:
+        resolved_thread_id = None
+    elif thread_id is None:
+        resolved_thread_id = config.TOPIC_ADVENTURE_ID
+    else:
+        resolved_thread_id = thread_id
+
     for attempt in range(2):
         try:
             await update.effective_chat.send_message(
-                clean_text, message_thread_id=thread_id if thread_id is not None else config.TOPIC_ADVENTURE_ID,
+                clean_text, message_thread_id=resolved_thread_id,
                 entities=entities or None, reply_markup=reply_markup,
             )
             if not is_buffering:
-                await _maybe_speak(update, text, thread_id)
+                await _maybe_speak(update, text, resolved_thread_id)
             return
         except TelegramError as e:
             if attempt == 0:
@@ -1759,6 +1776,13 @@ async def _safe_send(
                 await asyncio.sleep(2)
             else:
                 logger.warning(f"[message] send failed again, giving up: {e!r}")
+
+
+# Sentinel passed as _safe_send's thread_id to mean "the Main/General
+# topic, explicitly" -- see the comment inside _safe_send for why this
+# can't just be None (None already means "unspecified, default to
+# Adventure").
+_MAIN_TOPIC_SEND = object()
 
 
 async def _notify_main_topic(update: Update, text: str) -> None:
@@ -1773,7 +1797,7 @@ async def _notify_main_topic(update: Update, text: str) -> None:
     watch Main don't miss the big moments. Routed through the same
     _safe_send retry/entity-mention machinery as every other message.
     """
-    await _safe_send(update, text, thread_id=config.TOPIC_MAIN_ID)
+    await _safe_send(update, text, thread_id=_MAIN_TOPIC_SEND)
 
 
 @contextlib.asynccontextmanager
@@ -1849,9 +1873,13 @@ async def _maybe_speak(update: Update, text: str, thread_id: int | None) -> None
         await _speak_via_piper(update, speakable, thread_id)
         return
     try:
+        # thread_id here is already fully resolved by _safe_send's one
+        # call site (its only caller) -- None genuinely means Main/
+        # General (no thread), not "unspecified, default to Adventure"
+        # -- so it must be passed through as-is, not re-defaulted.
         trigger_message = await update.effective_chat.send_message(
             f"/tts {speakable}",
-            message_thread_id=thread_id if thread_id is not None else config.TOPIC_ADVENTURE_ID,
+            message_thread_id=thread_id,
         )
     except TelegramError as e:
         logger.warning(f"[tts] failed to trigger TextTSBot: {e!r}")
@@ -1896,11 +1924,13 @@ async def _speak_via_piper(update: Update, speakable: str, thread_id: int | None
     if wav_bytes is None:
         return
     try:
+        # thread_id is already fully resolved by _safe_send (same note
+        # as _maybe_speak above) -- None genuinely means Main/General.
         await update.effective_chat.send_audio(
             audio=wav_bytes,
             filename="narration.wav",
             title="Pandora MMO narration",
-            message_thread_id=thread_id if thread_id is not None else config.TOPIC_ADVENTURE_ID,
+            message_thread_id=thread_id,
         )
     except TelegramError as e:
         logger.warning(f"[tts] piper send_audio failed: {e!r}")
