@@ -11047,7 +11047,24 @@ async def _on_startup(application: Application) -> None:
                 async with sessions.get_lock(chat_id):
                     live_session = sessions.get_session(chat_id)
                     if live_session is not None:
-                        await _resolve_ai_turns(_StartupUpdateStub(application.bot, chat_id), live_session)
+                        # Real live incident (2026-07-19, Coffee: "no
+                        # enemys left standing... it stopped"): the exact
+                        # deadlock _try_end_stale_combat exists to fix
+                        # (see its docstring) doesn't just sit there
+                        # waiting for a NEW attack to trigger the
+                        # cleanup -- if the last attack before a restart
+                        # was the one that got interrupted, the restored
+                        # snapshot is ALREADY in the stuck state, and
+                        # nothing would ever prompt a real player to try
+                        # attacking again once they've given up on a
+                        # fight that looks frozen. Checked here too, same
+                        # startup stub as _resolve_ai_turns just below,
+                        # so a restart alone is enough to un-stick it --
+                        # confirmed live this exact restore left Wolf 1
+                        # and Wolf 2 both at 0 HP with no resolution.
+                        stub_update = _StartupUpdateStub(application.bot, chat_id)
+                        if not await _try_end_stale_combat(stub_update, live_session):
+                            await _resolve_ai_turns(stub_update, live_session)
             except Exception as e:
                 logger.error(f"[sessions] failed to announce restored session for chat {chat_id}: {e!r}")
 

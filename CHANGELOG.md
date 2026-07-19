@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.38] — The v1.11.37 deadlock fix now also checks proactively at startup
+
+v1.11.37's `_try_end_stale_combat` only ran reactively, on the next
+attack attempt against a fight with zero living enemies -- but Coffee's
+actual stuck fight was ALREADY sitting in that exact state when
+v1.11.37 deployed, and he'd already given up and moved on rather than
+attacking a visibly-dead wolf again. Confirmed live: the post-deploy
+snapshot still showed both wolves at 0 HP, unresolved. Now also checked
+once at startup for every restored session, same place and same
+`_StartupUpdateStub` pattern the existing AI-turn-resolution startup
+check (task #159 follow-up) already uses -- so a restart alone is
+enough to un-stick an already-stuck fight, no further player action
+required.
+
 ## [1.11.37] — Fix a real live combat deadlock (all enemies dead but fight wouldn't end); "who's here" now answers with real location-scoped presence; "any quests available?" now works
 
 **Real live incident (2026-07-19, Coffee: "no enemys left standing... it
