@@ -1619,7 +1619,7 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     action = parts[1] if len(parts) > 1 else ""
     value = parts[2] if len(parts) > 2 else None
     target_name = parts[3] if len(parts) > 3 else None
-    await query.answer()
+    await _safe_answer(query)
     character = db.get_character(user_id)
 
     if action == "menu":
@@ -1962,6 +1962,33 @@ async def _safe_send(
                 await asyncio.sleep(2)
             else:
                 logger.warning(f"[message] send failed again, giving up: {e!r}")
+
+
+async def _safe_answer(query) -> bool:
+    """
+    Real live bug (2026-07-19, caught via monitoring): every callback-
+    query handler in the game (battle menu, shop, spell, quest, item,
+    menu, equip, level) called a bare `await query.answer()` with no
+    exception handling. Telegram invalidates a callback query after a
+    few minutes (or if the underlying message got too old) -- tapping a
+    stale button then raised an unhandled `telegram.error.BadRequest`
+    ("Query is too old and response timeout expired or query id is
+    invalid"), caught only by the global error handler, which aborted
+    the callback before any of its real dispatch logic ever ran. The
+    player's tap did nothing except produce an error, with no feedback
+    that the button had simply expired.
+
+    Returns True if the query was answered successfully (the normal
+    case), False if it had already expired/was invalid -- callers can
+    use this to still fall through to a plain-text nudge instead of
+    silently doing nothing.
+    """
+    try:
+        await query.answer()
+        return True
+    except TelegramError as e:
+        logger.warning(f"[callback] query.answer() failed (likely expired): {e!r}")
+        return False
 
 
 # Sentinel passed as _safe_send's thread_id to mean "the Main/General
@@ -5247,7 +5274,7 @@ async def quest_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     parts = (query.data or "").split("|")
     kind = parts[2] if len(parts) > 2 else None
     ident = parts[3] if len(parts) > 3 else None
-    await query.answer()
+    await _safe_answer(query)
 
     title = None
     if kind == "story":
@@ -5901,7 +5928,7 @@ async def item_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
-    await query.answer()
+    await _safe_answer(query)
 
     if action == "use":
         item_id = parts[2] if len(parts) > 2 else None
@@ -8409,7 +8436,7 @@ async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     parts = (query.data or "").split("|")
     item_id = parts[2] if len(parts) > 2 else None
-    await query.answer()
+    await _safe_answer(query)
     item = items_module.get_item(item_id) if item_id else None
     if item is None:
         return
@@ -8688,7 +8715,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     query = update.callback_query
     parts = (query.data or "").split("|")
     section = parts[1] if len(parts) > 1 else ""
-    await query.answer()
+    await _safe_answer(query)
     if section == "root":
         await _do_show_menu(update)
     elif section == "sheet":
@@ -8801,7 +8828,7 @@ async def equip_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
-    await query.answer()
+    await _safe_answer(query)
     if action != "item":
         return
     item_id = parts[2] if len(parts) > 2 else None
@@ -8850,7 +8877,7 @@ async def level_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
-    await query.answer()
+    await _safe_answer(query)
     if action != "asi":
         return
     choice = parts[2] if len(parts) > 2 else None
@@ -8911,7 +8938,7 @@ async def spell_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
-    await query.answer()
+    await _safe_answer(query)
 
     if action == "cast":
         spell_id = parts[2] if len(parts) > 2 else None

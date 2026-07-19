@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.48] — Stale button taps no longer crash the callback (task #194)
+
+Live-caught via monitoring, 2026-07-19: Coffee tapped an old "Accept:
+Gather Silverleaf Herb" quest-board button and hit an unhandled
+`telegram.error.BadRequest` ("Query is too old and response timeout
+expired or query id is invalid") from `quest_menu_callback`'s bare
+`await query.answer()` — the global error handler caught it (no crash),
+but the callback aborted before its real dispatch logic ever ran, so the
+tap silently did nothing. Grep found the exact same unguarded pattern at
+all 8 callback-query handlers in the game (battle menu, shop, spell,
+quest, item, menu, equip, level). New shared helper `_safe_answer(query)`
+catches `TelegramError`, logs it, and lets the handler continue instead
+of aborting; all 8 call sites now use it. Verified via a real throwaway
+test with a callback query whose `.answer()` always raises — confirmed
+`menu_callback` and `quest_menu_callback` both complete normally instead
+of crashing.
+
 ## [1.11.47] — Full character-sheet menu system, full-storyline Phase 1, + 2 live bug fixes
 
 A complete, navigable menu system replacing the old flavor-only
