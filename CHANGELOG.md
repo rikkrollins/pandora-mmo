@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.56] — Sera's companion arc gets a real trust-banded resolution
+
+Continuing the full-storyline plan's Phase 3: Sera (Sarah) now has a
+second quest, "Worth Traveling With" (`seras_resolution`), offered
+once her existing personal quest ("Sarah's Safer Crossing") is done,
+triggered by returning to the Stonearch Bridge -- the exact spot she
+first sized up the party at, matching her ranger's "still deciding
+whether this is the group worth staying for" arc.
+
+`QUEST_COMPANION_RESOLUTIONS` (Grask/Vesh's pattern) now also covers
+`seras_resolution` -> `sera_wanderer`, banded by the same real
+`npc_relationships.affinity` thresholds: low (<=-20, resolved_estranged,
+still eyeing the road out of town), mid (-19..39, resolved_distant,
+sticks around but noncommittal), high (>=40, resolved_loyal, stops
+watching the horizon and commits to the party). Verified via a real
+throwaway fixture test driving `bot._complete_quest_and_announce`
+through all 3 bands end-to-end, confirming both the written
+`resolution` state and a real narration note land correctly for each.
+
 ## [1.11.55] — "Buy fishing hooks" silently bought the wrong item
 
 Live-caught while monitoring a real player's session: "Buy fishing

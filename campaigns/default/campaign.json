@@ -796,6 +796,19 @@
       },
       "clue": "Sarah says she'll feel better about the bridge once someone's actually walked it with her."
     },
+    "seras_resolution": {
+      "title": "Worth Traveling With",
+      "description": "Sarah's spent long enough sizing up this party to have an answer now, one way or another -- she wants to give it to you back at the bridge crossing where she first asked for a second set of eyes.",
+      "objective_location": "stonearch_bridge",
+      "giver_npc": "sera_wanderer",
+      "reward_xp": 150,
+      "reward_gold": 50,
+      "trigger": {
+        "type": "reach_location",
+        "location": "stonearch_bridge"
+      },
+      "clue": "Sarah keeps glancing down the far road out of town, like she's still weighing whether to take it."
+    },
     "borins_vouching_task": {
       "title": "A Name Worth Vouching For",
       "description": "Borin's done penance on this street long enough to know he can't vouch for anyone he hasn't actually seen handle real danger -- he wants the party to deal with whatever's really going on in the Goblin Warrens before he'll put his name behind them.",

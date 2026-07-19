@@ -4876,6 +4876,14 @@ QUEST_COMPANION_RESOLUTIONS = {
             "high": ("resolved_loyal", "grips your arm the whole way through and doesn't let go until you're both back out"),
         },
     },
+    "seras_resolution": {
+        "npc_id": "sera_wanderer",
+        "banded": {
+            "low": ("resolved_estranged", "says the road's still calling and she's not ready to stop listening to it"),
+            "mid": ("resolved_distant", "shrugs and says the group's as good a reason as any to stay a while longer"),
+            "high": ("resolved_loyal", "stops checking the far road out of town and finally looks at the party like she's already found what she was looking for"),
+        },
+    },
 }
 
 
