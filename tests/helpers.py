@@ -107,6 +107,37 @@ class FakeUpdate:
         self.effective_message = self.message
 
 
+class FakeCallbackQuery:
+    """
+    Minimal stand-in for python-telegram-bot's CallbackQuery, real enough
+    to drive the button-tap handlers (battle_menu_callback and task #176's
+    shop_menu_callback/spell_menu_callback/quest_menu_callback) end-to-end.
+    `sink` collects .answer() calls the same way FakeChat collects sent
+    messages, so a test can assert a tap was acknowledged.
+    """
+    def __init__(self, data, sink):
+        self.data = data
+        self._sink = sink
+        self.answered = None
+
+    async def answer(self, text=None, show_alert=False):
+        self.answered = text or "<ack>"
+        self._sink.append(f"<answer:{self.answered}>")
+
+    async def edit_message_reply_markup(self, reply_markup=None):
+        self._sink.append(f"<edit_markup:{reply_markup}>")
+
+
+class FakeCallbackUpdate:
+    """A FakeUpdate-equivalent for a button tap (callback_query), not a typed message."""
+    def __init__(self, user_id, data, sink):
+        self.effective_user = FakeUser(user_id)
+        self.effective_chat = FakeChat(sink)
+        self.callback_query = FakeCallbackQuery(data, sink)
+        self.message = None
+        self.effective_message = None
+
+
 class DummyMessage:
     """Bare reply_to_message target -- just enough for reply.from_user resolution."""
     def __init__(self, user_id, username=None, full_name=None):

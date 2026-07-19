@@ -2,6 +2,45 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.42] — Shop/spell/quest-board browsing gets real tap-to-act buttons (task #176)
+
+Per Coffee's request: extend the RPG-style battle-menu button pattern
+(shipped v1.11.28 for combat) to three out-of-combat browsing surfaces,
+purely additive alongside the existing free-text commands — every
+button dispatches through the SAME real handler the equivalent typed
+sentence already uses, never duplicated logic, same as the combat menu.
+
+- **Shop** (`_do_list_shop`): one button per real item actually in a
+  shop's stock (`_shop_keyboard`, grounded in the same items.py lookup
+  the listing text itself uses). Tapping re-resolves the shop from the
+  tapper's OWN current location and calls the real `_do_buy` — never
+  trusts anything about the shop from the button data itself.
+- **Spells** (`_do_check_sheet`, own sheet only): one button per a
+  character's real `known_spells` (`_spell_keyboard`) — never shown on
+  someone else's sheet, since nobody can tap a button to cast another
+  player's spells. Tapping calls the real `_do_cast_spell` with no
+  target, identical to typing "cast X" with nobody named — a targeted
+  spell fails the same honest way it already does without a stated
+  target, no new behavior invented for the button path.
+- **Quest board** (`_do_check_quests`): one "Accept" button per quest
+  actually postable right now — both the location's story-quest offer
+  and every not-yet-taken board quest (`_quest_board_keyboard`), using
+  each quest's own stable `quest_id`/`board_quest_id` as callback data
+  (never the title text itself, which can be long or punctuated) and
+  resolving back to the real title before calling the real
+  `_do_accept_quest` — same dispatch path the existing "say which
+  choice you want" free-text flow already uses.
+
+New callback-data namespaces (`shop|`, `spell|`, `quest|`), each with
+its own `CallbackQueryHandler`, so none of these can ever collide with
+the existing combat battle menu's `bm|` prefix or each other. Verified
+live through the real handlers end-to-end (throwaway test): tapping a
+shop button actually spent gold via the real purchase path, tapping a
+quest button actually wrote a real `active_quests` row via the real
+accept path, and tapping a spell button dispatched through the real
+cast path (correctly declining a target-needing spell with no target
+given, same as typing "cast Fire Bolt" alone would).
+
 ## [1.11.41] — Boss enemies get a pre-roll "sizing up its target" narration beat (task #167)
 
 Per Coffee's request: for every combat turn, narrate the enemy's

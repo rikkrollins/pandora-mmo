@@ -4968,6 +4968,59 @@ def _format_story_quest_poster(quest: dict, location_id: str) -> str:
     )
 
 
+def _quest_board_keyboard(
+    story_offer: tuple[str, dict] | None, area_board_quests: list[dict],
+) -> InlineKeyboardMarkup | None:
+    """
+    Task #176: one "Accept" button per real quest actually postable here
+    right now -- the same story_offer/area_board_quests _do_check_quests
+    already computed from real campaign/board data just above. Tapping
+    dispatches through the SAME _do_accept_quest handler the existing
+    "say which choice you want" free-text flow uses (naming the quest's
+    own title, exactly as a player would type it), never duplicated
+    accept logic. Story quests use their fixed campaign quest_id; board
+    quests use their own board_quest_id -- both are short, stable, and
+    safe as callback_data (never the title text itself, which can be
+    long/punctuated).
+    """
+    buttons = []
+    if story_offer is not None:
+        quest_id, quest = story_offer
+        buttons.append([InlineKeyboardButton(f"📜 Accept: {quest['title']}", callback_data=f"quest|accept|story|{quest_id}")])
+    for bq in area_board_quests:
+        if bq.get("accepted_by") or bq.get("completed_at"):
+            continue
+        buttons.append([InlineKeyboardButton(
+            f"📋 Accept: {bq['title']}", callback_data=f"quest|accept|board|{bq['board_quest_id']}",
+        )])
+    return InlineKeyboardMarkup(buttons) if buttons else None
+
+
+async def quest_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _quest_board_keyboard -- see its docstring."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    kind = parts[2] if len(parts) > 2 else None
+    ident = parts[3] if len(parts) > 3 else None
+    await query.answer()
+
+    title = None
+    if kind == "story":
+        quest = CAMPAIGN["quests"].get(ident)
+        title = quest["title"] if quest else None
+    elif kind == "board":
+        character = db.get_character(update.effective_user.id)
+        if character is not None:
+            location_id = character["current_location"]
+            for bq in board_quests_module.get_or_generate_board_quests(CAMPAIGN, location_id):
+                if str(bq["board_quest_id"]) == ident:
+                    title = bq["title"]
+                    break
+    if title is None:
+        return
+    await _do_accept_quest(update, title)
+
+
 async def _do_check_quests(update: Update) -> None:
     """
     Shows two distinct things, per Coffee's explicit terminology
@@ -5053,9 +5106,9 @@ async def _do_check_quests(update: Update) -> None:
     if area_board_quests:
         lines.append(board_quests_module.format_board_listings(area_board_quests))
     if story_offer or any(not q.get("accepted_by") and not q.get("completed_at") for q in area_board_quests):
-        lines.append("(Say \"I accept this quest\" — name it if more than one's posted.)")
+        lines.append("(Say \"I accept this quest\" — name it if more than one's posted — or tap a button below.)")
 
-    await _safe_send(update, "\n".join(lines))
+    await _safe_send(update, "\n".join(lines), reply_markup=_quest_board_keyboard(story_offer, area_board_quests))
 
 
 async def _do_ask_clue(update: Update) -> None:
@@ -5543,7 +5596,10 @@ async def _do_check_sheet(update: Update, target_name: str | None = None) -> Non
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
-    await _safe_send(update, _format_character_sheet(character))
+    # Task #176: spell-cast buttons only make sense on the ASKER's own
+    # sheet (target_name is None here) -- nobody can tap a button to
+    # cast someone else's spells.
+    await _safe_send(update, _format_character_sheet(character), reply_markup=_spell_keyboard(character))
 
 
 async def _do_check_inventory(update: Update) -> None:
@@ -7900,6 +7956,43 @@ def _extract_quantity(text: str) -> int:
     return 1
 
 
+def _shop_keyboard(shop_data: dict) -> InlineKeyboardMarkup | None:
+    """
+    Task #176 (per Coffee: extend the battle-menu button pattern to
+    out-of-combat browsing surfaces) -- one button per real stocked item,
+    grounded in the same shop_data/items.py lookup _do_list_shop already
+    uses right above. Tapping dispatches through the SAME _do_buy handler
+    free-text "buy X" already uses (see shop_menu_callback below), never
+    duplicated purchase logic. Own callback-data namespace ("shop|", not
+    "bm|") so this can never collide with the combat battle menu.
+    """
+    buttons = []
+    for item_id in shop_data["inventory"]:
+        item = items_module.get_item(item_id)
+        if item:
+            buttons.append([InlineKeyboardButton(
+                f"{item['name']} — {item['price']}g", callback_data=f"shop|buy|{item_id}",
+            )])
+    return InlineKeyboardMarkup(buttons) if buttons else None
+
+
+async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Handles taps on _shop_keyboard. Re-resolves the shop from the
+    TAPPER's own current location (never trusts anything about the shop
+    from the button itself) so this behaves identically to typing "buy
+    X" -- same real _do_buy handler, same stock/gold/inventory checks.
+    """
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    item_id = parts[2] if len(parts) > 2 else None
+    await query.answer()
+    item = items_module.get_item(item_id) if item_id else None
+    if item is None:
+        return
+    await _do_buy(update, f"buy {item['name']}")
+
+
 async def _do_list_shop(update: Update) -> None:
     """
     Real shop-browse action (2026-07-16, per Coffee): lists a shop's
@@ -7930,7 +8023,7 @@ async def _do_list_shop(update: Update) -> None:
         item = items_module.get_item(item_id)
         if item:
             lines.append(f"{item['name']} — {item['price']} gold")
-    await _safe_send(update, "\n".join(lines))
+    await _safe_send(update, "\n".join(lines), reply_markup=_shop_keyboard(shop_data))
 
 
 async def _do_buy(update: Update, text: str) -> None:
@@ -8121,6 +8214,39 @@ def _apply_empowered_spell(telegram_user_id: int, character: dict, spell: dict, 
         return result
     db.use_feature(telegram_user_id, "empowered_spell")
     return {**result, "rolls": new_rolls, "damage_dealt": result["damage_dealt"] + (sum(new_rolls) - sum(old_rolls))}
+
+
+def _spell_keyboard(character: dict) -> InlineKeyboardMarkup | None:
+    """
+    Task #176: out-of-combat spell-casting buttons for a character's own
+    real known_spells (grounded the same way _battle_menu_keyboard's
+    Skills button already is -- no generic fixed list). Tapping dispatches
+    "cast <spell name>" through the same _do_cast_spell handler free text
+    already uses, with no target -- identical to a player typing "cast
+    <spell>" with nobody named, so self/no-target spells work exactly as
+    they do today and targeted spells fail the same honest way they
+    already do without a stated target.
+    """
+    if not character.get("known_spells"):
+        return None
+    buttons = []
+    for spell_id in character["known_spells"]:
+        spell = spells_module.get_spell(spell_id)
+        if spell:
+            buttons.append([InlineKeyboardButton(f"✨ {spell['name']}", callback_data=f"spell|cast|{spell_id}")])
+    return InlineKeyboardMarkup(buttons) if buttons else None
+
+
+async def spell_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _spell_keyboard -- see its docstring."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    spell_id = parts[2] if len(parts) > 2 else None
+    await query.answer()
+    spell = spells_module.get_spell(spell_id) if spell_id else None
+    if spell is None:
+        return
+    await _do_cast_spell(update, f"cast {spell['name']}")
 
 
 async def _do_cast_spell(update: Update, text: str) -> None:
@@ -11193,6 +11319,12 @@ def build_application() -> Application:
     application.add_handler(MessageHandler(filters.Document.ALL, dev_topic_document_handler))
     application.add_handler(MessageHandler(filters.VIDEO, dev_topic_video_handler))
     application.add_handler(CallbackQueryHandler(battle_menu_callback, pattern=r"^bm\|"))
+    # Task #176: out-of-combat browsing buttons (shop/spells/quest board),
+    # own callback-data namespaces so none of these can ever collide with
+    # the combat battle menu above or each other.
+    application.add_handler(CallbackQueryHandler(shop_menu_callback, pattern=r"^shop\|"))
+    application.add_handler(CallbackQueryHandler(spell_menu_callback, pattern=r"^spell\|"))
+    application.add_handler(CallbackQueryHandler(quest_menu_callback, pattern=r"^quest\|"))
 
     application.add_error_handler(_log_unhandled_error)
 
