@@ -2,6 +2,38 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.49] — Manual dice rolls auto-roll after 1 minute + real "examine" matching fix
+
+Per Coffee's direct instruction ("give the user 1 minute to roll - if
+not then auto-roll"): a manual-dice-mode roll prompt (attack, skill
+check, shove, flee, gather, steal) previously waited indefinitely for
+the player's reported number. Every prompt now also names the specific
+character who needs to roll and says the 1-minute window out loud
+("you have 1 minute, or I'll roll for you"), per Coffee's follow-up
+("make sure to say what user has to roll the dice so its clear"). A
+new `_maybe_auto_roll_pending_dice` check (runs every 60s idle-loop
+tick) auto-resolves any prompt still unanswered after
+`DICE_ROLL_AUTO_TIMEOUT_SECONDS` (60s), rolling a real d20 in place of
+the manual value and posting a clear "didn't roll in time — auto-rolling"
+notice before the result. This also bounds task #186's restart-survival
+gap: a pending roll can now only ever be silently lost for at most one
+idle-loop tick after a restart, not forever.
+
+Live-caught bug, same conversation (Coffee: "a player is looking at the
+wide-boled tree and its not working"): `_find_interactable`'s
+word-overlap fallback split an interactable's stored name on whitespace
+without stripping punctuation, so a word immediately followed by a
+comma in the name (e.g. "an ancient, wide-boled tree" -> "ancient,")
+could never satisfy its own `\bword\b` regex match — a trailing
+comma-to-space transition has no word boundary at all. That silently
+dropped "ancient" from the overlap count entirely, so both a typo'd
+attempt ("wide-boiled") and even a perfectly normal shortening ("the
+ancient tree") fell one word short of the required >50% threshold and
+matched nothing. Fixed by stripping punctuation per word before
+matching; verified this doesn't regress any of the other 34
+interactables across the whole campaign (each still self-matches its
+own exact name).
+
 ## [1.11.48] — Stale button taps no longer crash the callback (task #194)
 
 Live-caught via monitoring, 2026-07-19: Coffee tapped an old "Accept:

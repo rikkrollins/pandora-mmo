@@ -274,7 +274,23 @@ _LAST_TOPIC_MESSAGE: dict[tuple[int, int], dict] = {}
 # invokes the stashed action with that forced roll. Deliberately does
 # NOT persist across a restart (same as combat sessions) -- a player
 # mid-prompt when the bot restarts just gets asked again next action.
+#
+# Per Coffee (2026-07-19): "give the user 1 minute to roll - if not
+# then auto-roll" -- each entry now also carries chat_id/created_at so
+# _maybe_auto_roll_pending_dice (run every idle-loop tick, see
+# _idle_inactivity_loop) can find and auto-resolve any prompt that's
+# gone unanswered for 60+ seconds, same real d20 roll a manual reply
+# would have supplied.
 _PENDING_DICE_ROLLS: dict[int, dict] = {}
+DICE_ROLL_AUTO_TIMEOUT_SECONDS = 60
+
+
+def _new_pending_roll(kind: str, action_text: str, chat_id: int, **extra) -> dict:
+    """Builds a _PENDING_DICE_ROLLS entry -- one place so every call site stamps chat_id/created_at consistently."""
+    return {
+        "kind": kind, "action_text": action_text, "chat_id": chat_id,
+        "created_at": datetime.now(timezone.utc).isoformat(), **extra,
+    }
 
 # Real player-driven Ability Score Improvements (2026-07-16, per
 # Coffee): a character with pending_asi_points > 0 who says "level up"
@@ -3522,12 +3538,12 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
         if forced_roll is None and attacker.get("manual_dice_enabled") and not attacker.get("is_ai"):
             forced_roll = _extract_combined_roll(action_text)
         if forced_roll is None and attacker.get("manual_dice_enabled") and not attacker.get("is_ai"):
-            _PENDING_DICE_ROLLS[user_id] = {"kind": "attack", "action_text": action_text}
+            _PENDING_DICE_ROLLS[user_id] = _new_pending_roll("attack", action_text, update.effective_chat.id)
             # Task #187: routed through _safe_send (not a raw send_message)
             # so a transient TimedOut retries once instead of silently
             # dropping the prompt -- confirmed live this WAS happening
             # (real ConnectTimeout caught only by the global error handler).
-            await _safe_send(update, "🎲 Roll a d20 for your attack and tell me the result.")
+            await _safe_send(update, f"🎲 **{attacker['name']}**, roll a d20 for your attack and tell me the result (you have 1 minute, or I'll roll for you).")
             return
         # Task #143: a real damage-die roll declared alongside the
         # attack roll in the same message ("attack goblin, i rolled 15
@@ -4003,12 +4019,12 @@ async def _do_skill_check(update: Update, ability: str, action_text: str, forced
     if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
         forced_roll = _extract_combined_roll(action_text)
     if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
-        _PENDING_DICE_ROLLS[update.effective_user.id] = {
-            "kind": "skill_check", "ability": ability, "action_text": action_text,
-        }
+        _PENDING_DICE_ROLLS[update.effective_user.id] = _new_pending_roll(
+            "skill_check", action_text, update.effective_chat.id, ability=ability,
+        )
         # Task #187: _safe_send, not a raw send_message -- see the attack
         # site's comment above for why.
-        await _safe_send(update, f"🎲 Roll a d20 for this {ability} check and tell me the result.")
+        await _safe_send(update, f"🎲 **{character['name']}**, roll a d20 for this {ability} check and tell me the result (you have 1 minute, or I'll roll for you).")
         return
 
     if lockable is not None:
@@ -4223,10 +4239,10 @@ async def _do_shove(update: Update, action_text: str, forced_roll: int | None = 
         if forced_roll is None and attacker.get("manual_dice_enabled") and not attacker.get("is_ai"):
             forced_roll = _extract_combined_roll(action_text)
         if forced_roll is None and attacker.get("manual_dice_enabled") and not attacker.get("is_ai"):
-            _PENDING_DICE_ROLLS[user_id] = {"kind": "shove", "action_text": action_text}
+            _PENDING_DICE_ROLLS[user_id] = _new_pending_roll("shove", action_text, update.effective_chat.id)
             # Task #187: _safe_send, not a raw send_message -- see the
             # attack site's comment above for why.
-            await _safe_send(update, "🎲 Roll a d20 for your shove and tell me the result.")
+            await _safe_send(update, f"🎲 **{attacker['name']}**, roll a d20 for your shove and tell me the result (you have 1 minute, or I'll roll for you).")
             return
 
         attacker_result = roll_ability_check(attacker, "strength", proficient=True, forced_roll=forced_roll)
@@ -4315,10 +4331,10 @@ async def _do_flee(update: Update, action_text: str, forced_roll: int | None = N
         if forced_roll is None and fleeing.get("manual_dice_enabled") and not fleeing.get("is_ai"):
             forced_roll = _extract_combined_roll(action_text)
         if forced_roll is None and fleeing.get("manual_dice_enabled") and not fleeing.get("is_ai"):
-            _PENDING_DICE_ROLLS[user_id] = {"kind": "flee", "action_text": action_text}
+            _PENDING_DICE_ROLLS[user_id] = _new_pending_roll("flee", action_text, update.effective_chat.id)
             # Task #187: _safe_send, not a raw send_message -- see the
             # attack site's comment above for why.
-            await _safe_send(update, "🎲 Roll a d20 for your escape attempt and tell me the result.")
+            await _safe_send(update, f"🎲 **{fleeing['name']}**, roll a d20 for your escape attempt and tell me the result (you have 1 minute, or I'll roll for you).")
             return
 
         # Ranger's Danger Sense (task #91, 2026-07-18): already real for
@@ -6090,10 +6106,10 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
     if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
         forced_roll = _extract_combined_roll(action_text)
     if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
-        _PENDING_DICE_ROLLS[update.effective_user.id] = {"kind": "gather", "action_text": action_text}
+        _PENDING_DICE_ROLLS[update.effective_user.id] = _new_pending_roll("gather", action_text, update.effective_chat.id)
         # Task #187: _safe_send, not a raw send_message -- this exact site
         # dropped a real prompt live to a transient TimedOut before this fix.
-        await _safe_send(update, f"🎲 Roll a d20 for this {node['ability']} check and tell me the result.")
+        await _safe_send(update, f"🎲 **{character['name']}**, roll a d20 for this {node['ability']} check and tell me the result (you have 1 minute, or I'll roll for you).")
         return
 
     result = roll_ability_check(character, node["ability"], proficient=False, forced_roll=forced_roll)
@@ -7179,7 +7195,20 @@ def _find_interactable(location: dict, text: str) -> tuple[str, dict] | None:
     # fallback in this codebase (NPC names, location names).
     best_obj, best_score, ambiguous = None, 0, False
     for obj_id, data in ordered:
-        words = [w for w in data["name"].lower().split() if w not in stopwords and len(w) >= 3]
+        # Real bug, live-caught 2026-07-19 (Coffee: "a player is looking
+        # at the wide-boled tree and its not working"): .split() left
+        # punctuation stuck to whichever word precedes it in the stored
+        # name (e.g. "an ancient, wide-boled tree" -> "ancient," with
+        # the comma attached) -- \bword\b then could never match, since
+        # a trailing comma-to-space transition has no word boundary at
+        # all. That silently dropped "ancient" from the overlap count
+        # entirely, so even "examine the ancient tree" (a perfectly
+        # normal shortening, zero typos) fell one word short of the
+        # >half threshold and matched nothing.
+        words = [
+            w.strip(".,;:!?\"'()") for w in data["name"].lower().split()
+        ]
+        words = [w for w in words if w and w not in stopwords and len(w) >= 3]
         if not words:
             continue
         matches = sum(1 for w in words if re.search(r"\b" + re.escape(w) + r"\b", lowered))
@@ -8592,10 +8621,10 @@ async def _do_steal(update: Update, text: str, forced_roll: int | None = None) -
     if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
         forced_roll = _extract_combined_roll(text)
     if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
-        _PENDING_DICE_ROLLS[telegram_user_id] = {"kind": "steal", "action_text": text}
+        _PENDING_DICE_ROLLS[telegram_user_id] = _new_pending_roll("steal", text, update.effective_chat.id)
         # Task #187: _safe_send, not a raw send_message -- see the attack
         # site's comment above for why.
-        await _safe_send(update, "🎲 Roll a d20 for your theft attempt and tell me the result.")
+        await _safe_send(update, f"🎲 **{character['name']}**, roll a d20 for your theft attempt and tell me the result (you have 1 minute, or I'll roll for you).")
         return
 
     result = roll_ability_check(character, "dexterity", proficient=False, forced_roll=forced_roll)
@@ -9583,8 +9612,12 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # Physical-dice mode (2026-07-16): if this user was just asked to
     # roll their own d20, their next message owns resuming that action
     # with the real number they report, rather than going through
-    # normal intent parsing. Waits indefinitely (per Coffee) -- no
-    # timeout falls back to an automatic roll.
+    # normal intent parsing. Updated 2026-07-19 (per Coffee: "give the
+    # user 1 minute to roll - if not then auto-roll") -- no longer waits
+    # indefinitely; _maybe_auto_roll_pending_dice (idle loop, 60s
+    # cadence) auto-resolves anything still pending after
+    # DICE_ROLL_AUTO_TIMEOUT_SECONDS, so this branch below only ever
+    # fires for a genuinely prompt manual reply.
     pending_roll = _PENDING_DICE_ROLLS.get(update.effective_user.id)
     if pending_roll is None:
         # Observability for a real gap found live 2026-07-18 (Coffee: "i
@@ -11761,6 +11794,54 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
     return "\n".join(lines)
 
 
+async def _maybe_auto_roll_pending_dice(bot) -> None:
+    """
+    Per Coffee (2026-07-19): "give the user 1 minute to roll - if not
+    then auto-roll" -- runs every idle-loop tick (60s cadence, see
+    _idle_inactivity_loop) and auto-resolves any _PENDING_DICE_ROLLS
+    entry that's been waiting DICE_ROLL_AUTO_TIMEOUT_SECONDS or longer,
+    using a real d20 roll in place of the manual one the player never
+    reported -- same dispatch this'd get from a real manual reply, just
+    with an auto-rolled value instead. Also incidentally bounds task
+    #186's restart-survival gap: a pending roll can now only ever be
+    silently lost for at most one idle-loop tick after a restart,
+    instead of forever.
+    """
+    now = datetime.now(timezone.utc)
+    expired_user_ids = [
+        user_id for user_id, pending in _PENDING_DICE_ROLLS.items()
+        if (now - datetime.fromisoformat(pending["created_at"])).total_seconds() >= DICE_ROLL_AUTO_TIMEOUT_SECONDS
+    ]
+    for user_id in expired_user_ids:
+        pending = _PENDING_DICE_ROLLS.pop(user_id, None)
+        if pending is None:
+            continue
+        character = db.get_character(user_id)
+        name = character["name"] if character else "Someone"
+        auto_value = roll_d20()
+        update_like = _AiPlayerUpdate(bot, pending["chat_id"], user_id, pending["action_text"])
+        logger.info(
+            f"[dice] user={user_id} auto-rolled pending {pending['kind']} roll with "
+            f"{auto_value} (no manual reply within {DICE_ROLL_AUTO_TIMEOUT_SECONDS}s)"
+        )
+        await _safe_send(update_like, f"⏱️ **{name}** didn't roll in time — auto-rolling: 🎲 {auto_value}.")
+        try:
+            if pending["kind"] == "attack":
+                await _do_attack(update_like, pending["action_text"], forced_roll=auto_value)
+            elif pending["kind"] == "skill_check":
+                await _do_skill_check(update_like, pending["ability"], pending["action_text"], forced_roll=auto_value)
+            elif pending["kind"] == "gather":
+                await _do_gather(update_like, pending["action_text"], forced_roll=auto_value)
+            elif pending["kind"] == "shove":
+                await _do_shove(update_like, pending["action_text"], forced_roll=auto_value)
+            elif pending["kind"] == "flee":
+                await _do_flee(update_like, pending["action_text"], forced_roll=auto_value)
+            elif pending["kind"] == "steal":
+                await _do_steal(update_like, pending["action_text"], forced_roll=auto_value)
+        except Exception as e:
+            logger.error(f"[dice] auto-roll dispatch for user={user_id} kind={pending['kind']} raised: {e!r}")
+
+
 async def _ai_party_autonomous_tick(bot) -> None:
     """
     Advances ONE AI-controlled character's turn per cycle (never all at
@@ -11864,6 +11945,10 @@ async def _idle_inactivity_loop(application: Application) -> None:
             db.expire_stale_board_quests()
         except Exception as e:
             logger.error(f"[board_quests] expiry check failed this cycle: {e!r}")
+        try:
+            await _maybe_auto_roll_pending_dice(application.bot)
+        except Exception as e:
+            logger.error(f"[dice] auto-roll check failed this cycle: {e!r}")
         try:
             await _ai_party_autonomous_tick(application.bot)
         except Exception as e:
