@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.40] — Skill-check narration (task #165) now states a concrete outcome, not just mood
+
+**Real live report (2026-07-18, trusted dev Sugar's first bug report):**
+"Search for wolves" → "Success! (rolled a 14)" followed by pure
+atmospheric prose (forest holding its breath, senses sharpening) that
+never said what was actually found — she couldn't tell what her
+successful check had revealed and had to ask in Development. Root
+cause in `ai/dm_agent.py`'s `_skill_check_preamble()`: it required
+"vivid, sensory prose" and faithfulness to success/failure, but never
+required the narration to land on an actual, stated result.
+
+Fixed in two parts:
+- The preamble now requires the narration's first sentence state a
+  concrete, actionable outcome, with the atmospheric prose built around
+  it rather than saved for last — a first pass that put the payoff at
+  the *end* got cut off mid-sentence by this model's output-length cap
+  in testing, silently reproducing the exact bug being fixed, so the
+  payoff now comes early where a cutoff can't drop it.
+- `_do_skill_check` (bot.py) now grounds search/perception-flavored
+  ("wisdom" ability) checks in a real fact when possible: if the
+  player's search text names a monster actually present at their
+  location (`location["monsters"]`, via the same `_find_monster_
+  mentioned_in_text` helper task #98's "examine" fix already
+  established), that real fact is handed to the narrator to state
+  plainly — never inventing a discovery that isn't backed by real game
+  data, same ground-truth boundary this project holds everywhere else.
+  No grounded fact available (most other skill checks) → narration
+  still gets a concrete-but-honest line ("nothing of note turns up")
+  rather than inventing specifics.
+
+Verified live through the real `_do_skill_check` handler at The
+Whispering Wood (a location with real wolves) — narration now clearly
+states the wolf's presence instead of pure mood with zero information.
+
 ## [1.11.39] — Mid-fight physical-dice toggle now actually takes effect
 
 **Real live report (2026-07-19, Coffee: "dice mode on doesnt seem to be

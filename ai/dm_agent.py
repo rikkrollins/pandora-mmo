@@ -95,17 +95,40 @@ def _skill_check_preamble() -> str:
         "this exact moment. Mention the actual raw d20 number rolled "
         "somewhere in your narration, and calibrate how dramatic your prose "
         f"is to how good or bad that roll actually was. {_NAMING_INSTRUCTION} "
-        f"{style_directive()}"
+        f"{style_directive()} "
+        # Real live bug (2026-07-18, task #165, reported by trusted dev
+        # Sugar): a "Search for wolves" success came back as pure
+        # atmospheric prose (forest holding its breath, senses
+        # sharpening) with no stated result at all -- she genuinely
+        # couldn't tell what her successful check had actually revealed
+        # and had to ask in Development. Nothing above ever required the
+        # narration to land on an actual answer, just mood. This closes
+        # that gap without inventing new game facts: your VERY FIRST
+        # sentence must be one plain-language line stating the concrete,
+        # actionable outcome (what the character now knows, notices, or
+        # can do next as a direct result of this roll) -- lead with the
+        # answer, THEN let the sensory prose follow to build atmosphere
+        # around it. Do not save the concrete outcome for the end: this
+        # model has a hard output-length cap and a late payoff risks
+        # being cut off entirely, silently reproducing the exact bug
+        # this fixes. If a "Known real fact" is given below, that first "
+        "sentence must reflect it exactly and invent nothing beyond it; "
+        "if none is given, keep it honest and general (e.g. nothing of "
+        "note turns up) rather than fabricating a specific discovery."
     )
 
 
 def _build_skill_check_prompt(character: dict, action_text: str, ability: str,
-                               mechanical_result: dict) -> str:
+                               mechanical_result: dict, grounded_fact: str | None = None) -> str:
     raw_roll = mechanical_result.get("raw_roll")
     drama = _drama_instruction(
         raw_roll,
         critical_hit=(raw_roll == 20),
         critical_fail=(raw_roll == 1),
+    )
+    fact_line = (
+        f"Known real fact (reflect this exactly on success, invent nothing "
+        f"beyond it): {grounded_fact}\n\n" if grounded_fact else ""
     )
     return (
         f"{_skill_check_preamble()}\n\n"
@@ -114,19 +137,28 @@ def _build_skill_check_prompt(character: dict, action_text: str, ability: str,
         f"Attempted action: {action_text}\n"
         f"Ability used: {ability.title()}\n\n"
         f"Mechanical result (already decided, narrate faithfully): {mechanical_result}\n\n"
+        f"{fact_line}"
         f"Tone guidance for this specific roll: {drama}\n\n"
         f"Narrate this outcome now (remember: this is NOT combat):"
     )
 
 
-def narrate_skill_check(character: dict, action_text: str, ability: str, mechanical_result: dict) -> str:
+def narrate_skill_check(character: dict, action_text: str, ability: str, mechanical_result: dict,
+                         grounded_fact: str | None = None) -> str:
     """
     Generates narration for a non-combat skill check. Uses its own
     prompt and fallback (rather than reusing narrate_action) so a
     sneaking or persuading attempt is never narrated with combat
     language like "attacks" or "damage".
+
+    grounded_fact (task #165): an optional real, already-true game fact
+    (e.g. a monster confirmed present at this location) the caller has
+    verified independently of the AI -- handed in so a search/perception
+    check can state something concrete without the model ever having to
+    invent what was found. Never populated with anything the rules
+    layer hasn't already confirmed true.
     """
-    prompt = _build_skill_check_prompt(character, action_text, ability, mechanical_result)
+    prompt = _build_skill_check_prompt(character, action_text, ability, mechanical_result, grounded_fact)
 
     try:
         response = requests.post(
@@ -147,22 +179,25 @@ def narrate_skill_check(character: dict, action_text: str, ability: str, mechani
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] skill check narration call failed, falling back to template: {e}")
 
-    return _fallback_skill_check_narration(character, action_text, mechanical_result)
+    return _fallback_skill_check_narration(character, action_text, mechanical_result, grounded_fact)
 
 
-def _fallback_skill_check_narration(character: dict, action_text: str, mechanical_result: dict) -> str:
+def _fallback_skill_check_narration(character: dict, action_text: str, mechanical_result: dict,
+                                     grounded_fact: str | None = None) -> str:
     """Plain-text, non-combat fallback if the narration model is unreachable."""
     raw_roll = mechanical_result.get("raw_roll")
     success = mechanical_result.get("success", False)
     name = character.get("name", "You")
 
     if raw_roll == 20:
-        return f"{name} pulls it off spectacularly — a natural 20! Nothing could have gone better."
-    if raw_roll == 1:
-        return f"{name} fumbles badly — a natural 1. It couldn't have gone worse."
-    if success:
-        return f"{name} succeeds. The attempt goes just as hoped."
-    return f"{name} doesn't quite manage it this time."
+        base = f"{name} pulls it off spectacularly — a natural 20! Nothing could have gone better."
+    elif raw_roll == 1:
+        base = f"{name} fumbles badly — a natural 1. It couldn't have gone worse."
+    elif success:
+        base = f"{name} succeeds. The attempt goes just as hoped."
+    else:
+        base = f"{name} doesn't quite manage it this time."
+    return f"{base} {grounded_fact}" if grounded_fact else base
 
 
 def _combat_preamble() -> str:

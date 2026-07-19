@@ -3795,9 +3795,27 @@ async def _do_skill_check(update: Update, ability: str, action_text: str, forced
     if success:
         db.record_skill_use(update.effective_user.id, ability)
 
+    # Task #165: ground search/perception-flavored checks in a real fact
+    # (a monster actually present at this location) rather than leaving
+    # the narrator free to either invent a discovery or produce pure
+    # mood with no answer at all -- see _skill_check_preamble's fix note.
+    # Only wisdom checks qualify since that's this game's search/spot/
+    # sense/track bucket (see intent_parser's skill_check_verb_abilities).
+    grounded_fact = None
+    if ability == "wisdom" and location is not None:
+        monster_match = _find_monster_mentioned_in_text(location, action_text)
+        if monster_match:
+            monster_key, template = monster_match
+            grounded_fact = (
+                f"A real {template['name']} is genuinely present at this location right now."
+                if success else
+                f"A real {template['name']} is present here, but this roll did not reveal it."
+            )
+
     flavor = await asyncio.to_thread(
         narrate_skill_check, character, action_text, ability,
         {**result, "ability": ability, "dc": SKILL_CHECK_DC, "success": success},
+        grounded_fact=grounded_fact,
     )
     message = _format_skill_check_result(flavor, result, ability, SKILL_CHECK_DC, success)
     # _safe_send, not a direct send: a transient network failure here
