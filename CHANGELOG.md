@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.54] — Vesh's companion arc gets a real trust-banded resolution
+
+Continuing the full-storyline plan's Phase 3: Vesh now has a second
+quest, "Back Down Into the Glow" (`veshs_resolution`), offered once her
+existing personal quest is done, triggered by returning to
+`glimmerdeep_grotto` -- the exact place her own quest text already
+established she's spent this whole time trying to forget (the
+"early-and-finite" companion pacing mode the narrative-craft memo
+called out for her specifically).
+
+`QUEST_COMPANION_RESOLUTIONS` (added for Grask last version) now
+supports a second shape: `"banded"`, reading the real
+`npc_relationships.affinity` column at completion time and picking one
+of 3 real outcomes — low (≤ -20, `resolved_estranged`), mid (-19..39,
+`resolved_distant`), or high (≥ 40, `resolved_loyal`) — the exact
+banding the memo's research settled on. Verified end-to-end across all
+three trust bands: each writes the correct persistent resolution state
+and surfaces its own distinct in-character note.
+
 ## [1.11.53] — Grask's held-back companion arc resolves at the Arc 2→3 turn
 
 Continuing the full-storyline plan's Phase 2: Grask, the companion

@@ -875,6 +875,19 @@
       },
       "clue": "Vesh says she stopped trying to count the days once the crystal-glow started tasting normal."
     },
+    "veshs_resolution": {
+      "title": "Back Down Into the Glow",
+      "description": "The party needs someone who's actually been past Glimmerdeep Grotto before, and Vesh is the only one who has -- which means going back to exactly the place she spent this long trying to forget.",
+      "objective_location": "glimmerdeep_grotto",
+      "giver_npc": "vesh_nightglass",
+      "reward_xp": 150,
+      "reward_gold": 50,
+      "trigger": {
+        "type": "reach_location",
+        "location": "glimmerdeep_grotto"
+      },
+      "clue": "Vesh goes quiet every time the crystal-glow comes up again."
+    },
     "the_hollow_stump": {
       "title": "The Hollow Stump",
       "description": "The shrine in the Whispering Wood may hold answers to what's been left behind there.",

@@ -4853,16 +4853,39 @@ def _chapter_complete_note(telegram_user_id: int, quest_id: str) -> str:
     return f"\n\n🌟 **Chapter complete: \"{arc['title']}\"** — {arc['description']}"
 
 
-# Full-storyline plan, Phase 2: a companion's resolution quest writes a
-# real, persistent state via db.resolve_companion the moment it
-# completes -- see _complete_quest_and_announce below. Grask is the
-# first (his goal was to leave the warrens and never look back; the
-# Arc 2->3 story_gates turn is where he chooses the party over that
-# instead), the other five companions get the same treatment in a
-# later pass, added to this same dict rather than a new mechanism.
+# Full-storyline plan, Phase 2/3: a companion's resolution quest writes
+# a real, persistent state via db.resolve_companion the moment it
+# completes -- see _complete_quest_and_announce below. Two shapes:
+# a flat resolution ({"npc_id", "resolution", "note"}) for a companion
+# whose arc only ever has one real outcome (Grask's is a single
+# "chooses loyalty at this exact gate" beat, not a variable one), or a
+# trust-banded one ({"npc_id", "banded": {"low"/"mid"/"high": (state,
+# note)}}) reading the real npc_relationships.affinity column at
+# completion time -- band cutoffs match the narrative-craft memo's:
+# low <= -20, mid -19..39, high >= 40.
 QUEST_COMPANION_RESOLUTIONS = {
-    "grasks_resolution": ("grask_emberscale", "resolved_loyal"),
+    "grasks_resolution": {
+        "npc_id": "grask_emberscale", "resolution": "resolved_loyal",
+        "note": "has made their choice",
+    },
+    "veshs_resolution": {
+        "npc_id": "vesh_nightglass",
+        "banded": {
+            "low": ("resolved_estranged", "flinches at the crystal-glow and says as little as possible until you're both back out"),
+            "mid": ("resolved_distant", "grits through it, quiet and tense, until you're both back out"),
+            "high": ("resolved_loyal", "grips your arm the whole way through and doesn't let go until you're both back out"),
+        },
+    },
 }
+
+
+def _companion_trust_band(telegram_user_id: int, npc_id: str) -> str:
+    affinity = db.get_relationship(telegram_user_id, npc_id)["affinity"]
+    if affinity >= 40:
+        return "high"
+    if affinity <= -20:
+        return "low"
+    return "mid"
 
 
 async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest_id: str) -> None:
@@ -4882,11 +4905,17 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
     resolution_note = ""
     companion_resolution = QUEST_COMPANION_RESOLUTIONS.get(quest_id)
     if companion_resolution:
-        npc_id, resolution_state = companion_resolution
+        npc_id = companion_resolution["npc_id"]
+        if "banded" in companion_resolution:
+            band = _companion_trust_band(telegram_user_id, npc_id)
+            resolution_state, note_text = companion_resolution["banded"][band]
+        else:
+            resolution_state = companion_resolution["resolution"]
+            note_text = companion_resolution.get("note", "has made their choice")
         db.resolve_companion(telegram_user_id, npc_id, resolution_state)
         companion_npc = CAMPAIGN["npcs"].get(npc_id)
         companion_name = companion_npc["name"] if companion_npc else npc_id
-        resolution_note = f"\n\n🤝 **{companion_name}** has made their choice."
+        resolution_note = f"\n\n🤝 **{companion_name}** {note_text}."
 
     if reward_xp:
         await _award_xp_and_announce_level_up(update_like, telegram_user_id, reward_xp)
