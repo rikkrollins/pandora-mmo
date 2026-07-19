@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.63] — "Look at [NPC]'s [object]" wrongly routed to NPC chat instead of examine
+
+Live-caught: "Look at old maren's brass scale" -- a real, described
+interactable at her location -- got hijacked to talk_npc purely
+because "maren" appears in the text, even though the message clearly
+uses an explicit examine verb targeting an OBJECT of hers, not
+addressing her directly. The 2026-07-14 filler-word fix (excluding
+"the"/"old"/etc. from counting as identifying NPC-name words) solved
+a different flavor of this same root problem but not this one, since
+"maren" is a genuine, real name-word.
+
+Fixed with a narrow guard on the NPC-name match: when the message also
+contains an explicit examine-style verb ("look at", "examine",
+"inspect", "read", "touch", "peer at", etc. -- the same verb set the
+existing examine detection further down already recognizes), the
+NPC-name hijack is skipped so the message falls through to real
+examine handling instead, which looks the target up against the
+location's actual interactables. Also closed a smaller gap while here:
+bare "look at X" (no "the"/"a"/"an") wasn't in the examine trigger
+list at all, only the articled forms were.
+
+Verified via a 12-case matrix (the live scale case, several NPC-chat
+cases that must keep working, recruit_npc, the shop-browse phrasing,
+whole-area "look", and every previously-fixed examine-verb case) plus
+the existing permanent regression test for NPC-name filler words --
+all pass with zero regressions.
+
 ## [1.11.62] — URGENT: fix a regression from v1.11.55 that broke selling a Fishing Pole
 
 Caught live within the hour: v1.11.55's fix for "Buy fishing hooks"

@@ -429,6 +429,22 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     _NPC_NAME_FILLER_WORDS = {"the", "a", "an", "of", "and", "old"}
     recruit_words = ["join us", "join our party", "join my party", "come with us",
                       "travel with us", "come along", "join the party"]
+    # Live-caught (2026-07-19, Sugar): "Look at old maren's brass scale"
+    # hijacked to talk_npc purely because "maren" appears in the text --
+    # even though the message is clearly examining an OBJECT of hers
+    # (the scale is a real, separately-described interactable), not
+    # addressing her directly. The 2026-07-14 filler-word fix above
+    # solved the "the"/"old" false-positive case but not this one, since
+    # "maren" is a genuine, real name-word -- the real distinguishing
+    # signal here is an explicit examine-style verb, which means route
+    # to examine (checked further below) instead, letting the object's
+    # own real description win over an ungrounded NPC-chat guess.
+    _NPC_HIJACK_EXAMINE_GUARD = re.compile(
+        r"\b(?:read|observe[d]?|examine[d]?|inspect(?:ed)?|search(?:ed)?|checked? out|"
+        r"touch(?:ed)?|look(?:ed)?\s+(?:at|closer at)|(?:peer|perr)(?:ed)?\s+(?:at|into|in)|"
+        r"glanced?\s+at)\b"
+    )
+    has_examine_verb = bool(_NPC_HIJACK_EXAMINE_GUARD.search(lowered))
     for npc_name in known_npc_names:
         # Matches the NPC's full registered name as a substring ("old
         # maren" in "go talk to old maren") OR any single word of it, at
@@ -445,9 +461,9 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
             w for w in npc_name.lower().split()
             if len(w) >= 3 and w not in _NPC_NAME_FILLER_WORDS
         ]
-        if npc_name.lower() in lowered or any(
+        if (npc_name.lower() in lowered or any(
             re.search(r"\b" + re.escape(w) + r"\b", lowered) for w in name_words
-        ):
+        )) and not has_examine_verb:
             if any(w in lowered for w in recruit_words):
                 return {**base, "action": "recruit_npc", "npc_name": npc_name}
             return {**base, "action": "talk_npc", "npc_name": npc_name}
@@ -796,7 +812,7 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # already checked first so "examine the area" can't be shadowed).
     # Target text is matched against the current location's real
     # interactables list in bot.py — never invented, same as items.
-    for trigger in ["examine the ", "examine ", "look at the ", "look closer at ", "inspect the ", "inspect ", "check out the ", "search the "]:
+    for trigger in ["examine the ", "examine ", "look at the ", "look closer at ", "inspect the ", "inspect ", "check out the ", "search the ", "look at "]:
         if trigger in lowered:
             target = text[lowered.index(trigger) + len(trigger):].strip()
             return {**base, "action": "examine", "target": target or None}
