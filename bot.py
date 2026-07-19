@@ -77,7 +77,7 @@ from rules.item_generator import generate_item
 from rules.leveling import (
     CLASS_HIT_DICE, scaled_enemy_count, breath_weapon_dice_count,
     CLASS_PRIMARY_ABILITY, CLASS_SAVE_PROFICIENCIES, is_proficient_in_skill,
-    skill_check_proficiency_bonus,
+    skill_check_proficiency_bonus, wild_shape_temp_hp,
 )
 from rules.proficiency import practiced_bonus, MAX_PRACTICE_BONUS
 
@@ -5778,6 +5778,9 @@ def _feature_use_status(character: dict) -> str | None:
     if char_class == "Wizard":
         used = db.get_feature_uses(telegram_user_id, "arcane_recovery")
         return f"Arcane Recovery: {max(0, 1 - used)}/1 use(s) remaining this rest"
+    if char_class == "Druid":
+        used = db.get_feature_uses(telegram_user_id, "wild_shape")
+        return f"Wild Shape: {max(0, WILD_SHAPE_MAX_USES - used)}/{WILD_SHAPE_MAX_USES} use(s) remaining this rest"
     return None
 
 
@@ -6439,6 +6442,7 @@ async def _do_second_wind(update: Update) -> None:
 
 RAGE_MAX_USES = 2
 RAGE_DAMAGE_BONUS = 2
+WILD_SHAPE_MAX_USES = 2
 
 
 async def _do_rage(update: Update) -> None:
@@ -6502,6 +6506,79 @@ async def _do_rage(update: Update) -> None:
         update,
         f"😡 **{character['name']}** flies into a rage — bonus damage and resistance to "
         f"physical harm for the rest of this fight!",
+    )
+
+
+async def _do_wild_shape(update: Update) -> None:
+    """
+    Real Druid class feature (level 2+, task #91 audit 2026-07-19: Druid
+    was found to have ZERO unique mechanical features of its own, the
+    only one of the 12 classes with nothing here at all -- spellcasting
+    alone). 2 uses per rest (real 5E). The `wild_shaped` flag lives on
+    the LIVE combat participant dict, same in-memory, combat-only
+    convention as `raging` (see _do_rage) -- grants bonus claw/bite
+    damage (wild_shape_damage_bonus) and a chunk of real temp_hp
+    (wild_shape_temp_hp, the same mechanic Dark One's Blessing already
+    uses), simplified from real 5E's actual separate beast statblock
+    since this engine has no such system for any class. The real
+    tradeoff (real 5E: a shapeshifted Druid can't cast spells) is
+    enforced in _do_cast_spell, mirroring the existing `silenced`
+    condition block there.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if character["char_class"] != "Druid":
+        await update.effective_chat.send_message(
+            "Wild Shape is a real Druid class feature — your class doesn't have it.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    if character["level"] < 2:
+        await update.effective_chat.send_message(
+            "Wild Shape is a Druid feature starting at level 2 — you're not there yet.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    if db.get_feature_uses(update.effective_user.id, "wild_shape") >= WILD_SHAPE_MAX_USES:
+        await update.effective_chat.send_message(
+            f"You've already used Wild Shape {WILD_SHAPE_MAX_USES} times since your last rest.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    session = sessions.get_session(update.effective_chat.id)
+    if session is None:
+        await update.effective_chat.send_message(
+            "You can only Wild Shape in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    participant = next(
+        (p for p in session.participants if p["telegram_user_id"] == update.effective_user.id), None
+    )
+    if participant is None:
+        await update.effective_chat.send_message(
+            "You're not part of the current fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if participant.get("wild_shaped"):
+        await update.effective_chat.send_message(
+            "You're already Wild Shaped.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    participant["wild_shaped"] = True
+    bonus_temp_hp = wild_shape_temp_hp(character["level"])
+    participant["temp_hp"] = max(participant.get("temp_hp", 0), bonus_temp_hp)
+    db.use_feature(update.effective_user.id, "wild_shape")
+
+    await _safe_send(
+        update,
+        f"🐾 **{character['name']}** shifts into a beast — {bonus_temp_hp} temporary HP and "
+        f"clawed, biting attacks for the rest of this fight, but no spellcasting while shifted!",
     )
 
 
@@ -9162,6 +9239,17 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                 message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
             return
+        # Real 5E: a Druid can't cast spells while Wild Shaped (task #91
+        # audit, 2026-07-19) -- same combat-only, in-memory condition
+        # check as `silenced` above, reading the `wild_shaped` flag
+        # _do_wild_shape sets on this same participant dict.
+        if caster and caster.get("wild_shaped"):
+            await update.effective_chat.send_message(
+                f"🐾 **{character['name']}** is Wild Shaped — no hands, no spellcasting until "
+                f"they shift back.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
 
     def _consume_scroll_if_any() -> None:
         if via_scroll:
@@ -10108,6 +10196,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_divine_smite(update)
     elif action == "flurry_of_blows":
         await _do_flurry_of_blows(update)
+    elif action == "wild_shape":
+        await _do_wild_shape(update)
     elif action == "toggle_manual_dice":
         await _do_toggle_manual_dice(update, intent.get("raw_text", text))
     elif action == "level_up":
@@ -10352,7 +10442,7 @@ Almost everything here is plain English, typed straight into Adventure -- no com
 **Combat**
 • "Attack the goblin" -- once combat's started
 • "Flee" / "Pass my turn"
-• Class abilities work by name too: "Rage", "Second Wind", "Action Surge", "Channel Divinity", "Cast fireball", etc.
+• Class abilities work by name too: "Rage", "Second Wind", "Action Surge", "Channel Divinity", "Wild Shape", "Cast fireball", etc.
 
 **Items & shops**
 • "What's in my inventory?" / "Check my sheet"

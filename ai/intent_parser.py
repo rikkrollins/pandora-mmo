@@ -141,6 +141,9 @@ attacks this turn, at the cost of attacks against you also having advantage unti
 hit for bonus radiant damage (e.g. "I smite", "divine smite", "I use divine smite").
 - "flurry_of_blows" is specifically a Monk's real class feature (level 2+): spending a ki point for a bonus \
 unarmed strike (e.g. "flurry of blows", "I use flurry of blows", "I flurry").
+- "wild_shape" is specifically a Druid's real class feature (level 2+): shapeshifting into a beast in combat \
+for bonus temporary HP and clawed/bitten attack damage, at the cost of being unable to cast spells while shifted \
+(e.g. "I wild shape", "I shapeshift", "shift into a beast", "become a beast").
 - "toggle_manual_dice" is for turning physical-dice mode on or off (e.g. "use my own dice", "roll my own dice", \
 "let the game roll for me", "dice on", "dice off", "turn off manual dice").
 - "level_up" is for spending a pending Ability Score Improvement -- saying "level up", naming which ability to \
@@ -643,6 +646,10 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in ["flurry of blows", "i flurry"]):
         return {**base, "action": "flurry_of_blows"}
 
+    if any(w in lowered for w in ["wild shape", "i shapeshift", "shift into a beast", "turn into a beast",
+                                    "become a beast"]):
+        return {**base, "action": "wild_shape"}
+
     if any(w in lowered for w in ["use my own dice", "roll my own dice", "own physical dice",
                                     "let the game roll for me", "dice on", "dice off",
                                     "turn on manual dice", "turn off manual dice",
@@ -1128,7 +1135,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "arcane_recovery",
                 "make_campfire", "give_item", "use_item", "equip_item", "auto_equip", "breath_weapon",
                 "channel_divinity", "action_surge", "reckless_attack", "divine_smite",
-                "flurry_of_blows", "toggle_manual_dice", "level_up", "set_description", "set_pronouns",
+                "flurry_of_blows", "wild_shape", "toggle_manual_dice", "level_up", "set_description", "set_pronouns",
                 "bestiary", "list_shop", "leaderboard", "check_achievements", "set_title", "check_weather",
                 "check_guild_quest",
             )

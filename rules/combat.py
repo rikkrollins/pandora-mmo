@@ -6,7 +6,7 @@ structured data; the AI layer (ai/dm_agent.py) only ever narrates the
 results computed here, never decides them.
 """
 from rules.dice import roll_d20, roll_attack, roll_damage, ability_modifier
-from rules.leveling import sneak_attack_dice_count, rage_damage_bonus
+from rules.leveling import sneak_attack_dice_count, rage_damage_bonus, wild_shape_damage_bonus
 
 # Monsters this campaign treats as undead for the Silver Wardens guild's
 # bonus_damage_vs_undead benefit (guilds.py) -- no monster template field
@@ -70,6 +70,14 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     damage plus resistance to all incoming damage while raging
     (simplified from the real three specific physical damage types,
     since this system doesn't model damage types at all).
+
+    A Druid's Wild Shape (task #91 audit, 2026-07-19: Druid had ZERO
+    unique mechanical features before this) is handled the same way as
+    Rage -- a `wild_shaped` flag (see bot.py's _do_wild_shape) grants
+    bonus claw/bite damage via wild_shape_damage_bonus, since this
+    engine has no separate-statblock system to actually swap a Druid's
+    attacks for a beast's (same simplification Rage already uses rather
+    than modeling a Barbarian's three specific resisted damage types).
 
     A Monk's Martial Arts is handled here too: real 5E lets a Monk use
     Dexterity instead of Strength for attacks with a monk weapon or an
@@ -151,6 +159,9 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         savage_attacks_die = 1 if (attacker.get("race") == "Half-Orc" and attack_result["critical_hit"]) else 0
         sneak_attack_die = 1 if (attacker.get("char_class") == "Rogue" and advantage) else 0
         rage_bonus = rage_damage_bonus(attacker.get("level", 1)) if attacker.get("raging") else 0
+        wild_shape_bonus = (
+            wild_shape_damage_bonus(attacker.get("level", 1)) if attacker.get("wild_shaped") else 0
+        )
         # Silver Wardens guild benefit (bonus_damage_vs_undead, guilds.py):
         # +2 damage against this campaign's undead-flavored monsters.
         warden_bonus = (
@@ -166,7 +177,7 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         # later swings are for the attack-roll forced_roll above.
         dmg = roll_damage(
             weapon["damage_dice"],
-            modifier=weapon.get("damage_bonus", 0) + rage_bonus + warden_bonus,
+            modifier=weapon.get("damage_bonus", 0) + rage_bonus + wild_shape_bonus + warden_bonus,
             critical=attack_result["critical_hit"],
             extra_dice=savage_attacks_die,
             forced_roll=forced_damage_roll,

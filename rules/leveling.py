@@ -105,6 +105,38 @@ def rage_damage_bonus(level: int) -> int:
     return 2
 
 
+def wild_shape_damage_bonus(level: int) -> int:
+    """
+    Druid's Wild Shape (task #91 audit, 2026-07-19 -- found completely
+    absent: Druid had zero unique mechanical features beyond spellcasting,
+    the only one of the 12 classes with nothing here at all). Real 5E
+    Wild Shape replaces your attacks with a beast's natural weapons
+    (claws/bite) rather than a flat bonus, but this engine has no
+    separate-statblock system for any class (Barbarian's Rage doesn't
+    reroll as a bear either) -- reusing the same "bonus die on your
+    existing weapon roll" simplification Rage already established,
+    scaled the same way (a claw/bite is comparable in punch to a Rage
+    swing, not weaker).
+    """
+    if level >= 16:
+        return 4
+    if level >= 9:
+        return 3
+    return 2
+
+
+def wild_shape_temp_hp(level: int) -> int:
+    """
+    Real 5E Wild Shape's real combat value is a separate HP pool (the
+    beast's own HP), not just bonus damage -- an honest, simplified
+    stand-in given this engine's temp_hp mechanic (already used for the
+    Warlock's Dark One's Blessing) rather than modeling a whole second
+    statblock. Scales with level since a higher-CR beast at higher
+    levels has proportionally more HP in real 5E too.
+    """
+    return level * 3
+
+
 # Real 5E: Ability Score Improvements are available at these levels.
 # Crossing one of these no longer auto-applies +2 to a fixed stat
 # (2026-07-16, per Coffee) -- it banks 2 points per level crossed on

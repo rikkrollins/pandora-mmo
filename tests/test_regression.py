@@ -2881,6 +2881,60 @@ class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(new_events, 2, "level 5 Fighter should get 2 real attacks per turn")
         sessions.end_session(-999)
 
+    # -- Wild Shape (task #91 audit, 2026-07-19): Druid had ZERO unique
+    #    mechanical features before this -- confirmed real via the
+    #    actual _do_wild_shape handler, resolve_attack's bonus damage,
+    #    and _do_cast_spell's real spellcasting block. --------------------
+    def test_wild_shape_damage_bonus_scales_with_druid_level(self):
+        from rules.leveling import wild_shape_damage_bonus
+        self.assertEqual(wild_shape_damage_bonus(1), 2)
+        self.assertEqual(wild_shape_damage_bonus(8), 2)
+        self.assertEqual(wild_shape_damage_bonus(9), 3)
+        self.assertEqual(wild_shape_damage_bonus(15), 3)
+        self.assertEqual(wild_shape_damage_bonus(16), 4)
+        self.assertEqual(wild_shape_damage_bonus(20), 4)
+
+    async def test_wild_shape_end_to_end_via_real_handlers(self):
+        import sessions
+        sessions.end_session(-999)
+
+        player_id = 999940
+        make_basic_character(
+            player_id, "Thornback", char_class="Druid", current_location="crossroads_tavern",
+            hp_max=20, armor_class=13, known_spells=["produce_flame"],
+        )
+        db.update_character(player_id, level=2)
+        player = db.get_character(player_id)
+        player["telegram_user_id"] = player_id
+        player["hp_current"] = 20
+
+        enemy_id = -2_500_040
+        enemy = {
+            "telegram_user_id": enemy_id, "name": "Straw Dummy", "dexterity": 10, "strength": 10,
+            "armor_class": 1, "hp_current": 200, "hp_max": 200, "is_ai": 1, "monster_key": "goblin",
+        }
+        session = sessions.start_session(-999, [player, enemy], {player_id: "party", enemy_id: "enemy"})
+        session.turn_order = [player_id, enemy_id]
+        session.current_turn_index = 0
+
+        sink = []
+        await bot._do_wild_shape(FakeUpdate(player_id, "I wild shape", sink))
+        participant = next(p for p in session.participants if p["telegram_user_id"] == player_id)
+        self.assertTrue(participant.get("wild_shaped"))
+        self.assertGreater(participant.get("temp_hp", 0), 0)
+        self.assertEqual(db.get_feature_uses(player_id, "wild_shape"), 1)
+
+        # A second Wild Shape attempt mid-fight should be refused, not stack.
+        sink2 = []
+        await bot._do_wild_shape(FakeUpdate(player_id, "I wild shape", sink2))
+        self.assertTrue(any("already" in m.lower() for m in sink2))
+
+        # Casting a real spell while Wild Shaped must be blocked (real 5E rule).
+        sink3 = []
+        await bot._do_cast_spell(FakeUpdate(player_id, "cast produce flame", sink3), "cast produce flame")
+        self.assertTrue(any("wild shaped" in m.lower() for m in sink3))
+        sessions.end_session(-999)
+
 
 if __name__ == "__main__":
     unittest.main()

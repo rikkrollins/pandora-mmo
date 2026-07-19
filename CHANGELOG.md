@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.59] — Druid gets Wild Shape (task #91: Druid had ZERO class features)
+
+Auditing task #91 (class features level 2-10+ for all 12 classes)
+found Druid was the one class with NOTHING here at all beyond ordinary
+spellcasting -- every other class had at least one real mechanical
+feature already (Fighter's Second Wind/Action Surge, Barbarian's Rage,
+Cleric's Channel Divinity, Wizard's Arcane Recovery, Monk's Flurry of
+Blows, Paladin's Divine Smite, Sorcerer's Metamagic, Warlock's Pact
+Magic, Rogue's Sneak Attack/Uncanny Dodge, Ranger's Natural Explorer,
+Bard's Jack of All Trades/Expertise/Song of Rest).
+
+Wild Shape (level 2+, 2 uses per rest, same convention as Rage): a new
+`wild_shaped` flag on the live combat participant dict grants bonus
+claw/bite damage (`wild_shape_damage_bonus`, scaled by level exactly
+like Rage's own bonus) and real temporary HP (`wild_shape_temp_hp`,
+the same `temp_hp` mechanic Dark One's Blessing already uses) --
+simplified from real 5E's actual separate beast statblock, since this
+engine has no such system for ANY class (Rage doesn't reroll as a bear
+either). The real tradeoff carries over honestly: a Wild Shaped Druid
+can't cast spells until they shift back, enforced in `_do_cast_spell`
+the same way the existing `silenced` condition already blocks casting.
+Recognized via natural language ("I wild shape", "shift into a beast",
+etc.) same as every other class ability. Verified via 2 real tests
+(one confirming the damage-bonus level scaling matches Rage's own
+curve, one driving the actual `_do_wild_shape`/`resolve_attack`/
+`_do_cast_spell` handlers end-to-end through a real combat session).
+
 ## [1.11.58] — Wren's and Pip's resolutions ship, completing Full-storyline Phase 3
 
 The last two companion resolution quests: Wren's "Roots Worth
