@@ -53,7 +53,7 @@ from ai.moltbook_agent import decide_social_action
 from ai.dev_agent import answer_dev_question
 from ai.dm_agent import (
     narrate_action, narrate_welcome, narrate_skill_check, narrate_hourly_update,
-    narrate_examine, narrate_branching_choice_outcome,
+    narrate_examine, narrate_branching_choice_outcome, narrate_boss_decision,
 )
 from ai.intent_parser import parse_intents
 from ai.npc_agent import register_npc, talk_to_npc, generate_ambient_line, _NPCS
@@ -2821,6 +2821,17 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
             if not opposing:
                 break
             target = min(opposing, key=lambda p: p["hp_current"])
+            # Task #167 (per Coffee, 2026-07-18, scoped to boss-tier enemies
+            # only after he flagged the latency cost of doing this for every
+            # regular monster too): a pre-roll "sizing up its target" beat,
+            # one per turn (attack_num == 0 only, so a boss's Multiattack
+            # second swing doesn't repeat it) -- target is already the same
+            # deterministic pick the rules layer just made above, so this
+            # narrates a real decision rather than inventing one, and the
+            # roll+outcome narration below is completely unaffected.
+            if current.get("is_boss") and attack_num == 0:
+                decision_flavor = await asyncio.to_thread(narrate_boss_decision, current, target)
+                await _safe_send(update, f"👁️ {decision_flavor}")
             adv, disadv = _attack_advantage_disadvantage(current, target)
             _refresh_real_player_spell_slots(target)
             result = resolve_attack(

@@ -359,6 +359,71 @@ def _fallback_narration(mechanical_result: dict) -> str:
     return f"{attacker} hits{roll_note} {defender} for {dmg} damage!"
 
 
+def _boss_decision_preamble() -> str:
+    return (
+        "You are the Dungeon Master narrating a boss monster's decision "
+        "in a Dungeons & Dragons 5th Edition game, in the moment BEFORE "
+        "any dice are rolled. No attack roll, hit/miss, or damage has "
+        "been decided yet — do not mention or imply any of those. Your "
+        "only job is a short, tense beat "
+        f"({scaled_sentences(2, 3)}) of the boss sizing up the "
+        "battlefield and settling on who to strike and why (weakest "
+        "prey, biggest threat, a grudge, simple proximity — whatever "
+        "fits the moment), ending with it committing to attack the "
+        "target you're given. Never invent a different target, a "
+        "different attacker, or any other characters, and never "
+        "resolve or hint at the outcome of the attack that hasn't "
+        f"happened yet. {_NAMING_INSTRUCTION} {style_directive()}"
+    )
+
+
+def _build_boss_decision_prompt(boss: dict, target: dict) -> str:
+    return (
+        f"{_boss_decision_preamble()}\n\n"
+        f"Boss (the one deciding): {boss.get('name')}\n"
+        f"Chosen target (already decided, do not change): {target.get('name')} "
+        f"({target.get('hp_current')}/{target.get('hp_max', target.get('hp_current'))} HP)\n\n"
+        f"Narrate the boss's decision now (no dice rolled yet):"
+    )
+
+
+def narrate_boss_decision(boss: dict, target: dict) -> str:
+    """
+    Task #167 (per Coffee, scoped to boss-tier enemies only after he
+    flagged the latency tradeoff of doing this for every regular
+    monster too): a short pre-roll narrative beat of a boss choosing
+    its target, called from _resolve_ai_turns right after the target is
+    already deterministically picked (min HP among the living
+    opposition) but before resolve_attack rolls anything -- so this
+    never invents a target, it just gives voice to a choice the rules
+    layer already made. Separate Ollama call from the post-roll
+    narrate_action, its own fallback so a network hiccup here never
+    blocks the actual attack resolution that follows.
+    """
+    prompt = _build_boss_decision_prompt(boss, target)
+
+    try:
+        response = requests.post(
+            f"{config.OLLAMA_BASE_URL}/api/generate",
+            json={
+                "model": config.DM_NARRATION_MODEL,
+                "prompt": prompt,
+                "stream": False,
+                "options": _NARRATION_OPTIONS,
+            },
+            timeout=200,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = strip_think_tags(data.get("response", ""))
+        if text:
+            return text
+    except (requests.RequestException, ValueError) as e:
+        print(f"[dm_agent] boss decision narration call failed, falling back to template: {e}")
+
+    return f"{boss.get('name')} sets its sights on {target.get('name')}."
+
+
 def _welcome_preamble() -> str:
     return (
         "You are the Dungeon Master opening a brand-new character's journey "

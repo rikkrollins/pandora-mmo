@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.41] — Boss enemies get a pre-roll "sizing up its target" narration beat (task #167)
+
+Per Coffee's request: for every combat turn, narrate the enemy's
+decision-making before the dice roll — who they're sizing up, why
+they chose that target — as its own beat, then the existing roll+
+outcome narration. Scoped to boss/named enemies only (Coffee's own
+call after I flagged the latency tradeoff of doing this for every
+regular goblin/wolf too): `_resolve_ai_turns` already picks the
+target deterministically (lowest current HP among the living
+opposition) before `resolve_attack` ever rolls anything, so this new
+`narrate_boss_decision` call (ai/dm_agent.py) just gives voice to a
+choice the rules layer already made — never invents a target, and
+the roll+outcome narration that follows is completely unchanged.
+Fires once per turn (not once per Multiattack swing) via an
+`attack_num == 0` guard, and has its own plain-text fallback so a
+narration-call hiccup here can never block the actual attack. Verified
+live through the real `_resolve_ai_turns` handler with a boss (2
+Multiattack swings): the decision beat fired exactly once, before the
+first swing, followed by both real attack resolutions.
+
 ## [1.11.40] — Skill-check narration (task #165) now states a concrete outcome, not just mood
 
 **Real live report (2026-07-18, trusted dev Sugar's first bug report):**
