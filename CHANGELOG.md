@@ -2,6 +2,49 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.37] — Fix a real live combat deadlock (all enemies dead but fight wouldn't end); "who's here" now answers with real location-scoped presence; "any quests available?" now works
+
+**Real live incident (2026-07-19, Coffee: "no enemys left standing... it
+stopped"):** confirmed via the session snapshot -- both wolves in the
+fight were at 0 HP, but the fight never ended and every further attack
+just said "No valid targets remain," forever. Root cause: `remove_defeated()`
+(which drops a dead monster from `turn_order`) only ever runs as a
+side-effect of the SAME attack that killed it; if that attack's
+resolution never finished (the same shutdown-interrupted-handler race
+already documented in task #184, just landing on combat state this time
+instead of a dropped chat reply), the dead monster stays in `turn_order`
+forever. `living_on_side()` correctly shows zero living enemies (it
+filters by HP), but `is_combat_over()` checks `turn_order` membership,
+not HP, so it never returns true either -- a permanent deadlock with no
+legal action to escape it. Fixed with a new `_try_end_stale_combat`
+safety net, called at all 5 "No valid targets remain" sites (attack,
+shove, breath weapon, damage-spell cast, and the battle menu's Fight
+button): it re-runs the defeat cleanup + victory resolution the
+interrupted attack should have finished, so a stale already-dead monster
+can never strand a fight again. Verified with a real test reproducing
+the exact stuck state (0 living enemies, `is_combat_over()` still
+False) and confirming it now resolves cleanly (XP, loot, achievements,
+session properly ended) instead of deadlocking.
+
+**"Who's here at the market with me?" (task #161)** fell through to
+plain chat -- same "words inserted between two required phrase parts"
+bug already fixed once for "who's ... with me" on its own, just not
+tolerant of "here at the market" landing in between. Broadened to a
+tolerant regex, plus bare "who's here"/"anyone here" as their own
+trigger. Also fixed what happens once classified: `check_party`
+previously only ever answered with the player's global party roster,
+never who's physically present at their CURRENT location -- which is
+what "who's here" is actually asking. It now answers with a real,
+location-scoped list of who else is at the same spot right now.
+
+**"Any quests available?" (task #185)** fell through to plain chat --
+found live via topic-activity monitoring right after the combat
+incident above. Same recurring gap this action has hit many times
+before: every existing check_quests trigger needs a qualifier word
+("my"/"board"/"active"/"check"/"show") next to "quest", and "any
+quests available" has none of them. Added tolerant "any ... quest(s)"
+and "quest(s) ... available" matching alongside the existing list.
+
 ## [1.11.36] — Combat messages now name the real spell/ability used, fixing the root cause of a support-agent hallucination (task #171)
 
 **Root cause traced all the way back to the deterministic combat message

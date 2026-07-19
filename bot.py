@@ -1552,9 +1552,13 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             if opposing:
                 await _do_attack(update, f"attack {opposing[0]['name']}")
             else:
-                await update.effective_chat.send_message(
-                    "No valid targets remain.", message_thread_id=config.TOPIC_ADVENTURE_ID,
-                )
+                async with sessions.get_lock(chat_id):
+                    live_session = sessions.get_session(chat_id)
+                    resolved = live_session is not None and await _try_end_stale_combat(update, live_session)
+                if not resolved:
+                    await update.effective_chat.send_message(
+                        "No valid targets remain.", message_thread_id=config.TOPIC_ADVENTURE_ID,
+                    )
             return
         buttons = [
             [InlineKeyboardButton(
@@ -2606,6 +2610,48 @@ def _determine_winner(session: sessions.Session) -> str:
     return "party" if party_remains else "enemy"
 
 
+async def _try_end_stale_combat(update: Update, session: sessions.Session) -> bool:
+    """
+    Real live incident (2026-07-19, Coffee: "no enemys left standing...
+    it stopped"): remove_defeated() only ever runs as a side-effect of
+    the SAME attack that dealt the killing blow -- if that never
+    finished (the same kind of shutdown-interrupted-handler race
+    documented in task #184, just landing on combat state that time
+    instead of a dropped chat reply), a monster can be stuck at 0 HP but
+    still present in turn_order forever: living_on_side() correctly
+    shows zero living enemies (it filters by hp_current), but
+    is_combat_over() checks turn_order membership, not HP, so it never
+    returns True either. Every subsequent attack then just hits "No
+    valid targets remain" -- a permanent deadlock with no legal action
+    to escape it, confirmed live via the session snapshot (Wolf 2 sat at
+    0/11 HP with no "has been defeated!" event ever logged for it).
+
+    Called right before any "No valid targets remain" bail-out, this
+    re-runs the normal defeat cleanup + victory resolution the
+    interrupted attack should have finished, so a stale already-dead
+    monster can never strand a fight again regardless of what caused the
+    original gap. Returns True if this fully resolved combat (the caller
+    should skip its own "no targets" message in that case).
+    """
+    chat_id = session.chat_id
+    removed = session.remove_defeated()
+    if removed:
+        await _announce_defeats(update, session, removed)
+    if not session.is_combat_over():
+        return False
+    winner = _determine_winner(session)
+    xp_summary, level_up_notes = _award_victory_xp(session) if winner == "party" else ("", [])
+    if winner == "party":
+        await _check_quest_completions_defeat_monster(update, session)
+        await _check_achievements_for_combat_party(update, session)
+        await _check_guild_quest_completion(update, session)
+    await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
+    for note in level_up_notes:
+        await _notify_main_topic(update, note)
+    sessions.end_session(chat_id)
+    return True
+
+
 async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
     """
     Resolves consecutive AI-controlled turns AND auto-resolved death-save
@@ -3259,9 +3305,10 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
 
         opposing = session.living_on_side(session.opposing_side(user_id))
         if not opposing:
-            await update.effective_chat.send_message(
-                "No valid targets remain.", message_thread_id=config.TOPIC_ADVENTURE_ID
-            )
+            if not await _try_end_stale_combat(update, session):
+                await update.effective_chat.send_message(
+                    "No valid targets remain.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                )
             return
 
         # Physical-dice mode (2026-07-16, per Coffee): only the FIRST
@@ -3913,9 +3960,10 @@ async def _do_shove(update: Update, action_text: str, forced_roll: int | None = 
 
         opposing = session.living_on_side(session.opposing_side(user_id))
         if not opposing:
-            await update.effective_chat.send_message(
-                "No valid targets remain.", message_thread_id=config.TOPIC_ADVENTURE_ID
-            )
+            if not await _try_end_stale_combat(update, session):
+                await update.effective_chat.send_message(
+                    "No valid targets remain.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                )
             return
         target = _pick_target(action_text, opposing)
 
@@ -5107,6 +5155,31 @@ async def _do_check_party(update: Update, text: str = "") -> None:
         await _safe_send(update, f"🎗️ **Your party's sheets ({len(members)}/{db.PARTY_MAX_MEMBERS}):**\n\n{sheets}")
         return
 
+    # Task #161 (real live incident): "Who's here at the market with me?"
+    # asks a genuinely different question than the rest of this handler
+    # answers -- everything below is about the player's PARTY (global,
+    # not location-scoped), but "who's here" is asking who's physically
+    # present at THIS location right now, party or not. Only triggers on
+    # explicit "here" phrasing so plain "check my party" keeps its
+    # existing global behavior unchanged.
+    if character and re.search(r"\bhere\b", text.lower()):
+        location = cl.get_location(CAMPAIGN, character["current_location"])
+        location_name = location["name"] if location else "here"
+        others_here = [
+            p for p in _get_party_members()
+            if p["current_location"] == character["current_location"]
+            and p["telegram_user_id"] != character["telegram_user_id"]
+        ]
+        if others_here:
+            names = [f"{p['name']} (AI)" if p.get("is_ai") else p["name"] for p in others_here]
+            await _safe_send(
+                update,
+                f"👥 At **{location_name}** with **{character['name']}** right now: {', '.join(names)}",
+            )
+        else:
+            await _safe_send(update, f"👥 **{character['name']}** doesn't see anyone else at **{location_name}** right now.")
+        return
+
     lines = [f"👥 Everyone currently active: {_party_summary_text()}"]
 
     if character:
@@ -6245,9 +6318,10 @@ async def _do_breath_weapon(update: Update) -> None:
 
         opposing = session.living_on_side(session.opposing_side(user_id))
         if not opposing:
-            await update.effective_chat.send_message(
-                "No valid targets remain.", message_thread_id=config.TOPIC_ADVENTURE_ID
-            )
+            if not await _try_end_stale_combat(update, session):
+                await update.effective_chat.send_message(
+                    "No valid targets remain.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                )
             return
         target = opposing[0]
 
@@ -8105,9 +8179,10 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                 return
             opposing = session.living_on_side(session.opposing_side(update.effective_user.id))
             if not opposing:
-                await update.effective_chat.send_message(
-                    "No valid targets remain.", message_thread_id=config.TOPIC_ADVENTURE_ID
-                )
+                if not await _try_end_stale_combat(update, session):
+                    await update.effective_chat.send_message(
+                        "No valid targets remain.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                    )
                 return
 
             # Only spend a slot once we KNOW the cast is actually valid —

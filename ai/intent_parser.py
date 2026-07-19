@@ -230,11 +230,26 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # reply about shop stock instead of showing the actual board listing,
     # because the NPC-name check below ran first and returned before this
     # block was ever reached. "quest board" is explicit enough to win.
-    if any(w in lowered for w in ["my quests", "quest journal", "quest log", "my quest log",
+    # Task #185 (real live incident): "any quests available ?" fell
+    # through to plain chat -- every phrase below requires a qualifier
+    # word ("my"/"board"/"current"/"active"/"check"/"show"/"list") right
+    # next to "quest", but "any quests available" has none of them, it's
+    # a bare "is there a quest" phrasing. Same recurring gap this file
+    # has hit many times before for this exact action (#92, #99, #109,
+    # #151, #154, #161) -- a tolerant regex for "any ... quest(s)" and
+    # "quest(s) ... available" covers the natural variations without an
+    # ever-growing literal list, same fix shape as #161's "who's ... with
+    # me" just above.
+    if (
+        any(w in lowered for w in ["my quests", "quest journal", "quest log", "my quest log",
                                     "quest board", "the board", "what's on the board",
                                     "quest details", "current quest", "my quest", "what quest",
                                     "what's my quest", "whats my quest", "active quest",
-                                    "check quest", "check my quest", "show quest", "list quest"]):
+                                    "check quest", "check my quest", "show quest", "list quest",
+                                    "any quests", "any quest", "is there a quest", "are there any quests"])
+        or re.search(r"\bany\b(?:\s+\w+){0,3}\s+quests?\b", lowered)
+        or re.search(r"\bquests?\b(?:\s+\w+){0,3}\s+available\b", lowered)
+    ):
         return {**base, "action": "check_quests"}
 
     # Checked BEFORE "buy" below: "where can I buy potions" is asking
@@ -523,11 +538,22 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # "whos". A regex tolerant of a word or two between "my" and
     # "party" (e.g. "my current party", "my active party") is more
     # robust than an ever-growing literal-phrase list.
+    # Task #161 (real live incident): "Who's here at the market with me?"
+    # fell through to plain chat -- the exact same "insertion between two
+    # required words breaks a contiguous-phrase match" bug already fixed
+    # above for "my ... party", just on the "who's ... with me" side of
+    # this same check instead. Tolerant regex (up to ~6 words between)
+    # instead of an ever-growing literal list, same fix shape as above.
+    # Bare "who's here"/"anyone here" (no "with me" at all) is an equally
+    # natural way to ask the same question, so it's added as its own
+    # trigger rather than assuming "with me" is always spelled out.
     if (
         any(w in lowered for w in ["who's in my party", "whos in my party", "who is in my party",
                                     "who is with me", "who's with me", "am i in a party",
-                                    "party status", "party members"])
+                                    "party status", "party members", "who's here", "who is here",
+                                    "whos here", "anyone here", "anybody here"])
         or re.search(r"\bmy\b(?:\s+\w+){0,2}\s+party\b", lowered)
+        or re.search(r"\bwho('s|s| is)\b(?:\s+\w+){0,6}\s+with me\b", lowered)
     ):
         return {**base, "action": "check_party"}
 
