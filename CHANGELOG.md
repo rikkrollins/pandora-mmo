@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.53] — Grask's held-back companion arc resolves at the Arc 2→3 turn
+
+Continuing the full-storyline plan's Phase 2: Grask, the companion
+withheld per the narrative-craft memo's finding (his own goal — leaving
+the warrens behind for good — resolves cleanly with no remaining hook
+into the deeper mystery, unlike Borin's or Wren's arcs), now has a real
+second quest, "Grask's Choice" (`grasks_resolution`), offered once his
+existing "Grask's Freedom" personal quest is done. Completing it (by
+reaching `the_first_city` — the same place the Arc 2→3 `story_gates`
+trust check already gates) writes a real, persistent
+`db.resolve_companion` call ("resolved_loyal") via a new small
+`QUEST_COMPANION_RESOLUTIONS` mapping in `_complete_quest_and_announce`,
+extensible to the other five companions in a later pass rather than a
+one-off special case. Verified end-to-end: his two quests correctly
+sequence in order, and completing the resolution quest writes the real
+resolution state and surfaces a clear "has made their choice" note.
+
 ## [1.11.52] — Full-storyline Phase 2 (Into the Hush, 3-stage chain) + "open" verb fix
 
 Phase 2 of the full multi-path storyline plan: Arc 2's climax quest,

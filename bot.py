@@ -4853,6 +4853,18 @@ def _chapter_complete_note(telegram_user_id: int, quest_id: str) -> str:
     return f"\n\n🌟 **Chapter complete: \"{arc['title']}\"** — {arc['description']}"
 
 
+# Full-storyline plan, Phase 2: a companion's resolution quest writes a
+# real, persistent state via db.resolve_companion the moment it
+# completes -- see _complete_quest_and_announce below. Grask is the
+# first (his goal was to leave the warrens and never look back; the
+# Arc 2->3 story_gates turn is where he chooses the party over that
+# instead), the other five companions get the same treatment in a
+# later pass, added to this same dict rather than a new mechanism.
+QUEST_COMPANION_RESOLUTIONS = {
+    "grasks_resolution": ("grask_emberscale", "resolved_loyal"),
+}
+
+
 async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest_id: str) -> None:
     quest = CAMPAIGN["quests"][quest_id]
     reward_xp = quest.get("reward_xp", 0)
@@ -4866,6 +4878,16 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
     )
 
     db.complete_quest(telegram_user_id, quest_id)
+
+    resolution_note = ""
+    companion_resolution = QUEST_COMPANION_RESOLUTIONS.get(quest_id)
+    if companion_resolution:
+        npc_id, resolution_state = companion_resolution
+        db.resolve_companion(telegram_user_id, npc_id, resolution_state)
+        companion_npc = CAMPAIGN["npcs"].get(npc_id)
+        companion_name = companion_npc["name"] if companion_npc else npc_id
+        resolution_note = f"\n\n🤝 **{companion_name}** has made their choice."
+
     if reward_xp:
         await _award_xp_and_announce_level_up(update_like, telegram_user_id, reward_xp)
     if reward_gold:
@@ -4899,7 +4921,7 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
 
     await _safe_send(
         update_like,
-        f"📜 **Quest complete: {quest['title']}!**\n{climax_narration}You've earned: {reward_text}.{chapter_note}",
+        f"📜 **Quest complete: {quest['title']}!**\n{climax_narration}You've earned: {reward_text}.{chapter_note}{resolution_note}",
     )
     # Task #172 gap (per Coffee, 2026-07-19): quest ACCEPT already
     # notifies Main (see _do_accept_quest's own _notify_main_topic

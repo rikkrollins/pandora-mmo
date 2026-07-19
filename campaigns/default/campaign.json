@@ -848,6 +848,19 @@
       },
       "clue": "Grask says whoever's giving these goblins their orders is the only thing standing between him and the surface."
     },
+    "grasks_resolution": {
+      "title": "Grask's Choice",
+      "description": "Every step back down has been against everything Grask swore to himself once he got out -- and he's taking every one of them anyway, because the party asked, not because the warrens ever let go of him.",
+      "objective_location": "the_first_city",
+      "giver_npc": "grask_emberscale",
+      "reward_xp": 300,
+      "reward_gold": 100,
+      "trigger": {
+        "type": "reach_location",
+        "location": "the_first_city"
+      },
+      "clue": "Grask keeps saying he's done with tunnels, then keeps following the party into the next one."
+    },
     "veshs_way_back": {
       "title": "Vesh's Way Back",
       "description": "Vesh got turned around chasing a light down into Glimmerdeep Grotto and has been living off crystal-glow ever since -- she just wants someone who actually knows the way to walk her back up to The Crossroads Tavern.",
