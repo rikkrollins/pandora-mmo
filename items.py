@@ -248,7 +248,14 @@ def find_item_mentioned_in_text(text: str, candidate_ids: list[str] | None = Non
     # collision this game has) rather than a general British/American
     # dictionary, which would be a much bigger surface for false
     # positives with no other real payoff here.
-    lowered = text.strip().lower().replace("armour", "armor")
+    #
+    # Same treatment for "fishing rod" (2026-07-19, confirmed live: "Sell
+    # 1x fishing rod" failed even though the character owned a real
+    # Fishing Pole) -- "rod" is the everyday real-world word for this
+    # exact tool and this game has no other item using "rod" at all, so
+    # normalizing it to "pole" is the same kind of safe, single-word,
+    # real-collision fix as armour/armor, not a general synonym engine.
+    lowered = text.strip().lower().replace("armour", "armor").replace("fishing rod", "fishing pole")
     search_space = candidate_ids if candidate_ids is not None else list(ITEMS.keys())
     # Check longer names first so "greater healing potion" doesn't get
     # shadowed by a shorter partial match like "healing potion".
@@ -280,34 +287,60 @@ def find_item_mentioned_in_text(text: str, candidate_ids: list[str] | None = Non
     # never equals "axe") -- \w+(?:'\w+)? keeps a real internal
     # apostrophe (e.g. "woodcutter's") but strips trailing punctuation.
     lowered_words = set(re.findall(r"\w+(?:'\w+)?", lowered))
-    matches = set()
+
+    # Real live bug (2026-07-19, confirmed live TWICE within the hour):
+    # "Buy fishing hooks" silently bought a Fishing Pole -- "hooks" isn't
+    # a real item anywhere, but "fishing" alone is a name-word of
+    # "Fishing Pole" and word-overlap treated that lone MODIFIER as a
+    # confident match. A required_for-based ambiguity check (flagging
+    # Bait too, since both tools share required_for="fishing") fixed
+    # that, but applying it unconditionally then broke "Sell 1x fishing
+    # rod" -- Fishing Pole should resolve confidently there since "rod"
+    # is just the everyday synonym for the SAME item's actual head noun
+    # ("pole"), already normalized to match above.
+    #
+    # The real distinction: a match on an item's HEAD noun (the last
+    # significant word -- "pole" in "Fishing Pole", "potion" in "Healing
+    # Potion", "axe" in "Woodcutter's Axe") is a strong, confident match
+    # that should win outright. A match on any OTHER word (a modifier,
+    # like the bare "fishing" in "fishing hooks") is weak and should
+    # still be checked against required_for for real ambiguity, exactly
+    # like the fallback below already does for a bare category word.
+    strong_matches = set()
+    weak_matches = set()
     for item_id in search_space:
-        data = ITEMS[item_id]
-        matched = False
-        for word in data["name"].lower().split():
-            singular = word[:-1] if word.endswith("s") else word
-            if singular in stopwords or len(singular) < 3:
-                continue
-            if singular in lowered_words or f"{singular}s" in lowered_words:
-                matched = True
+        name_words = [w for w in ITEMS[item_id]["name"].lower().split()]
+        significant_words = [
+            w[:-1] if w.endswith("s") else w for w in name_words
+            if (w[:-1] if w.endswith("s") else w) not in stopwords
+            and len(w[:-1] if w.endswith("s") else w) >= 3
+        ]
+        if not significant_words:
+            continue
+        # Check the head word FIRST, independent of its position in the
+        # name -- iterating in name order and breaking on the first
+        # match (as an earlier version of this fix did) could match a
+        # modifier before ever checking the head word even when the
+        # head word ALSO appears in the input, misclassifying a strong
+        # match as weak.
+        head_word = significant_words[-1]
+        if head_word in lowered_words or f"{head_word}s" in lowered_words:
+            strong_matches.add(item_id)
+            continue
+        for word in significant_words[:-1]:
+            if word in lowered_words or f"{word}s" in lowered_words:
+                weak_matches.add(item_id)
                 break
-        # Real live bug (2026-07-19, confirmed live: "Buy fishing hooks"
-        # silently bought a Fishing Pole -- "hooks" isn't a real item
-        # anywhere, but "fishing" alone is a name-word of "Fishing Pole"
-        # and word-overlap treated that lone modifier as a confident
-        # match). "fishing" is also a real category this shop stocks TWO
-        # tools for (Fishing Pole and Bait, both required_for="fishing")
-        # -- the fix is to also count a required_for match, so a bare
-        # category word correctly makes this AMBIGUOUS (both items match)
-        # instead of silently guessing the wrong one. Only checked when
-        # the name-word loop didn't already match, so it can only ever
-        # ADD ambiguity/ADD a match, never remove the resolved cases
-        # (axe/potions/armour) already fixed above.
-        if not matched:
-            required_for = data.get("required_for")
-            if required_for and (required_for in lowered_words or f"{required_for}s" in lowered_words):
-                matched = True
-        if matched:
+
+    if strong_matches:
+        if len(strong_matches) == 1:
+            return strong_matches.pop()
+        return None
+
+    matches = set(weak_matches)
+    for item_id in search_space:
+        required_for = ITEMS[item_id].get("required_for")
+        if required_for and (required_for in lowered_words or f"{required_for}s" in lowered_words):
             matches.add(item_id)
     if len(matches) == 1:
         return matches.pop()

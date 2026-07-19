@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.62] — URGENT: fix a regression from v1.11.55 that broke selling a Fishing Pole
+
+Caught live within the hour: v1.11.55's fix for "Buy fishing hooks"
+(a required_for-based ambiguity check between Fishing Pole and Bait)
+had an unintended side effect -- "Sell 1x fishing rod" and even a
+follow-up "Sell raw fish" started failing for the same player, because
+the required_for check fired unconditionally per item, manufacturing a
+false ambiguity even when Fishing Pole already matched confidently.
+
+Real fix, in `items.find_item_mentioned_in_text`:
+- "fishing rod" is now normalized to "fishing pole" up front, the same
+  single-word real-collision treatment already used for armour/armor
+  -- "rod" is the everyday word for this exact tool and no other item
+  in this game uses "rod" at all.
+- The word-overlap fallback now distinguishes a match on an item's
+  HEAD noun (e.g. "pole" in "Fishing Pole", "potion" in "Healing
+  Potion") -- a strong, confident match that wins outright -- from a
+  match on any other word (a modifier, like the bare "fishing" in
+  "fishing hooks") -- a weak match that still goes through the
+  required_for ambiguity check, exactly as intended.
+
+Verified via a new permanent regression test covering all 5 real
+cases (buy fishing hooks / buy bait / sell fishing rod / sell fishing
+pole / sell bait) plus a full self-match sweep across every item in
+the game (zero regressions) and the pre-existing axe/potions/armour
+cases.
+
 ## [1.11.61] — "Browse shops" silently fell through to chat
 
 Live-caught while monitoring a real player's session: "Browse shops"

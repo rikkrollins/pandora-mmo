@@ -2669,6 +2669,32 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_leaderboard(FakeUpdate(900942, "", sink))
         self.assertIn("Hall of Fame", sink[-1])
 
+    # -- find_item_mentioned_in_text: fishing gear (2026-07-19, both
+    #    caught live within the same hour). First "Buy fishing hooks"
+    #    silently bought a Fishing Pole ("hooks" isn't real, but bare
+    #    "fishing" alone matched as a modifier); a required_for-based
+    #    ambiguity fix for that then broke "Sell 1x fishing rod" for the
+    #    same player, since Bait ALSO got flagged via required_for even
+    #    though Fishing Pole already matched confidently. Final fix:
+    #    normalize "fishing rod" -> "fishing pole" (same tier as the
+    #    existing armour/armor fix) and only treat a match on an item's
+    #    HEAD noun as strong/confident, so a bare modifier-only match
+    #    still falls through to the required_for ambiguity check. -------
+    def test_fishing_pole_and_bait_item_matching(self):
+        import items as items_module
+        candidates = ["fishing_pole", "bait"]
+        self.assertIsNone(items_module.find_item_mentioned_in_text("Buy fishing hooks", candidate_ids=candidates))
+        self.assertEqual(items_module.find_item_mentioned_in_text("Buy bait", candidate_ids=candidates), "bait")
+        self.assertEqual(
+            items_module.find_item_mentioned_in_text("Sell 1x fishing rod", candidate_ids=candidates),
+            "fishing_pole",
+        )
+        self.assertEqual(
+            items_module.find_item_mentioned_in_text("Sell 1x fishing pole", candidate_ids=candidates),
+            "fishing_pole",
+        )
+        self.assertEqual(items_module.find_item_mentioned_in_text("Sell 2x bait", candidate_ids=candidates), "bait")
+
     # -- "Examine" a real monster present at the location, not just
     #    interactable objects (2026-07-17, Coffee, caught via live
     #    gameplay monitoring: "Look at the wolves ... give me detail
