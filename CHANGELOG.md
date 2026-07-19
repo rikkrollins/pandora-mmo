@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.60] — Rogue gets Cunning Action (task #91, reachable right now)
+
+Continuing the task #91 class-features audit, but prioritizing what's
+actually reachable over speculative level 5+ content: a real level 2
+Rogue is already playing (Laurienna), so Cunning Action (real 5E,
+level 2+: Disengage/Dash/Hide as a bonus action) is live-relevant
+today, unlike most of this game's remaining gaps.
+
+Translated as the one piece with an exact, already-existing hook:
+Disengage means fleeing a fight doesn't provoke the opportunity
+attacks every other class's flee attempt does (see 2026-07-13's
+opportunity-attack block in `_do_flee`) -- a level 2+ Rogue's flee now
+skips that block entirely and gets a real acknowledgment line instead
+of silently mattering nothing. Dash/Hide have no clean translation
+given this engine's lack of a positioning/movement system, so this is
+scoped to the one piece that does. Verified via 2 real tests: a level
+2 Rogue's flee shows no opportunity attacks, a level 1 Rogue's still
+does.
+
 ## [1.11.59] — Druid gets Wild Shape (task #91: Druid had ZERO class features)
 
 Auditing task #91 (class features level 2-10+ for all 12 classes)

@@ -2700,6 +2700,78 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("HP", reply)
         self.assertIn("AC", reply)
 
+    # -- Rogue's Cunning Action (level 2+, task #91 audit, 2026-07-19):
+    #    real 5E lets a Rogue Disengage as a bonus action, so THEIR
+    #    flee shouldn't provoke the opportunity attacks every other
+    #    class's does -- reachable right now by a real level 2 Rogue
+    #    already playing, unlike most of this game's remaining level
+    #    5+ class-feature gaps. -------------------------------------------
+    async def test_level_2_rogue_flee_skips_opportunity_attacks(self):
+        from unittest.mock import patch
+        import sessions
+        sessions.end_session(-999)
+
+        player_id = 999950
+        make_basic_character(
+            player_id, "Quickstep", char_class="Rogue", current_location="crossroads_tavern",
+            hp_max=20, armor_class=13,
+        )
+        db.update_character(player_id, level=2)
+        player = db.get_character(player_id)
+        player["telegram_user_id"] = player_id
+        player["hp_current"] = 20
+
+        enemy_id = -2_500_050
+        enemy = {
+            "telegram_user_id": enemy_id, "name": "Goblin", "dexterity": 10, "strength": 10,
+            "armor_class": 12, "hp_current": 10, "hp_max": 10, "is_ai": 1, "monster_key": "goblin",
+        }
+        session = sessions.start_session(-999, [player, enemy], {player_id: "party", enemy_id: "enemy"})
+        session.turn_order = [player_id, enemy_id]
+        session.current_turn_index = 0
+
+        sink = []
+        with patch("bot.roll_ability_check", return_value={
+            "raw_roll": 20, "modifier": 0, "proficiency": 0, "total": 20,
+        }), patch("bot.narrate_skill_check", return_value="You slip away."):
+            await bot._do_flee(FakeUpdate(player_id, "I flee", sink), "I flee")
+        reply = "\n".join(sink)
+        self.assertNotIn("Opportunity attacks", reply)
+        self.assertIn("Cunning Action", reply)
+        sessions.end_session(-999)
+
+    async def test_level_1_rogue_flee_still_takes_opportunity_attacks(self):
+        from unittest.mock import patch
+        import sessions
+        sessions.end_session(-999)
+
+        player_id = 999951
+        make_basic_character(
+            player_id, "Greenhorn", char_class="Rogue", current_location="crossroads_tavern",
+            hp_max=20, armor_class=13,
+        )
+        player = db.get_character(player_id)
+        player["telegram_user_id"] = player_id
+        player["hp_current"] = 20
+
+        enemy_id = -2_500_051
+        enemy = {
+            "telegram_user_id": enemy_id, "name": "Goblin", "dexterity": 10, "strength": 10,
+            "armor_class": 12, "hp_current": 10, "hp_max": 10, "is_ai": 1, "monster_key": "goblin",
+        }
+        session = sessions.start_session(-999, [player, enemy], {player_id: "party", enemy_id: "enemy"})
+        session.turn_order = [player_id, enemy_id]
+        session.current_turn_index = 0
+
+        sink = []
+        with patch("bot.roll_ability_check", return_value={
+            "raw_roll": 20, "modifier": 0, "proficiency": 0, "total": 20,
+        }), patch("bot.narrate_skill_check", return_value="You slip away."):
+            await bot._do_flee(FakeUpdate(player_id, "I flee", sink), "I flee")
+        reply = "\n".join(sink)
+        self.assertIn("Opportunity attacks", reply)
+        sessions.end_session(-999)
+
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
     """

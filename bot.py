@@ -4390,9 +4390,18 @@ async def _do_flee(update: Update, action_text: str, forced_roll: int | None = N
         # stack multiple 30-160s Ollama calls onto a single flee attempt
         # -- and reuses _format_combat_result with no flavor text for a
         # fast, fully deterministic result instead.
+        # Rogue's Cunning Action (level 2+, task #91 audit, 2026-07-19):
+        # real 5E lets a Rogue Disengage as a bonus action, meaning
+        # THEIR flee never provokes the opportunity attacks every other
+        # class's does -- the exact, already-existing block below is
+        # precisely what Disengage removes, so this is a clean
+        # skip-the-loop rather than new combat plumbing. Reachable right
+        # now (a real level 2 Rogue is already playing), unlike most of
+        # this game's remaining level 5+ class-feature gaps.
+        has_cunning_action = fleeing.get("char_class") == "Rogue" and fleeing.get("level", 1) >= 2
         opportunity_blocks = []
         _refresh_real_player_spell_slots(fleeing)
-        for enemy in session.living_on_side(session.opposing_side(user_id)):
+        for enemy in ([] if has_cunning_action else session.living_on_side(session.opposing_side(user_id))):
             if fleeing["hp_current"] <= 0:
                 break
             atk_result = resolve_attack(
@@ -4404,6 +4413,8 @@ async def _do_flee(update: Update, action_text: str, forced_roll: int | None = N
         if opportunity_blocks:
             _sync_player_to_db(fleeing)
             message = message + "\n\n🗡️ **Opportunity attacks as you break away:**\n\n" + "\n\n".join(opportunity_blocks)
+        elif has_cunning_action:
+            message = message + f"\n\n🗲 **{fleeing['name']}**'s Cunning Action lets them Disengage — no opportunity attacks on the way out!"
 
         if fleeing["hp_current"] <= 0:
             await _safe_send(
