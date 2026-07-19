@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.36] — Combat messages now name the real spell/ability used, fixing the root cause of a support-agent hallucination (task #171)
+
+**Root cause traced all the way back to the deterministic combat message
+itself, not the support agent.** Coffee replied to "Ravenloft hits
+Goblin 3 for 5 damage" with /help asking what spell that was; the
+support agent invented "fire_bolt" -- but the real spell cast was
+Eldritch Blast. Investigation found the actual bug: the combat
+resolution line for EVERY hit, spell or plain weapon attack alike, only
+ever said "attacks" -- it never named the real spell/ability at all,
+even in the deterministic rules-computed block. So when asked which
+spell was used, there was no real fact anywhere for the support agent
+to ground an answer in, and the model fabricated a plausible-sounding
+one instead of admitting it couldn't tell -- the same "no fact given,
+model invents one" failure mode already fixed once for class names
+(task #153).
+
+Fixed at the source: `_format_combat_result`/`_post_narrated` now take
+an optional `action_label`, and `_do_cast_spell`'s damage-spell branch
+passes the real spell name through. The resolution line now reads
+"**Ravenloft** casts **Eldritch Blast** at **Goblin 3** → **Hits for 8
+damage!**" instead of the old generic "attacks" -- both fixing what
+players actually see in real time AND giving any later /help-as-reply
+question about it a real fact to answer from, rather than needing a
+retroactive event-log lookup. Plain weapon attacks are unchanged (no
+name was ever being lost there). Verified live via a real test: a cast
+Eldritch Blast now shows the true spell name in the resolution block; a
+plain attack keeps its existing phrasing untouched.
+
 ## [1.11.35] — "Send X to Y" now works as give_item; giving an item to a recruited-NPC party member no longer misfires as talk_npc (task #181)
 
 **"Send woodcutters axe to @ShesAQueen_78" was misclassified as `chat`,

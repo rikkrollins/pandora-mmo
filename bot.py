@@ -1363,13 +1363,32 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
 # Combat helpers (shared by both natural-language flow and /commands)
 # ---------------------------------------------------------------------
 
-def _format_combat_result(flavor_text: str, result: dict, actor_label: str, defender_label: str) -> str:
+def _format_combat_result(flavor_text: str, result: dict, actor_label: str, defender_label: str,
+                           action_label: str | None = None) -> str:
     """
     Builds the visually structured combat message: a banner (critical hit /
     success / miss / fumble), the AI's short flavor line as a quote, then a
     deterministic resolution block with the REAL numbers from the rules
     engine — including the actual raw d20 roll — never left to the AI to
     state or invent.
+
+    action_label (task #171, real live incident 2026-07-18): the specific
+    spell/ability actually used, when there is one -- previously this
+    resolution line NEVER named the real action at all (a spell cast and a
+    plain weapon attack both just said "attacks"), so when Coffee replied
+    to a damage line with /help asking which spell that was, the support
+    agent had zero real grounding for the answer and invented a plausible-
+    sounding one ("fire_bolt") instead of the real spell actually cast
+    (Eldritch Blast) -- the same "no fact given, model invents one instead"
+    failure mode already fixed once for class names (task #153). Root
+    cause traced all the way to this deterministic line never stating the
+    real name in the first place, not just the AI flavor text possibly
+    getting it wrong -- so the real fix is here, not in the support agent:
+    state the true spell name whenever one exists, so both the player-
+    facing message AND any later /help-as-reply about it are grounded in a
+    real fact instead of silence. Plain weapon attacks (action_label=None)
+    keep the exact existing "attacks" phrasing -- there's no name being
+    lost there in the first place.
     """
     lines = []
     raw_roll = result.get("raw_roll")
@@ -1390,10 +1409,11 @@ def _format_combat_result(flavor_text: str, result: dict, actor_label: str, defe
     lines.append("")
     lines.append("⚔️ **Combat Resolution**")
     dmg = result.get("damage_dealt", 0)
+    verb = f"casts **{action_label}** at" if action_label else "attacks"
     if result.get("hit", True):
-        lines.append(f"- 🗡️ **{actor_label}** attacks **{defender_label}** → **Hits for {dmg} damage!**")
+        lines.append(f"- 🗡️ **{actor_label}** {verb} **{defender_label}** → **Hits for {dmg} damage!**")
     else:
-        lines.append(f"- 🗡️ **{actor_label}** attacks **{defender_label}** → **Misses!**")
+        lines.append(f"- 🗡️ **{actor_label}** {verb} **{defender_label}** → **Misses!**")
 
     hp_now = result.get("defender_hp_remaining")
     hp_max = result.get("defender_hp_max")
@@ -2049,7 +2069,8 @@ async def _announce_reaction(update: Update, defender: dict, result: dict) -> No
 
 
 async def _post_narrated(update: Update, character: dict, action_text: str,
-                          mechanical_result: dict, session: sessions.Session) -> None:
+                          mechanical_result: dict, session: sessions.Session,
+                          action_label: str | None = None) -> None:
     actor_personality = _personality_for_character_name(character.get("name", ""))
     location = cl.get_location(CAMPAIGN, character.get("current_location"))
     location_description = location["description"] if location else None
@@ -2061,6 +2082,7 @@ async def _post_narrated(update: Update, character: dict, action_text: str,
         flavor, mechanical_result,
         actor_label=mechanical_result.get("attacker", character.get("name", "?")),
         defender_label=mechanical_result.get("defender", "?"),
+        action_label=action_label,
     )
     session.log_event(f"{mechanical_result.get('attacker')} vs {mechanical_result.get('defender')}: {flavor}")
     await _safe_send(update, message)
@@ -8113,7 +8135,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                 "hit": True, "defender_hp_remaining": target["hp_current"],
                 "defender_hp_max": target.get("hp_max", target["hp_current"]),
             }
-            await _post_narrated(update, character, text, full_result, session)
+            await _post_narrated(update, character, text, full_result, session, action_label=spell["name"])
 
             removed = session.remove_defeated()
             await _announce_defeats(update, session, removed)
