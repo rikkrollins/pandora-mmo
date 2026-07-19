@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.61] — "Browse shops" silently fell through to chat
+
+Live-caught while monitoring a real player's session: "Browse shops"
+(right after arriving at Market Row) got silently classified as chat
+-- the `list_shop` keyword-fallback trigger list already covered
+"browse the shop" but not the bare plural "browse shops" or "browse
+shop" (no "the"), so it fell all the way past the fast keyword path
+to the AI model, which guessed chat instead. Added "browse shop",
+"browse shops", and "browse the shops" to the trigger list. Verified
+via a direct case matrix with zero regressions on the existing
+list_shop phrasings plus a handful of unrelated actions (check_quests,
+buy, sell).
+
 ## [1.11.60] — Rogue gets Cunning Action (task #91, reachable right now)
 
 Continuing the task #91 class-features audit, but prioritizing what's

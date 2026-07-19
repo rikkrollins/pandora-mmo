@@ -525,7 +525,8 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                                     "id like to shop", "i'd like to shop", "let me shop",
                                     "let's shop", "lets shop", "time to shop", "go shopping",
                                     "items in the shop", "items in his shop", "items in her shop",
-                                    "shop items", "browse the shop", "see the shop",
+                                    "shop items", "browse the shop", "browse shop", "browse shops",
+                                    "browse the shops", "see the shop",
                                     "what's in the shop", "whats in the shop", "look at the shop",
                                     "what's in his shop", "what's in her shop",
                                     "open the shop", "open shop", "open his shop", "open her shop"]):
