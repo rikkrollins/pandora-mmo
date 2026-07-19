@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.46] — Manual-dice-roll prompts now retry on a transient timeout (task #187)
+
+Real live incident, 2026-07-19: a `telegram.error.TimedOut` (transient
+network ConnectTimeout) hit while `_do_gather` tried to send its "Roll
+a d20" prompt — caught by the global error handler so the process
+didn't crash, but the prompt itself had no retry. Root cause: all six
+`_PENDING_DICE_ROLLS` prompt sites (attack, skill_check, shove, flee,
+gather, steal) called `update.effective_chat.send_message(...)`
+directly instead of `_safe_send`, which exists specifically to retry
+once on exactly this failure — the fix already rolled out to every
+other narration/reply site in the game, just missed at these six.
+Switched all six to `_safe_send`. Verified live through the real
+`_do_gather`/`_do_steal` functions that the prompt still sends and the
+pending-roll state still records correctly after the change (mechanical
+fix, same message text/thread_id at each site — no behavior change
+beyond the added retry).
+
+Filed as task #186 (not fixed here, needs a design decision): a
+related but separate bug found investigating this same incident —
+`_PENDING_DICE_ROLLS` is a bare in-memory dict, so a bot restart while
+a roll is pending silently drops it; the player's next roll then gets
+misclassified as ordinary chat with no reply. Reproduced live the same
+day this was found.
+
 ## [1.11.45] — Buyable maps: real, partial-reveal, never a spoiler (task #141, first half)
 
 Per Coffee's backlog: "buyable and secret discoverable maps (partial-

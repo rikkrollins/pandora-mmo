@@ -3445,10 +3445,11 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
             forced_roll = _extract_combined_roll(action_text)
         if forced_roll is None and attacker.get("manual_dice_enabled") and not attacker.get("is_ai"):
             _PENDING_DICE_ROLLS[user_id] = {"kind": "attack", "action_text": action_text}
-            await update.effective_chat.send_message(
-                "🎲 Roll a d20 for your attack and tell me the result.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
-            )
+            # Task #187: routed through _safe_send (not a raw send_message)
+            # so a transient TimedOut retries once instead of silently
+            # dropping the prompt -- confirmed live this WAS happening
+            # (real ConnectTimeout caught only by the global error handler).
+            await _safe_send(update, "🎲 Roll a d20 for your attack and tell me the result.")
             return
         # Task #143: a real damage-die roll declared alongside the
         # attack roll in the same message ("attack goblin, i rolled 15
@@ -3927,10 +3928,9 @@ async def _do_skill_check(update: Update, ability: str, action_text: str, forced
         _PENDING_DICE_ROLLS[update.effective_user.id] = {
             "kind": "skill_check", "ability": ability, "action_text": action_text,
         }
-        await update.effective_chat.send_message(
-            f"🎲 Roll a d20 for this {ability} check and tell me the result.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
-        )
+        # Task #187: _safe_send, not a raw send_message -- see the attack
+        # site's comment above for why.
+        await _safe_send(update, f"🎲 Roll a d20 for this {ability} check and tell me the result.")
         return
 
     if lockable is not None:
@@ -4146,10 +4146,9 @@ async def _do_shove(update: Update, action_text: str, forced_roll: int | None = 
             forced_roll = _extract_combined_roll(action_text)
         if forced_roll is None and attacker.get("manual_dice_enabled") and not attacker.get("is_ai"):
             _PENDING_DICE_ROLLS[user_id] = {"kind": "shove", "action_text": action_text}
-            await update.effective_chat.send_message(
-                "🎲 Roll a d20 for your shove and tell me the result.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
-            )
+            # Task #187: _safe_send, not a raw send_message -- see the
+            # attack site's comment above for why.
+            await _safe_send(update, "🎲 Roll a d20 for your shove and tell me the result.")
             return
 
         attacker_result = roll_ability_check(attacker, "strength", proficient=True, forced_roll=forced_roll)
@@ -4239,10 +4238,9 @@ async def _do_flee(update: Update, action_text: str, forced_roll: int | None = N
             forced_roll = _extract_combined_roll(action_text)
         if forced_roll is None and fleeing.get("manual_dice_enabled") and not fleeing.get("is_ai"):
             _PENDING_DICE_ROLLS[user_id] = {"kind": "flee", "action_text": action_text}
-            await update.effective_chat.send_message(
-                "🎲 Roll a d20 for your escape attempt and tell me the result.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
-            )
+            # Task #187: _safe_send, not a raw send_message -- see the
+            # attack site's comment above for why.
+            await _safe_send(update, "🎲 Roll a d20 for your escape attempt and tell me the result.")
             return
 
         # Ranger's Danger Sense (task #91, 2026-07-18): already real for
@@ -5901,10 +5899,9 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
         forced_roll = _extract_combined_roll(action_text)
     if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
         _PENDING_DICE_ROLLS[update.effective_user.id] = {"kind": "gather", "action_text": action_text}
-        await update.effective_chat.send_message(
-            f"🎲 Roll a d20 for this {node['ability']} check and tell me the result.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
-        )
+        # Task #187: _safe_send, not a raw send_message -- this exact site
+        # dropped a real prompt live to a transient TimedOut before this fix.
+        await _safe_send(update, f"🎲 Roll a d20 for this {node['ability']} check and tell me the result.")
         return
 
     result = roll_ability_check(character, node["ability"], proficient=False, forced_roll=forced_roll)
@@ -8332,10 +8329,9 @@ async def _do_steal(update: Update, text: str, forced_roll: int | None = None) -
         forced_roll = _extract_combined_roll(text)
     if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
         _PENDING_DICE_ROLLS[telegram_user_id] = {"kind": "steal", "action_text": text}
-        await update.effective_chat.send_message(
-            "🎲 Roll a d20 for your theft attempt and tell me the result.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
-        )
+        # Task #187: _safe_send, not a raw send_message -- see the attack
+        # site's comment above for why.
+        await _safe_send(update, "🎲 Roll a d20 for your theft attempt and tell me the result.")
         return
 
     result = roll_ability_check(character, "dexterity", proficient=False, forced_roll=forced_roll)
