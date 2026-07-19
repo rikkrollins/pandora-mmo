@@ -4892,6 +4892,22 @@ QUEST_COMPANION_RESOLUTIONS = {
             "high": ("resolved_loyal", "finally steps off the street he's stood on for years and says his penance is paid"),
         },
     },
+    "wrens_resolution": {
+        "npc_id": "wren_hollowbrook",
+        "banded": {
+            "low": ("resolved_estranged", "says some things aren't the party's to know and goes back to talking to the garden instead"),
+            "mid": ("resolved_distant", "lets the party stay close to the shrine, but still won't say what its roots are really drawing on"),
+            "high": ("resolved_loyal", "finally says out loud what she's spent this whole time protecting"),
+        },
+    },
+    "pips_resolution": {
+        "npc_id": "pip_thistledown",
+        "banded": {
+            "low": ("resolved_estranged", "admits the party's story wasn't the one he was waiting for, and keeps watching the road for a better one"),
+            "mid": ("resolved_distant", "calls it good enough for now and keeps traveling, though he's still humming about what's next"),
+            "high": ("resolved_loyal", "finally stops 'just about to cross' and admits the party's story is the one he's been waiting to be part of"),
+        },
+    },
 }
 
 

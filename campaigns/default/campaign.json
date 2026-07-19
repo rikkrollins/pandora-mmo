@@ -848,6 +848,19 @@
       },
       "clue": "Wren says the shrine's garden has been restless the same way it was the last time something changed down below."
     },
+    "wrens_resolution": {
+      "title": "Roots Worth Trusting",
+      "description": "Wren's let the party into the Sunken Root Caverns once already -- now it's a matter of whether she'll actually tell them what the shrine's roots are drawing on, back where she's kept that secret all along.",
+      "objective_location": "hollow_stump_shrine",
+      "giver_npc": "wren_hollowbrook",
+      "reward_xp": 150,
+      "reward_gold": 40,
+      "trigger": {
+        "type": "reach_location",
+        "location": "hollow_stump_shrine"
+      },
+      "clue": "Wren keeps almost saying something about the shrine's roots, then talking to the garden instead."
+    },
     "pips_story_worth_telling": {
       "title": "A Story Worth Telling",
       "description": "Pip's been stalling on this bridge for three days waiting for one good story before he'll finally move on -- he wants the party to bring back proof of something genuinely worth singing about from the Whispering Wood.",
@@ -860,6 +873,19 @@
         "location": "whispering_wood"
       },
       "clue": "Pip says a story only counts if he can honestly say he sent someone to go get it."
+    },
+    "pips_resolution": {
+      "title": "The Story He's Already In",
+      "description": "Pip got his story out of the Whispering Wood -- now it's just a matter of whether he realizes the better one's been happening around him this whole time, back on the same bridge he's been stalling on for days.",
+      "objective_location": "stonearch_bridge",
+      "giver_npc": "pip_thistledown",
+      "reward_xp": 120,
+      "reward_gold": 30,
+      "trigger": {
+        "type": "reach_location",
+        "location": "stonearch_bridge"
+      },
+      "clue": "Pip's still saying he's 'just about to cross,' but he's stopped actually packing to leave."
     },
     "grasks_freedom": {
       "title": "Grask's Freedom",

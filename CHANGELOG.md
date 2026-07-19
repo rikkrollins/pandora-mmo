@@ -2,6 +2,28 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.58] — Wren's and Pip's resolutions ship, completing Full-storyline Phase 3
+
+The last two companion resolution quests: Wren's "Roots Worth
+Trusting" (offered once "What the Roots Are Hiding" is done, triggered
+by returning to the Hollow Stump Shrine -- whether she finally tells
+the party what the shrine's roots are really drawing on), and Pip's
+"The Story He's Already In" (offered once "A Story Worth Telling" is
+done, triggered by returning to Stonearch Bridge -- whether he
+realizes the party's story is the one he's been stalling three days
+for). Both banded by real `npc_relationships.affinity` the same way
+as Grask/Vesh/Sera/Borin. Verified via a combined real throwaway
+fixture test driving `bot._complete_quest_and_announce` for both
+companions across all 3 trust bands each (6 runs total).
+
+This completes the full-storyline plan's Phase 3 -- all 6 recruitable
+companions (Grask, Vesh, Sera, Borin, Wren, Pip) now have a real,
+trust-driven resolution arc, each read off actual player behavior
+stored in the database, never invented by AI narration. Phase 4 (a
+one-off live quest-progress reset for real players, so everyone
+experiences this new content fresh) stays deliberately deferred until
+scope is confirmed -- not part of this release.
+
 ## [1.11.57] — Borin's companion arc gets a real trust-banded resolution
 
 Continuing the full-storyline plan's Phase 3: Borin now has a second
