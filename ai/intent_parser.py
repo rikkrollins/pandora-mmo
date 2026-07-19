@@ -249,6 +249,15 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                                     "any quests", "any quest", "is there a quest", "are there any quests"])
         or re.search(r"\bany\b(?:\s+\w+){0,3}\s+quests?\b", lowered)
         or re.search(r"\bquests?\b(?:\s+\w+){0,3}\s+available\b", lowered)
+        # Real live incident (2026-07-19, Sugar): "Check for quests in
+        # cellar" fell through every branch above (the literal "check
+        # quest"/"check my quest" phrases require no word in between,
+        # but this has "for" between "check" and "quests") all the way
+        # to the model, which misread it as check_sheet -- same
+        # recurring "check ... quest(s)" gap this file has hit before,
+        # just with a different filler word. Same tolerant-regex shape
+        # as the "any ... quest" fix just above.
+        or re.search(r"\bcheck\b(?:\s+\w+){0,3}\s+quests?\b", lowered)
     ):
         return {**base, "action": "check_quests"}
 

@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.50] — "Check for quests" misclassified as check_sheet (live-caught, Sugar)
+
+Live-caught while monitoring a real player's session: "Check for quests
+in cellar" fell through every `check_quests` keyword trigger in
+`ai/intent_parser.py`'s `_keyword_fallback` (the literal "check
+quest"/"check my quest" phrases require no word in between, but this
+has "for" between "check" and "quests") all the way to the model, which
+misread it as `check_sheet` -- same recurring "check ... quest(s)" gap
+class this file has hit before (tasks #92, #99, #109, #151, #154,
+#161, #185), just with a different filler word. Added a tolerant regex
+(`check ... quest(s)`, up to 3 filler words) matching the same shape as
+the existing "any ... quest" fix. Verified against a set of phrasings
+that should and shouldn't match check_quests -- no regressions on
+check_inventory/check_sheet.
+
 ## [1.11.49] — Manual dice rolls auto-roll after 1 minute + real "examine" matching fix
 
 Per Coffee's direct instruction ("give the user 1 minute to roll - if
