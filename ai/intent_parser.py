@@ -328,6 +328,63 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     ):
         return {**base, "action": "check_sheet", "target": named_sheet_match.group(1)}
 
+    if any(w in lowered for w in ["ask for a clue", "ask for clues", "give me a clue", "any clues",
+                                    "what's the clue", "need a hint", "give me a hint",
+                                    "ask for a hint", "what clues"]):
+        return {**base, "action": "ask_clue"}
+
+    # give_item (player-to-player trading, 2026-07-15): checked after
+    # ask_clue above so "give me a clue/hint" is never shadowed -- this
+    # only fires on "give"/"hand"/"trade"/"send" phrasing that also names a
+    # recipient via "to" or "them"/a name, distinct from ask_clue's
+    # "give me a ..." pattern (which never involves handing off to
+    # someone else).
+    #
+    # Real live bug (2026-07-19, found via a real test written for the
+    # "send" fix just below): giving an item to a party member whose
+    # name happens to be a recruited campaign NPC's -- "Give the potion
+    # to Sera", "Hand Sera the torch" -- came back as talk_npc instead,
+    # same root cause as every other fix in this "checked BEFORE the
+    # known-NPC-name loop" run above (buy/sell/recruit/invite/
+    # check_sheet): this check used to sit AFTER that loop, so the loop
+    # always caught Sera's name first and returned talk_npc before
+    # give_item ever got a chance to run. Moved up here, same fix
+    # pattern as all the others.
+    #
+    # Real live bug (2026-07-18, confirmed live via topic-activity
+    # monitoring: "Send woodcutters axe to @ShesAQueen_78" fell through
+    # to silent chat, no item transfer): "send " was never in this
+    # trigger-verb list, even though it's exactly the same "verb + item
+    # + to + recipient" construction as give/hand/trade.
+    if (any(w in lowered for w in ["give ", "hand ", "trade ", "send "])
+            and " to " in lowered and "give me a" not in lowered):
+        return {**base, "action": "give_item"}
+
+    # Real live bug (2026-07-18, confirmed live: Coffee's "Give Laurienna
+    # a woodcutting axe" fell through to silent chat): the "to" check
+    # above misses the equally natural English dative construction "give
+    # [recipient] a/an/the/some [item]" -- no "to" at all. Detected here
+    # via a capitalized word right after the verb (a real recipient's
+    # name is always capitalized), NOT via generic item-name matching --
+    # confirmed live that a loose item-name check falsely fires on
+    # idioms like "give it a hand" (matches "Bracers of the Steady
+    # Hand") or "give it a try"/"give her a hand" in general, since
+    # those don't require any real item at all. A lowercase pronoun
+    # ("it"/"her"/"him"/"them") right after the verb is exactly what
+    # this excludes.
+    # Real live bug (2026-07-18, confirmed live: Coffee's "Give
+    # @ShesAQueen_78 a Woodcutters Axe" fell through to silent chat):
+    # the capitalized-word check above never matches a real Telegram
+    # @username tag, since it starts with "@", not an uppercase letter
+    # -- exactly the same dative construction as the fix right above it,
+    # just with an @-tag recipient instead of a capitalized name. An
+    # @-tag is unambiguous regardless of case (unlike a bare capitalized
+    # word, which still needs the idiom-exclusion reasoning above), so
+    # this is checked as its own alternative rather than loosening the
+    # existing pattern.
+    if re.search(r"\b(?:[Gg]ive|[Hh]and|[Tt]rade|[Ss]end)\s+(?:[A-Z]\w+|@\w+)\s+(?:a|an|the|some)\b", text):
+        return {**base, "action": "give_item"}
+
     # Confirmed live 2026-07-14 (Coffee, reported as a broad "roadblock"
     # affecting both himself and the AI party): the per-word matching
     # below only filtered by word length (>=3), so filler words inside
@@ -502,46 +559,6 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                                     "my choice is", "i'll take the", "ill take the",
                                     "keep it and collect the reward", "leave it be instead"]):
         return {**base, "action": "resolve_choice"}
-
-    if any(w in lowered for w in ["ask for a clue", "ask for clues", "give me a clue", "any clues",
-                                    "what's the clue", "need a hint", "give me a hint",
-                                    "ask for a hint", "what clues"]):
-        return {**base, "action": "ask_clue"}
-
-    # give_item (player-to-player trading, 2026-07-15): checked after
-    # ask_clue above so "give me a clue/hint" is never shadowed -- this
-    # only fires on "give"/"hand"/"trade" phrasing that also names a
-    # recipient via "to" or "them"/a name, distinct from ask_clue's
-    # "give me a ..." pattern (which never involves handing off to
-    # someone else).
-    if (any(w in lowered for w in ["give ", "hand ", "trade "])
-            and " to " in lowered and "give me a" not in lowered):
-        return {**base, "action": "give_item"}
-
-    # Real live bug (2026-07-18, confirmed live: Coffee's "Give Laurienna
-    # a woodcutting axe" fell through to silent chat): the "to" check
-    # above misses the equally natural English dative construction "give
-    # [recipient] a/an/the/some [item]" -- no "to" at all. Detected here
-    # via a capitalized word right after the verb (a real recipient's
-    # name is always capitalized), NOT via generic item-name matching --
-    # confirmed live that a loose item-name check falsely fires on
-    # idioms like "give it a hand" (matches "Bracers of the Steady
-    # Hand") or "give it a try"/"give her a hand" in general, since
-    # those don't require any real item at all. A lowercase pronoun
-    # ("it"/"her"/"him"/"them") right after the verb is exactly what
-    # this excludes.
-    # Real live bug (2026-07-18, confirmed live: Coffee's "Give
-    # @ShesAQueen_78 a Woodcutters Axe" fell through to silent chat):
-    # the capitalized-word check above never matches a real Telegram
-    # @username tag, since it starts with "@", not an uppercase letter
-    # -- exactly the same dative construction as the fix right above it,
-    # just with an @-tag recipient instead of a capitalized name. An
-    # @-tag is unambiguous regardless of case (unlike a bare capitalized
-    # word, which still needs the idiom-exclusion reasoning above), so
-    # this is checked as its own alternative rather than loosening the
-    # existing pattern.
-    if re.search(r"\b(?:[Gg]ive|[Hh]and|[Tt]rade)\s+(?:[A-Z]\w+|@\w+)\s+(?:a|an|the|some)\b", text):
-        return {**base, "action": "give_item"}
 
     if any(w in lowered for w in ["i accept", "i'll do it", "ill do it", "count me in", "i'll help",
                                     "ill help", "i'll take the job", "i'll take it on"]):

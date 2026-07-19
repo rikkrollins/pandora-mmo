@@ -2,6 +2,32 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.35] — "Send X to Y" now works as give_item; giving an item to a recruited-NPC party member no longer misfires as talk_npc (task #181)
+
+**"Send woodcutters axe to @ShesAQueen_78" was misclassified as `chat`,
+found live via topic-activity monitoring: no item transfer, no reply
+about it.** Root cause: the give_item keyword check only triggered on
+`"give "`/`"hand "`/`"trade "` + `" to "`, and the no-"to" dative-construction
+regex only matched give/hand/trade -- "send" was never a trigger verb
+in either, even though "send X to Y" and "send Y a X" are exactly the
+same construction. Added "send" as an equal alternative in both checks.
+
+**Found via the real test written for the fix above, NOT part of the
+original report:** giving an item to a party member whose name happens
+to match a recruited campaign NPC -- "Give the potion to Sera", "Hand
+Sera the torch" -- came back as `talk_npc` instead of `give_item`. Same
+root cause as several earlier fixes in this file (buy/sell/recruit_npc/
+invite_to_party/check_sheet all needed the identical fix already):
+give_item's check used to sit AFTER the known-NPC-name matching loop,
+so a message naming a real NPC like Sera got swallowed as talk_npc
+before give_item ever ran. Moved give_item's two checks (and ask_clue,
+which must stay checked first) to before that loop, same fix pattern
+already established for every other action this has happened to.
+Verified with a real test: 17 cases covering the reported bug, the
+newly-found NPC-name-shadowing bug, and a regression sweep of
+recruit_npc/invite_to_party/buy/sell/talk_npc/ask_clue/give-idioms, all
+passing.
+
 ## [1.11.34] — Battle menu now asks who to target; fix a restart landing mid-AI-turn freezing combat forever
 
 **Battle menu didn't ask who a heal/potion/damage-spell targets, per Coffee:
