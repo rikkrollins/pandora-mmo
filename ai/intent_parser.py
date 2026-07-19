@@ -524,7 +524,8 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                                     "items in the shop", "items in his shop", "items in her shop",
                                     "shop items", "browse the shop", "see the shop",
                                     "what's in the shop", "whats in the shop", "look at the shop",
-                                    "what's in his shop", "what's in her shop"]):
+                                    "what's in his shop", "what's in her shop",
+                                    "open the shop", "open shop", "open his shop", "open her shop"]):
         return {**base, "action": "list_shop"}
 
     # Real live bug (2026-07-15): "auto equip my equipment" contains "my
@@ -830,6 +831,21 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if examine_verb_match:
         target = text[examine_verb_match.start(1):examine_verb_match.end(1)].strip()
         return {**base, "action": "examine", "target": target or None}
+
+    # Live-caught (2026-07-19, Sugar): "Try opening the barrel with a
+    # chalk symbol" fell all the way to 'chat' -- neither "open" nor any
+    # of its verb forms appeared in either examine trigger list above,
+    # the exact same "verb not covered" gap this file has hit many
+    # times before (touch/peer/read/observe, all added the same way).
+    # Deliberately excludes "force open"/"break down"/"smash" -- those
+    # already route to a real strength skill check further below (the
+    # object resists and needs to be forced), a genuinely different
+    # intent from just looking inside/at something unobstructed.
+    if not any(w in lowered for w in ["force open", "break down", "smash"]):
+        open_match = re.search(r"\bopen(?:ing|ed)?\b\s+(?:the |a |an )?(.+)", lowered)
+        if open_match:
+            target = text[open_match.start(1):open_match.end(1)].strip()
+            return {**base, "action": "examine", "target": target or None}
 
     if any(w in lowered for w in ["steal", "pickpocket", "rob the", "rob this", "swipe the", "take without paying"]):
         return {**base, "action": "steal"}

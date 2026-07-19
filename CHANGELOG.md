@@ -2,6 +2,41 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.52] — Full-storyline Phase 2 (Into the Hush, 3-stage chain) + "open" verb fix
+
+Phase 2 of the full multi-path storyline plan: Arc 2's climax quest,
+"Into the Hush," is now a real 3-stage chain instead of one single
+defeat-the-boss trigger, reusing the clue text already written for it
+(no new lore invented, just gated properly):
+- Stage 1, "Into the Hush" (reach `the_hush_below`) — the descent itself.
+- Stage 2, "What Watches in the Dark" (defeat `shadow_wisp`) — the
+  lesser threat already listed at that location has to be dealt with
+  first.
+- Stage 3, "Into the Hush" (defeat `the_unspoken`, `weight: climactic`)
+  — the real confrontation, now getting the deeper AI-narrated pass
+  from Phase 1's `narrate_chapter_climax`.
+
+`_offerable_quest_at_location`, `_check_story_gate`, `_chapter_complete_note`,
+and every other place that reads campaign quests are all fully generic
+over quest id and location, so this chain needed zero other code
+changes — verified end-to-end with a real throwaway test: stage1 →
+stage2 → stage3 cascade correctly, the level-up and chapter-complete
+notes both fire, and the Arc 2→3 `story_gates` check correctly
+recognizes `the_unspoken` as defeated via the new quest id.
+
+Live-caught bug, same monitoring session (Sugar): "Try opening the
+barrel with a chalk symbol" fell all the way to `chat` — neither
+`ai/intent_parser.py`'s two `examine` trigger lists included any form
+of "open" at all, the same "verb not covered" gap this file has hit
+many times before (touch/peer/read/observe, all added the same way).
+Added `open`/`opening`/`opened` to the examine matcher, explicitly
+excluding "force open"/"break down"/"smash" (those already route to a
+real strength check elsewhere — forcing something open is a genuinely
+different intent from just looking inside something unobstructed).
+Also closed the same pre-existing gap for `list_shop` ("open the
+shop"). Verified against a full case matrix with no regressions on
+check_inventory/check_sheet/skill_check.
+
 ## [1.11.51] — Guild membership requires vetting, not an instant join (task #170)
 
 Per Coffee's backlog design item: joining a guild previously just

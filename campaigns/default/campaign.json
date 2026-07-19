@@ -902,18 +902,43 @@
       },
       "clue": "Travelers who've passed the Sunken Root Caverns mention a faint, wrong-colored light deeper in."
     },
-    "the_hush": {
+    "the_hush_stage1_signs": {
+      "title": "Into the Hush",
+      "description": "No two accounts of what's past Glimmerdeep Grotto agree \u2014 that alone is worth noting. The only way to know for certain is to go down and see it yourself.",
+      "location": "the_hush_below",
+      "reward_xp": 100,
+      "reward_gold": 50,
+      "trigger": {
+        "type": "reach_location",
+        "location": "the_hush_below"
+      },
+      "clue": "No two accounts of what's past Glimmerdeep Grotto agree \u2014 that alone is worth noting."
+    },
+    "the_hush_stage2_the_wisp": {
+      "title": "What Watches in the Dark",
+      "description": "Something pale and quick moves at the edge of every torch's reach down here, blinding anyone who gets too close a good look at it \u2014 it has to be dealt with before whatever's deeper even notices you've arrived.",
+      "location": "the_hush_below",
+      "reward_xp": 200,
+      "reward_gold": 100,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "shadow_wisp"
+      },
+      "clue": "Footprints in old dust, fresh enough that the dust hasn't resettled \u2014 something else is already down here."
+    },
+    "the_hush_stage3_the_unspoken": {
       "title": "Into the Hush",
       "description": "Few who go into the Hush Below come back describing the same thing twice \u2014 and something down there has started describing YOU back, in a voice that isn't quite a voice.",
       "location": "the_hush_below",
-      "reward_xp": 750,
-      "reward_gold": 400,
+      "reward_xp": 450,
+      "reward_gold": 250,
       "reward_item": "cloak_of_elvenkind",
       "trigger": {
         "type": "defeat_monster",
         "monster": "the_unspoken"
       },
-      "clue": "No two accounts of what's past Glimmerdeep Grotto agree \u2014 that alone is worth noting."
+      "clue": "An old iron door, ajar, wasn't open a moment ago \u2014 whatever moved it wants to be found now.",
+      "weight": "climactic"
     },
     "the_first_city_quest": {
       "title": "The First City",
@@ -986,7 +1011,9 @@
       "description": "The pattern beneath the strangeness starts to surface.",
       "quests": [
         "the_wrong_color",
-        "the_hush"
+        "the_hush_stage1_signs",
+        "the_hush_stage2_the_wisp",
+        "the_hush_stage3_the_unspoken"
       ],
       "required_level": 5
     },
