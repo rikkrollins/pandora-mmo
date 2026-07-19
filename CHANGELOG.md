@@ -2,7 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
-## [1.11.47] — Full-storyline Phase 1 (companion trust, the Arc 2→3 turn) + 2 live bug fixes
+## [1.11.47] — Full character-sheet menu system, full-storyline Phase 1, + 2 live bug fixes
+
+A complete, navigable menu system replacing the old flavor-only
+character-sheet buttons, per Coffee's direct request ("I want a usable
+menu system linked to it... show things in menu that are needed for the
+game — story-so-far - quests - inventory - equip character - make it a
+complete menu system... leveling up... include it in the menu — can be
+used in adventure and support topics"):
+- New `/menu` command (works from both Adventure and Support) and a
+  "📖 Menu" root screen linking to six real sections — Character Sheet,
+  Story So Far, Quests, Inventory, Equip Gear, and Level Up — every
+  section loops back to the root via its own Menu button, forming a real
+  navigable loop rather than dead-end screens.
+- Spell and item buttons now use a real two-step target picker (self, or
+  any other real party member physically present) before casting/using —
+  "give them options so if they want to use a potion or charm a player,
+  they can select it, pick a target, and then execute it," per Coffee.
+- "Story So Far" is a real AI-narrated novel-style recap
+  (`narrate_story_so_far`), strictly grounded in the character's actual
+  completed chapters/current chapter/completed quests — never invented —
+  plus a deterministic chapter list (completed/current/locked).
+- Quest and chapter completions now also post to the Main topic (📜 per
+  quest, a separate more-prominent 🌟 for a full chapter/arc completion),
+  matching Coffee's "when characters complete a quest or mission it
+  should be posted to main also" request.
+- A small independent chance (8%) for combat loot to include a real,
+  buyable map item, on top of the existing gear-loot roll.
 
 Phase 1 of the full multi-path storyline plan (companion trust/branching
 resolutions, the Arc 2→3 mid-story turn), per Coffee's narrative-craft
