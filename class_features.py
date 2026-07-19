@@ -83,9 +83,26 @@ character-creation/combat-math tweak:
     resolve_heal_spell) adds 2 + the spell's level whenever a Cleric
     casts a leveled (not cantrip) healing spell, the real 5E formula.
 
-Everything else here is still real, accurate flavor text only --
-using it mechanically in combat beyond what's built above is a further
-step, not yet wired in everywhere.
+Since first written (2026-07-15/16), more real commands were added
+directly in bot.py rather than back into this module: Fighter's Action
+Surge (extra attack this turn, 1/rest), Barbarian's Reckless Attack
+(advantage on your attack, but attacks against you also get advantage
+until your next turn), Paladin's Divine Smite (spend a spell slot on a
+successful hit for bonus radiant damage) and Channel Divinity (shared
+Cleric/Paladin, real effect differs per class), and Monk's Flurry of
+Blows (bonus-action extra unarmed strike, spends 1 ki). This docstring
+undercounts real mechanical coverage as of 2026-07-19 -- see bot.py's
+`_do_action_surge`/`_do_reckless_attack`/`_do_divine_smite`/
+`_do_channel_divinity`/`_do_flurry_of_blows` for the current, accurate
+list, not just what's enumerated above.
+
+Remaining real gap (task #91, still open): Druid and Ranger have no
+real ACTIVE command yet (Druid has none at all beyond spellcasting;
+Ranger's Favored Enemy/Natural Explorer/Danger Sense are all passive) --
+Wild Shape specifically would need real alternate-stat-block combat
+support this engine doesn't have yet, which is why it hasn't been
+attempted alongside the others above. Everything else not named in
+either list above is still real, accurate flavor text only.
 """
 
 CLASS_FEATURES_LEVEL_1 = {
