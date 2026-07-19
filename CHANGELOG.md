@@ -2,6 +2,44 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.34] — Battle menu now asks who to target; fix a restart landing mid-AI-turn freezing combat forever
+
+**Battle menu didn't ask who a heal/potion/damage-spell targets, per Coffee:
+"in the battle menu wen using comsumables it shud ask who u want to use it
+on... same with attacks and abilities."** "Fight" already prompted for an
+enemy target; casting a damage spell or heal spell, and using a
+heal/cure_poison consumable, all used to dispatch immediately with no
+target named, so the underlying handlers' own free-text parsing always
+fell through to their default (first living enemy for damage, always
+self for heal/potions) -- never a real choice. Now shows the same
+button-picker pattern Fight already used: a damage spell prompts for
+which living enemy when there's more than one; a heal spell or
+heal/cure_poison item prompts for which living party member (including
+yourself) when there's more than one. Verified with a real test:
+casting Magic Missile at a specific goblin only damages that goblin (not
+the other), casting Cure Wounds and using a Healing Potion both
+correctly land on the chosen ally instead of defaulting to self, and the
+potion is consumed from the USER's own inventory, not the target's.
+
+**Real live incident (2026-07-19, Coffee: "the battle seemed to stop"):**
+the v1.11.33 restart landed exactly on an AI companion's turn
+(Bram Ashfield) mid-fight, and combat just sat there -- confirmed via the
+session snapshot, the last event was still the real player's attack from
+BEFORE the restart, nothing had advanced since. Root cause:
+`_resolve_ai_turns` (which processes AI/downed-player turns) has only
+ever run as a side-effect of a human or AI action that just finished
+(every action handler calls it right after `advance_turn()`) -- a
+startup restore is neither of those, so a restart landing on an
+AI-controlled turn had nothing to ever kick it forward again. Fixed by
+calling `_resolve_ai_turns` once, unconditionally, for every restored
+session right after announcing it in `_on_startup` -- confirmed by
+inspection that the function only ever touches `update.effective_chat`,
+so a minimal synthetic stand-in (`_StartupUpdateStub`/`_StartupChatStub`,
+sending straight through `application.bot`) is enough since there's no
+real incoming Update to hang one off at startup time. Safe even when
+it's already a real player's turn: it just re-sends that turn's
+announcement and battle menu and returns.
+
 ## [1.11.33] — Fix Main-topic notifications silently failing every time (task #182)
 
 **Every single `_notify_main_topic` send since v1.11.32 has been silently

@@ -1517,6 +1517,7 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
     value = parts[2] if len(parts) > 2 else None
+    target_name = parts[3] if len(parts) > 3 else None
     await query.answer()
     character = db.get_character(user_id)
 
@@ -1563,8 +1564,57 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if action == "cast":
         spell = spells_module.get_spell(value)
+        spell_name = spell["name"] if spell else value
+        # Real bug (2026-07-19, per Coffee: "same with attacks and abilities
+        # we shud be able to target"): this used to cast immediately with
+        # no target named at all, so _do_cast_spell's own free-text parsing
+        # always fell through to its default -- the first living enemy for
+        # damage spells, always self for heal spells -- never a real choice.
+        # "Fight" already prompts for a target (see the "fight"/"target"
+        # actions above); damage and heal spells now get the same picker,
+        # reusing that exact pattern, whenever there's more than one
+        # sensible option. Utility effects (buff/negate/ac_bonus/summon/
+        # resurrect) are unchanged -- summon has no target, resurrect needs
+        # a specific DEAD party member (not a live-combat concept, since
+        # Revivify only works outside combat per its own design), and the
+        # rest are still flavor-only with no mechanical target yet.
+        if spell and spell["effect"] == "damage":
+            opposing = session.living_on_side(session.opposing_side(user_id))
+            if len(opposing) > 1:
+                buttons = [
+                    [InlineKeyboardButton(
+                        f"{p['name']} ({p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP)",
+                        callback_data=f"bm|casttarget|{value}|{p['name']}",
+                    )]
+                    for p in opposing
+                ]
+                buttons.append([InlineKeyboardButton("« Back", callback_data="bm|skills")])
+                await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+                return
+        elif spell and spell["effect"] == "heal":
+            own_side = session.sides.get(user_id)
+            allies = session.living_on_side(own_side) if own_side else []
+            if len(allies) > 1:
+                buttons = [
+                    [InlineKeyboardButton(
+                        f"{p['name']} ({p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP)"
+                        + (" — you" if p["telegram_user_id"] == user_id else ""),
+                        callback_data=f"bm|casttarget|{value}|{p['name']}",
+                    )]
+                    for p in allies
+                ]
+                buttons.append([InlineKeyboardButton("« Back", callback_data="bm|skills")])
+                await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+                return
         await query.edit_message_reply_markup(reply_markup=None)
-        await _do_cast_spell(update, f"cast {spell['name']}" if spell else f"cast {value}")
+        await _do_cast_spell(update, f"cast {spell_name}")
+        return
+
+    if action == "casttarget":
+        spell = spells_module.get_spell(value)
+        spell_name = spell["name"] if spell else value
+        await query.edit_message_reply_markup(reply_markup=None)
+        await _do_cast_spell(update, f"cast {spell_name} on {target_name}")
         return
 
     if action == "items":
@@ -1582,8 +1632,39 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if action == "use":
         item = items_module.get_item(value)
+        item_name = item["name"] if item else value
+        # Real bug (2026-07-19, per Coffee: "it shud ask who u want to use
+        # it on - like a potion can be used on party members but it didnt
+        # prompt that"): this used to use the item immediately with no
+        # recipient named, so _do_use_item's own free-text parsing always
+        # fell through to its default of self, even though heal/
+        # cure_poison items can genuinely go on anyone in the fight.
+        # Flavor-only consumables (rations, ale, torch, etc.) have no real
+        # target choice either way, so they're unchanged.
+        if item and item.get("effect") in ("heal", "cure_poison"):
+            own_side = session.sides.get(user_id)
+            allies = session.living_on_side(own_side) if own_side else []
+            if len(allies) > 1:
+                buttons = [
+                    [InlineKeyboardButton(
+                        f"{p['name']} ({p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP)"
+                        + (" — you" if p["telegram_user_id"] == user_id else ""),
+                        callback_data=f"bm|usetarget|{value}|{p['name']}",
+                    )]
+                    for p in allies
+                ]
+                buttons.append([InlineKeyboardButton("« Back", callback_data="bm|items")])
+                await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+                return
         await query.edit_message_reply_markup(reply_markup=None)
-        await _do_use_item(update, f"use {item['name']}" if item else f"use {value}")
+        await _do_use_item(update, f"use {item_name}")
+        return
+
+    if action == "usetarget":
+        item = items_module.get_item(value)
+        item_name = item["name"] if item else value
+        await query.edit_message_reply_markup(reply_markup=None)
+        await _do_use_item(update, f"use {item_name} on {target_name}")
         return
 
     if action == "run":
@@ -10802,6 +10883,28 @@ async def _idle_inactivity_loop(application: Application) -> None:
             logger.error(f"[sessions] periodic snapshot failed this cycle: {e!r}")
 
 
+class _StartupChatStub:
+    """
+    Minimal effective_chat stand-in used ONLY to resolve any AI/downed
+    turn a restored combat session (task #159) might already be sitting
+    on at startup, when there's no real incoming Update to hang a chat
+    object off of. Sends go straight through application.bot, same
+    underlying call a real Chat.send_message would make.
+    """
+    def __init__(self, bot, chat_id: int):
+        self._bot = bot
+        self.id = chat_id
+
+    async def send_message(self, text, **kwargs):
+        return await self._bot.send_message(chat_id=self.id, text=text, **kwargs)
+
+
+class _StartupUpdateStub:
+    """Bare Update stand-in for the same startup-only AI-turn-resolution case — see _StartupChatStub."""
+    def __init__(self, bot, chat_id: int):
+        self.effective_chat = _StartupChatStub(bot, chat_id)
+
+
 async def _on_startup(application: Application) -> None:
     # Application.create_task ties this loop's lifecycle to the
     # application, so it's cancelled cleanly on shutdown.
@@ -10827,6 +10930,27 @@ async def _on_startup(application: Application) -> None:
                     message_thread_id=config.TOPIC_ADVENTURE_ID,
                     parse_mode="Markdown",
                 )
+                # Real live incident (2026-07-19, Coffee: "the battle seemed
+                # to stop"): a restore landing on an AI-controlled (or
+                # downed-real-player death-save) turn used to just sit
+                # there forever -- _resolve_ai_turns has ALWAYS only ever
+                # run as a side-effect of a human/AI action that just
+                # finished (_do_attack/_do_cast_spell/etc. each call it
+                # right after advancing the turn), and a startup restore
+                # is neither of those, so nothing ever kicked the fight
+                # forward again. Confirmed by inspection that
+                # _resolve_ai_turns only ever touches update.effective_chat
+                # (via _safe_send/_notify_main_topic), never anything else
+                # on Update, so a minimal synthetic stand-in built straight
+                # from application.bot is enough here -- there's no real
+                # incoming Update to hang one off at startup. Safe to call
+                # unconditionally even when it's already a real player's
+                # turn: _resolve_ai_turns just re-sends that turn's
+                # announcement + battle menu and returns immediately.
+                async with sessions.get_lock(chat_id):
+                    live_session = sessions.get_session(chat_id)
+                    if live_session is not None:
+                        await _resolve_ai_turns(_StartupUpdateStub(application.bot, chat_id), live_session)
             except Exception as e:
                 logger.error(f"[sessions] failed to announce restored session for chat {chat_id}: {e!r}")
 
