@@ -822,6 +822,19 @@
       },
       "clue": "Borin says a name means nothing until it's been tested somewhere that actually matters."
     },
+    "borins_resolution": {
+      "title": "The Watch He Keeps",
+      "description": "Borin's tested the party in the Warrens like he said he would -- now it's just a matter of whether he actually believes his own penance is paid, standing right back where he's stood watch this whole time.",
+      "objective_location": "market_row",
+      "giver_npc": "borin_ironjaw",
+      "reward_xp": 150,
+      "reward_gold": 50,
+      "trigger": {
+        "type": "reach_location",
+        "location": "market_row"
+      },
+      "clue": "Borin still takes up the same spot on Market Row every morning, like he hasn't decided anything yet."
+    },
     "wrens_root_worry": {
       "title": "What the Roots Are Hiding",
       "description": "Wren's shrine draws on something growing down in the Sunken Root Caverns, and lately it's felt wrong -- she wants someone who isn't afraid of the dark to go see what's changed down there.",

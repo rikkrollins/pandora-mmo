@@ -4884,6 +4884,14 @@ QUEST_COMPANION_RESOLUTIONS = {
             "high": ("resolved_loyal", "stops checking the far road out of town and finally looks at the party like she's already found what she was looking for"),
         },
     },
+    "borins_resolution": {
+        "npc_id": "borin_ironjaw",
+        "banded": {
+            "low": ("resolved_estranged", "says that wasn't enough to prove anything and goes right back to standing his post"),
+            "mid": ("resolved_distant", "grudgingly allows it might be enough, but keeps watching the street out of habit anyway"),
+            "high": ("resolved_loyal", "finally steps off the street he's stood on for years and says his penance is paid"),
+        },
+    },
 }
 
 

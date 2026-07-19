@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.57] — Borin's companion arc gets a real trust-banded resolution
+
+Continuing the full-storyline plan's Phase 3: Borin now has a second
+quest, "The Watch He Keeps" (`borins_resolution`), offered once his
+existing vouching quest is done, triggered by returning to Market Row
+-- the exact spot he's been doing penance on this whole time. Whether
+he decides his penance is actually paid depends on the real trust
+he's built with the party.
+
+`QUEST_COMPANION_RESOLUTIONS` now also covers `borins_resolution` ->
+`borin_ironjaw`, same real-affinity banding as Grask/Vesh/Sera: low
+(<=-20, resolved_estranged, back to standing his post), mid (-19..39,
+resolved_distant, grudgingly vouches but keeps watching anyway), high
+(>=40, resolved_loyal, finally steps off the street for good). Verified
+via a real throwaway fixture test driving `bot._complete_quest_and_
+announce` through all 3 bands end-to-end.
+
 ## [1.11.56] — Sera's companion arc gets a real trust-banded resolution
 
 Continuing the full-storyline plan's Phase 3: Sera (Sarah) now has a
