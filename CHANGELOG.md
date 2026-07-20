@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.13.3] — Real tap-buttons for character creation
+
+Per Coffee: "Add push buttons to the character creation sequence and
+anywhere else users must make choices... The players really like those
+push buttons." Race, class, dice-preference (physical dice yes/no),
+pronouns (He/Him, She/Her, They/Them, Skip), and the auto-assign
+ability-score shortcut now all show real tap buttons alongside their
+prompts -- free text still works exactly as before for every one of
+them (typing a race/class name, "yes"/"no", etc.), and a stale tap from
+a step you've already moved past is a harmless no-op. Both paths
+(button and text) drive the exact same underlying creation logic, so
+there's no divergent behavior between them.
+
 ## [1.13.2] — Two real shop-browsing gaps fixed
 
 - Live-caught (Coffee, dev-topic screenshot, 2026-07-19): "Look at

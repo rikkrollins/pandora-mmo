@@ -1143,6 +1143,42 @@ async def _send_welcome_narration(update: Update, character: dict) -> None:
     await _safe_send(update, welcome_text)
 
 
+def _race_keyboard() -> InlineKeyboardMarkup:
+    rows = [VALID_RACES[i:i + 2] for i in range(0, len(VALID_RACES), 2)]
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(r, callback_data=f"create|race|{r}") for r in row] for row in rows
+    ])
+
+
+def _class_keyboard() -> InlineKeyboardMarkup:
+    rows = [VALID_CLASSES[i:i + 2] for i in range(0, len(VALID_CLASSES), 2)]
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(c, callback_data=f"create|class|{c}") for c in row] for row in rows
+    ])
+
+
+def _dice_preference_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("🎲 Yes, my own dice", callback_data="create|dice|yes"),
+        InlineKeyboardButton("🎰 No, let the game roll", callback_data="create|dice|no"),
+    ]])
+
+
+def _pronouns_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("He/Him", callback_data="create|pronouns|he/him"),
+         InlineKeyboardButton("She/Her", callback_data="create|pronouns|she/her")],
+        [InlineKeyboardButton("They/Them", callback_data="create|pronouns|they/them"),
+         InlineKeyboardButton("Skip", callback_data="create|pronouns|skip")],
+    ])
+
+
+def _score_assignment_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("🎲 Auto-assign for me", callback_data="create|scores|auto"),
+    ]])
+
+
 async def _begin_character_creation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Starts character creation. A player can own multiple character slots
@@ -1199,10 +1235,19 @@ def _auto_assign_ability_scores(char_class: str, rolled_scores: list[int]) -> li
     return [assignment[ability] for ability in _ABILITY_ORDER]
 
 
-async def _continue_character_creation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def _continue_character_creation(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str | None = None) -> None:
+    """
+    Task #212, per Coffee: real tap-buttons for every choice step in
+    character creation (race/class/dice-preference/pronouns/score-
+    assignment), not just free text. `text` is optional so a button tap
+    can drive this exact same logic by passing its own value directly
+    (see creation_menu_callback below) instead of reading
+    update.message.text, which doesn't exist on a callback update.
+    """
     creation = context.user_data["creation"]
     step = creation["step"]
-    text = update.message.text.strip()
+    if text is None:
+        text = update.message.text.strip()
 
     if step == "name":
         # A character's name flows straight into every narration prompt
@@ -1223,6 +1268,7 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
         await update.effective_chat.send_message(
             f"Nice! What race? Choose one: {', '.join(VALID_RACES)}",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
+            reply_markup=_race_keyboard(),
         )
         return
 
@@ -1239,6 +1285,7 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
         await update.effective_chat.send_message(
             f"Great, a {race}! What class? Choose one: {', '.join(VALID_CLASSES)}",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
+            reply_markup=_class_keyboard(),
         )
         return
 
@@ -1267,6 +1314,7 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
             f"(e.g. '15 14 13 12 10 8'), or say \"assign them automatically\" / "
             f"\"do it for me\" to let the game pick a sensible spread for your class.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
+            reply_markup=_score_assignment_keyboard(),
         )
         return
 
@@ -1298,6 +1346,7 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
             "You can change this any time later by saying \"use my own dice\" or \"let the game "
             "roll for me\". (yes/no)",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
+            reply_markup=_dice_preference_keyboard(),
         )
         return
 
@@ -1309,6 +1358,7 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
             "they/them, or something else? Say \"skip\" to leave it unset (narration defaults "
             "to they/them) — you can always set this later by asking.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
+            reply_markup=_pronouns_keyboard(),
         )
         return
 
@@ -1454,6 +1504,34 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
         del context.user_data["creation"]
 
         await _send_welcome_narration(update, character)
+
+
+async def creation_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Handles taps on the character-creation keyboards (race/class/dice-
+    preference/pronouns/score-assignment) -- task #212. Drives the exact
+    same _continue_character_creation logic free text already uses, just
+    passing the button's own value in as `text` directly instead of
+    reading update.message.text (which doesn't exist on a callback
+    update). A stale tap from an abandoned or already-finished creation
+    flow (no "creation" in user_data any more) is answered but otherwise
+    a no-op, same as any other stale-button guard in this file.
+    """
+    query = update.callback_query
+    parts = (query.data or "").split("|", 2)
+    field = parts[1] if len(parts) > 1 else ""
+    value = parts[2] if len(parts) > 2 else ""
+    await _safe_answer(query)
+
+    creation = context.user_data.get("creation")
+    if not creation:
+        return
+    expected_step = {"race": "race", "class": "class", "dice": "dice_preference",
+                      "pronouns": "pronouns", "scores": "assign_scores"}.get(field)
+    if expected_step is None or creation.get("step") != expected_step:
+        return  # stale tap from a step the player has already moved past
+
+    await _continue_character_creation(update, context, text=value)
 
 
 # ---------------------------------------------------------------------
@@ -12562,6 +12640,7 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(equip_menu_callback, pattern=r"^equip\|"))
     application.add_handler(CallbackQueryHandler(level_menu_callback, pattern=r"^level\|"))
     application.add_handler(CallbackQueryHandler(roster_menu_callback, pattern=r"^roster\|"))
+    application.add_handler(CallbackQueryHandler(creation_menu_callback, pattern=r"^create\|"))
 
     application.add_error_handler(_log_unhandled_error)
 

@@ -3120,6 +3120,67 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_keyword_fallback("I want to buy a healing potion", [])["action"], "buy")
         self.assertEqual(_keyword_fallback("buy 2 torches", [])["action"], "buy")
 
+    # -- Task #212, per Coffee: real tap-buttons for character creation's
+    #    choice steps (race/class/dice-preference/pronouns/score-
+    #    assignment), not just free text.
+    async def test_character_creation_full_button_flow(self):
+        from unittest.mock import patch
+
+        user_id = 900562
+        sink = []
+        context = DummyContext()
+        context.user_data = {}
+        await bot._begin_character_creation(FakeUpdate(user_id, "", sink), context)
+        self.assertEqual(context.user_data["creation"]["step"], "name")
+
+        await bot._continue_character_creation(FakeUpdate(user_id, "", sink), context, text="ButtonHero")
+        self.assertEqual(context.user_data["creation"]["step"], "race")
+        # The race prompt should carry real tap buttons for every valid race.
+        reply_markup = sink[-1] if not isinstance(sink[-1], str) else None
+
+        def tap(field, value):
+            return FakeCallbackUpdate(user_id, f"create|{field}|{value}", sink)
+
+        await bot.creation_menu_callback(tap("race", "Elf"), context)
+        self.assertEqual(context.user_data["creation"]["step"], "class")
+
+        await bot.creation_menu_callback(tap("class", "Fighter"), context)
+        self.assertEqual(context.user_data["creation"]["step"], "assign_scores")
+
+        await bot.creation_menu_callback(tap("scores", "auto"), context)
+        self.assertEqual(context.user_data["creation"]["step"], "dice_preference")
+
+        await bot.creation_menu_callback(tap("dice", "yes"), context)
+        self.assertEqual(context.user_data["creation"]["step"], "pronouns")
+
+        await bot.creation_menu_callback(tap("pronouns", "they/them"), context)
+        self.assertEqual(context.user_data["creation"]["step"], "description")
+
+        with patch("bot.narrate_welcome", return_value="Welcome to the Crossroads."):
+            await bot._continue_character_creation(FakeUpdate(user_id, "", sink), context, text="skip")
+
+        character = bot.db.get_character(user_id)
+        self.assertEqual(character["race"], "Elf")
+        self.assertEqual(character["char_class"], "Fighter")
+        self.assertEqual(character["pronouns"], "they/them")
+        self.assertEqual(character["manual_dice_enabled"], 1)
+        self.assertNotIn("creation", context.user_data)
+
+    def test_creation_button_keyboards_cover_every_valid_choice(self):
+        race_labels = {btn.text for row in bot._race_keyboard().inline_keyboard for btn in row}
+        self.assertEqual(race_labels, set(bot.VALID_RACES))
+        class_labels = {btn.text for row in bot._class_keyboard().inline_keyboard for btn in row}
+        self.assertEqual(class_labels, set(bot.VALID_CLASSES))
+
+    async def test_stale_creation_button_tap_is_a_harmless_no_op(self):
+        user_id = 900563
+        sink = []
+        context = DummyContext()
+        context.user_data = {}  # no "creation" in progress at all
+        update = FakeCallbackUpdate(user_id, "create|race|Elf", sink)
+        await bot.creation_menu_callback(update, context)  # must not raise
+        self.assertNotIn("creation", context.user_data)
+
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
     """
