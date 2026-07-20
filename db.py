@@ -1702,7 +1702,7 @@ def get_ai_controlled_characters() -> list[dict]:
     AND recruited companions alike (2026-07-14, per Coffee: "make
     recruitable able to make their own choices... this goes for AIs
     also"). Broader than get_autonomous_players, which only covers the
-    hardcoded autonomous party and previously left recruits like Sera
+    hardcoded autonomous party and previously left recruits like Sarah
     doing nothing on their own between being talked to.
     """
     with get_connection() as conn:

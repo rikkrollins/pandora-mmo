@@ -45,7 +45,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
     # -- NPC-name stopword bug (v1.7.3) --------------------------------
     def test_npc_name_filler_words_dont_hijack_unrelated_messages(self):
-        known_npcs = ["Grimsby", "Old Maren", "Sera", "Theron", "Kess",
+        known_npcs = ["Grimsby", "Old Maren", "Sarah", "Theron", "Kess",
                       "Ossian Vane", "Borin Ironjaw", "Wren Hollowbrook",
                       "Pip Thistledown", "Grask Emberscale", "Vesh Nightglass"]
         # These all contain "the" or "old" and must NOT be swallowed by
@@ -87,7 +87,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
     def test_peer_still_yields_to_a_known_npc_mention(self):
         self.assertEqual(
-            _keyword_fallback("Say hello to Sera", ["Sera"])["action"], "talk_npc"
+            _keyword_fallback("Say hello to Sarah", ["Sarah"])["action"], "talk_npc"
         )
 
     # -- "Touch X" misclassified as look, not examine (2026-07-17, Coffee,
@@ -126,7 +126,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     def test_typo_tolerance_doesnt_break_unrelated_words(self):
         # Guards against the typo-normalizer being too aggressive.
         self.assertEqual(_keyword_fallback("I attack the goblin", [])["action"], "attack")
-        self.assertEqual(_keyword_fallback("give my potion to Sera", [])["action"], "give_item")
+        self.assertEqual(_keyword_fallback("give my potion to Sarah", [])["action"], "give_item")
 
     async def test_player_can_actually_leave_tavern_upstairs(self):
         user_id = 222222
@@ -219,19 +219,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         coffee_id, sera_id = 111111, -1002
         make_basic_character(coffee_id, "Elduinn")
         db.create_character(
-            sera_id, "Sera", "Elf", "Ranger",
+            sera_id, "Sarah", "Elf", "Ranger",
             {"strength": 12, "dexterity": 17, "constitution": 13,
              "intelligence": 11, "wisdom": 15, "charisma": 10},
             hp_max=11, armor_class=14, gold=50, inventory={}, known_spells=[], is_ai=True,
         )
         sink = []
-        update = FakeUpdate(coffee_id, "Show me my character sheet and Sera's character sheet",
+        update = FakeUpdate(coffee_id, "Show me my character sheet and Sarah's character sheet",
                              sink, thread_id=bot.config.TOPIC_SUPPORT_ID)
         await bot.support_topic_handler(update, DummyContext())
         reply = sink[-1]
         self.assertIn("Elduinn", reply)
-        self.assertIn("AC 14", reply)   # Sera's REAL AC, not invented
-        self.assertIn("HP 11/11", reply)  # Sera's REAL HP, not invented
+        self.assertIn("AC 14", reply)   # Sarah's REAL AC, not invented
+        self.assertIn("HP 11/11", reply)  # Sarah's REAL HP, not invented
         self.assertNotIn("mirrors this structure", reply.lower())
         self.assertNotIn("similar stats", reply.lower())
 
@@ -245,9 +245,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
     # -- Recruit still routes correctly despite examine/sheet fixes ----
     def test_recruit_and_invite_not_hijacked_by_other_fixes(self):
-        known_npcs = ["Sera"]
-        self.assertEqual(_keyword_fallback("Recruit sera to my party", known_npcs)["action"], "recruit_npc")
-        self.assertEqual(_keyword_fallback("Invite Sera to my party", known_npcs)["action"], "recruit_npc")
+        known_npcs = ["Sarah"]
+        self.assertEqual(_keyword_fallback("Recruit sarah to my party", known_npcs)["action"], "recruit_npc")
+        self.assertEqual(_keyword_fallback("Invite Sarah to my party", known_npcs)["action"], "recruit_npc")
 
     # -- TTS no longer leaves a visible duplicate message (post-1.8.2) -
     async def test_tts_trigger_message_gets_cleaned_up(self):
@@ -348,7 +348,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         }
         self.assertEqual(real_givers, expected_givers)
 
-    # -- Real live bug (2026-07-15): Sera (sera_wanderer) is both
+    # -- Real live bug (2026-07-15): Sarah (sera_wanderer) is both
     #    can_wander AND recruitable, so the living-world wander tick
     #    relocated her randomly, making her genuinely unfindable at the
     #    location a player would look for her to recruit. -------------
@@ -366,7 +366,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             for loc_id, loc in region.items()
             if "sera_wanderer" in loc.get("npcs", [])
         ]
-        self.assertEqual(len(found_at), 1, "Sera should be listed at exactly one real location")
+        self.assertEqual(len(found_at), 1, "Sarah should be listed at exactly one real location")
         self.assertIn("sera_wanderer", bot._npcs_at_location(found_at[0]))
 
     # -- "I have decided the answer to the riddle is X" (v1.9.2) -------
@@ -559,7 +559,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
     # -- Player-to-player item trading (v1.10.7 backlog item) ----------
     def test_give_item_phrasing_classified_correctly(self):
-        result = _keyword_fallback("give my healing potion to Sera", [])
+        result = _keyword_fallback("give my healing potion to Sarah", [])
         self.assertEqual(result["action"], "give_item")
 
     def test_give_me_a_clue_not_shadowed_by_give_item(self):
@@ -1024,7 +1024,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
     def test_compound_different_actions_still_works(self):
         intents = parse_intents(
-            "recruit Sera to my party, look at the quest board, and leave the tavern", []
+            "recruit Sarah to my party, look at the quest board, and leave the tavern", []
         )
         self.assertEqual([i["action"] for i in intents], ["recruit_npc", "check_quests", "move"])
 
@@ -1592,7 +1592,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
     def test_genuine_sheet_requests_still_work(self):
         self.assertEqual(bot._wants_sheet_names("show me my character sheet"), ["my"])
-        self.assertEqual(bot._wants_sheet_names("Sera's character sheet"), ["sera"])
+        self.assertEqual(bot._wants_sheet_names("Sarah's character sheet"), ["sarah"])
 
     async def test_attack_forced_roll_determines_hit_or_miss(self):
         import sessions
@@ -2866,6 +2866,129 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Opportunity attacks", reply)
         sessions.end_session(-999)
 
+    # -- Task #195, 2026-07-19: fast-travel skipped requires_item and
+    #    locked_connections entirely (only min_level and story_gates were
+    #    ever checked), so both were trivially bypassable by fast-
+    #    traveling instead of walking. Mirrors _do_move's own checks.
+    async def test_fast_travel_blocks_on_missing_requires_item(self):
+        user_id = 900530
+        make_basic_character(user_id, "Gatetest", current_location="the_first_city")
+        db.mark_visited(user_id, "the_unmoored_isle")
+        db.mark_visited(user_id, "the_first_city")
+        sink = []
+        await bot._do_fast_travel(FakeUpdate(user_id, "", sink), "fast travel to the unmoored isle")
+        self.assertIn("missing something needed", sink[-1])
+        self.assertEqual(db.get_character(user_id)["current_location"], "the_first_city")
+
+        db.add_item(user_id, "shard_of_dim_light", 1)
+        sink.clear()
+        await bot._do_fast_travel(FakeUpdate(user_id, "", sink), "fast travel to the unmoored isle")
+        self.assertEqual(db.get_character(user_id)["current_location"], "the_unmoored_isle")
+
+    async def test_fast_travel_blocks_on_locked_connection(self):
+        user_id = 900531
+        make_basic_character(user_id, "Locktest", current_location="the_weeping_well")
+        db.mark_visited(user_id, "the_weeping_well")
+        db.mark_visited(user_id, "glimmerdeep_grotto")
+        sink = []
+        await bot._do_fast_travel(FakeUpdate(user_id, "", sink), "fast travel to glimmerdeep grotto")
+        self.assertIn("blocked by", sink[-1])
+        self.assertEqual(db.get_character(user_id)["current_location"], "the_weeping_well")
+
+        bot._UNLOCKED.add("sealed_stone_door")
+        sink.clear()
+        await bot._do_fast_travel(FakeUpdate(user_id, "", sink), "fast travel to glimmerdeep grotto")
+        self.assertEqual(db.get_character(user_id)["current_location"], "glimmerdeep_grotto")
+
+    # -- Per Coffee, 2026-07-19: fishing loses bait by a real 50/50 d20
+    #    roll on every attempt (catch or miss), not a fixed schedule.
+    async def test_fishing_loses_bait_on_a_low_roll_not_a_high_one(self):
+        from unittest.mock import patch
+
+        user_id = 900532
+        make_basic_character(user_id, "Fishtest", current_location="stonearch_bridge")
+        db.add_item(user_id, "fishing_pole", 1)
+        db.add_item(user_id, "bait", 1)
+
+        with patch("bot.roll_ability_check", return_value={
+            "raw_roll": 15, "modifier": 0, "proficiency": 0, "total": 15,
+        }), patch("bot.narrate_skill_check", return_value="You cast your line."), \
+             patch("bot.roll_d20", return_value=3):
+            sink = []
+            await bot._do_gather(FakeUpdate(user_id, "", sink), "fish in the stream")
+            self.assertIn("bait comes free", sink[-1])
+            self.assertEqual(db.get_character(user_id)["inventory"].get("bait", 0), 0)
+
+        db.add_item(user_id, "bait", 1)
+        with patch("bot.roll_ability_check", return_value={
+            "raw_roll": 15, "modifier": 0, "proficiency": 0, "total": 15,
+        }), patch("bot.narrate_skill_check", return_value="You cast your line."), \
+             patch("bot.roll_d20", return_value=18):
+            sink = []
+            await bot._do_gather(FakeUpdate(user_id, "", sink), "fish in the stream")
+            self.assertNotIn("bait comes free", sink[-1])
+            self.assertEqual(db.get_character(user_id)["inventory"].get("bait", 0), 1)
+
+    # -- Real live bug (2026-07-19, Sugar): "Create character" (no
+    #    article) and "Create a second character" both missed the old
+    #    phrase list and fell through to chat.
+    def test_create_character_phrasing_gaps(self):
+        self.assertEqual(_keyword_fallback("Create character", [])["action"], "create_character")
+        self.assertEqual(_keyword_fallback("Create a second character", [])["action"], "create_character")
+        self.assertEqual(_keyword_fallback("I'd like to make another character", [])["action"], "create_character")
+
+    # -- Per Coffee, 2026-07-19: discoverable bait-gathering spots (mud,
+    #    fungus, rocks, bushes) -- reuses the generic resource_node system,
+    #    a new "bait_gathering" skill key so shears' quantity bonus
+    #    (hardcoded to skill_key=="herbalism") doesn't leak onto it.
+    async def test_bait_gathering_nodes_grant_real_bait(self):
+        from unittest.mock import patch
+
+        for loc_id, phrase in [
+            ("whispering_wood", "search the rotted log under the bushes"),
+            ("stonearch_bridge", "dig in the muddy bank"),
+            ("sunken_root_caverns", "check the fungus on the root"),
+            ("greymoor_downs", "look under the loose stones"),
+        ]:
+            user_id = 900540 + hash(loc_id) % 1000
+            make_basic_character(user_id, f"Baiter{loc_id}"[:20], current_location=loc_id)
+            sink = []
+            with patch("bot.roll_ability_check", return_value={
+                "raw_roll": 20, "modifier": 0, "proficiency": 0, "total": 20,
+            }), patch("bot.narrate_skill_check", return_value="You search around."):
+                await bot._do_gather(FakeUpdate(user_id, "", sink), phrase)
+            self.assertIn("Bait", sink[-1], f"{loc_id} didn't grant Bait: {sink[-1]}")
+            self.assertGreaterEqual(db.get_character(user_id)["inventory"].get("bait", 0), 1)
+
+    # -- World expansion (2026-07-19/20, per Coffee): compass navigation
+    #    ("directions", a display/nav layer over "connections") added
+    #    alongside the world's large-area expansion into many new
+    #    location ids.
+    async def test_compass_direction_resolves_to_the_right_location(self):
+        user_id = 900550
+        make_basic_character(user_id, "Compasstest", current_location="whispering_wood")
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "", sink), "go south")
+        self.assertEqual(db.get_character(user_id)["current_location"], "whispering_wood_deep_glade")
+
+    async def test_compass_word_with_no_directions_field_falls_through_harmlessly(self):
+        user_id = 900551
+        make_basic_character(user_id, "Compasstest2", current_location="market_row")
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "", sink), "go north")
+        # market_row has no "directions" field -- must not crash, and must
+        # not move the character anywhere (no location name matched either).
+        self.assertEqual(db.get_character(user_id)["current_location"], "market_row")
+
+    async def test_look_shows_compass_labels_for_directed_connections(self):
+        user_id = 900552
+        make_basic_character(user_id, "Compasstest3", current_location="greymoor_downs")
+        sink = []
+        await bot._do_look(FakeUpdate(user_id, "", sink))
+        reply = sink[-1]
+        self.assertIn("North:", reply)
+        self.assertIn("West:", reply)
+
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
     """
@@ -2930,7 +3053,7 @@ class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
         Real regression (2026-07-14): "Accept the quest, a quiet request
         for wood" -- a specific, real, correctly-classified accept_quest
         naming a real board quest -- got silently swallowed into
-        accepting Sera's companion quest instead, because that shortcut
+        accepting Sarah's companion quest instead, because that shortcut
         ran unconditionally. Needs a real board quest generated (a live
         Ollama call for its branching setup_narration), hence SlowLiveTests.
         """
@@ -2942,7 +3065,7 @@ class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
 
         sink = []
         await bot.adventure_master_handler(
-            FakeUpdate(user_id, "Recruit Sera to my party", sink), DummyContext())
+            FakeUpdate(user_id, "Recruit Sarah to my party", sink), DummyContext())
 
         db.update_character(user_id, current_location="whispering_wood")
         board_quests = board_quests_module.get_or_generate_board_quests(bot.CAMPAIGN, "whispering_wood")
@@ -2954,7 +3077,7 @@ class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
         await bot.adventure_master_handler(FakeUpdate(user_id, text, sink), DummyContext())
         combined = " ".join(sink)
         self.assertIn(named_quest["title"], combined)
-        self.assertNotIn("Sera's Safer Crossing", combined)
+        self.assertNotIn("Sarah's Safer Crossing", combined)
 
         character = db.get_character(user_id)
         self.assertNotIn("seras_safer_crossing", character["active_quests"])

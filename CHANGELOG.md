@@ -2,6 +2,62 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.12.0] — World expansion: compass navigation, 19 new areas, real puzzles & treasure
+
+Per Coffee's direction (2026-07-19/20): the world's large outdoor/
+underground areas are now much bigger and more explorable, navigated by
+a real compass system alongside the existing free-text movement.
+
+- **New "directions" field** on locations (compass word -> location
+  id), purely additive alongside the existing "connections" reachability
+  list -- every pre-existing location behaves identically to before;
+  new areas add real N/S/E/W navigation ("go north", "head south").
+  `_do_look` now labels known exits with their compass direction when
+  available.
+- **19 new locations** (world grows from 16 to 35), expanding Whispering
+  Wood, Greymoor Downs, Stonearch Bridge, the underground cave chain
+  (Sunken Root Caverns/Goblin Warrens/Glimmerdeep Grotto), and The First
+  City into real multi-node areas spanning both the surface and
+  underground layers -- while leaving small interior locations (the
+  tavern, market row, the shrine) untouched, and leaving the game's two
+  climactic boss arenas (The Hush Below, The Unmoored Isle) as focused
+  single-room fights rather than diluting them. Every existing quest,
+  NPC, and monster placement is unchanged -- purely additive, no existing
+  location id, connection, or quest target was renamed or moved.
+- **Real secrets to find**: several new lockpickable treasure chests, a
+  hidden shortcut door connecting two of the new areas, and two brand
+  new riddle puzzles (reusing the same solve-a-riddle mechanic as Old
+  Maren's existing strongbox) -- deliberately not detailed here; find
+  them in play.
+- New gathering opportunities across the expanded map, using the
+  existing herbalism/mining/lumberjacking/fishing/bait-gathering skills.
+- Verified with a real, complete playthrough test walking a character
+  through all four story arcs end-to-end (including the companion-trust
+  story gate blocking, then correctly opening once a trusted companion
+  and a defeated boss were both real) -- the full story critical path
+  is confirmed completable beginning to end on top of the bigger map.
+
+Bundled in the same release (all independently tested):
+- Fast-travel now honors `requires_item` and `locked_connections` gates,
+  matching on-foot movement -- previously only `min_level` and
+  `story_gates` were checked, so a required item or a locked shortcut
+  could be silently bypassed by fast-traveling instead of walking.
+- Fishing now loses its bait by a real 50/50 chance on every attempt
+  (catch or miss alike), not for free forever -- and bait itself can now
+  be found in the wild (mud, fungus, rotted wood, loose stones) at a few
+  discoverable spots, not only bought.
+- "Create character" (no article) and "Create a second character"
+  (an extra word breaking the old phrase match) now correctly start
+  character creation instead of silently falling through to chat.
+- A companion NPC's display name (now "Sarah") is fully consistent
+  across code comments, docstrings, and tests -- no game-visible change,
+  her in-game name was already correct.
+- Fixed a same-session regression: the bait-loss roll change above had
+  accidentally nested the board-quest-progress-crediting block inside
+  the wrong `if`, so gather-type board quests (except fishing ones)
+  stopped crediting progress entirely. Caught by the full regression
+  suite before shipping and fixed immediately.
+
 ## [1.11.68] — Test-only cleanup: 4 stale permanent tests (no game behavior change)
 
 Running the full FastRegressionTests suite end-to-end (started while

@@ -77,8 +77,15 @@
         "connections": [
           "crossroads_tavern",
           "hollow_stump_shrine",
-          "greymoor_downs"
+          "greymoor_downs",
+          "whispering_wood_deep_glade"
         ],
+        "directions": {
+          "west": "crossroads_tavern",
+          "north": "hollow_stump_shrine",
+          "east": "greymoor_downs",
+          "south": "whispering_wood_deep_glade"
+        },
         "monsters": [
           "goblin",
           "wolf"
@@ -97,6 +104,13 @@
             "material": "wood",
             "ability": "strength",
             "skill": "lumberjacking"
+          },
+          {
+            "id": "rotted_log",
+            "name": "a rotted log slumped under the low bushes",
+            "material": "bait",
+            "ability": "wisdom",
+            "skill": "bait_gathering"
           }
         ],
         "interactables": {
@@ -107,6 +121,122 @@
           "carved_waystone": {
             "name": "a weathered waystone",
             "description": "A trailside marker carved with a script no one in the Crossroads can read, in strokes too regular to be natural weathering."
+          }
+        }
+      },
+      "whispering_wood_deep_glade": {
+        "name": "The Deep Glade",
+        "layer": "surface",
+        "description": "The canopy closes overhead here, thick enough that even the leaves' restless movement comes through muffled, like something heard through a wall.",
+        "connections": [
+          "whispering_wood",
+          "whispering_wood_mossy_creek",
+          "whispering_wood_bramble_thicket"
+        ],
+        "directions": {
+          "north": "whispering_wood",
+          "east": "whispering_wood_mossy_creek",
+          "south": "whispering_wood_bramble_thicket"
+        },
+        "resource_nodes": [
+          {
+            "id": "glade_deadfall",
+            "name": "a stand of deadfall timber, dry and untouched",
+            "material": "wood",
+            "ability": "strength",
+            "skill": "lumberjacking"
+          }
+        ],
+        "interactables": {
+          "glade_hollow_ring": {
+            "name": "a perfect ring of mushrooms",
+            "description": "Too even to be natural, too old to be anyone's doing. Nothing else grows inside it."
+          }
+        }
+      },
+      "whispering_wood_mossy_creek": {
+        "name": "The Mossy Creek",
+        "layer": "surface",
+        "description": "A slow, quiet creek threading between the roots. The water runs clear enough to see the bottom, and still no one fishes it after dark.",
+        "connections": [
+          "whispering_wood_deep_glade"
+        ],
+        "directions": {
+          "west": "whispering_wood_deep_glade"
+        },
+        "resource_nodes": [
+          {
+            "id": "creek_shallows",
+            "name": "the creek's slow-moving shallows",
+            "material": "raw_fish",
+            "ability": "wisdom",
+            "skill": "fishing"
+          },
+          {
+            "id": "creek_mudbank",
+            "name": "a soft mudbank along the creek's edge",
+            "material": "bait",
+            "ability": "wisdom",
+            "skill": "bait_gathering"
+          }
+        ],
+        "interactables": {
+          "creek_stones": {
+            "name": "a line of flat stepping stones",
+            "description": "Worn smooth and evenly spaced, as if placed rather than found — though no one living remembers placing them."
+          }
+        }
+      },
+      "whispering_wood_bramble_thicket": {
+        "name": "The Bramble Thicket",
+        "layer": "surface",
+        "description": "Brambles grown into a wall taller than a person, with exactly one gap wide enough to push through. Something kept it that way.",
+        "connections": [
+          "whispering_wood_deep_glade",
+          "whispering_wood_elder_glen"
+        ],
+        "descends_to": "whispering_wood_root_hollow",
+        "directions": {
+          "north": "whispering_wood_deep_glade",
+          "east": "whispering_wood_elder_glen"
+        },
+        "monsters": [
+          "goblin"
+        ],
+        "interactables": {
+          "thicket_gap": {
+            "name": "the single gap through the brambles",
+            "description": "Just wide enough for one person at a time, thorns pulled back and tied off with old, sun-bleached cord."
+          }
+        }
+      },
+      "whispering_wood_elder_glen": {
+        "name": "The Elder Glen",
+        "layer": "surface",
+        "description": "The oldest trees in the Wood stand here in a loose, deliberate circle, bark carved smooth by centuries of wind. Locals say the trees remember things — here, it feels like they're the ones doing the watching.",
+        "connections": [
+          "whispering_wood_bramble_thicket"
+        ],
+        "directions": {
+          "west": "whispering_wood_bramble_thicket"
+        },
+        "resource_nodes": [
+          {
+            "id": "elder_silverleaf",
+            "name": "a rare, pale patch of Silverleaf Herbs",
+            "material": "silverleaf_herb",
+            "ability": "wisdom",
+            "skill": "herbalism"
+          }
+        ],
+        "interactables": {
+          "the_watching_circle": {
+            "name": "the ring of ancient, wind-smoothed trees",
+            "description": "Stand in the center and the leaves go still, all at once, all around you — the only place in the whole Wood where they ever stop moving."
+          },
+          "elder_carved_riddle": {
+            "name": "words worn into the widest tree's bark",
+            "description": "Carved so long ago the bark's grown almost smooth over it, but still legible: \"I have many rings but no fingers, many arms but no hands, and I tell your age without ever asking. What am I?\""
           }
         }
       },
@@ -160,13 +290,29 @@
         "description": "Rolling grey hills under a sky that seems one shade too dim, even at noon.",
         "connections": [
           "whispering_wood",
-          "stonearch_bridge"
+          "stonearch_bridge",
+          "greymoor_downs_windswept_ridge"
         ],
+        "descends_to": "greymoor_downs_sunken_barrow",
+        "directions": {
+          "west": "whispering_wood",
+          "east": "stonearch_bridge",
+          "north": "greymoor_downs_windswept_ridge"
+        },
         "monsters": [
           "wolf"
         ],
         "npcs": [
           "kess_the_bandit"
+        ],
+        "resource_nodes": [
+          {
+            "id": "loose_hillside_stones",
+            "name": "a scatter of loose stones at the base of the standing stones",
+            "material": "bait",
+            "ability": "wisdom",
+            "skill": "bait_gathering"
+          }
         ],
         "interactables": {
           "standing_stones": {
@@ -179,6 +325,73 @@
           }
         }
       },
+      "greymoor_downs_windswept_ridge": {
+        "name": "The Windswept Ridge",
+        "layer": "surface",
+        "description": "A high spine of rock along the Downs, wind loud enough here to cover most other sound. Good for seeing a long way. Good for not being heard, too.",
+        "connections": [
+          "greymoor_downs",
+          "greymoor_downs_lonely_cairn",
+          "greymoor_downs_broken_watchtower"
+        ],
+        "directions": {
+          "south": "greymoor_downs",
+          "north": "greymoor_downs_lonely_cairn",
+          "east": "greymoor_downs_broken_watchtower"
+        },
+        "monsters": [
+          "wolf"
+        ],
+        "interactables": {
+          "ridge_cairn_markers": {
+            "name": "a line of small stacked-stone markers",
+            "description": "Spaced too evenly to be idle piling, all pointing the same direction along the ridge — toward the cairn further north."
+          }
+        }
+      },
+      "greymoor_downs_lonely_cairn": {
+        "name": "The Lonely Cairn",
+        "layer": "surface",
+        "description": "A single burial cairn, well kept for something no one admits to visiting. Whoever tends it doesn't want to be found doing it.",
+        "connections": [
+          "greymoor_downs_windswept_ridge"
+        ],
+        "directions": {
+          "south": "greymoor_downs_windswept_ridge"
+        },
+        "interactables": {
+          "the_cairn_itself": {
+            "name": "the cairn's carefully fitted stones",
+            "description": "No name carved anywhere on it, but the topmost stone is always clean — swept clear, again and again, of whatever the wind piles onto it."
+          }
+        }
+      },
+      "greymoor_downs_broken_watchtower": {
+        "name": "The Broken Watchtower",
+        "layer": "surface",
+        "description": "A collapsed watchtower, half its height still standing. From the top of what's left, the bridge crossing is fully visible — every safe way across, and every way that isn't.",
+        "connections": [
+          "greymoor_downs_windswept_ridge"
+        ],
+        "directions": {
+          "west": "greymoor_downs_windswept_ridge"
+        },
+        "resource_nodes": [
+          {
+            "id": "watchtower_rubble_stones",
+            "name": "loose stones scattered through the tower's collapsed base",
+            "material": "bait",
+            "ability": "wisdom",
+            "skill": "bait_gathering"
+          }
+        ],
+        "interactables": {
+          "watchtower_vantage": {
+            "name": "the tower's remaining upper landing",
+            "description": "Rotted through in two places, but still holds — and still gives the clearest view of the bridge crossing for miles."
+          }
+        }
+      },
       "stonearch_bridge": {
         "name": "Stonearch Bridge",
         "layer": "surface",
@@ -186,8 +399,16 @@
         "connections": [
           "crossroads_tavern",
           "greymoor_downs",
-          "the_weeping_well"
+          "the_weeping_well",
+          "stonearch_bridge_far_end"
         ],
+        "descends_to": "stonearch_bridge_gorge_depths",
+        "directions": {
+          "north": "crossroads_tavern",
+          "west": "greymoor_downs",
+          "south": "the_weeping_well",
+          "east": "stonearch_bridge_far_end"
+        },
         "npcs": [
           "pip_thistledown"
         ],
@@ -201,6 +422,13 @@
             "material": "raw_fish",
             "ability": "wisdom",
             "skill": "fishing"
+          },
+          {
+            "id": "muddy_bank",
+            "name": "the muddy bank beneath the bridge, pocked with tiny burrows",
+            "material": "bait",
+            "ability": "wisdom",
+            "skill": "bait_gathering"
           }
         ],
         "interactables": {
@@ -211,6 +439,23 @@
           "gorge_below": {
             "name": "the gorge beneath the bridge",
             "description": "Looking down, the sound that rises up doesn't quite match falling water \u2014 closer to something breathing, slow and even."
+          }
+        }
+      },
+      "stonearch_bridge_far_end": {
+        "name": "The Far End of the Span",
+        "layer": "surface",
+        "description": "Where the bridge finally lets out past the gorge, onto a narrow shelf of rock before the land opens up again. Quieter here \u2014 the gorge's sound doesn't carry this far.",
+        "connections": [
+          "stonearch_bridge"
+        ],
+        "directions": {
+          "west": "stonearch_bridge"
+        },
+        "interactables": {
+          "far_end_marker": {
+            "name": "a single carved marker stone",
+            "description": "Newer than the bridge itself by centuries, but already weathering to match \u2014 someone wanted it to look like it had always been here."
           }
         }
       },
@@ -324,9 +569,15 @@
         "description": "Caves threaded with the pale, massive roots of something above. The air smells faintly of rain that never falls down here.",
         "connections": [
           "goblin_warrens",
-          "glimmerdeep_grotto"
+          "glimmerdeep_grotto",
+          "sunken_root_caverns_deep_tunnels"
         ],
         "ascends_to": "the_weeping_well",
+        "directions": {
+          "west": "goblin_warrens",
+          "east": "glimmerdeep_grotto",
+          "north": "sunken_root_caverns_deep_tunnels"
+        },
         "monsters": [
           "goblin",
           "goblin_shaman"
@@ -338,6 +589,13 @@
             "material": "sulfur_dust",
             "ability": "strength",
             "skill": "mining"
+          },
+          {
+            "id": "root_fungus_shelf",
+            "name": "a shelf of pale fungus clinging low to the massive root",
+            "material": "bait",
+            "ability": "wisdom",
+            "skill": "bait_gathering"
           }
         ],
         "interactables": {
@@ -356,8 +614,13 @@
         "layer": "underground",
         "description": "A cramped, chattering network of tunnels. Someone, or something, has been organizing the goblins here far better than goblins usually organize themselves.",
         "connections": [
-          "sunken_root_caverns"
+          "sunken_root_caverns",
+          "goblin_warrens_inner_den"
         ],
+        "directions": {
+          "east": "sunken_root_caverns",
+          "north": "goblin_warrens_inner_den"
+        },
         "npcs": [
           "grask_emberscale"
         ],
@@ -392,8 +655,14 @@
         "description": "Vast caverns lit by crystal formations that pulse very slowly, like something breathing. Some of the crystals have gone a wrong color.",
         "connections": [
           "sunken_root_caverns",
-          "the_hush_below"
+          "the_hush_below",
+          "glimmerdeep_grotto_glimmering_pool"
         ],
+        "directions": {
+          "west": "sunken_root_caverns",
+          "south": "the_hush_below",
+          "north": "glimmerdeep_grotto_glimmering_pool"
+        },
         "npcs": [
           "vesh_nightglass"
         ],
@@ -411,6 +680,126 @@
           "grotto_pool": {
             "name": "a still, black pool",
             "description": "The water is perfectly still, and reflects the ceiling above \u2014 except for one patch, near the center, that seems to reflect something else entirely."
+          }
+        }
+      },
+      "sunken_root_caverns_deep_tunnels": {
+        "name": "The Deep Tunnels",
+        "layer": "underground",
+        "description": "Passages that keep going long after they should have ended. Somewhere ahead, rubble chokes one of them almost shut \u2014 almost.",
+        "connections": [
+          "sunken_root_caverns",
+          "sunken_root_caverns_forgotten_cistern"
+        ],
+        "directions": {
+          "south": "sunken_root_caverns",
+          "east": "sunken_root_caverns_forgotten_cistern"
+        },
+        "lockables": [
+          {
+            "id": "rubble_choked_passage",
+            "kind": "door",
+            "name": "a rubble-choked passage",
+            "leads_to": "stonearch_bridge_gorge_depths"
+          }
+        ],
+        "locked_connections": {
+          "stonearch_bridge_gorge_depths": "rubble_choked_passage"
+        },
+        "monsters": [
+          "goblin"
+        ],
+        "interactables": {
+          "tunnel_rubble_choke": {
+            "name": "a passage nearly sealed by old rubble",
+            "description": "Almost fully collapsed, but not quite \u2014 cleared enough times, by something or someone, to still be worth clearing again. Air moves through it from somewhere else entirely."
+          }
+        }
+      },
+      "sunken_root_caverns_forgotten_cistern": {
+        "name": "The Forgotten Cistern",
+        "layer": "underground",
+        "description": "A dry, ancient cistern, long since cut off from whatever it used to hold. Someone stashed something down here and never came back for it.",
+        "connections": [
+          "sunken_root_caverns_deep_tunnels"
+        ],
+        "directions": {
+          "west": "sunken_root_caverns_deep_tunnels"
+        },
+        "lockables": [
+          {
+            "id": "cistern_sealed_cache",
+            "kind": "chest",
+            "name": "a sealed cache half-buried in dry silt",
+            "loot": {
+              "healing_potion": 2,
+              "scroll_bless": 1
+            },
+            "gold": 40
+          }
+        ],
+        "interactables": {
+          "cistern_dry_channels": {
+            "name": "the cistern's dry drainage channels",
+            "description": "Cut with real precision, leading nowhere any water could reach anymore. Someone built this to hold something other than water."
+          }
+        }
+      },
+      "goblin_warrens_inner_den": {
+        "name": "The Inner Den",
+        "layer": "underground",
+        "description": "Deeper into the warrens than most goblins bother going. Whatever discipline holds the outer tunnels together frays out completely back here.",
+        "connections": [
+          "goblin_warrens"
+        ],
+        "directions": {
+          "south": "goblin_warrens"
+        },
+        "monsters": [
+          "goblin",
+          "goblin_shaman"
+        ],
+        "resource_nodes": [
+          {
+            "id": "den_ore_scatter",
+            "name": "a scatter of unrefined ore the goblins never bothered collecting",
+            "material": "iron_ore",
+            "ability": "strength",
+            "skill": "mining"
+          }
+        ],
+        "interactables": {
+          "den_bone_pile": {
+            "name": "a disorganized pile of gnawed bones",
+            "description": "The one thing back here that ISN'T organized \u2014 everything else in these warrens is unnervingly tidy by comparison."
+          }
+        }
+      },
+      "glimmerdeep_grotto_glimmering_pool": {
+        "name": "The Glimmering Pool",
+        "layer": "underground",
+        "description": "A second, smaller pool tucked behind the grotto's main chamber, lit from below by something buried in the silt at its bottom.",
+        "connections": [
+          "glimmerdeep_grotto"
+        ],
+        "directions": {
+          "south": "glimmerdeep_grotto"
+        },
+        "lockables": [
+          {
+            "id": "pool_sunken_coffer",
+            "kind": "chest",
+            "name": "a corroded coffer resting on the pool's floor",
+            "loot": {
+              "greater_healing_potion": 1
+            },
+            "gold": 55
+          }
+        ],
+        "interactables": {
+          "pool_buried_light": {
+            "name": "whatever's glowing at the bottom of the pool",
+            "description": "Too deep to make out clearly, and it never stops glowing, no matter how long you watch it."
           }
         }
       },
@@ -452,11 +841,19 @@
         "layer": "underground",
         "description": "An impossibly old city, buried and forgotten, built by hands unfamiliar with any craft practiced above. Its central spire is still, somehow, faintly warm.",
         "connections": [
-          "the_hush_below"
+          "the_hush_below",
+          "the_first_city_outer_ward",
+          "the_first_city_spire_reaches"
         ],
         "ascends_to": "the_unmoored_isle",
+        "descends_to": "the_first_city_sunken_archive",
         "hidden": true,
         "min_level": 7,
+        "directions": {
+          "south": "the_hush_below",
+          "north": "the_first_city_outer_ward",
+          "east": "the_first_city_spire_reaches"
+        },
         "monsters": [
           "the_waking_ember"
         ],
@@ -471,6 +868,182 @@
           "unfamiliar_glyphs": {
             "name": "glyphs carved into every visible surface",
             "description": "A script that matches nothing above ground, repeated so often it starts to feel less like writing and more like counting."
+          }
+        }
+      },
+      "the_first_city_outer_ward": {
+        "name": "The Outer Ward",
+        "layer": "underground",
+        "description": "A ring of buried structures further out from the spire, walls still standing at odd, deliberate angles no living architect would choose. Whatever lived here built for reasons, not just shelter.",
+        "connections": [
+          "the_first_city"
+        ],
+        "directions": {
+          "south": "the_first_city"
+        },
+        "monsters": [
+          "the_waking_ember"
+        ],
+        "interactables": {
+          "ward_angled_walls": {
+            "name": "walls set at impossible, deliberate angles",
+            "description": "Every angle is different, and every angle is exact — nothing here is broken or worn, only built strangely on purpose."
+          }
+        }
+      },
+      "the_first_city_spire_reaches": {
+        "name": "The Spire Reaches",
+        "layer": "underground",
+        "description": "The upper reaches of the buried city, close enough to the central spire to feel its warmth without touching it. The glyphs here are denser, and some of them move, slightly, when you're not looking directly at them.",
+        "connections": [
+          "the_first_city"
+        ],
+        "directions": {
+          "west": "the_first_city"
+        },
+        "resource_nodes": [
+          {
+            "id": "spire_reaches_ore_vein",
+            "name": "an unnaturally pure vein of ore laced through the stone",
+            "material": "iron_ore",
+            "ability": "strength",
+            "skill": "mining"
+          }
+        ],
+        "interactables": {
+          "reaches_shifting_glyphs": {
+            "name": "a dense cluster of restless glyphs",
+            "description": "Watched directly, they hold perfectly still. Watched from the corner of your eye, more than one of them is moving."
+          }
+        }
+      },
+      "the_first_city_sunken_archive": {
+        "name": "The Sunken Archive",
+        "layer": "underground",
+        "description": "A lower level beneath the spire, shelved wall to wall with something that isn't quite paper and isn't quite stone. Whoever built this wanted it remembered, not just recorded.",
+        "connections": [],
+        "ascends_to": "the_first_city",
+        "lockables": [
+          {
+            "id": "archive_sealed_vault",
+            "kind": "chest",
+            "name": "a sealed vault set into the archive's far wall",
+            "loot": {
+              "scroll_invisibility": 1
+            },
+            "gold": 90
+          }
+        ],
+        "interactables": {
+          "archive_endless_shelves": {
+            "name": "shelves stretching further back than the light reaches",
+            "description": "Every shelf holds the same repeated shape, over and over, for as far as you can see — counting something, still, long after anyone stopped needing the count."
+          },
+          "archive_echoing_recess": {
+            "name": "a recess carved deep into the archive's rear wall",
+            "description": "Words carved at its edge, worn but legible: \"I speak without a mouth and hear without ears. I have no body, but I come alive with wind. What am I?\""
+          }
+        }
+      },
+      "whispering_wood_root_hollow": {
+        "name": "The Root Hollow",
+        "layer": "underground",
+        "description": "A hollow beneath the Bramble Thicket's roots, ceiling laced with pale tendrils still faintly warm to the touch. The air smells of turned earth.",
+        "connections": [
+          "whispering_wood_sunken_den"
+        ],
+        "ascends_to": "whispering_wood_bramble_thicket",
+        "directions": {
+          "east": "whispering_wood_sunken_den"
+        },
+        "resource_nodes": [
+          {
+            "id": "hollow_ore_seam",
+            "name": "a thin seam of ore threading through the roots",
+            "material": "iron_ore",
+            "ability": "strength",
+            "skill": "mining"
+          }
+        ],
+        "interactables": {
+          "hollow_root_lattice": {
+            "name": "the lattice of roots overhead",
+            "description": "Every root bends the same direction, all of them curving down and inward, toward wherever the den lies further in."
+          }
+        }
+      },
+      "whispering_wood_sunken_den": {
+        "name": "The Sunken Den",
+        "layer": "underground",
+        "description": "A low, wide den at the end of the roots, floor packed hard by years of restless pacing. Whatever den this is hasn't been abandoned long.",
+        "connections": [
+          "whispering_wood_root_hollow"
+        ],
+        "directions": {
+          "west": "whispering_wood_root_hollow"
+        },
+        "monsters": [
+          "wolf"
+        ],
+        "interactables": {
+          "den_claw_marks": {
+            "name": "deep claw marks scored into the packed earth",
+            "description": "Layered thick, over and over, always at the same height — whatever left them never grew any smaller."
+          }
+        }
+      },
+      "greymoor_downs_sunken_barrow": {
+        "name": "The Sunken Barrow",
+        "layer": "underground",
+        "description": "A real camp, still warm in places, dug into the hillside below the Downs — the cold campsite up top was never anything but bait for anyone who stopped looking too soon.",
+        "connections": [],
+        "ascends_to": "greymoor_downs",
+        "lockables": [
+          {
+            "id": "barrow_strongbox",
+            "kind": "chest",
+            "name": "a real strongbox, well hidden",
+            "loot": {
+              "shortsword": 1,
+              "scroll_shield": 1
+            },
+            "gold": 60
+          }
+        ],
+        "monsters": [
+          "wolf"
+        ],
+        "interactables": {
+          "barrow_supply_cache": {
+            "name": "a hidden supply cache dug into the barrow wall",
+            "description": "Recently restocked, by the look of it. Whoever uses this place isn't finished with it yet."
+          }
+        }
+      },
+      "stonearch_bridge_gorge_depths": {
+        "name": "The Gorge Depths",
+        "layer": "underground",
+        "description": "The bottom of the gorge beneath the bridge, close and dark, the air moving in and out on a slow rhythm that has nothing to do with wind.",
+        "connections": [],
+        "ascends_to": "stonearch_bridge",
+        "lockables": [
+          {
+            "id": "rubble_choked_passage",
+            "kind": "door",
+            "name": "a rubble-choked passage",
+            "leads_to": "sunken_root_caverns_deep_tunnels"
+          }
+        ],
+        "locked_connections": {
+          "sunken_root_caverns_deep_tunnels": "rubble_choked_passage"
+        },
+        "monsters": [
+          "giant_spider"
+        ],
+        "interactables": {
+          "depths_breathing_wall": {
+            "name": "a wide stretch of rock wall, faintly warm",
+            "description": "It rises and falls under your palm, slow and even — the same rhythm audible from the bridge far above, only close enough now to feel."
           }
         }
       }
@@ -1063,6 +1636,32 @@
       "reward_item": "amulet_of_health",
       "clue": "The riddle carved into the lid reads: \"I have cities, but no houses; forests, but no trees; rivers, but no water. What am I?\""
     },
+    "the_elder_glens_riddle": {
+      "title": "The Elder Glen's Riddle",
+      "description": "Words carved into the widest tree in the Elder Glen — old enough that whoever carved them is long gone, but the question still stands.",
+      "location": "whispering_wood_elder_glen",
+      "trigger": {
+        "type": "solve_puzzle",
+        "puzzle_id": "elder_glen_riddle"
+      },
+      "reward_xp": 150,
+      "reward_gold": 50,
+      "reward_item": "cloak_of_elvenkind",
+      "clue": "The words carved into the tree read: \"I have many rings but no fingers, many arms but no hands, and I tell your age without ever asking. What am I?\""
+    },
+    "the_archives_recess": {
+      "title": "The Archive's Recess",
+      "description": "A recess carved into the rear wall of the Sunken Archive, words worn into its edge — whoever carved them wanted this one specifically remembered.",
+      "location": "the_first_city_sunken_archive",
+      "trigger": {
+        "type": "solve_puzzle",
+        "puzzle_id": "archive_recess_riddle"
+      },
+      "reward_xp": 300,
+      "reward_gold": 100,
+      "reward_item": "lantern_of_true_sight",
+      "clue": "The words carved at the recess's edge read: \"I speak without a mouth and hear without ears. I have no body, but I come alive with wind. What am I?\""
+    },
     "the_weeping_wells_secret": {
       "title": "The Weeping Well's Secret",
       "description": "Sarah thinks the well's strange warmth isn't natural, and that whatever's behind it is worth finding, not just noting.",
@@ -1263,6 +1862,23 @@
         "map",
         "a map of the world",
         "a globe"
+      ]
+    },
+    "elder_glen_riddle": {
+      "riddle": "I have many rings but no fingers, many arms but no hands, and I tell your age without ever asking. What am I?",
+      "accepted_answers": [
+        "a tree",
+        "tree",
+        "an old tree",
+        "the tree"
+      ]
+    },
+    "archive_recess_riddle": {
+      "riddle": "I speak without a mouth and hear without ears. I have no body, but I come alive with wind. What am I?",
+      "accepted_answers": [
+        "an echo",
+        "echo",
+        "an echo of a sound"
       ]
     }
   }

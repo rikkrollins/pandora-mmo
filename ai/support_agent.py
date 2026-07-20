@@ -342,7 +342,7 @@ _PARTY_QUESTION_WORDS = [
 
 def _deterministic_party_answer(party_members: list[dict], question: str) -> str | None:
     """
-    Confirmed live (2026-07-14, Coffee): asked "Is Sera in my current
+    Confirmed live (2026-07-14, Coffee): asked "Is Sarah in my current
     party?" and "Show me my party character sheets" with only the
     asking player's OWN character ever passed to this module -- the
     model had zero real party data to answer from, so it either

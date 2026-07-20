@@ -247,7 +247,7 @@ _LAST_TOPIC_MESSAGE: dict[tuple[int, int], dict] = {}
 
 # ---------------------------------------------------------------------
 # Living world — NPCs tagged "can_wander" in campaign.json (currently
-# Sera and Theron) have a real, mutable current location, independent
+# Sarah and Theron) have a real, mutable current location, independent
 # of their static campaign.json placement, and can drift between
 # connected locations on their own over time. Fixed-role NPCs (the
 # innkeeper, the shopkeeper, the bandit) stay exactly where campaign
@@ -401,7 +401,7 @@ def _log_world_event(location_id: str | None, text: str) -> None:
 
 def _npc_currently_wanders(npc_id: str) -> bool:
     """
-    Real bug fixed 2026-07-15 (Coffee): Sera (sera_wanderer) is both
+    Real bug fixed 2026-07-15 (Coffee): Sarah (sera_wanderer) is both
     `can_wander` AND `recruitable` in campaign.json, so the living-
     world wander tick was relocating her randomly around the map --
     exactly like any other wanderer -- making her genuinely unfindable
@@ -4735,7 +4735,7 @@ def _offerable_companion_quest(character: dict) -> tuple[str, dict] | None:
     """
     A real party companion's own personal quest (2026-07-14, per
     Coffee: each recruitable should have "a mission or quest they go
-    on with players" -- e.g. Sera mentioning a task she'd like help
+    on with players" -- e.g. Sarah mentioning a task she'd like help
     with once recruited). Matched by 'giver_npc' against whoever's
     ACTUALLY in the party right now, not by location -- a companion's
     own request travels with the party rather than being tied to
@@ -5799,7 +5799,7 @@ def _find_campaign_npc_by_name(name: str) -> dict | None:
     """
     Looks up a campaign.json NPC (Grimsby, Old Maren, etc.) by display
     name, case-insensitive. Only for NPCs who were never recruited into
-    a real character row -- once recruited (like Sera), they show up
+    a real character row -- once recruited (like Sarah), they show up
     via db.find_character_by_name/_find_party_target_by_name instead,
     with a real full sheet.
     """
@@ -5965,7 +5965,7 @@ async def _do_check_sheet(update: Update, target_name: str | None = None) -> Non
     # Per Coffee's live report (2026-07-14): "Show me SERA's character
     # sheet" had nowhere to go -- check_sheet only ever showed the
     # asker's OWN sheet, so it fell through to "examine" and searched
-    # for an interactable object named "Sera" instead. A named target
+    # for an interactable object named "Sarah" instead. A named target
     # is looked up among real party members first (same lookup used for
     # support-spell targeting), then broadened (2026-07-14, per Coffee:
     # "character sheets of all players AI, NPC and human") to any real
@@ -6238,6 +6238,16 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
         db.record_skill_use(update.effective_user.id, skill_key)
         db.add_item(update.effective_user.id, node["material"], quantity)
 
+    # Per Coffee (2026-07-19): fishing consumes bait by chance, not on a
+    # fixed schedule -- whether the cast lands a fish or not, roll a d20
+    # each time and lose 1 bait on a low roll (<=10, a flat 50/50), same
+    # "real dice decide it" pattern as every other outcome in this game.
+    bait_lost = False
+    if skill_key == "fishing" and character["inventory"].get("bait", 0) > 0:
+        bait_lost = roll_d20() <= 10
+        if bait_lost:
+            db.remove_item(update.effective_user.id, "bait", 1)
+
     flavor = await asyncio.to_thread(
         narrate_skill_check, character, action_text, node["ability"],
         {**result, "ability": node["ability"], "dc": SKILL_CHECK_DC, "success": success},
@@ -6245,7 +6255,10 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
     message = _format_skill_check_result(flavor, result, node["ability"], SKILL_CHECK_DC, success)
     if success:
         message += f"\n🌿 **{character['name']}** gathers **{quantity}x {material['name']}**."
+    if bait_lost:
+        message += "\n🪱 The bait comes free of the hook and is gone."
 
+    if success:
         # Matches against this player's own accepted board quests (task
         # #149, 2026-07-17), not get_todays_board_quests -- a quest
         # accepted on a previous calendar day but still inside its real
@@ -7255,8 +7268,19 @@ async def _do_look(update: Update) -> None:
         lines.append(f"You sense danger here: {', '.join(monsters_here)}")
     connections = location.get("connections", [])
     if connections:
-        conn_names = [cl.get_location(CAMPAIGN, c)["name"] for c in connections]
-        lines.append(f"You can travel to: {', '.join(conn_names)}")
+        # Compass labels (world-expansion pass, 2026-07-19): "directions" is
+        # a pure display layer over the real "connections" reachability list
+        # -- inverted here so a connection with a compass word shows it
+        # (e.g. "North: The Deep Glade"), while any connection still without
+        # one (every pre-expansion location) falls back to the plain name,
+        # exactly as before.
+        direction_for_dest = {dest: word.capitalize() for word, dest in location.get("directions", {}).items()}
+        conn_labels = [
+            f"{direction_for_dest[c]}: {cl.get_location(CAMPAIGN, c)['name']}" if c in direction_for_dest
+            else cl.get_location(CAMPAIGN, c)["name"]
+            for c in connections
+        ]
+        lines.append(f"You can travel to: {', '.join(conn_labels)}")
     if "descends_to" in location:
         lines.append(f"You could descend to: {cl.get_location(CAMPAIGN, location['descends_to'])['name']}")
     if "ascends_to" in location:
@@ -7991,7 +8015,24 @@ async def _do_move(update: Update, text: str) -> None:
 
     destination_id = None
     lowered = text.lower()
+
+    # Compass navigation (world-expansion pass, 2026-07-19): "directions"
+    # is an optional per-location dict (compass word -> location id) that
+    # sits alongside "connections" -- checked first since it's unambiguous
+    # by construction (one destination per word), before the name-matching
+    # below that's still how a player naming a destination directly (or any
+    # pre-expansion location with no directions at all) always worked.
+    direction_words = current.get("directions", {})
+    if direction_words:
+        words_in_text = set(re.findall(r"[a-z]+", lowered))
+        for word, loc_id in direction_words.items():
+            if word in words_in_text and loc_id in reachable:
+                destination_id = loc_id
+                break
+
     for loc_id in reachable:
+        if destination_id is not None:
+            break
         loc = cl.get_location(CAMPAIGN, loc_id)
         if loc_id.replace("_", " ") in lowered or loc["name"].lower() in lowered:
             destination_id = loc_id
@@ -8255,11 +8296,32 @@ async def _do_fast_travel(update: Update, text: str) -> None:
         return
 
     destination = cl.get_location(CAMPAIGN, destination_id)
+    if destination.get("requires_item") and destination["requires_item"] not in character["inventory"]:
+        await update.effective_chat.send_message(
+            f"Something stops **{character['name']}** from going any further — missing something needed first.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
     if not _meets_location_level(character, destination):
         await _send_level_gate_message(update, destination)
         return
 
     current = cl.get_location(CAMPAIGN, character["current_location"])
+
+    locked_connections = current.get("locked_connections", {})
+    lockable_id = locked_connections.get(destination_id)
+    if lockable_id and lockable_id not in _UNLOCKED:
+        lockable = next(
+            (lk for lk in current.get("lockables", []) if lk["id"] == lockable_id), None
+        )
+        name = lockable["name"] if lockable else "something locked"
+        await update.effective_chat.send_message(
+            f"The way to {destination['name']} is blocked by {name}. Try picking the lock first.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
     story_gate_message = _check_story_gate(character, current, destination_id)
     if story_gate_message:
         await update.effective_chat.send_message(story_gate_message, message_thread_id=config.TOPIC_ADVENTURE_ID)
@@ -8537,7 +8599,7 @@ async def _do_equip_item(update: Update, text: str) -> None:
     parses which item, and for whom, from free text.
 
     Supports helping another party member gear up too (per Coffee:
-    "equip Sera with the longbow") -- same location-scoped "physically
+    "equip Sarah with the longbow") -- same location-scoped "physically
     present" lookup as _do_give_item, defaulting to the caller's own
     character when no other real party member is named. The item comes
     from the TARGET's own inventory, not the caller's -- this is
@@ -9689,7 +9751,7 @@ async def _do_delete_character(update: Update, text: str) -> None:
 def _find_npc_id_by_name(name: str) -> str | None:
     """
     Looks up an NPC's internal id from its real display name, since ids
-    and names don't always match (e.g. 'sera_wanderer' -> 'Sera'). Never
+    and names don't always match (e.g. 'sera_wanderer' -> 'Sarah'). Never
     assume npc_id == name.lower() — always go through this lookup.
     """
     for npc_id, data in CAMPAIGN["npcs"].items():
@@ -9953,7 +10015,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         "timestamp": datetime.now(timezone.utc),
     }
     known_npcs = [data["name"] for data in CAMPAIGN["npcs"].values()]
-    # A genuinely compound message ("recruit Sera, look at the quest
+    # A genuinely compound message ("recruit Sarah, look at the quest
     # board, and leave the tavern") returns more than one intent here --
     # see ai.intent_parser.parse_intents's own docstring for exactly how
     # conservative the detection is (deliberately keyword-only, no extra
@@ -10057,7 +10119,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
             )
 
     if len(intents) > 1:
-        # 2026-07-13 (Coffee): a genuinely compound message ("recruit Sera
+        # 2026-07-13 (Coffee): a genuinely compound message ("recruit Sarah
         # and check my inventory") previously sent one real Telegram
         # message per sub-action -- he wanted them combined into a single
         # reply instead. Every _do_* handler in this file only ever
@@ -11562,7 +11624,7 @@ async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     character = db.get_character(update.effective_user.id)
-    # 2026-07-14, per Coffee: "Is Sera in my current party?" and "Show
+    # 2026-07-14, per Coffee: "Is Sarah in my current party?" and "Show
     # me my party character sheets" both had nothing real to answer from
     # -- only the asking player's OWN character was ever passed here.
     party_members = _get_party_members() if character else None
@@ -11576,11 +11638,11 @@ async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TY
     # handed to the model.
     #
     # Confirmed live 2026-07-14 (Coffee, real screenshot): "Show me my
-    # character sheet and Sera's character sheet" -- TWO sheets in one
+    # character sheet and Sarah's character sheet" -- TWO sheets in one
     # message -- used re.search, which only ever finds the FIRST match
     # ("my", which was then excluded), so this fell through to the LLM
     # entirely. The model then answered Coffee's own sheet reasonably
-    # but OUTRIGHT INVENTED Sera's ("mirrors this structure... similar
+    # but OUTRIGHT INVENTED Sarah's ("mirrors this structure... similar
     # stats based on available data") -- a real hallucination of fake
     # stats, exactly what this game's grounding rules exist to prevent.
     # Fixed with re.findall (every match, not just the first) and a
@@ -12104,7 +12166,7 @@ async def _ai_party_autonomous_tick(bot) -> None:
     2026-07-14, per Coffee: "make recruitable able to make their own
     choices... this goes for AIs also." Previously only the separate
     hardcoded autonomous party (Zara/Bram) ever got a tick here --
-    recruited companions like Sera sat completely idle between being
+    recruited companions like Sarah sat completely idle between being
     directly talked to, with no way to notice and act on something like
     an active party gather quest on their own. Broadened to every
     AI-controlled character (db.get_ai_controlled_characters), sharing
@@ -12144,7 +12206,7 @@ async def _ai_party_autonomous_tick(bot) -> None:
     context_like = _AI_PLAYER_CONTEXTS.setdefault(user_id, _AiPlayerContext())
     last_action = context_like.user_data.get("last_autonomous_action")
 
-    # Recruited companions (e.g. Sera) aren't in the hardcoded
+    # Recruited companions (e.g. Sarah) aren't in the hardcoded
     # AI_PARTY_ROSTER at all -- their real personality lives in
     # campaign.json's NPC entry instead, same place their sheet-lookup
     # basic-info fallback already reads from.

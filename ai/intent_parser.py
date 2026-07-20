@@ -104,7 +104,7 @@ getting caught, with real consequences, not the same as "buy".
 - "use_item" is for drinking/using/consuming/quaffing a carried consumable item (e.g. a potion, antitoxin, \
 rations) — NOT a spell and NOT a shop purchase. Set "item_name" to the item, and "target" to who it's for if named (defaults to self).
 - "equip_item" is for equipping/wielding/wearing/putting on a weapon or piece of armor they're carrying \
-(e.g. "equip my longsword", "wear the chain mail", "wield the dagger", "equip Sera with the longbow"). \
+(e.g. "equip my longsword", "wear the chain mail", "wield the dagger", "equip Sarah with the longbow"). \
 Set "item_name" to the item, and "target" to who it's for if a specific OTHER party member is named (defaults to self).
 - "auto_equip" is for asking the game to automatically equip the best weapon/armor/shield being carried, \
 without naming a specific item (e.g. "auto equip my character", "put on my gear automatically", \
@@ -117,7 +117,7 @@ without naming a specific item (e.g. "auto equip my character", "put on my gear 
 - "leave_party" is for leaving a party the character is currently in.
 - "find_merchant" is for asking where to get supplies or find the nearest shop/merchant.
 - "give_item" is for handing/giving/trading a carried item to another real player or AI companion, \
-not a shop transaction (e.g. "give my healing potion to Sera", "hand Borin the torch"). Set "target" to the recipient's name.
+not a shop transaction (e.g. "give my healing potion to Sarah", "hand Borin the torch"). Set "target" to the recipient's name.
 - "second_wind" is specifically a Fighter's real class feature: a bonus action to catch their breath and \
 recover some HP outside of resting (e.g. "I use second wind", "catch my breath", "second wind").
 - "rage" is specifically a Barbarian's real class feature: entering a rage before or during a fight for \
@@ -290,13 +290,13 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
 
     # "recruit X" is checked BEFORE the known-NPC-name loop below and
     # regardless of whether the name matches one exactly -- confirmed
-    # live 2026-07-12, twice: "Recruit Sera to my party" (correct
+    # live 2026-07-12, twice: "Recruit Sarah to my party" (correct
     # spelling, a known NPC) still came back as talk_npc, because the
     # only recruit_words phrases below all require the word "join",
     # never the word "recruit" itself, even though that's the action's
     # own name and the single most obvious way a player would phrase
     # it. "Recruit Seta to my party" (a likely typo/mishearing of
-    # "Sera") is even worse off: it doesn't match any known NPC name at
+    # "Sarah") is even worse off: it doesn't match any known NPC name at
     # all, so it fell through everything else to "my party" and got
     # misread as check_party. Extracting the name after "recruit "
     # directly handles both a correct and a misspelled name the exact
@@ -316,7 +316,7 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # inviting a fellow player's/AI companion's own character
     # (invite_to_party, checked later below) -- disambiguated here by
     # whether the named person is a real campaign NPC. Confirmed live
-    # 2026-07-12: "Invite Sera to my party" (Sera IS a real recruitable
+    # 2026-07-12: "Invite Sarah to my party" (Sarah IS a real recruitable
     # NPC) still came back as talk_npc, the same root cause as the
     # "recruit " gap just above -- this only ever matched invite_to_
     # party's OWN trigger below, which never got reached because the
@@ -336,15 +336,15 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
             # own check further below, unchanged.
 
     # Checked BEFORE the known-NPC-name loop below, same reasoning as
-    # every fix above it: "Show me SERA's character sheet" (and the
-    # apostrophe-less retype "Show me sera character sheet") both
-    # contain "Sera" -- a real known NPC -- so the loop below caught
+    # every fix above it: "Show me SARAH's character sheet" (and the
+    # apostrophe-less retype "Show me sarah character sheet") both
+    # contain "Sarah" -- a real known NPC -- so the loop below caught
     # them FIRST and returned talk_npc before this ever ran, even
     # though it was already sitting further down in this same function.
     # Confirmed live 2026-07-14: moving the check earlier (not just
     # broadening its regex, which alone didn't fix it) was the actual
     # fix -- every single "show me X's sheet" attempt that day, with or
-    # without the apostrophe, kept coming back as talk_npc/Sera
+    # without the apostrophe, kept coming back as talk_npc/Sarah
     # replying instead, because it never got the chance to run. The
     # excluded-words guard keeps "my"/"the"/pronoun-only phrasing
     # ("check my character sheet") from being misread as a party
@@ -370,11 +370,11 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # Real live bug (2026-07-19, found via a real test written for the
     # "send" fix just below): giving an item to a party member whose
     # name happens to be a recruited campaign NPC's -- "Give the potion
-    # to Sera", "Hand Sera the torch" -- came back as talk_npc instead,
+    # to Sarah", "Hand Sarah the torch" -- came back as talk_npc instead,
     # same root cause as every other fix in this "checked BEFORE the
     # known-NPC-name loop" run above (buy/sell/recruit/invite/
     # check_sheet): this check used to sit AFTER that loop, so the loop
-    # always caught Sera's name first and returned talk_npc before
+    # always caught Sarah's name first and returned talk_npc before
     # give_item ever got a chance to run. Moved up here, same fix
     # pattern as all the others.
     #
@@ -424,7 +424,7 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # "Read the guest book", "Check out the door", every other
     # not-yet-covered examine phrasing below, and surely plenty more.
     # This is a strict denylist, not a rewrite of the length filter,
-    # since genuine short distinctive name-parts (Sera, Kess, Vane...)
+    # since genuine short distinctive name-parts (Sarah, Kess, Vane...)
     # still need to keep matching.
     _NPC_NAME_FILLER_WORDS = {"the", "a", "an", "of", "and", "old"}
     recruit_words = ["join us", "join our party", "join my party", "come with us",
@@ -514,7 +514,20 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in COMBAT_START_WORDS):
         return {**base, "action": "start_combat"}
 
-    if any(w in lowered for w in ["create a character", "make a character", "new character", "join the game"]):
+    # Real live bug (2026-07-19, Sugar): "Create character" (no article)
+    # and "Create a second character" (an extra word breaking the
+    # "create a character" substring) both missed every phrase below and
+    # fell through to the Ollama classifier, which misclassified them as
+    # "chat" -- silently no character got created. Added the bare/no-
+    # article form and explicit "second"/"another"/"additional character"
+    # phrasing (a player's own second character, not a request about an
+    # NPC), same narrow "fix the observed collision" pattern as every
+    # other phrasing gap here.
+    if any(w in lowered for w in [
+        "create a character", "make a character", "new character", "join the game",
+        "create character", "make character", "second character", "another character",
+        "additional character",
+    ]):
         return {**base, "action": "create_character"}
 
     # Checked BEFORE check_inventory below: "what items do you have for
@@ -1226,7 +1239,7 @@ def _split_compound_message(text: str) -> list[str]:
     it's exactly as likely to join two NOUNS in one action ("attack the
     goblin and the wolf") as it is to join two separate actions -- but
     confirmed live 2026-07-12 that excluding it silently drops entire
-    requests instead: "Invite Sera to join my party and check my
+    requests instead: "Invite Sarah to join my party and check my
     inventory" never split at all (no comma/"then"), fell through to
     single-action classification, and check_inventory was silently
     never run. The caller (parse_intents) already only trusts a split
@@ -1259,13 +1272,13 @@ def _split_compound_message(text: str) -> list[str]:
 def parse_intents(text: str, known_npc_names: list[str] | None = None, force_model: bool = False) -> list[dict]:
     """
     Like parse_intent, but detects genuinely compound player messages
-    ("recruit Sera, look at the quest board, and leave the tavern") and
+    ("recruit Sarah, look at the quest board, and leave the tavern") and
     returns one intent per real action instead of just the first guess.
 
     Confirmed live 2026-07-12: a real compound message like this was
     classified as a SINGLE action (whatever keyword happened to match
     first), silently dropping every other requested step -- e.g.
-    "recruit Sera... look at the quest board... leave the tavern" only
+    "recruit Sarah... look at the quest board... leave the tavern" only
     ever ran check_quests, everything else was silently ignored.
 
     Deliberately conservative, and deliberately keyword-only (no extra
