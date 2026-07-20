@@ -356,6 +356,7 @@
         "connections": [
           "greymoor_downs_windswept_ridge"
         ],
+        "descends_to": "greymoor_downs_below_the_cairn",
         "directions": {
           "south": "greymoor_downs_windswept_ridge"
         },
@@ -363,6 +364,19 @@
           "the_cairn_itself": {
             "name": "the cairn's carefully fitted stones",
             "description": "No name carved anywhere on it, but the topmost stone is always clean — swept clear, again and again, of whatever the wind piles onto it."
+          }
+        }
+      },
+      "greymoor_downs_below_the_cairn": {
+        "name": "Below the Cairn",
+        "layer": "underground",
+        "description": "A narrow shaft under the cairn's foundation stone, dug by hand and refilled by hand, over and over, by whoever keeps coming back. Nothing down here looks like it's resting.",
+        "connections": [],
+        "ascends_to": "greymoor_downs_lonely_cairn",
+        "interactables": {
+          "the_refilled_shaft": {
+            "name": "the shaft's carefully refilled walls",
+            "description": "Packed and re-packed so many times the dirt's gone smooth. Somebody keeps digging this back open, and somebody keeps closing it again."
           }
         }
       },
@@ -721,10 +735,12 @@
         "layer": "underground",
         "description": "A dry, ancient cistern, long since cut off from whatever it used to hold. Someone stashed something down here and never came back for it.",
         "connections": [
-          "sunken_root_caverns_deep_tunnels"
+          "sunken_root_caverns_deep_tunnels",
+          "sunken_root_caverns_precise_channel"
         ],
         "directions": {
-          "west": "sunken_root_caverns_deep_tunnels"
+          "west": "sunken_root_caverns_deep_tunnels",
+          "north": "sunken_root_caverns_precise_channel"
         },
         "lockables": [
           {
@@ -742,6 +758,23 @@
           "cistern_dry_channels": {
             "name": "the cistern's dry drainage channels",
             "description": "Cut with real precision, leading nowhere any water could reach anymore. Someone built this to hold something other than water."
+          }
+        }
+      },
+      "sunken_root_caverns_precise_channel": {
+        "name": "The Precise Channel",
+        "layer": "underground",
+        "description": "A single channel, cut with the same exact precision as the cistern's drainage, leading further down than anything else in these caverns goes. The stonework here isn't goblin work, and it isn't natural either.",
+        "connections": [
+          "sunken_root_caverns_forgotten_cistern"
+        ],
+        "directions": {
+          "south": "sunken_root_caverns_forgotten_cistern"
+        },
+        "interactables": {
+          "channel_matching_stonework": {
+            "name": "stonework that matches something else, somewhere else",
+            "description": "The same exact cut, the same exact angle, as stories describe far below the earth in places no one from up here has ever actually seen."
           }
         }
       },
@@ -921,7 +954,12 @@
         "name": "The Sunken Archive",
         "layer": "underground",
         "description": "A lower level beneath the spire, shelved wall to wall with something that isn't quite paper and isn't quite stone. Whoever built this wanted it remembered, not just recorded.",
-        "connections": [],
+        "connections": [
+          "the_first_city_deepest_record"
+        ],
+        "directions": {
+          "down": "the_first_city_deepest_record"
+        },
         "ascends_to": "the_first_city",
         "lockables": [
           {
@@ -942,6 +980,23 @@
           "archive_echoing_recess": {
             "name": "a recess carved deep into the archive's rear wall",
             "description": "Words carved at its edge, worn but legible: \"I speak without a mouth and hear without ears. I have no body, but I come alive with wind. What am I?\""
+          }
+        }
+      },
+      "the_first_city_deepest_record": {
+        "name": "The Deepest Record",
+        "layer": "underground",
+        "description": "The lowest chamber anyone's found beneath the spire, walls carved floor to ceiling in the same script found everywhere above — except here, for the first time, it isn't repeating. It's telling something.",
+        "connections": [
+          "the_first_city_sunken_archive"
+        ],
+        "directions": {
+          "up": "the_first_city_sunken_archive"
+        },
+        "interactables": {
+          "the_unrepeating_wall": {
+            "name": "the one wall in the whole buried city that doesn't repeat itself",
+            "description": "Every other surface up above counts the same shape over and over. This one, finally, says something different — though no one still living can read it."
           }
         }
       },
@@ -977,10 +1032,12 @@
         "layer": "underground",
         "description": "A low, wide den at the end of the roots, floor packed hard by years of restless pacing. Whatever den this is hasn't been abandoned long.",
         "connections": [
-          "whispering_wood_root_hollow"
+          "whispering_wood_root_hollow",
+          "whispering_wood_deeper_roots"
         ],
         "directions": {
-          "west": "whispering_wood_root_hollow"
+          "west": "whispering_wood_root_hollow",
+          "north": "whispering_wood_deeper_roots"
         },
         "monsters": [
           "wolf"
@@ -989,6 +1046,23 @@
           "den_claw_marks": {
             "name": "deep claw marks scored into the packed earth",
             "description": "Layered thick, over and over, always at the same height — whatever left them never grew any smaller."
+          }
+        }
+      },
+      "whispering_wood_deeper_roots": {
+        "name": "The Deeper Roots",
+        "layer": "underground",
+        "description": "Past the den, the roots stop looking like roots. They're too regular, too deliberate — less like something that grew here and more like something that was built to look grown.",
+        "connections": [
+          "whispering_wood_sunken_den"
+        ],
+        "directions": {
+          "south": "whispering_wood_sunken_den"
+        },
+        "interactables": {
+          "the_regular_growth": {
+            "name": "a stretch of unnaturally regular root-work",
+            "description": "Every join is the same angle. Whatever grew this whole forest from below, it wasn't growing at random."
           }
         }
       },
@@ -1024,8 +1098,13 @@
         "name": "The Gorge Depths",
         "layer": "underground",
         "description": "The bottom of the gorge beneath the bridge, close and dark, the air moving in and out on a slow rhythm that has nothing to do with wind.",
-        "connections": [],
+        "connections": [
+          "stonearch_bridge_deep_current"
+        ],
         "ascends_to": "stonearch_bridge",
+        "directions": {
+          "east": "stonearch_bridge_deep_current"
+        },
         "lockables": [
           {
             "id": "rubble_choked_passage",
@@ -1044,6 +1123,23 @@
           "depths_breathing_wall": {
             "name": "a wide stretch of rock wall, faintly warm",
             "description": "It rises and falls under your palm, slow and even — the same rhythm audible from the bridge far above, only close enough now to feel."
+          }
+        }
+      },
+      "stonearch_bridge_deep_current": {
+        "name": "The Deep Current",
+        "layer": "underground",
+        "description": "Where the gorge's water finally goes, funneled into a current that runs somewhere no map accounts for. It runs toward the same distant, slow rhythm that fills the depths above.",
+        "connections": [
+          "stonearch_bridge_gorge_depths"
+        ],
+        "directions": {
+          "west": "stonearch_bridge_gorge_depths"
+        },
+        "interactables": {
+          "the_vanishing_current": {
+            "name": "the current itself, vanishing into darker water",
+            "description": "It never resurfaces anywhere anyone's mapped. Wherever it's actually going, it's going somewhere with purpose."
           }
         }
       }
@@ -1384,7 +1480,8 @@
         "type": "reach_location",
         "location": "stonearch_bridge"
       },
-      "clue": "Sarah keeps glancing down the far road out of town, like she's still weighing whether to take it."
+      "clue": "Sarah keeps glancing down the far road out of town, like she's still weighing whether to take it.",
+      "weight": "climactic"
     },
     "borins_vouching_task": {
       "title": "A Name Worth Vouching For",
@@ -1410,7 +1507,8 @@
         "type": "reach_location",
         "location": "market_row"
       },
-      "clue": "Borin still takes up the same spot on Market Row every morning, like he hasn't decided anything yet."
+      "clue": "Borin still takes up the same spot on Market Row every morning, like he hasn't decided anything yet.",
+      "weight": "climactic"
     },
     "wrens_root_worry": {
       "title": "What the Roots Are Hiding",
@@ -1436,7 +1534,8 @@
         "type": "reach_location",
         "location": "hollow_stump_shrine"
       },
-      "clue": "Wren keeps almost saying something about the shrine's roots, then talking to the garden instead."
+      "clue": "Wren keeps almost saying something about the shrine's roots, then talking to the garden instead.",
+      "weight": "climactic"
     },
     "pips_story_worth_telling": {
       "title": "A Story Worth Telling",
@@ -1462,7 +1561,8 @@
         "type": "reach_location",
         "location": "stonearch_bridge"
       },
-      "clue": "Pip's still saying he's 'just about to cross,' but he's stopped actually packing to leave."
+      "clue": "Pip's still saying he's 'just about to cross,' but he's stopped actually packing to leave.",
+      "weight": "climactic"
     },
     "grasks_freedom": {
       "title": "Grask's Freedom",
@@ -1488,7 +1588,8 @@
         "type": "reach_location",
         "location": "the_first_city"
       },
-      "clue": "Grask keeps saying he's done with tunnels, then keeps following the party into the next one."
+      "clue": "Grask keeps saying he's done with tunnels, then keeps following the party into the next one.",
+      "weight": "climactic"
     },
     "veshs_way_back": {
       "title": "Vesh's Way Back",
@@ -1515,7 +1616,8 @@
         "type": "reach_location",
         "location": "glimmerdeep_grotto"
       },
-      "clue": "Vesh goes quiet every time the crystal-glow comes up again."
+      "clue": "Vesh goes quiet every time the crystal-glow comes up again.",
+      "weight": "climactic"
     },
     "the_hollow_stump": {
       "title": "The Hollow Stump",

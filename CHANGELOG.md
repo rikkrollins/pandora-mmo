@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.13.0] — Deeper world + narrated "cutscene" moments for every companion's story
+
+Per Coffee's direction (2026-07-20): the map goes further still (5 new
+frontier locations extending the Wood, the Downs, the gorge, the
+underground cave chain, and the buried city — world now 40 locations,
+up from 16 at the start of this session), each tied narratively to the
+same thread: something singular and ancient connects what's underneath
+all of them.
+
+The bigger addition: every one of the 6 recruitable companions'
+personal-quest **resolutions** (Sarah, Borin, Wren, Pip, Grask, Vesh)
+now gets the same longer, weighted narrated "cutscene" moment the
+game's 4 story-arc climaxes already got (task #192) — reusing that
+exact existing mechanism (any quest tagged `"weight": "climactic"`),
+so no new code was needed, just marking these real, existing
+personal-story payoffs as the story beats they already were.
+
 ## [1.12.1] — Fixed "Switch to my character X" never matching
 
 Live-caught (Coffee, 2026-07-19, dev-topic screenshot): "Switch to my
