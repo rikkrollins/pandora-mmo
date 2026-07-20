@@ -282,6 +282,16 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # buy request that got silently swallowed as ordinary conversation
     # with no purchase ever happening. "buy"/"purchase"/"sell" are
     # explicit enough to win over a bare NPC-name mention.
+    # Checked BEFORE "buy" below, same reasoning as "where can i buy"
+    # above: real live bug (2026-07-19, Sugar) -- "Look at wares
+    # available for purchase" contains the bare word "purchase" and got
+    # caught by the "buy"/"purchase" check below with no item named,
+    # giving the unhelpful "not sure what item you mean" the list_shop
+    # action (further below) exists specifically to avoid. These are
+    # clearly asking to browse, not naming anything to buy.
+    if any(w in lowered for w in ["available for purchase", "available to buy", "for purchase"]):
+        return {**base, "action": "list_shop"}
+
     if any(w in lowered for w in ["buy", "purchase"]):
         return {**base, "action": "buy"}
 
@@ -558,7 +568,13 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                                     "browse the shops", "see the shop",
                                     "what's in the shop", "whats in the shop", "look at the shop",
                                     "what's in his shop", "what's in her shop",
-                                    "open the shop", "open shop", "open his shop", "open her shop"]):
+                                    "open the shop", "open shop", "open his shop", "open her shop",
+                                    # Real live bug (2026-07-19, Sugar): "wares" was
+                                    # simply never in this list (the "for purchase"/
+                                    # "available to buy" phrasings from the same bug
+                                    # are caught earlier, before the "buy" check, since
+                                    # they contain the bare word "buy"/"purchase").
+                                    "wares"]):
         return {**base, "action": "list_shop"}
 
     # Real live bug (2026-07-15): "auto equip my equipment" contains "my

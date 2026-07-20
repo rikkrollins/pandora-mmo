@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.13.2] — Two real shop-browsing gaps fixed
+
+- Live-caught (Coffee, dev-topic screenshot, 2026-07-19): "Look at
+  wares available for purchase" matched the bare "buy"/"purchase"
+  keyword trigger before ever reaching the real shop-listing action,
+  giving an unhelpful "not sure what item you mean" instead of actually
+  showing the shop. Fixed with a browse-only check before that trigger
+  (same shape as the existing "where can i buy" precedent) plus adding
+  "wares" itself, which was simply never in the trigger list.
+- Dev-topic feedback (Coffee): "If a player wants to look at stalls and
+  shopfronts in market row - please give a description and then open
+  the shop." Examining a generic collective ("the stalls", "the
+  shopfronts") at a location with a real shop now gives a short flavor
+  line and then opens it -- examining the specific abandoned/shuttered
+  stall by name still just describes it, since that one's deliberately
+  not the working shop.
+
 ## [1.13.1] — Menu polish: Level Up only when it matters, tap-to-switch characters
 
 Dev-topic feedback (Coffee):

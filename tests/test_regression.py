@@ -3080,6 +3080,46 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(active["name"], "Gamma")
         sessions.end_session(-999)
 
+    # -- Dev-topic feedback (Coffee, 2026-07-19): "If a player wants to
+    #    look at stalls and shopfronts in market row - please give a
+    #    description and then open the shop."
+    async def test_examine_generic_stalls_describes_then_opens_shop(self):
+        user_id = 900559
+        make_basic_character(user_id, "Shopper", current_location="market_row")
+        sink = []
+        await bot._do_examine(FakeUpdate(user_id, "", sink), "the stalls and shopfronts")
+        self.assertTrue(any("🛒" in msg for msg in sink), sink)
+
+    async def test_examine_the_shuttered_stall_specifically_does_not_open_shop(self):
+        from unittest.mock import patch
+
+        user_id = 900560
+        make_basic_character(user_id, "Shopper2", current_location="market_row")
+        sink = []
+        with patch("bot.narrate_examine", return_value="Nailed shut, same as always."):
+            await bot._do_examine(FakeUpdate(user_id, "", sink), "the boarded-up shuttered stall")
+        self.assertFalse(any("🛒" in msg for msg in sink), sink)
+
+    async def test_examine_stalls_at_a_shopless_location_falls_through_normally(self):
+        user_id = 900561
+        make_basic_character(user_id, "Shopper3", current_location="whispering_wood")
+        sink = []
+        await bot._do_examine(FakeUpdate(user_id, "", sink), "the stalls")
+        self.assertFalse(any("🛒" in msg for msg in sink), sink)
+
+    # -- Real live bug (2026-07-19, Sugar, dev-topic screenshot): "Look
+    #    at wares available for purchase" fell through to "buy" with no
+    #    item named, giving "not sure what item you mean" instead of
+    #    actually showing the shop.
+    def test_wares_and_available_for_purchase_open_the_shop_not_buy(self):
+        self.assertEqual(_keyword_fallback("Look at wares available for purchase", [])["action"], "list_shop")
+        self.assertEqual(_keyword_fallback("What items are available to buy", [])["action"], "list_shop")
+        self.assertEqual(_keyword_fallback("Show me the wares", [])["action"], "list_shop")
+
+    def test_real_buy_requests_still_classify_as_buy(self):
+        self.assertEqual(_keyword_fallback("I want to buy a healing potion", [])["action"], "buy")
+        self.assertEqual(_keyword_fallback("buy 2 torches", [])["action"], "buy")
+
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
     """

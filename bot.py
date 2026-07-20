@@ -7539,6 +7539,29 @@ async def _do_examine(update: Update, target_text: str) -> None:
         )
         return
 
+    # Dev-topic feedback (Coffee, 2026-07-19): "If a player wants to look
+    # at stalls and shopfronts in market row - please give a description
+    # and then open the shop." A GENERIC "the stalls"/"the shopfronts"
+    # phrase shouldn't be forced onto one specific named interactable
+    # (market_row's own "shuttered_stall" is deliberately the one
+    # abandoned, nailed-shut stall -- examining that specifically should
+    # still just describe it, not open Maren's shop), so this only
+    # matches the generic plural/collective wording, checked before the
+    # normal interactable lookup.
+    generic_shop_words = {"stall", "stalls", "shopfront", "shopfronts", "store", "stores", "shop", "shops"}
+    shop_id = location.get("shop")
+    if shop_id and target_text:
+        lowered_target = target_text.lower()
+        target_words = set(re.findall(r"[a-z]+", lowered_target))
+        if target_words & generic_shop_words and "shuttered" not in lowered_target:
+            await _safe_send(
+                update,
+                f"🔍 **{character['name']}** takes in the stalls and shopfronts lining {location['name']} "
+                f"before stepping up to see what's actually for sale.",
+            )
+            await _do_list_shop(update)
+            return
+
     interactables = location.get("interactables", {})
     if not target_text or not target_text.strip():
         if interactables:
