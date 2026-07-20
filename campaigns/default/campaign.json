@@ -62,6 +62,10 @@
           "locksmiths_keys": {
             "name": "rows of hanging keys in the locksmith's window",
             "description": "Dozens of unlabeled keys, none cut to any lock still in use in town, as far as anyone will say. Someone still dusts them."
+          },
+          "marens_strongbox": {
+            "name": "Old Maren's locked strongbox",
+            "description": "An old strongbox Maren's lost the combination to. A riddle is carved into its lid, worn but still legible: \"I have cities, but no houses; forests, but no trees; rivers, but no water. What am I?\""
           }
         },
         "safe": true

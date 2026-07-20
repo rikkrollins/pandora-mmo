@@ -2,6 +2,32 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.67] — Real "Maren's strongbox" object added + head-noun matching fixed
+
+Live-caught the same session: the same player repeatedly tried to
+examine "the strongbox" -- a real quest (`marens_locked_ledger`)
+already describes it and its carved riddle in detail, but no actual
+interactable object for it ever existed at `market_row`, so every
+attempt hit the graceful-but-empty "doesn't spot anything" fallback.
+Added `marens_strongbox` as a real interactable, reusing the quest's
+own already-written description and riddle text verbatim (no new lore
+invented).
+
+That surfaced one more real bug while verifying it: "Old Maren's
+locked strongbox" has 3 significant words once "old" is excluded, so
+a natural phrasing that only says "strongbox" fell short of the plain
+majority-of-words threshold in `_find_interactable`'s word-overlap
+fallback, even though "strongbox" IS the object's real head noun --
+the exact same head-noun-vs-modifier distinction already fixed in
+`items.find_item_mentioned_in_text` for the fishing-gear bug earlier
+tonight, mirrored here: a lone head-noun match is now checked first
+and treated as confident on its own.
+
+Verified via the full 35-interactable self-match sweep (zero
+regressions, including re-confirming the brass-scale and boarded-up-
+stall fixes from earlier tonight still hold together) plus 2 new
+permanent regression tests.
+
 ## [1.11.66] — "a boarded up stall" silently failed to match (hyphen vs. space)
 
 Same session, same live player, same root shape as v1.11.65's fix:

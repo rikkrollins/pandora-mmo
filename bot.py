@@ -7400,7 +7400,7 @@ def _find_interactable(location: dict, text: str) -> tuple[str, dict] | None:
     # or tied overlap is left unmatched rather than guessed, same
     # "don't guess when ambiguous" philosophy as every other word-level
     # fallback in this codebase (NPC names, location names).
-    best_obj, best_score, ambiguous = None, 0, False
+    candidate_words: dict = {}
     for obj_id, data in ordered:
         # Real bug, live-caught 2026-07-19 (Coffee: "a player is looking
         # at the wide-boled tree and its not working"): .split() left
@@ -7427,8 +7427,29 @@ def _find_interactable(location: dict, text: str) -> tuple[str, dict] | None:
             w.strip(".,;:!?\"'()") for w in data["name"].lower().replace("-", " ").split()
         ]
         words = [w for w in words if w and w not in stopwords and len(w) >= 3]
-        if not words:
-            continue
+        if words:
+            candidate_words[obj_id] = (data, words)
+
+    # Real live bug (2026-07-19, same "old strongbox" session): "Old
+    # Maren's locked strongbox" (3 significant words after "old" is
+    # excluded) needed 2 of them to clear the plain >half threshold
+    # below, but "strongbox" -- the one word that actually NAMES the
+    # object, a real head noun -- should be a confident match on its
+    # own, the same distinction items.find_item_mentioned_in_text
+    # already draws between a head-noun match and a mere modifier.
+    # Checked as its own pass, before the general overlap threshold, so
+    # it can only ever ADD a match a shorter phrasing would otherwise
+    # miss, never take one away.
+    head_matches = []
+    for obj_id, (data, words) in candidate_words.items():
+        head_word = words[-1]
+        if re.search(r"\b" + re.escape(head_word) + r"\b", lowered):
+            head_matches.append((obj_id, data))
+    if len(head_matches) == 1:
+        return head_matches[0]
+
+    best_obj, best_score, ambiguous = None, 0, False
+    for obj_id, (data, words) in candidate_words.items():
         matches = sum(1 for w in words if re.search(r"\b" + re.escape(w) + r"\b", lowered))
         if matches > len(words) / 2:
             if matches > best_score:

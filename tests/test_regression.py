@@ -2727,6 +2727,24 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(found, f"failed to match: {text!r}")
             self.assertEqual(found[0], "shuttered_stall")
 
+    # -- _find_interactable: a real head-noun match should be confident
+    #    on its own (2026-07-19, same live session): "Old Maren's locked
+    #    strongbox" (added as a real interactable so the player's own
+    #    repeated live attempts to examine it -- the quest referenced it
+    #    but no interactable ever existed -- actually resolve) has 3
+    #    significant words once "old" is excluded, so a phrasing that
+    #    only says "strongbox" fell short of the plain >half threshold
+    #    even though "strongbox" IS the object's real head noun -- the
+    #    same head-noun-is-confident distinction already fixed in
+    #    items.find_item_mentioned_in_text, mirrored here. -------------
+    def test_find_interactable_head_noun_alone_is_confident(self):
+        location = bot.cl.get_location(bot.CAMPAIGN, "market_row")
+        for text in ["Examine the lid of the strongbox", "the old strongbox", "the strongbox",
+                     "Search for Maren's old strongbox"]:
+            found = bot._find_interactable(location, text)
+            self.assertIsNotNone(found, f"failed to match: {text!r}")
+            self.assertEqual(found[0], "marens_strongbox")
+
     # -- "Examine" a real monster present at the location, not just
     #    interactable objects (2026-07-17, Coffee, caught via live
     #    gameplay monitoring: "Look at the wolves ... give me detail
