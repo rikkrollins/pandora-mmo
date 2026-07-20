@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.66] — "a boarded up stall" silently failed to match (hyphen vs. space)
+
+Same session, same live player, same root shape as v1.11.65's fix:
+"Look closer at a boarded up stall" (the natural way to type it) never
+matched the stored "a boarded-up stall" -- the hyphen genuinely joined
+"boarded" and "up" into one unsplittable token in `_find_interactable`'s
+word-overlap fallback, so a plain space-separated phrasing could never
+reach it. Fixed by splitting on hyphens the same as whitespace before
+building the significant-word list, so "boarded-up" now contributes
+"boarded" to the overlap count exactly as if the stored name used a
+space -- the same fix direction as the existing "wide-boled tree"
+punctuation fix, just the opposite character. Verified via the full
+34-interactable self-match sweep (zero regressions) plus a new
+permanent regression test.
+
 ## [1.11.65] — "Look at Maren's brass scale" silently failed to match
 
 Live-caught via a real player's own screenshot ("Why isn't this

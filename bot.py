@@ -7412,8 +7412,19 @@ def _find_interactable(location: dict, text: str) -> tuple[str, dict] | None:
         # entirely, so even "examine the ancient tree" (a perfectly
         # normal shortening, zero typos) fell one word short of the
         # >half threshold and matched nothing.
+        # Real live bug (2026-07-19, same day as the "wide-boled tree"
+        # fix above, same root shape but the opposite direction): "a
+        # boarded up stall" (no hyphen, the natural way to type it)
+        # never matched the stored "a boarded-up stall" -- the comma-
+        # stripping fix above only ever handled a stray TRAILING
+        # punctuation mark, not a hyphen genuinely joining two words
+        # into one token, so "boarded-up" stayed a single unsplittable
+        # word no plain space-separated phrasing could ever equal.
+        # Splitting on hyphens the same as whitespace before stripping
+        # trailing punctuation means "boarded-up" contributes "boarded"
+        # to the overlap count same as if the stored name used a space.
         words = [
-            w.strip(".,;:!?\"'()") for w in data["name"].lower().split()
+            w.strip(".,;:!?\"'()") for w in data["name"].lower().replace("-", " ").split()
         ]
         words = [w for w in words if w and w not in stopwords and len(w) >= 3]
         if not words:

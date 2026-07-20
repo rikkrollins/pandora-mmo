@@ -2713,6 +2713,20 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(found, f"failed to match: {text!r}")
             self.assertEqual(found[0], "marens_scale")
 
+    # -- _find_interactable: hyphenated stored names (2026-07-19,
+    #    live-caught the same session, same "market_row" location): "a
+    #    boarded up stall" (the natural way to type it, no hyphen) never
+    #    matched the stored "a boarded-up stall" -- the existing
+    #    trailing-punctuation strip only handled a stray character stuck
+    #    to a word's END, not a hyphen genuinely joining two words into
+    #    one unsplittable token. -------------------------------------
+    def test_find_interactable_handles_hyphen_vs_space(self):
+        location = bot.cl.get_location(bot.CAMPAIGN, "market_row")
+        for text in ["a boarded up stall", "a boarded-up stall", "the boarded up stall"]:
+            found = bot._find_interactable(location, text)
+            self.assertIsNotNone(found, f"failed to match: {text!r}")
+            self.assertEqual(found[0], "shuttered_stall")
+
     # -- "Examine" a real monster present at the location, not just
     #    interactable objects (2026-07-17, Coffee, caught via live
     #    gameplay monitoring: "Look at the wolves ... give me detail
