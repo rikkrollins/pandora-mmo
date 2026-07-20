@@ -2989,6 +2989,23 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("North:", reply)
         self.assertIn("West:", reply)
 
+    # -- Real live bug (2026-07-19, Coffee): "Switch to my character
+    #    Elduinn" extracted "my character elduinn" as the target name
+    #    (longer than the real name "Elduinn"), which never matched --
+    #    the error message even listed "Elduinn" as a valid character
+    #    right there, while claiming it couldn't find it.
+    def test_switch_to_my_character_name_phrasing(self):
+        self.assertEqual(
+            _keyword_fallback("Switch to my character Elduinn", [])["target"], "Elduinn"
+        )
+
+    async def test_switch_character_matches_despite_my_character_filler(self):
+        user_id = 900553
+        make_basic_character(user_id, "Elduinn")
+        match = bot._find_own_character_by_name_fragment(user_id, "my character elduinn")
+        self.assertIsNotNone(match)
+        self.assertEqual(match["name"], "Elduinn")
+
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
     """

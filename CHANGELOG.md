@@ -2,6 +2,24 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.12.1] — Fixed "Switch to my character X" never matching
+
+Live-caught (Coffee, 2026-07-19, dev-topic screenshot): "Switch to my
+character Elduinn" replied "Couldn't find one of your characters by
+that name" while listing "Elduinn" as a valid character in the very
+same message. Root cause: the keyword-fallback trigger for switching
+characters only strips the literal "switch to " prefix, leaving "my
+character elduinn" as the extracted target -- longer than the real
+name, so the name-matching check (which only ever looks for the
+fragment being equal to, or contained within, the real name -- never
+the reverse) never matched. Fixed in two places: more specific trigger
+phrases ("switch to my character ", "switch my character to ") are now
+checked first in `ai/intent_parser.py` so the filler words are stripped
+along with the generic prefix, and `_find_own_character_by_name_
+fragment` in `bot.py` now also strips a leading "my character "/
+"character " itself as defense in depth for any other caller. Two new
+permanent tests added and passing.
+
 ## [1.12.0] — World expansion: compass navigation, 19 new areas, real puzzles & treasure
 
 Per Coffee's direction (2026-07-19/20): the world's large outdoor/

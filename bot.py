@@ -9682,6 +9682,17 @@ async def _do_list_characters(update: Update) -> None:
 
 def _find_own_character_by_name_fragment(telegram_user_id: int, fragment: str) -> dict | None:
     lowered = fragment.strip().lower()
+    # Defense in depth (2026-07-19/20, real bug): a caller-side filler
+    # word left in front of the real name (e.g. "my character elduinn")
+    # otherwise never matches, since the checks below only look for the
+    # fragment being equal to or a substring of the real name -- never
+    # the reverse. Stripped here too, not just at the keyword_fallback
+    # trigger, so any other caller passing a similarly-prefixed fragment
+    # is covered as well.
+    for filler in ("my character ", "character "):
+        if lowered.startswith(filler):
+            lowered = lowered[len(filler):]
+            break
     for c in db.list_characters(telegram_user_id):
         if lowered == c["name"].lower() or lowered in c["name"].lower():
             return c

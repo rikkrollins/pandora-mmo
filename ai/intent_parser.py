@@ -706,7 +706,18 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
             and "my characters name" not in lowered):
         return {**base, "action": "list_characters"}
 
-    for trigger in ["switch to ", "switch character to ", "play as "]:
+    # Real bug, live (2026-07-19, Coffee): "Switch to my character
+    # Elduinn" matched the plain "switch to " trigger below, leaving
+    # "my character elduinn" as the extracted name -- longer than the
+    # real name, so _find_own_character_by_name_fragment's match (which
+    # only checks the fragment against/within the real name, not the
+    # reverse) never found it, even with the fragment containing the
+    # right name at the end. Longer, more specific triggers are checked
+    # first so "my character "/"character " is stripped along with the
+    # generic "switch to " prefix, same fix shape "delete my character "
+    # already gets below.
+    for trigger in ["switch to my character ", "switch character to ", "switch my character to ",
+                     "switch to ", "play as "]:
         if trigger in lowered:
             name = text[lowered.index(trigger) + len(trigger):].strip()
             return {**base, "action": "switch_character", "target": name or None}
