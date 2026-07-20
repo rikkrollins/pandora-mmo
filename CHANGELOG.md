@@ -2,6 +2,32 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.65] — "Look at Maren's brass scale" silently failed to match
+
+Live-caught via a real player's own screenshot ("Why isn't this
+working?"): examining a real, described interactable
+("Old Maren's brass scale") kept getting "doesn't spot anything like
+that here" -- even though that exact object was named in the same
+reply's own hint list. Two compounding causes in `_find_interactable`:
+
+- A phone keyboard's smart-quote autocorrect sends a curly apostrophe
+  (’) which never equals the straight one (') this game's stored names
+  use, so "maren's" from the player's own message could never match
+  "Maren's" in the stored name at all -- same single-character-
+  collision shape as the existing armour/armor and fishing rod/pole
+  fixes, just a punctuation mark this time. Normalized the same way.
+- "old" wasn't excluded from the word-overlap fallback's stopword list
+  (the NPC-name matcher already excludes it as a filler word for the
+  same NPC's name, but this separate function never did) -- a 4-word
+  name like "Old Maren's brass scale" needed 3 of 4 words to clear the
+  match threshold, and with "maren's" silently failing (the apostrophe
+  bug above) AND "old" often left out of a natural shorter phrasing,
+  legitimate requests fell short by one word.
+
+Verified via a full 34-interactable self-match sweep across the whole
+game (zero regressions) plus a new permanent regression test covering
+all 4 real phrasings a player tried live.
+
 ## [1.11.64] — Test-only fix: stale guild-join test fixture (no game behavior change)
 
 Running the full regression suite while validating v1.11.63 surfaced

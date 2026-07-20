@@ -2697,6 +2697,22 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(items_module.find_item_mentioned_in_text("Sell 2x bait", candidate_ids=candidates), "bait")
 
+    # -- _find_interactable: smart-quote apostrophe + "old" filler word
+    #    (2026-07-19, live-caught via a real player's own screenshot):
+    #    "Look at maren's brass scale" (a real, described interactable)
+    #    failed -- a phone's smart-quote autocorrect sends a curly
+    #    apostrophe that never equals the straight one the stored name
+    #    uses, and without "old" (a throwaway descriptor, not a real
+    #    stopword in this function before this fix) a shorter phrasing
+    #    fell one word short of the word-overlap match threshold. -------
+    def test_find_interactable_handles_curly_apostrophe_and_old_filler(self):
+        location = bot.cl.get_location(bot.CAMPAIGN, "market_row")
+        for text in ["maren’s brass scale", "brass scale", "old maren’s brass scale",
+                     "maren's brass scale"]:
+            found = bot._find_interactable(location, text)
+            self.assertIsNotNone(found, f"failed to match: {text!r}")
+            self.assertEqual(found[0], "marens_scale")
+
     # -- "Examine" a real monster present at the location, not just
     #    interactable objects (2026-07-17, Coffee, caught via live
     #    gameplay monitoring: "Look at the wolves ... give me detail

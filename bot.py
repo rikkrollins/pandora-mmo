@@ -7348,7 +7348,17 @@ def _find_interactable(location: dict, text: str) -> tuple[str, dict] | None:
     the small classifier model to extract the object name exactly.
     """
     interactables = location.get("interactables", {})
-    lowered = text.strip().lower()
+    # Real live bug (2026-07-19, confirmed live: "Look at maren's brass
+    # scale" -- a real, described interactable -- failed even though a
+    # longer phrasing of the exact same request succeeded): a phone
+    # keyboard's smart-quote autocorrect sends a curly apostrophe (’,
+    # U+2019), which never equals the straight one (') this game's own
+    # stored names use, so "maren's" from the player's own message could
+    # never match the word "Maren's" in "Old Maren's brass scale" at
+    # all -- same single-character-collision shape as the existing
+    # armour/armor and fishing rod/pole normalizations, just a
+    # punctuation mark instead of a whole word this time.
+    lowered = text.strip().lower().replace("’", "'")
     ordered = sorted(interactables.items(), key=lambda kv: -len(kv[1]["name"]))
     for obj_id, data in ordered:
         if data["name"].lower() in lowered or obj_id.replace("_", " ") in lowered:
@@ -7361,7 +7371,16 @@ def _find_interactable(location: dict, text: str) -> tuple[str, dict] | None:
     # space in "guestbook" were never how a player would naturally type
     # it, so the exact-substring check above failed even though this
     # was clearly the same object.
-    stopwords = {"a", "an", "the", "of", "at", "on", "in", "to"}
+    # "old" added 2026-07-19 (same live "brass scale" bug as the
+    # apostrophe fix above): "Old Maren's brass scale" is a 4-word name
+    # where "old" is a throwaway descriptor, not a distinguishing word --
+    # the exact same reasoning the NPC-name matcher's own
+    # _NPC_NAME_FILLER_WORDS already applies to "old" for "Old Maren"
+    # herself. Without excluding it, a shorter (but perfectly clear)
+    # phrasing that skips "old" needs 3 of the remaining words just to
+    # clear the same >half-the-words bar a distinctive object should
+    # pass easily.
+    stopwords = {"a", "an", "the", "of", "at", "on", "in", "to", "old"}
     for obj_id, data in ordered:
         name = data["name"].lower()
         for article in ("a ", "an ", "the "):
