@@ -2,6 +2,38 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.68] — Test-only cleanup: 4 stale permanent tests (no game behavior change)
+
+Running the full FastRegressionTests suite end-to-end (started while
+validating v1.11.63, finished ~90 minutes later) surfaced 4 stale
+tests, all pre-existing technical debt from earlier feature work this
+session, none connected to anything shipped tonight:
+
+- `test_ranger_danger_sense_grants_advantage_on_dex_saves_from_level_2`
+  imported a nonexistent `_ranger_danger_sense_advantage` (leading
+  underscore) -- the real function is the public
+  `ranger_danger_sense_advantage` (no underscore, since bot.py's
+  `_do_flee` calls it from outside spells.py).
+- `test_the_hush_quest_requires_defeating_the_unspoken` accepted the
+  old flat `"the_hush"` quest id, from before Full-storyline Phase 2
+  split it into a 3-stage chain earlier this session. Updated to the
+  real final-stage id, `the_hush_stage3_the_unspoken`.
+- `test_skill_check_prompts_for_manual_roll_and_resumes_with_it`
+  checked for capitalized "Roll a d20", but the real prompt wording
+  (only the character's own name is capitalized) is lowercase "roll a
+  d20".
+- `test_support_model_unreachable_fallback_is_specific_not_generic_onboarding`
+  checked for older fallback wording ("busy"/"try asking again") that
+  task #178 already polished into the current, more specific message
+  ("genuinely overloaded"/"ask again, or ping an admin to run /redo").
+
+`test_arcane_circle_join_grants_a_real_scroll` (already fixed in
+v1.11.64) and `test_ai_companions_never_learn_monsters_for_the_human`
+(confirmed passing in isolation, a shared-DB test-ordering flake in
+the full run) needed no further changes. All 5 pass together now. No
+game code (bot.py/items.py/ai/*.py/campaigns/*.json) touched -- test
+file only, no redeploy needed.
+
 ## [1.11.67] — Real "Maren's strongbox" object added + head-noun matching fixed
 
 Live-caught the same session: the same player repeatedly tried to

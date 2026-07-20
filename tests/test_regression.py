@@ -952,8 +952,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         with patch("ai.support_agent.requests.post", side_effect=requests.RequestException("boom")), \
              patch("ai.support_agent.time.sleep"):
             answer = support_agent_module.answer_support_question("Where can I find a woodcutters axe?")
-        self.assertIn("busy", answer.lower())
-        self.assertIn("try asking again", answer.lower())
+        # Wording was polished since this test was written (task #178)
+        # -- checking for the CURRENT specific, non-generic fallback's
+        # real key phrases instead of the older "busy"/"try asking
+        # again" copy, same underlying intent: a real reason (overloaded,
+        # not vague), a real next step (ask again or /redo), never a
+        # generic "check the pinned message" onboarding non-answer.
+        self.assertIn("overloaded", answer.lower())
+        self.assertIn("ask again", answer.lower())
         self.assertNotIn("pinned message", answer.lower())
 
     # -- Real live bug (2026-07-16): this model has a documented bias
@@ -1548,7 +1554,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         sink = []
         await bot._do_skill_check(FakeUpdate(user_id, "I listen at the door", sink), "wisdom", "I listen at the door")
-        self.assertTrue(any("Roll a d20" in m for m in sink))
+        # Prompt wording is lowercase "roll a d20" (only the character's
+        # own name is capitalized/bolded) -- this test predates that
+        # standardized wording and checked for a capital "Roll".
+        self.assertTrue(any("roll a d20" in m.lower() for m in sink))
         self.assertIn(user_id, bot._PENDING_DICE_ROLLS)
         self.assertEqual(bot._PENDING_DICE_ROLLS[user_id]["kind"], "skill_check")
 
@@ -1752,12 +1761,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     #    need SlowLiveTests/Ollama -- _check_quest_completions_defeat_monster
     #    and _safe_send with FakeUpdate are both narration-free here. ---
     async def test_the_hush_quest_requires_defeating_the_unspoken(self):
+        # Task #86/Full-storyline Phase 2 split the old single "the_hush"
+        # quest into a 3-stage chain (the_hush_stage1_signs/stage2_the_
+        # wisp/stage3_the_unspoken) -- this fixture predates that and
+        # needs the final stage's real id, the one that actually carries
+        # the defeat_monster trigger for The Unspoken.
         import sessions
         sessions.end_session(-999)
 
         player_id = 999910
         make_basic_character(player_id, "Listener", current_location="the_hush_below")
-        db.accept_quest(player_id, "the_hush")
+        db.accept_quest(player_id, "the_hush_stage3_the_unspoken")
 
         boss_id = -2_500_010
         boss = {
@@ -1771,8 +1785,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._check_quest_completions_defeat_monster(FakeUpdate(player_id, "irrelevant", sink), session)
 
         character = db.get_character(player_id)
-        self.assertIn("the_hush", character["completed_quests"])
-        self.assertNotIn("the_hush", character["active_quests"])
+        self.assertIn("the_hush_stage3_the_unspoken", character["completed_quests"])
+        self.assertNotIn("the_hush_stage3_the_unspoken", character["active_quests"])
         sessions.end_session(-999)
 
     async def test_the_first_city_quest_requires_defeating_the_waking_ember(self):
@@ -1987,13 +2001,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
     # -- Ranger's Danger Sense (2026-07-16) ------------------------------
     def test_ranger_danger_sense_grants_advantage_on_dex_saves_from_level_2(self):
-        from spells import _ranger_danger_sense_advantage
+        # ranger_danger_sense_advantage has no leading underscore in the
+        # real module (unlike _gnome_cunning_advantage above) -- it's
+        # called from bot.py's _do_flee outside spells.py, so it was
+        # made a real public name; this test never got updated to match.
+        from spells import ranger_danger_sense_advantage
         ranger = {"char_class": "Ranger", "level": 2}
-        self.assertTrue(_ranger_danger_sense_advantage(ranger, "dexterity"))
-        self.assertFalse(_ranger_danger_sense_advantage(ranger, "constitution"), "only covers Dexterity saves")
-        self.assertFalse(_ranger_danger_sense_advantage({"char_class": "Ranger", "level": 1}, "dexterity"),
+        self.assertTrue(ranger_danger_sense_advantage(ranger, "dexterity"))
+        self.assertFalse(ranger_danger_sense_advantage(ranger, "constitution"), "only covers Dexterity saves")
+        self.assertFalse(ranger_danger_sense_advantage({"char_class": "Ranger", "level": 1}, "dexterity"),
                           "not unlocked until level 2")
-        self.assertFalse(_ranger_danger_sense_advantage({"char_class": "Fighter", "level": 5}, "dexterity"))
+        self.assertFalse(ranger_danger_sense_advantage({"char_class": "Fighter", "level": 5}, "dexterity"))
 
     # -- Sorcerer's Metamagic: Empowered Spell (2026-07-16) --------------
     def test_empowered_spell_rerolls_ones_and_twos(self):
