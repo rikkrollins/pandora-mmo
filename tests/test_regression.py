@@ -504,7 +504,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = make_basic_character(
             user_id, "Elowen", char_class="Wizard", current_location="crossroads_tavern",
         )
-        db.update_character(user_id, level=3)
+        # Task #170 (guild vetting): joining now requires proven_in_combat,
+        # not just level/class -- this fixture predates that requirement.
+        db.update_character(user_id, level=3, proven_in_combat=1)
         sink = []
         await bot._do_join_guild(FakeUpdate(user_id, "join the arcane circle", sink), "join the arcane circle")
         character = db.get_character(user_id)

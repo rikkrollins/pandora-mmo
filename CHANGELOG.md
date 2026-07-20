@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.11.64] — Test-only fix: stale guild-join test fixture (no game behavior change)
+
+Running the full regression suite while validating v1.11.63 surfaced
+`test_arcane_circle_join_grants_a_real_scroll` failing. Root cause:
+task #170 (guild membership requiring proof in real combat, shipped
+earlier) added a real `proven_in_combat` requirement to
+`eligible_for_guild`, but this pre-existing permanent test's fixture
+character was never updated to set that flag, so the join now
+correctly gets rejected and the test's own assertion (expecting a
+granted scroll) fails. The actual live game behavior was already
+correct the whole time -- this is a test-only fix (added
+`proven_in_combat=1` to the fixture), not a game code change. No
+bot.py/items.py/ai/intent_parser.py touched, no redeploy needed.
+
 ## [1.11.63] — "Look at [NPC]'s [object]" wrongly routed to NPC chat instead of examine
 
 Live-caught: "Look at old maren's brass scale" -- a real, described
