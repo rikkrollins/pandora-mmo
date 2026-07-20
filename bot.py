@@ -77,7 +77,7 @@ from rules.item_generator import generate_item
 from rules.leveling import (
     CLASS_HIT_DICE, scaled_enemy_count, breath_weapon_dice_count,
     CLASS_PRIMARY_ABILITY, CLASS_SAVE_PROFICIENCIES, is_proficient_in_skill,
-    skill_check_proficiency_bonus, wild_shape_temp_hp,
+    skill_check_proficiency_bonus, wild_shape_temp_hp, XP_THRESHOLDS,
 )
 from rules.proficiency import practiced_bonus, MAX_PRACTICE_BONUS
 
@@ -9009,15 +9009,23 @@ def _with_menu_button(keyboard: InlineKeyboardMarkup | None) -> InlineKeyboardMa
     return InlineKeyboardMarkup(rows)
 
 
-def _main_menu_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
+def _main_menu_keyboard(character: dict) -> InlineKeyboardMarkup:
+    """
+    Per Coffee (2026-07-19 dev-topic feedback): "Only show level up when
+    we have points to distribute. Otherwise it serves no purpose." The
+    Level Up row now only appears once pending_asi_points is real and
+    positive -- the rest of the menu is unconditional either way.
+    """
+    rows = [
         [InlineKeyboardButton("🧙 Character Sheet", callback_data="menu|sheet")],
         [InlineKeyboardButton("📖 Story So Far", callback_data="menu|story")],
         [InlineKeyboardButton("📋 Quests", callback_data="menu|quests")],
         [InlineKeyboardButton("🎒 Inventory", callback_data="menu|inventory")],
         [InlineKeyboardButton("⚔️ Equip Gear", callback_data="menu|equip")],
-        [InlineKeyboardButton("📈 Level Up", callback_data="menu|level")],
-    ])
+    ]
+    if character.get("pending_asi_points", 0) > 0:
+        rows.append([InlineKeyboardButton("📈 Level Up", callback_data="menu|level")])
+    return InlineKeyboardMarkup(rows)
 
 
 async def _do_show_menu(update: Update) -> None:
@@ -9037,7 +9045,7 @@ async def _do_show_menu(update: Update) -> None:
             "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
         )
         return
-    await _safe_send(update, f"📖 **{character['name']}** — what do you want to check?", reply_markup=_main_menu_keyboard())
+    await _safe_send(update, f"📖 **{character['name']}** — what do you want to check?", reply_markup=_main_menu_keyboard(character))
 
 
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -9193,6 +9201,11 @@ async def _do_show_level_menu(update: Update) -> None:
         )
         return
     lines = [f"📈 **Level {character['level']}** — {character['xp']} XP"]
+    next_threshold = XP_THRESHOLDS.get(character["level"] + 1)
+    if next_threshold is not None:
+        lines.append(f"{max(next_threshold - character['xp'], 0)} XP to Level {character['level'] + 1}")
+    else:
+        lines.append("Max level reached.")
     pending = character.get("pending_asi_points", 0)
     if pending:
         lines.append(f"\nYou have {pending} ability point(s) to spend:")
@@ -9659,6 +9672,24 @@ async def _do_join_guild(update: Update, text: str) -> None:
 # one is "active" (db.get_character resolves to it) at a time.
 # ---------------------------------------------------------------------
 
+def _roster_keyboard(roster: list[dict], active_id: int | None) -> InlineKeyboardMarkup:
+    """
+    Tap-to-switch buttons, one per character (task #213, per Coffee:
+    "put an option to be able to see those characters and switch them")
+    -- same real db.switch_character this already dispatches through via
+    free text, just reachable by tap too. The already-active character
+    still gets a button (a harmless no-op switch to itself) rather than
+    being singled out as unclickable, keeping the row count predictable.
+    """
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            f"{'📍 ' if c['character_id'] == active_id else ''}{c['name']} (Lv {c['level']} {c['char_class']})",
+            callback_data=f"roster|switch|{c['character_id']}",
+        )]
+        for c in roster
+    ])
+
+
 async def _do_list_characters(update: Update) -> None:
     roster = db.list_characters(update.effective_user.id)
     if not roster:
@@ -9670,14 +9701,44 @@ async def _do_list_characters(update: Update) -> None:
 
     active = db.get_character(update.effective_user.id)
     active_id = active["character_id"] if active else None
-    lines = ["🎭 **Your characters:**"]
+    lines = ["🎭 **Your characters:** (tap one to switch)"]
     for c in roster:
         marker = "📍 " if c["character_id"] == active_id else "   "
         lines.append(
             f"{marker}{c['name']} — Level {c['level']} {c['race']} {c['char_class']}"
         )
-    lines.append("\nSay 'switch to <name>' to change your active character.")
-    await _safe_send(update, "\n".join(lines))
+    await _safe_send(update, "\n".join(lines), reply_markup=_roster_keyboard(roster, active_id))
+
+
+async def roster_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _roster_keyboard -- dispatches through the same real switch_character/combat-lock checks _do_switch_character already applies to free text."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    await _safe_answer(query)
+    if action != "switch" or len(parts) < 3:
+        return
+    try:
+        character_id = int(parts[2])
+    except ValueError:
+        return
+
+    telegram_user_id = update.effective_user.id
+    roster = db.list_characters(telegram_user_id)
+    if not any(c["character_id"] == character_id for c in roster):
+        return
+    if sessions.get_session(update.effective_chat.id) is not None:
+        await update.effective_chat.send_message(
+            "You can't switch characters in the middle of combat.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    switched = db.switch_character(telegram_user_id, character_id)
+    await _safe_send(
+        update,
+        f"🎭 Switched to **{switched['name']}** the {switched['race']} {switched['char_class']} "
+        f"(Level {switched['level']}).",
+    )
 
 
 def _find_own_character_by_name_fragment(telegram_user_id: int, fragment: str) -> dict | None:
@@ -12477,6 +12538,7 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu\|"))
     application.add_handler(CallbackQueryHandler(equip_menu_callback, pattern=r"^equip\|"))
     application.add_handler(CallbackQueryHandler(level_menu_callback, pattern=r"^level\|"))
+    application.add_handler(CallbackQueryHandler(roster_menu_callback, pattern=r"^roster\|"))
 
     application.add_error_handler(_log_unhandled_error)
 

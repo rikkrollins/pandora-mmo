@@ -24,7 +24,9 @@ from ai.support_agent import _deterministic_inventory_answer
 from ai.text_cleanup import strip_think_tags
 from rules.combat import resolve_attack
 from rules.crafting import RECIPES
-from tests.helpers import DummyContext, DummyMessage, FakeUpdate, make_basic_character, use_test_db
+from tests.helpers import (
+    DummyContext, DummyMessage, FakeCallbackUpdate, FakeUpdate, make_basic_character, use_test_db,
+)
 
 
 class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
@@ -3005,6 +3007,78 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         match = bot._find_own_character_by_name_fragment(user_id, "my character elduinn")
         self.assertIsNotNone(match)
         self.assertEqual(match["name"], "Elduinn")
+
+    # -- Dev-topic feedback (Coffee, 2026-07-19): "Only show level up
+    #    when we have points to distribute. Otherwise it serves no
+    #    purpose."
+    def test_main_menu_hides_level_up_button_with_no_pending_points(self):
+        character = {"pending_asi_points": 0}
+        keyboard = bot._main_menu_keyboard(character)
+        labels = [btn.text for row in keyboard.inline_keyboard for btn in row]
+        self.assertNotIn("📈 Level Up", labels)
+
+    def test_main_menu_shows_level_up_button_with_pending_points(self):
+        character = {"pending_asi_points": 2}
+        keyboard = bot._main_menu_keyboard(character)
+        labels = [btn.text for row in keyboard.inline_keyboard for btn in row]
+        self.assertIn("📈 Level Up", labels)
+
+    async def test_level_menu_shows_xp_remaining_to_next_level(self):
+        user_id = 900554
+        make_basic_character(user_id, "XPTest")
+        sink = []
+        await bot._do_show_level_menu(FakeUpdate(user_id, "", sink))
+        self.assertIn("XP to Level 2", sink[-1])
+
+    async def test_level_menu_shows_max_level_at_20(self):
+        user_id = 900555
+        make_basic_character(user_id, "MaxLevelTest")
+        db.update_character(user_id, level=20)
+        sink = []
+        await bot._do_show_level_menu(FakeUpdate(user_id, "", sink))
+        self.assertIn("Max level reached", sink[-1])
+
+    # -- Task #213, per Coffee: "switch characters ... open up a tap
+    #    menu for my characters and ... an option to be able to see
+    #    those characters and switch them."
+    async def test_character_roster_shows_tap_to_switch_buttons(self):
+        user_id = 900556
+        make_basic_character(user_id, "First")
+        make_basic_character(user_id, "Second")
+        roster = bot.db.list_characters(user_id)
+        active = bot.db.get_character(user_id)
+        kb = bot._roster_keyboard(roster, active["character_id"])
+        labels = [btn.text for row in kb.inline_keyboard for btn in row]
+        self.assertTrue(any("First" in l for l in labels))
+        self.assertTrue(any("Second" in l for l in labels))
+
+    async def test_roster_button_tap_switches_active_character(self):
+        user_id = 900557
+        make_basic_character(user_id, "Alpha")
+        second = make_basic_character(user_id, "Beta")
+        sink = []
+        update = FakeCallbackUpdate(user_id, f"roster|switch|{second['character_id']}", sink)
+        await bot.roster_menu_callback(update, DummyContext())
+        active = bot.db.get_character(user_id)
+        self.assertEqual(active["name"], "Beta")
+
+    async def test_roster_button_tap_blocked_during_combat(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900558
+        first = make_basic_character(user_id, "Gamma")
+        second = make_basic_character(user_id, "Delta")
+        # make_basic_character makes the newest row active (Delta) -- switch
+        # back to Gamma so there's a real "currently active" character to
+        # stay locked onto while combat blocks the tap-to-switch attempt.
+        bot.db.switch_character(user_id, first["character_id"])
+        sessions.start_session(-999, [{"telegram_user_id": user_id, "name": "Gamma", "dexterity": 10}], {user_id: "party"})
+        sink = []
+        update = FakeCallbackUpdate(user_id, f"roster|switch|{second['character_id']}", sink)
+        await bot.roster_menu_callback(update, DummyContext())
+        active = bot.db.get_character(user_id)
+        self.assertEqual(active["name"], "Gamma")
+        sessions.end_session(-999)
 
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):

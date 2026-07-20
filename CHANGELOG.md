@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.13.1] — Menu polish: Level Up only when it matters, tap-to-switch characters
+
+Dev-topic feedback (Coffee):
+- The main menu's "Level Up" button now only appears when the
+  character actually has ability-score points pending -- "otherwise it
+  serves no purpose." The rest of the menu is unchanged.
+- The level menu now shows real XP remaining to the next level (or
+  "Max level reached" at 20) under the level/XP line.
+- Switching characters now has a real tap-to-switch button menu
+  ("Your characters", one button per character, marking the currently
+  active one) alongside the existing free-text "switch to <name>" --
+  both paths dispatch through the same real switch_character logic and
+  the same mid-combat lock.
+
 ## [1.13.0] — Deeper world + narrated "cutscene" moments for every companion's story
 
 Per Coffee's direction (2026-07-20): the map goes further still (5 new
