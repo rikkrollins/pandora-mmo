@@ -96,13 +96,19 @@ undercounts real mechanical coverage as of 2026-07-19 -- see bot.py's
 `_do_channel_divinity`/`_do_flurry_of_blows` for the current, accurate
 list, not just what's enumerated above.
 
-Remaining real gap (task #91, still open): Druid and Ranger have no
-real ACTIVE command yet (Druid has none at all beyond spellcasting;
-Ranger's Favored Enemy/Natural Explorer/Danger Sense are all passive) --
-Wild Shape specifically would need real alternate-stat-block combat
-support this engine doesn't have yet, which is why it hasn't been
-attempted alongside the others above. Everything else not named in
-either list above is still real, accurate flavor text only.
+2026-07-21 correction: the note below claiming Druid had no real active
+command was stale -- Wild Shape (bot.py's _do_wild_shape) was actually
+built and shipped since this docstring was last touched: a real command,
+2 uses/rest, granting real bonus damage (wild_shape_damage_bonus) and
+temp HP (wild_shape_temp_hp) for the fight, live-tested end to end. It
+just was never added to CLASS_FEATURES_LEVEL_1's Druid entry below, so
+the character sheet never displayed it. Fixed here.
+
+Ranger's Favored Enemy/Natural Explorer/Danger Sense remain passive-only
+-- consistent with real 5E, which gives Rangers no active class feature
+of their own before level 3's subcategory choice (no in-game subclass-
+choice mechanism exists in this build, same fixed-default convention as
+every other class above).
 """
 
 CLASS_FEATURES_LEVEL_1 = {
@@ -130,6 +136,8 @@ CLASS_FEATURES_LEVEL_1 = {
     "Druid": [
         "Spellcasting: casts druid spells using Wisdom",
         "Druidic: knows the secret Druidic language",
+        "Wild Shape: bonus action, transform into a beast for the fight — "
+        "bonus damage and temporary HP scaling with level, 2 uses per rest",
     ],
     "Fighter": [
         "Fighting Style: a combat specialization (e.g. Defense, Dueling, Great Weapon Fighting)",

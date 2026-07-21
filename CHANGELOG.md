@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.15.1] — /msg for AI party members, clearer multi-attacks, and a fix
+
+- **`/msg <name> <message>`** lets you tell an AI-controlled party member
+  something — in or out of combat — without it ever counting as
+  anyone's turn. Telling a companion to retreat mid-fight now actually
+  makes them attempt a real escape on their own next turn instead of
+  just attacking again.
+- **Multi-attacks are called out clearly now.** If you (or an AI party
+  member) have more than one attack this turn — Extra Attack, Action
+  Surge, Flurry of Blows — a plain "N attacks this turn!" line appears
+  before the sequence starts.
+- **Fix:** Druid's Wild Shape (a real, working command for a while now)
+  was never actually listed on the character sheet — it is now.
+
 ## [1.15.0] — Alignment, dice mini-games, and a more sensory world
 
 - **Alignment.** Every character now has a real 9-box alignment

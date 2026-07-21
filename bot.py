@@ -3149,6 +3149,24 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
             continue
         consecutive_noop_turns = 0
 
+        # Task #222, per Coffee: a human party member can message an
+        # AI-controlled companion mid-fight (see _do_message_ai) and
+        # have it actually act on real guidance to retreat, right on
+        # its own turn, instead of always just attacking every turn as
+        # this loop otherwise unconditionally does. One-shot (popped,
+        # not peeked) so it's only ever acted on once. Bosses can't be
+        # fled from at all (same rule _do_flee already enforces for a
+        # human), so guidance to run from one is silently ignored here
+        # rather than attempted and failing oddly.
+        ai_context = _AI_PLAYER_CONTEXTS.get(current["telegram_user_id"])
+        guidance = ai_context.user_data.pop("human_guidance", None) if ai_context else None
+        if guidance and not any(e.get("is_boss") for e in opposing) and any(
+            w in guidance.lower() for w in ("run", "retreat", "flee", "fall back", "escape")
+        ):
+            await _safe_send(update, f"🗣️ **{current['name']}** hears you and breaks for it!")
+            await _resolve_flee_attempt(update, session, guidance)
+            return
+
         # Boss Multiattack (2026-07-15) / Extra Attack (2026-07-16): every
         # is_boss monster gets 2 attacks/turn; separately, an AI-controlled
         # PARTY member (a recruited companion or autonomous AI player, real
@@ -3161,6 +3179,12 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
         # mid-turn kill leaves no target for the next attack, or if combat
         # itself ends mid-sequence.
         attack_count = 2 if current.get("is_boss") else _attacks_per_turn(current)
+        # Per Coffee (2026-07-21): same clear preface as the human attack
+        # path above -- skipped for bosses specifically, since those
+        # already get their own "sizing up its target" flavor line each
+        # turn (task #167) and a second generic line would just be noise.
+        if attack_count > 1 and not current.get("is_boss"):
+            await _safe_send(update, f"⚔️ **{current['name']}** has **{attack_count} attacks** this turn!")
         combat_ended_mid_turn = False
         for attack_num in range(attack_count):
             opposing = session.living_on_side(session.opposing_side(current["telegram_user_id"]))
@@ -3727,6 +3751,13 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
         # unarmed strikes to this turn, consumed the same way as
         # Action Surge above.
         attack_count += attacker.pop("flurry_bonus_attacks", 0)
+        # Per Coffee (2026-07-21): a player with more than one attack
+        # this turn (Extra Attack, Action Surge, Flurry of Blows) should
+        # be told so plainly -- the existing "(1/2)"/"(2/2)" suffix on
+        # each attack's own narration is easy to read past; this says it
+        # up front, once, before the sequence starts.
+        if attack_count > 1:
+            await _safe_send(update, f"⚔️ **{attacker['name']}** has **{attack_count} attacks** this turn!")
         for attack_num in range(attack_count):
             opposing = session.living_on_side(session.opposing_side(user_id))
             if not opposing:
@@ -4429,6 +4460,135 @@ async def _do_shove(update: Update, action_text: str, forced_roll: int | None = 
         await _resolve_ai_turns(update, session)
 
 
+async def _resolve_flee_attempt(update, session: sessions.Session, action_text: str, forced_roll: int | None = None) -> None:
+    """
+    Real core of a flee attempt, shared by _do_flee (a human player,
+    below) and _resolve_ai_turns (an AI party member acting on a human's
+    mid-combat guidance to retreat — task #222). Assumes the caller
+    already holds sessions.get_lock(session.chat_id) and that it's
+    genuinely the fleeing participant's own turn -- both call sites
+    confirm that before reaching here. Extracted 2026-07-21 so there's
+    one real implementation instead of two.
+    """
+    fleeing = session.current_participant()
+    user_id = fleeing["telegram_user_id"]
+    chat_id = session.chat_id
+    if fleeing["hp_current"] <= 0:
+        await update.effective_chat.send_message(
+            "You're unconscious (0 HP) and can't act until healed.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    opposing = session.living_on_side(session.opposing_side(user_id))
+    if any(e.get("is_boss") for e in opposing):
+        await update.effective_chat.send_message(
+            "🚫 There's no fleeing this fight — whatever you're facing won't let you leave.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    if forced_roll is None and fleeing.get("manual_dice_enabled") and not fleeing.get("is_ai"):
+        forced_roll = _extract_combined_roll(action_text)
+    if forced_roll is None and fleeing.get("manual_dice_enabled") and not fleeing.get("is_ai"):
+        _PENDING_DICE_ROLLS[user_id] = _new_pending_roll("flee", action_text, update.effective_chat.id)
+        # Task #187: _safe_send, not a raw send_message -- see the
+        # attack site's comment above for why.
+        await _safe_send(update, f"🎲 **{fleeing['name']}**, roll a d20 for your escape attempt and tell me the result (you have 1 minute, or I'll roll for you).")
+        return
+
+    # Ranger's Danger Sense (task #91, 2026-07-18): already real for
+    # spell saves (spells.py's ranger_danger_sense_advantage) but
+    # never reached this DEX-based escape roll -- the one other
+    # place in this engine a "Dexterity saving throw" genuinely
+    # happens, so a level 2+ Ranger's own claimed "advantage on
+    # Dexterity saving throws" (class_features.py) was incomplete.
+    has_danger_sense = spells_module.ranger_danger_sense_advantage(fleeing, "dexterity")
+    result = roll_ability_check(
+        fleeing, "dexterity", proficient=False, advantage=has_danger_sense, forced_roll=forced_roll
+    )
+    success = result["total"] >= SKILL_CHECK_DC
+
+    flavor = await asyncio.to_thread(
+        narrate_skill_check, fleeing, action_text, "dexterity",
+        {**result, "ability": "dexterity", "dc": SKILL_CHECK_DC, "success": success},
+    )
+    message = _format_skill_check_result(flavor, result, "dexterity", SKILL_CHECK_DC, success)
+
+    if not success:
+        await _safe_send(update, f"{message}\n\n💨 The attempt fails — you're still in the fight.")
+        session.advance_turn()
+        await _resolve_ai_turns(update, session)
+        return
+
+    # Opportunity attacks (2026-07-13): breaking off from a fight
+    # isn't a real Disengage action, it's turning your back mid-melee
+    # -- real 5E lets every enemy still standing take one free swing
+    # as you go. This game has no positioning system to gate that on
+    # (see resolve_attack's Sneak Attack comment on the same
+    # limitation), so every living opposing enemy gets one plain
+    # attack roll (no advantage/disadvantage) against the fleeing
+    # character before the escape is finalized. Deliberately skips
+    # the AI narrator per hit -- with several enemies that would
+    # stack multiple 30-160s Ollama calls onto a single flee attempt
+    # -- and reuses _format_combat_result with no flavor text for a
+    # fast, fully deterministic result instead.
+    # Rogue's Cunning Action (level 2+, task #91 audit, 2026-07-19):
+    # real 5E lets a Rogue Disengage as a bonus action, meaning
+    # THEIR flee never provokes the opportunity attacks every other
+    # class's does -- the exact, already-existing block below is
+    # precisely what Disengage removes, so this is a clean
+    # skip-the-loop rather than new combat plumbing. Reachable right
+    # now (a real level 2 Rogue is already playing), unlike most of
+    # this game's remaining level 5+ class-feature gaps.
+    has_cunning_action = fleeing.get("char_class") == "Rogue" and fleeing.get("level", 1) >= 2
+    opportunity_blocks = []
+    _refresh_real_player_spell_slots(fleeing)
+    for enemy in ([] if has_cunning_action else session.living_on_side(session.opposing_side(user_id))):
+        if fleeing["hp_current"] <= 0:
+            break
+        atk_result = resolve_attack(
+            enemy, fleeing, _weapon_for_attacker(enemy), round_number=session.round_number,
+        )
+        opportunity_blocks.append(_format_combat_result(
+            "", atk_result, enemy["name"], fleeing["name"],
+        ))
+    if opportunity_blocks:
+        _sync_player_to_db(fleeing)
+        message = message + "\n\n🗡️ **Opportunity attacks as you break away:**\n\n" + "\n\n".join(opportunity_blocks)
+    elif has_cunning_action:
+        message = message + f"\n\n🗲 **{fleeing['name']}**'s Cunning Action lets them Disengage — no opportunity attacks on the way out!"
+
+    if fleeing["hp_current"] <= 0:
+        await _safe_send(
+            update,
+            f"{message}\n\n⚠️ **{fleeing['name']} is cut down before escaping — knocked unconscious!** "
+            f"Still in the fight, rolling death saving throws on their turns until stable, revived, or worse.",
+        )
+        session.advance_turn()
+        await _resolve_ai_turns(update, session)
+        return
+
+    character = db.get_character(user_id)
+    destination_id = _nearest_safe_waypoint(character) if character else SAFE_LOCATION_FALLBACK
+    destination_name = cl.get_location(CAMPAIGN, destination_id)["name"]
+    if character:
+        db.update_character(user_id, current_location=destination_id)
+
+    session.remove_dead_player(user_id)
+    combat_over = session.is_combat_over()
+
+    await _safe_send(
+        update,
+        f"{message}\n\n🏃 **You break away and flee to {destination_name}!**"
+        + ("\n\n🏳️ With you gone, the fight has no one left to finish — it ends here." if combat_over else ""),
+    )
+    if combat_over:
+        sessions.end_session(chat_id)
+    else:
+        await _resolve_ai_turns(update, session)
+
+
 async def _do_flee(update: Update, action_text: str, forced_roll: int | None = None) -> None:
     """
     A real dice roll to escape an active fight — "cancel" no longer
@@ -4437,7 +4597,9 @@ async def _do_flee(update: Update, action_text: str, forced_roll: int | None = N
     Impossible against any enemy flagged is_boss in campaign.json —
     those fights don't let you walk away. Uses the same fixed
     SKILL_CHECK_DC as every other check in this game, on purpose, so
-    difficulty is never something the AI gets to invent.
+    difficulty is never something the AI gets to invent. Confirms it's
+    really the caller's own turn, then hands off to the shared
+    _resolve_flee_attempt above.
     """
     chat_id = update.effective_chat.id
     async with sessions.get_lock(chat_id):
@@ -4466,121 +4628,51 @@ async def _do_flee(update: Update, action_text: str, forced_roll: int | None = N
             )
             return
 
-        fleeing = session.current_participant()
-        if fleeing["hp_current"] <= 0:
-            await update.effective_chat.send_message(
-                "You're unconscious (0 HP) and can't act until healed.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
-            )
-            return
+        await _resolve_flee_attempt(update, session, action_text, forced_roll)
 
-        opposing = session.living_on_side(session.opposing_side(user_id))
-        if any(e.get("is_boss") for e in opposing):
-            await update.effective_chat.send_message(
-                "🚫 There's no fleeing this fight — whatever you're facing won't let you leave.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
-            )
-            return
 
-        if forced_roll is None and fleeing.get("manual_dice_enabled") and not fleeing.get("is_ai"):
-            forced_roll = _extract_combined_roll(action_text)
-        if forced_roll is None and fleeing.get("manual_dice_enabled") and not fleeing.get("is_ai"):
-            _PENDING_DICE_ROLLS[user_id] = _new_pending_roll("flee", action_text, update.effective_chat.id)
-            # Task #187: _safe_send, not a raw send_message -- see the
-            # attack site's comment above for why.
-            await _safe_send(update, f"🎲 **{fleeing['name']}**, roll a d20 for your escape attempt and tell me the result (you have 1 minute, or I'll roll for you).")
-            return
-
-        # Ranger's Danger Sense (task #91, 2026-07-18): already real for
-        # spell saves (spells.py's ranger_danger_sense_advantage) but
-        # never reached this DEX-based escape roll -- the one other
-        # place in this engine a "Dexterity saving throw" genuinely
-        # happens, so a level 2+ Ranger's own claimed "advantage on
-        # Dexterity saving throws" (class_features.py) was incomplete.
-        has_danger_sense = spells_module.ranger_danger_sense_advantage(fleeing, "dexterity")
-        result = roll_ability_check(
-            fleeing, "dexterity", proficient=False, advantage=has_danger_sense, forced_roll=forced_roll
+async def _do_message_ai(update: Update, text: str) -> None:
+    """
+    Task #222, per Coffee: "like /msg for human players," a way to tell
+    an AI-controlled party member something -- in or out of combat --
+    that never counts as anyone's turn. No session.advance_turn() call
+    anywhere on this path, on purpose. The message is stashed as real
+    guidance (_AI_PLAYER_CONTEXTS[...].user_data["human_guidance"]),
+    read exactly once by whichever of the two real consumers applies:
+    _resolve_ai_turns, on that companion's own next combat turn (acted
+    on immediately if it reads as a retreat), or _ai_party_autonomous_tick,
+    on their next idle-tick decision outside combat.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
         )
-        success = result["total"] >= SKILL_CHECK_DC
+        return
 
-        flavor = await asyncio.to_thread(
-            narrate_skill_check, fleeing, action_text, "dexterity",
-            {**result, "ability": "dexterity", "dc": SKILL_CHECK_DC, "success": success},
+    session = sessions.get_session(update.effective_chat.id)
+    if session is not None:
+        candidates = [
+            p for p in session.participants
+            if p.get("is_ai") and session.sides.get(p["telegram_user_id"]) == "party"
+        ]
+    else:
+        candidates = [
+            p for p in _get_combat_eligible_party_members(character["current_location"]) if p.get("is_ai")
+        ]
+
+    lowered = text.lower()
+    target = next((p for p in candidates if p["name"].lower() in lowered), None)
+    if target is None:
+        await update.effective_chat.send_message(
+            "Not sure who you're talking to — name an AI party member.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
-        message = _format_skill_check_result(flavor, result, "dexterity", SKILL_CHECK_DC, success)
+        return
 
-        if not success:
-            await _safe_send(update, f"{message}\n\n💨 The attempt fails — you're still in the fight.")
-            session.advance_turn()
-            await _resolve_ai_turns(update, session)
-            return
-
-        # Opportunity attacks (2026-07-13): breaking off from a fight
-        # isn't a real Disengage action, it's turning your back mid-melee
-        # -- real 5E lets every enemy still standing take one free swing
-        # as you go. This game has no positioning system to gate that on
-        # (see resolve_attack's Sneak Attack comment on the same
-        # limitation), so every living opposing enemy gets one plain
-        # attack roll (no advantage/disadvantage) against the fleeing
-        # character before the escape is finalized. Deliberately skips
-        # the AI narrator per hit -- with several enemies that would
-        # stack multiple 30-160s Ollama calls onto a single flee attempt
-        # -- and reuses _format_combat_result with no flavor text for a
-        # fast, fully deterministic result instead.
-        # Rogue's Cunning Action (level 2+, task #91 audit, 2026-07-19):
-        # real 5E lets a Rogue Disengage as a bonus action, meaning
-        # THEIR flee never provokes the opportunity attacks every other
-        # class's does -- the exact, already-existing block below is
-        # precisely what Disengage removes, so this is a clean
-        # skip-the-loop rather than new combat plumbing. Reachable right
-        # now (a real level 2 Rogue is already playing), unlike most of
-        # this game's remaining level 5+ class-feature gaps.
-        has_cunning_action = fleeing.get("char_class") == "Rogue" and fleeing.get("level", 1) >= 2
-        opportunity_blocks = []
-        _refresh_real_player_spell_slots(fleeing)
-        for enemy in ([] if has_cunning_action else session.living_on_side(session.opposing_side(user_id))):
-            if fleeing["hp_current"] <= 0:
-                break
-            atk_result = resolve_attack(
-                enemy, fleeing, _weapon_for_attacker(enemy), round_number=session.round_number,
-            )
-            opportunity_blocks.append(_format_combat_result(
-                "", atk_result, enemy["name"], fleeing["name"],
-            ))
-        if opportunity_blocks:
-            _sync_player_to_db(fleeing)
-            message = message + "\n\n🗡️ **Opportunity attacks as you break away:**\n\n" + "\n\n".join(opportunity_blocks)
-        elif has_cunning_action:
-            message = message + f"\n\n🗲 **{fleeing['name']}**'s Cunning Action lets them Disengage — no opportunity attacks on the way out!"
-
-        if fleeing["hp_current"] <= 0:
-            await _safe_send(
-                update,
-                f"{message}\n\n⚠️ **{fleeing['name']} is cut down before escaping — knocked unconscious!** "
-                f"Still in the fight, rolling death saving throws on their turns until stable, revived, or worse.",
-            )
-            session.advance_turn()
-            await _resolve_ai_turns(update, session)
-            return
-
-        character = db.get_character(user_id)
-        destination_id = _nearest_safe_waypoint(character) if character else SAFE_LOCATION_FALLBACK
-        destination_name = cl.get_location(CAMPAIGN, destination_id)["name"]
-        if character:
-            db.update_character(user_id, current_location=destination_id)
-
-        session.remove_dead_player(user_id)
-        combat_over = session.is_combat_over()
-
-        await _safe_send(
-            update,
-            f"{message}\n\n🏃 **You break away and flee to {destination_name}!**"
-            + ("\n\n🏳️ With you gone, the fight has no one left to finish — it ends here." if combat_over else ""),
-        )
-        if combat_over:
-            sessions.end_session(chat_id)
-        else:
-            await _resolve_ai_turns(update, session)
+    context_like = _AI_PLAYER_CONTEXTS.setdefault(target["telegram_user_id"], _AiPlayerContext())
+    context_like.user_data["human_guidance"] = text
+    await _safe_send(update, f"🗣️ **{character['name']}** tells **{target['name']}**: \"{text}\"")
 
 
 NATURAL_HEALING_FULL_REST_HOURS = config.NATURAL_HEALING_FULL_REST_HOURS  # moved to config.py 2026-07-14
@@ -10788,6 +10880,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_fortunes_wheel(update)
     elif action == "set_alignment":
         await _do_set_alignment(update, text)
+    elif action == "message_ai":
+        await _do_message_ai(update, intent.get("raw_text", text))
     elif action == "skill_check":
         await _do_skill_check(update, intent.get("ability") or "dexterity", text)
     elif action == "shove":
@@ -10951,6 +11045,13 @@ async def alignment_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if not topics.is_adventure(update.message.message_thread_id or 0):
         return
     await _do_set_alignment(update, " ".join(context.args))
+
+
+async def msg_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/msg <name> <message> -- tell an AI party member something, in or out of combat, without spending a turn. See _do_message_ai."""
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    await _do_message_ai(update, " ".join(context.args))
 
 
 async def map_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -11152,6 +11253,7 @@ Almost everything here is plain English, typed straight into Adventure -- no com
 • /inventory
 • /leaderboard
 • /map
+• /msg <name> <message> -- tell an AI party member something (in or out of combat), never spends a turn
 • /newcharacter
 • /note <text> -- a short status note party members can see ("/note clear" removes it)
 • /party [sheet] -- your party at a glance, or full sheets with "sheet"
@@ -12769,6 +12871,14 @@ async def _ai_party_autonomous_tick(bot) -> None:
         npc = _find_campaign_npc_by_name(actor["name"])
         personality = npc.get("personality", "") if npc else ""
     situation_facts = _build_ai_player_situation_facts(actor, actor["current_location"])
+    # Task #222, per Coffee: a human party member can tell an AI
+    # companion something mid-fight (see _do_message_ai) without it
+    # counting as anyone's turn -- that message is stashed here as real
+    # guidance and read exactly once, on this actor's own very next
+    # autonomous decision, then cleared so it never lingers past that.
+    guidance = context_like.user_data.pop("human_guidance", None)
+    if guidance:
+        situation_facts += f"\nA party member just told you directly: \"{guidance}\""
     action_text = await asyncio.to_thread(choose_next_action, actor, personality, situation_facts, last_action)
     context_like.user_data["last_autonomous_action"] = action_text
 
@@ -12999,6 +13109,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("dice_game", dice_game_command))
     application.add_handler(CommandHandler("fortune", fortune_command))
     application.add_handler(CommandHandler("alignment", alignment_command))
+    application.add_handler(CommandHandler("msg", msg_command))
     application.add_handler(CommandHandler("shop", shop_command))
     application.add_handler(CommandHandler("startcombat", startcombat_command))
     application.add_handler(CommandHandler("title", title_command))

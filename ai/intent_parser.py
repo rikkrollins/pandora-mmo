@@ -209,6 +209,16 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     base = {"action": "chat", "target": None, "npc_name": None, "ability": None,
             "item_name": None, "spell_name": None, "quantity": 1, "raw_text": text}
 
+    # Task #222, per Coffee: telling an AI party member something (e.g.
+    # "tell Sarah to run") must never be misread as the SPEAKER's own
+    # combat action -- checked first, before "flee"/"attack"/etc. below,
+    # so a message clearly directed at someone else by name never falls
+    # into one of those triggers just because it happens to share a word
+    # like "run". _do_message_ai independently verifies a real AI party
+    # member is actually named; if not, it says so rather than guessing.
+    if lowered.startswith("tell ") or " tell " in lowered:
+        return {**base, "action": "message_ai"}
+
     # Checked BEFORE check_quests below: "Accept the quest on the quest
     # board" and "Accept the quest 'a quiet request for Silverleaf Herb'"
     # both contain "quest board"/"quest" and would otherwise be swallowed
@@ -1203,7 +1213,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "channel_divinity", "action_surge", "reckless_attack", "divine_smite",
                 "flurry_of_blows", "wild_shape", "toggle_manual_dice", "level_up", "set_description", "set_pronouns",
                 "bestiary", "list_shop", "leaderboard", "check_achievements", "set_title", "check_weather",
-                "check_guild_quest", "dice_game", "fortunes_wheel", "set_alignment",
+                "check_guild_quest", "dice_game", "fortunes_wheel", "set_alignment", "message_ai",
             )
             if parsed["action"] not in valid_actions:
                 return fallback
