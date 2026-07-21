@@ -676,6 +676,9 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if "alignment" in lowered:
         return {**base, "action": "set_alignment"}
 
+    if any(w in lowered for w in ["skill tree", "skill points", "skilltree"]):
+        return {**base, "action": "skill_tree"}
+
     if any(w in lowered for w in ["second wind", "catch my breath", "catch our breath"]):
         return {**base, "action": "second_wind"}
 
@@ -1214,6 +1217,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "flurry_of_blows", "wild_shape", "toggle_manual_dice", "level_up", "set_description", "set_pronouns",
                 "bestiary", "list_shop", "leaderboard", "check_achievements", "set_title", "check_weather",
                 "check_guild_quest", "dice_game", "fortunes_wheel", "set_alignment", "message_ai",
+                "skill_tree",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

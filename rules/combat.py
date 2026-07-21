@@ -188,6 +188,10 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
             # (1d6 at 1-2, up to 10d6 at 19-20) -- found frozen at a flat
             # 1d6 regardless of level (2026-07-16 audit).
             extra_sneak_dice = sneak_attack_dice_count(attacker.get("level", 1)) - 1
+            # Task #131 skill-tree upgrade "killers_instinct": one extra
+            # Sneak Attack die, real per-character persisted choice.
+            if "killers_instinct" in (attacker.get("skill_tree_upgrades") or []):
+                extra_sneak_dice += 1
             sneak_dmg = roll_damage("1d6", critical=attack_result["critical_hit"], extra_dice=extra_sneak_dice)
             damage_dealt += sneak_dmg["total"]
         if defender.get("raging"):
@@ -230,6 +234,9 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         # value, not add to it, matching the real rule.
         if hp_after == 0 and hp_before > 0 and attacker.get("char_class") == "Warlock":
             blessing_hp = max(1, ability_modifier(attacker.get("charisma", 10)) + attacker.get("level", 1))
+            # Task #131 skill-tree upgrade "darker_bargain": +2 temp HP.
+            if "darker_bargain" in (attacker.get("skill_tree_upgrades") or []):
+                blessing_hp += 2
             if blessing_hp > attacker.get("temp_hp", 0):
                 attacker["temp_hp"] = blessing_hp
                 dark_ones_blessing_gained = blessing_hp

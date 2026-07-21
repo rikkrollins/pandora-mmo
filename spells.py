@@ -452,7 +452,11 @@ def resolve_heal_spell(spell_id: str, caster: dict, target: dict) -> dict:
     # 2 + the spell's level whenever a leveled (not cantrip) spell
     # restores HP, real 5E formula.
     if caster.get("char_class", "").lower() == "cleric" and spell["level"] > 0:
-        total_healed += 2 + spell["level"]
+        disciple_of_life_bonus = 2 + spell["level"]
+        # Task #131 skill-tree upgrade "disciples_grace": doubles this bonus.
+        if "disciples_grace" in (caster.get("skill_tree_upgrades") or []):
+            disciple_of_life_bonus *= 2
+        total_healed += disciple_of_life_bonus
     hp_before = target["hp_current"]
     hp_max = target.get("hp_max", hp_before)
     target["hp_current"] = min(hp_before + total_healed, hp_max)

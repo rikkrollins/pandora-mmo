@@ -262,6 +262,15 @@ def init_db() -> None:
         if "alignment_good_evil" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN alignment_good_evil INTEGER NOT NULL DEFAULT 0")
 
+        # Task #131, per Coffee: a real skill-tree point system on
+        # level-up. skill_points is a spendable resource (like
+        # pending_asi_points); skill_tree_upgrades is the real,
+        # persistent list of which upgrades this character has bought.
+        if "skill_points" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN skill_points INTEGER NOT NULL DEFAULT 0")
+        if "skill_tree_upgrades" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN skill_tree_upgrades TEXT NOT NULL DEFAULT '[]'")
+
         npc_relationship_columns = _existing_columns(conn, "npc_relationships")
         if "resolution" not in npc_relationship_columns:
             conn.execute("ALTER TABLE npc_relationships ADD COLUMN resolution TEXT NOT NULL DEFAULT 'unresolved'")
@@ -344,6 +353,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     d["known_monsters"] = json.loads(d["known_monsters"])
     d["achievements"] = json.loads(d["achievements"])
     d["map_revealed_locations"] = json.loads(d["map_revealed_locations"])
+    d["skill_tree_upgrades"] = json.loads(d["skill_tree_upgrades"])
     return d
 
 
@@ -452,7 +462,7 @@ def update_character(telegram_user_id: int, **fields) -> dict | None:
     if not fields:
         return get_character(telegram_user_id)
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "achievements", "map_revealed_locations")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "achievements", "map_revealed_locations", "skill_tree_upgrades")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -960,6 +970,13 @@ def add_xp(telegram_user_id: int, amount: int) -> dict | None:
             # up" -- see bot.py's _do_level_up. Real 5E lets you defer
             # ASIs indefinitely too, so this has no expiry.
             updates["pending_asi_points"] = character.get("pending_asi_points", 0) + 2 * asi_count
+
+        # Task #131, per Coffee: a real skill-tree point system on
+        # level-up -- 1 point per level gained, spent on real,
+        # class-flavored upgrades (see bot.py's SKILL_TREE_UPGRADES /
+        # _do_show_skill_tree). Banked the same way pending_asi_points
+        # is, no expiry.
+        updates["skill_points"] = character.get("skill_points", 0) + levels_gained
 
         newly_unlocked = spells_module.spells_unlocked_at_level(character["char_class"], new_level)
         newly_learned = [s for s in newly_unlocked if s not in character["known_spells"]]

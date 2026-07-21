@@ -2,6 +2,17 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.16.0] — A real skill tree
+
+- Every level gained now banks a real, spendable Skill Point (see it on
+  your sheet or with `/skilltree`).
+- Fighter, Rogue, Warlock, Sorcerer, Cleric, and Bard each have a real,
+  class-flavored upgrade to unlock — each one meaningfully strengthens
+  that class's signature ability, not just a flat stat bump. Tap
+  "Skill Tree" in the menu, or use `/skilltree`, to spend your points.
+- The remaining six classes are getting their own upgrades next, using
+  this same system.
+
 ## [1.15.1] — /msg for AI party members, clearer multi-attacks, and a fix
 
 - **`/msg <name> <message>`** lets you tell an AI-controlled party member
