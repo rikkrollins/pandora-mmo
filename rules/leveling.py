@@ -3,7 +3,8 @@ rules/leveling.py
 Standard D&D 5E XP-to-level thresholds and proficiency bonus table.
 """
 
-# Level -> minimum XP required to reach that level (5E core rules)
+# Level -> minimum XP required to reach that level (5E core rules,
+# levels 1-20). Real 5E has no official rules past 20 at all.
 XP_THRESHOLDS = {
     1: 0,
     2: 300,
@@ -26,6 +27,37 @@ XP_THRESHOLDS = {
     19: 305000,
     20: 355000,
 }
+
+# Task #215, per Coffee: "if you can make it so characters can level up
+# past 20 maybe?! - those other games goto 99" and "die hards may jus
+# continue to level up to max all stats." Real 5E has no official
+# levels past 20, so this is a genuine, documented house extension
+# (levels 21-99), not a real-rules lookup like the table above.
+# Deliberately real but bounded in what it grants further stat-wise:
+# - proficiency_bonus_for_level already naturally stays capped at +6
+#   past level 17 (no change needed) -- letting it keep climbing to
+#   99 would eventually make this game's fixed DC-13 skill checks an
+#   automatic success, breaking a different, deliberate simplification
+#   (CLAUDE.md: "Skill checks use one fixed DC (13) for every
+#   situation... to avoid the AI inventing difficulty numbers").
+# - Ability scores already cap at 20 (_apply_asi_choice's own
+#   min(..., 20)), so continuing to grant ASI points past level 20
+#   (see ASI_LEVELS below) can't run away either -- it just lets a
+#   long-term player eventually max every one of their six scores,
+#   exactly the "grind to max all stats" goal above.
+# - HP and skill points (db.add_xp's own per-level-gained logic) are
+#   already generic and keep growing for every level past 20 too, with
+#   no code change needed here.
+# The XP curve itself keeps growing per level (a real, escalating
+# grind, not a flat repeat) rather than trying to hand-author 79 more
+# real thresholds one at a time.
+_post_20_increment = 50000
+for _lvl in range(21, 100):
+    XP_THRESHOLDS[_lvl] = XP_THRESHOLDS[_lvl - 1] + _post_20_increment
+    _post_20_increment += 5000
+del _lvl, _post_20_increment
+
+MAX_LEVEL = 99
 
 
 def level_for_xp(xp: int) -> int:
@@ -144,7 +176,11 @@ def wild_shape_temp_hp(level: int) -> int:
 # whenever they want by saying "level up" (or immediately, via CLASS_
 # PRIMARY_ABILITY, if they say "auto"/"do it for me"). See db.add_xp
 # and bot.py's _do_level_up.
-ASI_LEVELS = {4, 8, 12, 16, 19}
+# Task #215: continues the exact same every-4-levels cadence past 19
+# (23, 27, 31, ... 99) rather than a different post-20 rule -- real 5E
+# never defines this, so consistency with the existing pattern is the
+# more honest choice than inventing a distinct "epic" schedule.
+ASI_LEVELS = {4, 8, 12, 16, 19} | set(range(23, 100, 4))
 
 CLASS_PRIMARY_ABILITY = {
     "barbarian": "strength", "fighter": "strength", "paladin": "strength",

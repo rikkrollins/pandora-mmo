@@ -13,18 +13,38 @@ import random
 
 from rules.dice import roll
 
+# weapon_category/armor_category (task #223's proficiency system,
+# 2026-07-21, caught before it caused a real bug): every generated item
+# must carry the same real category fields items.py's own weapons/
+# armor do, or a generated "legendary longsword" would silently fall
+# back to _weapon_for_attacker's "simple" default -- wrong for a real
+# martial weapon, and a real, if quiet, hole in the proficiency system
+# for any item that ever came from this generator instead of the
+# static catalog. Categories match items.py's own for the same base
+# weapons exactly (dagger/shortsword simple, longsword/greataxe/longbow
+# martial).
 WEAPON_BASES = {
-    "dagger": {"damage_dice": "1d4", "ability": "dexterity", "base_price": 2},
-    "shortsword": {"damage_dice": "1d6", "ability": "dexterity", "base_price": 10},
-    "longsword": {"damage_dice": "1d8", "ability": "strength", "base_price": 15},
-    "greataxe": {"damage_dice": "1d12", "ability": "strength", "base_price": 30},
-    "longbow": {"damage_dice": "1d8", "ability": "dexterity", "base_price": 50},
+    "dagger": {"damage_dice": "1d4", "ability": "dexterity", "base_price": 2, "weapon_category": "simple"},
+    "shortsword": {"damage_dice": "1d6", "ability": "dexterity", "base_price": 10, "weapon_category": "simple"},
+    "longsword": {"damage_dice": "1d8", "ability": "strength", "base_price": 15, "weapon_category": "martial"},
+    "greataxe": {"damage_dice": "1d12", "ability": "strength", "base_price": 30, "weapon_category": "martial"},
+    "longbow": {"damage_dice": "1d8", "ability": "dexterity", "base_price": 50, "weapon_category": "martial"},
 }
 
 ARMOR_BASES = {
-    "leather": {"ac_base": 11, "base_price": 10},
-    "chain_shirt": {"ac_base": 13, "base_price": 50},
-    "chain_mail": {"ac_base": 16, "base_price": 75},
+    "leather": {"ac_base": 11, "base_price": 10, "armor_category": "light"},
+    "chain_shirt": {"ac_base": 13, "base_price": 50, "armor_category": "medium"},
+    "chain_mail": {"ac_base": 16, "base_price": 75, "armor_category": "heavy"},
+}
+
+# Task, per Coffee (2026-07-21): "make sure there is weapons and
+# armours for all proficiencies... make complete list of normal items
+# then you can use the item generator to make magic ones." Shields
+# were the one real gap -- items.py has exactly one (Wooden Shield),
+# but this generator had no shield base or generate_shield() at all,
+# so a magic/tiered shield could never actually be rolled.
+SHIELD_BASES = {
+    "wooden_shield": {"ac_bonus": 2, "base_price": 10, "armor_category": "shield"},
 }
 
 TIERS = ["common", "uncommon", "rare", "very_rare", "legendary"]
@@ -89,6 +109,7 @@ def generate_weapon(base_id: str | None = None, tier: str | None = None) -> dict
         "weight": 2,
         "damage_dice": damage_dice,
         "ability": base["ability"],
+        "weapon_category": base["weapon_category"],
         "generated": True,
         "generated_base": base_id,
         "note": f"A {tier.replace('_', ' ')} find, worked with more care than most of its kind.",
@@ -110,6 +131,29 @@ def generate_armor(base_id: str | None = None, tier: str | None = None) -> dict:
         "price": base["base_price"] * TIER_PRICE_MULT[tier],
         "weight": 15,
         "ac_base": base["ac_base"] + bonus,
+        "armor_category": base["armor_category"],
+        "generated": True,
+        "generated_base": base_id,
+        "note": f"A {tier.replace('_', ' ')} find, worked with more care than most of its kind.",
+    }
+
+
+def generate_shield(base_id: str | None = None, tier: str | None = None) -> dict:
+    base_id = base_id or random.choice(list(SHIELD_BASES.keys()))
+    base = SHIELD_BASES[base_id]
+    tier = tier or roll_tier()
+    bonus = TIER_BONUS[tier]
+
+    name = _name_for(base_id.replace("_", " ").title(), tier)
+
+    return {
+        "name": name,
+        "type": "shield",
+        "rarity": tier,
+        "price": base["base_price"] * TIER_PRICE_MULT[tier],
+        "weight": 6,
+        "ac_bonus": base["ac_bonus"] + bonus,
+        "armor_category": base["armor_category"],
         "generated": True,
         "generated_base": base_id,
         "note": f"A {tier.replace('_', ' ')} find, worked with more care than most of its kind.",
@@ -117,7 +161,9 @@ def generate_armor(base_id: str | None = None, tier: str | None = None) -> dict:
 
 
 def generate_item(item_type: str = "weapon", base_id: str | None = None, tier: str | None = None) -> dict:
-    """item_type is 'weapon' or 'armor'. base_id/tier are optional — omit either to roll it."""
+    """item_type is 'weapon', 'armor', or 'shield'. base_id/tier are optional — omit either to roll it."""
     if item_type == "armor":
         return generate_armor(base_id=base_id, tier=tier)
+    if item_type == "shield":
+        return generate_shield(base_id=base_id, tier=tier)
     return generate_weapon(base_id=base_id, tier=tier)

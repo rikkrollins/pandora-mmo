@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.20.0] — Level cap raised to 99
+
+- Characters can now level all the way to 99, a real house extension
+  since 5E itself stops at 20 — HP, skill points, and Ability Score
+  Improvements (still capped at 20 per stat, same as before) all keep
+  growing the whole way, so dedicated players have a genuine long-term
+  goal in maxing out every stat.
+- Proficiency bonus intentionally stays capped at +6 past level 20 —
+  letting it keep climbing would eventually make this game's fixed
+  DC-13 skill checks a guaranteed success, which isn't the goal here.
+- Fix: the procedural magic-item generator (used for rare/legendary
+  loot) never tagged weapon/armor category on what it rolled, so a
+  generated item could silently fall back to the wrong proficiency
+  category. Fixed, and it can generate magic shields now too.
+
 ## [1.19.0] — Weapon/armor proficiency, a visual map, and dev-topic fixes
 
 - **Real weapon and armor proficiency.** Every class now has a genuine

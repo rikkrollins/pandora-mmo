@@ -23,7 +23,7 @@ from ai.text_cleanup import strip_think_tags
 from guilds import GUILDS
 from models import VALID_CLASSES
 from rules.crafting import RECIPES
-from rules.leveling import XP_THRESHOLDS, level_for_xp
+from rules.leveling import XP_THRESHOLDS, level_for_xp, MAX_LEVEL
 
 # Standard 5E priority order for which ability scores matter most to each
 # class -- real, sourced SRD convention, not project-specific data (unlike
@@ -225,7 +225,7 @@ def _build_character_facts(character: dict) -> str:
     xp = character.get("xp", 0)
     level = character.get("level") or level_for_xp(xp)
     next_level_xp = XP_THRESHOLDS.get(level + 1)
-    xp_to_next = f"{next_level_xp - xp} XP" if next_level_xp is not None else "already at max level (20)"
+    xp_to_next = f"{next_level_xp - xp} XP" if next_level_xp is not None else f"already at max level ({MAX_LEVEL})"
 
     known_spells = character.get("known_spells") or []
     active_quests = character.get("active_quests") or {}

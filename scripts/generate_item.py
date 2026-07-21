@@ -17,12 +17,12 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from rules.item_generator import ARMOR_BASES, TIERS, WEAPON_BASES, generate_item
+from rules.item_generator import ARMOR_BASES, SHIELD_BASES, TIERS, WEAPON_BASES, generate_item
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Roll a procedural tiered weapon or armor piece.")
-    parser.add_argument("--type", choices=["weapon", "armor"], default="weapon")
-    parser.add_argument("--base", choices=list(WEAPON_BASES.keys()) + list(ARMOR_BASES.keys()), default=None)
+    parser = argparse.ArgumentParser(description="Roll a procedural tiered weapon, armor, or shield.")
+    parser.add_argument("--type", choices=["weapon", "armor", "shield"], default="weapon")
+    parser.add_argument("--base", choices=list(WEAPON_BASES.keys()) + list(ARMOR_BASES.keys()) + list(SHIELD_BASES.keys()), default=None)
     parser.add_argument("--tier", choices=TIERS, default=None)
     parser.add_argument("--count", type=int, default=1)
     args = parser.parse_args()

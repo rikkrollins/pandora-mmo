@@ -32,6 +32,12 @@ ACHIEVEMENTS = {
         "title": "the Legendary",
         "check": {"type": "min_level", "value": 10},
     },
+    "ascended": {
+        "name": "Ascended",
+        "description": "Reach character level 99 (task #215's real level-cap extension, 2026-07-21).",
+        "title": "the Ascended",
+        "check": {"type": "min_level", "value": 99},
+    },
     "monster_hunter": {
         "name": "Monster Hunter",
         "description": "Learn the real bestiary entry for 3 different monsters.",
