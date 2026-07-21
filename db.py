@@ -253,6 +253,15 @@ def init_db() -> None:
         if "active_quests" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN active_quests TEXT NOT NULL DEFAULT '{}'")
 
+        # Task #133, per Coffee: real 9-box alignment (Law/Chaos x
+        # Good/Evil), each axis a persistent -100..100 score defaulting
+        # to 0 (True Neutral) -- see bot.py's _alignment_label for how
+        # these two numbers become a real label.
+        if "alignment_law_chaos" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN alignment_law_chaos INTEGER NOT NULL DEFAULT 0")
+        if "alignment_good_evil" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN alignment_good_evil INTEGER NOT NULL DEFAULT 0")
+
         npc_relationship_columns = _existing_columns(conn, "npc_relationships")
         if "resolution" not in npc_relationship_columns:
             conn.execute("ALTER TABLE npc_relationships ADD COLUMN resolution TEXT NOT NULL DEFAULT 'unresolved'")

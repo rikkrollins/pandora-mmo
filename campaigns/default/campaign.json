@@ -16,6 +16,10 @@
           "tavern_cellar",
           "tavern_upstairs"
         ],
+        "sensory_connections": {
+          "whispering_wood": "A rutted dirt road runs west out of the yard, straight for a stretch before curving out of sight toward a dark, unbroken tree line — the Whispering Wood, farther off than it looks from the tavern steps.",
+          "stonearch_bridge": "East, past the last few rooftops, the road narrows and climbs toward a low stone rise — Stonearch Bridge is up and over that rise, out of sight until you're most of the way there."
+        },
         "npcs": [
           "grimsby",
           "sera_wanderer"

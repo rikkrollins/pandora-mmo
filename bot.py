@@ -182,6 +182,50 @@ def _faction_for_npc(npc_id: str) -> str | None:
 def _faction_starting_standing(faction_id: str) -> int:
     return CAMPAIGN.get("factions", {}).get(faction_id, {}).get("starting_standing", 0)
 
+
+ALIGNMENT_LAW_CHAOS_LABELS = {1: "Lawful", 0: "Neutral", -1: "Chaotic"}
+ALIGNMENT_GOOD_EVIL_LABELS = {1: "Good", 0: "Neutral", -1: "Evil"}
+
+
+def _alignment_axis_bucket(value: int) -> int:
+    if value >= 20:
+        return 1
+    if value <= -20:
+        return -1
+    return 0
+
+
+def _alignment_label(law_chaos: int, good_evil: int) -> str:
+    lc = ALIGNMENT_LAW_CHAOS_LABELS[_alignment_axis_bucket(law_chaos)]
+    ge = ALIGNMENT_GOOD_EVIL_LABELS[_alignment_axis_bucket(good_evil)]
+    return "True Neutral" if lc == "Neutral" and ge == "Neutral" else f"{lc} {ge}"
+
+
+def _adjust_faction_standing(telegram_user_id: int, faction_id: str, delta: int, starting_standing: int = 0) -> int:
+    """
+    Task #133, per Coffee: alignment "shifted by actions" -- the one
+    real, already-instrumented signal every faction interaction already
+    produces is a standing delta plus that faction's own real
+    alignment_lean (good/evil/neutral, from campaign.json). Wraps
+    db.adjust_faction_standing so every existing call site gets a real
+    Good/Evil nudge for free, no new call sites to remember. Helping a
+    good-leaning faction (or hurting an evil one) shifts toward Good;
+    hurting a good-leaning faction (or helping an evil one) shifts
+    toward Evil. Law/Chaos isn't touched here -- no faction currently
+    carries a law/chaos lean, so that axis only moves via _do_set_alignment.
+    """
+    new_standing = db.adjust_faction_standing(telegram_user_id, faction_id, delta, starting_standing)
+    lean = CAMPAIGN.get("factions", {}).get(faction_id, {}).get("alignment_lean")
+    if lean in ("good", "evil") and delta:
+        character = db.get_character(telegram_user_id)
+        if character:
+            axis_delta = 2 if delta > 0 else -2
+            if lean == "evil":
+                axis_delta = -axis_delta
+            new_ge = max(-100, min(100, character.get("alignment_good_evil", 0) + axis_delta))
+            db.update_character(telegram_user_id, alignment_good_evil=new_ge)
+    return new_standing
+
 # Lockable chests/doors that have been picked, keyed by their lockable
 # "id" from campaign.json. In-memory, not persisted — same deliberate
 # simplification as combat conditions: shared world state that resets on
@@ -2416,7 +2460,7 @@ def _award_victory_xp(session: sessions.Session) -> tuple[str, list[str]]:
             faction_id = _faction_for_npc(npc_id)
             if faction_id:
                 for pid in real_party_ids_all:
-                    db.adjust_faction_standing(pid, faction_id, -15, _faction_starting_standing(faction_id))
+                    _adjust_faction_standing(pid, faction_id, -15, _faction_starting_standing(faction_id))
 
     enemy_xp_total = sum(
         p.get("xp_reward", 0) for p in session.participants
@@ -5465,7 +5509,7 @@ async def _do_resolve_quest_choice(update: Update, text: str) -> None:
     fresh = db.get_character(telegram_user_id)
     db.update_character(telegram_user_id, gold=fresh["gold"] + chosen["reward_gold"])
     if chosen.get("faction_id") and chosen.get("faction_delta"):
-        db.adjust_faction_standing(telegram_user_id, chosen["faction_id"], chosen["faction_delta"])
+        _adjust_faction_standing(telegram_user_id, chosen["faction_id"], chosen["faction_delta"])
 
     location = cl.get_location(CAMPAIGN, quest["location_id"])
     location_name = location["name"] if location else quest["location_id"]
@@ -5768,6 +5812,121 @@ async def _do_gamble(update: Update, text: str) -> None:
         update,
         f"{banner} You roll {dice_roll[0]} + {dice_roll[1]} = **{total}** "
         f"(need {GAMBLE_WIN_THRESHOLD}+). Gold: {change} → **{new_gold}**.",
+    )
+
+
+# Task #143, per Coffee: "Class-flavored dice mini-games (7-dice set),
+# everyone can play, all levelable." A free (no gold at risk), self-
+# contained side activity distinct from _do_gamble above -- one themed
+# die per class (covering all 6 real polyhedral dice), plus a universal
+# d100 "Fortune's Wheel" anyone can play regardless of class. "Levelable"
+# reuses the existing generic skill_uses bucket (db.record_skill_use)
+# rather than a new schema column -- a real, persistent play count per
+# character that a rank title is derived from.
+CLASS_DICE_GAMES = {
+    "Wizard": (4, "Arcane Draw"), "Sorcerer": (4, "Arcane Draw"),
+    "Rogue": (6, "Sleight of Hand"),
+    "Cleric": (8, "Blessing Roll"), "Druid": (8, "Blessing Roll"), "Bard": (8, "Blessing Roll"),
+    "Ranger": (10, "Focused Shot"), "Monk": (10, "Focused Strike"),
+    "Fighter": (12, "Clash of Arms"), "Barbarian": (12, "Clash of Arms"),
+    "Paladin": (20, "Oath Gambit"), "Warlock": (20, "Oath Gambit"),
+}
+
+
+def _dice_game_rank(uses: int) -> str:
+    if uses >= 15:
+        return "Master"
+    if uses >= 5:
+        return "Adept"
+    return "Novice"
+
+
+async def _do_dice_game(update: Update) -> None:
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    sides, game_name = CLASS_DICE_GAMES.get(character["char_class"], (20, "High Roll"))
+    result = roll(1, sides)[0]
+    won = result > sides // 2
+    xp_reward = 15 if won else 0
+    if xp_reward:
+        await _award_xp_and_announce_level_up(update, update.effective_user.id, xp_reward)
+    uses = db.record_skill_use(update.effective_user.id, "dice_game")
+    rank = _dice_game_rank(uses)
+    banner = "🎲 **A win!**" if won else "🎲 No luck this time."
+    reward_note = f" +{xp_reward} XP." if xp_reward else ""
+    await _safe_send(
+        update,
+        f"{banner} **{character['name']}** plays {game_name} (d{sides}): rolled **{result}**.{reward_note}\n"
+        f"{game_name} rank: {rank} ({uses} played)",
+    )
+
+
+async def _do_fortunes_wheel(update: Update) -> None:
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    result = roll(1, 100)[0]
+    won = result >= 80
+    xp_reward = 50 if won else 0
+    gold_reward = 10 if won else 0
+    if xp_reward:
+        await _award_xp_and_announce_level_up(update, update.effective_user.id, xp_reward)
+    if gold_reward:
+        db.update_character(update.effective_user.id, gold=character["gold"] + gold_reward)
+    uses = db.record_skill_use(update.effective_user.id, "fortunes_wheel")
+    rank = _dice_game_rank(uses)
+    banner = "🎡 **The wheel favors you!**" if won else "🎡 The wheel turns on, unmoved."
+    reward_note = f" +{xp_reward} XP, +{gold_reward} gold." if won else ""
+    await _safe_send(
+        update,
+        f"{banner} **{character['name']}** spins Fortune's Wheel (d100): rolled **{result}**.{reward_note}\n"
+        f"Fortune's Wheel rank: {rank} ({uses} played)",
+    )
+
+
+_ALIGNMENT_PHRASES = {
+    "lawful good": (50, 50), "neutral good": (0, 50), "chaotic good": (-50, 50),
+    "lawful neutral": (50, 0), "true neutral": (0, 0), "chaotic neutral": (-50, 0),
+    "lawful evil": (50, -50), "neutral evil": (0, -50), "chaotic evil": (-50, -50),
+}
+
+
+async def _do_set_alignment(update: Update, text: str) -> None:
+    """
+    Task #133, per Coffee: alignment "set at creation" -- rather than
+    lengthening the (already real-tested) character-creation wizard
+    with another step, every new character simply starts True Neutral
+    (db default 0/0) and can declare a starting alignment any time via
+    this, same "available anytime, not creation-locked" spirit as
+    description/pronouns (task #96). Matched longest-phrase-first so
+    "chaotic neutral" doesn't get swallowed by a bare "neutral" check.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    lowered = text.lower()
+    for phrase in sorted(_ALIGNMENT_PHRASES, key=len, reverse=True):
+        if phrase in lowered:
+            law_chaos, good_evil = _ALIGNMENT_PHRASES[phrase]
+            db.update_character(
+                update.effective_user.id, alignment_law_chaos=law_chaos, alignment_good_evil=good_evil,
+            )
+            await _safe_send(update, f"⚖️ **{character['name']}**'s alignment is now **{phrase.title()}**.")
+            return
+    await update.effective_chat.send_message(
+        "Which alignment? e.g. \"set my alignment to chaotic good\" — "
+        "Lawful/Neutral/Chaotic x Good/Neutral/Evil, or \"true neutral\".",
+        message_thread_id=config.TOPIC_ADVENTURE_ID,
     )
 
 
@@ -6103,6 +6262,7 @@ def _format_character_sheet(character: dict) -> str:
         f"Level {character['level']} | XP {character['xp']}{xp_remaining_line}\n"
         f"HP {character['hp_current']}/{character['hp_max']} | AC {character['armor_class']}\n"
         f"{ability_line}"
+        f"Alignment: {_alignment_label(character.get('alignment_law_chaos', 0), character.get('alignment_good_evil', 0))}\n"
         f"Gold: {character['gold']} | Guild: {character.get('guild') or 'None'}\n"
         f"{equipped_line}"
         f"{carried_gear_line}"
@@ -7427,19 +7587,34 @@ async def _do_look(update: Update) -> None:
         lines.append(f"You sense danger here: {', '.join(monsters_here)}")
     connections = location.get("connections", [])
     if connections:
+        # Sensory travel descriptions (task #220, per Coffee: "explain
+        # to them how/why they can go there" instead of just naming a
+        # destination) -- an optional, purely additive per-connection
+        # sentence, layered the same way "directions" already is over
+        # the real connections list. Only written for a handful of
+        # major, farther-off destinations so far (not every short
+        # interior hop needs one); anything without a sensory line
+        # keeps falling back to the flat name list exactly as before.
+        sensory_for_dest = location.get("sensory_connections", {})
+        sensory_conns = [c for c in connections if c in sensory_for_dest]
+        for c in sensory_conns:
+            lines.append(f"👀 {sensory_for_dest[c]}")
+
         # Compass labels (world-expansion pass, 2026-07-19): "directions" is
         # a pure display layer over the real "connections" reachability list
         # -- inverted here so a connection with a compass word shows it
         # (e.g. "North: The Deep Glade"), while any connection still without
         # one (every pre-expansion location) falls back to the plain name,
         # exactly as before.
-        direction_for_dest = {dest: word.capitalize() for word, dest in location.get("directions", {}).items()}
-        conn_labels = [
-            f"{direction_for_dest[c]}: {cl.get_location(CAMPAIGN, c)['name']}" if c in direction_for_dest
-            else cl.get_location(CAMPAIGN, c)["name"]
-            for c in connections
-        ]
-        lines.append(f"You can travel to: {', '.join(conn_labels)}")
+        plain_conns = [c for c in connections if c not in sensory_for_dest]
+        if plain_conns:
+            direction_for_dest = {dest: word.capitalize() for word, dest in location.get("directions", {}).items()}
+            conn_labels = [
+                f"{direction_for_dest[c]}: {cl.get_location(CAMPAIGN, c)['name']}" if c in direction_for_dest
+                else cl.get_location(CAMPAIGN, c)["name"]
+                for c in plain_conns
+            ]
+            lines.append(f"You can travel to: {', '.join(conn_labels)}")
     if "descends_to" in location:
         lines.append(f"You could descend to: {cl.get_location(CAMPAIGN, location['descends_to'])['name']}")
     if "ascends_to" in location:
@@ -9153,7 +9328,7 @@ async def _do_steal(update: Update, text: str, forced_roll: int | None = None) -
             db.set_banned_by_npc(telegram_user_id, owner_npc, True)
             faction_id = _faction_for_npc(owner_npc)
             if faction_id:
-                db.adjust_faction_standing(
+                _adjust_faction_standing(
                     telegram_user_id, faction_id, -15, _faction_starting_standing(faction_id)
                 )
 
@@ -10588,7 +10763,7 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
             db.adjust_affinity(update.effective_user.id, npc_id, 1)
             faction_id = _faction_for_npc(npc_id)
             if faction_id:
-                db.adjust_faction_standing(
+                _adjust_faction_standing(
                     update.effective_user.id, faction_id, 1, _faction_starting_standing(faction_id)
                 )
     elif action == "recruit_npc" and intent.get("npc_name"):
@@ -10607,6 +10782,12 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_answer_puzzle(update, text)
     elif action == "gamble":
         await _do_gamble(update, text)
+    elif action == "dice_game":
+        await _do_dice_game(update)
+    elif action == "fortunes_wheel":
+        await _do_fortunes_wheel(update)
+    elif action == "set_alignment":
+        await _do_set_alignment(update, text)
     elif action == "skill_check":
         await _do_skill_check(update, intent.get("ability") or "dexterity", text)
     elif action == "shove":
@@ -10749,6 +10930,27 @@ async def replay_intro_command(update: Update, context: ContextTypes.DEFAULT_TYP
     if not topics.is_adventure(update.message.message_thread_id or 0):
         return
     await _do_replay_chapter_intro(update)
+
+
+async def dice_game_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/dice_game -- play your class's dice mini-game. See _do_dice_game."""
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    await _do_dice_game(update)
+
+
+async def fortune_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/fortune -- spin Fortune's Wheel, open to every class. See _do_fortunes_wheel."""
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    await _do_fortunes_wheel(update)
+
+
+async def alignment_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/alignment <text> -- set your alignment (e.g. "/alignment chaotic good"). See _do_set_alignment."""
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    await _do_set_alignment(update, " ".join(context.args))
 
 
 async def map_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -10941,7 +11143,10 @@ Almost everything here is plain English, typed straight into Adventure -- no com
 • /buy <item>
 • /cast <spell> [target]
 • /changelog
+• /alignment <lawful/neutral/chaotic> <good/neutral/evil> -- set your alignment
+• /dice_game -- play your class's own dice mini-game (free, levelable)
 • /donotdisturb -- toggle DND so you're skipped for join-a-fight nudges
+• /fortune -- spin Fortune's Wheel, open to every class
 • /guild -- today's guild quest status
 • /hint -- real things to try here, no spoilers
 • /inventory
@@ -12791,6 +12996,9 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("sell", sell_command))
     application.add_handler(CommandHandler("sheet", sheet_command))
     application.add_handler(CommandHandler("replay_intro", replay_intro_command))
+    application.add_handler(CommandHandler("dice_game", dice_game_command))
+    application.add_handler(CommandHandler("fortune", fortune_command))
+    application.add_handler(CommandHandler("alignment", alignment_command))
     application.add_handler(CommandHandler("shop", shop_command))
     application.add_handler(CommandHandler("startcombat", startcombat_command))
     application.add_handler(CommandHandler("title", title_command))

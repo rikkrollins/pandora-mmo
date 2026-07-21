@@ -2,6 +2,24 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.15.0] — Alignment, dice mini-games, and a more sensory world
+
+- **Alignment.** Every character now has a real 9-box alignment
+  (Lawful/Neutral/Chaotic x Good/Neutral/Evil), shown on the character
+  sheet. Set yours with `/alignment` (e.g. "/alignment chaotic good"),
+  or let it emerge on its own — helping or hurting a faction now
+  genuinely nudges you toward or away from Good/Evil based on that
+  faction's own real leanings.
+- **Dice mini-games.** `/dice_game` plays your class's own themed die
+  (Wizards and Sorcerers draw a d4, Rogues roll a d6, and so on up
+  through a d12) for a small XP reward, free to play and levelable —
+  and `/fortune` spins a universal d100 Fortune's Wheel open to every
+  class.
+- **A more sensory world.** Looking around near the Crossroads Tavern
+  now describes what's actually visible toward the Whispering Wood and
+  Stonearch Bridge — real sight lines, not just a list of names — the
+  first pass of a wider pass still to come.
+
 ## [1.14.1] — Dev-topic feedback batch
 
 - Character sheet now shows XP remaining to next level right on the

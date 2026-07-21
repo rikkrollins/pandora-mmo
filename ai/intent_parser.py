@@ -657,6 +657,15 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                                     "play dice for gold", "bet "]):
         return {**base, "action": "gamble"}
 
+    if any(w in lowered for w in ["fortune's wheel", "fortunes wheel", "spin the wheel", "spin fortune"]):
+        return {**base, "action": "fortunes_wheel"}
+
+    if any(w in lowered for w in ["play dice", "dice game", "roll my dice game", "roll for fun"]):
+        return {**base, "action": "dice_game"}
+
+    if "alignment" in lowered:
+        return {**base, "action": "set_alignment"}
+
     if any(w in lowered for w in ["second wind", "catch my breath", "catch our breath"]):
         return {**base, "action": "second_wind"}
 
@@ -1194,7 +1203,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "channel_divinity", "action_surge", "reckless_attack", "divine_smite",
                 "flurry_of_blows", "wild_shape", "toggle_manual_dice", "level_up", "set_description", "set_pronouns",
                 "bestiary", "list_shop", "leaderboard", "check_achievements", "set_title", "check_weather",
-                "check_guild_quest",
+                "check_guild_quest", "dice_game", "fortunes_wheel", "set_alignment",
             )
             if parsed["action"] not in valid_actions:
                 return fallback
