@@ -5256,16 +5256,45 @@ async def _arc_opening_note(character: dict, quest_id: str, quest: dict) -> str:
     return f"🎬 **{arc['title']}**\n{opening_text}\n\n"
 
 
-async def _do_replay_chapter_intro(update: Update) -> None:
+def _arc_is_reached(character: dict, arc_id: str, arc: dict) -> bool:
+    """A chapter is safe to replay/show only once it's been reached -- completed, or the current one. Never a locked future one."""
+    completed_ids = set(character["completed_quests"])
+    arc_quests = set(arc.get("quests", []))
+    is_completed = bool(arc_quests) and arc_quests.issubset(completed_ids)
+    current = _current_story_arc(character)
+    is_current = current is not None and current[0] == arc_id
+    return is_completed or is_current
+
+
+def _story_chapter_keyboard(character: dict) -> InlineKeyboardMarkup | None:
+    """
+    Per Coffee (2026-07-21): a real tap-to-replay menu of chapters on
+    the Story So Far screen -- one button per chapter this character
+    has actually reached (completed or current), same fog-of-war rule
+    _do_show_story_so_far's own "???" listing already uses, so a locked
+    future chapter's title is never exposed via a button either.
+    """
+    buttons = []
+    for arc_id, arc in CAMPAIGN.get("story_arcs", {}).items():
+        if _arc_is_reached(character, arc_id, arc):
+            buttons.append([InlineKeyboardButton(f"🎬 {arc['title']}", callback_data=f"story|replay|{arc_id}")])
+    return InlineKeyboardMarkup(buttons) if buttons else None
+
+
+async def _do_replay_chapter_intro(update: Update, arc_id: str | None = None) -> None:
     """
     /replay_intro, per Coffee (2026-07-20): the arc-opening cutscene
     above fires automatically the moment a character takes on a new
     chapter's first quest -- often right at the start of a fresh
-    character, easy to miss in the scroll. This re-narrates the CURRENT
-    chapter's opening on demand (same real narrate_arc_opening call,
-    grounded in the same real arc/quest facts) without touching any
-    quest/inventory state -- purely a rewatch, safe to call any number
-    of times.
+    character, easy to miss in the scroll. This re-narrates a chapter's
+    opening on demand (same real narrate_arc_opening call, grounded in
+    the same real arc/quest facts) without touching any quest/inventory
+    state -- purely a rewatch, safe to call any number of times.
+    arc_id is None for the plain /replay_intro command (always the
+    CURRENT chapter); the Story So Far chapter-button menu (task,
+    2026-07-21) passes a specific arc_id instead, re-validated here via
+    _arc_is_reached so a tampered callback can never replay/spoil a
+    locked future chapter.
     """
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -5273,14 +5302,22 @@ async def _do_replay_chapter_intro(update: Update) -> None:
             "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
         )
         return
-    current = _current_story_arc(character)
-    if current is None:
-        await update.effective_chat.send_message(
-            "You've already completed every chapter — there's no current one to replay.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
-        )
-        return
-    _, arc = current
+    if arc_id is None:
+        current = _current_story_arc(character)
+        if current is None:
+            await update.effective_chat.send_message(
+                "You've already completed every chapter — there's no current one to replay.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+        arc_id, arc = current
+    else:
+        arc = CAMPAIGN.get("story_arcs", {}).get(arc_id)
+        if arc is None or not _arc_is_reached(character, arc_id, arc):
+            await update.effective_chat.send_message(
+                "That chapter hasn't been reached yet.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            )
+            return
     arc_quests = arc.get("quests", [])
     first_quest = CAMPAIGN["quests"].get(arc_quests[0]) if arc_quests else None
     quest_title = first_quest["title"] if first_quest else arc["title"]
@@ -6475,7 +6512,59 @@ async def _do_check_party(update: Update, text: str = "") -> None:
         else:
             lines.append("\n🎗️ You're not in a formed party. Say \"invite [name] to my party\" to start one.")
 
-    await _safe_send(update, "\n".join(lines))
+    keyboard = _party_keyboard(character) if character else None
+    await _safe_send(update, "\n".join(lines), reply_markup=keyboard)
+
+
+def _party_keyboard(character: dict) -> InlineKeyboardMarkup | None:
+    """
+    Per Coffee (2026-07-21): "add (Party) to the menu ... Being able to
+    add or remove members also for battle planning ... would be
+    awesome." Real tap buttons over the exact same invite/accept/leave
+    logic free text already drives (_do_invite_to_party/
+    _do_accept_party_invite/_do_leave_party) -- never a separate
+    membership path. Invite candidates are simply anyone else active at
+    this exact location not already in this same party -- a real
+    player, an AI companion, or a not-yet-recruited NPC all show up the
+    same way, since _get_party_members already returns all of them.
+    """
+    rows = []
+    party_id = character.get("party_id")
+    if party_id:
+        rows.append([InlineKeyboardButton("🚪 Leave Party", callback_data="party|leave")])
+    elif character.get("pending_party_invite"):
+        rows.append([InlineKeyboardButton("✅ Accept Invite", callback_data="party|accept")])
+
+    candidates = [
+        p for p in _get_party_members()
+        if p["current_location"] == character["current_location"]
+        and p["telegram_user_id"] != character["telegram_user_id"]
+        and not (party_id is not None and p.get("party_id") == party_id)
+    ]
+    for c in candidates[:5]:
+        rows.append([InlineKeyboardButton(f"➕ Invite {c['name']}", callback_data=f"party|invite|{c['telegram_user_id']}")])
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
+async def party_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _party_keyboard -- dispatches through the exact same real invite/accept/leave handlers free text already uses."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    await _safe_answer(query)
+    if action == "leave":
+        await _do_leave_party(update)
+    elif action == "accept":
+        await _do_accept_party_invite(update)
+    elif action == "invite" and len(parts) > 2:
+        try:
+            target_id = int(parts[2])
+        except ValueError:
+            return
+        target = db.get_character(target_id)
+        if target is None:
+            return
+        await _do_invite_to_party(update, target["name"])
 
 
 async def _do_invite_to_party(update: Update, target_name: str) -> None:
@@ -7333,6 +7422,68 @@ async def _do_rage(update: Update) -> None:
     )
 
 
+async def _do_join_battle(update: Update) -> None:
+    """
+    Per Coffee (2026-07-21): "if the AI is in battle and human players
+    are not, let them continue [elsewhere] ... if the characters want
+    to join the battle, let them travel to the battle and join." Real
+    gap this closes: combat participants were previously fixed the
+    instant _do_start_combat ran (via _get_combat_eligible_party_members
+    at that one moment) with no way to add a live participant
+    afterward, even for a player who deliberately traveled to the exact
+    location where the fight is happening. This is the other half of
+    that -- non-participants were already free to gather/move/act
+    normally the whole time (_do_gather/_do_move never checked for an
+    active session at all), so nothing needed fixing there.
+    """
+    telegram_user_id = update.effective_user.id
+    character = db.get_character(telegram_user_id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    chat_id = update.effective_chat.id
+    async with sessions.get_lock(chat_id):
+        session = sessions.get_session(chat_id)
+        if session is None:
+            await update.effective_chat.send_message(
+                "There's no fight happening right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            )
+            return
+        if any(p["telegram_user_id"] == telegram_user_id for p in session.participants):
+            await update.effective_chat.send_message(
+                "You're already part of this fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            )
+            return
+        if character["hp_current"] <= 0:
+            await update.effective_chat.send_message(
+                "You can't join a fight at 0 HP.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            )
+            return
+
+        # The fight's real location is wherever its own party members
+        # actually are -- session participants carry current_location
+        # frozen from when combat started (nobody mid-fight is moving),
+        # so this is a real check, not a guess.
+        party_members = [p for p in session.participants if session.sides.get(p["telegram_user_id"]) == "party"]
+        battle_location = next((p.get("current_location") for p in party_members if p.get("current_location")), None)
+        if battle_location is not None and character["current_location"] != battle_location:
+            dest = cl.get_location(CAMPAIGN, battle_location)
+            location_name = dest["name"] if dest else battle_location
+            await update.effective_chat.send_message(
+                f"The fight is happening at {location_name} — you'd need to go there first.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+
+        session.participants.append(character)
+        session.sides[telegram_user_id] = "party"
+        session.turn_order.append(telegram_user_id)
+        await _safe_send(update, f"⚔️ **{character['name']}** joins the battle!")
+
+
 async def _do_wild_shape(update: Update) -> None:
     """
     Real Druid class feature (level 2+, task #91 audit 2026-07-19: Druid
@@ -8042,6 +8193,47 @@ async def _do_arcane_recovery(update: Update) -> None:
     )
 
 
+def _look_travel_keyboard(location: dict) -> InlineKeyboardMarkup | None:
+    """
+    Per Coffee (2026-07-21): "when u look around put pop up options for
+    areas u have already traveled to so they can tap ... (use fog of
+    war)." A location's own `connections` are exactly the fog-of-war-
+    correct set here -- they're only ever the places actually visible/
+    reachable standing right here, never a spoiler of anything further
+    off (that's what the separate Waypoints menu is for, covering
+    already-visited-but-distant places instead). Tapping dispatches
+    through the exact same _do_move free text already uses, so every
+    existing gate (requires_item, locked_connections, min_level,
+    story_gates) still applies unchanged.
+    """
+    connections = location.get("connections", [])
+    if not connections:
+        return None
+    direction_for_dest = {dest: word.capitalize() for word, dest in location.get("directions", {}).items()}
+    rows = []
+    for dest_id in connections:
+        dest = cl.get_location(CAMPAIGN, dest_id)
+        if dest is None:
+            continue
+        label = f"{direction_for_dest[dest_id]}: {dest['name']}" if dest_id in direction_for_dest else dest["name"]
+        rows.append([InlineKeyboardButton(f"🚶 {label}", callback_data=f"travel|go|{dest_id}")])
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
+async def travel_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _look_travel_keyboard -- dispatches through the exact same _do_move a typed destination name already uses."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    await _safe_answer(query)
+    if action != "go" or len(parts) < 3:
+        return
+    dest = cl.get_location(CAMPAIGN, parts[2])
+    if dest is None:
+        return
+    await _do_move(update, dest["name"])
+
+
 async def _do_look(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -8159,7 +8351,7 @@ async def _do_look(update: Update) -> None:
     # messages that were never meant to be narrated aloud, but "look"
     # is real player-facing narration and should have gone through
     # _safe_send like every other primary action reply already does.
-    await _safe_send(update, "\n".join(lines))
+    await _safe_send(update, "\n".join(lines), reply_markup=_look_travel_keyboard(location))
 
 
 async def _do_check_weather(update: Update) -> None:
@@ -9902,9 +10094,15 @@ def _main_menu_keyboard(character: dict) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📋 Quests", callback_data="menu|quests")],
         [InlineKeyboardButton("🎒 Inventory", callback_data="menu|inventory")],
         [InlineKeyboardButton("⚔️ Equip Gear", callback_data="menu|equip")],
+        [InlineKeyboardButton("👥 Party", callback_data="menu|party")],
         [InlineKeyboardButton("🎭 Switch Character", callback_data="menu|roster")],
         [InlineKeyboardButton("🧭 Waypoints", callback_data="menu|waypoints")],
         [InlineKeyboardButton("🌳 Skill Tree", callback_data="menu|skilltree")],
+        [InlineKeyboardButton("🏅 Achievements", callback_data="menu|achievements")],
+        [InlineKeyboardButton("🏛️ Market", callback_data="menu|market")],
+        [InlineKeyboardButton("📚 Bestiary", callback_data="menu|bestiary")],
+        [InlineKeyboardButton("🌤️ Weather", callback_data="menu|weather")],
+        [InlineKeyboardButton("🏆 Leaderboard", callback_data="menu|leaderboard")],
     ]
     if character.get("pending_asi_points", 0) > 0:
         rows.append([InlineKeyboardButton("📈 Level Up", callback_data="menu|level")])
@@ -9957,6 +10155,29 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await _do_show_waypoints(update)
     elif section == "skilltree":
         await _do_show_skill_tree(update)
+    elif section == "achievements":
+        await _do_check_achievements(update)
+    elif section == "market":
+        await _do_check_market(update)
+    elif section == "bestiary":
+        await _do_bestiary(update)
+    elif section == "weather":
+        await _do_check_weather(update)
+    elif section == "leaderboard":
+        await _do_leaderboard(update)
+    elif section == "party":
+        await _do_check_party(update)
+
+
+async def story_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _story_chapter_keyboard -- re-validates the chapter's actually been reached server-side, never trusts the button alone."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    await _safe_answer(query)
+    if action != "replay" or len(parts) < 3:
+        return
+    await _do_replay_chapter_intro(update, parts[2])
 
 
 async def _do_show_story_so_far(update: Update) -> None:
@@ -10007,7 +10228,7 @@ async def _do_show_story_so_far(update: Update) -> None:
 
     await _safe_send(
         update, f"📖 **Story So Far**\n\n{recap}\n\n" + "\n".join(chapter_lines),
-        reply_markup=_with_menu_button(None),
+        reply_markup=_with_menu_button(_story_chapter_keyboard(character)),
     )
 
 
@@ -11302,6 +11523,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_accept_duel(update)
     elif action == "check_market":
         await _do_check_market(update)
+    elif action == "join_battle":
+        await _do_join_battle(update)
     elif action == "skill_check":
         await _do_skill_check(update, intent.get("ability") or "dexterity", text)
     elif action == "shove":
@@ -11516,6 +11739,13 @@ async def buy_market_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await _do_buy_market(update, context.args)
 
 
+async def join_battle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/join_battle -- join an in-progress fight at your current location. See _do_join_battle."""
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    await _do_join_battle(update)
+
+
 async def map_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     /map (2026-07-17, per Coffee) -- same real fog-of-war map _do_show_map
@@ -11713,6 +11943,7 @@ Almost everything here is plain English, typed straight into Adventure -- no com
 • /donotdisturb -- toggle DND so you're skipped for join-a-fight nudges
 • /fortune -- spin Fortune's Wheel, open to every class
 • /guild -- today's guild quest status
+• /join_battle -- join an in-progress fight at your current location
 • /hint -- real things to try here, no spoilers
 • /inventory
 • /leaderboard
@@ -13584,6 +13815,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("sell_market", sell_market_command))
     application.add_handler(CommandHandler("market", market_command))
     application.add_handler(CommandHandler("buy_market", buy_market_command))
+    application.add_handler(CommandHandler("join_battle", join_battle_command))
     application.add_handler(CommandHandler("shop", shop_command))
     application.add_handler(CommandHandler("startcombat", startcombat_command))
     application.add_handler(CommandHandler("title", title_command))
@@ -13612,6 +13844,9 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(roster_menu_callback, pattern=r"^roster\|"))
     application.add_handler(CallbackQueryHandler(waypoint_menu_callback, pattern=r"^waypoint\|"))
     application.add_handler(CallbackQueryHandler(skilltree_menu_callback, pattern=r"^skilltree\|"))
+    application.add_handler(CallbackQueryHandler(story_menu_callback, pattern=r"^story\|"))
+    application.add_handler(CallbackQueryHandler(party_menu_callback, pattern=r"^party\|"))
+    application.add_handler(CallbackQueryHandler(travel_menu_callback, pattern=r"^travel\|"))
     application.add_handler(CallbackQueryHandler(creation_menu_callback, pattern=r"^create\|"))
 
     application.add_error_handler(_log_unhandled_error)

@@ -687,6 +687,10 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in ["the market", "marketplace", "market listings"]):
         return {**base, "action": "check_market"}
 
+    if any(w in lowered for w in ["join the battle", "join the fight", "help them fight",
+                                    "jump into the fight", "join in the fight"]):
+        return {**base, "action": "join_battle"}
+
     if any(w in lowered for w in ["second wind", "catch my breath", "catch our breath"]):
         return {**base, "action": "second_wind"}
 
@@ -1225,7 +1229,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "flurry_of_blows", "wild_shape", "toggle_manual_dice", "level_up", "set_description", "set_pronouns",
                 "bestiary", "list_shop", "leaderboard", "check_achievements", "set_title", "check_weather",
                 "check_guild_quest", "dice_game", "fortunes_wheel", "set_alignment", "message_ai",
-                "skill_tree", "challenge_duel", "accept_duel", "check_market",
+                "skill_tree", "challenge_duel", "accept_duel", "check_market", "join_battle",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

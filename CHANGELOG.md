@@ -2,6 +2,24 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.18.0] — Join battles mid-fight, a much bigger menu, and tap-to-travel
+
+- **Join an in-progress fight.** If a battle breaks out somewhere and
+  you're elsewhere, you're never blocked from gathering, moving, or
+  anything else in the meantime — and if you want in, just travel to
+  where it's happening and join.
+- **Story So Far now has a chapter menu** — tap any chapter you've
+  actually reached to rewatch its opening cutscene, right from that
+  screen.
+- **A much bigger main menu**: Party, Achievements, Market, Bestiary,
+  Weather, and Leaderboard are all one tap away now, alongside
+  everything already there.
+- **Real party management buttons** — invite, accept, and leave your
+  party with a tap instead of typing, right from the new Party screen.
+- **Tap-to-travel on "look around."** Every place you can already see
+  from where you're standing now shows up as a real button — no more
+  typing the name to walk over.
+
 ## [1.17.0] — PvP, a player marketplace, the Colosseum, real portraits, and more secrets
 
 - **PvP**: `/duel <name>` challenges a real player at your location — they
