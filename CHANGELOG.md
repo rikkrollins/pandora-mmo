@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.21.0] — Weather and night now matter in a fight
+
+- Checking the weather now shows a real 3-day forecast for the region,
+  not just today's conditions.
+- Steady rain and rolling thunderstorms now make footing genuinely
+  slippery — a real chance of disadvantage on attacks for anyone
+  fighting out in it.
+- Hostile monsters are more dangerous after dark — real advantage on
+  their attacks at Night, never affecting players or party companions.
+- Both effects are read straight off the same deterministic weather
+  and clock system `/weather` already used, so the forecast and the
+  in-combat effects are always in sync — never invented independently.
+
 ## [1.20.1] — Shops now have real sections
 
 Every shop now opens with a real flavor description of the stall

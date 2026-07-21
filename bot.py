@@ -4491,6 +4491,20 @@ def _attack_advantage_disadvantage(attacker: dict, defender: dict) -> tuple[bool
         or "blinded" in attacker_conditions or "frightened" in attacker_conditions
         or armor_unproficient
     )
+    # Weather hazard (per Coffee, 2026-07-21: "raining = wet = slippery
+    # variable"): a real, per-attack chance of disadvantage while
+    # fighting in rain/thunderstorms on the surface or open sky --
+    # never underground, where weather never reaches (world_clock's own
+    # rule). Rolled fresh each attack (a real environmental risk, not a
+    # flat always-on penalty), and applies to BOTH sides fighting here,
+    # not just whoever the "attacker" happens to be this swing.
+    attacker_location_id = attacker.get("current_location") or defender.get("current_location")
+    weather_hazard = False
+    if attacker_location_id:
+        attacker_location = cl.get_location(CAMPAIGN, attacker_location_id)
+        if attacker_location and world_clock.is_hazardous(attacker_location["layer"]):
+            weather_hazard = roll_d20() <= 5
+    disadvantage = disadvantage or weather_hazard
     # Task #131 skill-tree upgrade "true_aim": extends Favored Enemy's
     # advantage to wolves too, this campaign's other very common enemy.
     ranger_extra_favored = (
@@ -4506,9 +4520,19 @@ def _attack_advantage_disadvantage(attacker: dict, defender: dict) -> tuple[bool
     # one on just for this would be a bigger, riskier change than the
     # value of one more (documented) simplification justifies.
     reckless = attacker.pop("reckless_active", False)
+    # Night aggression (per Coffee, 2026-07-21: "Night time monsters are
+    # more aggressive"): real hostile monsters/NPCs (never a real
+    # player OR an AI-controlled PARTY companion -- both always carry a
+    # real char_class, which nothing in this game's monster templates
+    # ever sets) get advantage on their attacks after dark. Time of day
+    # is a pure real-clock fact (world_clock.is_night), not location-
+    # dependent, matching how time-of-day is already treated everywhere
+    # else in this game (e.g. _do_look's own conditions_line).
+    monster_night_aggression = world_clock.is_night() and not attacker.get("char_class")
     advantage = (
         "prone" in defender_conditions or "blinded" in defender_conditions
         or "paralyzed" in defender_conditions or favored_enemy or reckless
+        or monster_night_aggression
     )
     return advantage, disadvantage
 
@@ -8421,8 +8445,22 @@ async def _do_check_weather(update: Update) -> None:
     conditions = world_clock.conditions_line(location["layer"])
     if location["layer"] == "underground":
         await _safe_send(update, f"🌤️ {conditions} — no real weather reaches this deep, just the dark.")
-    else:
-        await _safe_send(update, f"🌤️ {conditions} at **{location['name']}**.")
+        return
+
+    lines = [f"🌤️ {conditions} at **{location['name']}**."]
+    # Real forecast (task, per Coffee, 2026-07-21): the exact same
+    # deterministic (day, region) weather roll current_weather already
+    # uses, just walked forward -- tomorrow's forecast really is
+    # tomorrow's real weather, never a separate invented guess.
+    upcoming = world_clock.forecast(location["layer"], days=3)[1:]
+    if upcoming:
+        forecast_line = ", ".join(f"{date} — {weather}" for date, weather in upcoming)
+        lines.append(f"📅 Forecast: {forecast_line}")
+    if world_clock.is_hazardous(location["layer"]):
+        lines.append("⚠️ Underfoot's slick out there — footing hazards are real right now.")
+    if world_clock.is_night():
+        lines.append("🌙 Whatever's out there tonight is hunting with more bite than usual.")
+    await _safe_send(update, "\n".join(lines))
 
 
 def _find_interactable(location: dict, text: str) -> tuple[str, dict] | None:
