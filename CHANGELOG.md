@@ -2,6 +2,13 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.16.1] — Skill tree: the remaining six classes
+
+- Barbarian, Paladin, Wizard, Monk, Ranger, and Druid now each have a
+  real, class-flavored skill-tree upgrade too, same as the first six —
+  all 12 classes are covered now. Tap "Skill Tree" in the menu or use
+  `/skilltree` to see yours.
+
 ## [1.16.0] — A real skill tree
 
 - Every level gained now banks a real, spendable Skill Point (see it on

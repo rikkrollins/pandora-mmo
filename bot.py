@@ -4340,8 +4340,13 @@ def _attack_advantage_disadvantage(attacker: dict, defender: dict) -> tuple[bool
         "prone" in attacker_conditions or "poisoned" in attacker_conditions
         or "blinded" in attacker_conditions or "frightened" in attacker_conditions
     )
+    # Task #131 skill-tree upgrade "true_aim": extends Favored Enemy's
+    # advantage to wolves too, this campaign's other very common enemy.
+    ranger_extra_favored = (
+        _has_skill_upgrade(attacker, "true_aim") and defender.get("monster_key") == "wolf"
+    )
     favored_enemy = (attacker.get("char_class") == "Ranger"
-                      and defender.get("monster_key", "").startswith("goblin"))
+                      and (defender.get("monster_key", "").startswith("goblin") or ranger_extra_favored))
     # Reckless Attack (Barbarian, 2026-07-16 level-2-10 audit): advantage
     # on your own attacks this turn once declared. Real 5E's downside
     # (attacks against you also get advantage until your next turn) is
@@ -6031,11 +6036,10 @@ async def _do_set_alignment(update: Update, text: str) -> None:
 # This ships the real, working first slice instead: 1 skill point per
 # level gained (db.add_xp), spent on a single, real, class-flavored
 # upgrade that deepens the class's EXISTING fixed subclass feature
-# rather than switching to a different one. Shipped now for the 6
-# classes actually being played live (Fighter/Rogue/Warlock/Sorcerer/
-# Cleric/Bard, confirmed via the live DB 2026-07-21); the other 6
-# classes are real backlog using this exact same pattern, not a
-# different design.
+# rather than switching to a different one. First shipped 2026-07-21
+# for the 6 classes played live at the time (Fighter/Rogue/Warlock/
+# Sorcerer/Cleric/Bard); the remaining 6 (Barbarian/Paladin/Wizard/
+# Monk/Ranger/Druid) added the same day using the identical pattern.
 SKILL_TREE_UPGRADES = {
     "Fighter": {"id": "hardened_resolve", "name": "Hardened Resolve", "cost": 2,
                 "description": "Second Wind heals an extra 1d10."},
@@ -6049,6 +6053,18 @@ SKILL_TREE_UPGRADES = {
                "description": "Disciple of Life's healing bonus doubles."},
     "Bard": {"id": "greater_inspiration", "name": "Greater Inspiration", "cost": 2,
              "description": "Bardic Inspiration's die improves (d6 → d8)."},
+    "Barbarian": {"id": "endless_fury", "name": "Endless Fury", "cost": 2,
+                  "description": "One extra Rage use per rest."},
+    "Paladin": {"id": "greater_mercy", "name": "Greater Mercy", "cost": 2,
+                "description": "Lay on Hands' healing pool grows (5 → 6 per level)."},
+    "Wizard": {"id": "deeper_recovery", "name": "Deeper Recovery", "cost": 2,
+               "description": "Arcane Recovery restores one extra spell slot."},
+    "Monk": {"id": "iron_will", "name": "Iron Will", "cost": 2,
+             "description": "2 extra ki points per rest."},
+    "Ranger": {"id": "true_aim", "name": "True Aim", "cost": 2,
+               "description": "Favored Enemy advantage extends to wolves too."},
+    "Druid": {"id": "primal_surge", "name": "Primal Surge", "cost": 2,
+              "description": "Wild Shape grants 2 extra temporary HP."},
 }
 
 
@@ -7018,9 +7034,10 @@ async def _do_rage(update: Update) -> None:
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
-    if db.get_feature_uses(update.effective_user.id, "rage") >= RAGE_MAX_USES:
+    max_rages = RAGE_MAX_USES + (1 if _has_skill_upgrade(character, "endless_fury") else 0)
+    if db.get_feature_uses(update.effective_user.id, "rage") >= max_rages:
         await update.effective_chat.send_message(
-            f"You've already raged {RAGE_MAX_USES} times since your last rest.",
+            f"You've already raged {max_rages} times since your last rest.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
@@ -7118,6 +7135,8 @@ async def _do_wild_shape(update: Update) -> None:
 
     participant["wild_shaped"] = True
     bonus_temp_hp = wild_shape_temp_hp(character["level"])
+    if _has_skill_upgrade(character, "primal_surge"):
+        bonus_temp_hp += 2
     participant["temp_hp"] = max(participant.get("temp_hp", 0), bonus_temp_hp)
     db.use_feature(update.effective_user.id, "wild_shape")
 
@@ -7343,7 +7362,8 @@ async def _do_flurry_of_blows(update: Update) -> None:
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
-    if db.get_feature_uses(update.effective_user.id, "ki") >= character["level"]:
+    max_ki = character["level"] + (2 if _has_skill_upgrade(character, "iron_will") else 0)
+    if db.get_feature_uses(update.effective_user.id, "ki") >= max_ki:
         await update.effective_chat.send_message(
             "You're out of ki points until your next rest.", message_thread_id=config.TOPIC_ADVENTURE_ID
         )
@@ -7686,7 +7706,8 @@ async def _do_lay_on_hands(update: Update, target_text: str) -> None:
         )
         return
 
-    pool = 5 * character["level"]
+    pool_per_level = 6 if _has_skill_upgrade(character, "greater_mercy") else 5
+    pool = pool_per_level * character["level"]
     target_character = _find_party_target_by_name(target_text) or character
     new_hp = min(target_character["hp_max"], target_character["hp_current"] + pool)
     actual_healed = new_hp - target_character["hp_current"]
@@ -7745,6 +7766,8 @@ async def _do_arcane_recovery(update: Update) -> None:
         return
 
     max_recoverable = (character["level"] + 1) // 2
+    if _has_skill_upgrade(character, "deeper_recovery"):
+        max_recoverable += 1
     recovered = min(max_recoverable, missing_slots)
     new_current = character["spell_slots_current"] + recovered
     db.update_character(update.effective_user.id, spell_slots_current=new_current)
