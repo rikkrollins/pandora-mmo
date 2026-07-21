@@ -3352,6 +3352,21 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             )
             return
 
+        # Per Coffee (2026-07-20): "Dont let the AI progress story line
+        # without the party- they shudnt be in boss battles without
+        # human players." An AI-controlled character (recruited
+        # companion or the autonomous AI party) acting entirely on its
+        # own must not start a fight against a story boss unless a real
+        # human party member is actually here too -- this only blocks
+        # the AI-INITIATED case; a human starting the same boss fight
+        # with only AI allies alongside them is unaffected.
+        if requester.get("is_ai") and template.get("is_boss") and not any(not p.get("is_ai") for p in party):
+            await update.effective_chat.send_message(
+                f"{requester['name']} sizes up {template['name']} and holds back — not a fight worth starting without the rest of the party here.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+
         # No explicit count requested -- scale the encounter to the
         # CURRENT party (size and level) via real 5E Medium-difficulty
         # encounter math instead of always defaulting to one lone
@@ -4969,6 +4984,38 @@ async def _arc_opening_note(character: dict, quest_id: str, quest: dict) -> str:
     return f"🎬 **{arc['title']}**\n{opening_text}\n\n"
 
 
+async def _do_replay_chapter_intro(update: Update) -> None:
+    """
+    /replay_intro, per Coffee (2026-07-20): the arc-opening cutscene
+    above fires automatically the moment a character takes on a new
+    chapter's first quest -- often right at the start of a fresh
+    character, easy to miss in the scroll. This re-narrates the CURRENT
+    chapter's opening on demand (same real narrate_arc_opening call,
+    grounded in the same real arc/quest facts) without touching any
+    quest/inventory state -- purely a rewatch, safe to call any number
+    of times.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    current = _current_story_arc(character)
+    if current is None:
+        await update.effective_chat.send_message(
+            "You've already completed every chapter — there's no current one to replay.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    _, arc = current
+    arc_quests = arc.get("quests", [])
+    first_quest = CAMPAIGN["quests"].get(arc_quests[0]) if arc_quests else None
+    quest_title = first_quest["title"] if first_quest else arc["title"]
+    opening_text = await asyncio.to_thread(narrate_arc_opening, arc["title"], arc["description"], quest_title)
+    await _safe_send(update, f"🎬 **{arc['title']}**\n{opening_text}")
+
+
 # Full-storyline plan, Phase 2/3: a companion's resolution quest writes
 # a real, persistent state via db.resolve_companion the moment it
 # completes -- see _complete_quest_and_announce below. Two shapes:
@@ -6042,13 +6089,18 @@ def _format_character_sheet(character: dict) -> str:
         f"CON {character['constitution']} INT {character['intelligence']} "
         f"WIS {character['wisdom']} CHA {character['charisma']}\n"
     )
+    next_threshold = XP_THRESHOLDS.get(character["level"] + 1)
+    xp_remaining_line = (
+        f" ({max(next_threshold - character['xp'], 0)} XP to Level {character['level'] + 1})"
+        if next_threshold is not None else " (Max level reached)"
+    )
     return (
         f"{name_line} — {character['race']} {character['char_class']}\n"
         f"{pronouns_line}"
         f"{presence_line}"
         f"{streak_line}"
         f"{description_line}"
-        f"Level {character['level']} | XP {character['xp']}\n"
+        f"Level {character['level']} | XP {character['xp']}{xp_remaining_line}\n"
         f"HP {character['hp_current']}/{character['hp_max']} | AC {character['armor_class']}\n"
         f"{ability_line}"
         f"Gold: {character['gold']} | Guild: {character.get('guild') or 'None'}\n"
@@ -8881,26 +8933,48 @@ def _shop_keyboard(shop_data: dict) -> InlineKeyboardMarkup | None:
         item = items_module.get_item(item_id)
         if item:
             buttons.append([InlineKeyboardButton(
-                f"{item['name']} — {item['price']}g", callback_data=f"shop|buy|{item_id}",
+                f"{item['name']} — {item['price']}g", callback_data=f"shop|qty|{item_id}",
             )])
     return InlineKeyboardMarkup(buttons) if buttons else None
 
 
+def _quantity_keyboard(item_id: str) -> InlineKeyboardMarkup:
+    """
+    Per Coffee (2026-07-20): "when they select the item can you prompt
+    with click buttons for those selections" -- picking an item in the
+    shop now asks HOW MANY via real tap buttons instead of always
+    buying a single one, same reuse-the-existing-handler pattern as
+    every other button in this game (_do_buy already parses "buy 5 X").
+    """
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(str(qty), callback_data=f"shop|buy|{item_id}|{qty}")
+        for qty in (1, 5, 10)
+    ]])
+
+
 async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Handles taps on _shop_keyboard. Re-resolves the shop from the
-    TAPPER's own current location (never trusts anything about the shop
-    from the button itself) so this behaves identically to typing "buy
-    X" -- same real _do_buy handler, same stock/gold/inventory checks.
+    Handles taps on _shop_keyboard/_quantity_keyboard. Re-resolves the
+    shop from the TAPPER's own current location (never trusts anything
+    about the shop from the button itself) so this behaves identically
+    to typing "buy X" -- same real _do_buy handler, same stock/gold/
+    inventory checks. Tapping an item first shows a quantity picker
+    (1/5/10); tapping a quantity actually buys.
     """
     query = update.callback_query
     parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
     item_id = parts[2] if len(parts) > 2 else None
     await _safe_answer(query)
     item = items_module.get_item(item_id) if item_id else None
     if item is None:
         return
-    await _do_buy(update, f"buy {item['name']}")
+    if action == "qty":
+        await _safe_send(update, f"How many {item['name']}?", reply_markup=_quantity_keyboard(item_id))
+        return
+    if action == "buy":
+        qty = int(parts[3]) if len(parts) > 3 else 1
+        await _do_buy(update, f"buy {qty} {item['name']}")
 
 
 async def _do_list_shop(update: Update) -> None:
@@ -9153,6 +9227,7 @@ def _main_menu_keyboard(character: dict) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🎒 Inventory", callback_data="menu|inventory")],
         [InlineKeyboardButton("⚔️ Equip Gear", callback_data="menu|equip")],
         [InlineKeyboardButton("🎭 Switch Character", callback_data="menu|roster")],
+        [InlineKeyboardButton("🧭 Waypoints", callback_data="menu|waypoints")],
     ]
     if character.get("pending_asi_points", 0) > 0:
         rows.append([InlineKeyboardButton("📈 Level Up", callback_data="menu|level")])
@@ -9201,6 +9276,8 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await _do_show_level_menu(update)
     elif section == "roster":
         await _do_list_characters(update)
+    elif section == "waypoints":
+        await _do_show_waypoints(update)
 
 
 async def _do_show_story_so_far(update: Update) -> None:
@@ -9798,6 +9875,60 @@ async def _do_join_guild(update: Update, text: str) -> None:
     await _safe_send(update, f"🏛️ You've joined {GUILDS[guild_id]['name']}!{join_note}{topic_note}")
     await _notify_main_topic(update, f"🏛️ **{character['name']}** joined {GUILDS[guild_id]['name']}!")
     await _check_and_award_achievements(update, db.get_character(update.effective_user.id))
+
+
+# ---------------------------------------------------------------------
+# Waypoints — tap-to-travel buttons over the exact same fast-travel
+# destinations _do_fast_travel already accepts as free text (any
+# location in character['visited_locations']). Per Coffee (2026-07-20):
+# "Can you add waypoint to the menu also."
+# ---------------------------------------------------------------------
+
+def _waypoint_keyboard(visited_locations: list[str], current_location_id: str) -> InlineKeyboardMarkup:
+    rows = []
+    for loc_id in visited_locations:
+        if loc_id == current_location_id:
+            continue
+        loc = cl.get_location(CAMPAIGN, loc_id)
+        if loc:
+            rows.append([InlineKeyboardButton(loc["name"], callback_data=f"waypoint|go|{loc_id}")])
+    return InlineKeyboardMarkup(rows)
+
+
+async def _do_show_waypoints(update: Update) -> None:
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    visited = character["visited_locations"]
+    others = [loc_id for loc_id in visited if loc_id != character["current_location"]]
+    if not others:
+        await update.effective_chat.send_message(
+            "You haven't discovered anywhere else to fast-travel to yet.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    await _safe_send(
+        update, "🧭 **Waypoints** — tap one to fast-travel there:",
+        reply_markup=_waypoint_keyboard(visited, character["current_location"]),
+    )
+
+
+async def waypoint_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _waypoint_keyboard -- dispatches through the exact same _do_fast_travel a typed destination name already uses."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    await _safe_answer(query)
+    if action != "go" or len(parts) < 3:
+        return
+    loc_id = parts[2]
+    loc = cl.get_location(CAMPAIGN, loc_id)
+    if loc is None:
+        return
+    await _do_fast_travel(update, loc["name"])
 
 
 # ---------------------------------------------------------------------
@@ -10613,6 +10744,13 @@ async def sheet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await _do_check_sheet(update)
 
 
+async def replay_intro_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/replay_intro -- rewatch the current chapter's opening cutscene. See _do_replay_chapter_intro."""
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    await _do_replay_chapter_intro(update)
+
+
 async def map_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     /map (2026-07-17, per Coffee) -- same real fog-of-war map _do_show_map
@@ -10813,6 +10951,7 @@ Almost everything here is plain English, typed straight into Adventure -- no com
 • /note <text> -- a short status note party members can see ("/note clear" removes it)
 • /party [sheet] -- your party at a glance, or full sheets with "sheet"
 • /quests
+• /replay_intro -- rewatch your current chapter's opening cutscene
 • /rest
 • /sell <item>
 • /sheet
@@ -12651,6 +12790,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("rest", rest_command))
     application.add_handler(CommandHandler("sell", sell_command))
     application.add_handler(CommandHandler("sheet", sheet_command))
+    application.add_handler(CommandHandler("replay_intro", replay_intro_command))
     application.add_handler(CommandHandler("shop", shop_command))
     application.add_handler(CommandHandler("startcombat", startcombat_command))
     application.add_handler(CommandHandler("title", title_command))
@@ -12677,6 +12817,7 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(equip_menu_callback, pattern=r"^equip\|"))
     application.add_handler(CallbackQueryHandler(level_menu_callback, pattern=r"^level\|"))
     application.add_handler(CallbackQueryHandler(roster_menu_callback, pattern=r"^roster\|"))
+    application.add_handler(CallbackQueryHandler(waypoint_menu_callback, pattern=r"^waypoint\|"))
     application.add_handler(CallbackQueryHandler(creation_menu_callback, pattern=r"^create\|"))
 
     application.add_error_handler(_log_unhandled_error)

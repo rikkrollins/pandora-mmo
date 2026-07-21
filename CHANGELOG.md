@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.14.1] — Dev-topic feedback batch
+
+- Character sheet now shows XP remaining to next level right on the
+  Level/XP line, not just in the level-up menu.
+- New `/replay_intro` command rewatches your current chapter's opening
+  cutscene, in case you missed it (e.g. right at character creation).
+- Main menu's Waypoints button lets you tap any place you've already
+  discovered to fast-travel there, instead of typing the name.
+- Tapping an item in a shop now asks how many (1/5/10) via buttons
+  instead of always buying one.
+- AI-controlled party members will no longer start a fight against a
+  story boss entirely on their own — a real human has to be there too.
+
 ## [1.14.0] — Story cutscenes, roster menu, and real secrets to find
 
 - **Story cutscenes.** Accepting the very first quest of a new chapter
