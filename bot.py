@@ -55,7 +55,7 @@ from ai.dev_agent import answer_dev_question
 from ai.dm_agent import (
     narrate_action, narrate_welcome, narrate_skill_check, narrate_hourly_update,
     narrate_examine, narrate_branching_choice_outcome, narrate_boss_decision,
-    narrate_story_so_far, narrate_chapter_climax,
+    narrate_story_so_far, narrate_chapter_climax, narrate_arc_opening,
 )
 from ai.intent_parser import parse_intents
 from ai.npc_agent import register_npc, talk_to_npc, generate_ambient_line, _NPCS
@@ -4942,6 +4942,33 @@ def _chapter_complete_note(telegram_user_id: int, quest_id: str) -> str:
     return f"\n\n🌟 **Chapter complete: \"{arc['title']}\"** — {arc['description']}"
 
 
+async def _arc_opening_note(character: dict, quest_id: str, quest: dict) -> str:
+    """
+    Cutscene bookend to _chapter_complete_note's closing beat, per
+    Coffee's request for RPG-style cutscenes on story/character quests
+    (2026-07-19/20): fires a real AI-narrated opening (narrate_arc_
+    opening) the moment a character takes on the FIRST quest of a story
+    arc they've never touched before -- checked against completed_quests
+    AND active_quests so this can only ever fire once per arc per
+    character, never on a re-accept. Returns "" for any quest that isn't
+    literally arc["quests"][0], so mid-arc quests stay a plain accept.
+    """
+    arc_info = _story_arc_for_quest(quest_id)
+    if arc_info is None:
+        return ""
+    _, arc = arc_info
+    arc_quests = arc.get("quests", [])
+    if not arc_quests or arc_quests[0] != quest_id:
+        return ""
+    already_touched = set(character["completed_quests"]) | set(character["active_quests"].keys())
+    if already_touched & set(arc_quests):
+        return ""
+    opening_text = await asyncio.to_thread(
+        narrate_arc_opening, arc["title"], arc["description"], quest["title"],
+    )
+    return f"🎬 **{arc['title']}**\n{opening_text}\n\n"
+
+
 # Full-storyline plan, Phase 2/3: a companion's resolution quest writes
 # a real, persistent state via db.resolve_companion the moment it
 # completes -- see _complete_quest_and_announce below. Two shapes:
@@ -5222,8 +5249,9 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
             or any(q["title"].lower() in text.lower() for q in available_board)
         )
         if not names_something_else:
+            opening_note = await _arc_opening_note(character, quest_id, quest)
             db.accept_quest(telegram_user_id, quest_id)
-            await _safe_send(update, f"📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}")
+            await _safe_send(update, f"{opening_note}📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}")
             await _notify_main_topic(update, f"📜 **{character['name']}** accepted a quest: {quest['title']}")
             return
 
@@ -5245,8 +5273,9 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
         quest_id, quest = offer
         names_something_else = any(q["title"].lower() in text.lower() for q in available)
         if not names_something_else:
+            opening_note = await _arc_opening_note(character, quest_id, quest)
             db.accept_quest(telegram_user_id, quest_id)
-            await _safe_send(update, f"📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}")
+            await _safe_send(update, f"{opening_note}📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}")
             await _notify_main_topic(update, f"📜 **{character['name']}** accepted a quest: {quest['title']}")
             return
     if not available:
@@ -9123,6 +9152,7 @@ def _main_menu_keyboard(character: dict) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📋 Quests", callback_data="menu|quests")],
         [InlineKeyboardButton("🎒 Inventory", callback_data="menu|inventory")],
         [InlineKeyboardButton("⚔️ Equip Gear", callback_data="menu|equip")],
+        [InlineKeyboardButton("🎭 Switch Character", callback_data="menu|roster")],
     ]
     if character.get("pending_asi_points", 0) > 0:
         rows.append([InlineKeyboardButton("📈 Level Up", callback_data="menu|level")])
@@ -9169,6 +9199,8 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await _do_show_equip_menu(update)
     elif section == "level":
         await _do_show_level_menu(update)
+    elif section == "roster":
+        await _do_list_characters(update)
 
 
 async def _do_show_story_so_far(update: Update) -> None:
@@ -9782,13 +9814,15 @@ def _roster_keyboard(roster: list[dict], active_id: int | None) -> InlineKeyboar
     still gets a button (a harmless no-op switch to itself) rather than
     being singled out as unclickable, keeping the row count predictable.
     """
-    return InlineKeyboardMarkup([
+    rows = [
         [InlineKeyboardButton(
             f"{'📍 ' if c['character_id'] == active_id else ''}{c['name']} (Lv {c['level']} {c['char_class']})",
             callback_data=f"roster|switch|{c['character_id']}",
         )]
         for c in roster
-    ])
+    ]
+    rows.append([InlineKeyboardButton("✨ Create New Character", callback_data="roster|new")])
+    return InlineKeyboardMarkup(rows)
 
 
 async def _do_list_characters(update: Update) -> None:
@@ -9817,6 +9851,9 @@ async def roster_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
     await _safe_answer(query)
+    if action == "new":
+        await _begin_character_creation(update, context)
+        return
     if action != "switch" or len(parts) < 3:
         return
     try:

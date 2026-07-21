@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.14.0] — Story cutscenes, roster menu, and real secrets to find
+
+- **Story cutscenes.** Accepting the very first quest of a new chapter
+  now opens with a real AI-narrated cutscene, a bookend to the existing
+  "chapter complete" closing beat — grounded strictly in that chapter's
+  own real title and description, never inventing new plot.
+- **Menu upgrades.** The main `/menu` now has a "Switch Character" row
+  that opens your full roster with tap-to-switch buttons, and that
+  roster screen now also has a "Create New Character" button, so
+  starting an additional character no longer requires typing.
+- **Real secrets exist in the world now** — deliberately not detailed
+  here. Some things are worth finding on your own.
+
 ## [1.13.3] — Real tap-buttons for character creation
 
 Per Coffee: "Add push buttons to the character creation sequence and

@@ -41,6 +41,11 @@ ITEMS = {
         "price": 0, "weight": 2, "damage_dice": "1d6+2", "ability": "dexterity",
         "note": "Warm to the touch. Wreathes itself in fire when drawn in anger.",
     },
+    "the_last_word": {
+        "name": "The Last Word", "type": "weapon", "rarity": "legendary",
+        "price": 0, "weight": 3, "damage_dice": "2d8+3", "ability": "strength",
+        "note": "The carving stops repeating itself the instant your hand closes around the hilt.",
+    },
 
     # --- Armor & Shields ---
     "leather_armor": {"name": "Leather Armor", "type": "armor", "rarity": "common", "price": 10, "weight": 10, "ac_base": 11},

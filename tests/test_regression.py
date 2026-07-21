@@ -16,6 +16,7 @@ import shutil
 import unittest
 
 import bot
+import campaign_loader as cl
 import db
 import items as items_module
 import spells
@@ -550,6 +551,41 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         db.complete_quest(user_id, arc1_quests[0])  # only the first of several
         note = bot._chapter_complete_note(user_id, arc1_quests[0])
         self.assertEqual(note, "")
+
+    async def test_arc_opening_cutscene_fires_on_a_chapters_first_quest(self):
+        """
+        Per Coffee's request for RPG-style cutscenes on story quests
+        (2026-07-19/20): accepting the very first quest of a story arc
+        (arc_1_discovery's welcome_to_the_crossroads) should get a real
+        AI-narrated opening beat (_arc_opening_note), the opening bookend
+        to the existing chapter-complete closing beat above.
+        """
+        from unittest.mock import patch
+        use_test_db("tests/tmp/arc_opening_test.db")
+        user_id = 888901
+        make_basic_character(user_id, "Cutscenetester", current_location="crossroads_tavern")
+        sink = []
+        with patch("bot.narrate_arc_opening", return_value="A quiet dread settles over the crossroads.") as mock_narrate:
+            await bot._do_accept_quest(FakeUpdate(user_id, "I accept the quest", sink), "I accept the quest")
+        combined = " ".join(sink)
+        self.assertTrue(mock_narrate.called)
+        self.assertIn("🎬", combined)
+        self.assertIn("Discovery", combined)
+
+    async def test_arc_opening_cutscene_does_not_repeat_mid_chapter(self):
+        """Sibling to the test above: a LATER quest in the same arc (not arc["quests"][0]) must not re-trigger the opening cutscene."""
+        from unittest.mock import patch
+        use_test_db("tests/tmp/arc_opening_test2.db")
+        user_id = 888902
+        make_basic_character(user_id, "Cutscenetester2", current_location="crossroads_tavern")
+        db.complete_quest(user_id, "welcome_to_the_crossroads")
+        db.update_character(user_id, current_location="hollow_stump_shrine")
+        sink = []
+        with patch("bot.narrate_arc_opening", return_value="SHOULD NOT APPEAR") as mock_narrate:
+            await bot._do_accept_quest(FakeUpdate(user_id, "I accept the quest", sink), "I accept the quest")
+        combined = " ".join(sink)
+        self.assertFalse(mock_narrate.called)
+        self.assertNotIn("🎬", combined)
 
     async def test_check_quests_shows_current_chapter(self):
         use_test_db("tests/tmp/story_arc_test3.db")
@@ -1824,6 +1860,63 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(bot.CAMPAIGN["monsters"]["the_unspoken"]["is_boss"])
         self.assertTrue(bot.CAMPAIGN["monsters"]["the_waking_ember"]["is_boss"])
 
+    # -- Task #218, per Coffee: an optional hidden superboss + legendary
+    #    artifact chain, deliberately outside the main story_arcs (never
+    #    part of chapter progression, never blocking or gating anything
+    #    else) -- reachable only through a hidden lockable door off an
+    #    existing far location, same door/lockpick mechanism as every
+    #    other hidden passage in this campaign.
+    async def test_hidden_superboss_quest_grants_the_legendary_reward(self):
+        import sessions
+        sessions.end_session(-997)
+
+        player_id = 999912
+        make_basic_character(player_id, "DepthSeeker", current_location="the_first_city_forgotten_depth")
+        db.accept_quest(player_id, "the_unrepeating_depth")
+
+        boss_id = -2_500_012
+        boss = {
+            "telegram_user_id": boss_id, "name": "The Unrepeating", "dexterity": 16,
+            "is_ai": 1, "monster_key": "the_unrepeating",
+        }
+        session = sessions.start_session(-997, [boss], {boss_id: "enemy", player_id: "party"})
+        session.turn_order = [boss_id, player_id]
+
+        sink = []
+        await bot._check_quest_completions_defeat_monster(FakeUpdate(player_id, "irrelevant", sink), session)
+
+        character = db.get_character(player_id)
+        self.assertIn("the_unrepeating_depth", character["completed_quests"])
+        self.assertNotIn("the_unrepeating_depth", character["active_quests"])
+        self.assertEqual(character["inventory"].get("the_last_word", 0), 1)
+        sessions.end_session(-997)
+
+    def test_hidden_superboss_door_and_quest_are_outside_the_main_story(self):
+        loc = cl.get_location(bot.CAMPAIGN, "the_first_city_deepest_record")
+        self.assertEqual(loc["locked_connections"]["the_first_city_forgotten_depth"], "record_hidden_seam")
+        lockable = next(lk for lk in loc["lockables"] if lk["id"] == "record_hidden_seam")
+        self.assertEqual(lockable["leads_to"], "the_first_city_forgotten_depth")
+        arc_info = bot._story_arc_for_quest("the_unrepeating_depth")
+        self.assertIsNone(arc_info, "the hidden superboss quest must not be part of any story arc")
+
+    # -- Task #137, per Coffee: a hidden, standalone "Pandora" legend --
+    #    original content, never referenced by or influencing the real
+    #    storyline -- just discoverable flavor text, same interactables
+    #    mechanism as every other examinable object in this campaign.
+    def test_standalone_pandora_legend_exists_and_is_isolated(self):
+        loc = cl.get_location(bot.CAMPAIGN, "greymoor_downs_below_the_cairn")
+        marker = loc["interactables"]["the_wedged_marker"]
+        self.assertIn("Pandora", marker["description"])
+        # Isolation check: this location must not be any quest's location/
+        # objective_location, nor named in any quest's reach_location
+        # trigger -- confirming the legend never gates or feeds the real
+        # story, per Coffee's explicit "never influencing the main story."
+        for quest_id, quest in bot.CAMPAIGN["quests"].items():
+            self.assertNotEqual(quest.get("location"), "greymoor_downs_below_the_cairn", quest_id)
+            self.assertNotEqual(quest.get("objective_location"), "greymoor_downs_below_the_cairn", quest_id)
+            trigger = quest.get("trigger", {})
+            self.assertNotEqual(trigger.get("location"), "greymoor_downs_below_the_cairn", quest_id)
+
     # -- Racial traits audit (2026-07-16): only Half-Orc's traits were
     #    ever mechanically wired; every other race's signature traits
     #    were pure flavor text in races.py, confirmed inert by grep.
@@ -3079,6 +3172,41 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         active = bot.db.get_character(user_id)
         self.assertEqual(active["name"], "Gamma")
         sessions.end_session(-999)
+
+    # -- Coffee, 2026-07-20: "can u put the switch characters option in
+    #    the menu?" + "in the switch character option include (Create
+    #    New Character)" -- the roster/switch feature (task #213) already
+    #    existed via /roster, just wasn't reachable from the main /menu,
+    #    and had no way to start a new character from that same screen.
+    def test_main_menu_includes_switch_character_row(self):
+        character = {"pending_asi_points": 0}
+        keyboard = bot._main_menu_keyboard(character)
+        labels = [btn.text for row in keyboard.inline_keyboard for btn in row]
+        self.assertIn("🎭 Switch Character", labels)
+
+    async def test_main_menu_switch_character_button_opens_roster(self):
+        user_id = 900559
+        make_basic_character(user_id, "MenuRosterTest")
+        sink = []
+        update = FakeCallbackUpdate(user_id, "menu|roster", sink)
+        await bot.menu_callback(update, DummyContext())
+        self.assertTrue(any("tap one to switch" in m for m in sink))
+
+    def test_roster_keyboard_includes_create_new_character_button(self):
+        roster = [{"character_id": 1, "name": "Solo", "level": 1, "char_class": "Fighter"}]
+        kb = bot._roster_keyboard(roster, 1)
+        labels = [btn.text for row in kb.inline_keyboard for btn in row]
+        self.assertIn("✨ Create New Character", labels)
+
+    async def test_roster_create_new_character_button_starts_creation(self):
+        user_id = 900560
+        make_basic_character(user_id, "ExistingOne")
+        sink = []
+        context = DummyContext()
+        update = FakeCallbackUpdate(user_id, "roster|new", sink)
+        await bot.roster_menu_callback(update, context)
+        self.assertEqual(context.user_data.get("creation", {}).get("step"), "name")
+        self.assertTrue(any("create" in m.lower() or "name" in m.lower() for m in sink))
 
     # -- Dev-topic feedback (Coffee, 2026-07-19): "If a player wants to
     #    look at stalls and shopfronts in market row - please give a

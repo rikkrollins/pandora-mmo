@@ -861,3 +861,55 @@ def narrate_chapter_climax(quest_title: str, quest_description: str, reward_text
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] chapter climax narration failed, falling back to template: {e}")
     return f"This was a turning point. {quest_description}"
+
+
+def _arc_opening_preamble() -> str:
+    return (
+        "You are the Dungeon Master narrating the OPENING of a brand new "
+        "chapter of a much longer story -- the character has just taken "
+        "on the quest that starts it. You are given the chapter's real "
+        "title and description, and the specific quest that opens it; "
+        f"narrate ONLY these facts ({scaled_sentences(3, 5, boost=2)}), "
+        "setting the mood and stakes without resolving anything or "
+        "inventing a new plot detail, character, or twist beyond what's "
+        f"given. {_NAMING_INSTRUCTION} {style_directive(boost=2)}"
+    )
+
+
+def _build_arc_opening_prompt(arc_title: str, arc_description: str, quest_title: str) -> str:
+    return (
+        f"{_arc_opening_preamble()}\n\n"
+        f"Real facts (narrate ONLY these, faithfully):\n"
+        f"New chapter beginning: {arc_title}\n"
+        f"What this chapter is about: {arc_description}\n"
+        f"The quest that opens it: {quest_title}\n\n"
+        f"Write the opening now:"
+    )
+
+
+def narrate_arc_opening(arc_title: str, arc_description: str, quest_title: str) -> str:
+    """
+    Cutscene-style bookend to narrate_chapter_climax's ending flourish:
+    fires once, the moment a character accepts the FIRST quest of a new
+    story arc (see bot.py's _arc_opening_note), giving that transition a
+    real narrated beat instead of just a quest-accept line -- per
+    Coffee's request for RPG-style cutscenes on story beats (2026-07-19/
+    20). Same rules-decide/AI-narrates split as every other narration
+    call: the arc's title/description and the quest's title are already-
+    decided real facts, never invented here.
+    """
+    prompt = _build_arc_opening_prompt(arc_title, arc_description, quest_title)
+    try:
+        response = requests.post(
+            f"{config.OLLAMA_BASE_URL}/api/generate",
+            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False, "options": _NARRATION_OPTIONS},
+            timeout=200,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = strip_think_tags(data.get("response", ""))
+        if text:
+            return text
+    except (requests.RequestException, ValueError) as e:
+        print(f"[dm_agent] arc opening narration failed, falling back to template: {e}")
+    return f"A new chapter begins. {arc_description}"

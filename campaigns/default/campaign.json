@@ -377,6 +377,10 @@
           "the_refilled_shaft": {
             "name": "the shaft's carefully refilled walls",
             "description": "Packed and re-packed so many times the dirt's gone smooth. Somebody keeps digging this back open, and somebody keeps closing it again."
+          },
+          "the_wedged_marker": {
+            "name": "a weather-stained marker, wedged sideways into the shaft wall",
+            "description": "Not local stone — carried here, then left. Scratched into its face, in a hand that matches nothing else down here, is a story about someone called Pandora, who was given a box she never asked for and told only that she must never open it — and who spent the rest of her life proving that being told 'never' isn't the same as being told 'why.' The marker doesn't say what was inside. It doesn't say she opened it, either. It just says she kept the box, and kept asking, until the day she didn't need an answer anymore. Nothing else here explains why it's buried under a cairn on the far side of a world it clearly wasn't carved in."
           }
         }
       },
@@ -998,7 +1002,25 @@
             "name": "the one wall in the whole buried city that doesn't repeat itself",
             "description": "Every other surface up above counts the same shape over and over. This one, finally, says something different — though no one still living can read it."
           }
+        },
+        "lockables": [
+          {
+            "id": "record_hidden_seam",
+            "kind": "door",
+            "name": "a seam in the floor, hidden beneath old dust",
+            "leads_to": "the_first_city_forgotten_depth"
+          }
+        ],
+        "locked_connections": {
+          "the_first_city_forgotten_depth": "record_hidden_seam"
         }
+      },
+      "the_first_city_forgotten_depth": {
+        "name": "The Forgotten Depth",
+        "layer": "underground",
+        "description": "Past the seam in the floor, the carved script gives up its shape completely — the walls here are smooth, black, and warm, like something that stopped bothering to explain itself a long time ago.",
+        "connections": [],
+        "monsters": ["the_unrepeating"]
       },
       "whispering_wood_root_hollow": {
         "name": "The Root Hollow",
@@ -1776,6 +1798,19 @@
       "reward_gold": 100,
       "reward_item": "moonpetal",
       "clue": "Sarah says the sealed door low in the well's wall is the only part of it that isn't carved from ordinary stone."
+    },
+    "the_unrepeating_depth": {
+      "title": "What Finally Speaks",
+      "description": "Past the seam in the Deepest Record's floor, the walls stop repeating themselves entirely — and whatever kept them company down here is done waiting to be read.",
+      "location": "the_first_city_forgotten_depth",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_unrepeating"
+      },
+      "reward_xp": 2000,
+      "reward_gold": 500,
+      "reward_item": "the_last_word",
+      "clue": "Nothing about this place was ever part of the story everyone else was told."
     }
   },
   "story_arcs": {
@@ -1919,6 +1954,18 @@
       "hp_max": 65,
       "proficiency_bonus": 4,
       "xp_reward": 500,
+      "is_boss": true,
+      "on_hit_condition": "frightened",
+      "life_drain": true
+    },
+    "the_unrepeating": {
+      "name": "The Unrepeating",
+      "dexterity": 16,
+      "strength": 20,
+      "armor_class": 19,
+      "hp_max": 95,
+      "proficiency_bonus": 5,
+      "xp_reward": 700,
       "is_boss": true,
       "on_hit_condition": "frightened",
       "life_drain": true
