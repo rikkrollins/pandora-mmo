@@ -11525,6 +11525,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_check_market(update)
     elif action == "join_battle":
         await _do_join_battle(update)
+    elif action == "replay_intro":
+        await _do_replay_chapter_intro(update)
     elif action == "skill_check":
         await _do_skill_check(update, intent.get("ability") or "dexterity", text)
     elif action == "shove":

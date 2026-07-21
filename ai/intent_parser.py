@@ -679,6 +679,14 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in ["skill tree", "skill points", "skilltree"]):
         return {**base, "action": "skill_tree"}
 
+    # Real gap (2026-07-21, per Coffee: "a player tried 'replay intro'
+    # and it didnt work"): /replay_intro only ever existed as a slash
+    # command -- plain text like "replay intro" or "replay the
+    # cutscene" had no keyword trigger at all and silently fell through
+    # to chat.
+    if "replay" in lowered and any(w in lowered for w in ["intro", "cutscene", "chapter", "opening"]):
+        return {**base, "action": "replay_intro"}
+
     if "duel" in lowered:
         if "accept" in lowered:
             return {**base, "action": "accept_duel"}
@@ -1230,6 +1238,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "bestiary", "list_shop", "leaderboard", "check_achievements", "set_title", "check_weather",
                 "check_guild_quest", "dice_game", "fortunes_wheel", "set_alignment", "message_ai",
                 "skill_tree", "challenge_duel", "accept_duel", "check_market", "join_battle",
+                "replay_intro",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

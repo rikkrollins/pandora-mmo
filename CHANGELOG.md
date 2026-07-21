@@ -2,6 +2,11 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.18.1] — Fix: "replay intro" as plain text
+
+`/replay_intro` worked as a slash command but typing "replay intro" in
+plain English silently did nothing — fixed, both now work identically.
+
 ## [1.18.0] — Join battles mid-fight, a much bigger menu, and tap-to-travel
 
 - **Join an in-progress fight.** If a battle breaks out somewhere and
