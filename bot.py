@@ -39,6 +39,7 @@ import campaign_loader as cl
 import config
 import version
 import db
+import images as images_module
 import items as items_module
 import sessions
 import shop as shop_module
@@ -343,6 +344,14 @@ def _new_pending_roll(kind: str, action_text: str, chat_id: int, **extra) -> dic
 # message the same way it checks _PENDING_DICE_ROLLS, so a stray later
 # message (normal gameplay) is never misread as a stat choice.
 _PENDING_ASI_CHOICE: set[int] = set()
+
+# Task #82, per Coffee: PvP, "safe zones by design, intentional-
+# targeting only." A duel challenge is real consent, not an ambush --
+# stored here (target_id -> challenger_id) the moment it's issued,
+# consumed the moment it's accepted or the target does anything else
+# (same in-memory, session-scoped, "one specific next reply" pattern as
+# _PENDING_ASI_CHOICE/_PENDING_DICE_ROLLS above).
+_PENDING_DUELS: dict[int, int] = {}
 
 # Character description (2026-07-16, per Coffee): "add a description to my
 # character" asks what the description should be rather than trying to
@@ -1546,6 +1555,26 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
         )
         await update.effective_chat.send_message(sheet, message_thread_id=config.TOPIC_ADVENTURE_ID)
         del context.user_data["creation"]
+
+        # Task #81, per Coffee: a real generated portrait, one per
+        # character, a genuine surprise -- never previewed, never the
+        # same prompt twice since it's grounded in this character's own
+        # real race/class/description. Best-effort: image generation
+        # failing (Pollinations down, network hiccup) must never block
+        # character creation itself, so this is caught and silently
+        # skipped rather than surfaced as an error.
+        try:
+            portrait_prompt = (
+                f"fantasy RPG character portrait, {character['race']} {character['char_class']}, "
+                f"{character.get('description') or 'determined adventurer'}, digital painting"
+            )
+            await update.effective_chat.send_photo(
+                photo=images_module.generate_image_url(portrait_prompt),
+                caption=f"🎨 {character['name']}",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+        except Exception as e:
+            logger.warning(f"[images] portrait generation failed, skipping: {e!r}")
 
         await _send_welcome_narration(update, character)
 
@@ -3360,6 +3389,108 @@ def _parse_enemy_count(lowered_text: str) -> int | None:
         if _monster_plural(key.replace("_", " ")) in lowered_text:
             return 2
     return None
+
+
+async def _do_challenge_duel(update: Update, text: str) -> None:
+    """
+    Task #82, per Coffee: PvP, "safe zones by design, intentional-
+    targeting only, tied to alignment/vendettas." This is the
+    intentional-targeting half: a real challenge, naming a specific
+    real player character at the same location, who must explicitly
+    accept (_do_accept_duel) before anything happens -- never an
+    ambush, never accidental. Any location flagged "safe" in
+    campaign.json (the same flag resting already reuses) refuses to
+    host one at all, giving "safe zones" for free with zero new schema.
+    A real duel, once accepted, resolves through the exact same combat
+    engine as any other fight -- same death-save/downed rules, no
+    separate reduced-stakes variant, real consent is the actual safety
+    mechanism here, not softened consequences.
+    """
+    telegram_user_id = update.effective_user.id
+    character = db.get_character(telegram_user_id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    location = cl.get_location(CAMPAIGN, character["current_location"])
+    if location and location.get("safe"):
+        await update.effective_chat.send_message(
+            "This is a safe place — no duels here.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    if sessions.get_session(update.effective_chat.id) is not None:
+        await update.effective_chat.send_message(
+            "A fight's already happening here.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    candidates = _get_combat_eligible_party_members(character["current_location"])
+    lowered = text.lower()
+    target = next(
+        (p for p in candidates
+         if not p.get("is_ai") and p["telegram_user_id"] != telegram_user_id and p["name"].lower() in lowered),
+        None,
+    )
+    if target is None:
+        await update.effective_chat.send_message(
+            "Not sure who you mean — name a real player here to challenge.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    _PENDING_DUELS[target["telegram_user_id"]] = telegram_user_id
+    await _safe_send(
+        update,
+        f"⚔️ **{character['name']}** challenges **{target['name']}** to a duel! "
+        f"**{target['name']}**, say \"accept duel\" to fight, or just ignore it to decline.",
+    )
+
+
+async def _do_accept_duel(update: Update) -> None:
+    telegram_user_id = update.effective_user.id
+    challenger_id = _PENDING_DUELS.pop(telegram_user_id, None)
+    if challenger_id is None:
+        await update.effective_chat.send_message(
+            "No duel challenge is waiting for you.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    target = db.get_character(telegram_user_id)
+    challenger = db.get_character(challenger_id)
+    if target is None or challenger is None:
+        return
+
+    # Defense in depth: re-check everything at accept-time too, since
+    # real time may have passed since the challenge was issued.
+    if target["current_location"] != challenger["current_location"]:
+        await update.effective_chat.send_message(
+            f"{challenger['name']} isn't here anymore — the duel's off.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    location = cl.get_location(CAMPAIGN, target["current_location"])
+    if location and location.get("safe"):
+        await update.effective_chat.send_message(
+            "This is a safe place — no duels here.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if sessions.get_session(update.effective_chat.id) is not None:
+        await update.effective_chat.send_message(
+            "A fight's already happening here.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    session = sessions.start_session(
+        update.effective_chat.id, [challenger, target],
+        {challenger_id: "party", telegram_user_id: "enemy"},
+    )
+    await _safe_send(
+        update, f"⚔️ **{challenger['name']}** vs **{target['name']}** — the duel begins!",
+    )
+    await _safe_send(update, _turn_announcement(session), reply_markup=_battle_menu_keyboard(session))
 
 
 async def _do_start_combat(update: Update, monster_key: str | None = None, count: int | None = None) -> None:
@@ -5860,6 +5991,136 @@ async def _do_answer_puzzle(update: Update, text: str) -> None:
     )
 
 
+# Task #79, per Coffee: a real player-run marketplace, NOT an auction
+# house -- one fixed price per listing, first buyer to say so takes it
+# whole, never a bid. Global (not location-scoped) for this first
+# version -- reachable from anywhere via /sell_market, /market,
+# /buy_market, same as any other command.
+async def _do_sell_market(update: Update, args: list[str]) -> None:
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if len(args) < 3:
+        await update.effective_chat.send_message(
+            "Usage: /sell_market <quantity> <price> <item name>", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    try:
+        quantity = int(args[0])
+        price = int(args[1])
+    except ValueError:
+        await update.effective_chat.send_message(
+            "Quantity and price both need to be real numbers.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if quantity <= 0 or price <= 0:
+        await update.effective_chat.send_message(
+            "Quantity and price both need to be more than zero.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    item_text = " ".join(args[2:])
+    item_id = items_module.find_item_mentioned_in_text(item_text, candidate_ids=list(character["inventory"].keys()))
+    if item_id is None:
+        await update.effective_chat.send_message(
+            "You don't have that item to sell.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    held = character["inventory"].get(item_id, 0)
+    if held < quantity:
+        await update.effective_chat.send_message(
+            f"You only have {held}.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    removed, _ = db.remove_item(update.effective_user.id, item_id, quantity)
+    if not removed:
+        return
+    listing_id = db.create_market_listing(
+        update.effective_user.id, character["name"], item_id, quantity, price
+    )
+    item_name = items_module.get_item(item_id)["name"]
+    await _safe_send(
+        update,
+        f"🏷️ **{character['name']}** lists **{quantity}x {item_name}** for **{price} gold** "
+        f"(listing #{listing_id}). Say \"/buy_market {listing_id}\" to buy it.",
+    )
+
+
+async def _do_check_market(update: Update) -> None:
+    listings = db.get_market_listings()
+    if not listings:
+        await update.effective_chat.send_message(
+            "The marketplace is empty right now — nobody's listed anything for sale.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    lines = ["🏛️ **Player Marketplace:**"]
+    for listing in listings:
+        item = items_module.get_item(listing["item_id"])
+        item_name = item["name"] if item else listing["item_id"]
+        lines.append(
+            f"#{listing['listing_id']}: {listing['quantity']}x {item_name} — {listing['price']} gold "
+            f"(seller: {listing['seller_name']})"
+        )
+    lines.append("\nSay \"/buy_market <#>\" to buy one.")
+    await _safe_send(update, "\n".join(lines))
+
+
+async def _do_buy_market(update: Update, args: list[str]) -> None:
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if not args:
+        await update.effective_chat.send_message(
+            "Usage: /buy_market <listing #>", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    try:
+        listing_id = int(args[0].lstrip("#"))
+    except ValueError:
+        await update.effective_chat.send_message(
+            "That's not a real listing number.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    listing = db.get_market_listing(listing_id)
+    if listing is None:
+        await update.effective_chat.send_message(
+            "That listing doesn't exist — it may have already been bought.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    if listing["seller_id"] == update.effective_user.id:
+        await update.effective_chat.send_message(
+            "You can't buy your own listing.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if character["gold"] < listing["price"]:
+        await update.effective_chat.send_message(
+            f"You only have {character['gold']} gold — this costs {listing['price']}.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    db.update_character(update.effective_user.id, gold=character["gold"] - listing["price"])
+    db.add_item(update.effective_user.id, listing["item_id"], listing["quantity"])
+    seller = db.get_character(listing["seller_id"])
+    if seller:
+        db.update_character(listing["seller_id"], gold=seller["gold"] + listing["price"])
+    db.remove_market_listing(listing_id)
+
+    item_name = items_module.get_item(listing["item_id"])["name"]
+    await _safe_send(
+        update,
+        f"🏛️ **{character['name']}** buys **{listing['quantity']}x {item_name}** from "
+        f"**{listing['seller_name']}** for **{listing['price']} gold**.",
+    )
+
+
 GAMBLE_WIN_THRESHOLD = 8  # 2d6 total needed to double your wager
 
 
@@ -8312,6 +8573,19 @@ def _achievement_condition_met(character: dict, check: dict) -> bool:
         return bool(character.get("equipped_weapon")) and bool(
             character.get("equipped_armor") or character.get("equipped_shield")
         )
+    if check_type == "hidden_synergy":
+        # Task #134: real, undocumented emergent-build achievements --
+        # a genuine multi-system combo (alignment extreme + a real
+        # skill-tree investment + an existing level milestone), never
+        # hinted at in any visible text.
+        good_evil = character.get("alignment_good_evil", 0)
+        has_upgrade = bool(character.get("skill_tree_upgrades"))
+        is_legendary = "legendary" in (character.get("achievements") or [])
+        if check["variant"] == "elect":
+            return good_evil >= 60 and has_upgrade and is_legendary
+        if check["variant"] == "damned":
+            return good_evil <= -60 and has_upgrade and is_legendary
+        return False
     return False
 
 
@@ -11022,6 +11296,12 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_message_ai(update, intent.get("raw_text", text))
     elif action == "skill_tree":
         await _do_show_skill_tree(update)
+    elif action == "challenge_duel":
+        await _do_challenge_duel(update, text)
+    elif action == "accept_duel":
+        await _do_accept_duel(update)
+    elif action == "check_market":
+        await _do_check_market(update)
     elif action == "skill_check":
         await _do_skill_check(update, intent.get("ability") or "dexterity", text)
     elif action == "shove":
@@ -11199,6 +11479,41 @@ async def skilltree_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if not topics.is_adventure(update.message.message_thread_id or 0):
         return
     await _do_show_skill_tree(update)
+
+
+async def duel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/duel <name> -- challenge a real player at your location to PvP. See _do_challenge_duel."""
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    await _do_challenge_duel(update, " ".join(context.args))
+
+
+async def accept_duel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/accept_duel -- accept a pending duel challenge. See _do_accept_duel."""
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    await _do_accept_duel(update)
+
+
+async def sell_market_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/sell_market <quantity> <price> <item name> -- list an item on the player marketplace. See _do_sell_market."""
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    await _do_sell_market(update, context.args)
+
+
+async def market_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/market -- shows all current player marketplace listings. See _do_check_market."""
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    await _do_check_market(update)
+
+
+async def buy_market_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/buy_market <listing #> -- buy a player marketplace listing. See _do_buy_market."""
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    await _do_buy_market(update, context.args)
 
 
 async def map_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -11392,7 +11707,9 @@ Almost everything here is plain English, typed straight into Adventure -- no com
 • /cast <spell> [target]
 • /changelog
 • /alignment <lawful/neutral/chaotic> <good/neutral/evil> -- set your alignment
+• /accept_duel -- accept a pending PvP duel challenge
 • /dice_game -- play your class's own dice mini-game (free, levelable)
+• /duel <name> -- challenge a real player at your location to PvP (not allowed in safe places)
 • /donotdisturb -- toggle DND so you're skipped for join-a-fight nudges
 • /fortune -- spin Fortune's Wheel, open to every class
 • /guild -- today's guild quest status
@@ -11400,6 +11717,9 @@ Almost everything here is plain English, typed straight into Adventure -- no com
 • /inventory
 • /leaderboard
 • /map
+• /market -- see current player marketplace listings
+• /buy_market <listing #> -- buy a marketplace listing
+• /sell_market <quantity> <price> <item name> -- list an item for sale on the player marketplace
 • /msg <name> <message> -- tell an AI party member something (in or out of combat), never spends a turn
 • /newcharacter
 • /note <text> -- a short status note party members can see ("/note clear" removes it)
@@ -13259,6 +13579,11 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("alignment", alignment_command))
     application.add_handler(CommandHandler("msg", msg_command))
     application.add_handler(CommandHandler("skilltree", skilltree_command))
+    application.add_handler(CommandHandler("duel", duel_command))
+    application.add_handler(CommandHandler("accept_duel", accept_duel_command))
+    application.add_handler(CommandHandler("sell_market", sell_market_command))
+    application.add_handler(CommandHandler("market", market_command))
+    application.add_handler(CommandHandler("buy_market", buy_market_command))
     application.add_handler(CommandHandler("shop", shop_command))
     application.add_handler(CommandHandler("startcombat", startcombat_command))
     application.add_handler(CommandHandler("title", title_command))

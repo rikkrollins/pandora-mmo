@@ -74,6 +74,26 @@ ACHIEVEMENTS = {
         "title": "the Wealthy",
         "check": {"type": "min_gold", "value": 500},
     },
+    # Task #134, per Coffee: "Hidden emergent-synergy system: secret
+    # builds discovered, not documented." Deliberately vague description
+    # text (this module's own achievements already never get listed to
+    # a player before they're earned -- see bot.py's _do_check_achievements,
+    # which only ever shows the unlocked list) -- these two are real,
+    # multi-system combos (alignment + a real skill-tree investment +
+    # an existing level milestone), not a single stat threshold, so
+    # they can't be stumbled into by chasing one number.
+    "the_elect": {
+        "name": "The Elect",
+        "description": "A path few walk on purpose.",
+        "title": "the Elect",
+        "check": {"type": "hidden_synergy", "variant": "elect"},
+    },
+    "the_damned": {
+        "name": "The Damned",
+        "description": "A path few walk on purpose.",
+        "title": "the Damned",
+        "check": {"type": "hidden_synergy", "variant": "damned"},
+    },
 }
 
 

@@ -105,6 +105,23 @@ CREATE TABLE IF NOT EXISTS faction_standing (
 );
 """
 
+# Task #79, per Coffee: a real player-run marketplace, NOT an auction
+# house -- a direct listing at a fixed price, first buyer takes it,
+# never a bid. Global (not location-scoped) for a first real version --
+# a location-scoped marketplace is a natural, cheap follow-up on this
+# same table if wanted later.
+CREATE_MARKET_LISTINGS_TABLE = """
+CREATE TABLE IF NOT EXISTS market_listings (
+    listing_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    seller_id INTEGER NOT NULL,
+    seller_name TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    price INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+"""
+
 # Area quest board — distinct from a character's personal quest journal
 # (active_quests/completed_quests on the characters table, which only
 # ever covers the hand-authored story quests). A board quest is a
@@ -232,6 +249,7 @@ def init_db() -> None:
         conn.execute(CREATE_ACTIVE_CHARACTERS_TABLE)
         conn.execute(CREATE_NPC_RELATIONSHIPS_TABLE)
         conn.execute(CREATE_FACTION_STANDING_TABLE)
+        conn.execute(CREATE_MARKET_LISTINGS_TABLE)
         conn.execute(CREATE_BOARD_QUESTS_TABLE)
         conn.execute(CREATE_PARTIES_TABLE)
         conn.execute(CREATE_GAME_SETTINGS_TABLE)
@@ -1107,6 +1125,41 @@ def adjust_faction_standing(telegram_user_id: int, faction_id: str, delta: int,
             (new_standing, telegram_user_id, faction_id),
         )
     return new_standing
+
+
+# ---------------------------------------------------------------------
+# Player-run marketplace (task #79) — a real listing at a fixed price,
+# never a bid/auction. Global, not location-scoped, for this first
+# version.
+# ---------------------------------------------------------------------
+
+def create_market_listing(seller_id: int, seller_name: str, item_id: str, quantity: int, price: int) -> int:
+    with get_connection() as conn:
+        cur = conn.execute(
+            "INSERT INTO market_listings (seller_id, seller_name, item_id, quantity, price, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (seller_id, seller_name, item_id, quantity, price, datetime.now(timezone.utc).isoformat()),
+        )
+        return cur.lastrowid
+
+
+def get_market_listings() -> list[dict]:
+    with get_connection() as conn:
+        rows = conn.execute("SELECT * FROM market_listings ORDER BY listing_id").fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_market_listing(listing_id: int) -> dict | None:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM market_listings WHERE listing_id = ?", (listing_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def remove_market_listing(listing_id: int) -> None:
+    with get_connection() as conn:
+        conn.execute("DELETE FROM market_listings WHERE listing_id = ?", (listing_id,))
 
 
 # ---------------------------------------------------------------------

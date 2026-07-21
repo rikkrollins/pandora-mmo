@@ -2,6 +2,22 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.17.0] — PvP, a player marketplace, the Colosseum, real portraits, and more secrets
+
+- **PvP**: `/duel <name>` challenges a real player at your location — they
+  have to `/accept_duel` before anything happens, and it never works in
+  a safe location. A real fight, same rules as any other.
+- **Player marketplace**: `/sell_market <qty> <price> <item>` lists
+  something for sale at a fixed price (never an auction), `/market`
+  browses current listings, `/buy_market <#>` buys one outright.
+- **The Colosseum**: a new location off the Crossroads Tavern with a
+  real, repeatable challenger waiting inside — come back as often as
+  you like.
+- **Character portraits**: every new character now gets a real,
+  generated portrait image alongside their creation summary.
+- A few more real secrets exist in the world now — deliberately not
+  detailed here.
+
 ## [1.16.1] — Skill tree: the remaining six classes
 
 - Barbarian, Paladin, Wizard, Monk, Ranger, and Druid now each have a

@@ -14,7 +14,8 @@
           "stonearch_bridge",
           "market_row",
           "tavern_cellar",
-          "tavern_upstairs"
+          "tavern_upstairs",
+          "the_colosseum"
         ],
         "sensory_connections": {
           "whispering_wood": "A rutted dirt road runs west out of the yard, straight for a stretch before curving out of sight toward a dark, unbroken tree line — the Whispering Wood, farther off than it looks from the tavern steps.",
@@ -73,6 +74,18 @@
           }
         },
         "safe": true
+      },
+      "the_colosseum": {
+        "name": "The Colosseum",
+        "layer": "surface",
+        "description": "A weathered ring of stone stands apart from the market's noise, its sand still dark in patches from bouts nobody talks about after. A challenger's bell hangs by the gate, worn smooth from use.",
+        "connections": [
+          "crossroads_tavern"
+        ],
+        "monsters": [
+          "colosseum_champion"
+        ],
+        "safe": false
       },
       "whispering_wood": {
         "name": "The Whispering Wood",
@@ -1973,6 +1986,17 @@
       "is_boss": true,
       "on_hit_condition": "frightened",
       "life_drain": true
+    },
+    "colosseum_champion": {
+      "name": "The Colosseum Champion",
+      "dexterity": 14,
+      "strength": 17,
+      "armor_class": 16,
+      "hp_max": 45,
+      "proficiency_bonus": 3,
+      "xp_reward": 250,
+      "is_boss": true,
+      "on_hit_condition": "frightened"
     }
   },
   "factions": {
