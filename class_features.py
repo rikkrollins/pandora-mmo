@@ -188,3 +188,64 @@ CLASS_FEATURES_LEVEL_1 = {
 
 def get_class_features(char_class: str) -> list[str]:
     return CLASS_FEATURES_LEVEL_1.get(char_class, [])
+
+
+# Task #223, per Coffee: weapon/armor proficiency, previously modeled
+# nowhere at all in this game (confirmed via grep -- any class could
+# equip and use any weapon/armor with zero penalty). Real 5E
+# categories, simplified to fit this game's own small item catalog
+# (see items.py's weapon_category/armor_category fields) rather than
+# the full PHB weapon/armor lists, which include many things this game
+# doesn't have. A monster/NPC with no char_class at all (every hostile
+# combatant) is intentionally unaffected -- is_weapon_proficient/
+# is_armor_proficient both fall back to fully permissive for an
+# unrecognized class, so this only ever narrows a real player's own
+# proficiency, never a monster's.
+WEAPON_PROFICIENCIES = {
+    "Barbarian": {"simple", "martial"},
+    "Fighter": {"simple", "martial"},
+    "Paladin": {"simple", "martial"},
+    "Ranger": {"simple", "martial"},
+    # Cleric and Rogue widened to include martial too (2026-07-21,
+    # caught before shipping): this game's own STARTING_EQUIPMENT
+    # (models.py) already starts a Cleric with a longsword and a Rogue
+    # with a longbow -- both "martial" in this catalog's categorization
+    # -- so a strict-RAW simple-only list would have immediately
+    # disadvantaged every brand-new character of both classes with
+    # their own starting weapon. A deliberate house departure from
+    # strict 5E for this reason, not an oversight.
+    "Cleric": {"simple", "martial"},
+    "Rogue": {"simple", "martial"},
+    "Bard": {"simple"},
+    "Druid": {"simple"},
+    "Monk": {"simple"},
+    "Sorcerer": {"simple"},
+    "Warlock": {"simple"},
+    "Wizard": {"simple"},
+}
+
+ARMOR_PROFICIENCIES = {
+    "Barbarian": {"light", "medium", "shield"},
+    "Fighter": {"light", "medium", "heavy", "shield"},
+    "Paladin": {"light", "medium", "heavy", "shield"},
+    "Ranger": {"light", "medium", "shield"},
+    "Cleric": {"light", "medium", "shield"},
+    "Druid": {"light", "medium", "shield"},
+    "Bard": {"light"},
+    "Rogue": {"light"},
+    "Warlock": {"light"},
+    "Monk": set(),
+    "Sorcerer": set(),
+    "Wizard": set(),
+}
+
+_ALL_WEAPON_CATEGORIES = {"simple", "martial"}
+_ALL_ARMOR_CATEGORIES = {"light", "medium", "heavy", "shield"}
+
+
+def is_weapon_proficient(char_class: str | None, weapon_category: str) -> bool:
+    return weapon_category in WEAPON_PROFICIENCIES.get(char_class, _ALL_WEAPON_CATEGORIES)
+
+
+def is_armor_proficient(char_class: str | None, armor_category: str) -> bool:
+    return armor_category in ARMOR_PROFICIENCIES.get(char_class, _ALL_ARMOR_CATEGORIES)

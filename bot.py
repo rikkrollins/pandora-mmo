@@ -102,7 +102,7 @@ if ACTIVE_CAMPAIGN_ID not in cl.discover_campaigns():
     )
 CAMPAIGN = cl.load_campaign(ACTIVE_CAMPAIGN_ID)
 
-DEFAULT_WEAPON = {"ability": "strength", "damage_dice": "1d8", "damage_bonus": 0}
+DEFAULT_WEAPON = {"ability": "strength", "damage_dice": "1d8", "damage_bonus": 0, "weapon_category": "simple"}
 
 
 def _weapon_for_attacker(attacker: dict) -> dict:
@@ -122,6 +122,7 @@ def _weapon_for_attacker(attacker: dict) -> dict:
                 "ability": item.get("ability", "strength"),
                 "damage_dice": item["damage_dice"],
                 "damage_bonus": item.get("damage_bonus", 0),
+                "weapon_category": item.get("weapon_category", "simple"),
             }
     return DEFAULT_WEAPON
 
@@ -4467,9 +4468,28 @@ def _attack_advantage_disadvantage(attacker: dict, defender: dict) -> tuple[bool
     """
     attacker_conditions = attacker.get("conditions", [])
     defender_conditions = defender.get("conditions", [])
+    # Task #223: real armor/shield proficiency -- wearing armor or
+    # wielding a shield you're not trained with gives disadvantage on
+    # attack rolls (a simplified stand-in for real 5E's fuller penalty,
+    # which also touches ability checks/saves/spellcasting this engine
+    # doesn't model uniformly enough to extend there too). A monster/
+    # NPC with no equipped_armor/equipped_shield field at all is
+    # unaffected -- both .get() calls are simply None for them.
+    armor_unproficient = False
+    for slot, category in (("equipped_armor", None), ("equipped_shield", "shield")):
+        equipped_id = attacker.get(slot)
+        if not equipped_id:
+            continue
+        item = items_module.get_item(equipped_id)
+        if not item:
+            continue
+        item_category = category or item.get("armor_category", "light")
+        if not class_features_module.is_armor_proficient(attacker.get("char_class"), item_category):
+            armor_unproficient = True
     disadvantage = (
         "prone" in attacker_conditions or "poisoned" in attacker_conditions
         or "blinded" in attacker_conditions or "frightened" in attacker_conditions
+        or armor_unproficient
     )
     # Task #131 skill-tree upgrade "true_aim": extends Favored Enemy's
     # advantage to wolves too, this campaign's other very common enemy.
@@ -4778,6 +4798,22 @@ async def _do_message_ai(update: Update, text: str) -> None:
     _resolve_ai_turns, on that companion's own next combat turn (acted
     on immediately if it reads as a retreat), or _ai_party_autonomous_tick,
     on their next idle-tick decision outside combat.
+
+    Real bug, live-caught (2026-07-21, Coffee: "/msg @ShesAQueen_78 wow
+    menu is crazy good!!!" -- got back "Not sure who you're talking to
+    — name an AI party member"): this originally only ever matched
+    AI-controlled candidates, so /msg toward a REAL human player (which
+    Coffee's own original request explicitly named as the precedent --
+    "Jus like we can msg human players with /msg") always failed with a
+    confusing AI-only error, even though the message had already
+    reached that player fine via the shared chat itself. Now resolves
+    against the full active roster (real @username tagging included,
+    via the same _match_member_by_name_or_username every other
+    targeting call site already uses) and branches: an AI target still
+    gets real guidance stored for its next turn/tick; a real human
+    target just gets a quiet confirmation, since Telegram already
+    delivered the message the moment it was sent -- there's nothing
+    further for the bot to do for a human recipient.
     """
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -4790,20 +4826,22 @@ async def _do_message_ai(update: Update, text: str) -> None:
     if session is not None:
         candidates = [
             p for p in session.participants
-            if p.get("is_ai") and session.sides.get(p["telegram_user_id"]) == "party"
+            if session.sides.get(p["telegram_user_id"]) == "party"
         ]
     else:
-        candidates = [
-            p for p in _get_combat_eligible_party_members(character["current_location"]) if p.get("is_ai")
-        ]
+        candidates = _get_party_members()
+    candidates = [p for p in candidates if p["telegram_user_id"] != character["telegram_user_id"]]
 
-    lowered = text.lower()
-    target = next((p for p in candidates if p["name"].lower() in lowered), None)
+    target = _match_member_by_name_or_username(text, candidates)
     if target is None:
         await update.effective_chat.send_message(
-            "Not sure who you're talking to — name an AI party member.",
+            "Not sure who you're talking to — name a party member, or tag them with @username.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
+        return
+
+    if not target.get("is_ai"):
+        await _safe_send(update, f"🗣️ **{character['name']}** tells **{target['name']}**: \"{text}\"")
         return
 
     context_like = _AI_PLAYER_CONTEXTS.setdefault(target["telegram_user_id"], _AiPlayerContext())
@@ -6438,6 +6476,7 @@ async def skilltree_menu_callback(update: Update, context: ContextTypes.DEFAULT_
         updates["armor_class"] = character["armor_class"] + 1
     db.update_character(update.effective_user.id, **updates)
     await _safe_send(update, f"🌳 **{character['name']}** unlocks **{upgrade['name']}**!")
+    await _notify_main_topic(update, f"🌳 **{character['name']}** unlocked a skill-tree upgrade: {upgrade['name']}!")
 
 
 async def _do_check_party(update: Update, text: str = "") -> None:
@@ -7038,15 +7077,24 @@ def _gather_quantity(character: dict, skill_key: str, practiced_bonus: int) -> i
     1. Herbalism is the one tool-free skill, but owning Shears lets you
     harvest up to 3 per success (a dice roll, not a flat bonus) --
     Shears use "boosts_quantity_for" (items.py) since they're optional,
-    unlike the required tools above. Separately, real practiced skill
-    (the same practiced_bonus that already improves the success roll,
-    see _practiced_bonus_for) has a small chance at one extra material
-    on ANY gathering skill once it's capped out, rewarding repeated use
+    unlike the required tools above. Extended 2026-07-21 (per Coffee:
+    "add shovels to increase the amount of bait we can get... have it
+    use a dice roll") to check ANY owned tool's "boosts_quantity_for"
+    generically, instead of hardcoding Shears/herbalism specifically --
+    Shovel/bait_gathering works the exact same way for free, and any
+    future tool+skill pairing added to items.py needs zero new code
+    here either. Separately, real practiced skill (the same
+    practiced_bonus that already improves the success roll, see
+    _practiced_bonus_for) has a small chance at one extra material on
+    ANY gathering skill once it's capped out, rewarding repeated use
     beyond just a better roll target.
     """
     quantity = 1
-    has_shears = character["inventory"].get("shears", 0) > 0
-    if skill_key == "herbalism" and has_shears:
+    has_boost_tool = any(
+        character["inventory"].get(item_id, 0) > 0 and item.get("boosts_quantity_for") == skill_key
+        for item_id, item in items_module.ITEMS.items()
+    )
+    if has_boost_tool:
         quantity = roll(1, 3)[0]
     if practiced_bonus >= MAX_PRACTICE_BONUS and roll_d20() >= 15:
         quantity += 1
@@ -7482,6 +7530,7 @@ async def _do_join_battle(update: Update) -> None:
         session.sides[telegram_user_id] = "party"
         session.turn_order.append(telegram_user_id)
         await _safe_send(update, f"⚔️ **{character['name']}** joins the battle!")
+        await _notify_main_topic(update, f"⚔️ **{character['name']}** joined an in-progress battle!")
 
 
 async def _do_wild_shape(update: Update) -> None:
@@ -8688,6 +8737,52 @@ async def _do_show_map(update: Update) -> None:
             lines.append(f"❓ {layer_locations[loc_id]['name']} *(marked on a map, not yet visited)*")
 
     await _safe_send(update, "\n".join(lines))
+
+
+async def _do_show_visual_map(update: Update) -> None:
+    """
+    Task #221, per Coffee: "design a visual/graphical fog-of-war map
+    (image, not just text)." Real, but honestly scoped: Pollinations.ai
+    (task #81's image service) is a generative model, not a cartography
+    engine -- it can't take this game's real location/connection graph
+    and render an accurate schematic the way _do_show_map's text output
+    does, and asking any current image model to render legible text
+    labels reliably fails. So this generates real atmospheric map ART,
+    grounded ONLY in the real names of locations this character has
+    actually visited (the exact same fog-of-war set _do_show_map reads,
+    never anything undiscovered) -- a genuine visual complement to the
+    precise text map, not a replacement for it.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    visited = character.get("visited_locations") or []
+    if not visited:
+        await update.effective_chat.send_message(
+            "You haven't explored anywhere yet.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    names = [cl.get_location(CAMPAIGN, loc_id)["name"] for loc_id in visited if cl.get_location(CAMPAIGN, loc_id)]
+    prompt = (
+        "an old hand-drawn fantasy world map on weathered parchment, aged ink and watercolor "
+        f"illustration style, depicting these named regions: {', '.join(names)}, "
+        "no readable text or labels, cartography art"
+    )
+    try:
+        await update.effective_chat.send_photo(
+            photo=images_module.generate_image_url(prompt, width=768, height=768),
+            caption="🗺️ Your explored world, so far.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+    except Exception as e:
+        logger.warning(f"[images] visual map generation failed: {e!r}")
+        await update.effective_chat.send_message(
+            "Couldn't generate a map image right now — try again in a bit.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
 
 
 def _format_bestiary_entry(monster_key: str, template: dict) -> str:
@@ -10103,6 +10198,7 @@ def _main_menu_keyboard(character: dict) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📚 Bestiary", callback_data="menu|bestiary")],
         [InlineKeyboardButton("🌤️ Weather", callback_data="menu|weather")],
         [InlineKeyboardButton("🏆 Leaderboard", callback_data="menu|leaderboard")],
+        [InlineKeyboardButton("🗺️ Visual Map", callback_data="menu|visualmap")],
     ]
     if character.get("pending_asi_points", 0) > 0:
         rows.append([InlineKeyboardButton("📈 Level Up", callback_data="menu|level")])
@@ -10167,6 +10263,8 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await _do_leaderboard(update)
     elif section == "party":
         await _do_check_party(update)
+    elif section == "visualmap":
+        await _do_show_visual_map(update)
 
 
 async def story_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -11527,6 +11625,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_join_battle(update)
     elif action == "replay_intro":
         await _do_replay_chapter_intro(update)
+    elif action == "visual_map":
+        await _do_show_visual_map(update)
     elif action == "skill_check":
         await _do_skill_check(update, intent.get("ability") or "dexterity", text)
     elif action == "shove":
@@ -11762,6 +11862,13 @@ async def map_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await _do_show_map(update)
 
 
+async def visual_map_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/visual_map -- a real generated map image, grounded in your actual explored locations. See _do_show_visual_map."""
+    if not topics.is_adventure(update.message.message_thread_id or 0):
+        return
+    await _do_show_visual_map(update)
+
+
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     /menu -- slash-command shortcut for _do_show_menu, task #176's full
@@ -11951,6 +12058,7 @@ Almost everything here is plain English, typed straight into Adventure -- no com
 • /leaderboard
 • /map
 • /market -- see current player marketplace listings
+• /visual_map -- a real generated map image of your explored world
 • /buy_market <listing #> -- buy a marketplace listing
 • /sell_market <quantity> <price> <item name> -- list an item for sale on the player marketplace
 • /msg <name> <message> -- tell an AI party member something (in or out of combat), never spends a turn
@@ -13795,6 +13903,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("inventory", inventory_command))
     application.add_handler(CommandHandler("leaderboard", leaderboard_command))
     application.add_handler(CommandHandler("map", map_command))
+    application.add_handler(CommandHandler("visual_map", visual_map_command))
     application.add_handler(CommandHandler("menu", menu_command))
     application.add_handler(CommandHandler("newcharacter", newcharacter_command))
     application.add_handler(CommandHandler("note", note_command))

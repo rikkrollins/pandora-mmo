@@ -687,6 +687,9 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if "replay" in lowered and any(w in lowered for w in ["intro", "cutscene", "chapter", "opening"]):
         return {**base, "action": "replay_intro"}
 
+    if any(w in lowered for w in ["visual map", "picture of the map", "draw the map", "map image", "image of the map"]):
+        return {**base, "action": "visual_map"}
+
     if "duel" in lowered:
         if "accept" in lowered:
             return {**base, "action": "accept_duel"}
@@ -1238,7 +1241,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "bestiary", "list_shop", "leaderboard", "check_achievements", "set_title", "check_weather",
                 "check_guild_quest", "dice_game", "fortunes_wheel", "set_alignment", "message_ai",
                 "skill_tree", "challenge_duel", "accept_duel", "check_market", "join_battle",
-                "replay_intro",
+                "replay_intro", "visual_map",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

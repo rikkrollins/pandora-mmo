@@ -7,6 +7,7 @@ results computed here, never decides them.
 """
 from rules.dice import roll_d20, roll_attack, roll_damage, ability_modifier
 from rules.leveling import sneak_attack_dice_count, rage_damage_bonus, wild_shape_damage_bonus
+from class_features import is_weapon_proficient
 
 # Monsters this campaign treats as undead for the Silver Wardens guild's
 # bonus_damage_vs_undead benefit (guilds.py) -- no monster template field
@@ -129,11 +130,16 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     5E's one-reaction-per-round economy.
     """
     attack_ability = "dexterity" if attacker.get("char_class") == "Monk" else weapon.get("ability", "strength")
+    # Task #223: real weapon proficiency -- a monster/NPC with no
+    # char_class at all always reads as proficient (is_weapon_proficient's
+    # own permissive fallback), so this only ever narrows a real
+    # player's own attack, never a monster's.
+    weapon_proficient = is_weapon_proficient(attacker.get("char_class"), weapon.get("weapon_category", "simple"))
     attack_result = roll_attack(
         attacker,
         target_ac=defender["armor_class"],
         ability=attack_ability,
-        proficient=True,
+        proficient=weapon_proficient,
         advantage=advantage,
         disadvantage=disadvantage,
         forced_roll=forced_roll,

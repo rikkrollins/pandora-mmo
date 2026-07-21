@@ -11,47 +11,63 @@ import re
 
 ITEMS = {
     # --- Weapons ---
+    # weapon_category (task #223, per Coffee): "simple" or "martial" --
+    # real classification for THIS game's own small weapon catalog, not
+    # a byte-for-byte copy of the full 5E weapon table (which has many
+    # weapons this game doesn't). See class_features.py's
+    # WEAPON_PROFICIENCIES for which classes are proficient with which.
     "rusty_dagger": {
         "name": "Rusty Dagger", "type": "weapon", "rarity": "common",
         "price": 2, "weight": 1, "damage_dice": "1d4", "ability": "dexterity",
+        "weapon_category": "simple",
     },
     "shortsword": {
         "name": "Shortsword", "type": "weapon", "rarity": "common",
         "price": 10, "weight": 2, "damage_dice": "1d6", "ability": "dexterity",
+        "weapon_category": "simple",
     },
     "longsword": {
         "name": "Longsword", "type": "weapon", "rarity": "common",
         "price": 15, "weight": 3, "damage_dice": "1d8", "ability": "strength",
+        "weapon_category": "martial",
     },
     "greataxe": {
         "name": "Greataxe", "type": "weapon", "rarity": "common",
         "price": 30, "weight": 7, "damage_dice": "1d12", "ability": "strength",
+        "weapon_category": "martial",
     },
     "longbow": {
         "name": "Longbow", "type": "weapon", "rarity": "common",
         "price": 50, "weight": 2, "damage_dice": "1d8", "ability": "dexterity",
+        "weapon_category": "martial",
     },
     "silvered_dagger": {
         "name": "Silvered Dagger", "type": "weapon", "rarity": "uncommon",
         "price": 75, "weight": 1, "damage_dice": "1d4+1", "ability": "dexterity",
         "note": "Effective against creatures vulnerable to silver.",
+        "weapon_category": "simple",
     },
     "flametongue_shortsword": {
         "name": "Flametongue Shortsword", "type": "weapon", "rarity": "rare",
         "price": 0, "weight": 2, "damage_dice": "1d6+2", "ability": "dexterity",
         "note": "Warm to the touch. Wreathes itself in fire when drawn in anger.",
+        "weapon_category": "martial",
     },
     "the_last_word": {
         "name": "The Last Word", "type": "weapon", "rarity": "legendary",
         "price": 0, "weight": 3, "damage_dice": "2d8+3", "ability": "strength",
         "note": "The carving stops repeating itself the instant your hand closes around the hilt.",
+        "weapon_category": "martial",
     },
 
     # --- Armor & Shields ---
-    "leather_armor": {"name": "Leather Armor", "type": "armor", "rarity": "common", "price": 10, "weight": 10, "ac_base": 11},
-    "chain_shirt": {"name": "Chain Shirt", "type": "armor", "rarity": "common", "price": 50, "weight": 20, "ac_base": 13},
-    "chain_mail": {"name": "Chain Mail", "type": "armor", "rarity": "uncommon", "price": 75, "weight": 55, "ac_base": 16},
-    "wooden_shield": {"name": "Wooden Shield", "type": "shield", "rarity": "common", "price": 10, "weight": 6, "ac_bonus": 2},
+    # armor_category (task #223): "light"/"medium"/"heavy", or "shield"
+    # for the shield itself -- same real-consequence system as
+    # weapon_category above (see class_features.py's ARMOR_PROFICIENCIES).
+    "leather_armor": {"name": "Leather Armor", "type": "armor", "rarity": "common", "price": 10, "weight": 10, "ac_base": 11, "armor_category": "light"},
+    "chain_shirt": {"name": "Chain Shirt", "type": "armor", "rarity": "common", "price": 50, "weight": 20, "ac_base": 13, "armor_category": "medium"},
+    "chain_mail": {"name": "Chain Mail", "type": "armor", "rarity": "uncommon", "price": 75, "weight": 55, "ac_base": 16, "armor_category": "heavy"},
+    "wooden_shield": {"name": "Wooden Shield", "type": "shield", "rarity": "common", "price": 10, "weight": 6, "ac_bonus": 2, "armor_category": "shield"},
 
     # --- Consumables ---
     "healing_potion": {
@@ -207,6 +223,11 @@ ITEMS = {
     "woodcutters_axe": {"name": "Woodcutter's Axe", "type": "tool", "rarity": "common", "price": 10, "weight": 4, "required_for": "lumberjacking"},
     "pickaxe": {"name": "Pickaxe", "type": "tool", "rarity": "common", "price": 10, "weight": 5, "required_for": "mining"},
     "shears": {"name": "Shears", "type": "tool", "rarity": "common", "price": 6, "weight": 0.5, "boosts_quantity_for": "herbalism"},
+    # Task, per Coffee (2026-07-21): "add shovels to increase the
+    # amount of bait we can get?! Have it use a dice roll." Same
+    # optional, dice-rolled quantity-boost shape as Shears above, just
+    # for bait_gathering instead of herbalism.
+    "shovel": {"name": "Shovel", "type": "tool", "rarity": "common", "price": 5, "weight": 3, "boosts_quantity_for": "bait_gathering"},
 }
 
 

@@ -2,6 +2,22 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.19.0] — Weapon/armor proficiency, a visual map, and dev-topic fixes
+
+- **Real weapon and armor proficiency.** Every class now has a genuine
+  proficiency list — using a weapon or wearing armor/a shield outside
+  it has a real mechanical cost (no proficiency bonus on the attack
+  roll, or disadvantage), instead of no consequence at all.
+- **`/visual_map`** generates a real map image grounded in exactly the
+  places you've actually explored — fog of war applies here too.
+- **Fix:** `/msg` failed with a confusing error when messaging a real
+  human player by @username — it only ever recognized AI party
+  members. Now works for both.
+- **New:** a Shovel tool boosts bait-gathering quantity via a dice
+  roll, the same way Shears already do for herbalism.
+- Joining an in-progress battle and unlocking a skill-tree upgrade now
+  post to the Main topic too.
+
 ## [1.18.1] — Fix: "replay intro" as plain text
 
 `/replay_intro` worked as a slash command but typing "replay intro" in
