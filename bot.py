@@ -9966,11 +9966,54 @@ async def _do_list_shop(update: Update) -> None:
         return
     shop_data = cl.get_shop(CAMPAIGN, shop_id)
     lines = [f"🛒 **{cl.get_location(CAMPAIGN, character['current_location'])['name']}**"]
-    for item_id in shop_data["inventory"]:
-        item = items_module.get_item(item_id)
-        if item:
+    if shop_data.get("description"):
+        lines.append(shop_data["description"])
+    # Per Coffee (2026-07-21): "make different shops for the
+    # appropriate items (weapons, armour, Magic, General Items)...
+    # describe the stalls and say what each store is." Rather than
+    # splitting one location into several separately-walkable shops (a
+    # bigger change to the one-shop-per-location structure this whole
+    # game already relies on), this groups a shop's real stock into
+    # real labeled sections -- the same effect players actually asked
+    # for (a Maren's Wares that clearly separates its weapon rack from
+    # its armor rack from its general goods) without touching how
+    # buying/location resolution work at all.
+    for header, item_ids in _grouped_shop_inventory(shop_data["inventory"]).items():
+        lines.append(f"\n{header}")
+        for item_id in item_ids:
+            item = items_module.get_item(item_id)
             lines.append(f"{item['name']} — {item['price']} gold")
     await _safe_send(update, "\n".join(lines), reply_markup=_shop_keyboard(shop_data))
+
+
+_SHOP_SECTION_FOR_TYPE = {
+    "weapon": "⚔️ Weapons",
+    "armor": "🛡️ Armor & Shields",
+    "shield": "🛡️ Armor & Shields",
+    "tool": "🧰 Tools",
+    "consumable": "🧪 Consumables",
+    "scroll": "📜 Scrolls",
+    "ring": "🔮 Magic Items",
+    "amulet": "🔮 Magic Items",
+    "wondrous": "🔮 Magic Items",
+    "map": "🗺️ Maps",
+}
+_SHOP_SECTION_ORDER = [
+    "⚔️ Weapons", "🛡️ Armor & Shields", "🧰 Tools", "🧪 Consumables",
+    "📜 Scrolls", "🔮 Magic Items", "🗺️ Maps", "📦 Other",
+]
+
+
+def _grouped_shop_inventory(item_ids: list[str]) -> dict[str, list[str]]:
+    """Groups a shop's real inventory by item type into real, labeled sections, always in the same reader-friendly order."""
+    sections: dict[str, list[str]] = {}
+    for item_id in item_ids:
+        item = items_module.get_item(item_id)
+        if not item:
+            continue
+        header = _SHOP_SECTION_FOR_TYPE.get(item.get("type"), "📦 Other")
+        sections.setdefault(header, []).append(item_id)
+    return {header: sections[header] for header in _SHOP_SECTION_ORDER if header in sections}
 
 
 async def _do_buy(update: Update, text: str) -> None:

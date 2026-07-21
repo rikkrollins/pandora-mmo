@@ -2,6 +2,13 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.20.1] — Shops now have real sections
+
+Every shop now opens with a real flavor description of the stall
+itself, then lists its stock grouped into clear labeled sections —
+Weapons, Armor & Shields, Tools, Consumables, Scrolls, Magic Items,
+Maps — instead of one flat list.
+
 ## [1.20.0] — Level cap raised to 99
 
 - Characters can now level all the way to 99, a real house extension

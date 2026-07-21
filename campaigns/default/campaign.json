@@ -1429,6 +1429,7 @@
   "shops": {
     "marens_wares": {
       "owner_npc": "old_maren",
+      "description": "Old Maren's stall sprawls across three tables — a weapon rack, a rack of hung armor, and shelves of tools and provisions, every price scratched straight into the wood in her own tally-marks.",
       "inventory": [
         "rusty_dagger",
         "shortsword",
@@ -1455,6 +1456,7 @@
     },
     "vanes_curiosities": {
       "owner_npc": "ossian_vane",
+      "description": "Ossian Vane's corner of the Arcane Nook — scrolls pinned in neat rows, a locked case of stranger things, and a ledger he never quite lets anyone read.",
       "inventory": [
         "scroll_cure_wounds",
         "scroll_shield",
@@ -1473,6 +1475,7 @@
     },
     "grimsbys_tavern": {
       "owner_npc": "grimsby",
+      "description": "Grimsby keeps a short shelf behind the bar — ale, rations, and just enough healing to get a rough night behind you.",
       "inventory": [
         "ale",
         "rations",
