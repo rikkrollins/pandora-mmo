@@ -971,6 +971,22 @@ class _ChatOnlyUpdate:
                 chat_id=self.id, message_thread_id=message_thread_id, text=text, **kwargs
             )
 
+        async def send_audio(self, audio=None, message_thread_id=None, **kwargs):
+            # Real live bug (2026-07-22, caught by direct log monitoring,
+            # not a dev-topic report): this shim only ever implemented
+            # send_message, so any background loop routed through it
+            # (the autonomous AI party's own turns, the hourly idle-check
+            # loop) crashed with a bare AttributeError the moment Piper
+            # TTS tried to send a real voice clip -- an unhandled
+            # exception here aborted the ENTIRE autonomous turn/cycle,
+            # not just the TTS attempt, since _speak_via_piper's except
+            # clause below only ever caught TelegramError (see that
+            # fix too). Delegates to the real bot the same way
+            # send_message already does.
+            return await self._bot.send_audio(
+                chat_id=self.id, message_thread_id=message_thread_id, audio=audio, **kwargs
+            )
+
     def __init__(self, bot, chat_id: int):
         self.effective_chat = _ChatOnlyUpdate._Chat(bot, chat_id)
 
@@ -2353,7 +2369,15 @@ async def _speak_via_piper(update: Update, speakable: str, thread_id: int | None
             title="Pandora MMO narration",
             message_thread_id=thread_id,
         )
-    except TelegramError as e:
+    except Exception as e:
+        # Real live bug (2026-07-22): this only ever caught TelegramError,
+        # so a non-Telegram failure (an AttributeError from a synthetic
+        # Update shim missing send_audio, see _ChatOnlyUpdate._Chat's own
+        # fix) propagated all the way up and silently aborted the
+        # caller's ENTIRE turn -- an optional TTS narration hiccup should
+        # never do that, same "never breaks the real feature it
+        # accompanies" guarantee this function's own docstring already
+        # claims but didn't actually keep for non-Telegram errors.
         logger.warning(f"[tts] piper send_audio failed: {e!r}")
 
 
@@ -6666,12 +6690,27 @@ async def _do_show_skill_tree(update: Update) -> None:
         )
         return
     owned = _has_skill_upgrade(character, upgrade["id"])
-    status = "✅ Unlocked" if owned else f"Cost: {upgrade['cost']} point(s)"
+    can_afford = points >= upgrade["cost"]
+    # Real live bug (2026-07-22, Coffee: "when I opened it up in menu it
+    # didn't have anything to tap and it didn't tell me how to level it
+    # up" / "it won't let me distribute my point"): NOT a bug -- Fighter's
+    # only real upgrade costs 2 points and Elduinn had 1 banked, so the
+    # tap button was correctly withheld (see keyboard below) -- but the
+    # old status line just said "Cost: 2 point(s)" with no indication
+    # WHY nothing was tappable, indistinguishable from something broken.
+    # Now says plainly how many more points are still needed.
+    if owned:
+        status = "✅ Unlocked"
+    elif can_afford:
+        status = f"Cost: {upgrade['cost']} point(s) — tap below to unlock"
+    else:
+        short_by = upgrade["cost"] - points
+        status = f"Cost: {upgrade['cost']} point(s) — need {short_by} more (keep leveling up to bank more points)"
     text = (
         f"🌳 **{character['name']}**'s Skill Tree — {points} point(s) banked\n"
         f"**{upgrade['name']}** ({status})\n{upgrade['description']}"
     )
-    keyboard = _skill_tree_keyboard(upgrade) if not owned and points >= upgrade["cost"] else None
+    keyboard = _skill_tree_keyboard(upgrade) if not owned and can_afford else None
     await _safe_send(update, text, reply_markup=keyboard, speak=False)
 
 
@@ -8950,11 +8989,31 @@ def _find_interactable(location: dict, text: str) -> tuple[str, dict] | None:
     # Checked as its own pass, before the general overlap threshold, so
     # it can only ever ADD a match a shorter phrasing would otherwise
     # miss, never take one away.
+    # Real live bug (2026-07-22, Coffee, escalated dev-topic report --
+    # "the third response now I have not gotten a reply"): "Take the
+    # scrap of paper off the corkboard" never matched "the corkboard by
+    # the door" -- the head-word check above only ever tried the LAST
+    # significant word ("door", a generic location descriptor here, not
+    # the actual object), so a name shaped "OBJECT by/behind/under the
+    # LOCATION" (this campaign has several: "the corkboard by the
+    # door", "the heavy ledger behind the bar") could never head-match
+    # on the word that actually names the object. Generalized to try
+    # EVERY one of a candidate's significant words, not just the last
+    # -- a word only counts if it's unique to exactly one candidate at
+    # this location (never ambiguously shared by two), same "don't
+    # guess when ambiguous" discipline as the rest of this function.
     head_matches = []
     for obj_id, (data, words) in candidate_words.items():
-        head_word = words[-1]
-        if re.search(r"\b" + re.escape(head_word) + r"\b", lowered):
-            head_matches.append((obj_id, data))
+        for word in words:
+            if not re.search(r"\b" + re.escape(word) + r"\b", lowered):
+                continue
+            shared = any(
+                other_id != obj_id and word in other_words
+                for other_id, (_, other_words) in candidate_words.items()
+            )
+            if not shared:
+                head_matches.append((obj_id, data))
+            break
     if len(head_matches) == 1:
         return head_matches[0]
 

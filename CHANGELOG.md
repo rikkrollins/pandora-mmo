@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.25.2] — Three more real fixes from live monitoring
+
+- Fixed: interacting with an object whose name ends in a location
+  descriptor (like "the corkboard by the door") now matches correctly
+  on the word that actually names the object, instead of only ever
+  checking the last word of its name — another real silent-reply cause.
+- Fixed: the skill tree screen now clearly says how many more points
+  you need when you can't afford an upgrade yet, instead of just
+  showing the cost with no explanation for why there's nothing to tap.
+- Fixed a real background-loop crash: the autonomous AI party and
+  hourly update loop could silently abort mid-turn if voice narration
+  was enabled, due to a missing method on an internal helper. Also
+  hardened that same narration path so any future unexpected hiccup
+  there can never abort a real game turn again.
+
 ## [1.25.1] — Fixed a real silent-reply bug
 
 Fixed: an action naming something real (like carving your initials
