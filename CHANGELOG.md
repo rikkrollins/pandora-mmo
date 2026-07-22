@@ -2,6 +2,14 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.21.2] — Clearer feedback on button taps that aren't yours
+
+Tapping a button meant for someone else — another player's character-
+switch or character-creation button — now gives a clear message
+instead of silently doing nothing. Nothing was ever at risk of being
+changed by the wrong player; this just makes it obvious when a tap
+doesn't apply to you.
+
 ## [1.21.1] — Two more natural-language recognition fixes
 
 - Talking to something that isn't a real NPC (a tree, a statue, a

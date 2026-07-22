@@ -1598,13 +1598,23 @@ async def creation_menu_callback(update: Update, context: ContextTypes.DEFAULT_T
     value = parts[2] if len(parts) > 2 else ""
     await _safe_answer(query)
 
+    # Real dev-topic feedback (2026-07-21, Coffee): "make sure only the
+    # player it's meant for can interact with pop-up buttons" -- these
+    # creation buttons are visible to the whole group, but user_data is
+    # scoped per real Telegram user, so a tap from anyone not currently
+    # creating a character (the common "wrong player" case) or on a
+    # step they've already moved past (a stale tap on their OWN old
+    # flow) used to fail completely silently either way. A clear line
+    # replaces both silent no-ops.
     creation = context.user_data.get("creation")
     if not creation:
+        await _safe_send(update, "That's not your character creation to continue.")
         return
     expected_step = {"race": "race", "class": "class", "dice": "dice_preference",
                       "pronouns": "pronouns", "scores": "assign_scores"}.get(field)
     if expected_step is None or creation.get("step") != expected_step:
-        return  # stale tap from a step the player has already moved past
+        await _safe_send(update, "That step's already been decided — nothing to change there now.")
+        return
 
     await _continue_character_creation(update, context, text=value)
 
@@ -11107,6 +11117,16 @@ async def roster_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     telegram_user_id = update.effective_user.id
     roster = db.list_characters(telegram_user_id)
     if not any(c["character_id"] == character_id for c in roster):
+        # Real dev-topic feedback (2026-07-21, Coffee): "make sure only
+        # the player it's meant for can interact with pop-up buttons" --
+        # this specific button is another real player's own roster
+        # entry, tapped by someone it was never meant for. This already
+        # couldn't switch anyone's ACTIVE character out from under them
+        # (roster is looked up by the clicker's own telegram_user_id,
+        # never the button's), but it used to fail completely silently,
+        # indistinguishable from a random dead tap. A clear line instead
+        # tells a wrong tapper plainly why nothing happened.
+        await _safe_send(update, "That's not one of your characters.")
         return
     if sessions.get_session(update.effective_chat.id) is not None:
         await update.effective_chat.send_message(
