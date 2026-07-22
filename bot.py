@@ -47,6 +47,7 @@ import shop as shop_module
 import spells as spells_module
 import races as races_module
 import class_features as class_features_module
+import hybrid_features
 import achievements as achievements_module
 import world_clock
 import moltbook
@@ -80,6 +81,7 @@ from rules.leveling import (
     CLASS_HIT_DICE, scaled_enemy_count, breath_weapon_dice_count,
     CLASS_PRIMARY_ABILITY, CLASS_SAVE_PROFICIENCIES, is_proficient_in_skill,
     skill_check_proficiency_bonus, wild_shape_temp_hp, XP_THRESHOLDS,
+    MAX_LEVEL, ability_score_cap, xp_gain_multiplier, hybrid_tier, HYBRID_MAX_TIER,
 )
 from rules.proficiency import practiced_bonus, MAX_PRACTICE_BONUS
 
@@ -2719,8 +2721,14 @@ def _apply_asi_choice(character: dict, text: str) -> str | None:
             return None
         spend = min(pending, 2)  # real 5E: at most +2 into a single ability per ASI
 
+    # Rebirth (2026-07-22, per Coffee): each rebirth raises this
+    # character's own ability-score ceiling above the normal 20 (see
+    # rules/leveling.py's ability_score_cap) -- real "godly" growth for
+    # a character that's gone through the rebirth loop, while a
+    # never-reborn character keeps the exact same 20 cap as before.
     before_value = character[ability]
-    after_value = min(before_value + spend, 20)
+    cap = ability_score_cap(character.get("rebirth_count", 0))
+    after_value = min(before_value + spend, cap)
     updated = db.update_character(
         character["telegram_user_id"],
         **{ability: after_value},
@@ -2730,6 +2738,153 @@ def _apply_asi_choice(character: dict, text: str) -> str | None:
     if updated["pending_asi_points"] > 0:
         note += f" You still have {updated['pending_asi_points']} point(s) left to spend — say \"level up\" again."
     return note
+
+
+async def _do_rebirth(update: Update) -> None:
+    """
+    Prestige/rebirth (2026-07-22, per Coffee: "keeps all stats but we
+    go to lv one to exponentially level up our character again...
+    maybe making for another rebirth"). Only level and xp reset --
+    ability scores, HP, gear, gold, skill points, achievements, and
+    every other stat stay exactly as they are, so this is never a
+    power loss. The reward: a permanently higher ability-score cap
+    (rules/leveling.py's ability_score_cap) and a stacking XP-gain
+    bonus (xp_gain_multiplier) that make the climb back to MAX_LEVEL
+    genuinely faster each time, plus (after the first rebirth) access
+    to a freely-chosen hybrid class flavor -- see _do_choose_hybrid.
+    Only available at MAX_LEVEL: a real endgame choice, not something
+    to stumble into early and lose your level progress by accident.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if character["level"] < MAX_LEVEL:
+        await _safe_send(
+            update,
+            f"Rebirth is only available at level {MAX_LEVEL} — **{character['name']}** is level "
+            f"{character['level']} right now.",
+        )
+        return
+
+    new_rebirth_count = character.get("rebirth_count", 0) + 1
+    updated = db.update_character(
+        update.effective_user.id,
+        level=1, xp=0, rebirth_count=new_rebirth_count,
+    )
+    new_cap = ability_score_cap(new_rebirth_count)
+    new_xp_bonus = int(round((xp_gain_multiplier(new_rebirth_count) - 1.0) * 100))
+    lines = [
+        f"✨ **{updated['name']}** is reborn — level and XP reset to 1, but every stat, every "
+        f"item, and every point already earned stays exactly as it was.",
+        f"This is rebirth #{new_rebirth_count}: ability scores can now climb as high as {new_cap} "
+        f"(instead of the usual 20), and XP gains are permanently boosted by {new_xp_bonus}%.",
+    ]
+    if new_rebirth_count == 1:
+        lines.append("A hybrid class is now available — say \"become a hybrid [class]\" to pick one.")
+    await _safe_send(update, "\n".join(lines))
+    await _notify_main_topic(update, f"✨ **{updated['name']}** has been reborn (rebirth #{new_rebirth_count})!")
+
+
+# Hybrid classes (2026-07-22, per Coffee): freely pick/re-pick any of
+# the other 11 classes as a secondary flavor once you've rebirthed at
+# least once. Depth (rules/leveling.py's hybrid_tier) is a direct
+# function of total rebirth count, capped at HYBRID_MAX_TIER -- see
+# HYBRID_CLASS_FEATURES below for what each tier actually grants.
+HYBRID_CLASS_FEATURES = {
+    "Barbarian": [
+        "a real chance of resisting damage when hit, Rage-style",
+        "a real chance of advantage on your own attacks, Reckless-Attack-style",
+        "a real chance of bonus damage on a hit, Rage-style",
+    ],
+    "Fighter": [
+        "a real chance of bonus damage on a hit",
+        "a bigger real chance of that bonus damage",
+        "a real chance of healing a little when you land a hit, Second-Wind-style",
+    ],
+    "Rogue": [
+        "a real chance of bonus precision damage when attacking with advantage",
+        "a bigger real chance of that bonus precision damage",
+        "an even bigger real chance, with a bigger bonus",
+    ],
+    "Ranger": [
+        "advantage vs. goblins, this campaign's most common real threat",
+        "advantage vs. goblins AND wolves",
+        "the same advantage, plus a real chance of bonus damage against a favored enemy",
+    ],
+    "Paladin": [
+        "a real chance of healing a little when you land a hit",
+        "a bigger real chance of that self-heal",
+        "a real chance of bonus radiant damage on a hit, Divine-Smite-style",
+    ],
+    "Monk": [
+        "a small AC bump while unarmored",
+        "a bigger AC bump while unarmored",
+        "the same AC bump, plus a real chance of bonus unarmed-strike damage",
+    ],
+    "Bard": [
+        "a real chance of a little bonus damage, channeling inspiration into your own strike",
+        "a bigger real chance of that bonus damage",
+        "an even bigger real chance, with a bigger bonus",
+    ],
+    "Cleric": [
+        "a real chance of a bonus heal when you cast a healing spell",
+        "a bigger real chance of that bonus heal",
+        "an even bigger real chance, with a bigger bonus",
+    ],
+    "Druid": [
+        "a real chance of bonus damage on a hit, Wild-Shape-style",
+        "a bigger real chance of that bonus damage, plus a little temp HP",
+        "an even bigger real chance, with more of both",
+    ],
+    "Wizard": [
+        "a real chance of recovering a little spell energy on rest, Arcane-Recovery-style",
+        "a bigger real chance of that recovery",
+        "an even bigger real chance, recovering more",
+    ],
+    "Sorcerer": [
+        "a small AC bump while unarmored, Draconic-Resilience-style",
+        "a bigger AC bump while unarmored",
+        "the same AC bump, plus a real chance of recovering a little spell energy on rest",
+    ],
+    "Warlock": [
+        "a real chance of temp HP when you drop a hostile to 0, Dark-One's-Blessing-style",
+        "a bigger real chance of that temp HP",
+        "an even bigger real chance, with more temp HP",
+    ],
+}
+
+
+async def _do_choose_hybrid(update: Update, text: str) -> None:
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    tier = hybrid_tier(character.get("rebirth_count", 0))
+    if tier <= 0:
+        await _safe_send(update, "Hybrid classes unlock after your first rebirth — say \"rebirth\" once you're level 99.")
+        return
+
+    lowered = text.lower()
+    match = next((c for c in HYBRID_CLASS_FEATURES if c.lower() in lowered), None)
+    if match is None:
+        options = ", ".join(HYBRID_CLASS_FEATURES)
+        await _safe_send(update, f"Which class do you want as your hybrid flavor? Options: {options}")
+        return
+    if match == character["char_class"]:
+        await _safe_send(update, f"**{character['name']}** is already a {match} — pick a different class to hybridize with.")
+        return
+
+    db.update_character(update.effective_user.id, hybrid_class=match)
+    perk = HYBRID_CLASS_FEATURES[match][tier - 1]
+    await _safe_send(
+        update,
+        f"🌟 **{character['name']}** takes on a **{match}** hybrid flavor (tier {tier}/{HYBRID_MAX_TIER}): {perk}.",
+    )
 
 
 async def _do_level_up(update: Update, text: str) -> None:
@@ -4540,10 +4695,16 @@ def _attack_advantage_disadvantage(attacker: dict, defender: dict) -> tuple[bool
     # dependent, matching how time-of-day is already treated everywhere
     # else in this game (e.g. _do_look's own conditions_line).
     monster_night_aggression = world_clock.is_night() and not attacker.get("char_class")
+    # Hybrid classes (2026-07-22): a Ranger hybrid's Favored-Enemy-
+    # flavored advantage (deterministic vs. goblins/wolves, same as the
+    # real feature) and a Barbarian hybrid's Reckless-Attack-flavored
+    # advantage chance -- see hybrid_features.py.
+    hybrid_favored = hybrid_features.hybrid_favored_enemy_advantage(attacker, defender.get("monster_key", ""))
+    hybrid_reckless = hybrid_features.hybrid_reckless_advantage(attacker)
     advantage = (
         "prone" in defender_conditions or "blinded" in defender_conditions
         or "paralyzed" in defender_conditions or favored_enemy or reckless
-        or monster_night_aggression
+        or monster_night_aggression or hybrid_favored or hybrid_reckless
     )
     return advantage, disadvantage
 
@@ -4947,6 +5108,12 @@ def _apply_natural_healing(telegram_user_id: int, character: dict, elapsed_secon
     slot_gain = min(missing_slots, round(missing_slots * slot_fraction))
     if hp_gain > 0:
         hp_gain = min(missing_hp, hp_gain + _song_of_rest_bonus(character))
+    # Hybrid Wizard/Sorcerer (2026-07-22): a chance-gated bonus slot on
+    # a full rest, Arcane-Recovery-flavored -- only on a COMPLETED full
+    # rest (fraction >= 1.0), same convention as the limited-use
+    # feature resets below, not the gradual proportional recovery above.
+    if fraction >= 1.0:
+        slot_gain = min(missing_slots, slot_gain + hybrid_features.hybrid_rest_slot_recovery(character))
     if hp_gain > 0 or slot_gain > 0:
         db.update_character(
             telegram_user_id,
@@ -6864,6 +7031,17 @@ def _format_character_sheet(character: dict) -> str:
         skill_points_line = (
             f"🌳 {character['skill_points']} skill point(s) banked — say \"skill tree\" to spend them.\n"
         )
+    # Rebirth/hybrid (2026-07-22): only shown once a character has
+    # actually gone through the rebirth loop at least once -- a never-
+    # reborn character's sheet looks exactly as it always has.
+    rebirth_line = ""
+    if character.get("rebirth_count"):
+        rebirth_line = f"✨ Reborn {character['rebirth_count']}x (ability cap {ability_score_cap(character['rebirth_count'])})\n"
+        if character.get("hybrid_class"):
+            rebirth_line += (
+                f"🌟 Hybrid: {character['hybrid_class']} "
+                f"(tier {hybrid_tier(character['rebirth_count'])}/{HYBRID_MAX_TIER})\n"
+            )
     title_suffix = f" \"{character['active_title']}\"" if character.get("active_title") else ""
     name_line = f"**{character['name']}**{title_suffix}" + (" *(AI companion)*" if character.get("is_ai") else "")
     equipped_line = _format_equipped_line(character)
@@ -6901,6 +7079,7 @@ def _format_character_sheet(character: dict) -> str:
         f"{streak_line}"
         f"{description_line}"
         f"Level {character['level']} | XP {character['xp']}{xp_remaining_line}\n"
+        f"{rebirth_line}"
         f"HP {character['hp_current']}/{character['hp_max']} | AC {character['armor_class']}\n"
         f"{ability_line}"
         f"Alignment: {_alignment_label(character.get('alignment_law_chaos', 0), character.get('alignment_good_evil', 0))}\n"
@@ -8903,6 +9082,8 @@ def _achievement_condition_met(character: dict, check: dict) -> bool:
         return len(character.get("completed_quests") or []) >= check["value"]
     if check_type == "min_board_quests_completed":
         return character.get("board_quests_completed", 0) >= check["value"]
+    if check_type == "min_rebirth_count":
+        return character.get("rebirth_count", 0) >= check["value"]
     if check_type == "has_guild":
         return bool(character.get("guild"))
     if check_type == "well_equipped":
@@ -11771,6 +11952,10 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_replay_chapter_intro(update)
     elif action == "visual_map":
         await _do_show_visual_map(update)
+    elif action == "rebirth":
+        await _do_rebirth(update)
+    elif action == "choose_hybrid":
+        await _do_choose_hybrid(update, intent.get("raw_text", text))
     elif action == "skill_check":
         await _do_skill_check(update, intent.get("ability") or "dexterity", text)
     elif action == "shove":

@@ -6,6 +6,7 @@ narrates what a spell looked like, but never decides its numeric effect.
 """
 from rules.dice import roll_damage, roll_d20, ability_modifier
 from rules.leveling import is_proficient_in_save
+import hybrid_features
 
 # Which ability a class casts spells with — needed to calculate a real
 # 5E spell save DC (8 + proficiency bonus + spellcasting ability modifier).
@@ -457,6 +458,11 @@ def resolve_heal_spell(spell_id: str, caster: dict, target: dict) -> dict:
         if "disciples_grace" in (caster.get("skill_tree_upgrades") or []):
             disciple_of_life_bonus *= 2
         total_healed += disciple_of_life_bonus
+    # Hybrid Cleric (2026-07-22): a real, chance-gated, scaled-down
+    # taste of Disciple of Life -- can't ever double up with the real
+    # Cleric bonus above (a hybrid pick can never equal your own real
+    # char_class).
+    total_healed += hybrid_features.hybrid_heal_bonus(caster, spell["level"])
     hp_before = target["hp_current"]
     hp_max = target.get("hp_max", hp_before)
     target["hp_current"] = min(hp_before + total_healed, hp_max)

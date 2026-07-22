@@ -22,7 +22,7 @@ import items as items_module
 from rules.dice import ability_modifier, average_damage
 from rules.leveling import (
     level_for_xp, proficiency_bonus_for_level,
-    hp_gain_for_level, ASI_LEVELS,
+    hp_gain_for_level, ASI_LEVELS, xp_gain_multiplier,
 )
 import spells as spells_module
 
@@ -356,6 +356,23 @@ def init_db() -> None:
             # still show up on _do_show_map with no connection details (the
             # actual spoiler), only the name itself.
             conn.execute("ALTER TABLE characters ADD COLUMN map_revealed_locations TEXT NOT NULL DEFAULT '[]'")
+
+        # Prestige/rebirth system, per Coffee (2026-07-22): "keeps all
+        # stats but we go to lv one to exponentially level up our
+        # character again... maybe making for another rebirth." Only
+        # level/xp reset on rebirth (see bot.py's _do_rebirth) --
+        # ability scores, gear, gold, skill-tree upgrades, everything
+        # else stays exactly as-is, so rebirth_count is purely an
+        # additive counter, never a reset-and-recompute of anything
+        # else. hybrid_class is the freely-chosen (and re-choosable)
+        # secondary class flavor this unlocks after the first rebirth
+        # -- see rules/leveling.py's rebirth constants and bot.py's
+        # hybrid feature hooks for how rebirth_count and hybrid_class
+        # combine into real mechanical bonuses.
+        if "rebirth_count" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN rebirth_count INTEGER NOT NULL DEFAULT 0")
+        if "hybrid_class" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN hybrid_class TEXT")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -964,6 +981,12 @@ def add_xp(telegram_user_id: int, amount: int) -> dict | None:
         return None
 
     old_level = character["level"]
+    # Rebirth (2026-07-22, per Coffee): a permanent, stacking XP-gain
+    # bonus is the actual "exponentially level up again" reward for
+    # going through a rebirth -- see rules/leveling.py's
+    # xp_gain_multiplier. A never-reborn character gets exactly the
+    # same XP as before (multiplier 1.0).
+    amount = round(amount * xp_gain_multiplier(character.get("rebirth_count", 0)))
     new_xp = character["xp"] + amount
     new_level = level_for_xp(new_xp)
     new_prof = proficiency_bonus_for_level(new_level)

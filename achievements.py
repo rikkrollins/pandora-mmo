@@ -38,6 +38,24 @@ ACHIEVEMENTS = {
         "title": "the Ascended",
         "check": {"type": "min_level", "value": 99},
     },
+    "reborn": {
+        "name": "Reborn",
+        "description": "Go through the rebirth loop once (2026-07-22's prestige system) -- level and XP reset, everything else earned stays.",
+        "title": "the Reborn",
+        "check": {"type": "min_rebirth_count", "value": 1},
+    },
+    "undying": {
+        "name": "the Undying",
+        "description": "Rebirth 3 times -- deep enough for your hybrid class to reach its final tier.",
+        "title": "the Undying",
+        "check": {"type": "min_rebirth_count", "value": 3},
+    },
+    "godlike": {
+        "name": "Godlike",
+        "description": "Rebirth 10 times -- an ability-score cap of 40, real godhood by this game's own numbers.",
+        "title": "the Godlike",
+        "check": {"type": "min_rebirth_count", "value": 10},
+    },
     "monster_hunter": {
         "name": "Monster Hunter",
         "description": "Learn the real bestiary entry for 3 different monsters.",

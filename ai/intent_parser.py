@@ -750,6 +750,16 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if "level up" in lowered:
         return {**base, "action": "level_up"}
 
+    # Rebirth/hybrid classes (2026-07-22, per Coffee): checked as
+    # unambiguous standalone triggers, same shape as every other
+    # explicit-keyword action here -- "rebirth" and "hybrid" aren't
+    # words this game uses anywhere else, so a bare substring match is
+    # safe with no risk of catching an unrelated sentence.
+    if "rebirth" in lowered:
+        return {**base, "action": "rebirth"}
+    if "hybrid" in lowered:
+        return {**base, "action": "choose_hybrid"}
+
     # Checked BEFORE check_sheet below: "my characters" (plural, roster) is
     # a substring-superset of check_sheet's "my character" (singular) —
     # confirmed live to otherwise get shadowed and misread as check_sheet,
@@ -1241,7 +1251,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "bestiary", "list_shop", "leaderboard", "check_achievements", "set_title", "check_weather",
                 "check_guild_quest", "dice_game", "fortunes_wheel", "set_alignment", "message_ai",
                 "skill_tree", "challenge_duel", "accept_duel", "check_market", "join_battle",
-                "replay_intro", "visual_map",
+                "replay_intro", "visual_map", "rebirth", "choose_hybrid",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

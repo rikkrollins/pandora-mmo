@@ -59,6 +59,45 @@ del _lvl, _post_20_increment
 
 MAX_LEVEL = 99
 
+# Prestige/rebirth system, per Coffee (2026-07-22): "keeps all stats
+# but we go to lv one to exponentially level up our character again...
+# maybe making for another rebirth." A rebirth only resets level/XP
+# (see bot.py's _do_rebirth) -- ability scores, gear, gold, and every
+# other stat stay exactly as they are, so the reward for going through
+# it again has to come from somewhere else: each rebirth permanently
+# raises this character's personal ability-score cap above the normal
+# 20 (real "godly" territory over multiple rebirths) and grants a
+# stacking XP-gain bonus, so the climb back to MAX_LEVEL is genuinely
+# faster each time -- the actual "exponential" part Coffee asked for.
+REBIRTH_ABILITY_CAP_BONUS_PER_REBIRTH = 2
+REBIRTH_XP_BONUS_PER_REBIRTH = 0.25
+
+
+def ability_score_cap(rebirth_count: int) -> int:
+    """A character's personal ability-score ceiling -- 20 normally, +2 per rebirth."""
+    return 20 + REBIRTH_ABILITY_CAP_BONUS_PER_REBIRTH * max(rebirth_count, 0)
+
+
+def xp_gain_multiplier(rebirth_count: int) -> float:
+    """Permanent, stacking XP-gain bonus earned by rebirthing -- 1.0 normally, +25% per rebirth."""
+    return 1.0 + REBIRTH_XP_BONUS_PER_REBIRTH * max(rebirth_count, 0)
+
+
+# Hybrid classes (per Coffee, 2026-07-22): gated behind a character's
+# first rebirth -- earned, not available day one -- then freely
+# pick/re-pick any of the other 11 classes as a secondary flavor.
+# Depth is a direct function of total rebirth count, capped at 3 tiers
+# since that's the actual designed content depth (see bot.py's
+# HYBRID_CLASS_FEATURES) -- further rebirths beyond 3 keep paying off
+# through the ability-score-cap/XP-multiplier side above, just don't
+# add more hybrid depth.
+HYBRID_MAX_TIER = 3
+
+
+def hybrid_tier(rebirth_count: int) -> int:
+    """How deep a character's chosen hybrid class goes -- 0 (locked) until the first rebirth, then min(rebirth_count, HYBRID_MAX_TIER)."""
+    return min(max(rebirth_count, 0), HYBRID_MAX_TIER)
+
 
 def level_for_xp(xp: int) -> int:
     """Return the correct level for a given total XP amount."""

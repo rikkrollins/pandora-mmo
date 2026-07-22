@@ -8,6 +8,7 @@ results computed here, never decides them.
 from rules.dice import roll_d20, roll_attack, roll_damage, ability_modifier
 from rules.leveling import sneak_attack_dice_count, rage_damage_bonus, wild_shape_damage_bonus
 from class_features import is_weapon_proficient
+import hybrid_features
 
 # Monsters this campaign treats as undead for the Silver Wardens guild's
 # bonus_damage_vs_undead benefit (guilds.py) -- no monster template field
@@ -135,9 +136,14 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     # own permissive fallback), so this only ever narrows a real
     # player's own attack, never a monster's.
     weapon_proficient = is_weapon_proficient(attacker.get("char_class"), weapon.get("weapon_category", "simple"))
+    # Hybrid classes (2026-07-22): a Monk/Sorcerer hybrid's AC bump is
+    # computed live here rather than stored on the character -- see
+    # hybrid_features.hybrid_ac_bonus's own docstring for why (freely
+    # switching hybrid flavors can never leave a stale bonus behind).
+    effective_defender_ac = defender["armor_class"] + hybrid_features.hybrid_ac_bonus(defender)
     attack_result = roll_attack(
         attacker,
-        target_ac=defender["armor_class"],
+        target_ac=effective_defender_ac,
         ability=attack_ability,
         proficient=weapon_proficient,
         advantage=advantage,
@@ -150,7 +156,7 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     if (attack_result["hit"] and not attack_result["critical_hit"] and reaction_available
             and "shield" in (defender.get("known_spells") or [])
             and defender.get("spell_slots_current", 0) > 0
-            and attack_result["total"] < defender["armor_class"] + 5):
+            and attack_result["total"] < effective_defender_ac + 5):
         defender["spell_slots_current"] -= 1
         defender["reaction_used_round"] = round_number
         attack_result["hit"] = False
@@ -161,6 +167,9 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     relentless_endurance_triggered = False
     dark_ones_blessing_gained = 0
     uncanny_dodge_triggered = False
+    hybrid_bonus_gained = 0
+    hybrid_temp_hp_gained = 0
+    hybrid_self_heal_gained = 0
     if attack_result["hit"]:
         savage_attacks_die = 1 if (attacker.get("race") == "Half-Orc" and attack_result["critical_hit"]) else 0
         sneak_attack_die = 1 if (attacker.get("char_class") == "Rogue" and advantage) else 0
@@ -175,6 +184,10 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
                   and defender.get("monster_key") in UNDEAD_MONSTER_KEYS)
             else 0
         )
+        # Hybrid classes (2026-07-22): a real, chance-gated, scaled-down
+        # taste of a second class's damage-flavored feature -- see
+        # hybrid_features.py's own docstring for the shared design.
+        hybrid_bonus_gained = hybrid_features.hybrid_damage_bonus(attacker)
         # Task #143: a physical-dice-mode player's own reported damage
         # roll (see roll_damage's forced_roll docstring) only ever
         # substitutes into THIS main weapon die -- Sneak Attack's
@@ -183,7 +196,7 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         # later swings are for the attack-roll forced_roll above.
         dmg = roll_damage(
             weapon["damage_dice"],
-            modifier=weapon.get("damage_bonus", 0) + rage_bonus + wild_shape_bonus + warden_bonus,
+            modifier=weapon.get("damage_bonus", 0) + rage_bonus + wild_shape_bonus + warden_bonus + hybrid_bonus_gained,
             critical=attack_result["critical_hit"],
             extra_dice=savage_attacks_die,
             forced_roll=forced_damage_roll,
@@ -202,6 +215,24 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
             damage_dealt += sneak_dmg["total"]
         if defender.get("raging"):
             damage_dealt = damage_dealt // 2
+        # Hybrid Barbarian (2026-07-22): a chance-gated, scaled-down
+        # taste of Rage's damage resistance -- deliberately independent
+        # of a REAL raging Barbarian's own unconditional halving above
+        # (both can't ever apply to the same defender, since a hybrid
+        # pick can never equal your own real char_class).
+        if hybrid_features.hybrid_damage_resistance(defender):
+            damage_dealt = damage_dealt // 2
+        # Hybrid Druid (2026-07-22): Wild-Shape-flavored temp HP, rolled
+        # alongside its own bonus damage above.
+        hybrid_temp_hp_gained = hybrid_features.hybrid_temp_hp_on_damage(attacker)
+        if hybrid_temp_hp_gained > attacker.get("temp_hp", 0):
+            attacker["temp_hp"] = hybrid_temp_hp_gained
+        # Hybrid Fighter/Paladin (2026-07-22): a chance-gated self-heal
+        # on landing a hit.
+        hybrid_self_heal_gained = hybrid_features.hybrid_self_heal_on_hit(attacker)
+        if hybrid_self_heal_gained > 0:
+            attacker_hp_max = attacker.get("hp_max", attacker.get("hp_current", 0))
+            attacker["hp_current"] = min(attacker.get("hp_current", 0) + hybrid_self_heal_gained, attacker_hp_max)
 
         # Uncanny Dodge (real 5E Rogue feature, level 5+): halves damage
         # from a confirmed hit, once per round -- shares the same
@@ -247,6 +278,16 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
                 attacker["temp_hp"] = blessing_hp
                 dark_ones_blessing_gained = blessing_hp
 
+        # Hybrid Warlock (2026-07-22): a chance-gated, scaled-down taste
+        # of Dark One's Blessing, same 0-HP trigger as the real feature
+        # above -- can't ever double up with it (a hybrid pick can
+        # never equal your own real char_class).
+        if hp_after == 0 and hp_before > 0:
+            hybrid_kill_hp = hybrid_features.hybrid_temp_hp_on_kill(attacker)
+            if hybrid_kill_hp > attacker.get("temp_hp", 0):
+                attacker["temp_hp"] = hybrid_kill_hp
+                hybrid_temp_hp_gained = max(hybrid_temp_hp_gained, hybrid_kill_hp)
+
     return {
         "attacker": attacker["name"],
         "defender": defender["name"],
@@ -255,12 +296,15 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         "critical_fail": attack_result["critical_fail"],
         "raw_roll": attack_result["raw_roll"],
         "attack_roll": attack_result["total"],
-        "target_ac": defender["armor_class"],
+        "target_ac": effective_defender_ac,
         "damage_dealt": damage_dealt,
         "relentless_endurance_triggered": relentless_endurance_triggered,
         "dark_ones_blessing_gained": dark_ones_blessing_gained,
         "shield_reaction_triggered": shield_reaction_triggered,
         "uncanny_dodge_triggered": uncanny_dodge_triggered,
+        "hybrid_bonus_damage": hybrid_bonus_gained,
+        "hybrid_temp_hp_gained": hybrid_temp_hp_gained,
+        "hybrid_self_heal_gained": hybrid_self_heal_gained,
         "defender_hp_remaining": defender["hp_current"],
         "defender_hp_max": defender.get("hp_max", defender["hp_current"]),
     }

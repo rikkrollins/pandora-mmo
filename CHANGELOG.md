@@ -2,6 +2,18 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.22.0] — Rebirth and hybrid classes
+
+- New: at level 99, say "rebirth" to reset your level and XP back to
+  1 — but you keep every stat, item, and point you've earned. Each
+  rebirth permanently raises your ability-score cap above the normal
+  20, and speeds up all future leveling, so the climb back is
+  genuinely faster every time.
+- New: after your first rebirth, freely pick any other class as a
+  hybrid flavor ("become a hybrid Wizard") for a real, chance-based
+  taste of that class's signature ability — a bonus that deepens
+  further with each additional rebirth, up to a 3rd tier.
+
 ## [1.21.2] — Clearer feedback on button taps that aren't yours
 
 Tapping a button meant for someone else — another player's character-
