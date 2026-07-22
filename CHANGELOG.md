@@ -2,6 +2,14 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.25.0] — Real images for NPCs, monsters, and items
+
+Completing the full "images for the whole game" request: real
+generated images now show for NPCs (when you talk to them), monsters
+(when a fight starts), and equipped items (when you equip something)
+— same consistent image every time for a given NPC/monster/item, same
+as locations.
+
 ## [1.24.1] — Location images now show every visit
 
 Per player feedback, location images now show every time you visit a

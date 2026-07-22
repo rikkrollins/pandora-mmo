@@ -3829,6 +3829,7 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             location_name = cl.get_location(CAMPAIGN, requester["current_location"])["name"]
             header += f"\n\n📢 {names} — a fight just broke out at **{location_name}**, come join if you can!"
         await _safe_send(update, header, reply_markup=_battle_menu_keyboard(session))
+        await _maybe_send_monster_image(update, monster_key, template)
         await _notify_main_topic(update, f"⚔️ {_format_party_names(party)} entered battle against {enemy_description}!")
         await _resolve_ai_turns(update, session)
 
@@ -8538,15 +8539,22 @@ async def travel_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await _do_move(update, dest["name"])
 
 
+def _deterministic_image_seed(key: str) -> int:
+    """
+    Shared deterministic seed (2026-07-22, task "images for the whole
+    game"): the same real key (a location id, an NPC id, a monster
+    key, an item id) always produces the same seed, so every player
+    sees the exact same generated depiction of that same real thing --
+    a stable, canonical look, never a different random image each
+    time. Same principle as world_clock.py's own deterministic per-day
+    weather hash. Used across every image type this game generates
+    (locations, NPC portraits, and whatever comes next), not just one.
+    """
+    return int(hashlib.sha256(key.encode()).hexdigest(), 16) % (2 ** 31)
+
+
 def _location_image_seed(location_id: str) -> int:
-    """
-    Deterministic seed (2026-07-22, task "images for the whole game,
-    start with locations"): every player who visits the same location
-    sees the exact same generated depiction of it, not a different
-    random image each time -- a stable, canonical look, same principle
-    as world_clock.py's own deterministic per-day weather hash.
-    """
-    return int(hashlib.sha256(location_id.encode()).hexdigest(), 16) % (2 ** 31)
+    return _deterministic_image_seed(f"location:{location_id}")
 
 
 async def _maybe_send_location_image(update: Update, location: dict, location_id: str, already_visited: bool) -> None:
@@ -8578,6 +8586,108 @@ async def _maybe_send_location_image(update: Update, location: dict, location_id
         )
     except Exception as e:
         logger.warning(f"[images] location image failed for {location_id!r}: {e!r}")
+
+
+def _npc_portrait_prompt(npc_data: dict) -> str:
+    """
+    Grounded ONLY in real fields already in campaign.json -- role,
+    personality, and (for recruitable companions like Sarah, who carry
+    a real stats block) race/class. Deliberately never invents a
+    gender or appearance detail that isn't already a stated fact,
+    same "never invent a game fact" discipline as everywhere else in
+    this game (and the same reasoning that kept ai/tts_piper.py's two
+    voices purpose-based rather than guessing NPC genders). Non-
+    recruitable NPCs (most of them) have no stats block at all, so
+    race_class is simply omitted for those rather than guessed.
+    """
+    stats = npc_data.get("stats") or {}
+    race_class = f"{stats['race']} {stats['char_class']}, " if stats.get("race") and stats.get("char_class") else ""
+    role = (npc_data.get("role") or "").replace("_", " ")
+    return (
+        f"fantasy RPG character portrait, {race_class}{role}, "
+        f"{npc_data.get('personality', '')}, digital painting"
+    )
+
+
+def _item_image_prompt(item_data: dict) -> str:
+    """Grounded only in the item's own real name/type/rarity fields -- no invented material/design detail."""
+    rarity = item_data.get("rarity", "common")
+    item_type = item_data.get("type", "item")
+    return (
+        f"fantasy RPG {rarity} {item_type} icon, {item_data['name']}, "
+        "isolated on a plain background, digital game art, no text or labels"
+    )
+
+
+async def _maybe_send_item_image(update: Update, item_id: str, item_data: dict) -> None:
+    """
+    Real item icon (2026-07-22, task "images for the whole game" --
+    item icons, last of the four pieces asked for). Sent when a
+    character actually equips something -- a deliberate single action,
+    not the bulk loot-drop/inventory-listing moment, which would spam
+    many images at once for little value. Same deterministic-per-item
+    convention as locations/NPCs/monsters.
+    """
+    prompt = _item_image_prompt(item_data)
+    try:
+        await update.effective_chat.send_photo(
+            photo=images_module.generate_image_url(
+                prompt, width=512, height=512, seed=_deterministic_image_seed(f"item:{item_id}"),
+            ),
+            caption=f"🎒 {item_data['name']}",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+    except Exception as e:
+        logger.warning(f"[images] item image failed for {item_id!r}: {e!r}")
+
+
+def _monster_image_prompt(template: dict) -> str:
+    """Grounded only in the monster's own real name and is_boss flag -- no invented physical detail beyond generic 'fantasy monster' framing."""
+    creature_desc = "a fearsome, powerful boss monster" if template.get("is_boss") else "a monster"
+    return f"fantasy RPG {creature_desc}, {template['name']}, digital painting, dramatic lighting, no text or labels"
+
+
+async def _maybe_send_monster_image(update: Update, monster_key: str, template: dict) -> None:
+    """
+    Real monster art (2026-07-22, task "images for the whole game" --
+    monster/combat images, third of the four pieces asked for). Sent
+    every time a fight starts against this monster type, same
+    deterministic-per-key convention as locations/NPCs -- the same
+    monster always gets the same generated depiction.
+    """
+    prompt = _monster_image_prompt(template)
+    try:
+        await update.effective_chat.send_photo(
+            photo=images_module.generate_image_url(
+                prompt, width=512, height=512, seed=_deterministic_image_seed(f"monster:{monster_key}"),
+            ),
+            caption=f"⚔️ {template['name']}",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+    except Exception as e:
+        logger.warning(f"[images] monster image failed for {monster_key!r}: {e!r}")
+
+
+async def _maybe_send_npc_portrait(update: Update, npc_id: str, npc_data: dict) -> None:
+    """
+    Real NPC portrait (2026-07-22, task "images for the whole game" --
+    NPC portraits, second of the four pieces asked for). Sent every
+    time a player talks to an NPC, same "always show, not just first
+    time" convention just established for location images -- but still
+    the exact same deterministic image per NPC every time
+    (_deterministic_image_seed), never a different random depiction.
+    """
+    prompt = _npc_portrait_prompt(npc_data)
+    try:
+        await update.effective_chat.send_photo(
+            photo=images_module.generate_image_url(
+                prompt, width=512, height=512, seed=_deterministic_image_seed(f"npc:{npc_id}"),
+            ),
+            caption=f"🎨 {npc_data.get('name', npc_id)}",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+    except Exception as e:
+        logger.warning(f"[images] NPC portrait failed for {npc_id!r}: {e!r}")
 
 
 async def _do_look(update: Update) -> None:
@@ -10100,10 +10210,17 @@ async def _do_equip_item(update: Update, text: str) -> None:
 
     prefix = "" if target is character else f"**{target['name']}**: "
     lines = []
+    equipped_item_ids = []
     for item_id, _quantity in items_wanted:
         success, message, _ = db.equip_item(target["telegram_user_id"], item_id)
         lines.append(f"⚔️ {prefix}{message}" if success else message)
+        if success:
+            equipped_item_ids.append(item_id)
     await _safe_send(update, "\n".join(lines))
+    for item_id in equipped_item_ids:
+        item_data = items_module.get_item(item_id)
+        if item_data:
+            await _maybe_send_item_image(update, item_id, item_data)
     await _check_and_award_achievements(update, db.get_character(target["telegram_user_id"]))
 
 
@@ -12054,8 +12171,10 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
             reply = await asyncio.to_thread(
                 talk_to_npc, npc_id, text, character_name, relationship["memory_events"], quest_facts
             )
-            npc_display_name = CAMPAIGN["npcs"].get(npc_id, {}).get("name", intent["npc_name"])
+            npc_data = CAMPAIGN["npcs"].get(npc_id, {})
+            npc_display_name = npc_data.get("name", intent["npc_name"])
             await _safe_send(update, f"💬 **{npc_display_name}:** {reply}")
+            await _maybe_send_npc_portrait(update, npc_id, npc_data)
             # Ordinary conversation builds a small amount of rapport over
             # time — real, persistent, and separate from the short-term
             # conversation buffer talk_to_npc already keeps.
