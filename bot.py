@@ -8551,18 +8551,19 @@ def _location_image_seed(location_id: str) -> int:
 
 async def _maybe_send_location_image(update: Update, location: dict, location_id: str, already_visited: bool) -> None:
     """
-    Real location art, sent once -- the first time a character ever
-    visits a location (already_visited reflects the fog-of-war state
-    BEFORE this visit was marked, so True here means they've been here
-    before -- no repeat spam on every later look/travel back to
-    somewhere already seen). Same Pollinations.ai service as the
-    existing character-creation portraits (task #81) and visual world
-    map (task #221), same grounding discipline: the prompt is built
-    only from this location's own real description text already in
-    campaign.json, never invented detail.
+    Real location art, sent every time (2026-07-22, per Coffee: "show
+    images even after the first time" -- reverses this function's
+    original first-visit-only gating). `already_visited` is kept as a
+    parameter (unused for gating now) since both call sites already
+    compute it and it costs nothing to keep passing. Same
+    Pollinations.ai service as the existing character-creation
+    portraits (task #81) and visual world map (task #221), same
+    grounding discipline: the prompt is built only from this location's
+    own real description text already in campaign.json, never invented
+    detail. Still uses a deterministic per-location seed
+    (_location_image_seed) so the SAME place always shows the SAME
+    image, never a different random one each visit.
     """
-    if already_visited:
-        return
     prompt = (
         f"{location['description']}, fantasy tabletop RPG environment concept art, "
         "atmospheric lighting, detailed digital painting, no text or labels"

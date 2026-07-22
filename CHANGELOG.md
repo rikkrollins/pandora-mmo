@@ -2,6 +2,13 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.24.1] — Location images now show every visit
+
+Per player feedback, location images now show every time you visit a
+place, not just the first time — still the same consistent image for
+a given location every time, just no longer limited to first
+discovery.
+
 ## [1.24.0] — Real images for locations
 
 The first time you ever visit a place, it now comes with a real
