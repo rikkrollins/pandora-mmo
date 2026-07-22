@@ -2,6 +2,15 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.21.1] — Two more natural-language recognition fixes
+
+- Talking to something that isn't a real NPC (a tree, a statue, a
+  waystone) used to get silently dropped with no reply at all — it now
+  falls back to examining the thing instead.
+- Guild-join phrasing now tolerates apostrophe differences (a phone
+  keyboard's curly quote) and small spelling typos, instead of only
+  matching an exact name.
+
 ## [1.21.0] — Weather and night now matter in a fight
 
 - Checking the weather now shows a real 3-day forecast for the region,

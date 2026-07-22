@@ -11,6 +11,7 @@ route intent and narrate results.
 import asyncio
 import contextlib
 import json
+import difflib
 import logging
 import os
 import random
@@ -10917,12 +10918,44 @@ async def _do_join_guild(update: Update, text: str) -> None:
         )
         return
 
-    lowered = text.lower()
+    # Real live bug (2026-07-21, Coffee): "adventurers' guild" (an iPhone
+    # keyboard's curly apostrophe, U+2019) never matched the stored
+    # straight-quote "Adventurers' Guild" name -- same single-character
+    # collision _find_interactable already normalizes for. Also strip
+    # apostrophes entirely before comparing so "adventurers guild" (no
+    # apostrophe at all) still resolves.
+    lowered = text.lower().replace("’", "'")
     guild_id = None
     for gid, guild in GUILDS.items():
-        if gid.replace("_", " ") in lowered or guild["name"].lower() in lowered:
+        candidates = {gid.replace("_", " "), guild["name"].lower()}
+        candidates = {c.replace("'", "") for c in candidates} | candidates
+        if any(c in lowered or c in lowered.replace("'", "") for c in candidates):
             guild_id = gid
             break
+
+    # Real live bug (2026-07-21, same session): "Ask to join adventures
+    # guild" -- a genuine one-letter typo ("adventures" for
+    # "adventurers"), not a formatting difference the exact checks
+    # above can catch -- also matched nothing. A plain substring check
+    # can never forgive a misspelled word, so fall back to fuzzy word
+    # matching (stdlib difflib, no new dependency) against each guild's
+    # own significant name words, same "don't guess when ambiguous"
+    # shape as _find_interactable's word-overlap fallback: only trusted
+    # above a high similarity ratio, and only the single best match
+    # wins.
+    if guild_id is None:
+        input_words = re.findall(r"[a-z]+", lowered)
+        best_gid, best_ratio = None, 0.0
+        for gid, guild in GUILDS.items():
+            for name_word in re.findall(r"[a-z]+", guild["name"].lower()):
+                if len(name_word) < 5:
+                    continue
+                for input_word in input_words:
+                    ratio = difflib.SequenceMatcher(None, name_word, input_word).ratio()
+                    if ratio > best_ratio:
+                        best_gid, best_ratio = gid, ratio
+        if best_ratio >= 0.82:
+            guild_id = best_gid
 
     if guild_id is None:
         names = ", ".join(g["name"] for g in GUILDS.values())
@@ -11651,7 +11684,17 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_check_sheet(update, intent.get("target"))
     elif action == "talk_npc" and intent.get("npc_name"):
         npc_id = _find_npc_id_by_name(intent["npc_name"])
-        if npc_id and npc_id in _NPCS:
+        if not npc_id or npc_id not in _NPCS:
+            # Real live bug (2026-07-21, Coffee): "Speak to the wide-boled
+            # tree" got classified talk_npc with npc_name="the wide-boled
+            # tree" -- not a real NPC, so this branch used to just silently
+            # do nothing (no reply at all). A non-NPC target of "talk"/
+            # "speak to" is almost always a real interactable instead
+            # (a tree, a statue, a waystone), so fall back to the same
+            # examine path "Say hello to Grimsby" already proved works
+            # for the opposite miscue, rather than dropping the message.
+            await _do_examine(update, intent["npc_name"])
+        elif npc_id and npc_id in _NPCS:
             character = db.get_character(update.effective_user.id)
             character_name = character["name"] if character else "the player"
             relationship = db.get_relationship(update.effective_user.id, npc_id)
