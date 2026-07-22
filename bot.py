@@ -64,7 +64,7 @@ from ai.intent_parser import parse_intents
 from ai.npc_agent import register_npc, talk_to_npc, generate_ambient_line, _NPCS
 from ai.support_agent import answer_support_question
 from ai.text_cleanup import to_speakable_text
-from ai import tts_piper
+from ai import tts_piper, stt_groq
 from guilds import GUILDS, eligible_for_guild, GUILD_QUESTS
 from models import (
     VALID_CLASSES,
@@ -2067,8 +2067,20 @@ def _build_message_entities(text: str, mentionable_players: list[dict]) -> tuple
 async def _safe_send(
     update: Update, text: str, thread_id: int | None = None,
     reply_markup: InlineKeyboardMarkup | None = None,
+    speak: bool = True,
 ) -> None:
     """
+    speak=False (2026-07-22, per Coffee: "don't use tts for menus and
+    other things that don't need voice") skips _maybe_speak entirely
+    for this send -- used at every plain informational/menu listing
+    (character sheet, inventory, quests journal/board, shop, market,
+    bestiary, weather, leaderboard, achievements, skill tree, party
+    roster, waypoints, visual map caption, the menu screens
+    themselves). Defaults to True so real narration (location
+    descriptions, combat, NPC dialogue, examine/story text) is
+    unaffected -- this only ever narrows what gets voiced, never
+    silences something that already didn't speak.
+
     Sends a message to a topic (Adventure by default), but never lets a
     transient Telegram/network failure escape and abort whatever state
     progression the caller still needs to make (turn advancement,
@@ -2134,7 +2146,7 @@ async def _safe_send(
                 clean_text, message_thread_id=resolved_thread_id,
                 entities=entities or None, reply_markup=reply_markup,
             )
-            if not is_buffering:
+            if not is_buffering and speak:
                 await _maybe_speak(update, text, resolved_thread_id)
             return
         except TelegramError as e:
@@ -2264,7 +2276,7 @@ async def _maybe_speak(update: Update, text: str, thread_id: int | None) -> None
     if not speakable:
         return
     if db.get_setting("tts_backend", "textbot") == "piper":
-        await _speak_via_piper(update, speakable, thread_id)
+        await _speak_via_piper(update, speakable, thread_id, _pick_piper_voice(text))
         return
     try:
         # thread_id here is already fully resolved by _safe_send's one
@@ -2302,7 +2314,21 @@ async def _maybe_speak(update: Update, text: str, thread_id: int | None) -> None
     asyncio.create_task(_delete_trigger_after_delay())
 
 
-async def _speak_via_piper(update: Update, speakable: str, thread_id: int | None) -> None:
+def _pick_piper_voice(raw_text: str) -> str:
+    """
+    Two real voices (2026-07-22, task #97 "better TTS" follow-up), not
+    per-individual-NPC ones -- see ai/tts_piper.py's module docstring
+    for why. Every NPC dialogue line in this game is already built from
+    the same "💬 **Name:**" marker (bot.py's talk_npc/AI-chatter/quest-
+    offer sends), a real structural fact already in the text, not a
+    guess -- checked against the RAW pre-cleanup text, since
+    to_speakable_text's own emoji stripping would otherwise remove the
+    very marker this depends on.
+    """
+    return "npc" if raw_text.strip().startswith("💬") else tts_piper.DEFAULT_VOICE_KEY
+
+
+async def _speak_via_piper(update: Update, speakable: str, thread_id: int | None, voice_key: str) -> None:
     """
     Local TTS backend (2026-07-18) -- see ai/tts_piper.py. Synthesis is
     CPU-bound, same asyncio.to_thread convention as every other
@@ -2314,7 +2340,7 @@ async def _speak_via_piper(update: Update, speakable: str, thread_id: int | None
     this codebase. A plain WAV audio attachment still plays natively in
     every Telegram client, just as a music-style bubble instead.
     """
-    wav_bytes = await asyncio.to_thread(tts_piper.synthesize_to_wav_bytes, speakable)
+    wav_bytes = await asyncio.to_thread(tts_piper.synthesize_to_wav_bytes, speakable, voice_key)
     if wav_bytes is None:
         return
     try:
@@ -2866,7 +2892,10 @@ async def _do_choose_hybrid(update: Update, text: str) -> None:
         return
     tier = hybrid_tier(character.get("rebirth_count", 0))
     if tier <= 0:
-        await _safe_send(update, "Hybrid classes unlock after your first rebirth — say \"rebirth\" once you're level 99.")
+        await _safe_send(
+            update, "Hybrid classes unlock after your first rebirth — say \"rebirth\" once you're level 99.",
+            speak=False,
+        )
         return
 
     lowered = text.lower()
@@ -6213,6 +6242,7 @@ async def _do_check_quests(update: Update) -> None:
     await _safe_send(
         update, "\n".join(lines),
         reply_markup=_with_menu_button(_quest_board_keyboard(story_offer, area_board_quests)),
+        speak=False,
     )
 
 
@@ -6342,7 +6372,7 @@ async def _do_check_market(update: Update) -> None:
             f"(seller: {listing['seller_name']})"
         )
     lines.append("\nSay \"/buy_market <#>\" to buy one.")
-    await _safe_send(update, "\n".join(lines))
+    await _safe_send(update, "\n".join(lines), speak=False)
 
 
 async def _do_buy_market(update: Update, args: list[str]) -> None:
@@ -6630,6 +6660,7 @@ async def _do_show_skill_tree(update: Update) -> None:
             update,
             f"🌳 **{character['name']}**'s Skill Tree — {points} point(s) banked. "
             f"No real upgrade exists for {character['char_class']} yet — more classes are coming.",
+            speak=False,
         )
         return
     owned = _has_skill_upgrade(character, upgrade["id"])
@@ -6639,7 +6670,7 @@ async def _do_show_skill_tree(update: Update) -> None:
         f"**{upgrade['name']}** ({status})\n{upgrade['description']}"
     )
     keyboard = _skill_tree_keyboard(upgrade) if not owned and points >= upgrade["cost"] else None
-    await _safe_send(update, text, reply_markup=keyboard)
+    await _safe_send(update, text, reply_markup=keyboard, speak=False)
 
 
 async def skilltree_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -6696,11 +6727,14 @@ async def _do_check_party(update: Update, text: str = "") -> None:
                 update,
                 "You're not in a formed party — here's your own sheet:\n\n"
                 + _format_character_sheet(character),
+                speak=False,
             )
             return
         members = db.get_party_members_by_id(party_id)
         sheets = "\n\n".join(_format_character_sheet(m) for m in members)
-        await _safe_send(update, f"🎗️ **Your party's sheets ({len(members)}/{db.PARTY_MAX_MEMBERS}):**\n\n{sheets}")
+        await _safe_send(
+            update, f"🎗️ **Your party's sheets ({len(members)}/{db.PARTY_MAX_MEMBERS}):**\n\n{sheets}", speak=False,
+        )
         return
 
     # Task #161 (real live incident): "Who's here at the market with me?"
@@ -6723,9 +6757,13 @@ async def _do_check_party(update: Update, text: str = "") -> None:
             await _safe_send(
                 update,
                 f"👥 At **{location_name}** with **{character['name']}** right now: {', '.join(names)}",
+                speak=False,
             )
         else:
-            await _safe_send(update, f"👥 **{character['name']}** doesn't see anyone else at **{location_name}** right now.")
+            await _safe_send(
+                update, f"👥 **{character['name']}** doesn't see anyone else at **{location_name}** right now.",
+                speak=False,
+            )
         return
 
     lines = [f"👥 Everyone currently active: {_party_summary_text()}"]
@@ -6754,7 +6792,7 @@ async def _do_check_party(update: Update, text: str = "") -> None:
             lines.append("\n🎗️ You're not in a formed party. Say \"invite [name] to my party\" to start one.")
 
     keyboard = _party_keyboard(character) if character else None
-    await _safe_send(update, "\n".join(lines), reply_markup=keyboard)
+    await _safe_send(update, "\n".join(lines), reply_markup=keyboard, speak=False)
 
 
 def _party_keyboard(character: dict) -> InlineKeyboardMarkup | None:
@@ -7116,11 +7154,11 @@ async def _do_check_sheet(update: Update, target_name: str | None = None) -> Non
     if target_name:
         target = _find_party_target_by_name(target_name) or db.find_character_by_name(target_name)
         if target is not None:
-            await _safe_send(update, _format_character_sheet(target))
+            await _safe_send(update, _format_character_sheet(target), speak=False)
             return
         npc = _find_campaign_npc_by_name(target_name)
         if npc is not None:
-            await _safe_send(update, _format_npc_basic_info(npc))
+            await _safe_send(update, _format_npc_basic_info(npc), speak=False)
             return
         # Real live bug (2026-07-16, Coffee): .title() on a hallucinated,
         # non-name target (the model can invent one when there's no real
@@ -7146,6 +7184,7 @@ async def _do_check_sheet(update: Update, target_name: str | None = None) -> Non
     # cast someone else's spells.
     await _safe_send(
         update, _format_character_sheet(character), reply_markup=_with_menu_button(_spell_keyboard(character)),
+        speak=False,
     )
 
 
@@ -7168,6 +7207,7 @@ async def _do_check_inventory(update: Update) -> None:
         lines.append(f"  {name} x{qty}")
     await _safe_send(
         update, "🎒 Your backpack:\n" + "\n".join(lines), reply_markup=_with_menu_button(_item_keyboard(character)),
+        speak=False,
     )
 
 
@@ -8626,15 +8666,15 @@ async def _do_check_weather(update: Update) -> None:
     """
     character = db.get_character(update.effective_user.id)
     if character is None:
-        await _safe_send(update, "You don't have a character yet!")
+        await _safe_send(update, "You don't have a character yet!", speak=False)
         return
     location = cl.get_location(CAMPAIGN, character["current_location"])
     if location is None:
-        await _safe_send(update, "Hard to say — you don't seem to be anywhere in particular.")
+        await _safe_send(update, "Hard to say — you don't seem to be anywhere in particular.", speak=False)
         return
     conditions = world_clock.conditions_line(location["layer"])
     if location["layer"] == "underground":
-        await _safe_send(update, f"🌤️ {conditions} — no real weather reaches this deep, just the dark.")
+        await _safe_send(update, f"🌤️ {conditions} — no real weather reaches this deep, just the dark.", speak=False)
         return
 
     lines = [f"🌤️ {conditions} at **{location['name']}**."]
@@ -8650,7 +8690,7 @@ async def _do_check_weather(update: Update) -> None:
         lines.append("⚠️ Underfoot's slick out there — footing hazards are real right now.")
     if world_clock.is_night():
         lines.append("🌙 Whatever's out there tonight is hunting with more bite than usual.")
-    await _safe_send(update, "\n".join(lines))
+    await _safe_send(update, "\n".join(lines), speak=False)
 
 
 def _find_interactable(location: dict, text: str) -> tuple[str, dict] | None:
@@ -8964,7 +9004,7 @@ async def _do_show_map(update: Update) -> None:
         for loc_id in revealed_here:
             lines.append(f"❓ {layer_locations[loc_id]['name']} *(marked on a map, not yet visited)*")
 
-    await _safe_send(update, "\n".join(lines))
+    await _safe_send(update, "\n".join(lines), speak=False)
 
 
 async def _do_show_visual_map(update: Update) -> None:
@@ -9061,7 +9101,7 @@ async def _do_bestiary(update: Update) -> None:
             continue
         lines.append(_format_bestiary_entry(monster_key, template))
 
-    await _safe_send(update, "\n".join(lines))
+    await _safe_send(update, "\n".join(lines), speak=False)
 
 
 def _achievement_condition_met(character: dict, check: dict) -> bool:
@@ -9190,7 +9230,7 @@ async def _do_check_guild_quest(update: Update, guild_id: str) -> None:
         update,
         f"📜 **{quest['title']}**\n{quest['description']}\n"
         f"Reward: {quest['reward_gold']} gold, {quest['reward_xp']} XP\nStatus: {status}",
-        thread_id=update.message.message_thread_id,
+        thread_id=update.message.message_thread_id, speak=False,
     )
 
 
@@ -9247,7 +9287,7 @@ async def _check_and_award_achievements(update: Update, character: dict | None) 
 async def _do_check_achievements(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
-        await _safe_send(update, "You don't have a character yet!")
+        await _safe_send(update, "You don't have a character yet!", speak=False)
         return
     unlocked = character.get("achievements") or []
     if not unlocked:
@@ -9255,6 +9295,7 @@ async def _do_check_achievements(update: Update) -> None:
             update,
             "No achievements unlocked yet. Say \"check achievements\" any time to see your progress "
             "as you play — nothing's spoiled here, they unlock naturally as you go.",
+            speak=False,
         )
         return
     lines = ["🏅 **Your achievements:**"]
@@ -9268,7 +9309,7 @@ async def _do_check_achievements(update: Update) -> None:
         lines.append(f"\nCurrent title: \"{character['active_title']}\"")
     else:
         lines.append("\nNo title set — say \"set my title to <title>\" to wear one you've earned.")
-    await _safe_send(update, "\n".join(lines))
+    await _safe_send(update, "\n".join(lines), speak=False)
 
 
 _INLINE_TITLE_RE = re.compile(r"title\s+to\s+(.+)|title[^:]*:\s*(.+)", re.IGNORECASE)
@@ -9354,7 +9395,7 @@ async def _do_leaderboard(update: Update) -> None:
             f"{character['race']} {character['char_class']} ({character['xp']} XP)"
         )
 
-    await _safe_send(update, "\n".join(lines))
+    await _safe_send(update, "\n".join(lines), speak=False)
 
 
 def _find_location_by_name_fragment(fragment: str) -> str | None:
@@ -10213,7 +10254,7 @@ async def _do_list_shop(update: Update) -> None:
         for item_id in item_ids:
             item = items_module.get_item(item_id)
             lines.append(f"{item['name']} — {item['price']} gold")
-    await _safe_send(update, "\n".join(lines), reply_markup=_shop_keyboard(shop_data))
+    await _safe_send(update, "\n".join(lines), reply_markup=_shop_keyboard(shop_data), speak=False)
 
 
 _SHOP_SECTION_FOR_TYPE = {
@@ -10504,7 +10545,10 @@ async def _do_show_hybrid_menu(update: Update) -> None:
         return
     tier = hybrid_tier(character.get("rebirth_count", 0))
     if tier <= 0:
-        await _safe_send(update, "Hybrid classes unlock after your first rebirth — say \"rebirth\" once you're level 99.")
+        await _safe_send(
+            update, "Hybrid classes unlock after your first rebirth — say \"rebirth\" once you're level 99.",
+            speak=False,
+        )
         return
     current = (
         f"Current hybrid: **{character['hybrid_class']}** (tier {tier}/{HYBRID_MAX_TIER})\n\n"
@@ -10514,6 +10558,7 @@ async def _do_show_hybrid_menu(update: Update) -> None:
         update,
         f"🌟 **{character['name']}** — pick a hybrid class flavor:\n\n{current}Tap one below:",
         reply_markup=_with_menu_button(_hybrid_keyboard(character)),
+        speak=False,
     )
 
 
@@ -10545,7 +10590,10 @@ async def _do_show_menu(update: Update) -> None:
             "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
         )
         return
-    await _safe_send(update, f"📖 **{character['name']}** — what do you want to check?", reply_markup=_main_menu_keyboard(character))
+    await _safe_send(
+        update, f"📖 **{character['name']}** — what do you want to check?",
+        reply_markup=_main_menu_keyboard(character), speak=False,
+    )
 
 
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -10688,11 +10736,12 @@ async def _do_show_equip_menu(update: Update) -> None:
     if keyboard is None:
         await _safe_send(
             update, "⚔️ Nothing in your backpack is equippable right now.", reply_markup=_with_menu_button(None),
+            speak=False,
         )
         return
     await _safe_send(
         update, "⚔️ **Equip Gear** — tap something carried but not yet equipped:",
-        reply_markup=_with_menu_button(keyboard),
+        reply_markup=_with_menu_button(keyboard), speak=False,
     )
 
 
@@ -10744,10 +10793,10 @@ async def _do_show_level_menu(update: Update) -> None:
     pending = character.get("pending_asi_points", 0)
     if pending:
         lines.append(f"\nYou have {pending} ability point(s) to spend:")
-        await _safe_send(update, "\n".join(lines), reply_markup=_with_menu_button(_level_keyboard()))
+        await _safe_send(update, "\n".join(lines), reply_markup=_with_menu_button(_level_keyboard()), speak=False)
     else:
         lines.append("\nNo ability score improvements waiting to be spent right now.")
-        await _safe_send(update, "\n".join(lines), reply_markup=_with_menu_button(None))
+        await _safe_send(update, "\n".join(lines), reply_markup=_with_menu_button(None), speak=False)
 
 
 async def level_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -11270,6 +11319,7 @@ async def _do_show_waypoints(update: Update) -> None:
     await _safe_send(
         update, "🧭 **Waypoints** — tap one to fast-travel there:",
         reply_markup=_waypoint_keyboard(visited, character["current_location"]),
+        speak=False,
     )
 
 
@@ -11330,7 +11380,7 @@ async def _do_list_characters(update: Update) -> None:
         lines.append(
             f"{marker}{c['name']} — Level {c['level']} {c['race']} {c['char_class']}"
         )
-    await _safe_send(update, "\n".join(lines), reply_markup=_roster_keyboard(roster, active_id))
+    await _safe_send(update, "\n".join(lines), reply_markup=_roster_keyboard(roster, active_id), speak=False)
 
 
 async def roster_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -13592,6 +13642,74 @@ async def _run_in_user_order(user_id: int, coro_fn) -> None:
     await future
 
 
+class _TranscribedMessageProxy:
+    """
+    Duck-typed stand-in for update.message/effective_message: identical
+    to the real one except .text, which is swapped for a real STT
+    transcription (task #97, 2026-07-22). Needed because python-
+    telegram-bot's real Message can't have .text reassigned in place
+    (TelegramObject enforces frozen attributes) -- same reasoning as
+    _EffectiveChatOverride above, just for .text instead of
+    effective_chat.
+    """
+    def __init__(self, real_message, transcribed_text: str):
+        self._real_message = real_message
+        self.text = transcribed_text
+
+    def __getattr__(self, name):
+        return getattr(self._real_message, name)
+
+
+class _VoiceTranscriptUpdate:
+    """
+    Duck-typed stand-in for Update: identical to the real one except
+    .message/.effective_message, swapped for a _TranscribedMessageProxy
+    -- lets a transcribed voice message flow through the EXACT same
+    real text pipeline (_route_text_message, adventure_master_handler,
+    intent parsing, the works) a typed message already uses, never a
+    separate parallel voice-only code path.
+    """
+    def __init__(self, real_update: Update, transcribed_text: str):
+        self._real_update = real_update
+        proxy = _TranscribedMessageProxy(real_update.message, transcribed_text)
+        self.message = proxy
+        self.effective_message = proxy
+
+    def __getattr__(self, name):
+        return getattr(self._real_update, name)
+
+
+async def voice_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Voice message input (task #97, 2026-07-22 investigation: "investigate
+    better tts/stt options that are FREE"). Downloads the real voice
+    note, transcribes it via Groq's free Whisper endpoint
+    (ai/stt_groq.py -- cloud-hosted, no local CPU cost, since a local
+    STT model would compete with Ollama's single generation slot on
+    this box), echoes back what was heard (voice transcription is
+    genuinely error-prone, so a player can tell at a glance whether it
+    needs retyping), then routes the transcription through the exact
+    same real pipeline a typed message already uses.
+    """
+    if update.message is None or update.message.voice is None:
+        return
+    if not config.GROQ_API_KEY:
+        return  # STT not configured -- silently a no-op, not an error, same convention as TTS being off
+    telegram_file = await update.message.voice.get_file()
+    audio_bytes = await telegram_file.download_as_bytearray()
+    transcribed = await asyncio.to_thread(stt_groq.transcribe_voice, bytes(audio_bytes))
+    if not transcribed:
+        return
+    await update.effective_chat.send_message(
+        f"🎙️ Heard: \"{transcribed}\"", message_thread_id=update.message.message_thread_id,
+    )
+    transcript_update = _VoiceTranscriptUpdate(update, transcribed)
+    if update.effective_user is None:
+        await _route_text_message(transcript_update, context)
+        return
+    await _run_in_user_order(update.effective_user.id, lambda: _route_text_message(transcript_update, context))
+
+
 async def _route_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     raw_thread_id = update.message.message_thread_id  # may genuinely be None for Main
     thread_id = raw_thread_id or 0
@@ -14321,6 +14439,7 @@ def build_application() -> Application:
 
     # Single unified router for all plain text messages, across topics.
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message_router))
+    application.add_handler(MessageHandler(filters.VOICE, voice_message_handler))
     application.add_handler(MessageHandler(filters.PHOTO, dev_topic_photo_handler))
     application.add_handler(MessageHandler(filters.Document.ALL, dev_topic_document_handler))
     application.add_handler(MessageHandler(filters.VIDEO, dev_topic_video_handler))

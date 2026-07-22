@@ -18,6 +18,12 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 BUILD_MODEL = os.getenv("BUILD_MODEL", "lfm2.5-thinking:latest")
 DM_NARRATION_MODEL = os.getenv("DM_NARRATION_MODEL", "lfm2.5-thinking:latest")
 
+# Voice-message transcription (task #97, 2026-07-22) -- Groq's free
+# Whisper endpoint, see ai/stt_groq.py. Empty/unset means STT is
+# simply off, not an error -- same convention as every other optional
+# integration here.
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+
 # Telegram forum topic thread IDs (real values for this group)
 TOPIC_MAIN_ID = int(os.getenv("TOPIC_MAIN_ID", "1"))
 TOPIC_SUPPORT_ID = int(os.getenv("TOPIC_SUPPORT_ID", "22"))

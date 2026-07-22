@@ -2,6 +2,22 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.23.0] — Voice message input, and a second real narration voice
+
+- New: send a voice message in Adventure and it's transcribed (via a
+  free cloud speech-to-text service) and played through the exact
+  same real game pipeline as typing it — no separate "voice mode,"
+  just another way to say what you want to do. The bot echoes back
+  what it heard first, since transcription isn't perfect.
+- TTS narration (when enabled) now uses two distinct voices instead of
+  one — a narrator voice for general narration, and a different voice
+  for NPC dialogue lines specifically, so a conversation actually
+  sounds like two different speakers.
+- TTS no longer reads menu/informational screens aloud — character
+  sheet, inventory, quests, shop, market, achievements, bestiary,
+  weather, leaderboard, and every other menu stay silent. Only real
+  narration and dialogue get voiced.
+
 ## [1.22.1] — Push-button menus for rebirth and hybrid classes
 
 Rebirth and hybrid-class picking now have real push-button menu
