@@ -2,6 +2,11 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.26.2] — Push-button title picker
+
+Setting your title now has real tap-to-choose buttons when you check
+your achievements, instead of needing to type the exact title text.
+
 ## [1.26.1] — Two more real fixes from active playtesting
 
 - Fixed the deeper cause of the AI party's stall: accepting a quest

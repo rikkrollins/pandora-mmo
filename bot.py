@@ -9532,7 +9532,39 @@ async def _do_check_achievements(update: Update) -> None:
         lines.append(f"\nCurrent title: \"{character['active_title']}\"")
     else:
         lines.append("\nNo title set — say \"set my title to <title>\" to wear one you've earned.")
-    await _safe_send(update, "\n".join(lines), speak=False)
+    await _safe_send(update, "\n".join(lines), reply_markup=_title_keyboard(character, unlocked), speak=False)
+
+
+def _title_keyboard(character: dict, unlocked: list[str]) -> InlineKeyboardMarkup | None:
+    """
+    Real dev-topic feedback (2026-07-22, Sugar: "I earned the title and
+    want to set my title") -- setting a title required typing its exact
+    text verbatim with no way to just pick from what's actually earned.
+    One tappable button per real unlocked achievement's title, same
+    "reuse the real handler, never a separate path" convention as every
+    other push-button menu this session.
+    """
+    buttons = []
+    for achievement_id in unlocked:
+        data = achievements_module.get_achievement(achievement_id)
+        if data is None or data["title"] == character.get("active_title"):
+            continue
+        buttons.append([InlineKeyboardButton(f"🏅 {data['title']}", callback_data=f"title|set|{achievement_id}")])
+    return InlineKeyboardMarkup(buttons) if buttons else None
+
+
+async def title_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _title_keyboard -- dispatches through the same real _do_set_title free text already uses."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    await _safe_answer(query)
+    if action != "set" or len(parts) < 3:
+        return
+    data = achievements_module.get_achievement(parts[2])
+    if data is None:
+        return
+    await _do_set_title(update, data["title"])
 
 
 _INLINE_TITLE_RE = re.compile(r"title\s+to\s+(.+)|title[^:]*:\s*(.+)", re.IGNORECASE)
@@ -14740,6 +14772,7 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(travel_menu_callback, pattern=r"^travel\|"))
     application.add_handler(CallbackQueryHandler(creation_menu_callback, pattern=r"^create\|"))
     application.add_handler(CallbackQueryHandler(hybrid_menu_callback, pattern=r"^hybrid\|"))
+    application.add_handler(CallbackQueryHandler(title_menu_callback, pattern=r"^title\|"))
 
     application.add_error_handler(_log_unhandled_error)
 
