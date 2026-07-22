@@ -2,6 +2,15 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.25.1] — Fixed a real silent-reply bug
+
+Fixed: an action naming something real (like carving your initials
+into a real object you'd already looked at) that the game couldn't
+parse into a specific mechanic used to get silently dropped with no
+reply at all — it now falls back to examining the thing instead, so
+you always get SOME response when you've named something real.
+Ordinary chat between players stays exactly as quiet as before.
+
 ## [1.25.0] — Real images for NPCs, monsters, and items
 
 Completing the full "images for the whole game" request: real

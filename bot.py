@@ -12322,8 +12322,29 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_switch_character(update, intent.get("target") or text)
     elif action == "delete_character":
         await _do_delete_character(update, intent.get("target") or text)
-    # action == "chat" (or unmatched talk_npc): no game action, let it be
-    # ordinary roleplay chatter with no bot response required.
+    elif action == "chat":
+        # Real live bug (2026-07-22, Coffee: "Im not getting a response?!
+        # if the action doesn't work, can you please say something"):
+        # "Curve my initials on the hearth mantle" (a real attempt to
+        # interact with a real, already-examined interactable, just
+        # phrased with a verb -- "carve"/"curve" -- this game has no
+        # specific action for) resolved to the catch-all "chat", which
+        # is silent by design for ordinary roleplay banter -- but this
+        # wasn't banter, it named a real object. Same "don't guess, but
+        # don't stay silent when a real game fact IS present" fix shape
+        # as the wide-boled-tree talk_npc misfire fixed earlier this
+        # session: if the text actually names a real interactable at
+        # this character's own location, fall back to examining it
+        # instead of dropping the message -- ordinary chit-chat never
+        # matches a real interactable name, so this can't turn genuine
+        # banter noisy.
+        character = db.get_character(update.effective_user.id)
+        if character is not None:
+            location = cl.get_location(CAMPAIGN, character["current_location"])
+            if location is not None and _find_interactable(location, text):
+                await _do_examine(update, text)
+    # Any other unmatched "chat": no game action, let it be ordinary
+    # roleplay chatter with no bot response required.
 
 
 # ---------------------------------------------------------------------
