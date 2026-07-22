@@ -51,6 +51,7 @@ a place/person/item that isn't actually listed there):"""
 # always-shown line: an example whose entire premise isn't true right now
 # is now omitted from the prompt entirely, not just its placeholder name.
 _EXAMPLE_LINES = [
+    ("needs you to travel to", "I head to [the exact place named after 'needs you to travel to', if it's also listed under Places reachable from here]"),
     ("Places reachable from here", "I head to [a place listed under Places reachable from here]"),
     ("Danger here", "I attack [something listed under Danger here]"),
     ("People here", "I talk to [someone listed under People here]"),
@@ -80,14 +81,27 @@ standing in, spamming the same rejected action every cycle. The facts \
 given below for THIS moment are the only valid source for any name in \
 your action.
 
-How to prioritize, per Coffee (2026-07-14): if the facts mention the \
-party's quest still needing something you can gather right here, that \
-comes first -- it directly helps the party. Otherwise, lean toward \
-whatever skill you're already practiced in (shown under "Skills you've \
-practiced"), the same way a real adventurer plays to their strengths. \
-But if something useful here uses a skill you haven't tried yet or \
-aren't practiced in, that's a real opportunity to improve at it, not a \
-reason to avoid it -- don't only ever repeat what you're already good at.
+How to prioritize, per Coffee (2026-07-14, revised 2026-07-22 after \
+direct log monitoring caught the AI party stalled at level 1 for days, \
+looping the same examine/gather actions in one place instead of ever \
+progressing): a real quest of yours that "needs you to travel to" \
+somewhere ALWAYS comes first -- heading there is how the story and \
+your own level actually move forward, and it beats every other option \
+below, including a party gather-quest need or a shop/skill-practice \
+opportunity right where you're already standing. If the facts mention \
+the party's quest still needing something you can gather right here, \
+that comes second -- it directly helps the party. Otherwise, lean \
+toward whatever skill you're already practiced in (shown under "Skills \
+you've practiced"), the same way a real adventurer plays to their \
+strengths. But if something useful here uses a skill you haven't tried \
+yet or aren't practiced in, that's a real opportunity to improve at \
+it, not a reason to avoid it -- don't only ever repeat what you're \
+already good at. And if NONE of the above ever seem to apply for \
+several turns in a row (no quest, no gather need, nothing new to try), \
+that's a real sign you've been sitting still too long -- head to \
+somewhere listed under "Places reachable from here" you haven't fully \
+explored yet, rather than examining or gathering the exact same thing \
+again.
 
 Respond with ONLY the action sentence, nothing else."""
 

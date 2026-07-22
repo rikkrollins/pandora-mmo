@@ -2,6 +2,17 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.26.0] — Autonomous AI party actually progresses now, clearer map
+
+- Fixed: the autonomous AI party was stalling on repetitive flavor
+  actions instead of progressing quests, because it was never actually
+  told where its own active quests needed it to go. It now knows its
+  real quest destinations and prioritizes heading there over
+  everything else.
+- The map's own notation (current location, visited places,
+  connections, unexplored paths) is now explained with a short legend,
+  instead of just being used with no explanation.
+
 ## [1.25.2] — Three more real fixes from live monitoring
 
 - Fixed: interacting with an object whose name ends in a location

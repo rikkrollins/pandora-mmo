@@ -9197,7 +9197,16 @@ async def _do_show_map(update: Update) -> None:
         )
         return
 
-    lines = ["🗺️ **Your map**"]
+    # Real dev-topic confusion (2026-07-22, Coffee: "?!! What is this")
+    # -- the map's own notation (📍/•/→/"N unexplored path(s)") was
+    # never actually explained anywhere, just used. Not a bug (the data
+    # itself was always correct), but a real, fixable UX gap -- a one-
+    # line legend costs nothing and removes the ambiguity outright.
+    lines = [
+        "🗺️ **Your map** (📍 = where you are now, • = a place you've "
+        "visited, → its known connections, \"N unexplored path(s)\" = "
+        "routes leading somewhere you haven't been yet)",
+    ]
     for layer, layer_locations in CAMPAIGN["locations"].items():
         visited_here = [loc_id for loc_id in layer_locations if loc_id in visited]
         revealed_here = [loc_id for loc_id in layer_locations if loc_id in revealed]
@@ -14302,7 +14311,30 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
         lines.append(f"You have a decision to make on \"{q['title']}\" -- your options are: {labels}")
 
     if character.get("active_quests"):
-        lines.append(f"You have {len(character['active_quests'])} active quest(s) in your journal already.")
+        # Real live gap found via direct log monitoring (2026-07-22): the
+        # AI party has been looping on the same few flavor actions
+        # (examine the same tree, gather the same herb) for days without
+        # ever meaningfully progressing the story -- traced to this line
+        # only ever giving a bare COUNT of active quests, never WHERE one
+        # actually needs to go next. A quest's own real objective_location
+        # field (campaign.json) already exists for exactly this; it was
+        # simply never read here. Only surfaced for quests whose
+        # objective isn't already right here (otherwise the reach_location
+        # trigger already fires on its own the moment they arrived, and
+        # this would just be pointing at where they're already standing).
+        elsewhere_quests = []
+        for quest_id in character["active_quests"]:
+            quest = CAMPAIGN.get("quests", {}).get(quest_id)
+            objective_id = quest.get("objective_location") if quest else None
+            if objective_id and objective_id != location_id:
+                objective_loc = cl.get_location(CAMPAIGN, objective_id)
+                if objective_loc:
+                    elsewhere_quests.append((quest["title"], objective_loc["name"]))
+        if elsewhere_quests:
+            for title, dest_name in elsewhere_quests:
+                lines.append(f"Your active quest \"{title}\" needs you to travel to {dest_name}.")
+        else:
+            lines.append(f"You have {len(character['active_quests'])} active quest(s) in your journal already.")
 
     # Same reasoning as the reachable-places/shop/branching-choice facts
     # above: guild joining is a real, location-independent action
