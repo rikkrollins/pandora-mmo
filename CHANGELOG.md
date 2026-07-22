@@ -2,6 +2,13 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.22.1] — Push-button menus for rebirth and hybrid classes
+
+Rebirth and hybrid-class picking now have real push-button menu
+access too, not just natural language. A Rebirth button appears in the
+main menu once you hit level 99, and a Hybrid Class button appears
+once you've rebirthed at least once.
+
 ## [1.22.0] — Rebirth and hybrid classes
 
 - New: at level 99, say "rebirth" to reset your level and XP back to

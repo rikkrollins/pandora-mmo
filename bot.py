@@ -10475,7 +10475,57 @@ def _main_menu_keyboard(character: dict) -> InlineKeyboardMarkup:
     ]
     if character.get("pending_asi_points", 0) > 0:
         rows.append([InlineKeyboardButton("📈 Level Up", callback_data="menu|level")])
+    # Rebirth/hybrid (2026-07-22): same "only show it when it actually
+    # applies" convention as Level Up above -- Rebirth only appears at
+    # MAX_LEVEL (it would just reject the tap otherwise), and Hybrid
+    # Class only once it's actually unlocked (after a first rebirth).
+    if character.get("level", 1) >= MAX_LEVEL:
+        rows.append([InlineKeyboardButton("✨ Rebirth", callback_data="menu|rebirth")])
+    if hybrid_tier(character.get("rebirth_count", 0)) > 0:
+        rows.append([InlineKeyboardButton("🌟 Hybrid Class", callback_data="menu|hybrid")])
     return InlineKeyboardMarkup(rows)
+
+
+def _hybrid_keyboard(character: dict) -> InlineKeyboardMarkup:
+    """Every OTHER real class as a tappable hybrid pick -- never your own char_class, which _do_choose_hybrid would reject anyway."""
+    buttons = [
+        [InlineKeyboardButton(cls, callback_data=f"hybrid|choose|{cls}")]
+        for cls in HYBRID_CLASS_FEATURES if cls != character.get("char_class")
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+async def _do_show_hybrid_menu(update: Update) -> None:
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    tier = hybrid_tier(character.get("rebirth_count", 0))
+    if tier <= 0:
+        await _safe_send(update, "Hybrid classes unlock after your first rebirth — say \"rebirth\" once you're level 99.")
+        return
+    current = (
+        f"Current hybrid: **{character['hybrid_class']}** (tier {tier}/{HYBRID_MAX_TIER})\n\n"
+        if character.get("hybrid_class") else ""
+    )
+    await _safe_send(
+        update,
+        f"🌟 **{character['name']}** — pick a hybrid class flavor:\n\n{current}Tap one below:",
+        reply_markup=_with_menu_button(_hybrid_keyboard(character)),
+    )
+
+
+async def hybrid_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _hybrid_keyboard -- dispatches through the same real _do_choose_hybrid free text already uses."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    await _safe_answer(query)
+    if action != "choose" or len(parts) < 3:
+        return
+    await _do_choose_hybrid(update, parts[2])
 
 
 async def _do_show_menu(update: Update) -> None:
@@ -10538,6 +10588,10 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await _do_check_party(update)
     elif section == "visualmap":
         await _do_show_visual_map(update)
+    elif section == "rebirth":
+        await _do_rebirth(update)
+    elif section == "hybrid":
+        await _do_show_hybrid_menu(update)
 
 
 async def story_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -14288,6 +14342,7 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(party_menu_callback, pattern=r"^party\|"))
     application.add_handler(CallbackQueryHandler(travel_menu_callback, pattern=r"^travel\|"))
     application.add_handler(CallbackQueryHandler(creation_menu_callback, pattern=r"^create\|"))
+    application.add_handler(CallbackQueryHandler(hybrid_menu_callback, pattern=r"^hybrid\|"))
 
     application.add_error_handler(_log_unhandled_error)
 
