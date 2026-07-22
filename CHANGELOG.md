@@ -2,6 +2,14 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.24.0] — Real images for locations
+
+The first time you ever visit a place, it now comes with a real
+generated image alongside the description — everyone who visits the
+same place sees the same consistent depiction, not a different random
+image each time. First of several planned image expansions (NPC
+portraits, monster art, and item icons are next).
+
 ## [1.23.0] — Voice message input, and a second real narration voice
 
 - New: send a voice message in Adventure and it's transcribed (via a

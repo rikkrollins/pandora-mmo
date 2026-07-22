@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import json
 import difflib
+import hashlib
 import logging
 import os
 import random
@@ -8537,6 +8538,47 @@ async def travel_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await _do_move(update, dest["name"])
 
 
+def _location_image_seed(location_id: str) -> int:
+    """
+    Deterministic seed (2026-07-22, task "images for the whole game,
+    start with locations"): every player who visits the same location
+    sees the exact same generated depiction of it, not a different
+    random image each time -- a stable, canonical look, same principle
+    as world_clock.py's own deterministic per-day weather hash.
+    """
+    return int(hashlib.sha256(location_id.encode()).hexdigest(), 16) % (2 ** 31)
+
+
+async def _maybe_send_location_image(update: Update, location: dict, location_id: str, already_visited: bool) -> None:
+    """
+    Real location art, sent once -- the first time a character ever
+    visits a location (already_visited reflects the fog-of-war state
+    BEFORE this visit was marked, so True here means they've been here
+    before -- no repeat spam on every later look/travel back to
+    somewhere already seen). Same Pollinations.ai service as the
+    existing character-creation portraits (task #81) and visual world
+    map (task #221), same grounding discipline: the prompt is built
+    only from this location's own real description text already in
+    campaign.json, never invented detail.
+    """
+    if already_visited:
+        return
+    prompt = (
+        f"{location['description']}, fantasy tabletop RPG environment concept art, "
+        "atmospheric lighting, detailed digital painting, no text or labels"
+    )
+    try:
+        await update.effective_chat.send_photo(
+            photo=images_module.generate_image_url(
+                prompt, width=768, height=512, seed=_location_image_seed(location_id),
+            ),
+            caption=f"📍 {location['name']}",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+    except Exception as e:
+        logger.warning(f"[images] location image failed for {location_id!r}: {e!r}")
+
+
 async def _do_look(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -8552,6 +8594,7 @@ async def _do_look(update: Update) -> None:
         )
         return
 
+    already_visited = character["current_location"] in (character.get("visited_locations") or [])
     db.mark_visited(update.effective_user.id, character["current_location"])
 
     # Names the looker (task #139, 2026-07-17): in a shared chat, a bare
@@ -8655,6 +8698,7 @@ async def _do_look(update: Update) -> None:
     # is real player-facing narration and should have gone through
     # _safe_send like every other primary action reply already does.
     await _safe_send(update, "\n".join(lines), reply_markup=_look_travel_keyboard(location))
+    await _maybe_send_location_image(update, location, character["current_location"], already_visited)
 
 
 async def _do_check_weather(update: Update) -> None:
@@ -9551,6 +9595,7 @@ async def _do_move(update: Update, text: str) -> None:
         await update.effective_chat.send_message(story_gate_message, message_thread_id=config.TOPIC_ADVENTURE_ID)
         return
 
+    destination_already_visited = destination_id in (character.get("visited_locations") or [])
     db.move_character(update.effective_user.id, destination_id)
     db.mark_visited(update.effective_user.id, destination_id)
 
@@ -9571,6 +9616,7 @@ async def _do_move(update: Update, text: str) -> None:
     # reply never went through _safe_send, so this (one of the most
     # common actions in the game) always silently skipped TTS.
     await _safe_send(update, f"🚶 **{character['name']}** travels to **{destination['name']}**.\n{destination['description']}")
+    await _maybe_send_location_image(update, destination, destination_id, destination_already_visited)
 
     updated_character = db.get_character(update.effective_user.id)
     await _maybe_trigger_npc_encounter(update, updated_character, destination)
