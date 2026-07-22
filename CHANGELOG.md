@@ -2,6 +2,17 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.26.1] — Two more real fixes from active playtesting
+
+- Fixed the deeper cause of the AI party's stall: accepting a quest
+  that's actually on offer is now the AI's single highest priority,
+  above everything else — it was previously just one option among
+  many and the AI kept choosing safer-looking flavor actions instead,
+  for days.
+- Fixed: "use dragon breath" (a Dragonborn's own racial ability) was
+  being misclassified and given the wrong response entirely. Now
+  recognized directly.
+
 ## [1.26.0] — Autonomous AI party actually progresses now, clearer map
 
 - Fixed: the autonomous AI party was stalling on repetitive flavor

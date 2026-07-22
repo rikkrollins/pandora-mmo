@@ -129,7 +129,8 @@ pool of divine healing (e.g. "I use lay on hands on X", "I lay hands on myself")
 - "arcane_recovery" is specifically a Wizard's real class feature: recovering expended spell slots once per \
 rest without fully resting (e.g. "I use arcane recovery", "recover a spell slot", "recover my spell slots").
 - "breath_weapon" is specifically a Dragonborn's real racial trait: a damaging breath attack usable once per \
-rest, replacing a normal attack in combat (e.g. "I use my breath weapon", "breathe fire", "unleash my breath").
+rest, replacing a normal attack in combat (e.g. "I use my breath weapon", "breathe fire", "unleash my breath", \
+"use dragon breath").
 - "channel_divinity" is specifically a Cleric's real class feature (level 2+): Turn Undead, forcing an undead \
 creature to become frightened, usable once per rest (e.g. "I channel divinity", "I turn undead", "turn the undead").
 - "action_surge" is specifically a Fighter's real class feature (level 2+): take an extra action, once per rest \
@@ -719,7 +720,15 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                                     "recover spell slots"]):
         return {**base, "action": "arcane_recovery"}
 
-    if any(w in lowered for w in ["breath weapon", "breathe fire", "unleash my breath", "use my breath"]):
+    # Real live bug (2026-07-22, Charvenna/Sugar): "Use dragon breath on
+    # the bark of the ancient, wide-boled tree" fell through every
+    # trigger below (none of them cover "dragon breath", the single
+    # most natural way to describe a Dragonborn's own racial ability),
+    # landed on the model as an unrecognized "chat", and got hallucinated
+    # as "show_map" -- a real action, just completely wrong -- twice in
+    # a row. "dragon breath"/"dragon's breath" added directly.
+    if any(w in lowered for w in ["breath weapon", "breathe fire", "unleash my breath", "use my breath",
+                                    "dragon breath", "dragon's breath", "dragons breath"]):
         return {**base, "action": "breath_weapon"}
 
     if any(w in lowered for w in ["channel divinity", "turn undead", "turn the undead"]):

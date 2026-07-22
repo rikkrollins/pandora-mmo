@@ -84,8 +84,13 @@ your action.
 How to prioritize, per Coffee (2026-07-14, revised 2026-07-22 after \
 direct log monitoring caught the AI party stalled at level 1 for days, \
 looping the same examine/gather actions in one place instead of ever \
-progressing): a real quest of yours that "needs you to travel to" \
-somewhere ALWAYS comes first -- heading there is how the story and \
+progressing): if the facts say "A quest is on offer here," accepting \
+it ("I accept the quest") is the single highest priority of all, full \
+stop -- confirmed live that without this being said explicitly and \
+first, this model can sit right next to an offered quest for DAYS \
+without ever once accepting it, favoring safer-looking flavor actions \
+instead. A real quest of yours that "needs you to travel to" \
+somewhere comes right after that -- heading there is how the story and \
 your own level actually move forward, and it beats every other option \
 below, including a party gather-quest need or a shop/skill-practice \
 opportunity right where you're already standing. If the facts mention \
