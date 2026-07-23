@@ -2,6 +2,12 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.26.7] — Fixed "Shop" and "Look at shop" not opening the shop
+
+Fixed: typing just "Shop" got zero reply, and "Look at shop" only
+showed the shopkeeper's portrait instead of what's actually for sale.
+Both now open the real shop listing, same as "what's for sale" already did.
+
 ## [1.26.6] — Fixed joining a guild by name getting no reply at all
 
 Fixed: saying "join Adventurers' Guild" (or a typo like "I wan to

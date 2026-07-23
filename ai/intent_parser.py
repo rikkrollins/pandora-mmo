@@ -585,7 +585,16 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                                     # "available to buy" phrasings from the same bug
                                     # are caught earlier, before the "buy" check, since
                                     # they contain the bare word "buy"/"purchase").
-                                    "wares"]):
+                                    "wares",
+                                    # Real live bug (2026-07-22, Coffee: "why is it not
+                                    # opening the shop for this user?"): Sugar's plain
+                                    # "Shop" got zero reply (fell to silent chat), and
+                                    # "Look at shop" -- missing "the" this list already
+                                    # required -- fell to a plain "examine" instead,
+                                    # which only ever shows the NPC, not the wares.
+                                    "look at shop"]):
+        return {**base, "action": "list_shop"}
+    if lowered.strip(" .!?").strip() in ("shop", "shops", "the shop"):
         return {**base, "action": "list_shop"}
 
     # Real live bug (2026-07-15): "auto equip my equipment" contains "my
