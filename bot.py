@@ -8601,7 +8601,7 @@ async def _do_arcane_recovery(update: Update) -> None:
     )
 
 
-def _look_travel_keyboard(location: dict) -> InlineKeyboardMarkup | None:
+def _look_action_keyboard(location: dict, unclaimed_board_quests: list) -> InlineKeyboardMarkup | None:
     """
     Per Coffee (2026-07-21): "when u look around put pop up options for
     areas u have already traveled to so they can tap ... (use fog of
@@ -8609,16 +8609,30 @@ def _look_travel_keyboard(location: dict) -> InlineKeyboardMarkup | None:
     correct set here -- they're only ever the places actually visible/
     reachable standing right here, never a spoiler of anything further
     off (that's what the separate Waypoints menu is for, covering
-    already-visited-but-distant places instead). Tapping dispatches
-    through the exact same _do_move free text already uses, so every
-    existing gate (requires_item, locked_connections, min_level,
-    story_gates) still applies unchanged.
+    already-visited-but-distant places instead). Tapping a travel row
+    dispatches through the exact same _do_move free text already uses,
+    so every existing gate (requires_item, locked_connections,
+    min_level, story_gates) still applies unchanged.
+
+    Extended (2026-07-22, per Coffee: "if u look around and a place is
+    visble let them hit buttons for it -- example, I look around the
+    market and see the stalls of shop items, add a shop button abov
+    the locations"): the look text already NAMES a couple of other
+    obviously-tappable things at a glance -- a shop, and a quest board
+    -- so those get real buttons too, stacked above the travel rows
+    the same way Coffee described. Both are deterministic (no Ollama
+    call, no extra state), which is why these two specifically and not
+    also a "talk to X" button per NPC present -- talking is its own
+    real conversation, not a single obvious tap target.
     """
-    connections = location.get("connections", [])
-    if not connections:
-        return None
-    direction_for_dest = {dest: word.capitalize() for word, dest in location.get("directions", {}).items()}
     rows = []
+    if location.get("shop"):
+        rows.append([InlineKeyboardButton("🛒 Shop", callback_data="lookact|shop")])
+    if unclaimed_board_quests:
+        rows.append([InlineKeyboardButton("📋 Quest Board", callback_data="lookact|quests")])
+
+    connections = location.get("connections", [])
+    direction_for_dest = {dest: word.capitalize() for word, dest in location.get("directions", {}).items()}
     for dest_id in connections:
         dest = cl.get_location(CAMPAIGN, dest_id)
         if dest is None:
@@ -8629,7 +8643,7 @@ def _look_travel_keyboard(location: dict) -> InlineKeyboardMarkup | None:
 
 
 async def travel_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles taps on _look_travel_keyboard -- dispatches through the exact same _do_move a typed destination name already uses."""
+    """Handles taps on _look_action_keyboard's travel rows -- dispatches through the exact same _do_move a typed destination name already uses."""
     query = update.callback_query
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
@@ -8640,6 +8654,18 @@ async def travel_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if dest is None:
         return
     await _do_move(update, dest["name"])
+
+
+async def look_action_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _look_action_keyboard's Shop/Quest Board rows -- dispatches through the exact same real handlers free text already uses."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    await _safe_answer(query)
+    if action == "shop":
+        await _do_list_shop(update)
+    elif action == "quests":
+        await _do_check_quests(update)
 
 
 def _deterministic_image_seed(key: str) -> int:
@@ -8911,7 +8937,7 @@ async def _do_look(update: Update) -> None:
     # messages that were never meant to be narrated aloud, but "look"
     # is real player-facing narration and should have gone through
     # _safe_send like every other primary action reply already does.
-    await _safe_send(update, "\n".join(lines), reply_markup=_look_travel_keyboard(location))
+    await _safe_send(update, "\n".join(lines), reply_markup=_look_action_keyboard(location, unclaimed_board_quests))
     await _maybe_send_location_image(update, location, character["current_location"], already_visited)
 
 
@@ -14879,6 +14905,7 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(story_menu_callback, pattern=r"^story\|"))
     application.add_handler(CallbackQueryHandler(party_menu_callback, pattern=r"^party\|"))
     application.add_handler(CallbackQueryHandler(travel_menu_callback, pattern=r"^travel\|"))
+    application.add_handler(CallbackQueryHandler(look_action_menu_callback, pattern=r"^lookact\|"))
     application.add_handler(CallbackQueryHandler(creation_menu_callback, pattern=r"^create\|"))
     application.add_handler(CallbackQueryHandler(hybrid_menu_callback, pattern=r"^hybrid\|"))
     application.add_handler(CallbackQueryHandler(title_menu_callback, pattern=r"^title\|"))

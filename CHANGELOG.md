@@ -2,6 +2,13 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.1] — "Look around" gets Shop and Quest Board buttons
+
+Per Coffee: if a place is visibly there when you look around, you
+should be able to tap it. Looking around now shows a real Shop button
+when the location has one, and a Quest Board button when there's an
+unclaimed bounty posted, stacked above the existing travel buttons.
+
 ## [1.27.0] — Player marketplace gets real buttons and clearer instructions
 
 Per Coffee: the player marketplace (list items for other players to
