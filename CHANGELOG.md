@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.5] — Fixed solo combat drafting in unrelated companions, and talking to an NPC misrouting
+
+Fixed: starting a fight while playing solo could pull in an unrelated
+AI party member who simply happened to be standing at the same spot,
+even though they were never actually part of your party. Combat allies
+are now scoped to your real party, not just "whoever's nearby."
+
+Fixed: talking to an NPC with a longer message could get misrouted as
+messaging a party member instead, if the message happened to contain
+the phrase "tell me" anywhere in it (a completely ordinary way to
+phrase a question). Also hardened NPC name matching against a garbled
+name extraction so a real NPC is found even when extra words get
+attached to it.
+
 ## [1.27.4] — Two more real bugs caught by an internal end-to-end story run
 
 Fixed: attacking a named boss-type monster at a location that also has

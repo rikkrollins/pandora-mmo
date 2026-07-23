@@ -1087,6 +1087,30 @@ def _get_combat_eligible_party_members(location_id: str) -> list[dict]:
     ]
 
 
+def _get_real_party_combatants(requester: dict) -> list[dict]:
+    """
+    Who actually fights ALONGSIDE requester when combat starts (2026-07-23,
+    Coffee: "I don't remember inviting ZARA to our party is this a
+    glitch? ... They have to be in our party" -- Elduinn said "attack
+    the wolf" solo and Zara Windrift, an unrelated autonomous AI party
+    member who simply happened to be standing in the same spot, was
+    pulled in as an ally). _get_combat_eligible_party_members only ever
+    filtered by location, which is deliberately right for give_item/
+    equip-help/spell-target ("anyone physically here" is the natural
+    reading there) but wrong for who's actually on YOUR side in a
+    fight -- that has to be real party_id membership, not just
+    happening to share a room. A character with no real party_id at all
+    (the common case -- most characters never form or join one) fights
+    solo: everyone else here, even another solo character, sits it out.
+    """
+    location_id = requester["current_location"]
+    eligible = _get_combat_eligible_party_members(location_id)
+    party_id = requester.get("party_id")
+    if not party_id:
+        return [p for p in eligible if p["telegram_user_id"] == requester["telegram_user_id"]]
+    return [p for p in eligible if p.get("party_id") == party_id]
+
+
 def _presence_status(character: dict, now: datetime | None = None) -> str:
     """
     Derived presence (task #144), never stored as its own field -- it's
@@ -3773,8 +3797,12 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
         # character is in the tavern and another is in the whispering
         # woods they shud not be able to fight." Scoped to wherever the
         # player actually starting this fight is standing, not every
-        # active character in the whole game.
-        all_characters = _get_combat_eligible_party_members(requester["current_location"])
+        # active character in the whole game -- and (2026-07-23, same
+        # bug shape confirmed live: an unrelated autonomous AI party
+        # member got pulled into Elduinn's solo fight just for standing
+        # in the same spot) further scoped to requester's REAL party,
+        # never merely "whoever else happens to be here."
+        all_characters = _get_real_party_combatants(requester)
         # Characters at 0 HP can't fight until they rest — never silently
         # dragged into a new combat as if nothing happened.
         party = [p for p in all_characters if p["hp_current"] > 0]
@@ -3977,7 +4005,10 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
             # Same location-scoping fix as _do_start_combat (2026-07-14,
             # per Coffee): an ambush breaking out here shouldn't pull in
             # party members who are actually somewhere else entirely.
-            all_characters = _get_combat_eligible_party_members(location["id"])
+            # Also scoped to a REAL party (2026-07-23, same bug as
+            # _do_start_combat) -- an ambush shouldn't draft in whoever
+            # else happens to be standing nearby either.
+            all_characters = _get_real_party_combatants(character)
             party = [p for p in all_characters if p["hp_current"] > 0]
             if not party:
                 return
@@ -11911,9 +11942,26 @@ def _find_npc_id_by_name(name: str) -> str | None:
     Looks up an NPC's internal id from its real display name, since ids
     and names don't always match (e.g. 'sera_wanderer' -> 'Sarah'). Never
     assume npc_id == name.lower() — always go through this lookup.
+
+    Real live bug (2026-07-23, Coffee: "Talk to Ossian Vane 'how are
+    you? What can you tell me about the whispering woods?'" fell to
+    "doesn't spot anything like that here" instead of reaching Ossian):
+    for a longer sentence with an embedded quoted question, the model's
+    extracted npc_name can come back with extra trailing/leading words
+    attached (same shape as the earlier "Sarah into my party" recruit
+    bug) -- an exact-match-only lookup then finds nothing at all, even
+    though a real NPC's name is clearly IN there. Falls back to a
+    whole-word substring match (longest real name wins first, so a
+    short name can't accidentally match inside a longer, unrelated one)
+    before giving up.
     """
     for npc_id, data in CAMPAIGN["npcs"].items():
         if data["name"].lower() == name.lower() or npc_id.lower() == name.lower():
+            return npc_id
+    lowered = name.lower()
+    candidates = sorted(CAMPAIGN["npcs"].items(), key=lambda kv: -len(kv[1]["name"]))
+    for npc_id, data in candidates:
+        if re.search(r"\b" + re.escape(data["name"].lower()) + r"\b", lowered):
             return npc_id
     return None
 

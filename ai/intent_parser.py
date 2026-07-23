@@ -217,7 +217,15 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # into one of those triggers just because it happens to share a word
     # like "run". _do_message_ai independently verifies a real AI party
     # member is actually named; if not, it says so rather than guessing.
-    if lowered.startswith("tell ") or " tell " in lowered:
+    # Real live bug (2026-07-23, Coffee: "Talk to Ossian Vane 'how are
+    # you? What can you tell me about the whispering woods?'" got "Not
+    # sure who you're talking to -- name a party member"): the bare "
+    # tell " substring check above also fires on "what can you TELL ME
+    # about X" -- a completely ordinary question aimed at whoever's
+    # just been named/talked to, not an instruction being relayed to a
+    # party member. "tell me" specifically is never that instruction
+    # shape ("tell <name> to <verb>"), so it's excluded here.
+    if (lowered.startswith("tell ") or " tell " in lowered) and "tell me" not in lowered:
         return {**base, "action": "message_ai"}
 
     # Checked BEFORE check_quests below: "Accept the quest on the quest
