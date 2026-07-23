@@ -4047,10 +4047,24 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
         character = db.get_character(update.effective_user.id)
         location = cl.get_location(CAMPAIGN, character["current_location"]) if character else None
         local_monsters = location.get("monsters", []) if location else []
-        lowered = action_text.lower()
-        matched_monster = next(
-            (m for m in local_monsters if _text_mentions_monster(m, lowered)), None
-        ) or (local_monsters[0] if len(local_monsters) == 1 else None)
+        # Real live bug (caught by the full-playthrough simulation,
+        # 2026-07-23): "I attack the goblin boss" at the Goblin Warrens
+        # (monsters: goblin, goblin_shaman, goblin_boss) started a fight
+        # against a plain "goblin" instead -- _text_mentions_monster does
+        # an unordered plain-substring check, and "goblin boss" DOES
+        # contain the bare substring "goblin", so `next()` over
+        # local_monsters in its raw list order matched and stopped on
+        # the FIRST (least specific) monster whose name happened to
+        # substring-match, never reaching goblin_boss right after it in
+        # the same list. clear_the_warrens (defeat_monster: goblin_boss)
+        # could therefore never complete no matter how many "goblin
+        # boss" fights were won. _find_monster_mentioned_in_text already
+        # gets this right elsewhere (sorts candidates by name length
+        # descending, so "Goblin Boss"/"Goblin Shaman" both win over the
+        # bare "Goblin") -- reusing it here instead of duplicating a
+        # second, less careful matcher.
+        match = _find_monster_mentioned_in_text(location, action_text) if location else None
+        matched_monster = match[0] if match else (local_monsters[0] if len(local_monsters) == 1 else None)
         if matched_monster is not None:
             await _do_start_combat(update, monster_key=matched_monster)
 
@@ -5923,31 +5937,32 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
 
     location_id = character["current_location"]
 
-    # Checked BEFORE the location-based offer below: a companion's own
-    # personal quest is a real, specific thing the party just agreed to
-    # help with (see _offerable_companion_quest) -- it should win over
-    # an unrelated location-based quest that happens to also be posted
-    # wherever the player's currently standing, for a GENERIC "I accept
-    # the quest" with nothing specific named.
-    #
-    # Confirmed live 2026-07-14 (Coffee): this shortcut was
-    # unconditional, so "Accept the quest, a quiet request for wood" --
-    # a SPECIFIC, correctly-classified accept_quest naming a real
-    # different (board) quest by title -- got silently swallowed into
-    # accepting the companion quest instead, regardless of what was
-    # actually typed. Now only takes the shortcut when the text doesn't
-    # clearly name something else that's actually available here.
+    all_quests = board_quests_module.get_or_generate_board_quests(CAMPAIGN, location_id)
+    available = [q for q in all_quests if not q.get("accepted_by") and not q.get("completed_at")]
+
+    # Location-based story offer is checked BEFORE the companion offer
+    # below (2026-07-23, caught by the full-playthrough simulation): a
+    # companion's personal quest has no location at all (see
+    # _offerable_companion_quest's own docstring -- "not by location, a
+    # companion's own request travels with the party"), so with the
+    # companion check going first, a player standing at a real story
+    # location and saying a bare "I accept the quest" could silently
+    # accept an unrelated companion errand instead -- confirmed live in
+    # the sim: recruiting Sarah (a 2-quest personal arc) meant THREE
+    # separate "I accept the quest" attempts at The Hush Below were
+    # needed before its own real story quest was ever reached, with no
+    # sign anything unexpected had happened each time. Standing at a
+    # specific location is a much stronger signal of intent than "some
+    # companion elsewhere still has something pending" -- explicitly
+    # naming the companion quest by title still reaches it either way,
+    # same as explicitly naming a board quest already did.
+    offer = _offerable_quest_at_location(character, location_id)
     companion_offer = _offerable_companion_quest(character)
-    if companion_offer is not None:
-        quest_id, quest = companion_offer
-        location_offer_for_check = _offerable_quest_at_location(character, location_id)
-        board_quests_here = board_quests_module.get_or_generate_board_quests(CAMPAIGN, location_id)
-        available_board = [
-            q for q in board_quests_here if not q.get("accepted_by") and not q.get("completed_at")
-        ]
+    if offer is not None:
+        quest_id, quest = offer
         names_something_else = (
-            (location_offer_for_check is not None and location_offer_for_check[1]["title"].lower() in text.lower())
-            or any(q["title"].lower() in text.lower() for q in available_board)
+            (companion_offer is not None and companion_offer[1]["title"].lower() in text.lower())
+            or any(q["title"].lower() in text.lower() for q in available)
         )
         if not names_something_else:
             opening_note = await _arc_opening_note(character, quest_id, quest)
@@ -5956,22 +5971,15 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
             await _notify_main_topic(update, f"📜 **{character['name']}** accepted a quest: {quest['title']}")
             return
 
-    # No story quest on offer here — try the area's board quest(s) instead.
-    all_quests = board_quests_module.get_or_generate_board_quests(CAMPAIGN, location_id)
-    available = [q for q in all_quests if not q.get("accepted_by") and not q.get("completed_at")]
-
-    # Defensive fix (2026-07-18): this location-based story-quest
-    # shortcut used to be unconditional, the same class of mistake
-    # already fixed above for companion_offer on 2026-07-14 -- a
-    # location-tied story quest could otherwise win over a real, clearly
-    # named board quest posted at the same spot. (Confirmed this build's
-    # current campaign has no story quest actually tied to Whispering
-    # Wood, so this specific guard wasn't the cause of the Goblins/Wolves
-    # mixup below -- but the same shortcut-shadowing shape is real and
-    # worth closing here too, same as companion_offer already was.)
-    offer = _offerable_quest_at_location(character, location_id)
-    if offer is not None:
-        quest_id, quest = offer
+    # Confirmed live 2026-07-14 (Coffee): this shortcut was
+    # unconditional, so "Accept the quest, a quiet request for wood" --
+    # a SPECIFIC, correctly-classified accept_quest naming a real
+    # different (board) quest by title -- got silently swallowed into
+    # accepting the companion quest instead, regardless of what was
+    # actually typed. Now only takes the shortcut when the text doesn't
+    # clearly name something else that's actually available here.
+    if companion_offer is not None:
+        quest_id, quest = companion_offer
         names_something_else = any(q["title"].lower() in text.lower() for q in available)
         if not names_something_else:
             opening_note = await _arc_opening_note(character, quest_id, quest)
@@ -5979,6 +5987,8 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
             await _safe_send(update, f"{opening_note}📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}")
             await _notify_main_topic(update, f"📜 **{character['name']}** accepted a quest: {quest['title']}")
             return
+
+    # No story quest on offer here — try the area's board quest(s) instead.
     if not available:
         if all_quests:
             await update.effective_chat.send_message(

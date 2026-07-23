@@ -2,6 +2,22 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.4] — Two more real bugs caught by an internal end-to-end story run
+
+Fixed: attacking a named boss-type monster at a location that also has
+weaker versions of the same creature could start a fight against the
+wrong (weaker) one instead, since the match wasn't preferring the more
+specific name. Some story quests tied to defeating that exact monster
+could never complete as a result.
+
+Fixed: a bare "accept the quest" while standing at a real story
+location could silently accept an unrelated recruited companion's own
+personal errand instead, with no sign anything unexpected happened --
+now the location you're actually standing at wins; naming a companion
+quest by name still reaches it. Also renamed one quest that
+accidentally shared its title with a different, later one in the same
+storyline.
+
 ## [1.27.3] — Fixed a companion's personal quest being offered to the wrong player
 
 Fixed: a player could accept a quest and get a completely unrelated
