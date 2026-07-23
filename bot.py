@@ -9938,7 +9938,18 @@ async def _do_fast_travel(update: Update, text: str) -> None:
         )
         return
 
-    if sessions.get_session(update.effective_chat.id) is not None:
+    # Real live bug (2026-07-22, Sugar: "I'm not in battle why can't I
+    # travel?"): this only ever checked whether ANY combat session
+    # existed anywhere in the shared chat -- since sessions.py's
+    # _ACTIVE_SESSIONS is one Session per chat_id (this whole game
+    # shares a single Adventure chat), a fight happening to a DIFFERENT
+    # character entirely (confirmed live: Sarah fighting a Giant Spider
+    # while Sugar's own character was elsewhere, uninvolved) blocked
+    # every other player in the game from fast-traveling too. Now only
+    # blocks a character who's actually a real participant in that
+    # session -- someone else's fight elsewhere no longer stops you.
+    active_session = sessions.get_session(update.effective_chat.id)
+    if active_session is not None and telegram_user_id in active_session.turn_order:
         await update.effective_chat.send_message(
             "You can't fast-travel in the middle of combat.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,

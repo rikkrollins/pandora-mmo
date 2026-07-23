@@ -2,6 +2,13 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.26.3] — Fixed a real fast-travel blocker
+
+Fixed: fast-travel was being blocked for EVERYONE in the game whenever
+ANY combat was happening anywhere, even to players who weren't
+involved at all. Now only blocks you if you're actually the one
+fighting.
+
 ## [1.26.2] — Push-button title picker
 
 Setting your title now has real tap-to-choose buttons when you check
