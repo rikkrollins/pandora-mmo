@@ -5439,9 +5439,23 @@ def _offerable_companion_quest(character: dict) -> tuple[str, dict] | None:
     never collides with the ordinary location-based quests above
     (this game's only other quest with a 'location' field matching
     that spot might already be a different quest entirely).
+
+    Real live bug (2026-07-22, Coffee: "what is wrong with the quest
+    system?" -- accepted a quest right after talking to Wren
+    Hollowbrook and got Pip Thistledown's quest instead): this used to
+    scope "who's in the party" via _get_party_members(), which returns
+    EVERY active character in the ENTIRE GAME, not this character's own
+    party -- so a companion recruited by a completely different player
+    elsewhere could still get offered here, and dict order (not
+    recency or relevance) decided which one won. Now scoped to this
+    character's own real party_id, the same way _check_story_gate's
+    companion-trust check already does it.
     """
+    party_id = character.get("party_id")
+    if not party_id:
+        return None
     party_npc_ids = {
-        _find_npc_id_by_name(p["name"]) for p in _get_party_members() if p.get("is_ai")
+        _find_npc_id_by_name(p["name"]) for p in db.get_party_members_by_id(party_id) if p.get("is_ai")
     }
     for quest_id, quest in CAMPAIGN.get("quests", {}).items():
         giver = quest.get("giver_npc")

@@ -2,6 +2,15 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.3] — Fixed a companion's personal quest being offered to the wrong player
+
+Fixed: a player could accept a quest and get a completely unrelated
+companion's personal storyline instead -- one that was never actually
+in their own party at all. A companion's own quest was being matched
+against every active companion in the whole game rather than just the
+accepting player's real party, so someone else's recruited companion
+could win out. Now scoped correctly to the player's own party.
+
 ## [1.27.2] — Fixed "recruit X into my party" failing to find a real companion
 
 Fixed (caught by an internal end-to-end simulation): "I recruit Sarah
