@@ -1011,10 +1011,21 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     mentions_a_real_guild = "guild" in lowered or any(
         gid.replace("_", " ") in lowered or g["name"].lower() in lowered for gid, g in GUILDS.items()
     )
-    if mentions_a_real_guild and any(w in lowered for w in [
-        "join the", "i want to join", "become a member of", "join a guild",
-        "guilds can i join", "what guilds", "which guilds",
-    ]):
+    # Real live bug (2026-07-22, Coffee: "join Adventurers' Guild" /
+    # "I wan to join Adventurers' Guild" got zero reply at all): the
+    # phrase list below only covered "join THE X" or "I want to join
+    # X", missing the equally natural bare "join X" (with or without
+    # "the") and casual "wan[t] to join" typos. Safe to broaden to any
+    # bare "join" since mentions_a_real_guild above already requires a
+    # real guild's own name/id (or the literal word "guild") to be
+    # present -- that's what keeps "I want to join the hunt for
+    # wolves" from matching, not the phrase list's narrowness.
+    if mentions_a_real_guild and (
+        re.search(r"\bjoin\b", lowered)
+        or any(w in lowered for w in [
+            "become a member of", "what guilds", "which guilds",
+        ])
+    ):
         return {**base, "action": "join_guild"}
 
     pass_words = ["pass", "skip my turn", "i wait", "i'll wait", "ill wait", "wait and see", "hold my action"]

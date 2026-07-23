@@ -2,6 +2,14 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.26.6] — Fixed joining a guild by name getting no reply at all
+
+Fixed: saying "join Adventurers' Guild" (or a typo like "I wan to
+join...") got zero reply. The natural-language fallback only
+recognized "join THE X" or "I want to join X" phrasing, missing the
+equally natural bare "join X". Now recognizes any real guild mention
+alongside the word "join" in any form.
+
 ## [1.26.5] — Fixed replies silently dropping during busy combat
 
 Fixed: players reported not being able to do anything (open the menu,
