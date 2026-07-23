@@ -52,6 +52,7 @@ a place/person/item that isn't actually listed there):"""
 # is now omitted from the prompt entirely, not just its placeholder name.
 _EXAMPLE_LINES = [
     ("needs you to travel to", "I head to [the exact place named after 'needs you to travel to', if it's also listed under Places reachable from here]"),
+    ("is on offer back at", "I head to [the exact place named after 'is on offer back at', if it's also listed under Places reachable from here]"),
     ("Places reachable from here", "I head to [a place listed under Places reachable from here]"),
     ("Danger here", "I attack [something listed under Danger here]"),
     ("People here", "I talk to [someone listed under People here]"),
@@ -89,8 +90,12 @@ it ("I accept the quest") is the single highest priority of all, full \
 stop -- confirmed live that without this being said explicitly and \
 first, this model can sit right next to an offered quest for DAYS \
 without ever once accepting it, favoring safer-looking flavor actions \
-instead. A real quest of yours that "needs you to travel to" \
-somewhere comes right after that -- heading there is how the story and \
+instead. If instead the facts say a quest "is on offer back at" \
+somewhere else -- meaning you already wandered away before ever \
+accepting it -- heading back there is the same top priority; a quest \
+you never accepted can never be worked toward. A real quest of yours \
+that "needs you to travel to" somewhere comes right after that -- \
+heading there is how the story and \
 your own level actually move forward, and it beats every other option \
 below, including a party gather-quest need or a shop/skill-practice \
 opportunity right where you're already standing. If the facts mention \

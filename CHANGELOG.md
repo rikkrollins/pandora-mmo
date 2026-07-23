@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.26.5] — Fixed replies silently dropping during busy combat
+
+Fixed: players reported not being able to do anything (open the menu,
+use waypoints) while an unrelated fight was happening elsewhere in the
+same chat. The actual cause wasn't a combat gate -- neither the menu
+nor waypoints have one -- it was message volume: heavy send traffic
+from an active fight tripped Telegram's own flood control, and the
+retry logic gave up after one quick retry, silently dropping several
+real replies in the same short burst. Now retries more persistently
+and, when Telegram says "try again in N seconds," actually waits that
+long instead of guessing.
+
+## [1.26.4] — Fixed location/monster images failing silently, and AI
+companions not returning to accept a quest they'd wandered away from
+
+Fixed: location and monster images could fail to send during
+background AI-party turns and the hourly world update, due to a
+missing method on an internal helper (same shape as the earlier
+send_audio fix). These were already caught gracefully, so nothing
+crashed, but the images were being silently skipped.
+
+Fixed: an autonomous AI party member could wander away from a quest
+board before ever accepting what was offered there, with nothing in
+its own situational awareness ever pointing back to it -- it now
+notices an unaccepted quest on offer elsewhere and can choose to head
+back for it.
+
 ## [1.26.3] — Fixed a real fast-travel blocker
 
 Fixed: fast-travel was being blocked for EVERYONE in the game whenever

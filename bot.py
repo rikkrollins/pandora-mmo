@@ -24,7 +24,7 @@ import requests
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity, Update, User
 from telegram.constants import ChatAction
-from telegram.error import TelegramError
+from telegram.error import RetryAfter, TelegramError
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -985,6 +985,21 @@ class _ChatOnlyUpdate:
             # send_message already does.
             return await self._bot.send_audio(
                 chat_id=self.id, message_thread_id=message_thread_id, audio=audio, **kwargs
+            )
+
+        async def send_photo(self, photo=None, caption=None, message_thread_id=None, **kwargs):
+            # Real live bug (2026-07-22, caught by direct log monitoring):
+            # same missing-method shape as send_audio above, this time
+            # for location images -- the autonomous AI party's own
+            # moves into a new location kept raising a bare AttributeError
+            # from _maybe_send_location_image, since this shim never
+            # implemented send_photo either. Caught there by a broad
+            # except (so it only silently skipped the image rather than
+            # aborting the whole turn like the send_audio bug did), but
+            # still a real, fixable gap. Delegates to the real bot the
+            # same way send_message/send_audio already do.
+            return await self._bot.send_photo(
+                chat_id=self.id, message_thread_id=message_thread_id, photo=photo, caption=caption, **kwargs
             )
 
     def __init__(self, bot, chat_id: int):
@@ -2128,6 +2143,22 @@ async def _safe_send(
     turning a genuinely broken connection into a long hang -- the
     caller's already-decided game state doesn't depend on this send
     succeeding either way, so a short, bounded retry is pure upside.
+
+    2026-07-22: confirmed live a THIRD failure mode, reported as "we
+    can't do anything while there's an ongoing battle" (Coffee) and a
+    waypoint tap silently doing nothing (Sugar) -- neither /menu nor
+    the waypoint button have any combat-gating code at all, so the
+    real cause wasn't a gate, it was volume: heavy concurrent send
+    traffic from an active AI-party fight saturating this same chat
+    tripped Telegram's actual flood control (a genuine 429 + `RetryAfter
+    ("Flood control exceeded. Retry in 5 seconds")`), and the single
+    flat 2s-then-give-up retry above wasn't enough to survive a burst
+    -- the log shows five separate real replies hit "giving up" inside
+    one eight-second window at the exact timestamp of Coffee's report.
+    Now retries up to 3 times total and, on a RetryAfter specifically,
+    sleeps for the duration Telegram actually asked for (plus a small
+    margin) instead of a flat guess -- giving bursts a real chance to
+    clear before a reply is dropped.
     """
     is_buffering = isinstance(update.effective_chat, _BufferingChatProxy)
     if is_buffering:
@@ -2157,7 +2188,8 @@ async def _safe_send(
     else:
         resolved_thread_id = thread_id
 
-    for attempt in range(2):
+    max_attempts = 3
+    for attempt in range(max_attempts):
         try:
             await update.effective_chat.send_message(
                 clean_text, message_thread_id=resolved_thread_id,
@@ -2167,11 +2199,15 @@ async def _safe_send(
                 await _maybe_speak(update, text, resolved_thread_id)
             return
         except TelegramError as e:
-            if attempt == 0:
-                logger.warning(f"[message] send failed, retrying once: {e!r}")
-                await asyncio.sleep(2)
-            else:
+            if attempt == max_attempts - 1:
                 logger.warning(f"[message] send failed again, giving up: {e!r}")
+            elif isinstance(e, RetryAfter):
+                wait = e.retry_after + 1
+                logger.warning(f"[message] flood control hit, waiting {wait}s then retrying: {e!r}")
+                await asyncio.sleep(wait)
+            else:
+                logger.warning(f"[message] send failed, retrying: {e!r}")
+                await asyncio.sleep(2)
 
 
 async def _safe_answer(query) -> bool:
@@ -14326,6 +14362,28 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
     story_offer = _offerable_quest_at_location(character, location_id)
     if story_offer:
         lines.append(f"A quest is on offer here: {story_offer[1]['title']}")
+    else:
+        # Real live gap found via direct monitoring (2026-07-22): once
+        # the AI party wandered away from wherever a quest was actually
+        # offered (its own starting location, in the confirmed case),
+        # this fact -- and the "accepting an offered quest is the
+        # single highest priority" guidance in ai/autonomous_player.py
+        # -- had nothing left to trigger on, ever again, since a
+        # quest's offer only ever showed while standing exactly there.
+        # Surfaces a real, grounded reminder to go back for it instead.
+        for quest_id, quest in CAMPAIGN.get("quests", {}).items():
+            offer_location = quest.get("location")
+            if not offer_location or offer_location == location_id:
+                continue
+            if quest_id in character["completed_quests"] or quest_id in character["active_quests"]:
+                continue
+            offer_loc_data = cl.get_location(CAMPAIGN, offer_location)
+            if offer_loc_data:
+                lines.append(
+                    f"A quest (\"{quest['title']}\") is on offer back at {offer_loc_data['name']} -- "
+                    "you could head there to accept it."
+                )
+                break
 
     # Per Coffee (2026-07-14): a recruited companion's own personal
     # quest should be something the AI party can choose to help with
