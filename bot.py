@@ -6417,12 +6417,36 @@ async def _do_sell_market(update: Update, args: list[str]) -> None:
     )
 
 
+def _market_keyboard(listings: list[dict]) -> InlineKeyboardMarkup | None:
+    """
+    Per Coffee (2026-07-22): "make buttons on market and tell players
+    how to use market" -- the player marketplace was slash-command-only
+    with no buttons at all (unlike the NPC shop's _shop_keyboard),
+    which cuts against this whole game's "no slash commands required"
+    design. One Buy button per real listing, same reuse-the-existing-
+    handler pattern as _shop_keyboard -- tapping dispatches through the
+    SAME _do_buy_market a typed "/buy_market <#>" already uses.
+    """
+    buttons = []
+    for listing in listings:
+        item = items_module.get_item(listing["item_id"])
+        item_name = item["name"] if item else listing["item_id"]
+        buttons.append([InlineKeyboardButton(
+            f"Buy {listing['quantity']}x {item_name} — {listing['price']}g",
+            callback_data=f"market|buy|{listing['listing_id']}",
+        )])
+    return InlineKeyboardMarkup(buttons) if buttons else None
+
+
 async def _do_check_market(update: Update) -> None:
     listings = db.get_market_listings()
     if not listings:
-        await update.effective_chat.send_message(
-            "The marketplace is empty right now — nobody's listed anything for sale.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        await _safe_send(
+            update,
+            "The marketplace is empty right now — nobody's listed anything for sale.\n\n"
+            "Want to sell something yourself? Say \"/sell_market <quantity> <price> <item name>\" "
+            "(e.g. \"/sell_market 3 50 Silverleaf Herb\") to list it for other players to buy.",
+            speak=False,
         )
         return
     lines = ["🏛️ **Player Marketplace:**"]
@@ -6433,8 +6457,12 @@ async def _do_check_market(update: Update) -> None:
             f"#{listing['listing_id']}: {listing['quantity']}x {item_name} — {listing['price']} gold "
             f"(seller: {listing['seller_name']})"
         )
-    lines.append("\nSay \"/buy_market <#>\" to buy one.")
-    await _safe_send(update, "\n".join(lines), speak=False)
+    lines.append(
+        "\nTap a listing below to buy it, or say \"/buy_market <#>\".\n"
+        "Selling something yourself? Say \"/sell_market <quantity> <price> <item name>\" "
+        "(e.g. \"/sell_market 3 50 Silverleaf Herb\")."
+    )
+    await _safe_send(update, "\n".join(lines), reply_markup=_market_keyboard(listings), speak=False)
 
 
 async def _do_buy_market(update: Update, args: list[str]) -> None:
@@ -10520,6 +10548,17 @@ async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if action == "buy":
         qty = int(parts[3]) if len(parts) > 3 else 1
         await _do_buy(update, f"buy {qty} {item['name']}")
+
+
+async def market_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _market_keyboard -- dispatches through the same _do_buy_market a typed "/buy_market <#>" already uses."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    await _safe_answer(query)
+    if action != "buy" or len(parts) < 3:
+        return
+    await _do_buy_market(update, [parts[2]])
 
 
 async def _do_list_shop(update: Update) -> None:
@@ -14827,6 +14866,7 @@ def build_application() -> Application:
     # own callback-data namespaces so none of these can ever collide with
     # the combat battle menu above or each other.
     application.add_handler(CallbackQueryHandler(shop_menu_callback, pattern=r"^shop\|"))
+    application.add_handler(CallbackQueryHandler(market_menu_callback, pattern=r"^market\|"))
     application.add_handler(CallbackQueryHandler(spell_menu_callback, pattern=r"^spell\|"))
     application.add_handler(CallbackQueryHandler(quest_menu_callback, pattern=r"^quest\|"))
     application.add_handler(CallbackQueryHandler(item_menu_callback, pattern=r"^item\|"))

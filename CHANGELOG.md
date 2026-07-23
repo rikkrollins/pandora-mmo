@@ -2,6 +2,15 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.0] — Player marketplace gets real buttons and clearer instructions
+
+Per Coffee: the player marketplace (list items for other players to
+buy) was slash-command-only with no buttons at all, unlike the NPC
+shop. Checking the market now shows a real Buy button per listing
+(tap to purchase, same as the NPC shop already works), and both the
+empty and populated market views now clearly explain how to list
+something for sale yourself.
+
 ## [1.26.7] — Fixed "Shop" and "Look at shop" not opening the shop
 
 Fixed: typing just "Shop" got zero reply, and "Look at shop" only
