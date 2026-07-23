@@ -326,7 +326,16 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     for trigger in ["recruit "]:
         if trigger in lowered:
             name = text[lowered.index(trigger) + len(trigger):].strip()
-            for cut in (" to my party", " to the party", " to our party", " to join", " to my group"):
+            # Real live bug (2026-07-22, caught by the full-playthrough
+            # simulation): "I recruit Sarah INTO my party" isn't covered
+            # by any "to X" cut phrase below, so the whole trailing
+            # "Sarah into my party" got passed as the npc_name verbatim
+            # -- doesn't match any real NPC, so _do_recruit_npc's own
+            # "no one by that name" fires even though Sarah IS real and
+            # recruitable. Same gap shape as every other missing-
+            # preposition-variant bug this session.
+            for cut in (" to my party", " to the party", " to our party", " to join", " to my group",
+                        " into my party", " into the party", " into our party", " into my group"):
                 if cut in name.lower():
                     name = name[:name.lower().index(cut)].strip()
                     break

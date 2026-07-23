@@ -2,6 +2,13 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.2] — Fixed "recruit X into my party" failing to find a real companion
+
+Fixed (caught by an internal end-to-end simulation): "I recruit Sarah
+into my party" said a real, recruitable companion couldn't be found,
+because the name-extraction only handled "recruit X TO my party," not
+"INTO." Now recognizes both.
+
 ## [1.27.1] — "Look around" gets Shop and Quest Board buttons
 
 Per Coffee: if a place is visibly there when you look around, you
