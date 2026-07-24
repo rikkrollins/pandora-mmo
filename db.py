@@ -1705,6 +1705,33 @@ def get_party_members_by_id(party_id: int) -> list[dict]:
     return [_row_to_dict(r) for r in rows]
 
 
+def get_party_members_by_id_including_inactive_slots(party_id: int) -> list[dict]:
+    """
+    Real bug caught live (2026-07-24, Coffee: "she's currently dead"
+    but the shrine kept saying "there's no one to bring back"):
+    get_party_members_by_id's active_characters join means a dead real
+    player who has since SWITCHED to a different character (per
+    CLAUDE.md's own documented behavior -- "the player can switch to
+    another character of theirs in the meantime" while dead) silently
+    vanishes from every party lookup entirely, since her dead character
+    is no longer her account's active slot -- a different, alive
+    character of hers is. Confirmed live: Laurienna's real owner had
+    switched to a character named Charvenna, so Laurienna (is_dead=1,
+    genuinely sitting in the party) never showed up in any
+    active-characters-gated query at all. This variant is scoped by
+    party_id alone, matching every OTHER member sharing this party --
+    exactly what revival features (shrine offering, Tent/Cabin/House)
+    need, since a permanently-dead character is precisely the kind of
+    "inactive slot" real player death leaves behind.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM characters WHERE party_id = ? AND is_deleted = 0",
+            (party_id,),
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
 def list_all_active_real_players() -> list[dict]:
     """
     Every real (non-AI) player's currently active character, across the

@@ -10691,7 +10691,21 @@ async def _do_give_offering(update: Update, text: str) -> None:
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
-    target = _find_party_target_by_name(text)
+    # Real bug caught live (2026-07-24, Coffee: "she's currently dead"
+    # but the shrine kept saying nobody was): _find_party_target_by_name
+    # (like every OTHER caller of _get_party_members) only ever sees a
+    # player's CURRENTLY ACTIVE character -- a real player who dies and
+    # switches to another character in the meantime (their documented,
+    # intended option while dead) makes their dead character invisible
+    # to this lookup entirely, forever, since it's no longer anyone's
+    # active slot. Scoped to the CALLER's own real party_id instead
+    # (via the new inclusive lookup), so a dead party member still
+    # shows up regardless of what their owner is currently playing.
+    party_members = (
+        db.get_party_members_by_id_including_inactive_slots(character["party_id"])
+        if character.get("party_id") else []
+    )
+    target = _match_member_by_name_or_username(text, party_members)
     if target is None or not target.get("is_dead"):
         # Real live bug (2026-07-24, Coffee: "I pray at the shrine" then
         # got told to name someone, but had already been trying to pray
@@ -10704,7 +10718,7 @@ async def _do_give_offering(update: Update, text: str) -> None:
         # defaulting to the only enemy present, single-word location
         # matching when it's the only candidate, etc.) -- only ask for a
         # name when there's genuine ambiguity (more than one fallen ally).
-        dead_members = [m for m in _get_party_members() if m.get("is_dead")]
+        dead_members = [m for m in party_members if m.get("is_dead")]
         if target is None and len(dead_members) == 1:
             target = dead_members[0]
         elif target is None and len(dead_members) > 1:
@@ -10744,7 +10758,15 @@ async def _do_shrine_offering_menu(update: Update) -> None:
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
-    dead_members = [m for m in _get_party_members() if m.get("is_dead")]
+    # Same real bug/fix as _do_give_offering above -- _get_party_members
+    # only ever shows a player's currently active character, so a dead
+    # real player who's switched to a different one in the meantime
+    # would never show up here at all.
+    party_members = (
+        db.get_party_members_by_id_including_inactive_slots(character["party_id"])
+        if character.get("party_id") else []
+    )
+    dead_members = [m for m in party_members if m.get("is_dead")]
     if not dead_members:
         await update.effective_chat.send_message(
             "No one to bring back right now — everyone in your party is alive and well.",

@@ -2,6 +2,16 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.16] — Fixed a dead party member becoming permanently unrevivable after switching characters
+
+Fixed a real bug: a player who died and then switched to play a
+different character in the meantime (an intended option while dead)
+made their fallen character invisible to every revival method —
+praying at the shrine, items, everything — since it was no longer
+their "active" character. Party lookups for reviving someone now
+correctly include every real party member regardless of which
+character their owner currently has active.
+
 ## [1.27.15] — Praying at the shrine is easier, plus new tap-to-revive buttons
 
 Fixed: praying at the shrine without naming who in that exact same
