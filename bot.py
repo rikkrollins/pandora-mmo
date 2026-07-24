@@ -5309,13 +5309,25 @@ async def _do_rest(update: Update) -> None:
     NATURAL_HEALING_FULL_REST_HOURS.
     """
     chat_id = update.effective_chat.id
-    if sessions.get_session(chat_id) is not None:
+    telegram_user_id = update.effective_user.id
+    # Real live bug (2026-07-23, Coffee: "I ran from battle, but for
+    # some reason, it still thinks I'm in battle"): this only ever
+    # checked whether ANY combat session existed anywhere in the shared
+    # chat -- since sessions.py's _ACTIVE_SESSIONS is one Session per
+    # chat_id (this whole game shares a single Adventure chat),
+    # successfully fleeing a fight that a PARTY MEMBER (Sugar) was
+    # still in left the chat's session very much alive, so resting
+    # right afterward was blocked even though Coffee himself was no
+    # longer a real participant in it. Same fix shape as the earlier
+    # fast-travel bug (v1.26.3) -- only blocks a character who's
+    # actually still in that session's turn order.
+    active_session = sessions.get_session(chat_id)
+    if active_session is not None and telegram_user_id in active_session.turn_order:
         await update.effective_chat.send_message(
             "You can't rest in the middle of combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
         )
         return
 
-    telegram_user_id = update.effective_user.id
     character = db.get_character(telegram_user_id)
     if character is None:
         await update.effective_chat.send_message(
@@ -11880,7 +11892,11 @@ async def roster_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         # tells a wrong tapper plainly why nothing happened.
         await _safe_send(update, "That's not one of your characters.")
         return
-    if sessions.get_session(update.effective_chat.id) is not None:
+    # Same real bug shape as _do_rest (2026-07-23, Coffee): only blocks
+    # a character who's actually still a participant in this chat's
+    # shared combat session, not merely "some fight is happening here."
+    active_session = sessions.get_session(update.effective_chat.id)
+    if active_session is not None and telegram_user_id in active_session.turn_order:
         await update.effective_chat.send_message(
             "You can't switch characters in the middle of combat.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
@@ -11924,7 +11940,8 @@ async def _do_switch_character(update: Update, text: str) -> None:
         )
         return
 
-    if sessions.get_session(update.effective_chat.id) is not None:
+    active_session = sessions.get_session(update.effective_chat.id)
+    if active_session is not None and update.effective_user.id in active_session.turn_order:
         await update.effective_chat.send_message(
             "You can't switch characters in the middle of combat.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
@@ -11950,7 +11967,8 @@ async def _do_delete_character(update: Update, text: str) -> None:
         )
         return
 
-    if sessions.get_session(update.effective_chat.id) is not None:
+    active_session = sessions.get_session(update.effective_chat.id)
+    if active_session is not None and update.effective_user.id in active_session.turn_order:
         await update.effective_chat.send_message(
             "You can't delete a character in the middle of combat.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,

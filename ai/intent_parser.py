@@ -506,7 +506,10 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                 return {**base, "action": "recruit_npc", "npc_name": npc_name}
             return {**base, "action": "talk_npc", "npc_name": npc_name}
 
-    flee_words = ["flee", "run away", "try to run", "try to escape", "escape the fight",
+    # Real live bug (2026-07-23, Coffee: "Run from battle" got classified
+    # as bare chat instead of fleeing -- only "run away" was covered,
+    # missing the equally natural "run from X").
+    flee_words = ["flee", "run away", "run from", "try to run", "try to escape", "escape the fight",
                   "retreat", "get out of here", "get me out", "make a break for it"]
     if any(w in lowered for w in flee_words):
         return {**base, "action": "flee"}

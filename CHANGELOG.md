@@ -2,6 +2,16 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.7] — Fixed "still thinks I'm in combat" after successfully fleeing
+
+Fixed: "Run from battle" (and similar phrasing) could get misread as
+an ordinary comment instead of actually attempting to flee. Also
+fixed: resting, switching characters, or deleting a character could
+still say "you can't do that in the middle of combat" even after you
+successfully fled a fight, if another party member was still in it --
+these now only block someone who's actually still a real participant
+in that fight, not just "a fight is happening somewhere in this chat."
+
 ## [1.27.6] — Reduced background load on shared narration capacity
 
 Purely atmospheric background narration (the "world keeps living while
