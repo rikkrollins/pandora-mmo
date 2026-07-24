@@ -2,6 +2,14 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.12] — Fixed "use the scroll..." style phrasing sometimes being misread
+
+Fixed: using an item or scroll ("Use the scroll of X on Y", "Use my
+potion") without starting the sentence with "I" could occasionally be
+misread as an unrelated action. This phrasing is now recognized
+reliably every time, and scrolls specifically are routed to the right
+place so they're found and consumed correctly.
+
 ## [1.27.11] — Companions now stay with your party when you travel, and other party fixes
 
 Fixed a real bug where a companion could get left behind whenever you

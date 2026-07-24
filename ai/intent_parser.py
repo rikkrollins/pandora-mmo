@@ -1009,7 +1009,16 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in ["steal", "pickpocket", "rob the", "rob this", "swipe the", "take without paying"]):
         return {**base, "action": "steal"}
 
-    if any(w in lowered for w in ["cast ", "i cast"]):
+    # "scroll" + any "use" phrasing (2026-07-24, Coffee: "Use the scroll
+    # of revivify on Laurrienna" got misread as a plain look-around) --
+    # a scroll is a type="scroll" item, not a type="consumable" one, so
+    # _do_use_item's own inventory filter would never find it and would
+    # just reject the action; _do_cast_spell is the real handler that
+    # already knows how to find a matching scroll in inventory and
+    # consume it in place of a spell slot. Checked BEFORE the general
+    # "use the/my/a" -> use_item broadening below, so a scroll always
+    # wins that ambiguity.
+    if any(w in lowered for w in ["cast ", "i cast"]) or ("scroll" in lowered and re.search(r"\buse\b", lowered)):
         return {**base, "action": "cast_spell"}
 
     if any(w in lowered for w in ["equip ", "wield ", "wear ", "put on the", "put on my",
@@ -1026,7 +1035,17 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # exact-phrase-only "eat my rations"/"eat the rations" (which missed
     # the equally natural "Eat ration" / "I eat a ration") to any real
     # eat phrasing.
-    if any(w in lowered for w in ["drink ", "quaff", "i use my", "i use the", "i use a"]) \
+    # Real live bug (2026-07-24, Coffee: "Use the scroll of revivify on
+    # Laurrienna" got misread as a plain "look around"): these all
+    # required a leading "i " ("i use my"/"i use the"/"i use a"), so any
+    # phrasing WITHOUT that pronoun ("Use the scroll of...", "Use my
+    # potion on...") fell all the way through to the real model instead
+    # of the deterministic fast path -- and the model got this one
+    # wrong. Same word-boundary "use (the|my|a|an)" now matches
+    # regardless of a leading pronoun; \b keeps it from false-positiving
+    # on words that merely CONTAIN "use" ("because the", "used the").
+    if any(w in lowered for w in ["drink ", "quaff"]) \
+            or re.search(r"\buse (the|my|a|an)\b", lowered) \
             or re.search(r"\beats?\b", lowered):
         return {**base, "action": "use_item"}
 
