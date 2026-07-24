@@ -516,6 +516,48 @@ def update_character(telegram_user_id: int, **fields) -> dict | None:
     return get_character(telegram_user_id)
 
 
+def update_character_by_id(character_id: int, **fields) -> dict | None:
+    """
+    Real bug caught live (2026-07-24, same incident as
+    get_party_members_by_id_including_inactive_slots): update_character
+    always writes to whichever character is CURRENTLY ACTIVE for a
+    telegram_user_id -- there's no way for it to target a specific,
+    non-active character row. This silently broke the shrine offering's
+    actual revival write: it correctly FOUND a dead character sitting in
+    an inactive slot (their owner had switched to play someone else
+    while dead), sent a real "they gasp back to life" message, then
+    called update_character(target["telegram_user_id"], is_dead=0, ...)
+    -- which updated the owner's CURRENTLY ACTIVE character instead
+    (a different, already-alive one), leaving the actually-dead
+    character silently untouched. The player-facing message claimed
+    success while nothing had actually changed. This variant targets an
+    exact character_id directly, bypassing the active-character
+    indirection entirely -- required whenever the character being
+    modified might not be its owner's active slot (reviving a fallen
+    ally who isn't currently being played is exactly that case).
+    """
+    if not fields:
+        with get_connection() as conn:
+            row = conn.execute("SELECT * FROM characters WHERE character_id = ?", (character_id,)).fetchone()
+        return _row_to_dict(row) if row else None
+
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "achievements", "map_revealed_locations", "skill_tree_upgrades")
+    for key in json_fields:
+        if key in fields and not isinstance(fields[key], str):
+            fields[key] = json.dumps(fields[key])
+
+    columns = ", ".join(f"{k} = ?" for k in fields)
+    values = list(fields.values())
+
+    with get_connection() as conn:
+        conn.execute(
+            f"UPDATE characters SET {columns} WHERE character_id = ?",
+            values + [character_id],
+        )
+        row = conn.execute("SELECT * FROM characters WHERE character_id = ?", (character_id,)).fetchone()
+    return _row_to_dict(row) if row else None
+
+
 def add_item(telegram_user_id: int, item_id: str, quantity: int = 1) -> dict | None:
     """Add `quantity` of an item to a character's backpack (dict of item_id -> count)."""
     character = get_character(telegram_user_id)
@@ -815,6 +857,24 @@ def get_character(telegram_user_id: int) -> dict | None:
         character_id = _active_character_id(telegram_user_id, conn)
         if character_id is None:
             return None
+        row = conn.execute(
+            "SELECT * FROM characters WHERE character_id = ? AND is_deleted = 0",
+            (character_id,),
+        ).fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def get_character_by_id(character_id: int) -> dict | None:
+    """
+    Returns one exact character row, regardless of whether it's that
+    owner's currently active character -- needed anywhere a specific,
+    possibly-inactive character must be targeted directly (e.g. the
+    shrine's tap-to-revive buttons resolving a specific dead party
+    member, not whichever character that player happens to have active
+    right now). See update_character_by_id's docstring for the real
+    live incident this pairs with.
+    """
+    with get_connection() as conn:
         row = conn.execute(
             "SELECT * FROM characters WHERE character_id = ? AND is_deleted = 0",
             (character_id,),

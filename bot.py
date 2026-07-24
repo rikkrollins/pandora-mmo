@@ -10522,7 +10522,18 @@ async def _do_use_item(update: Update, text: str) -> None:
         return
 
     item = items_module.get_item(item_id)
-    target = _find_party_target_by_name(text) or character
+    # Real bug caught live (2026-07-24, Coffee: "revival can't see
+    # inactive characters... shrine, tent, cabin, house, it all needs
+    # to work this way"): _find_party_target_by_name only ever sees a
+    # player's currently ACTIVE character, so a dead party member whose
+    # owner has since switched to play someone else (a real, intended
+    # option while dead) was invisible here too, same root cause/fix as
+    # the shrine offering's get_party_members_by_id_including_inactive_slots.
+    party_id = character.get("party_id")
+    all_party_members = (
+        db.get_party_members_by_id_including_inactive_slots(party_id) if party_id else []
+    )
+    target = _match_member_by_name_or_username(text, all_party_members) or character
     is_self = target["telegram_user_id"] == character["telegram_user_id"]
     target_note = "" if is_self else f" on **{target['name']}**"
 
@@ -10556,7 +10567,12 @@ async def _do_use_item(update: Update, text: str) -> None:
         new_hp = min(hp_before + healing["total"], hp_max)
         if live_target is not None:
             live_target["hp_current"] = new_hp
-        db.update_character(target["telegram_user_id"], hp_current=new_hp)
+        # character_id, not telegram_user_id -- see
+        # update_character_by_id's docstring (2026-07-24): target might
+        # be an alive-but-inactive party member (their owner is
+        # currently playing someone else), which update_character would
+        # silently misdirect to the wrong, actually-active character.
+        db.update_character_by_id(target["character_id"], hp_current=new_hp)
         message = (
             f"🧪 **{character['name']}** uses a {item['name']}{target_note}, "
             f"healing {new_hp - hp_before} HP ({new_hp}/{hp_max})."
@@ -10609,7 +10625,20 @@ async def _do_use_item(update: Update, text: str) -> None:
                 p for p in _get_combat_eligible_party_members(character["current_location"])
                 if character.get("party_id") and p.get("party_id") == character["party_id"]
             ] or [character]
-            recipients = present if max_targets is None else present[:max_targets]
+            # A dead party member isn't "physically present" anywhere
+            # meaningful (they're incapacitated, not standing around),
+            # so location-based presence is the wrong gate for THEM --
+            # same real bug/fix as the single-target case above, added
+            # in regardless of location so a Cabin/House can revive
+            # someone even if their last-known location doesn't match
+            # where the party is gathered now.
+            dead_anywhere = [m for m in all_party_members if m.get("is_dead")]
+            combined = {p["character_id"]: p for p in present}
+            for m in dead_anywhere:
+                combined.setdefault(m["character_id"], m)
+            recipients = list(combined.values())
+            if max_targets is not None:
+                recipients = recipients[:max_targets]
         healed_lines = []
         for recipient in recipients:
             live_target = None
@@ -10620,8 +10649,12 @@ async def _do_use_item(update: Update, text: str) -> None:
             hp_source = live_target if live_target is not None else recipient
             hp_max = hp_source.get("hp_max", hp_source["hp_current"])
             was_dead = bool(recipient.get("is_dead"))
-            db.update_character(
-                recipient["telegram_user_id"], hp_current=hp_max, is_dead=0,
+            # character_id, not telegram_user_id -- see
+            # update_character_by_id's docstring. Without this, reviving
+            # someone who isn't their owner's active character silently
+            # updated the WRONG (already-alive) character instead.
+            db.update_character_by_id(
+                recipient["character_id"], hp_current=hp_max, is_dead=0,
                 death_save_successes=0, death_save_failures=0,
             )
             if live_target is not None:
@@ -10776,7 +10809,13 @@ async def _do_shrine_offering_menu(update: Update) -> None:
     rows = [
         [InlineKeyboardButton(
             f"🕯️ Revive {m['name']} ({HOLLOW_STUMP_SHRINE_OFFERING_COST}g)",
-            callback_data=f"shrine|revive|{m['telegram_user_id']}",
+            # character_id, not telegram_user_id (2026-07-24, same
+            # incident as update_character_by_id): a dead party member
+            # might not be their owner's active character right now --
+            # exactly the case this whole feature exists for -- so the
+            # tap target has to be resolved by exact character_id, never
+            # "whichever character is active for this owner".
+            callback_data=f"shrine|revive|{m['character_id']}",
         )]
         for m in dead_members
     ]
@@ -10798,7 +10837,7 @@ async def shrine_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     character = db.get_character(update.effective_user.id)
     if character is None:
         return
-    target = db.get_character(int(parts[2]))
+    target = db.get_character_by_id(int(parts[2]))
     if target is None or not target.get("is_dead"):
         await update.effective_chat.send_message(
             "That party member isn't waiting to be revived anymore.",
@@ -10818,8 +10857,14 @@ async def _apply_shrine_offering(update: Update, character: dict, target: dict) 
         )
         return
     db.update_character(character["telegram_user_id"], gold=character["gold"] - HOLLOW_STUMP_SHRINE_OFFERING_COST)
-    db.update_character(
-        target["telegram_user_id"], is_dead=0, hp_current=1,
+    # Real bug caught live (2026-07-24): update_character always writes
+    # to whichever character is CURRENTLY ACTIVE for a telegram_user_id
+    # -- if target isn't their owner's active slot (exactly the case
+    # this whole fix exists for), this would silently revive the WRONG,
+    # already-alive character instead while claiming success. Targets
+    # the exact character_id directly.
+    db.update_character_by_id(
+        target["character_id"], is_dead=0, hp_current=1,
         death_save_successes=0, death_save_failures=0,
     )
     await _safe_send(

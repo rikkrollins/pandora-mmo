@@ -2,6 +2,16 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.17] — Fixed revival items/potions silently reviving the wrong character
+
+Fixed a serious follow-on to the previous fix: reviving or healing a
+party member who wasn't their owner's currently-active character (the
+shrine, Tent, Cabin, House, or a plain healing potion) could report
+success while actually updating a completely different, already-alive
+character instead — the real target was never touched. Every one of
+these now writes to the exact character being revived or healed, not
+whichever character their owner happens to have active.
+
 ## [1.27.16] — Fixed a dead party member becoming permanently unrevivable after switching characters
 
 Fixed a real bug: a player who died and then switched to play a
