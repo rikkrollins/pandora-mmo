@@ -2,6 +2,15 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.10] — Fixed attacks sometimes hitting the wrong enemy in mixed fights
+
+Naming a specific enemy in a fight with multiple similarly-named
+opponents (e.g. two different goblin-type enemies at once) could
+mistakenly target the wrong one, since the shorter name was checked
+first. Now checks the most specific name match, so "attack the
+goblin boss" reliably hits the boss instead of a regular goblin
+standing nearby.
+
 ## [1.27.9] — Fixed combat rounds occasionally taking a very long time in multi-enemy fights
 
 Fights against several enemies at once (especially ones with a

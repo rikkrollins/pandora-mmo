@@ -1257,8 +1257,21 @@ def _match_member_by_name_or_username(text: str, members: list[dict]) -> dict | 
     )
     if tagged is not None:
         return tagged
-    for member in members:
-        if member["name"].lower() in lowered:
+    # Real bug caught by the full-playthrough simulation (2026-07-24):
+    # this checked `members` in whatever order they were passed with a
+    # plain substring test, so "I attack the goblin boss" against a
+    # fight with both a plain "Goblin" and a "Goblin Boss" present
+    # matched the bare "Goblin" first ("goblin" IS a substring of the
+    # text) and never reached "Goblin Boss" -- this is the single
+    # shared matcher behind every targeting call site in the file
+    # (combat target picking, support-spell/use_item targeting, give/
+    # equip/auto-equip), so the bug silently affected all of them
+    # whenever two candidates' names overlapped like this. Same fix
+    # already used in _find_monster_mentioned_in_text: check the MOST
+    # SPECIFIC (longest) name first, with a word-boundary match so
+    # "Goblin" doesn't also wrongly match inside "Hobgoblin".
+    for member in sorted(members, key=lambda m: -len(m["name"])):
+        if re.search(r"\b" + re.escape(member["name"].lower()) + r"\b", lowered):
             return member
     return None
 
@@ -4822,10 +4835,6 @@ def _pick_target(action_text: str, opposing: list[dict]) -> dict:
     tagged = _match_member_by_name_or_username(action_text, opposing)
     if tagged is not None:
         return tagged
-    lowered = action_text.lower()
-    for candidate in opposing:
-        if candidate["name"].lower() in lowered:
-            return candidate
     return opposing[0]
 
 
