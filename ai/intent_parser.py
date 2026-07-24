@@ -1108,9 +1108,19 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # no spell slot/scroll, just presence at the shrine. Checked after
     # rest_words so a plain "revive me" (self, no offering/shrine
     # language) keeps meaning the ordinary rest/heal action.
-    offering_words = ["give an offering", "give offering", "leave an offering", "make an offering",
-                       "pray at the shrine", "pray for", "offering to the dead", "offer at the shrine"]
-    if any(w in lowered for w in offering_words):
+    #
+    # Real live bug (2026-07-24, Coffee: "why won't it let me pray at
+    # the shrine to bring back Laurienna"): the original trigger list
+    # required an EXACT literal phrase ("pray at the shrine"), so real
+    # natural variations -- "Pray to the shrine", "I pray at the hollow
+    # stump shrine" (naming the shrine by its real name instead of the
+    # bare word), "pray for X" -- all fell through to "chat" instead.
+    # "pray" has no other meaning anywhere in this game, so matching the
+    # bare word (any tense) is safe and far more forgiving.
+    if re.search(r"\bpray(?:s|ed|ing)?\b", lowered) or any(
+        w in lowered for w in ["give an offering", "give offering", "leave an offering",
+                                "make an offering", "offering to the dead", "offer at the shrine"]
+    ):
         return {**base, "action": "give_offering"}
 
     unconditional_shove_words = ["shove", "tackle", "trip", "push over"]

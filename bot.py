@@ -2091,6 +2091,22 @@ async def _announce_defeats(update: Update, session: sessions.Session, removed: 
     Announces each defeated participant, wording it differently for a
     real player (who can recover by resting once combat ends) versus a
     monster or AI companion (a clean defeat announcement).
+
+    Real bug (2026-07-24, Coffee: a companion "died in battle last
+    night" but nothing -- not a scroll, not a revival item, not the
+    shrine offering -- could find her as dead the next day): an AI
+    companion's HP is deliberately never synced to the DB during combat
+    (_sync_player_to_db is a no-op for is_ai), and remove_defeated()
+    only ever removes them from the in-memory session -- so a defeated
+    companion's DB row silently stayed exactly as it was before the
+    fight (is_dead=0, full HP), with no real lasting consequence and no
+    way for any revival mechanism to ever find them as dead. Real
+    players already get persistent death this way via the 3-failed-
+    death-saves path; a recruited companion (a real DB row, unlike a
+    hostile monster with none) now gets the same real, lasting
+    consequence -- db.update_character is a safe no-op for a monster
+    with no matching active_characters row, so this only ever affects
+    genuine companions.
     """
     for entry in removed:
         session.log_event(f"{entry['name']} has been defeated!")
@@ -2101,6 +2117,8 @@ async def _announce_defeats(update: Update, session: sessions.Session, removed: 
                 f"combat ends to recover (just say \"I rest\" in Adventure).",
             )
         else:
+            if entry["is_ai"]:
+                db.update_character(entry["telegram_user_id"], is_dead=1, hp_current=0)
             await _safe_send(update, f"💀 **{entry['name']} has been defeated!**")
 
 
@@ -10122,7 +10140,10 @@ async def _do_move(update: Update, text: str) -> None:
     # _ai_party_autonomous_tick), not where it physically stands.
     if character.get("party_id"):
         for member in db.get_party_members_by_id(character["party_id"]):
-            if member.get("is_ai") and member["telegram_user_id"] != update.effective_user.id:
+            # A dead companion (2026-07-24, see _announce_defeats) stays
+            # exactly where they fell until revived, same as a dead real
+            # player -- never dragged along by the rest of the party.
+            if member.get("is_ai") and not member.get("is_dead") and member["telegram_user_id"] != update.effective_user.id:
                 db.move_character(member["telegram_user_id"], destination_id)
 
     # Per Coffee (2026-07-14): TTS coverage audit -- _do_move's primary

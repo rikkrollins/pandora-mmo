@@ -2,6 +2,15 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.14] — Fixed a fallen companion not being recognized by revival features
+
+Fixed a real bug where a companion who died in a fight didn't actually
+register as dead afterward — so no revival item, scroll, or the shrine
+prayer could ever find and bring them back. Their death is now properly
+recorded the moment they fall. Also broadened praying at the shrine to
+recognize a lot more natural phrasing ("Pray to the shrine", "I pray at
+the Hollow Stump Shrine") instead of requiring one exact wording.
+
 ## [1.27.13] — Fixed a rare hard-freeze when a solo fighter got paralyzed
 
 Fixed a real bug where a solo player who got paralyzed mid-fight could
