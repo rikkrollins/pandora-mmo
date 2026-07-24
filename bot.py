@@ -107,7 +107,7 @@ if ACTIVE_CAMPAIGN_ID not in cl.discover_campaigns():
     )
 CAMPAIGN = cl.load_campaign(ACTIVE_CAMPAIGN_ID)
 
-DEFAULT_WEAPON = {"ability": "strength", "damage_dice": "1d8", "damage_bonus": 0, "weapon_category": "simple"}
+DEFAULT_WEAPON = {"ability": "strength", "damage_dice": "1d8", "damage_bonus": 0, "weapon_category": "simple", "name": "fists"}
 
 
 def _weapon_for_attacker(attacker: dict) -> dict:
@@ -118,6 +118,12 @@ def _weapon_for_attacker(attacker: dict) -> dict:
     ability fields existed but nothing ever read them. Monsters and
     hostile NPCs have no "equipped_weapon" field at all, so .get()
     safely falls through to DEFAULT_WEAPON for them unchanged.
+
+    "name" (2026-07-23, per Coffee: "when they attack, can you say it
+    like ... Sarah attacks giant spider with her, and whatever attack/
+    skill she is using") lets a plain weapon attack's combat-resolution
+    line name the real weapon actually swung, the same way a spell cast
+    already names the real spell -- see _format_combat_result.
     """
     equipped_id = attacker.get("equipped_weapon")
     if equipped_id:
@@ -128,6 +134,7 @@ def _weapon_for_attacker(attacker: dict) -> dict:
                 "damage_dice": item["damage_dice"],
                 "damage_bonus": item.get("damage_bonus", 0),
                 "weapon_category": item.get("weapon_category", "simple"),
+                "name": item["name"],
             }
     return DEFAULT_WEAPON
 
@@ -1718,7 +1725,7 @@ async def creation_menu_callback(update: Update, context: ContextTypes.DEFAULT_T
 # ---------------------------------------------------------------------
 
 def _format_combat_result(flavor_text: str, result: dict, actor_label: str, defender_label: str,
-                           action_label: str | None = None) -> str:
+                           action_label: str | None = None, weapon_name: str | None = None) -> str:
     """
     Builds the visually structured combat message: a banner (critical hit /
     success / miss / fumble), the AI's short flavor line as a quote, then a
@@ -1740,9 +1747,16 @@ def _format_combat_result(flavor_text: str, result: dict, actor_label: str, defe
     getting it wrong -- so the real fix is here, not in the support agent:
     state the true spell name whenever one exists, so both the player-
     facing message AND any later /help-as-reply about it are grounded in a
-    real fact instead of silence. Plain weapon attacks (action_label=None)
-    keep the exact existing "attacks" phrasing -- there's no name being
-    lost there in the first place.
+    real fact instead of silence.
+
+    weapon_name (2026-07-23, per Coffee: "when they attack, can you say
+    it like ... Sarah attacks giant spider with her, and whatever attack/
+    skill she is using") extends the same fix to plain weapon attacks --
+    previously these ALWAYS just said "attacks" with no weapon named,
+    even though _weapon_for_attacker already knew exactly which weapon
+    was actually swung. Ignored whenever action_label is set (a spell
+    cast already names the real action; a weapon name would be a lie or
+    redundant on top of it).
     """
     lines = []
     raw_roll = result.get("raw_roll")
@@ -1764,10 +1778,11 @@ def _format_combat_result(flavor_text: str, result: dict, actor_label: str, defe
     lines.append("⚔️ **Combat Resolution**")
     dmg = result.get("damage_dealt", 0)
     verb = f"casts **{action_label}** at" if action_label else "attacks"
+    weapon_suffix = f" with their **{weapon_name}**" if (weapon_name and not action_label) else ""
     if result.get("hit", True):
-        lines.append(f"- 🗡️ **{actor_label}** {verb} **{defender_label}** → **Hits for {dmg} damage!**")
+        lines.append(f"- 🗡️ **{actor_label}** {verb} **{defender_label}**{weapon_suffix} → **Hits for {dmg} damage!**")
     else:
-        lines.append(f"- 🗡️ **{actor_label}** {verb} **{defender_label}** → **Misses!**")
+        lines.append(f"- 🗡️ **{actor_label}** {verb} **{defender_label}**{weapon_suffix} → **Misses!**")
 
     hp_now = result.get("defender_hp_remaining")
     hp_max = result.get("defender_hp_max")
@@ -2523,6 +2538,7 @@ async def _post_narrated(update: Update, character: dict, action_text: str,
         actor_label=mechanical_result.get("attacker", character.get("name", "?")),
         defender_label=mechanical_result.get("defender", "?"),
         action_label=action_label,
+        weapon_name=None if action_label else _weapon_for_attacker(character).get("name"),
     )
     session.log_event(f"{mechanical_result.get('attacker')} vs {mechanical_result.get('defender')}: {flavor}")
     await _safe_send(update, message)
@@ -5071,11 +5087,13 @@ async def _resolve_flee_attempt(update, session: sessions.Session, action_text: 
     for enemy in ([] if has_cunning_action else session.living_on_side(session.opposing_side(user_id))):
         if fleeing["hp_current"] <= 0:
             break
+        enemy_weapon = _weapon_for_attacker(enemy)
         atk_result = resolve_attack(
-            enemy, fleeing, _weapon_for_attacker(enemy), round_number=session.round_number,
+            enemy, fleeing, enemy_weapon, round_number=session.round_number,
         )
         opportunity_blocks.append(_format_combat_result(
             "", atk_result, enemy["name"], fleeing["name"],
+            weapon_name=enemy_weapon.get("name"),
         ))
     if opportunity_blocks:
         _sync_player_to_db(fleeing)
@@ -10397,10 +10415,27 @@ async def _do_use_item(update: Update, text: str) -> None:
 
     effect = item.get("effect", "none")
     if effect == "heal" and item.get("heal_dice"):
+        # Real bug (2026-07-23, live report: "healing 0 HP (11/11)" posted
+        # for a companion the roster showed at 3/11 both before and after):
+        # target came straight from _find_party_target_by_name -> a plain
+        # DB row, but HP during active combat lives on the session's live
+        # participant dict instead (mutated in place, only synced to the DB
+        # at specific checkpoints -- see _sync_player_to_db) -- so mid-fight
+        # this read stale, already-full HP and healed for 0. Mirrors the
+        # cure_poison branch below, which already looks up the live
+        # participant correctly.
+        live_target = None
+        if session is not None:
+            live_target = next(
+                (p for p in session.participants if p["telegram_user_id"] == target["telegram_user_id"]), None,
+            )
+        hp_source = live_target if live_target is not None else target
         healing = roll_damage(item["heal_dice"])
-        hp_before = target["hp_current"]
-        hp_max = target.get("hp_max", hp_before)
+        hp_before = hp_source["hp_current"]
+        hp_max = hp_source.get("hp_max", hp_before)
         new_hp = min(hp_before + healing["total"], hp_max)
+        if live_target is not None:
+            live_target["hp_current"] = new_hp
         db.update_character(target["telegram_user_id"], hp_current=new_hp)
         message = (
             f"🧪 **{character['name']}** uses a {item['name']}{target_note}, "

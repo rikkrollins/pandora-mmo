@@ -2,6 +2,15 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.8] — Attacks now name your weapon, and fixed a mid-combat healing bug
+
+Combat messages now say which weapon an attack actually used (e.g.
+"Sarah attacks Giant Spider with their Longsword") instead of just
+"attacks", for both real players and companions. Also fixed: using a
+healing potion on a party member mid-fight could report "healing 0 HP"
+and do nothing, even when that ally was genuinely hurt — the potion
+now heals off the ally's real, current combat HP.
+
 ## [1.27.7] — Fixed "still thinks I'm in combat" after successfully fleeing
 
 Fixed: "Run from battle" (and similar phrasing) could get misread as
