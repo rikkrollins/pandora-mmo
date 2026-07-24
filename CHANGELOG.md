@@ -2,6 +2,15 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.15] — Praying at the shrine is easier, plus new tap-to-revive buttons
+
+Fixed: praying at the shrine without naming who in that exact same
+message used to just ask you to name someone — it now automatically
+figures out who you mean when there's only one fallen party member.
+Also added real tap-to-revive buttons right at the shrine: looking
+around there now shows a "Pray at the Shrine" button, and tapping it
+lists anyone fallen with their own one-tap revive option.
+
 ## [1.27.14] — Fixed a fallen companion not being recognized by revival features
 
 Fixed a real bug where a companion who died in a fight didn't actually

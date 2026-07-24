@@ -8847,6 +8847,12 @@ def _look_action_keyboard(location: dict, unclaimed_board_quests: list) -> Inlin
         rows.append([InlineKeyboardButton("🛒 Shop", callback_data="lookact|shop")])
     if unclaimed_board_quests:
         rows.append([InlineKeyboardButton("📋 Quest Board", callback_data="lookact|quests")])
+    # Per Coffee (2026-07-24): "add buttons to the shrine for praying/
+    # offering" -- same real _do_give_offering path free text already
+    # uses, so every existing rule (must be at the shrine, real gold
+    # cost, only a genuinely dead party member) still applies unchanged.
+    if location.get("id") == "hollow_stump_shrine":
+        rows.append([InlineKeyboardButton("🕯️ Pray at the Shrine", callback_data="lookact|pray")])
 
     connections = location.get("connections", [])
     direction_for_dest = {dest: word.capitalize() for word, dest in location.get("directions", {}).items()}
@@ -8883,6 +8889,8 @@ async def look_action_menu_callback(update: Update, context: ContextTypes.DEFAUL
         await _do_list_shop(update)
     elif action == "quests":
         await _do_check_quests(update)
+    elif action == "pray":
+        await _do_shrine_offering_menu(update)
 
 
 def _deterministic_image_seed(key: str) -> int:
@@ -10685,11 +10693,101 @@ async def _do_give_offering(update: Update, text: str) -> None:
         return
     target = _find_party_target_by_name(text)
     if target is None or not target.get("is_dead"):
+        # Real live bug (2026-07-24, Coffee: "I pray at the shrine" then
+        # got told to name someone, but had already been trying to pray
+        # FOR a specific fallen ally the whole time -- he just didn't
+        # repeat her name in the exact same message as "pray"). When no
+        # name is given, auto-resolve to the sole dead party member if
+        # there's only one -- unambiguous by construction, same
+        # "resolve automatically when there's only one real answer"
+        # convention this codebase already uses elsewhere (_pick_target
+        # defaulting to the only enemy present, single-word location
+        # matching when it's the only candidate, etc.) -- only ask for a
+        # name when there's genuine ambiguity (more than one fallen ally).
+        dead_members = [m for m in _get_party_members() if m.get("is_dead")]
+        if target is None and len(dead_members) == 1:
+            target = dead_members[0]
+        elif target is None and len(dead_members) > 1:
+            names = ", ".join(m["name"] for m in dead_members)
+            await update.effective_chat.send_message(
+                f"More than one fallen party member — who do you want to pray for? ({names})",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+        else:
+            await update.effective_chat.send_message(
+                "Name a dead party member to pray for — there's no one to bring back right now.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+    await _apply_shrine_offering(update, character, target)
+
+
+async def _do_shrine_offering_menu(update: Update) -> None:
+    """
+    Per Coffee (2026-07-24): "in the shrine buttons when clicked show
+    players who are dead and give a button so they can revive them" --
+    the tap-driven counterpart to _do_give_offering's free-text path,
+    listing every real fallen party member as its own tap-to-revive
+    button instead of needing their name typed at all.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
         await update.effective_chat.send_message(
-            "Name a dead party member to pray for — there's no one to bring back right now.",
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if character["current_location"] != "hollow_stump_shrine":
+        await update.effective_chat.send_message(
+            "There's no shrine to give an offering at here — the Hollow Stump Shrine, "
+            "back in the Whispering Wood, is the place for that.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
+    dead_members = [m for m in _get_party_members() if m.get("is_dead")]
+    if not dead_members:
+        await update.effective_chat.send_message(
+            "No one to bring back right now — everyone in your party is alive and well.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    rows = [
+        [InlineKeyboardButton(
+            f"🕯️ Revive {m['name']} ({HOLLOW_STUMP_SHRINE_OFFERING_COST}g)",
+            callback_data=f"shrine|revive|{m['telegram_user_id']}",
+        )]
+        for m in dead_members
+    ]
+    await update.effective_chat.send_message(
+        f"Who do you want to pray for? The offering calls for {HOLLOW_STUMP_SHRINE_OFFERING_COST} gold.",
+        reply_markup=InlineKeyboardMarkup(rows),
+        message_thread_id=config.TOPIC_ADVENTURE_ID,
+    )
+
+
+async def shrine_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _do_shrine_offering_menu's Revive rows -- dispatches through the exact same real offering logic free text already uses."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    await _safe_answer(query)
+    if action != "revive" or len(parts) < 3:
+        return
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        return
+    target = db.get_character(int(parts[2]))
+    if target is None or not target.get("is_dead"):
+        await update.effective_chat.send_message(
+            "That party member isn't waiting to be revived anymore.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    await _apply_shrine_offering(update, character, target)
+
+
+async def _apply_shrine_offering(update: Update, character: dict, target: dict) -> None:
+    """Shared real logic behind both the shrine's free-text prayer and its tap-to-revive buttons -- gold cost, then the actual revival."""
     if character["gold"] < HOLLOW_STUMP_SHRINE_OFFERING_COST:
         await update.effective_chat.send_message(
             f"The offering calls for {HOLLOW_STUMP_SHRINE_OFFERING_COST} gold — "
@@ -15288,6 +15386,7 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(party_menu_callback, pattern=r"^party\|"))
     application.add_handler(CallbackQueryHandler(travel_menu_callback, pattern=r"^travel\|"))
     application.add_handler(CallbackQueryHandler(look_action_menu_callback, pattern=r"^lookact\|"))
+    application.add_handler(CallbackQueryHandler(shrine_menu_callback, pattern=r"^shrine\|"))
     application.add_handler(CallbackQueryHandler(creation_menu_callback, pattern=r"^create\|"))
     application.add_handler(CallbackQueryHandler(hybrid_menu_callback, pattern=r"^hybrid\|"))
     application.add_handler(CallbackQueryHandler(title_menu_callback, pattern=r"^title\|"))
