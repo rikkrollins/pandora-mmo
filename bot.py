@@ -17,6 +17,7 @@ import logging
 import os
 import random
 import re
+import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -60,7 +61,7 @@ from ai.dm_agent import (
     narrate_action, narrate_welcome, narrate_skill_check, narrate_hourly_update,
     narrate_examine, narrate_branching_choice_outcome, narrate_boss_decision,
     narrate_story_so_far, narrate_chapter_climax, narrate_arc_opening,
-    _fallback_hourly_update,
+    _fallback_hourly_update, _fallback_narration,
 )
 from ai.intent_parser import parse_intents
 from ai.npc_agent import register_npc, talk_to_npc, generate_ambient_line, _NPCS
@@ -526,6 +527,12 @@ def _wander_npcs() -> None:
 
 
 OLLAMA_CONGESTION_LOAD_THRESHOLD = 12.0
+
+# Real wall-clock circuit breaker (2026-07-24, see _post_narrated's and
+# _resolve_ai_turns's docstrings): bounds how long a single player action
+# can ever take waiting on AI-turn narration, regardless of AI turn count
+# or whether load average happens to catch the contention.
+AI_TURN_NARRATION_BUDGET_SECONDS = 45.0
 
 
 def _ollama_congested() -> bool:
@@ -2525,14 +2532,39 @@ async def _announce_reaction(update: Update, defender: dict, result: dict) -> No
 
 async def _post_narrated(update: Update, character: dict, action_text: str,
                           mechanical_result: dict, session: sessions.Session,
-                          action_label: str | None = None) -> None:
+                          action_label: str | None = None, skip_narration: bool = False) -> None:
+    """
+    Real live finding (2026-07-23/24, a full-playthrough simulation run
+    hit this twice, once for 2+ hours): a multi-monster fight against a
+    boss-tier enemy (goblin + goblin_shaman + goblin_boss, the boss
+    getting 2 attacks/turn plus its own narrate_boss_decision call) can
+    need up to 6 real Ollama narration calls before _resolve_ai_turns
+    ever hands control back to a real player. With a single generation
+    slot and zero retry ceiling, sustained demand can stack these into
+    HOURS. `skip_narration` (set by _resolve_ai_turns once its own
+    per-invocation wall-clock narration budget is spent -- see
+    AI_TURN_NARRATION_BUDGET_SECONDS) is the reliable fix: load average
+    alone (_ollama_congested) turned out NOT to catch this specific case
+    live (load sat at ~7, under its 12.0 threshold, even while the one
+    shared generation slot was fully monopolized) -- a single slot being
+    busy doesn't show up as host-wide load the way many competing
+    processes would. A real wall-clock deadline bounds the worst case
+    regardless of what load average happens to read. Never set for a
+    real player's own action (only _resolve_ai_turns's AI-turn loop
+    passes it) -- a real player's own attack is always fully narrated
+    regardless of load or time spent, matching _ollama_congested's own
+    stated scope of never gating "a real player's own direct action".
+    """
     actor_personality = _personality_for_character_name(character.get("name", ""))
     location = cl.get_location(CAMPAIGN, character.get("current_location"))
     location_description = location["description"] if location else None
-    flavor = await asyncio.to_thread(
-        narrate_action, character, action_text, mechanical_result, session.recent_events(),
-        actor_personality, location_description,
-    )
+    if skip_narration or (character.get("is_ai") and _ollama_congested()):
+        flavor = _fallback_narration(mechanical_result)
+    else:
+        flavor = await asyncio.to_thread(
+            narrate_action, character, action_text, mechanical_result, session.recent_events(),
+            actor_personality, location_description,
+        )
     message = _format_combat_result(
         flavor, mechanical_result,
         actor_label=mechanical_result.get("attacker", character.get("name", "?")),
@@ -3379,6 +3411,16 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
     consecutive_noop_turns = 0
     iteration_safety_cap = 200
     iterations = 0
+    # Real wall-clock circuit breaker (2026-07-24) -- see _post_narrated's
+    # docstring: this whole function can need several real Ollama calls
+    # before ever returning (one per AI-controlled turn/attack in the
+    # round), and _ollama_congested's load-average check doesn't reliably
+    # catch a single monopolized generation slot. Once this many seconds
+    # of real wall-clock time have been spent inside THIS invocation,
+    # every remaining AI-turn narration call in it skips Ollama and uses
+    # the deterministic fallback template instead -- bounding how long a
+    # single player action can ever take, regardless of AI turn count.
+    turns_started_at = time.monotonic()
 
     while not session.is_combat_over():
         iterations += 1
@@ -3561,7 +3603,8 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
             # deterministic pick the rules layer just made above, so this
             # narrates a real decision rather than inventing one, and the
             # roll+outcome narration below is completely unaffected.
-            if current.get("is_boss") and attack_num == 0:
+            narration_budget_spent = time.monotonic() - turns_started_at > AI_TURN_NARRATION_BUDGET_SECONDS
+            if current.get("is_boss") and attack_num == 0 and not narration_budget_spent and not _ollama_congested():
                 decision_flavor = await asyncio.to_thread(narrate_boss_decision, current, target)
                 await _safe_send(update, f"👁️ {decision_flavor}")
             adv, disadv = _attack_advantage_disadvantage(current, target)
@@ -3605,7 +3648,10 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
                 f"{current['name']} attacks {target['name']}" if attack_count == 1
                 else f"{current['name']} attacks {target['name']} ({attack_num + 1}/{attack_count})"
             )
-            await _post_narrated(update, current, attack_label, result, session)
+            await _post_narrated(
+                update, current, attack_label, result, session,
+                skip_narration=time.monotonic() - turns_started_at > AI_TURN_NARRATION_BUDGET_SECONDS,
+            )
             if applied_condition:
                 await _safe_send(update, f"☠️ **{target['name']} is now {applied_condition.upper()}!**")
             if resisted_condition:

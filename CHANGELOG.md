@@ -2,6 +2,15 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.9] — Fixed combat rounds occasionally taking a very long time in multi-enemy fights
+
+Fights against several enemies at once (especially ones with a
+boss-tier enemy) could, under heavy load, take an unreasonably long
+time to resolve a single round while narration caught up. Combat now
+keeps its pace bounded even under heavy load — mechanics and outcomes
+were never affected, only how long an over-loaded system could make
+you wait to see the result.
+
 ## [1.27.8] — Attacks now name your weapon, and fixed a mid-combat healing bug
 
 Combat messages now say which weapon an attack actually used (e.g.
