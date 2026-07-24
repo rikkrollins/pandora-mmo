@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.11] — Companions now stay with your party when you travel, and other party fixes
+
+Fixed a real bug where a companion could get left behind whenever you
+moved to a new location, even though they were genuinely part of your
+formed party — the party could end up scattered across the map over
+time. Absent party members' share of battle XP earned while away is
+now 50% (up from 10%). Added a one-tap "Party Sheets" button to the
+menu showing full HP/level/XP details for everyone in your party at
+once.
+
+New ways to bring a fallen party member back: a few new consumable
+items now fully heal and revive, and there's a real place you can
+visit to pray and leave an offering for a fallen companion instead.
+
 ## [1.27.10] — Fixed attacks sometimes hitting the wrong enemy in mixed fights
 
 Naming a specific enemy in a fight with multiple similarly-named

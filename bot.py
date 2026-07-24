@@ -2631,7 +2631,7 @@ def _sync_player_to_db(character: dict) -> None:
     )
 
 
-INACTIVE_PARTY_XP_SHARE = 0.10  # per Coffee (2026-07-16): 5-10% for absent party members
+INACTIVE_PARTY_XP_SHARE = 0.50  # per Coffee (2026-07-24, raised from 5-10%): 50% for absent party members
 
 
 def _level_up_note(before: dict, after: dict) -> str:
@@ -10080,13 +10080,26 @@ async def _do_move(update: Update, text: str) -> None:
     # (is_ai=1, is_autonomous=0) are supposed to be traveling WITH
     # whoever recruited them, but this only ever moved the acting
     # player -- companions just stood still forever. Only moves real
-    # recruited companions sharing this player's party_id; the
-    # hardcoded autonomous AI-played party (is_autonomous=1) roams and
-    # acts entirely on its own and must never be dragged around by a
-    # human's movement.
+    # companions sharing this player's party_id.
+    #
+    # Second real bug found live (2026-07-24, Coffee: "the party's
+    # scattered all over the place... Pip is the only one staying with
+    # me"): this used to also exclude any is_autonomous=1 companion,
+    # meant to protect the separate hardcoded autonomous AI party
+    # (AI_PARTY_ROSTER) from being dragged around by an unrelated
+    # human's movement -- but a member of that roster (e.g. Zara
+    # Windrift) CAN later be genuinely recruited into a real player's
+    # own party via _do_recruit_npc, which reassigns their party_id
+    # to the recruiter's -- her stale is_autonomous=1 flag then wrongly
+    # kept excluding her from move-along even though party_id already
+    # says she belongs here now. party_id membership is the real,
+    # authoritative signal of "traveling with this player" -- the
+    # is_autonomous flag only matters for whether a character ALSO
+    # takes independent actions on its own tick (see
+    # _ai_party_autonomous_tick), not where it physically stands.
     if character.get("party_id"):
         for member in db.get_party_members_by_id(character["party_id"]):
-            if member.get("is_ai") and not member.get("is_autonomous") and member["telegram_user_id"] != update.effective_user.id:
+            if member.get("is_ai") and member["telegram_user_id"] != update.effective_user.id:
                 db.move_character(member["telegram_user_id"], destination_id)
 
     # Per Coffee (2026-07-14): TTS coverage audit -- _do_move's primary
@@ -10524,6 +10537,47 @@ async def _do_use_item(update: Update, text: str) -> None:
                 f"📜 **{character['name']}** unrolls the {item['name']} — it marks the rough "
                 f"location of {revealed_names}, though you'll still need to find your own way there."
             )
+    elif effect == "heal_and_revive":
+        # Per Coffee (2026-07-24): "add items like tents and cabins and
+        # houses to reviving and healing characters to full" -- a
+        # stronger, pricier alternative to Revivify/Scroll of Revivify
+        # (which only restore 1 HP): this fully heals AND revives,
+        # tiered by how many party members it reaches at once via
+        # item["revive_targets"] (1 = just the one you named, matching
+        # every other single-target consumable; a number = up to that
+        # many; None = the whole party) -- same "physically present"
+        # scoping _do_give_item/_do_equip_item already use, since this
+        # is meant to be used once the party's actually gathered, not
+        # reach across the map.
+        max_targets = item.get("revive_targets", 1)
+        if max_targets == 1:
+            recipients = [target]
+        else:
+            present = [
+                p for p in _get_combat_eligible_party_members(character["current_location"])
+                if character.get("party_id") and p.get("party_id") == character["party_id"]
+            ] or [character]
+            recipients = present if max_targets is None else present[:max_targets]
+        healed_lines = []
+        for recipient in recipients:
+            live_target = None
+            if session is not None:
+                live_target = next(
+                    (p for p in session.participants if p["telegram_user_id"] == recipient["telegram_user_id"]), None,
+                )
+            hp_source = live_target if live_target is not None else recipient
+            hp_max = hp_source.get("hp_max", hp_source["hp_current"])
+            was_dead = bool(recipient.get("is_dead"))
+            db.update_character(
+                recipient["telegram_user_id"], hp_current=hp_max, is_dead=0,
+                death_save_successes=0, death_save_failures=0,
+            )
+            if live_target is not None:
+                live_target["hp_current"] = hp_max
+            revive_note = " — brought back from death" if was_dead else ""
+            healed_lines.append(f"**{recipient['name']}** fully restored{revive_note} ({hp_max}/{hp_max} HP)")
+        message = f"🏕️ **{character['name']}** sets up the {item['name']} — " + "; ".join(healed_lines) + "."
+
     elif effect == "cure_poison":
         cured = False
         if session is not None:
@@ -10552,6 +10606,64 @@ async def _do_use_item(update: Update, text: str) -> None:
             if session is not None:
                 session.advance_turn()
                 await _resolve_ai_turns(update, session)
+
+
+HOLLOW_STUMP_SHRINE_OFFERING_COST = 300
+
+
+async def _do_give_offering(update: Update, text: str) -> None:
+    """
+    Per Coffee (2026-07-24): "a local church we can go to pray and give
+    an offering to the dead which revives the characters too." Grounded
+    in the Hollow Stump Shrine, an EXISTING location already described
+    as a place where "offerings left here are never touched by
+    animals" with a real "offering_line" interactable -- not an
+    invented new church. A non-caster-accessible alternative to
+    Revivify: costs real gold instead of a spell slot/scroll, but only
+    works at this one real place, and (same as Revivify itself) only
+    brings someone back at 1 HP -- the stronger full-heal-and-revive
+    effect stays exclusive to the pricier Tent/Cabin/House items (see
+    effect="heal_and_revive" in _do_use_item), so there's a real reason
+    to pick one over the other rather than this just being a free copy.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if character["current_location"] != "hollow_stump_shrine":
+        await update.effective_chat.send_message(
+            "There's no shrine to give an offering at here — the Hollow Stump Shrine, "
+            "back in the Whispering Wood, is the place for that.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    target = _find_party_target_by_name(text)
+    if target is None or not target.get("is_dead"):
+        await update.effective_chat.send_message(
+            "Name a dead party member to pray for — there's no one to bring back right now.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    if character["gold"] < HOLLOW_STUMP_SHRINE_OFFERING_COST:
+        await update.effective_chat.send_message(
+            f"The offering calls for {HOLLOW_STUMP_SHRINE_OFFERING_COST} gold — "
+            f"you only have {character['gold']}.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    db.update_character(character["telegram_user_id"], gold=character["gold"] - HOLLOW_STUMP_SHRINE_OFFERING_COST)
+    db.update_character(
+        target["telegram_user_id"], is_dead=0, hp_current=1,
+        death_save_successes=0, death_save_failures=0,
+    )
+    await _safe_send(
+        update,
+        f"🕯️ **{character['name']}** kneels at the shrine and lays {HOLLOW_STUMP_SHRINE_OFFERING_COST} gold "
+        f"among the offerings, praying for **{target['name']}**'s return — breath returns, and they gasp back "
+        f"to life at 1 HP.",
+    )
 
 
 async def _do_equip_item(update: Update, text: str) -> None:
@@ -11073,6 +11185,7 @@ def _main_menu_keyboard(character: dict) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🎒 Inventory", callback_data="menu|inventory")],
         [InlineKeyboardButton("⚔️ Equip Gear", callback_data="menu|equip")],
         [InlineKeyboardButton("👥 Party", callback_data="menu|party")],
+        [InlineKeyboardButton("🧾 Party Sheets", callback_data="menu|partysheets")],
         [InlineKeyboardButton("🎭 Switch Character", callback_data="menu|roster")],
         [InlineKeyboardButton("🧭 Waypoints", callback_data="menu|waypoints")],
         [InlineKeyboardButton("🌳 Skill Tree", callback_data="menu|skilltree")],
@@ -11203,6 +11316,13 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await _do_leaderboard(update)
     elif section == "party":
         await _do_check_party(update)
+    elif section == "partysheets":
+        # Per Coffee (2026-07-24): "There's no way for me to see my
+        # party's details like hp and status... and lv exp." The full
+        # sheets view already existed via typing "check my party
+        # sheets" -- this button is the same real code path, just
+        # actually discoverable instead of needing exact free-text.
+        await _do_check_party(update, text="sheets")
     elif section == "visualmap":
         await _do_show_visual_map(update)
     elif section == "rebirth":
@@ -12674,6 +12794,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_give_item(update, intent.get("raw_text", text))
     elif action == "use_item":
         await _do_use_item(update, intent.get("raw_text", text))
+    elif action == "give_offering":
+        await _do_give_offering(update, intent.get("raw_text", text))
     elif action == "equip_item":
         await _do_equip_item(update, intent.get("raw_text", text))
     elif action == "auto_equip":

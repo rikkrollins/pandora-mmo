@@ -82,6 +82,27 @@ ITEMS = {
         "name": "Antitoxin", "type": "consumable", "rarity": "common",
         "price": 15, "weight": 0.1, "effect": "cure_poison",
     },
+    # Per Coffee (2026-07-24): "add items like tents and cabins and
+    # houses to reviving and healing characters to full" -- a stronger,
+    # pricier alternative to Revivify (which only restores 1 HP): these
+    # fully heal AND revive, priced above Scroll of Revivify's 350g
+    # since they do strictly more, and tiered by how many party members
+    # they reach at once (see effect="heal_and_revive" in _do_use_item).
+    "tent": {
+        "name": "Tent", "type": "consumable", "rarity": "rare",
+        "price": 500, "weight": 10, "effect": "heal_and_revive", "revive_targets": 1,
+        "note": "A night under real canvas mends more than a potion ever could.",
+    },
+    "cabin": {
+        "name": "Cabin", "type": "consumable", "rarity": "rare",
+        "price": 1000, "weight": 20, "effect": "heal_and_revive", "revive_targets": 3,
+        "note": "Four walls and a hearth -- room enough for the whole party to actually rest.",
+    },
+    "house": {
+        "name": "House", "type": "consumable", "rarity": "legendary",
+        "price": 2000, "weight": 50, "effect": "heal_and_revive", "revive_targets": None,
+        "note": "A real roof over everyone's head. Whatever happened out there, it stays outside.",
+    },
     "rations": {
         "name": "Rations (1 day)", "type": "consumable", "rarity": "common",
         "price": 2, "weight": 2, "effect": "none",

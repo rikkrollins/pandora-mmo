@@ -103,6 +103,8 @@ getting caught, with real consequences, not the same as "buy".
 - "cast_spell" is for casting/using a named spell.
 - "use_item" is for drinking/using/consuming/quaffing a carried consumable item (e.g. a potion, antitoxin, \
 rations) — NOT a spell and NOT a shop purchase. Set "item_name" to the item, and "target" to who it's for if named (defaults to self).
+- "give_offering" is for praying at a shrine and leaving a real offering (gold, not an item) to revive a dead \
+party member — different from casting a revival spell. Set "target" to the dead party member being prayed for.
 - "equip_item" is for equipping/wielding/wearing/putting on a weapon or piece of armor they're carrying \
 (e.g. "equip my longsword", "wear the chain mail", "wield the dagger", "equip Sarah with the longbow"). \
 Set "item_name" to the item, and "target" to who it's for if a specific OTHER party member is named (defaults to self).
@@ -1080,6 +1082,18 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if any(w in lowered for w in rest_words):
         return {**base, "action": "rest"}
 
+    # Per Coffee (2026-07-24): "a local church we can go to pray and
+    # give an offering to the dead which revives the characters too" --
+    # grounded in the Hollow Stump Shrine's existing "offering_line"
+    # interactable, a real gold-cost alternative to Revivify that needs
+    # no spell slot/scroll, just presence at the shrine. Checked after
+    # rest_words so a plain "revive me" (self, no offering/shrine
+    # language) keeps meaning the ordinary rest/heal action.
+    offering_words = ["give an offering", "give offering", "leave an offering", "make an offering",
+                       "pray at the shrine", "pray for", "offering to the dead", "offer at the shrine"]
+    if any(w in lowered for w in offering_words):
+        return {**base, "action": "give_offering"}
+
     unconditional_shove_words = ["shove", "tackle", "trip", "push over"]
     knock_down_phrasing = "knock" in lowered and ("prone" in lowered or "down" in lowered)
     if any(w in lowered for w in unconditional_shove_words) or knock_down_phrasing:
@@ -1300,7 +1314,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "bestiary", "list_shop", "leaderboard", "check_achievements", "set_title", "check_weather",
                 "check_guild_quest", "dice_game", "fortunes_wheel", "set_alignment", "message_ai",
                 "skill_tree", "challenge_duel", "accept_duel", "check_market", "join_battle",
-                "replay_intro", "visual_map", "rebirth", "choose_hybrid",
+                "replay_intro", "visual_map", "rebirth", "choose_hybrid", "give_offering",
             )
             if parsed["action"] not in valid_actions:
                 return fallback
