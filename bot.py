@@ -60,6 +60,7 @@ from ai.dm_agent import (
     narrate_action, narrate_welcome, narrate_skill_check, narrate_hourly_update,
     narrate_examine, narrate_branching_choice_outcome, narrate_boss_decision,
     narrate_story_so_far, narrate_chapter_climax, narrate_arc_opening,
+    _fallback_hourly_update,
 )
 from ai.intent_parser import parse_intents
 from ai.npc_agent import register_npc, talk_to_npc, generate_ambient_line, _NPCS
@@ -517,6 +518,32 @@ def _wander_npcs() -> None:
         _NPC_LOCATIONS[npc_id] = random.choice(connections)
 
 
+OLLAMA_CONGESTION_LOAD_THRESHOLD = 12.0
+
+
+def _ollama_congested() -> bool:
+    """
+    Real live finding (2026-07-23): this box has exactly one Ollama
+    generation slot (-np 1) shared by every real player, the autonomous
+    AI party, hourly updates, AND any background test/simulation run --
+    with no fairness/backpressure between them, sustained heavy demand
+    from all of them at once can stack up into a single action taking
+    HOURS to resolve (each individual 200s-timeout narration call gives
+    up cleanly, but there's no limit on how many separate calls end up
+    competing for the one slot in sequence). Load average is a cheap,
+    real proxy for "is something already straining this shared
+    resource" -- used to skip PURELY discretionary narration (nobody is
+    actually blocked waiting on an ambient NPC line or an hourly-update
+    flavor post) so it doesn't add to that same queue. Never gates a
+    real player's own direct action -- only background flavor no one
+    would notice going quiet for a while.
+    """
+    try:
+        return os.getloadavg()[0] > OLLAMA_CONGESTION_LOAD_THRESHOLD
+    except OSError:
+        return False
+
+
 async def _maybe_post_world_heartbeat(bot) -> None:
     """
     "The world keeps living while everyone's away" — if real players
@@ -529,6 +556,8 @@ async def _maybe_post_world_heartbeat(bot) -> None:
     global _LAST_WORLD_HEARTBEAT_AT
     if _LAST_KNOWN_CHAT_ID is None:
         return
+    if _ollama_congested():
+        return  # purely discretionary flavor -- not worth adding to an already-strained shared queue
 
     now = datetime.now(timezone.utc)
     with db.get_connection() as conn:
@@ -779,7 +808,14 @@ async def _maybe_post_hourly_status_update(bot) -> None:
     ]
     area_board_quests = board_quests_module.get_or_generate_board_quests(CAMPAIGN, location_id)
 
-    flavor = await asyncio.to_thread(narrate_hourly_update, location_name, recent_events, activity_lines)
+    if _ollama_congested():
+        # Same reasoning as _maybe_post_world_heartbeat -- no one's
+        # blocked waiting on this post, so skip straight to the real
+        # deterministic fallback rather than adding another 200s
+        # attempt to an already-strained shared Ollama slot.
+        flavor = _fallback_hourly_update(location_name, recent_events, activity_lines)
+    else:
+        flavor = await asyncio.to_thread(narrate_hourly_update, location_name, recent_events, activity_lines)
 
     lines = [f"🕐 *(the hour turns over — {location_name})*", flavor, ""]
     total_active = active_count + ai_active_count

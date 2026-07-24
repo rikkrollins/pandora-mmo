@@ -2,6 +2,15 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.6] — Reduced background load on shared narration capacity
+
+Purely atmospheric background narration (the "world keeps living while
+you're away" ambient line, and the hourly status update's flavor text)
+now skips its own narration attempt entirely when the system is
+already under heavy load, since nobody is actually waiting on either
+one in real time. Frees up shared capacity for narration a real player
+(or an active companion) is actually waiting on.
+
 ## [1.27.5] — Fixed solo combat drafting in unrelated companions, and talking to an NPC misrouting
 
 Fixed: starting a fight while playing solo could pull in an unrelated
