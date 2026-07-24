@@ -2,6 +2,13 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.13] — Fixed a rare hard-freeze when a solo fighter got paralyzed
+
+Fixed a real bug where a solo player who got paralyzed mid-fight could
+end up stuck forever, eventually forcing combat to abort with an ugly
+"stuck in a loop" message instead of a real resolution. This now
+resolves cleanly as a stalemate the moment it happens.
+
 ## [1.27.12] — Fixed "use the scroll..." style phrasing sometimes being misread
 
 Fixed: using an item or scroll ("Use the scroll of X on Y", "Use my

@@ -3447,7 +3447,30 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
             return
 
         stall_threshold = max(len(session.turn_order) * 2, 4)
-        if consecutive_noop_turns >= stall_threshold:
+        # Real bug caught by the full-playthrough simulation (2026-07-24):
+        # a monster with on_hit_condition="paralyzed" (e.g. the_waking_
+        # ember) can permanently paralyze a real player -- this engine has
+        # no duration tracking for ANY condition (see the paralyzed branch
+        # below), so once paralyzed, a solo player NEVER gets another turn
+        # for the rest of this fight. consecutive_noop_turns alone doesn't
+        # catch this: it keeps resetting to 0 every time the ENEMY takes a
+        # normal turn, so it can cycle forever between "player paralyzed
+        # (+1)" and "enemy acts normally (reset to 0)" without ever
+        # reaching stall_threshold -- the fight hit the hard 200-iteration
+        # safety cap and force-ended with an ugly "stuck in a loop"
+        # message instead of resolving gracefully. If literally every
+        # party-side member still in the fight is either paralyzed or
+        # already stabilized (both are permanent, no-recovery-within-
+        # combat states, unlike a live death-save still in progress),
+        # the party side can never act again regardless of what the enemy
+        # does -- that alone is real, complete proof of a stalemate.
+        party_ids_in_combat = [pid for pid in session.turn_order if session.sides.get(pid) == "party"]
+        party_all_incapacitated = bool(party_ids_in_combat) and all(
+            "paralyzed" in next(p for p in session.participants if p["telegram_user_id"] == pid).get("conditions", [])
+            or pid in session.stabilized_ids
+            for pid in party_ids_in_combat
+        )
+        if consecutive_noop_turns >= stall_threshold or party_all_incapacitated:
             await _safe_send(
                 update,
                 "🏳️ **Stalemate — the enemy breaks off, unable to finish the fight. "
