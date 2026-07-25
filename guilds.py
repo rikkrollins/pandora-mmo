@@ -48,6 +48,27 @@ GUILDS = {
         "join_requirement_classes": ["cleric", "druid"],
         "benefits": ["bonus_healing", "shop_discount_10"],
     },
+    # 2 more guilds (2026-07-25, per Coffee): "also consider a guild for
+    # forging (with % enhancements stats)... and a guild for enchanting
+    # wearable items and making items magic items." Both are a real
+    # alternate PATH for the same classes Silver Wardens/Arcane Circle
+    # already cover -- crafting focus instead of combat focus -- rather
+    # than open to everyone, keeping the same class+subclass gating
+    # every other guild here already uses.
+    "forge_guild": {
+        "name": "The Forge Guild",
+        "description": "Master smiths who trust their own hammer and steel more than any spell.",
+        "join_requirement_level": 5,
+        "join_requirement_classes": ["fighter", "paladin", "barbarian", "ranger", "monk"],
+        "benefits": ["bonus_weapon_damage_10", "shop_discount_10"],
+    },
+    "enchanters_guild": {
+        "name": "The Enchanters' Guild",
+        "description": "Artificers who bind real magic into ring and blade rather than casting it themselves.",
+        "join_requirement_level": 5,
+        "join_requirement_classes": ["wizard", "sorcerer", "warlock"],
+        "benefits": ["commission_enchantment", "shop_discount_10"],
+    },
 }
 
 # Guild quests (task #77): one real, repeatable bounty per guild,
@@ -86,6 +107,18 @@ GUILD_QUESTS = {
         "reward_gold": 25,
         "reward_xp": 25,
     },
+    "forge_guild": {
+        "title": "Proving the Steel",
+        "description": "A smith's work means nothing untested -- put your own forged gear through a real fight.",
+        "reward_gold": 30,
+        "reward_xp": 25,
+    },
+    "enchanters_guild": {
+        "title": "Gathering Residue",
+        "description": "Real battle leaves behind the raw arcane residue enchantment needs -- go collect some.",
+        "reward_gold": 25,
+        "reward_xp": 30,
+    },
 }
 
 # Real, modest membership benefits (2026-07-25) -- consumed by bot.py's
@@ -96,6 +129,15 @@ GUILD_QUESTS = {
 ARCANE_CIRCLE_SPELL_DAMAGE_BONUS_PCT = 15
 THIEVES_GUILD_STEAL_BONUS = 3
 FAITH_CIRCLE_HEAL_BONUS = 3
+FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT = 10
+
+# Arcane Circle exclusive spells (2026-07-25, per Coffee: "let them
+# learn new spells not otherwise available unless in the guilds") --
+# real spell_ids defined in spells.py's SPELLS, deliberately absent
+# from any class's normal CLASS_SPELL_LISTS entry so they can never
+# auto-unlock the ordinary way. bot.py's _do_learn_guild_spell is the
+# only path to ever know one, gated on real Arcane Circle membership.
+ARCANE_CIRCLE_EXCLUSIVE_SPELLS = ["starfall_lance", "voidcall"]
 
 
 def get_guild_quest(guild_id: str) -> dict | None:

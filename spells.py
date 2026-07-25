@@ -245,6 +245,24 @@ SPELLS = {
         "name": "Hold Monster", "level": 5, "school": "enchantment",
         "effect": "buff", "duration_rounds": 10,
     },
+    # Arcane Circle exclusive spells (2026-07-25, per Coffee: "let them
+    # learn new spells not otherwise available unless in the guilds").
+    # Deliberately NOT in any CLASS_SPELL_LISTS entry below, so they
+    # never auto-unlock via spells_unlocked_at_level like every other
+    # spell in this file does -- the only way to ever know one is
+    # bot.py's _do_learn_guild_spell, gated on real Arcane Circle
+    # membership (guilds.ARCANE_CIRCLE_EXCLUSIVE_SPELLS). Genuinely the
+    # strongest damage spells in the game (stronger than the previous
+    # top tier, Cone of Cold's 8d8) -- a real, mechanical reason to join
+    # beyond the flat +15% damage bonus.
+    "starfall_lance": {
+        "name": "Starfall Lance", "level": 4, "school": "evocation",
+        "effect": "damage", "damage_dice": "8d8", "save_ability": "dexterity", "damage_type": "radiant",
+    },
+    "voidcall": {
+        "name": "Voidcall", "level": 5, "school": "necromancy",
+        "effect": "damage", "damage_dice": "10d8", "save_ability": "constitution", "damage_type": "necrotic",
+    },
 }
 
 # Cantrips (level 0) each class has at-will, alongside their leveled spells.

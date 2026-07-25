@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.30] — Fix: party members no longer scatter away from the leader
+
+Real bug from Development, reported twice: a recruited/autonomous AI
+companion had no way of knowing where its human party leader actually
+was, so it would just as happily wander off exploring on its own as
+stay together — "the party's scattered all over the place" / "what
+happened to all the party members? I'm the only one here." Companions
+now snap back to their active party leader's location the moment
+they've drifted apart, instead of relying on the AI to decide to stay
+together on its own. Only while the leader is actually active — a
+resting/away leader doesn't drag their party around with them.
+
+Also: The Arcane Circle can now learn 2 real exclusive spells
+(Starfall Lance, Voidcall — stronger than any other spell in the
+game) found nowhere else, gated on real Circle membership and
+character level.
+
 ## [1.27.29] — Class profession affinity + 5 real guilds, class+subclass gated
 
 Every class now has a real "home" profession (e.g. Fighter →

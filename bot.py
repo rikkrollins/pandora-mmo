@@ -70,7 +70,7 @@ from ai.text_cleanup import to_speakable_text
 from ai import tts_piper, stt_groq
 from guilds import (
     GUILDS, eligible_for_guild, GUILD_QUESTS,
-    ARCANE_CIRCLE_SPELL_DAMAGE_BONUS_PCT, THIEVES_GUILD_STEAL_BONUS,
+    ARCANE_CIRCLE_SPELL_DAMAGE_BONUS_PCT, THIEVES_GUILD_STEAL_BONUS, ARCANE_CIRCLE_EXCLUSIVE_SPELLS,
 )
 from models import (
     VALID_CLASSES,
@@ -10137,6 +10137,77 @@ async def guild_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     lowered = update.message.text.lower()
     if any(w in lowered for w in ["guild quest", "check quest", "today's quest", "todays quest"]):
         await _do_check_guild_quest(update, guild_id)
+        return
+    if guild_id == "arcane_circle" and any(w in lowered for w in ["learn", "secret", "teach"]):
+        await _do_learn_guild_spell(update, update.message.text)
+
+
+async def _do_learn_guild_spell(update: Update, text: str) -> None:
+    """
+    Per Coffee (2026-07-25): "let them learn new spells not otherwise
+    available unless in the guilds" -- the Arcane Circle's own
+    exclusive spells (guilds.ARCANE_CIRCLE_EXCLUSIVE_SPELLS,
+    spells.py's SPELLS), gated on real Circle membership and never
+    reachable through the normal per-level auto-unlock every other
+    spell in this game uses (spells_module.spells_unlocked_at_level).
+    Still respects the same real character-level gate every other
+    spell already does (max_spell_level_for_character_level), so a
+    fresh level-3 joiner can't walk out with the level-5 capstone.
+    """
+    # This is only ever reached from guild_topic_handler, so replies stay
+    # in whichever real topic the request came from (the Arcane Circle's
+    # own topic) rather than defaulting to Adventure.
+    reply_thread_id = update.message.message_thread_id
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=reply_thread_id
+        )
+        return
+    if character.get("guild") != "arcane_circle":
+        await update.effective_chat.send_message(
+            "Only Arcane Circle members can learn the Circle's secret spells — join first.",
+            message_thread_id=reply_thread_id,
+        )
+        return
+    known = character.get("known_spells", [])
+    candidates = [sid for sid in ARCANE_CIRCLE_EXCLUSIVE_SPELLS if sid not in known]
+    if not candidates:
+        await update.effective_chat.send_message(
+            "You already know every secret the Circle has to teach.",
+            message_thread_id=reply_thread_id,
+        )
+        return
+    lowered = text.lower()
+    spell_id = next(
+        (sid for sid in candidates if spells_module.get_spell(sid)["name"].lower() in lowered), None
+    )
+    if spell_id is None:
+        if len(candidates) == 1:
+            spell_id = candidates[0]
+        else:
+            names = ", ".join(spells_module.get_spell(sid)["name"] for sid in candidates)
+            await update.effective_chat.send_message(
+                f"Which secret do you want to learn? {names}",
+                message_thread_id=reply_thread_id,
+            )
+            return
+    spell = spells_module.get_spell(spell_id)
+    max_level = spells_module.max_spell_level_for_character_level(character["level"])
+    if spell["level"] > max_level:
+        await update.effective_chat.send_message(
+            f"**{spell['name']}** is a level {spell['level']} secret — you're not experienced enough "
+            f"yet (character level {character['level']}).",
+            message_thread_id=reply_thread_id,
+        )
+        return
+    db.learn_spell(update.effective_user.id, spell_id)
+    await _safe_send(
+        update,
+        f"📖 **{character['name']}** learns the Circle's secret: **{spell['name']}** "
+        f"({spell['damage_dice']} {spell['damage_type']} damage).",
+        thread_id=reply_thread_id,
+    )
 
 
 async def _check_and_award_achievements(update: Update, character: dict | None) -> None:
@@ -15828,6 +15899,38 @@ async def _ai_party_autonomous_tick(bot) -> None:
     _LAST_AI_PARTY_TICK_AT = now
 
     user_id = actor["telegram_user_id"]
+
+    # Party cohesion fix (2026-07-25, per Coffee, reported twice: "the
+    # parties scattered all over the place... we need them to stay in
+    # the players area when the player is active" / "what happened to
+    # all the party members?... I'm the only one here?"): a recruited/
+    # autonomous companion's own situation facts (_build_ai_player_
+    # situation_facts) never told it where its human party leader
+    # actually was, so choose_next_action -- an LLM call with zero
+    # party-cohesion signal -- would just as happily wander off
+    # exploring on its own as stay put. Confirmed real root cause, not
+    # a fluke. Rather than trust the model to "choose" to stay together
+    # (exactly what was already failing), deterministically snap a
+    # drifted companion back to its human leader's CURRENT location
+    # whenever they've drifted apart, skipping the LLM call for this
+    # tick -- same guaranteed-correct instant relocation
+    # _do_recruit_npc already does once at recruit time, just
+    # re-applied continuously. Only while the leader is actually
+    # active (not resting) -- an inactive/away leader shouldn't yank
+    # their party around with them.
+    party_id = actor.get("party_id")
+    if party_id:
+        human_leader = next(
+            (m for m in db.get_party_members_by_id(party_id) if not m.get("is_ai")), None
+        )
+        if (human_leader and not human_leader.get("is_inactive")
+                and human_leader["current_location"] != actor["current_location"]):
+            db.update_character(user_id, current_location=human_leader["current_location"])
+            _log_world_event(
+                human_leader["current_location"], f"{actor['name']} hurries to catch up with the party."
+            )
+            return
+
     context_like = _AI_PLAYER_CONTEXTS.setdefault(user_id, _AiPlayerContext())
     last_action = context_like.user_data.get("last_autonomous_action")
 
