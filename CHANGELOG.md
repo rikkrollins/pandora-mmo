@@ -2,6 +2,15 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.21] — Crafting splits into real named professions
+
+Crafting is no longer one shared "crafting" skill — alchemy (potions,
+antitoxin, scrolls), cooking, and a new blacksmithing (forge a real
+longsword from iron ore) now each level up independently, the same
+way herbalism/mining/fishing/lumberjacking already do. Your backpack
+screen now shows a real tap-to-craft button for anything you actually
+have the materials for.
+
 ## [1.27.20] — Some water in the world isn't just water
 
 Added a real, undisclosed effect to certain water sources in the

@@ -7569,10 +7569,49 @@ async def _do_check_inventory(update: Update) -> None:
         item = items_module.get_item(item_id)
         name = item["name"] if item else item_id
         lines.append(f"  {name} x{qty}")
+    item_rows = _item_keyboard(character)
+    craft_rows = _craft_keyboard(character)
+    combined_rows = (item_rows.inline_keyboard if item_rows else []) + (craft_rows.inline_keyboard if craft_rows else [])
+    keyboard = InlineKeyboardMarkup(combined_rows) if combined_rows else None
     await _safe_send(
-        update, "🎒 Your backpack:\n" + "\n".join(lines), reply_markup=_with_menu_button(_item_keyboard(character)),
+        update, "🎒 Your backpack:\n" + "\n".join(lines), reply_markup=_with_menu_button(keyboard),
         speak=False,
     )
+
+
+def _craft_keyboard(character: dict) -> InlineKeyboardMarkup | None:
+    """
+    Per Coffee (2026-07-24, right after the new named-professions split:
+    "make sure characters have buttons for all that stuff too"): a real
+    tap per recipe this character can actually afford to attempt right
+    now (has_materials), same "only show what's actually usable"
+    discipline as _item_keyboard. Tapping dispatches through the exact
+    same _do_craft free text already uses.
+    """
+    craftable = [
+        recipe_id for recipe_id, recipe in RECIPES.items()
+        if has_materials(character.get("inventory", {}), recipe)
+    ]
+    if not craftable:
+        return None
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"⚗️ Craft {items_module.get_item(rid)['name']}", callback_data=f"craft|make|{rid}")]
+        for rid in craftable
+    ])
+
+
+async def craft_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _craft_keyboard -- dispatches through the exact same _do_craft free text already uses."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    await _safe_answer(query)
+    if action != "make" or len(parts) < 3:
+        return
+    item = items_module.get_item(parts[2])
+    if item is None:
+        return
+    await _do_craft(update, f"craft {item['name']}")
 
 
 def _item_keyboard(character: dict) -> InlineKeyboardMarkup | None:
@@ -7887,11 +7926,17 @@ async def _do_craft(update: Update, text: str) -> None:
         )
         return
 
-    # 2026-07-14, per Coffee: "crafting" is its own named, levelable
+    # 2026-07-14, per Coffee: crafting is its own named, levelable
     # skill -- tracked separately from whichever ability a given recipe
     # happens to roll with (wisdom for a potion, intelligence for a
-    # scroll), same split as the gathering professions above.
-    bonus = _practiced_bonus_for(update.effective_user.id, "crafting")
+    # scroll), same split as the gathering professions above. Extended
+    # 2026-07-24: each recipe now names its own profession (alchemy,
+    # cooking, blacksmithing, ...) instead of everything sharing one
+    # "crafting" bucket -- practicing potions no longer secretly makes
+    # you better at forging weapons too. Recipes with no profession set
+    # fall back to the old shared "crafting" key.
+    profession = get_recipe(recipe_id).get("profession", "crafting")
+    bonus = _practiced_bonus_for(update.effective_user.id, profession)
     result = resolve_craft(character, recipe_id, practiced_bonus=bonus)
 
     if result["outcome"] == "missing_materials":
@@ -7910,7 +7955,7 @@ async def _do_craft(update: Update, text: str) -> None:
 
     success = result["outcome"] == "success"
     if success:
-        db.record_skill_use(update.effective_user.id, "crafting")
+        db.record_skill_use(update.effective_user.id, profession)
         db.add_item(update.effective_user.id, result["result_item"], result["result_qty"])
 
     flavor = await asyncio.to_thread(
@@ -15747,6 +15792,7 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(spell_menu_callback, pattern=r"^spell\|"))
     application.add_handler(CallbackQueryHandler(quest_menu_callback, pattern=r"^quest\|"))
     application.add_handler(CallbackQueryHandler(item_menu_callback, pattern=r"^item\|"))
+    application.add_handler(CallbackQueryHandler(craft_menu_callback, pattern=r"^craft\|"))
     application.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu\|"))
     application.add_handler(CallbackQueryHandler(equip_menu_callback, pattern=r"^equip\|"))
     application.add_handler(CallbackQueryHandler(level_menu_callback, pattern=r"^level\|"))
