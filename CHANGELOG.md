@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.38] — Real mechanical hooks for all 11 "utility" subclasses
+
+Closes the honesty gap from the subclass system's first pass: every
+class's second ("utility") archetype now has a genuine mechanical
+bonus instead of being sheet-only flavor. Thief gets +3 on steal
+attempts (stacks with the Thieves' Guild's own bonus), Life gets +2
+extra healing on top of Disciple of Life, and Totem Warrior extends
+Rage's damage resistance to spell damage too, not just weapon hits.
+The other 8 (Battle Master, Devotion, Beast Master, Wild Magic, Great
+Old One, Lore, Land, Open Hand) each get a real +2 on a
+class-appropriate ability check, applied automatically anywhere that
+check already happens — skill checks, gathering, shoving.
+
 ## [1.27.37] — Fix: scrolls had no button, anywhere
 
 Real bug from Development ("No button for scrolls?", shown from a

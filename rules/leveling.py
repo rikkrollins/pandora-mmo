@@ -156,6 +156,44 @@ COMBAT_SUBCLASS_DAMAGE_BONUS_PCT = 20
 # here can't leak across classes).
 COMBAT_SUBCLASS_NAMES = frozenset(names[0] for names in CLASS_SUBCLASSES.values())
 
+# Real mechanical hooks for the SECOND ("utility") name in each
+# CLASS_SUBCLASSES pair (2026-07-25, per Coffee: "go ahead with the
+# subclass hooks" -- closing the honesty gap the pilot above explicitly
+# flagged: "no mechanical bonus is built for it yet"). Three archetypes
+# get a distinct, name-appropriate mechanic reusing an existing system
+# (Thief -> steal bonus, Life -> extra healing, Totem Warrior ->
+# broader Rage resistance) since a real existing hook fit naturally;
+# the rest get a flat ability-check bonus via this one shared table,
+# consumed generically by rules/dice.roll_ability_check so it applies
+# everywhere a check of that ability already happens (skill checks,
+# gathering, shoving) with no per-site wiring needed.
+UTILITY_SUBCLASS_CHECK_BONUS_VALUE = 2
+UTILITY_SUBCLASS_ABILITY_CHECK_BONUS = {
+    "Battle Master": "strength",     # tactical brawn
+    "Devotion": "charisma",          # force of presence and faith
+    "Beast Master": "wisdom",        # attuned to animals
+    "Wild Magic": "charisma",        # chaotic force of personality
+    "Great Old One": "intelligence",  # alien, half-understood knowledge
+    "Lore": "intelligence",          # bardic knowledge
+    "Land": "wisdom",                # deep attunement to nature
+    "Open Hand": "wisdom",           # inner stillness and focus
+}
+
+# The 3 specially-handled utility archetypes (Thief/Life/Totem Warrior)
+# -- bot.py/spells.py/rules/combat.py check these constants directly at
+# their own real hook points rather than through the generic ability-
+# check table above.
+THIEF_SUBCLASS_STEAL_BONUS = 3
+LIFE_SUBCLASS_HEAL_BONUS = 2
+TOTEM_WARRIOR_SUBCLASS_NAME = "Totem Warrior"
+
+
+def utility_subclass_ability_check_bonus(subclass: str | None, ability: str) -> int:
+    """Real +2 on an ability check when this is exactly the archetype's own flagged ability."""
+    if subclass and UTILITY_SUBCLASS_ABILITY_CHECK_BONUS.get(subclass) == ability.lower():
+        return UTILITY_SUBCLASS_CHECK_BONUS_VALUE
+    return 0
+
 
 def level_for_xp(xp: int) -> int:
     """Return the correct level for a given total XP amount."""

@@ -7,6 +7,8 @@ core the rest of the game trusts for numeric outcomes.
 import random
 import re
 
+from rules.leveling import utility_subclass_ability_check_bonus
+
 
 def roll(num_dice: int, sides: int) -> list[int]:
     """Roll num_dice dice of `sides` sides each, return list of individual rolls."""
@@ -74,12 +76,21 @@ def roll_ability_check(character: dict, ability: str, proficient: bool = False,
     score = character[ability.lower()]
     mod = ability_modifier(score)
     prof = character.get("proficiency_bonus", 0) if proficient else 0
+    # Utility subclass hook (2026-07-25): a real, flat +2 when this
+    # check's ability matches the character's chosen "utility"
+    # archetype's own flagged ability (rules/leveling.
+    # UTILITY_SUBCLASS_ABILITY_CHECK_BONUS) -- one shared hook point so
+    # every ability check that already routes through here (skill
+    # checks, gathering, shoving) picks it up automatically, no
+    # per-call-site wiring needed.
+    subclass_bonus = utility_subclass_ability_check_bonus(character.get("subclass"), ability)
     raw = roll_d20(advantage=advantage, disadvantage=disadvantage, forced_roll=forced_roll)
-    total = raw + mod + prof
+    total = raw + mod + prof + subclass_bonus
     return {
         "raw_roll": raw,
         "modifier": mod,
         "proficiency": prof,
+        "subclass_bonus": subclass_bonus,
         "total": total,
     }
 

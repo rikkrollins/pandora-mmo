@@ -93,6 +93,8 @@ from rules.leveling import (
     skill_check_proficiency_bonus, wild_shape_temp_hp, XP_THRESHOLDS,
     MAX_LEVEL, ability_score_cap, xp_gain_multiplier, hybrid_tier, HYBRID_MAX_TIER,
     magic_penetration_pct, CLASS_SUBCLASSES, COMBAT_SUBCLASS_NAMES, COMBAT_SUBCLASS_DAMAGE_BONUS_PCT,
+    THIEF_SUBCLASS_STEAL_BONUS, TOTEM_WARRIOR_SUBCLASS_NAME, LIFE_SUBCLASS_HEAL_BONUS,
+    UTILITY_SUBCLASS_ABILITY_CHECK_BONUS, UTILITY_SUBCLASS_CHECK_BONUS_VALUE,
 )
 from rules.proficiency import practiced_bonus, MAX_PRACTICE_BONUS
 
@@ -3242,6 +3244,31 @@ async def _do_choose_subclass(update: Update, text: str) -> None:
             update,
             f"⚔️ **{character['name']}** takes up the path of the **{match}** — weapon attacks now deal "
             f"{COMBAT_SUBCLASS_DAMAGE_BONUS_PCT}% more damage.",
+        )
+    elif match == "Thief":
+        await _safe_send(
+            update,
+            f"🗝️ **{character['name']}** takes up the path of the **Thief** — a trained hand at theft, "
+            f"+{THIEF_SUBCLASS_STEAL_BONUS} on every steal attempt.",
+        )
+    elif match == "Life":
+        await _safe_send(
+            update,
+            f"💚 **{character['name']}** takes up the path of **Life** — healing spells restore "
+            f"+{LIFE_SUBCLASS_HEAL_BONUS} extra HP on top of Disciple of Life.",
+        )
+    elif match == TOTEM_WARRIOR_SUBCLASS_NAME:
+        await _safe_send(
+            update,
+            f"🐻 **{character['name']}** takes up the path of the **{TOTEM_WARRIOR_SUBCLASS_NAME}** — "
+            f"while raging, spell damage is halved too, not just weapon hits.",
+        )
+    elif match in UTILITY_SUBCLASS_ABILITY_CHECK_BONUS:
+        ability = UTILITY_SUBCLASS_ABILITY_CHECK_BONUS[match]
+        await _safe_send(
+            update,
+            f"📜 **{character['name']}** takes up the path of the **{match}** — "
+            f"+{UTILITY_SUBCLASS_CHECK_BONUS_VALUE} on every {ability.capitalize()} check.",
         )
     else:
         await _safe_send(
@@ -12244,6 +12271,13 @@ async def _do_steal(update: Update, text: str, forced_roll: int | None = None) -
     # secrets, not available outside it.
     if character.get("guild") == "thieves_guild":
         bonus += THIEVES_GUILD_STEAL_BONUS
+    # Rogue's Thief subclass hook (2026-07-25): the same real +3, this
+    # time for actually having chosen the archetype named for exactly
+    # this -- stacks with the guild bonus above (different sources,
+    # same spirit), same as every other subclass/guild bonus in this
+    # game stacking rather than overriding.
+    if character.get("subclass") == "Thief":
+        bonus += THIEF_SUBCLASS_STEAL_BONUS
     result["total"] += bonus
     result["practiced_bonus"] = bonus
     success = result["total"] >= STEAL_DC
@@ -12928,6 +12962,17 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             result["damage_dealt"] = apply_damage_type_modifier(
                 result["damage_dealt"], spell.get("damage_type", "physical"), target, character
             )
+            # Totem Warrior subclass hook (2026-07-25): real 5E's Bear
+            # Totem Spirit extends Rage's damage resistance to nearly
+            # everything, including magic -- unlike base Rage (which
+            # already halves weapon damage taken while raging, see
+            # resolve_attack's own "raging" check), NOTHING in this game
+            # previously made spell damage respect Rage at all. Scoped
+            # to Totem Warrior specifically (not every raging
+            # Barbarian), same as real 5E reserving this for the one
+            # totem spirit that actually grants it.
+            if target.get("raging") and target.get("subclass") == TOTEM_WARRIOR_SUBCLASS_NAME:
+                result["damage_dealt"] = result["damage_dealt"] // 2
             target["hp_current"] = max(target["hp_current"] - result["damage_dealt"], 0)
             _sync_player_to_db(target)
             full_result = {

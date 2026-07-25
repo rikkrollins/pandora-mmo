@@ -5,7 +5,7 @@ spell damage/healing numbers are rolled through rules/dice.py — the AI
 narrates what a spell looked like, but never decides its numeric effect.
 """
 from rules.dice import roll_damage, roll_d20, ability_modifier
-from rules.leveling import is_proficient_in_save
+from rules.leveling import is_proficient_in_save, LIFE_SUBCLASS_HEAL_BONUS
 from guilds import FAITH_CIRCLE_HEAL_BONUS
 import hybrid_features
 
@@ -466,11 +466,11 @@ def resolve_heal_spell(spell_id: str, caster: dict, target: dict) -> dict:
         raise ValueError(f"{spell_id} is not a healing spell")
     healing = roll_damage(spell["heal_dice"])
     total_healed = healing["total"]
-    # Cleric's Divine Domain (fixed-default: Life Domain, same convention
-    # as Sorcerer's Draconic Bloodline/Warlock's Fiend patron -- no
-    # in-game subclass-choice mechanism exists): Disciple of Life adds
-    # 2 + the spell's level whenever a leveled (not cantrip) spell
-    # restores HP, real 5E formula.
+    # Cleric's Divine Domain: every Cleric gets this Disciple of Life
+    # bonus unconditionally (a fixed-default Life Domain flavor, same
+    # convention as Sorcerer's Draconic Bloodline/Warlock's Fiend
+    # patron) -- adds 2 + the spell's level whenever a leveled (not
+    # cantrip) spell restores HP, real 5E formula.
     if caster.get("char_class", "").lower() == "cleric" and spell["level"] > 0:
         disciple_of_life_bonus = 2 + spell["level"]
         # Task #131 skill-tree upgrade "disciples_grace": doubles this bonus.
@@ -487,6 +487,12 @@ def resolve_heal_spell(spell_id: str, caster: dict, target: dict) -> dict:
     # Disciple of Life above -- stacks with it rather than replacing it.
     if caster.get("guild") == "faith_circle":
         total_healed += FAITH_CIRCLE_HEAL_BONUS
+    # Cleric's Life subclass hook (2026-07-25): actually CHOOSING Life
+    # (rather than War) over the unconditional Disciple of Life above
+    # now means something real -- a further, distinct flat bonus on
+    # top, same stacking convention as Faith Circle.
+    if caster.get("subclass") == "Life":
+        total_healed += LIFE_SUBCLASS_HEAL_BONUS
     hp_before = target["hp_current"]
     hp_max = target.get("hp_max", hp_before)
     target["hp_current"] = min(hp_before + total_healed, hp_max)
