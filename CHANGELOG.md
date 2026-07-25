@@ -2,6 +2,17 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.37] — Fix: scrolls had no button, anywhere
+
+Real bug from Development ("No button for scrolls?", shown from a
+real backpack listing with a Scroll of Revivify and zero way to tap
+it): scrolls were never included in either the backpack's item
+buttons or the character sheet's spell buttons, even though using
+one has always worked via typed text. Both screens now show a real
+"📜 Spell Name (scroll)" button per carried scroll, using the exact
+same cast dispatch as a known spell — skipped only when you already
+know that spell outright, so it doesn't duplicate.
+
 ## [1.27.36] — New achievement: Master of a Trade
 
 Reaching Master rank (the top practiced bonus, 15 uses) in any of

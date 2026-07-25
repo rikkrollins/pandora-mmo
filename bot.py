@@ -7967,7 +7967,16 @@ async def _do_check_inventory(update: Update) -> None:
         lines.append(f"  {name} x{qty}")
     item_rows = _item_keyboard(character)
     craft_rows = _craft_keyboard(character)
-    combined_rows = (item_rows.inline_keyboard if item_rows else []) + (craft_rows.inline_keyboard if craft_rows else [])
+    # Scroll-cast buttons (2026-07-25, per Coffee: "No button for
+    # scrolls?" -- reported from exactly this backpack screen). Known
+    # spells already have their own buttons on the character sheet, so
+    # only the scroll-derived ones show up here, not a duplicate set.
+    scroll_rows = _scroll_spell_buttons(character)
+    combined_rows = (
+        (item_rows.inline_keyboard if item_rows else [])
+        + (craft_rows.inline_keyboard if craft_rows else [])
+        + scroll_rows
+    )
     keyboard = InlineKeyboardMarkup(combined_rows) if combined_rows else None
     await _safe_send(
         update, "🎒 Your backpack:\n" + "\n".join(lines), reply_markup=_with_menu_button(keyboard),
@@ -12662,14 +12671,45 @@ def _spell_keyboard(character: dict) -> InlineKeyboardMarkup | None:
     aim it at, the exact utility Coffee asked for, instead of always
     silently self-casting with no way to say who it's for.
     """
-    if not character.get("known_spells"):
-        return None
     buttons = []
-    for spell_id in character["known_spells"]:
+    seen_spell_ids = set()
+    for spell_id in character.get("known_spells") or []:
         spell = spells_module.get_spell(spell_id)
         if spell:
             buttons.append([InlineKeyboardButton(f"✨ {spell['name']}", callback_data=f"spell|cast|{spell_id}")])
+            seen_spell_ids.add(spell_id)
+    buttons += _scroll_spell_buttons(character, exclude_spell_ids=seen_spell_ids)
     return InlineKeyboardMarkup(buttons) if buttons else None
+
+
+def _scroll_spell_buttons(character: dict, exclude_spell_ids: set[str] = frozenset()) -> list:
+    """
+    Scrolls (2026-07-25, per Coffee: "No button for scrolls?" -- a real
+    backpack listing showed "Scroll of Revivify x1" with no way to tap
+    it, only free text). A scroll in the backpack already lets anyone
+    cast its one spell regardless of known_spells (_do_cast_spell's own
+    via_scroll branch), so this reuses the exact same spell|cast
+    callback _spell_keyboard's known-spell buttons use --
+    _do_cast_spell doesn't care whether the spell name it matched came
+    from known_spells or a scroll, so no new dispatch path is needed.
+    `exclude_spell_ids` skips a spell already covered by a known-spell
+    button (casting your own known spell costs a slot instead of the
+    scroll, the better default when both exist).
+    """
+    buttons = []
+    for item_id, qty in (character.get("inventory") or {}).items():
+        if qty <= 0:
+            continue
+        item = items_module.get_item(item_id)
+        if not item or item.get("type") != "scroll":
+            continue
+        spell_id = item.get("spell")
+        if not spell_id or spell_id in exclude_spell_ids:
+            continue
+        spell = spells_module.get_spell(spell_id)
+        if spell:
+            buttons.append([InlineKeyboardButton(f"📜 {spell['name']} (scroll)", callback_data=f"spell|cast|{spell_id}")])
+    return buttons
 
 
 def _target_picker_keyboard(prefix: str, action_id: str, requester: dict) -> InlineKeyboardMarkup | None:
