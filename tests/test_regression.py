@@ -18,6 +18,7 @@ import unittest
 import bot
 import campaign_loader as cl
 import db
+import guilds
 import items as items_module
 import spells
 from ai.intent_parser import _keyword_fallback, parse_intents
@@ -441,6 +442,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             referenced.update(cantrips)
         for spell_list in spells.CLASS_SPELL_LISTS.values():
             referenced.update(spell_list)
+        # Arcane Circle exclusive spells (2026-07-25) are deliberately NOT
+        # in any CLASS_SPELL_LISTS entry -- spells.py's own comment above
+        # starfall_lance/voidcall says so -- reachable only via guild
+        # membership + bot.py's _do_learn_guild_spell. This test predates
+        # that real reachability path, same stale-assumption shape as the
+        # 3 tests fixed in 822e728.
+        referenced.update(guilds.ARCANE_CIRCLE_EXCLUSIVE_SPELLS)
         orphaned = set(spells.SPELLS.keys()) - referenced
         self.assertEqual(orphaned, set(), f"unreachable by any class: {orphaned}")
 
@@ -509,7 +517,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         # Task #170 (guild vetting): joining now requires proven_in_combat,
         # not just level/class -- this fixture predates that requirement.
-        db.update_character(user_id, level=3, proven_in_combat=1)
+        # Guild vetting was further extended (2026-07-25) to also require
+        # a chosen subclass (eligible_for_guild) -- this fixture predates
+        # that too, stale the same way the 3 tests fixed in 822e728 were.
+        db.update_character(user_id, level=3, proven_in_combat=1, subclass="evocation")
         sink = []
         await bot._do_join_guild(FakeUpdate(user_id, "join the arcane circle", sink), "join the arcane circle")
         character = db.get_character(user_id)

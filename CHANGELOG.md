@@ -2,6 +2,44 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.41] — The Hollow Verge: the first rebirth-gated dungeon, plus two real bug fixes
+
+The first of 3 planned post-rebirth dungeons is live: **The Hollow
+Verge**, reachable north from the Far End of the Span (past Stonearch
+Bridge) — but only for a character who has rebirthed at least once.
+Everyone else finds the way there simply doesn't resolve yet. Four
+connected areas (a haunted threshold, a bonefield, a sealed cairn with
+a real riddle to solve, and an inner sanctum), four new monsters with
+real damage-type resistances/vulnerabilities (a Verge Wraith resistant
+to physical damage but weak to radiant, a Bone Legionnaire weak to
+fire, a Cairn Watcher resistant to necrotic, and the dungeon's own
+boss — The Verge Warden, resistant to both physical and necrotic, and
+by far the toughest thing in the game so far), a full quest chain
+ending in a real capstone reward, and 2 new items earned only by
+clearing it.
+
+Also fixed two real bugs found while building this:
+- **Monster resistances/vulnerabilities were silently never applied in
+  real combat.** The damage-type system (shipped earlier) fully
+  supported a monster template setting `resistances`/`vulnerabilities`/
+  `immunities`, but the actual enemy-building code in combat never
+  copied those fields onto the real fight participant — so even a
+  monster that set them would have had them silently do nothing. No
+  monster happened to use them yet, so this never showed up until now.
+  Real damage-type combat math against The Hollow Verge's new monsters
+  confirms this now works correctly (halved/doubled damage as
+  expected).
+- **The "Run" (and some other) battle buttons could silently do
+  nothing.** Found live in Development (2026-07-25): tapping "Run" hit
+  a `telegram.error.BadRequest("Message is not modified")` from
+  Telegram's side (the button's own visual update was a no-op) and
+  that error aborted the ENTIRE button handler before fleeing ever
+  actually ran — so the tap just did nothing, with no explanation.
+  Every battle-menu button (Fight, Skills, Items, Run, and their
+  submenus) shared this same silent-failure risk. Fixed the same way
+  an earlier "stale button" bug was fixed: the button's own visual
+  update failing no longer blocks the real action underneath it.
+
 ## [1.27.40] — Switching characters now carries your party seat with you
 
 Real confusion from Development ("The AI member arent showing up in

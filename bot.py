@@ -1948,13 +1948,13 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     character = db.get_character(user_id)
 
     if action == "menu":
-        await query.edit_message_reply_markup(reply_markup=_battle_menu_keyboard(session))
+        await _safe_edit_markup(query, _battle_menu_keyboard(session))
         return
 
     if action == "fight":
         opposing = session.living_on_side(session.opposing_side(user_id))
         if len(opposing) <= 1:
-            await query.edit_message_reply_markup(reply_markup=None)
+            await _safe_edit_markup(query)
             if opposing:
                 await _do_attack(update, f"attack {opposing[0]['name']}")
             else:
@@ -1974,11 +1974,11 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             for p in opposing
         ]
         buttons.append([InlineKeyboardButton("« Back", callback_data="bm|menu")])
-        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+        await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
         return
 
     if action == "target":
-        await query.edit_message_reply_markup(reply_markup=None)
+        await _safe_edit_markup(query)
         await _do_attack(update, f"attack {value}")
         return
 
@@ -1989,7 +1989,7 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             for sid in known if spells_module.get_spell(sid)
         ]
         spell_buttons.append([InlineKeyboardButton("« Back", callback_data="bm|menu")])
-        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(spell_buttons))
+        await _safe_edit_markup(query, InlineKeyboardMarkup(spell_buttons))
         return
 
     if action == "cast":
@@ -2019,7 +2019,7 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                     for p in opposing
                 ]
                 buttons.append([InlineKeyboardButton("« Back", callback_data="bm|skills")])
-                await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+                await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
                 return
         elif spell and spell["effect"] == "heal":
             own_side = session.sides.get(user_id)
@@ -2034,16 +2034,16 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                     for p in allies
                 ]
                 buttons.append([InlineKeyboardButton("« Back", callback_data="bm|skills")])
-                await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+                await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
                 return
-        await query.edit_message_reply_markup(reply_markup=None)
+        await _safe_edit_markup(query)
         await _do_cast_spell(update, f"cast {spell_name}")
         return
 
     if action == "casttarget":
         spell = spells_module.get_spell(value)
         spell_name = spell["name"] if spell else value
-        await query.edit_message_reply_markup(reply_markup=None)
+        await _safe_edit_markup(query)
         await _do_cast_spell(update, f"cast {spell_name} on {target_name}")
         return
 
@@ -2057,7 +2057,7 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             for iid in consumable_ids if items_module.get_item(iid)
         ]
         item_buttons.append([InlineKeyboardButton("« Back", callback_data="bm|menu")])
-        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(item_buttons))
+        await _safe_edit_markup(query, InlineKeyboardMarkup(item_buttons))
         return
 
     if action == "use":
@@ -2084,21 +2084,21 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                     for p in allies
                 ]
                 buttons.append([InlineKeyboardButton("« Back", callback_data="bm|items")])
-                await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+                await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
                 return
-        await query.edit_message_reply_markup(reply_markup=None)
+        await _safe_edit_markup(query)
         await _do_use_item(update, f"use {item_name}")
         return
 
     if action == "usetarget":
         item = items_module.get_item(value)
         item_name = item["name"] if item else value
-        await query.edit_message_reply_markup(reply_markup=None)
+        await _safe_edit_markup(query)
         await _do_use_item(update, f"use {item_name} on {target_name}")
         return
 
     if action == "run":
-        await query.edit_message_reply_markup(reply_markup=None)
+        await _safe_edit_markup(query)
         await _do_flee(update, "flee")
         return
 
@@ -2367,6 +2367,28 @@ async def _safe_answer(query) -> bool:
         return True
     except TelegramError as e:
         logger.warning(f"[callback] query.answer() failed (likely expired): {e!r}")
+        return False
+
+
+async def _safe_edit_markup(query, reply_markup=None) -> bool:
+    """
+    Same bug shape as _safe_answer above, found live 2026-07-25: every
+    `query.edit_message_reply_markup(...)` call in battle_menu_callback
+    (and the shop/spell pickers elsewhere) was bare, no exception
+    handling. Telegram raises BadRequest("Message is not modified") the
+    moment the requested markup happens to already match the message's
+    current markup -- confirmed live via a real "Run" tap
+    (bot_live_tmp.log, 2026-07-25 11:38): the button press aborted the
+    ENTIRE handler before _do_flee ever ran, so the player couldn't flee
+    at all, with no error shown to them. Swallowing this one specific,
+    harmless case (nothing actually needed to change) lets the real
+    action underneath still run every time.
+    """
+    try:
+        await query.edit_message_reply_markup(reply_markup=reply_markup)
+        return True
+    except TelegramError as e:
+        logger.warning(f"[callback] edit_message_reply_markup failed (likely already current): {e!r}")
         return False
 
 
@@ -4196,6 +4218,20 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 "monster_key": monster_key,
                 "is_boss": template.get("is_boss", False),
                 "life_drain": template.get("life_drain", False),
+                # Real bug found live (2026-07-25, while building the
+                # rebirth dungeons): campaign.json monster templates
+                # have always supported real resistances/vulnerabilities/
+                # immunities (Phase 1 of the damage-type system,
+                # apply_damage_type_modifier already reads them off the
+                # defender dict) -- but THIS enemy-building loop, the one
+                # actual place real combat participants get constructed,
+                # never copied them over from the template at all. No
+                # monster in the campaign happened to set them yet, so
+                # this silently did nothing so far -- but it would have
+                # quietly no-op'd the very first monster that ever did.
+                "resistances": template.get("resistances", []),
+                "vulnerabilities": template.get("vulnerabilities", []),
+                "immunities": template.get("immunities", []),
             })
         sides = {p["telegram_user_id"]: "party" for p in party}
         for enemy in enemies:
@@ -8105,7 +8141,7 @@ async def item_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if picker is None:
             await _do_use_item(update, f"use {item['name']}")
             return
-        await query.edit_message_reply_markup(reply_markup=picker)
+        await _safe_edit_markup(query, picker)
         return
 
     if action == "target":
@@ -10849,6 +10885,10 @@ async def _do_move(update: Update, text: str) -> None:
         await _send_level_gate_message(update, destination)
         return
 
+    if not _meets_rebirth_requirement(character, destination):
+        await _send_rebirth_gate_message(update, destination)
+        return
+
     locked_connections = current.get("locked_connections", {})
     lockable_id = locked_connections.get(destination_id)
     if lockable_id and lockable_id not in _UNLOCKED:
@@ -11014,6 +11054,29 @@ async def _send_level_gate_message(update: Update, destination: dict) -> None:
     )
 
 
+def _meets_rebirth_requirement(character: dict, destination: dict) -> bool:
+    """
+    Rebirth-gated content (2026-07-25, per the standing damage-type/
+    rebirth plan's Phase 3): a location can set requires_rebirth_count
+    (an int) alongside min_level -- same additive, independent-gate
+    pattern as every other location restriction in this file. Any
+    location with no requires_rebirth_count set (i.e. everything in
+    the campaign before this phase) is completely unaffected.
+    """
+    required = destination.get("requires_rebirth_count")
+    return required is None or character.get("rebirth_count", 0) >= required
+
+
+async def _send_rebirth_gate_message(update: Update, destination: dict) -> None:
+    required = destination["requires_rebirth_count"]
+    await update.effective_chat.send_message(
+        f"Something about **{destination['name']}** refuses to fully resolve in front of you — "
+        f"as if the world itself doesn't think you've lived enough of it yet "
+        f"(requires {required} rebirth{'s' if required != 1 else ''}).",
+        message_thread_id=config.TOPIC_ADVENTURE_ID,
+    )
+
+
 async def _do_fast_travel(update: Update, text: str) -> None:
     """
     Warp directly to any location this character has already visited
@@ -11082,6 +11145,10 @@ async def _do_fast_travel(update: Update, text: str) -> None:
 
     if not _meets_location_level(character, destination):
         await _send_level_gate_message(update, destination)
+        return
+
+    if not _meets_rebirth_requirement(character, destination):
+        await _send_rebirth_gate_message(update, destination)
         return
 
     current = cl.get_location(CAMPAIGN, character["current_location"])
@@ -12806,7 +12873,7 @@ async def spell_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         if picker is None:
             await _do_cast_spell(update, f"cast {spell['name']}")
             return
-        await query.edit_message_reply_markup(reply_markup=picker)
+        await _safe_edit_markup(query, picker)
         return
 
     if action == "target":

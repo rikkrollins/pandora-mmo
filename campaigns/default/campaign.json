@@ -62,7 +62,7 @@
           },
           "shuttered_stall": {
             "name": "a boarded-up stall",
-            "description": "Nailed shut from the outside, which is the strange part \u2014 nobody in Market Row admits to knowing who used to run it."
+            "description": "Nailed shut from the outside, which is the strange part — nobody in Market Row admits to knowing who used to run it."
           },
           "locksmiths_keys": {
             "name": "rows of hanging keys in the locksmith's window",
@@ -133,7 +133,7 @@
         "interactables": {
           "listening_tree": {
             "name": "an ancient, wide-boled tree",
-            "description": "Its bark seems to almost resolve into faces at the edge of your vision \u2014 never quite there when you look straight at it."
+            "description": "Its bark seems to almost resolve into faces at the edge of your vision — never quite there when you look straight at it."
           },
           "carved_waystone": {
             "name": "a weathered waystone",
@@ -307,7 +307,7 @@
           },
           "stumps_rings": {
             "name": "the stump's growth rings",
-            "description": "Visible where the outer bark has fallen away. One ring, deep in, is far darker than all the others \u2014 as if that entire year burned instead of grew."
+            "description": "Visible where the outer bark has fallen away. One ring, deep in, is far darker than all the others — as if that entire year burned instead of grew."
           }
         }
       },
@@ -499,24 +499,26 @@
           },
           "gorge_below": {
             "name": "the gorge beneath the bridge",
-            "description": "Looking down, the sound that rises up doesn't quite match falling water \u2014 closer to something breathing, slow and even."
+            "description": "Looking down, the sound that rises up doesn't quite match falling water — closer to something breathing, slow and even."
           }
         }
       },
       "stonearch_bridge_far_end": {
         "name": "The Far End of the Span",
         "layer": "surface",
-        "description": "Where the bridge finally lets out past the gorge, onto a narrow shelf of rock before the land opens up again. Quieter here \u2014 the gorge's sound doesn't carry this far.",
+        "description": "Where the bridge finally lets out past the gorge, onto a narrow shelf of rock before the land opens up again. Quieter here — the gorge's sound doesn't carry this far.",
         "connections": [
-          "stonearch_bridge"
+          "stonearch_bridge",
+          "hollow_verge_threshold"
         ],
         "directions": {
-          "west": "stonearch_bridge"
+          "west": "stonearch_bridge",
+          "north": "hollow_verge_threshold"
         },
         "interactables": {
           "far_end_marker": {
             "name": "a single carved marker stone",
-            "description": "Newer than the bridge itself by centuries, but already weathering to match \u2014 someone wanted it to look like it had always been here."
+            "description": "Newer than the bridge itself by centuries, but already weathering to match — someone wanted it to look like it had always been here."
           }
         }
       },
@@ -619,11 +621,109 @@
         "interactables": {
           "vanes_shelves": {
             "name": "shelves of curiosities behind the counter",
-            "description": "Nothing on them is labeled, and no two items seem to be from the same era, region, or maker \u2014 yet somehow none of it looks out of place next to the rest."
+            "description": "Nothing on them is labeled, and no two items seem to be from the same era, region, or maker — yet somehow none of it looks out of place next to the rest."
           },
           "the_uneven_floor": {
             "name": "the shop's oddly uneven floor",
             "description": "The floorboards slope gently toward the back of the nook, just enough to notice, never enough to explain."
+          }
+        }
+      },
+      "hollow_verge_threshold": {
+        "name": "The Hollow Verge",
+        "layer": "surface",
+        "description": "The land past the bridge's far end doesn't just open up -- it keeps opening, further than the shelf of rock should allow, into a grey hush that wasn't visible from the bridge at all. The air feels thinner here, like the world is only half-finished with this part of itself.",
+        "connections": [
+          "stonearch_bridge_far_end",
+          "hollow_verge_bonefield"
+        ],
+        "directions": {
+          "south": "stonearch_bridge_far_end",
+          "north": "hollow_verge_bonefield"
+        },
+        "requires_rebirth_count": 1,
+        "monsters": [
+          "verge_wraith"
+        ],
+        "interactables": {
+          "half_finished_horizon": {
+            "name": "the horizon, somehow unfinished",
+            "description": "Where the sky should meet the ground, it just... doesn't, quite. The seam is close enough to see if you don't look at it directly."
+          }
+        }
+      },
+      "hollow_verge_bonefield": {
+        "name": "The Bonefield",
+        "layer": "surface",
+        "description": "A field of old bone, sun-grey and half-sunk into the ground, arranged in ranks too even to be an accident. Whatever army this once was, it's still standing in formation, waiting for an order that never came.",
+        "connections": [
+          "hollow_verge_threshold",
+          "hollow_verge_sealed_cairn"
+        ],
+        "directions": {
+          "south": "hollow_verge_threshold",
+          "north": "hollow_verge_sealed_cairn"
+        },
+        "monsters": [
+          "bone_legionnaire",
+          "verge_wraith"
+        ],
+        "interactables": {
+          "standing_ranks": {
+            "name": "the bonefield's standing ranks",
+            "description": "Row after row, still in formation after however long this has been. A few ranks nearer the cairn have started, almost imperceptibly, to turn their heads."
+          }
+        },
+        "story_gates": {
+          "hollow_verge_sealed_cairn": {
+            "requires_cleared_location": "hollow_verge_bonefield"
+          }
+        }
+      },
+      "hollow_verge_sealed_cairn": {
+        "name": "The Sealed Cairn",
+        "layer": "surface",
+        "description": "A low cairn built from the same grey stone as everything else here, sealed with a door that has no visible hinge and no visible lock -- just a single line of script worn nearly smooth, still just legible.",
+        "connections": [
+          "hollow_verge_bonefield",
+          "hollow_verge_inner_sanctum"
+        ],
+        "directions": {
+          "south": "hollow_verge_bonefield",
+          "north": "hollow_verge_inner_sanctum"
+        },
+        "monsters": [
+          "cairn_watcher"
+        ],
+        "interactables": {
+          "worn_seal_script": {
+            "name": "the cairn's worn seal script",
+            "description": "\"I am given back to those who already have everything, and worth nothing to those who have lost it all. What am I?\" -- carved deep enough to have survived whatever wore the rest of the stone smooth."
+          }
+        },
+        "story_gates": {
+          "hollow_verge_inner_sanctum": {
+            "requires_cleared_location": "hollow_verge_sealed_cairn"
+          }
+        }
+      },
+      "hollow_verge_inner_sanctum": {
+        "name": "The Verge Sanctum",
+        "layer": "surface",
+        "description": "The unfinished horizon closes in completely here, until the sanctum itself is the only clearly real thing left standing. Something has been waiting at its center for exactly as long as the field outside has been standing at attention -- and it has finally noticed you.",
+        "connections": [
+          "hollow_verge_sealed_cairn"
+        ],
+        "directions": {
+          "south": "hollow_verge_sealed_cairn"
+        },
+        "monsters": [
+          "the_verge_warden"
+        ],
+        "interactables": {
+          "unfinished_center": {
+            "name": "the sanctum's unfinished center",
+            "description": "Not empty, exactly -- more like a space the world hasn't gotten around to deciding what belongs in yet. Right now, that's the Warden."
           }
         }
       }
@@ -671,7 +771,7 @@
           },
           "damp_alcove": {
             "name": "a damp stone alcove",
-            "description": "Old claw marks score the walls here, layered over each other by what must have been years of the same animal returning to the same spot \u2014 or several animals never learning better."
+            "description": "Old claw marks score the walls here, layered over each other by what must have been years of the same animal returning to the same spot — or several animals never learning better."
           }
         },
         "story_gates": {
@@ -718,7 +818,7 @@
         "interactables": {
           "chalk_markings": {
             "name": "chalk markings on the tunnel walls",
-            "description": "Goblin scrawl, but organized \u2014 arrows, tallies, what might be a crude map \u2014 in a hand far steadier than goblins are known for."
+            "description": "Goblin scrawl, but organized — arrows, tallies, what might be a crude map — in a hand far steadier than goblins are known for."
           },
           "makeshift_totem": {
             "name": "a crude bone totem",
@@ -761,7 +861,7 @@
           },
           "grotto_pool": {
             "name": "a still, black pool",
-            "description": "The water is perfectly still, and reflects the ceiling above \u2014 except for one patch, near the center, that seems to reflect something else entirely."
+            "description": "The water is perfectly still, and reflects the ceiling above — except for one patch, near the center, that seems to reflect something else entirely."
           }
         },
         "story_gates": {
@@ -773,7 +873,7 @@
       "sunken_root_caverns_deep_tunnels": {
         "name": "The Deep Tunnels",
         "layer": "underground",
-        "description": "Passages that keep going long after they should have ended. Somewhere ahead, rubble chokes one of them almost shut \u2014 almost.",
+        "description": "Passages that keep going long after they should have ended. Somewhere ahead, rubble chokes one of them almost shut — almost.",
         "connections": [
           "sunken_root_caverns",
           "sunken_root_caverns_forgotten_cistern"
@@ -799,7 +899,7 @@
         "interactables": {
           "tunnel_rubble_choke": {
             "name": "a passage nearly sealed by old rubble",
-            "description": "Almost fully collapsed, but not quite \u2014 cleared enough times, by something or someone, to still be worth clearing again. Air moves through it from somewhere else entirely."
+            "description": "Almost fully collapsed, but not quite — cleared enough times, by something or someone, to still be worth clearing again. Air moves through it from somewhere else entirely."
           }
         },
         "story_gates": {
@@ -882,7 +982,7 @@
         "interactables": {
           "den_bone_pile": {
             "name": "a disorganized pile of gnawed bones",
-            "description": "The one thing back here that ISN'T organized \u2014 everything else in these warrens is unnervingly tidy by comparison."
+            "description": "The one thing back here that ISN'T organized — everything else in these warrens is unnervingly tidy by comparison."
           }
         }
       },
@@ -1105,7 +1205,9 @@
         "layer": "underground",
         "description": "Past the seam in the floor, the carved script gives up its shape completely — the walls here are smooth, black, and warm, like something that stopped bothering to explain itself a long time ago.",
         "connections": [],
-        "monsters": ["the_unrepeating"]
+        "monsters": [
+          "the_unrepeating"
+        ]
       },
       "whispering_wood_root_hollow": {
         "name": "The Root Hollow",
@@ -1269,11 +1371,13 @@
         "connections": [],
         "hidden": true,
         "requires_item": "shard_of_dim_light",
-        "monsters": ["the_waiting_shape"],
+        "monsters": [
+          "the_waiting_shape"
+        ],
         "interactables": {
           "waiting_shape": {
             "name": "a still shape at the island's center",
-            "description": "Motionless, silhouetted, and unmistakably waiting \u2014 for how long, and for what, you can't yet say."
+            "description": "Motionless, silhouetted, and unmistakably waiting — for how long, and for what, you can't yet say."
           },
           "isles_edge": {
             "name": "the island's crumbling edge",
@@ -1340,7 +1444,7 @@
     "theron_the_wanderer": {
       "name": "Theron",
       "role": "wandering_monk",
-      "personality": "a quiet, unaligned drifter who speaks in riddles and owes loyalty to no one \u2014 not unfriendly, but never quite trustworthy either",
+      "personality": "a quiet, unaligned drifter who speaks in riddles and owes loyalty to no one — not unfriendly, but never quite trustworthy either",
       "alignment": "True Neutral",
       "disposition": "neutral",
       "can_wander": true,
@@ -1354,7 +1458,7 @@
     "kess_the_bandit": {
       "name": "Kess",
       "role": "bandit_captain",
-      "personality": "a cold, calculating highwaywoman who sizes up travelers as marks before they've even noticed her \u2014 cruel by choice, not desperation",
+      "personality": "a cold, calculating highwaywoman who sizes up travelers as marks before they've even noticed her — cruel by choice, not desperation",
       "alignment": "Chaotic Evil",
       "disposition": "hostile",
       "stats": {
@@ -1754,7 +1858,7 @@
         "type": "reach_location",
         "location": "hollow_stump_shrine"
       },
-      "clue": "Old offerings at the shrine are undisturbed by animals \u2014 worth seeing with your own eyes."
+      "clue": "Old offerings at the shrine are undisturbed by animals — worth seeing with your own eyes."
     },
     "clear_the_warrens": {
       "title": "Clear the Goblin Warrens",
@@ -1785,7 +1889,7 @@
     },
     "the_hush_stage1_signs": {
       "title": "Into the Hush",
-      "description": "No two accounts of what's past Glimmerdeep Grotto agree \u2014 that alone is worth noting. The only way to know for certain is to go down and see it yourself.",
+      "description": "No two accounts of what's past Glimmerdeep Grotto agree — that alone is worth noting. The only way to know for certain is to go down and see it yourself.",
       "location": "the_hush_below",
       "reward_xp": 100,
       "reward_gold": 50,
@@ -1793,11 +1897,11 @@
         "type": "reach_location",
         "location": "the_hush_below"
       },
-      "clue": "No two accounts of what's past Glimmerdeep Grotto agree \u2014 that alone is worth noting."
+      "clue": "No two accounts of what's past Glimmerdeep Grotto agree — that alone is worth noting."
     },
     "the_hush_stage2_the_wisp": {
       "title": "What Watches in the Dark",
-      "description": "Something pale and quick moves at the edge of every torch's reach down here, blinding anyone who gets too close a good look at it \u2014 it has to be dealt with before whatever's deeper even notices you've arrived.",
+      "description": "Something pale and quick moves at the edge of every torch's reach down here, blinding anyone who gets too close a good look at it — it has to be dealt with before whatever's deeper even notices you've arrived.",
       "location": "the_hush_below",
       "reward_xp": 200,
       "reward_gold": 100,
@@ -1805,11 +1909,11 @@
         "type": "defeat_monster",
         "monster": "shadow_wisp"
       },
-      "clue": "Footprints in old dust, fresh enough that the dust hasn't resettled \u2014 something else is already down here."
+      "clue": "Footprints in old dust, fresh enough that the dust hasn't resettled — something else is already down here."
     },
     "the_hush_stage3_the_unspoken": {
       "title": "What Answers Back",
-      "description": "Few who go into the Hush Below come back describing the same thing twice \u2014 and something down there has started describing YOU back, in a voice that isn't quite a voice.",
+      "description": "Few who go into the Hush Below come back describing the same thing twice — and something down there has started describing YOU back, in a voice that isn't quite a voice.",
       "location": "the_hush_below",
       "reward_xp": 450,
       "reward_gold": 250,
@@ -1818,12 +1922,12 @@
         "type": "defeat_monster",
         "monster": "the_unspoken"
       },
-      "clue": "An old iron door, ajar, wasn't open a moment ago \u2014 whatever moved it wants to be found now.",
+      "clue": "An old iron door, ajar, wasn't open a moment ago — whatever moved it wants to be found now.",
       "weight": "climactic"
     },
     "the_first_city_quest": {
       "title": "The First City",
-      "description": "Beneath everything, something predates the goblins, the roots, and the crystals \u2014 and the spire's slow, warm breathing has just changed rhythm.",
+      "description": "Beneath everything, something predates the goblins, the roots, and the crystals — and the spire's slow, warm breathing has just changed rhythm.",
       "location": "the_first_city",
       "reward_xp": 1500,
       "reward_gold": 1000,
@@ -1913,6 +2017,58 @@
       "reward_gold": 500,
       "reward_item": "the_last_word",
       "clue": "Nothing about this place was ever part of the story everyone else was told."
+    },
+    "verge_wraiths_unrest": {
+      "title": "The Wraith's Unrest",
+      "description": "Whatever haunts the Hollow Verge's threshold isn't going to let anyone deeper in while it's still standing.",
+      "location": "hollow_verge_threshold",
+      "reward_xp": 600,
+      "reward_gold": 300,
+      "reward_item": "verge_ashbound_band",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "verge_wraith"
+      },
+      "clue": "The wraith seems less interested in stopping you than in making sure you remember it was here first."
+    },
+    "bonefields_march": {
+      "title": "The March That Never Ended",
+      "description": "The Bonefield's ranks won't break formation on their own -- someone has to actually give them a reason to stop standing at attention.",
+      "location": "hollow_verge_bonefield",
+      "reward_xp": 700,
+      "reward_gold": 350,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "bone_legionnaire"
+      },
+      "clue": "A few of the nearer ranks have started turning their heads toward the cairn, like they're waiting for the same order you are."
+    },
+    "cairns_silence": {
+      "title": "The Cairn's Silence",
+      "description": "The Sealed Cairn's door has no hinge and no lock -- just a riddle worn nearly smooth, and it isn't opening for anyone who can't answer it.",
+      "location": "hollow_verge_sealed_cairn",
+      "trigger": {
+        "type": "solve_puzzle",
+        "puzzle_id": "hollow_verge_riddle"
+      },
+      "reward_xp": 500,
+      "reward_gold": 200,
+      "reward_item": "weathered_surface_map",
+      "clue": "The riddle carved into the seal reads: \"I am given back to those who already have everything, and worth nothing to those who have lost it all. What am I?\""
+    },
+    "the_verge_wardens_toll": {
+      "title": "The Warden's Toll",
+      "description": "Everything in the Hollow Verge has been standing at attention for the Warden's sake -- and it has finally noticed you're the reason the wait is over.",
+      "location": "hollow_verge_inner_sanctum",
+      "reward_xp": 2000,
+      "reward_gold": 1500,
+      "reward_item": "wardens_reprieve",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_verge_warden"
+      },
+      "clue": "The unfinished space at the sanctum's center hasn't decided what belongs in it yet -- right now, that's the Warden, and it knows it's temporary.",
+      "weight": "climactic"
     }
   },
   "story_arcs": {
@@ -2082,12 +2238,74 @@
       "xp_reward": 250,
       "is_boss": true,
       "on_hit_condition": "frightened"
+    },
+    "verge_wraith": {
+      "name": "Verge Wraith",
+      "dexterity": 16,
+      "strength": 10,
+      "armor_class": 14,
+      "hp_max": 30,
+      "proficiency_bonus": 2,
+      "xp_reward": 400,
+      "on_hit_condition": "frightened",
+      "resistances": [
+        "physical"
+      ],
+      "vulnerabilities": [
+        "radiant"
+      ]
+    },
+    "bone_legionnaire": {
+      "name": "Bone Legionnaire",
+      "dexterity": 12,
+      "strength": 15,
+      "armor_class": 15,
+      "hp_max": 35,
+      "proficiency_bonus": 2,
+      "xp_reward": 450,
+      "vulnerabilities": [
+        "fire"
+      ]
+    },
+    "cairn_watcher": {
+      "name": "Cairn Watcher",
+      "dexterity": 10,
+      "strength": 14,
+      "armor_class": 16,
+      "hp_max": 40,
+      "proficiency_bonus": 3,
+      "xp_reward": 500,
+      "resistances": [
+        "necrotic"
+      ],
+      "vulnerabilities": [
+        "radiant"
+      ]
+    },
+    "the_verge_warden": {
+      "name": "The Verge Warden",
+      "dexterity": 15,
+      "strength": 19,
+      "armor_class": 19,
+      "hp_max": 95,
+      "proficiency_bonus": 4,
+      "xp_reward": 1400,
+      "is_boss": true,
+      "on_hit_condition": "frightened",
+      "life_drain": true,
+      "resistances": [
+        "physical",
+        "necrotic"
+      ],
+      "vulnerabilities": [
+        "radiant"
+      ]
     }
   },
   "factions": {
     "crossroads_folk": {
       "name": "The Crossroads Folk",
-      "description": "The ordinary people who keep the Crossroads running \u2014 innkeepers, traders, and the wanderers who pass through and stay a while. No oaths, no hierarchy, just people who look out for each other.",
+      "description": "The ordinary people who keep the Crossroads running — innkeepers, traders, and the wanderers who pass through and stay a while. No oaths, no hierarchy, just people who look out for each other.",
       "alignment_lean": "good",
       "member_npcs": [
         "grimsby",
@@ -2098,7 +2316,7 @@
     },
     "blackthorn_raiders": {
       "name": "The Blackthorn Raiders",
-      "description": "A loose band of highwaymen and opportunists preying on the roads between settlements. Small, cruel, and \u2014 some in the Crossroads whisper \u2014 funded by something bigger than banditry.",
+      "description": "A loose band of highwaymen and opportunists preying on the roads between settlements. Small, cruel, and — some in the Crossroads whisper — funded by something bigger than banditry.",
       "alignment_lean": "evil",
       "member_npcs": [
         "kess_the_bandit"
@@ -2108,7 +2326,7 @@
     },
     "the_wanderers_road": {
       "name": "The Wanderers' Road",
-      "description": "An informal fellowship of drifters, hermits, and those who owe allegiance to no settlement or crown. Neither friend nor enemy by default \u2014 standing with them is earned entirely by what you actually do.",
+      "description": "An informal fellowship of drifters, hermits, and those who owe allegiance to no settlement or crown. Neither friend nor enemy by default — standing with them is earned entirely by what you actually do.",
       "alignment_lean": "neutral",
       "member_npcs": [
         "theron_the_wanderer"
@@ -2141,6 +2359,15 @@
         "an echo",
         "echo",
         "an echo of a sound"
+      ]
+    },
+    "hollow_verge_riddle": {
+      "riddle": "I am given back to those who already have everything, and worth nothing to those who have lost it all. What am I?",
+      "accepted_answers": [
+        "time",
+        "a second chance",
+        "more time",
+        "another chance"
       ]
     }
   }

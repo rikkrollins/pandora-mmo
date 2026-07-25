@@ -217,6 +217,21 @@ ITEMS = {
         "note": "It doesn't quite sit still on your head, like it's listening for something.",
     },
 
+    # Hollow Verge dungeon rewards (2026-07-25, rebirth-1 gated content --
+    # see campaign.json's hollow_verge_* locations/quests). Quest-only,
+    # never shop-buyable, same price-0 convention as the guild commissions
+    # above.
+    "verge_ashbound_band": {
+        "name": "Verge-Ashbound Band", "type": "ring", "rarity": "rare",
+        "price": 0, "weight": 0, "regen_bonus": 2, "ac_bonus": 1,
+        "note": "Ash that never finished falling, cooled into a ring shape and left to be found.",
+    },
+    "wardens_reprieve": {
+        "name": "Warden's Reprieve", "type": "wondrous", "rarity": "very_rare",
+        "price": 0, "weight": 1, "regen_bonus": 3,
+        "note": "Whatever waited that long to be defeated leaves behind something that knows how to wait, too.",
+    },
+
     # --- Maps (task #141: buyable/discoverable, partial-reveal only --
     # see bot.py's _do_use_item "map" branch and _do_show_map's
     # revealed-but-unvisited rendering. reveals_layer/reveals_count are
