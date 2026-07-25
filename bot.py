@@ -835,7 +835,7 @@ async def _maybe_post_hourly_status_update(bot) -> None:
         for q in CAMPAIGN["quests"].values()
         if q.get("location") == location_id
     ]
-    area_board_quests = board_quests_module.get_or_generate_board_quests(CAMPAIGN, location_id)
+    area_board_quests = board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, location_id)
 
     if _ollama_congested():
         # Same reasoning as _maybe_post_world_heartbeat -- no one's
@@ -6080,7 +6080,7 @@ def _npc_quest_facts(character: dict, npc_id: str) -> str | None:
         reward_text = f" Reward: {', '.join(reward_bits)}." if reward_bits else ""
         lines.append(f"Your real quest to offer: \"{quest['title']}\" — {quest['description']}{reward_text}")
 
-    board_quests = board_quests_module.get_todays_board_quests(location_id)
+    board_quests = board_quests_module.get_all_todays_board_quests(location_id)
     for q in board_quests:
         if q.get("giver_npc") != npc_id or q.get("completed_at"):
             continue
@@ -6511,7 +6511,7 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
 
     location_id = character["current_location"]
 
-    all_quests = board_quests_module.get_or_generate_board_quests(CAMPAIGN, location_id)
+    all_quests = board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, location_id)
     available = [q for q in all_quests if not q.get("accepted_by") and not q.get("completed_at")]
 
     # Location-based story offer is checked BEFORE the companion offer
@@ -6804,7 +6804,7 @@ async def quest_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         character = db.get_character(update.effective_user.id)
         if character is not None:
             location_id = character["current_location"]
-            for bq in board_quests_module.get_or_generate_board_quests(CAMPAIGN, location_id):
+            for bq in board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, location_id):
                 if str(bq["board_quest_id"]) == ident:
                     title = bq["title"]
                     break
@@ -6888,7 +6888,7 @@ async def _do_check_quests(update: Update) -> None:
     location_id = character["current_location"]
     location = cl.get_location(CAMPAIGN, location_id)
     story_offer = _offerable_quest_at_location(character, location_id)
-    area_board_quests = board_quests_module.get_or_generate_board_quests(CAMPAIGN, location_id)
+    area_board_quests = board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, location_id)
     lines.append(f"\n📋 **Quest board — {location['name'] if location else location_id}**")
     if not story_offer and not area_board_quests:
         lines.append("Nothing posted here today.")
@@ -9625,7 +9625,7 @@ async def _do_look(update: Update) -> None:
         else:
             lines.append("📜 There's a task tied to this place, though no one's here to ask about it right now.")
 
-    board_quests_here = board_quests_module.get_or_generate_board_quests(CAMPAIGN, character["current_location"])
+    board_quests_here = board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, character["current_location"])
     unclaimed_board_quests = [q for q in board_quests_here if not q.get("accepted_by")]
     if unclaimed_board_quests:
         lines.append("📋 There's a bounty posted on the board here — say \"check quests\" to see it.")
@@ -14431,7 +14431,7 @@ async def hint_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if story_offer:
         lines.append("• Someone here looks like they need help with something — try talking to them")
 
-    board_quests_here = board_quests_module.get_or_generate_board_quests(CAMPAIGN, character["current_location"])
+    board_quests_here = board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, character["current_location"])
     if any(not q.get("accepted_by") and not q.get("completed_at") for q in board_quests_here):
         lines.append("• There's a bounty posted on the board — say \"check quests\" to see it")
 
@@ -15898,7 +15898,7 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
     if companion_offer:
         lines.append(f"A party companion has a personal task on offer: {companion_offer[1]['title']}")
 
-    board_quests = board_quests_module.get_todays_board_quests(location_id)
+    board_quests = board_quests_module.get_all_todays_board_quests(location_id)
     unclaimed = [q for q in board_quests if not q.get("accepted_by") and not q.get("completed_at")]
     if unclaimed:
         lines.append(f"Quest board has something posted: {', '.join(q['title'] for q in unclaimed)}")

@@ -2,6 +2,15 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.33] — Weekly and monthly missions, separate from the storyline
+
+Every location's quest board now offers weekly and monthly missions
+alongside the existing daily ones — same real objective mechanic
+(defeat/gather), just bigger scale (much higher counts) and bigger
+rewards (6x for weekly, 25x for monthly), with expiry windows that
+actually match (7 days / 30 days instead of 24h). Reward XP already
+scales further with rebirth for free, same as every other XP source.
+
 ## [1.27.32] — Silver Wardens' Colosseum echo-trials
 
 A real, repeatable grind path parallel to rebirth: Silver Wardens

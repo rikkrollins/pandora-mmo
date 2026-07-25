@@ -25,6 +25,24 @@ from ai.dm_agent import narrate_branching_quest_setup
 
 DAILY_BOARD_QUEST_COUNT = 2
 
+# Weekly/monthly missions (2026-07-25, per Coffee: "daily, weekly,
+# monthly missions separate from story-line... worked into the
+# evolution system"). Bigger objective counts and flat reward
+# multipliers than a daily bounty -- real XP reward on top of that
+# already scales with rebirth for free via db.add_xp's existing
+# xp_gain_multiplier, so a heavily-evolved character's weekly/monthly
+# payout is bigger automatically, no extra plumbing needed here.
+# Deliberately simple bounties only for these 2 tiers (never a
+# branching moral-choice quest, which stays a daily-only flourish) --
+# scope kept to what the ask actually needed.
+BOARD_QUEST_TIER_COUNT = {"daily": DAILY_BOARD_QUEST_COUNT, "weekly": 1, "monthly": 1}
+BOARD_QUEST_TIER_COUNT_RANGE = {
+    "daily": {"defeat": (2, 4), "gather": (3, 5)},
+    "weekly": {"defeat": (10, 16), "gather": (15, 25)},
+    "monthly": {"defeat": (40, 60), "gather": (60, 100)},
+}
+BOARD_QUEST_TIER_REWARD_MULT = {"daily": 1, "weekly": 6, "monthly": 25}
+
 DEFEAT_BOUNTY_TITLES = [
     "Thin the {plural}",
     "Clear out the {plural}",
@@ -56,10 +74,28 @@ def _day_key(now: datetime | None = None) -> str:
     return (now or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
 
 
-def _generate_for_location(campaign_data: dict, location_id: str, avoid: set[tuple[str, str]]) -> dict | None:
+def _period_key(tier: str, now: datetime | None = None) -> str:
+    """
+    The generation-period key for a given tier -- reuses day_key's
+    column for ALL 3 tiers (its format already differs per tier, e.g.
+    "2026-07-25" vs "2026-W30" vs "2026-07", so there's no real
+    collision risk sharing one column).
+    """
+    now = now or datetime.now(timezone.utc)
+    if tier == "weekly":
+        iso_year, iso_week, _ = now.isocalendar()
+        return f"{iso_year}-W{iso_week:02d}"
+    if tier == "monthly":
+        return now.strftime("%Y-%m")
+    return _day_key(now)
+
+
+def _generate_for_location(
+    campaign_data: dict, location_id: str, avoid: set[tuple[str, str]], tier: str = "daily",
+) -> dict | None:
     """
     `avoid` is a set of (objective_type, objective_target) already posted
-    today at this location, so a second/third generated quest doesn't
+    this period at this location, so a second/third generated quest doesn't
     just repeat the same bounty — best-effort variety, not a hard
     guarantee (falls back to a repeat if that's genuinely all there is).
     """
@@ -83,31 +119,36 @@ def _generate_for_location(campaign_data: dict, location_id: str, avoid: set[tup
 
     giver_npc = (location.get("npcs") or [None])[0]
     kind = random.choice(options)
+    count_range = BOARD_QUEST_TIER_COUNT_RANGE.get(tier, BOARD_QUEST_TIER_COUNT_RANGE["daily"])
+    reward_mult = BOARD_QUEST_TIER_REWARD_MULT.get(tier, 1)
+    tier_label = "" if tier == "daily" else f"[{tier.capitalize()}] "
 
     if kind == "defeat":
         monster_key = random.choice(monster_options)
         monster_data = campaign_data["monsters"][monster_key]
-        count = random.randint(2, 4)
-        title = random.choice(DEFEAT_BOUNTY_TITLES).format(name=monster_data["name"], plural=_plural(monster_data["name"]))
+        count = random.randint(*count_range["defeat"])
+        title = tier_label + random.choice(DEFEAT_BOUNTY_TITLES).format(
+            name=monster_data["name"], plural=_plural(monster_data["name"]),
+        )
         description = f"Defeat {count}x {monster_data['name']} at {location['name']}."
-        reward_xp = max(monster_data.get("xp_reward", 50) * count // 2, 10)
-        reward_gold = 10 * count
+        reward_xp = max(monster_data.get("xp_reward", 50) * count // 2, 10) * reward_mult
+        reward_gold = 10 * count * reward_mult
         return db.create_board_quest(
-            location_id, _day_key(), title, description, giver_npc,
-            "defeat_monster", monster_key, count, reward_xp, reward_gold,
+            location_id, _period_key(tier), title, description, giver_npc,
+            "defeat_monster", monster_key, count, reward_xp, reward_gold, tier=tier,
         )
 
     node = random.choice(node_options)
     material_id = node["material"]
     material_data = items_module.get_item(material_id) or {"name": material_id.replace("_", " ").title(), "price": 5}
-    count = random.randint(3, 5)
-    title = random.choice(GATHER_BOUNTY_TITLES).format(name=material_data["name"])
+    count = random.randint(*count_range["gather"])
+    title = tier_label + random.choice(GATHER_BOUNTY_TITLES).format(name=material_data["name"])
     description = f"Gather {count}x {material_data['name']} at {location['name']}."
-    reward_xp = 30 * count
-    reward_gold = max(material_data.get("price", 5), 1) * count
+    reward_xp = 30 * count * reward_mult
+    reward_gold = max(material_data.get("price", 5), 1) * count * reward_mult
     return db.create_board_quest(
-        location_id, _day_key(), title, description, giver_npc,
-        "gather_material", material_id, count, reward_xp, reward_gold,
+        location_id, _period_key(tier), title, description, giver_npc,
+        "gather_material", material_id, count, reward_xp, reward_gold, tier=tier,
     )
 
 
@@ -216,42 +257,46 @@ def _generate_branching_quest_for_location(campaign_data: dict, location_id: str
 
     board_quest = db.create_board_quest(
         location_id, _day_key(), title, description, giver_npc_id,
-        objective_type, objective_target, count, base_xp, base_gold,
+        objective_type, objective_target, count, base_xp, base_gold, tier="daily",
     )
     db.set_board_quest_branch_data(board_quest["board_quest_id"], branch_data)
     board_quest["branch_data"] = branch_data
     return board_quest
 
 
-def get_or_generate_board_quests(campaign_data: dict, location_id: str) -> list[dict]:
+def get_or_generate_board_quests(campaign_data: dict, location_id: str, tier: str = "daily") -> list[dict]:
     """
-    Today's ACTIVE board for this location — tops up to
-    DAILY_BOARD_QUEST_COUNT if under. The first quest generated for a
-    location each day is always attempted as a branching (moral-choice)
-    quest; the rest are simple bounties, for a mix of both.
+    This period's ACTIVE board for this location — tops up to
+    BOARD_QUEST_TIER_COUNT[tier] if under. Daily's first quest each
+    period is always attempted as a branching (moral-choice) quest, the
+    rest simple bounties; weekly/monthly are simple bounties only
+    (2026-07-25 addition, per Coffee: "daily, weekly, monthly missions
+    separate from story-line") -- same real objective/reward mechanic,
+    just a longer period and a bigger scale.
 
     Completed quests are deliberately excluded from both the count and
     the returned list (2026-07-16, per Coffee): they used to count
-    toward DAILY_BOARD_QUEST_COUNT forever, so finishing every quest
-    posted for the day permanently occupied every slot with a "already
-    completed" placeholder for the rest of that day instead of freeing
-    it up for a fresh one, and completed bounties kept cluttering the
-    board listing indefinitely. `avoid` still considers every quest
-    generated today (including completed ones) so a replacement isn't
-    just a repeat of what was already cleared.
+    toward the period's quota forever, so finishing every quest posted
+    for the period permanently occupied every slot with an "already
+    completed" placeholder instead of freeing it up for a fresh one,
+    and completed bounties kept cluttering the board listing
+    indefinitely. `avoid` still considers every quest generated this
+    period (including completed ones) so a replacement isn't just a
+    repeat of what was already cleared.
     """
-    all_today = get_todays_board_quests(location_id)
-    avoid = {(q["objective_type"], q["objective_target"]) for q in all_today}
-    active = [q for q in all_today if not q.get("completed_at")]
+    all_this_period = get_todays_board_quests(location_id, tier=tier)
+    avoid = {(q["objective_type"], q["objective_target"]) for q in all_this_period}
+    active = [q for q in all_this_period if not q.get("completed_at")]
 
-    if not all_today:
+    if not all_this_period and tier == "daily":
         branching = _generate_branching_quest_for_location(campaign_data, location_id, avoid)
         if branching:
             active.append(branching)
             avoid.add((branching["objective_type"], branching["objective_target"]))
 
-    while len(active) < DAILY_BOARD_QUEST_COUNT:
-        new_quest = _generate_for_location(campaign_data, location_id, avoid)
+    target_count = BOARD_QUEST_TIER_COUNT.get(tier, DAILY_BOARD_QUEST_COUNT)
+    while len(active) < target_count:
+        new_quest = _generate_for_location(campaign_data, location_id, avoid, tier=tier)
         if new_quest is None:
             break
         active.append(new_quest)
@@ -259,9 +304,33 @@ def get_or_generate_board_quests(campaign_data: dict, location_id: str) -> list[
     return active
 
 
-def get_todays_board_quests(location_id: str) -> list[dict]:
-    """Existing board quests for this location today, if any (never creates one)."""
-    return db.get_active_board_quests(location_id, _day_key())
+def get_todays_board_quests(location_id: str, tier: str = "daily") -> list[dict]:
+    """Existing board quests for this location this period, if any (never creates one)."""
+    return db.get_active_board_quests(location_id, _period_key(tier), tier=tier)
+
+
+def get_all_todays_board_quests(location_id: str) -> list[dict]:
+    """All 3 tiers' existing board quests for this location, combined (read-only, never generates)."""
+    quests = []
+    for tier in ("daily", "weekly", "monthly"):
+        quests.extend(get_todays_board_quests(location_id, tier=tier))
+    return quests
+
+
+def get_or_generate_all_board_quests(campaign_data: dict, location_id: str) -> list[dict]:
+    """
+    All 3 tiers combined (daily + weekly + monthly) for this location,
+    in one flat list -- every existing consumer (format_board_listings,
+    find_board_quest_by_name, plain "any board quest posted?" checks)
+    already operates generically on a list of board_quest dicts, so
+    this is a drop-in superset of the old daily-only
+    get_or_generate_board_quests everywhere a player actually sees or
+    accepts board quests.
+    """
+    quests = []
+    for tier in ("daily", "weekly", "monthly"):
+        quests.extend(get_or_generate_board_quests(campaign_data, location_id, tier=tier))
+    return quests
 
 
 # Backward-compatible singular helpers (first listing only).

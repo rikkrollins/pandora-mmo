@@ -300,6 +300,17 @@ def init_db() -> None:
         board_quest_columns = _existing_columns(conn, "board_quests")
         if "branch_data" not in board_quest_columns:
             conn.execute("ALTER TABLE board_quests ADD COLUMN branch_data TEXT")
+        # tier (2026-07-25, per Coffee: "daily, weekly, monthly missions
+        # separate from story-line... worked into the evolution
+        # system"): board_quests were daily-only until now. day_key's
+        # format already differs per tier (a plain date vs "2026-W30"
+        # vs "2026-07"), so there's no real collision risk, but a real
+        # column lets accept_board_quest look up the right expiry
+        # window (24h/7d/30d) without parsing that string. Reward XP
+        # already scales with rebirth for free via db.add_xp's existing
+        # xp_gain_multiplier -- no extra plumbing needed for that part.
+        if "tier" not in board_quest_columns:
+            conn.execute("ALTER TABLE board_quests ADD COLUMN tier TEXT NOT NULL DEFAULT 'daily'")
 
         if "party_id" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN party_id INTEGER")
@@ -1619,43 +1630,44 @@ def _board_quest_row_to_dict(row) -> dict:
     return d
 
 
-def get_active_board_quests(location_id: str, day_key: str) -> list[dict]:
-    """All of today's board quests for this location (accepted or not), oldest first."""
+def get_active_board_quests(location_id: str, day_key: str, tier: str = "daily") -> list[dict]:
+    """All of this period's board quests for this location (accepted or not), oldest first."""
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT * FROM board_quests WHERE location_id = ? AND day_key = ? "
+            "SELECT * FROM board_quests WHERE location_id = ? AND day_key = ? AND tier = ? "
             "ORDER BY board_quest_id ASC",
-            (location_id, day_key),
+            (location_id, day_key, tier),
         ).fetchall()
     return [_board_quest_row_to_dict(r) for r in rows]
 
 
-def get_active_board_quest(location_id: str, day_key: str) -> dict | None:
-    """The single most-recent board quest for this location today, if any (accepted or not)."""
+def get_active_board_quest(location_id: str, day_key: str, tier: str = "daily") -> dict | None:
+    """The single most-recent board quest for this location this period, if any (accepted or not)."""
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT * FROM board_quests WHERE location_id = ? AND day_key = ? "
+            "SELECT * FROM board_quests WHERE location_id = ? AND day_key = ? AND tier = ? "
             "ORDER BY board_quest_id DESC LIMIT 1",
-            (location_id, day_key),
+            (location_id, day_key, tier),
         ).fetchone()
     return _board_quest_row_to_dict(row) if row else None
 
 
 def create_board_quest(location_id: str, day_key: str, title: str, description: str,
                         giver_npc: str | None, objective_type: str, objective_target: str,
-                        objective_count: int, reward_xp: int, reward_gold: int) -> dict:
+                        objective_count: int, reward_xp: int, reward_gold: int,
+                        tier: str = "daily") -> dict:
     with get_connection() as conn:
         cur = conn.execute(
             """
             INSERT INTO board_quests (
                 location_id, day_key, title, description, giver_npc,
                 objective_type, objective_target, objective_count,
-                reward_xp, reward_gold, generated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                reward_xp, reward_gold, generated_at, tier
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (location_id, day_key, title, description, giver_npc,
              objective_type, objective_target, objective_count,
-             reward_xp, reward_gold, datetime.now(timezone.utc).isoformat()),
+             reward_xp, reward_gold, datetime.now(timezone.utc).isoformat(), tier),
         )
         board_quest_id = cur.lastrowid
         row = conn.execute(
@@ -1664,10 +1676,25 @@ def create_board_quest(location_id: str, day_key: str, title: str, description: 
     return _board_quest_row_to_dict(row)
 
 
+BOARD_QUEST_TIER_EXPIRY_HOURS = {"daily": 24, "weekly": 7 * 24, "monthly": 30 * 24}
+
+
 def accept_board_quest(board_quest_id: int, telegram_user_id: int) -> dict | None:
+    """
+    Expiry window scales with the quest's own tier (2026-07-25,
+    per Coffee's weekly/monthly missions ask) -- 24h for a daily bounty,
+    same as always, but a real 7 days for a weekly one and 30 for a
+    monthly one, so accepting a bigger mission doesn't hand back a
+    24h-or-lose-it window that was only ever sized for the daily kind.
+    """
     now = datetime.now(timezone.utc)
-    expires = now.timestamp() + (24 * 3600)
     with get_connection() as conn:
+        existing = conn.execute(
+            "SELECT tier FROM board_quests WHERE board_quest_id = ?", (board_quest_id,)
+        ).fetchone()
+        tier = existing["tier"] if existing else "daily"
+        expiry_hours = BOARD_QUEST_TIER_EXPIRY_HOURS.get(tier, 24)
+        expires = now.timestamp() + (expiry_hours * 3600)
         conn.execute(
             "UPDATE board_quests SET accepted_by = ?, accepted_at = ?, expires_at = ? "
             "WHERE board_quest_id = ? AND accepted_by IS NULL",
