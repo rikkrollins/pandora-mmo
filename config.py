@@ -42,6 +42,9 @@ GUILD_TOPIC_IDS = {
     # 2 new guild topics (2026-07-25, via scripts/create_new_guild_topics.py)
     "thieves_guild": int(os.getenv("TOPIC_THIEVES_GUILD_ID", "0")) or None,
     "faith_circle": int(os.getenv("TOPIC_FAITH_CIRCLE_ID", "0")) or None,
+    # 2 more guild topics (2026-07-25, via scripts/create_forge_enchanters_topics.py)
+    "forge_guild": int(os.getenv("TOPIC_FORGE_GUILD_ID", "0")) or None,
+    "enchanters_guild": int(os.getenv("TOPIC_ENCHANTERS_GUILD_ID", "0")) or None,
 }
 
 # The group's own chat id (distinct from the topic thread ids above —

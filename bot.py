@@ -71,6 +71,7 @@ from ai import tts_piper, stt_groq
 from guilds import (
     GUILDS, eligible_for_guild, GUILD_QUESTS,
     ARCANE_CIRCLE_SPELL_DAMAGE_BONUS_PCT, THIEVES_GUILD_STEAL_BONUS, ARCANE_CIRCLE_EXCLUSIVE_SPELLS,
+    ENCHANTMENT_COMMISSION_TIERS,
 )
 from models import (
     VALID_CLASSES,
@@ -10140,6 +10141,9 @@ async def guild_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     if guild_id == "arcane_circle" and any(w in lowered for w in ["learn", "secret", "teach"]):
         await _do_learn_guild_spell(update, update.message.text)
+        return
+    if guild_id == "enchanters_guild" and any(w in lowered for w in ["enchant", "commission", "imbue", "embue"]):
+        await _do_commission_enchantment(update)
 
 
 async def _do_learn_guild_spell(update: Update, text: str) -> None:
@@ -10206,6 +10210,53 @@ async def _do_learn_guild_spell(update: Update, text: str) -> None:
         update,
         f"📖 **{character['name']}** learns the Circle's secret: **{spell['name']}** "
         f"({spell['damage_dice']} {spell['damage_type']} damage).",
+        thread_id=reply_thread_id,
+    )
+
+
+async def _do_commission_enchantment(update: Update) -> None:
+    """
+    Per Coffee (2026-07-25): "a guild for enchanting wearable items and
+    making items magic items... use a generator to handle this so it
+    uses the players stats to embue/enchant." A real 1d20 + the
+    caster's own spellcasting ability modifier (spells.py's
+    SPELLCASTING_ABILITY, same real check every spell save DC already
+    uses) against guilds.ENCHANTMENT_COMMISSION_TIERS decides which
+    real, equippable items.py item is granted -- deterministic dice,
+    not an AI-invented outcome, same as everything else in this game.
+    Once per rest (feature_uses, same convention as Second Wind/
+    healing_water), gated on real Enchanters' Guild membership.
+    """
+    character = db.get_character(update.effective_user.id)
+    reply_thread_id = update.message.message_thread_id
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=reply_thread_id
+        )
+        return
+    if character.get("guild") != "enchanters_guild":
+        await update.effective_chat.send_message(
+            "Only Enchanters' Guild members can commission an enchantment — join first.",
+            message_thread_id=reply_thread_id,
+        )
+        return
+    if db.get_feature_uses(update.effective_user.id, "enchantment_commission") >= 1:
+        await update.effective_chat.send_message(
+            "The Guild's artificers are already working your last commission — rest before asking for another.",
+            message_thread_id=reply_thread_id,
+        )
+        return
+    ability = spells_module.SPELLCASTING_ABILITY.get(character["char_class"].lower(), "intelligence")
+    roll_result = roll_d20()
+    total = roll_result + ability_modifier(character.get(ability, 10))
+    item_id = next(iid for threshold, iid in ENCHANTMENT_COMMISSION_TIERS if total >= threshold)
+    item = items_module.get_item(item_id)
+    db.use_feature(update.effective_user.id, "enchantment_commission")
+    db.add_item(update.effective_user.id, item_id, 1)
+    await _safe_send(
+        update,
+        f"✨ **{character['name']}** commissions an enchantment — rolls {roll_result} "
+        f"+ {total - roll_result} ({ability}) = **{total}**. The Guild delivers: **{item['name']}**.",
         thread_id=reply_thread_id,
     )
 

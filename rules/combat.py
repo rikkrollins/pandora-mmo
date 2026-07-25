@@ -11,6 +11,7 @@ from rules.leveling import (
     COMBAT_SUBCLASS_NAMES, COMBAT_SUBCLASS_DAMAGE_BONUS_PCT,
 )
 from class_features import is_weapon_proficient
+from guilds import FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT
 import hybrid_features
 import races
 
@@ -283,6 +284,13 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         # (rules/leveling.CLASS_SUBCLASSES) deals more weapon damage.
         if attacker.get("subclass") in COMBAT_SUBCLASS_NAMES:
             damage_dealt = int(damage_dealt * (1 + COMBAT_SUBCLASS_DAMAGE_BONUS_PCT / 100))
+        # Forge Guild membership benefit (2026-07-25, per Coffee: "a
+        # guild for forging (with % enhancements stats"): a real +10%
+        # weapon damage bonus -- a smith trusts their own hammer and
+        # steel more than any spell, same multiplicative stacking as
+        # the subclass bonus just above.
+        if attacker.get("guild") == "forge_guild":
+            damage_dealt = int(damage_dealt * (1 + FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT / 100))
         if defender.get("raging"):
             damage_dealt = damage_dealt // 2
         # Hybrid Barbarian (2026-07-22): a chance-gated, scaled-down

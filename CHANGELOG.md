@@ -2,6 +2,18 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.31] — 2 more guilds: The Forge Guild, The Enchanters' Guild
+
+Two brand new guilds, each with their own real Telegram topic: The
+Forge Guild (Fighter/Paladin/Barbarian/Ranger/Monk — a crafting-focus
+alternative to Silver Wardens) grants members +10% weapon damage. The
+Enchanters' Guild (Wizard/Sorcerer/Warlock — a crafting-focus
+alternative to The Arcane Circle) lets members commission a real
+enchanted item once per rest: a 1d20 + their own spellcasting ability
+modifier decides which of 3 new real, equippable items (Band of
+Ember, Sigil of the Deep, Crown of the Unmoored) they receive. Same
+class+subclass gating and permanent membership as every other guild.
+
 ## [1.27.30] — Fix: party members no longer scatter away from the leader
 
 Real bug from Development, reported twice: a recruited/autonomous AI

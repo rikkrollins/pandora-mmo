@@ -194,6 +194,28 @@ ITEMS = {
         "price": 110, "weight": 0, "ac_bonus": 1,
         "note": "Cold as riverwater no matter how long it's worn.",
     },
+    # Enchanters' Guild commissions (2026-07-25, per Coffee: "a guild
+    # for enchanting wearable items and making items magic items"): 3
+    # real, equippable rewards -- never shop-buyable (price 0, same
+    # convention as Amulet of Health/Ring of Protection), only granted
+    # via bot.py's _do_commission_enchantment, a real dice roll (biased
+    # by the caster's own spellcasting ability) deciding which tier is
+    # earned.
+    "band_of_ember": {
+        "name": "Band of Ember", "type": "ring", "rarity": "uncommon",
+        "price": 0, "weight": 0, "regen_bonus": 1,
+        "note": "Warm to the touch, like a coal that never quite goes out.",
+    },
+    "sigil_of_the_deep": {
+        "name": "Sigil of the Deep", "type": "amulet", "rarity": "rare",
+        "price": 0, "weight": 0, "regen_bonus": 2, "ac_bonus": 1,
+        "note": "Carved from something that was never meant to see the surface.",
+    },
+    "crown_of_the_unmoored": {
+        "name": "Crown of the Unmoored", "type": "wondrous", "rarity": "very_rare",
+        "price": 0, "weight": 1, "regen_bonus": 2, "ac_bonus": 2,
+        "note": "It doesn't quite sit still on your head, like it's listening for something.",
+    },
 
     # --- Maps (task #141: buyable/discoverable, partial-reveal only --
     # see bot.py's _do_use_item "map" branch and _do_show_map's

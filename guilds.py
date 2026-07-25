@@ -139,6 +139,20 @@ FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT = 10
 # only path to ever know one, gated on real Arcane Circle membership.
 ARCANE_CIRCLE_EXCLUSIVE_SPELLS = ["starfall_lance", "voidcall"]
 
+# Enchanters' Guild commission tiers (2026-07-25, per Coffee: "a guild
+# for enchanting wearable items... use a generator... that uses the
+# players stats to embue/enchant"): bot.py's _do_commission_enchantment
+# rolls 1d20 + the caster's own spellcasting ability modifier (a real
+# stat check, same convention as every other roll in this game) against
+# these thresholds to decide which real items.py item (band_of_ember /
+# sigil_of_the_deep / crown_of_the_unmoored) is granted -- once per
+# rest, same feature_uses convention as Second Wind/healing_water.
+ENCHANTMENT_COMMISSION_TIERS = [
+    (18, "crown_of_the_unmoored"),
+    (12, "sigil_of_the_deep"),
+    (0, "band_of_ember"),
+]
+
 
 def get_guild_quest(guild_id: str) -> dict | None:
     return GUILD_QUESTS.get(guild_id)
