@@ -1204,10 +1204,15 @@
         "name": "The Forgotten Depth",
         "layer": "underground",
         "description": "Past the seam in the floor, the carved script gives up its shape completely — the walls here are smooth, black, and warm, like something that stopped bothering to explain itself a long time ago.",
-        "connections": [],
+        "connections": [
+          "wordless_choir_gate"
+        ],
         "monsters": [
           "the_unrepeating"
-        ]
+        ],
+        "directions": {
+          "down": "wordless_choir_gate"
+        }
       },
       "whispering_wood_root_hollow": {
         "name": "The Root Hollow",
@@ -1359,6 +1364,103 @@
           "the_vanishing_current": {
             "name": "the current itself, vanishing into darker water",
             "description": "It never resurfaces anywhere anyone's mapped. Wherever it's actually going, it's going somewhere with purpose."
+          }
+        }
+      },
+      "wordless_choir_gate": {
+        "name": "The Wordless Gate",
+        "layer": "underground",
+        "description": "Past where The Unrepeating finally stopped, the black walls open into something that was never meant to be walked through twice -- not a door, exactly, more like the held breath before whatever this place used to say.",
+        "connections": [
+          "the_first_city_forgotten_depth",
+          "wordless_choir_machinery"
+        ],
+        "directions": {
+          "up": "the_first_city_forgotten_depth",
+          "down": "wordless_choir_machinery"
+        },
+        "requires_rebirth_count": 2,
+        "monsters": [
+          "choir_remnant"
+        ],
+        "interactables": {
+          "held_breath": {
+            "name": "the held breath in the stone",
+            "description": "Not a sound, not quite silence either -- the specific quiet of something about to speak that never quite does."
+          }
+        }
+      },
+      "wordless_choir_machinery": {
+        "name": "The Still Machinery",
+        "layer": "underground",
+        "description": "Vast shapes stand silent in ranks, built for a purpose no one living was ever told. Whatever they once made — sound, meaning, both — they stopped making it so long ago that stillness is the only thing they do well anymore.",
+        "connections": [
+          "wordless_choir_gate",
+          "wordless_choir_hall"
+        ],
+        "directions": {
+          "up": "wordless_choir_gate",
+          "down": "wordless_choir_hall"
+        },
+        "monsters": [
+          "still_machinery_sentinel"
+        ],
+        "interactables": {
+          "silent_ranks": {
+            "name": "the machinery's silent ranks",
+            "description": "Row after row of shapes built to carry something further than a voice alone ever could. None of them have moved in longer than anyone down here has been able to count."
+          }
+        },
+        "story_gates": {
+          "wordless_choir_hall": {
+            "requires_cleared_location": "wordless_choir_machinery"
+          }
+        }
+      },
+      "wordless_choir_hall": {
+        "name": "The Choir Hall",
+        "layer": "underground",
+        "description": "A chamber shaped like a throat, built to carry a single note to every corner at once. It hasn't held one in longer than anything else down here has been keeping time.",
+        "connections": [
+          "wordless_choir_machinery",
+          "wordless_choir_source"
+        ],
+        "directions": {
+          "up": "wordless_choir_machinery",
+          "down": "wordless_choir_source"
+        },
+        "monsters": [
+          "voiceless_warden"
+        ],
+        "interactables": {
+          "throat_shaped_walls": {
+            "name": "the hall's throat-shaped walls",
+            "description": "\"Every voice down here says the same thing until it reaches me, and then it says nothing at all. What am I?\" -- the shape of the question is carved into the curve of the walls themselves, the answer nowhere in sight."
+          }
+        },
+        "story_gates": {
+          "wordless_choir_source": {
+            "requires_cleared_location": "wordless_choir_hall"
+          }
+        }
+      },
+      "wordless_choir_source": {
+        "name": "The Source",
+        "layer": "underground",
+        "description": "Where the hall's shape finally resolves into a single point, something is still, impossibly, humming — a note too low to hear and too old to have ever had a name.",
+        "connections": [
+          "wordless_choir_hall"
+        ],
+        "directions": {
+          "up": "wordless_choir_hall"
+        },
+        "monsters": [
+          "the_undertone"
+        ],
+        "interactables": {
+          "impossible_hum": {
+            "name": "the impossible, wordless hum",
+            "description": "Not a sound you hear so much as one you stop, for a moment, being able to not hear. It has been going on, unheard, for exactly as long as everything above it has been standing still."
           }
         }
       }
@@ -2069,6 +2171,58 @@
       },
       "clue": "The unfinished space at the sanctum's center hasn't decided what belongs in it yet -- right now, that's the Warden, and it knows it's temporary.",
       "weight": "climactic"
+    },
+    "choir_remnants_echo": {
+      "title": "The Remnant's Echo",
+      "description": "Whatever's left of this place's voice isn't willing to let anyone else borrow it.",
+      "location": "wordless_choir_gate",
+      "reward_xp": 900,
+      "reward_gold": 400,
+      "reward_item": "echo_bound_signet",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "choir_remnant"
+      },
+      "clue": "It doesn't attack so much as answer -- the same way an echo answers, whether or not you wanted it to."
+    },
+    "still_machinery_wakes": {
+      "title": "What the Machinery Still Remembers",
+      "description": "The Still Machinery hasn't moved in longer than memory -- but it hasn't forgotten how, either.",
+      "location": "wordless_choir_machinery",
+      "reward_xp": 1100,
+      "reward_gold": 500,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "still_machinery_sentinel"
+      },
+      "clue": "Whatever it was built to carry, it's still trying to carry it -- straight through anyone standing in the way."
+    },
+    "wordless_choirs_silence": {
+      "title": "The Choir's Silence",
+      "description": "The Choir Hall was built to carry one note to every corner at once -- but it's been asking the same question back for longer than anyone's been around to answer it.",
+      "location": "wordless_choir_hall",
+      "trigger": {
+        "type": "solve_puzzle",
+        "puzzle_id": "wordless_choir_riddle"
+      },
+      "reward_xp": 900,
+      "reward_gold": 300,
+      "reward_item": "weathered_surface_map",
+      "clue": "The question carved into the hall's own walls reads: \"Every voice down here says the same thing until it reaches me, and then it says nothing at all. What am I?\""
+    },
+    "the_undertones_reckoning": {
+      "title": "The Undertone's Reckoning",
+      "description": "Something has been humming, unheard, at the exact center of everything down here -- and it has finally noticed it isn't unheard anymore.",
+      "location": "wordless_choir_source",
+      "reward_xp": 3000,
+      "reward_gold": 2000,
+      "reward_item": "the_undertones_hum",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_undertone"
+      },
+      "clue": "It was never trying to be found. That's exactly why it took this long.",
+      "weight": "climactic"
     }
   },
   "story_arcs": {
@@ -2300,6 +2454,72 @@
       "vulnerabilities": [
         "radiant"
       ]
+    },
+    "choir_remnant": {
+      "name": "Choir Remnant",
+      "dexterity": 14,
+      "strength": 12,
+      "armor_class": 15,
+      "hp_max": 45,
+      "proficiency_bonus": 3,
+      "xp_reward": 550,
+      "on_hit_condition": "silenced",
+      "resistances": [
+        "necrotic"
+      ],
+      "vulnerabilities": [
+        "lightning"
+      ]
+    },
+    "still_machinery_sentinel": {
+      "name": "Still Machinery Sentinel",
+      "dexterity": 8,
+      "strength": 20,
+      "armor_class": 19,
+      "hp_max": 70,
+      "proficiency_bonus": 3,
+      "xp_reward": 750,
+      "resistances": [
+        "physical"
+      ],
+      "vulnerabilities": [
+        "lightning"
+      ]
+    },
+    "voiceless_warden": {
+      "name": "Voiceless Warden",
+      "dexterity": 12,
+      "strength": 17,
+      "armor_class": 18,
+      "hp_max": 85,
+      "proficiency_bonus": 4,
+      "xp_reward": 950,
+      "on_hit_condition": "frightened",
+      "resistances": [
+        "psychic"
+      ],
+      "vulnerabilities": [
+        "radiant"
+      ]
+    },
+    "the_undertone": {
+      "name": "The Undertone",
+      "dexterity": 17,
+      "strength": 20,
+      "armor_class": 20,
+      "hp_max": 120,
+      "proficiency_bonus": 5,
+      "xp_reward": 2200,
+      "is_boss": true,
+      "on_hit_condition": "silenced",
+      "life_drain": true,
+      "resistances": [
+        "physical",
+        "psychic"
+      ],
+      "vulnerabilities": [
+        "lightning"
+      ]
     }
   },
   "factions": {
@@ -2368,6 +2588,15 @@
         "a second chance",
         "more time",
         "another chance"
+      ]
+    },
+    "wordless_choir_riddle": {
+      "riddle": "Every voice down here says the same thing until it reaches me, and then it says nothing at all. What am I?",
+      "accepted_answers": [
+        "silence",
+        "the silence",
+        "quiet",
+        "the quiet"
       ]
     }
   }

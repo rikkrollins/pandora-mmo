@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.42] — The Wordless Choir: the second rebirth-gated dungeon
+
+The second of 3 planned post-rebirth dungeons is live: **The Wordless
+Choir**, found by pressing on past The Unrepeating — the secret boss
+already waiting in the depths beneath The First City — but only for a
+character who has rebirthed at least twice. Four connected chambers (a
+threshold guarded by a lingering echo, a hall of ancient silent
+machinery, a throat-shaped chamber with a real riddle to answer, and
+the source of an impossible, wordless hum at the very center), four
+new monsters with their own real damage-type resistances/
+vulnerabilities — including a return of the real `silenced` condition,
+fittingly, on the ones guarding a place built around silence — a full
+quest chain, and 2 new items, including the game's new most powerful
+piece of equipment so far.
+
+This one builds directly on content that was already there rather than
+bolting on somewhere new: The First City's deepest chamber already had
+a real secret final boss (The Unrepeating) with nothing beyond it —
+now there is.
+
 ## [1.27.41] — The Hollow Verge: the first rebirth-gated dungeon, plus two real bug fixes
 
 The first of 3 planned post-rebirth dungeons is live: **The Hollow

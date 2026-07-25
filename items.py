@@ -232,6 +232,21 @@ ITEMS = {
         "note": "Whatever waited that long to be defeated leaves behind something that knows how to wait, too.",
     },
 
+    # The Wordless Choir dungeon rewards (2026-07-25, rebirth-2 gated
+    # content -- see campaign.json's wordless_choir_* locations/quests).
+    # Quest-only, never shop-buyable, same convention as the Hollow
+    # Verge rewards above -- a clear step up in power for a deeper gate.
+    "echo_bound_signet": {
+        "name": "Echo-Bound Signet", "type": "ring", "rarity": "rare",
+        "price": 0, "weight": 0, "regen_bonus": 3, "ac_bonus": 1,
+        "note": "Whatever it echoes back was never quite what you said.",
+    },
+    "the_undertones_hum": {
+        "name": "The Undertone's Hum", "type": "wondrous", "rarity": "legendary",
+        "price": 0, "weight": 1, "regen_bonus": 4, "ac_bonus": 2,
+        "note": "It doesn't make a sound. You just stop, for a moment, being able to not hear it.",
+    },
+
     # --- Maps (task #141: buyable/discoverable, partial-reveal only --
     # see bot.py's _do_use_item "map" branch and _do_show_map's
     # revealed-but-unvisited rendering. reveals_layer/reveals_count are
