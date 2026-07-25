@@ -6,6 +6,7 @@ narrates what a spell looked like, but never decides its numeric effect.
 """
 from rules.dice import roll_damage, roll_d20, ability_modifier
 from rules.leveling import is_proficient_in_save
+from guilds import FAITH_CIRCLE_HEAL_BONUS
 import hybrid_features
 
 # Which ability a class casts spells with — needed to calculate a real
@@ -463,6 +464,11 @@ def resolve_heal_spell(spell_id: str, caster: dict, target: dict) -> dict:
     # Cleric bonus above (a hybrid pick can never equal your own real
     # char_class).
     total_healed += hybrid_features.hybrid_heal_bonus(caster, spell["level"])
+    # Faith Circle membership benefit (2026-07-25, per Coffee): a real
+    # flat bonus on every heal cast, same additive convention as
+    # Disciple of Life above -- stacks with it rather than replacing it.
+    if caster.get("guild") == "faith_circle":
+        total_healed += FAITH_CIRCLE_HEAL_BONUS
     hp_before = target["hp_current"]
     hp_max = target.get("hp_max", hp_before)
     target["hp_current"] = min(hp_before + total_healed, hp_max)

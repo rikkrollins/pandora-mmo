@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.29] — Class profession affinity + 5 real guilds, class+subclass gated
+
+Every class now has a real "home" profession (e.g. Fighter →
+Blacksmithing, Wizard → Alchemy, Ranger → Lumberjacking) granting a
+genuine +2 ability-check bonus when crafting/gathering in it, shown
+on the character sheet. All 7 professions are covered by at least one
+class; subclass choice never changes it, since every subclass belongs
+to one fixed base class.
+
+Guilds are now genuinely restricted and meaningful: The Arcane Circle
+(Wizard/Sorcerer/Warlock), The Silver Wardens (Fighter/Paladin/
+Barbarian/Ranger/Monk), 2 brand new guilds — The Thieves' Guild
+(Rogue/Bard) and The Faith Circle (Cleric/Druid) — plus the still-open
+Adventurers' Guild. Joining any of the 4 restricted guilds now also
+requires having chosen a real subclass first. Guild membership is a
+real, permanent commitment now — once you're in, you can't leave or
+switch to another guild. Hybrid characters (rebirth's dual-class
+system) qualify for a guild on EITHER of their two classes' terms.
+
+Real new membership benefits: Arcane Circle members deal +15% spell
+damage; Thieves' Guild members get +3 on every steal attempt; Faith
+Circle members heal +3 extra on every heal spell cast. Also added a
+"🗝️ Steal Something" button to the shop menu.
+
 ## [1.27.28] — Four more profession recipes: blacksmithing's full curve + Scroll of Cure Wounds
 
 Blacksmithing now covers 6 real tiers instead of 3: Rusty Dagger,

@@ -68,7 +68,10 @@ from ai.npc_agent import register_npc, talk_to_npc, generate_ambient_line, _NPCS
 from ai.support_agent import answer_support_question
 from ai.text_cleanup import to_speakable_text
 from ai import tts_piper, stt_groq
-from guilds import GUILDS, eligible_for_guild, GUILD_QUESTS
+from guilds import (
+    GUILDS, eligible_for_guild, GUILD_QUESTS,
+    ARCANE_CIRCLE_SPELL_DAMAGE_BONUS_PCT, THIEVES_GUILD_STEAL_BONUS,
+)
 from models import (
     VALID_CLASSES,
     VALID_RACES,
@@ -77,7 +80,10 @@ from models import (
     BASE_ARMOR_CLASS,
 )
 from rules.combat import resolve_attack, resolve_death_save, UNDEAD_MONSTER_KEYS, apply_damage_type_modifier
-from rules.crafting import RECIPES, get_recipe, has_materials, resolve_craft
+from rules.crafting import (
+    RECIPES, get_recipe, has_materials, resolve_craft,
+    CLASS_PROFESSIONS, CLASS_PROFESSION_AFFINITY_BONUS, class_profession_affinity_bonus,
+)
 from rules.dice import roll, roll_damage, ability_modifier, roll_ability_check, roll_d20
 from rules.item_generator import generate_item
 from rules.leveling import (
@@ -7637,6 +7643,11 @@ def _format_character_sheet(character: dict) -> str:
             subclass_line = f"📖 School of {character['subclass'].capitalize()}\n"
         else:
             subclass_line = f"📖 Subclass: {character['subclass']}\n"
+    # Class profession affinity (2026-07-25, per Coffee: "make sure all
+    # classes and sub classes have a profession") -- shown so the real
+    # +2 bonus (class_profession_affinity_bonus) isn't invisible.
+    home_profession = CLASS_PROFESSIONS.get(character["char_class"])
+    profession_line = f"🔨 Favored trade: {home_profession.capitalize()} (+{CLASS_PROFESSION_AFFINITY_BONUS})\n" if home_profession else ""
     title_suffix = f" \"{character['active_title']}\"" if character.get("active_title") else ""
     name_line = f"**{character['name']}**{title_suffix}" + (" *(AI companion)*" if character.get("is_ai") else "")
     equipped_line = _format_equipped_line(character)
@@ -7689,6 +7700,7 @@ def _format_character_sheet(character: dict) -> str:
         f"Level {character['level']} | XP {character['xp']}{xp_remaining_line}\n"
         f"{rebirth_line}"
         f"{subclass_line}"
+        f"{profession_line}"
         f"HP {character['hp_current']}/{character['hp_max']} | AC {character['armor_class']}\n"
         f"{ability_line}"
         f"Alignment: {_alignment_label(character.get('alignment_law_chaos', 0), character.get('alignment_good_evil', 0))}\n"
@@ -8029,6 +8041,10 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
 
     result = roll_ability_check(character, node["ability"], proficient=False, forced_roll=forced_roll)
     bonus = _practiced_bonus_for(update.effective_user.id, skill_key)
+    # Class profession affinity (2026-07-25, per Coffee), same real +2
+    # as _do_craft's -- a Ranger foraging herbs, a Barbarian in a mine,
+    # etc. See rules/crafting.py's CLASS_PROFESSIONS.
+    bonus += class_profession_affinity_bonus(character["char_class"], skill_key)
     result["total"] += bonus
     result["practiced_bonus"] = bonus
     success = result["total"] >= SKILL_CHECK_DC
@@ -8145,7 +8161,14 @@ async def _do_craft(update: Update, text: str) -> None:
     # you better at forging weapons too. Recipes with no profession set
     # fall back to the old shared "crafting" key.
     profession = get_recipe(recipe_id).get("profession", "crafting")
+    # Class profession affinity (2026-07-25, per Coffee): a real +2 on
+    # top of the usual earned practiced_bonus when this is the
+    # character's own class's home profession (rules/crafting.py's
+    # CLASS_PROFESSIONS) -- e.g. a Wizard brewing alchemy, a Fighter
+    # forging at the anvil. Every class has exactly one home
+    # profession, so this never silently favors one build over another.
     bonus = _practiced_bonus_for(update.effective_user.id, profession)
+    bonus += class_profession_affinity_bonus(character["char_class"], profession)
     result = resolve_craft(character, recipe_id, practiced_bonus=bonus)
 
     if result["outcome"] == "missing_materials":
@@ -11596,6 +11619,13 @@ def _shop_keyboard(shop_data: dict) -> InlineKeyboardMarkup | None:
             buttons.append([InlineKeyboardButton(
                 f"{item['name']} — {item['price']}g", callback_data=f"shop|qty|{item_id}",
             )])
+    if buttons:
+        # Per Coffee (2026-07-25): "make sure players that can steal...
+        # has buttons they can use to do these things" -- a real tap,
+        # dispatching through the exact same _do_steal free text already
+        # uses (own DC roll, own real ban-on-failure consequence, no
+        # shortcut around any of it).
+        buttons.append([InlineKeyboardButton("🗝️ Steal Something", callback_data="shop|steal")])
     return InlineKeyboardMarkup(buttons) if buttons else None
 
 
@@ -11627,6 +11657,9 @@ async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     action = parts[1] if len(parts) > 1 else ""
     item_id = parts[2] if len(parts) > 2 else None
     await _safe_answer(query)
+    if action == "steal":
+        await _do_steal(update, "")
+        return
     item = items_module.get_item(item_id) if item_id else None
     if item is None:
         return
@@ -11849,6 +11882,11 @@ async def _do_steal(update: Update, text: str, forced_roll: int | None = None) -
 
     result = roll_ability_check(character, "dexterity", proficient=False, forced_roll=forced_roll)
     bonus = _practiced_bonus_for(telegram_user_id, "dexterity")
+    # Thieves' Guild membership benefit (2026-07-25, per Coffee): a real
+    # +3 on top of the usual practiced bonus -- the Ledger's own trade
+    # secrets, not available outside it.
+    if character.get("guild") == "thieves_guild":
+        bonus += THIEVES_GUILD_STEAL_BONUS
     result["total"] += bonus
     result["practiced_bonus"] = bonus
     success = result["total"] >= STEAL_DC
@@ -12484,6 +12522,13 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             # subclass system grants so far.
             if character.get("subclass") and spell.get("school") == character["subclass"]:
                 result["damage_dealt"] = int(result["damage_dealt"] * (1 + SUBCLASS_SCHOOL_DAMAGE_BONUS_PCT / 100))
+            # Arcane Circle membership benefit (2026-07-25, per Coffee):
+            # a real, flat +15% on top of any subclass bonus above --
+            # stacks additively-then-multiplicatively the same way the
+            # subclass bonus itself stacks on the base roll, not a
+            # separate independent multiplier.
+            if character.get("guild") == "arcane_circle":
+                result["damage_dealt"] = int(result["damage_dealt"] * (1 + ARCANE_CIRCLE_SPELL_DAMAGE_BONUS_PCT / 100))
             # Damage-type system (2026-07-24): resolve_damage_spell never
             # calls resolve_attack (its own, separate pipeline -- see
             # rules/combat.py's docstring), so it needs its own call to

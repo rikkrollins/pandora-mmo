@@ -3,6 +3,14 @@ guilds.py
 Guild definitions and membership benefits. Guild membership is stored
 directly on the character record in db.py (a single 'guild' column,
 since this game keeps one guild per character for simplicity).
+
+Redesigned 2026-07-25 (per Coffee): 5 real guilds, each restricted to
+specific classes (subclass required too, once a class has one to
+choose), and joining is a real, PERMANENT commitment -- once you're in
+a guild you can never leave or switch to another one. A hybrid
+character (rules/leveling.py's rebirth-earned hybrid_class) qualifies
+for a guild on EITHER of its two classes' terms, rewarding going hybrid
+with genuinely wider guild access instead of narrowing it.
 """
 
 GUILDS = {
@@ -17,13 +25,28 @@ GUILDS = {
         "description": "A secretive order of spellcasters who trade knowledge for loyalty.",
         "join_requirement_level": 3,
         "join_requirement_classes": ["wizard", "sorcerer", "warlock"],
-        "benefits": ["bonus_spell_scroll", "shop_discount_10"],
+        "benefits": ["bonus_spell_scroll", "shop_discount_10", "bonus_spell_damage_15"],
     },
     "silver_wardens": {
         "name": "The Silver Wardens",
         "description": "Monster hunters who've noticed the world's darkening edges and organized against it.",
         "join_requirement_level": 5,
+        "join_requirement_classes": ["fighter", "paladin", "barbarian", "ranger", "monk"],
         "benefits": ["bonus_damage_vs_undead", "shop_discount_15"],
+    },
+    "thieves_guild": {
+        "name": "The Thieves' Guild",
+        "description": "A quiet network of pickpockets, fences, and people who ask too few questions.",
+        "join_requirement_level": 3,
+        "join_requirement_classes": ["rogue", "bard"],
+        "benefits": ["bonus_steal", "shop_discount_10"],
+    },
+    "faith_circle": {
+        "name": "The Faith Circle",
+        "description": "Healers and keepers of living things, sworn to mend what the world keeps breaking.",
+        "join_requirement_level": 3,
+        "join_requirement_classes": ["cleric", "druid"],
+        "benefits": ["bonus_healing", "shop_discount_10"],
     },
 }
 
@@ -51,7 +74,28 @@ GUILD_QUESTS = {
         "reward_gold": 30,
         "reward_xp": 25,
     },
+    "thieves_guild": {
+        "title": "Quiet Work",
+        "description": "The Ledger always needs proof you can still handle yourself when it matters.",
+        "reward_gold": 30,
+        "reward_xp": 25,
+    },
+    "faith_circle": {
+        "title": "Mercy's Errand",
+        "description": "Every real threat put down is one less the Circle has to tend the wounds of later.",
+        "reward_gold": 25,
+        "reward_xp": 25,
+    },
 }
+
+# Real, modest membership benefits (2026-07-25) -- consumed by bot.py's
+# _do_cast_spell (Arcane Circle) / _do_steal (Thieves' Guild) /
+# spells.py's resolve_heal_spell (Faith Circle). Silver Wardens' and
+# Adventurers' Guild's existing benefits (bonus_damage_vs_undead,
+# shop_discount) were already real before this pass.
+ARCANE_CIRCLE_SPELL_DAMAGE_BONUS_PCT = 15
+THIEVES_GUILD_STEAL_BONUS = 3
+FAITH_CIRCLE_HEAL_BONUS = 3
 
 
 def get_guild_quest(guild_id: str) -> dict | None:
@@ -63,14 +107,42 @@ def get_guild(guild_id: str) -> dict | None:
 
 
 def eligible_for_guild(character: dict, guild_id: str) -> tuple[bool, str]:
+    """
+    Real eligibility check, now covering (2026-07-25, per Coffee):
+    - Permanent membership: once in ANY guild, ineligible to join ANY
+      other (including the one they're already in) -- guild membership
+      is a one-time, irreversible commitment, never a re-spec.
+    - Class + subclass gating: a guild with join_requirement_classes
+      also requires the character to have actually chosen a subclass
+      (rules/leveling.py's CLASS_SUBCLASSES/WIZARD_SCHOOLS) -- a
+      fighting guild shouldn't take a magic user with no martial
+      training, and vice versa, so "picked a real subclass" is the
+      proof of that training, same spirit as proven_in_combat below.
+    - Hybrid characters (a real second class via rebirth's hybrid_class)
+      qualify for a guild on EITHER their base class's or their hybrid
+      class's terms -- going hybrid genuinely widens guild access
+      rather than leaving them stuck with only their original class's
+      options.
+    """
     guild = GUILDS.get(guild_id)
     if guild is None:
         return False, "That guild doesn't exist."
+    if character.get("guild"):
+        if character["guild"] == guild_id:
+            return False, "You're already a member."
+        current = GUILDS.get(character["guild"])
+        current_name = current["name"] if current else character["guild"]
+        return False, f"Guild membership is permanent — you've already sworn yourself to {current_name}."
     if character["level"] < guild["join_requirement_level"]:
         return False, f"Requires level {guild['join_requirement_level']}."
     required_classes = guild.get("join_requirement_classes")
-    if required_classes and character["char_class"].lower() not in required_classes:
-        return False, f"Only open to: {', '.join(required_classes)}."
+    if required_classes:
+        char_class = character["char_class"].lower()
+        hybrid_class = (character.get("hybrid_class") or "").lower()
+        if char_class not in required_classes and hybrid_class not in required_classes:
+            return False, f"Only open to: {', '.join(c.capitalize() for c in required_classes)}."
+        if not character.get("subclass"):
+            return False, "Requires choosing a subclass first (say \"choose the path of...\")."
     # Task #170, per Coffee: guild membership should require vetting, not
     # be an instant join. Reuses the exact same real proof every guild
     # already demands of its ONGOING members (winning a real fight, see

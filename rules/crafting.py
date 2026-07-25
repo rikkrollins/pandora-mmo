@@ -121,6 +121,37 @@ RECIPES = {
 }
 
 
+# Class profession affinity (2026-07-25, per Coffee: "make sure all
+# classes and sub classes have a profession"). Every one of the 12
+# classes gets a thematically-fitting "home" profession -- subclass
+# choice (rules/leveling.py's CLASS_SUBCLASSES/WIZARD_SCHOOLS) never
+# changes it, since every subclass is a refinement of one fixed base
+# class, so mapping at the class level already covers every subclass
+# for free. All 7 real professions (the 3 crafting ones above plus the
+# 4 gathering ones -- herbalism/mining/fishing/lumberjacking) are used
+# by at least one class, so nothing here is decorative filler.
+CLASS_PROFESSIONS = {
+    "Barbarian": "mining",         # breaks rock same as skulls
+    "Sorcerer": "mining",          # raw, untamed power drawn like ore from the earth
+    "Fighter": "blacksmithing",    # forges their own steel
+    "Paladin": "blacksmithing",    # forges sacred arms
+    "Rogue": "alchemy",            # poisons and a rogue's trade secrets
+    "Wizard": "alchemy",           # arcane scholar, brews and scribes
+    "Warlock": "fishing",          # patience, waiting on a bargain struck in still water
+    "Monk": "fishing",             # patience and discipline
+    "Ranger": "lumberjacking",     # woodsman, at home with an axe and the forest
+    "Druid": "herbalism",          # living nature-magic
+    "Cleric": "herbalism",         # tends healing herbs for the faithful
+    "Bard": "cooking",             # innkeeper's trade, tavern life on the road
+}
+CLASS_PROFESSION_AFFINITY_BONUS = 2
+
+
+def class_profession_affinity_bonus(char_class: str, profession: str) -> int:
+    """Real +2 ability-check bonus when practicing your own class's home profession, on top of practiced_bonus."""
+    return CLASS_PROFESSION_AFFINITY_BONUS if CLASS_PROFESSIONS.get(char_class) == profession else 0
+
+
 def get_recipe(recipe_id: str) -> dict | None:
     return RECIPES.get(recipe_id)
 
