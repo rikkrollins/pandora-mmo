@@ -2,6 +2,16 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.23] — Real subclass choice for all 12 classes
+
+Every class now has two genuine 5E subclasses to choose from (e.g.
+Barbarian's Berserker/Totem Warrior, Fighter's Champion/Battle Master,
+Rogue's Assassin/Thief), picked with "choose the path of X" — no
+rebirth required. One real archetype per class grants a genuine +20%
+weapon damage bonus; the other is a real, valid, sheet-showing pick
+with no mechanical bonus wired up yet (honest about the gap, not
+faked). Shows on your character sheet either way.
+
 ## [1.27.22] — Real subclass choice (Wizard pilot)
 
 Wizards can now really specialize: "choose the school of evocation"

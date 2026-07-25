@@ -85,7 +85,7 @@ from rules.leveling import (
     CLASS_PRIMARY_ABILITY, CLASS_SAVE_PROFICIENCIES, is_proficient_in_skill,
     skill_check_proficiency_bonus, wild_shape_temp_hp, XP_THRESHOLDS,
     MAX_LEVEL, ability_score_cap, xp_gain_multiplier, hybrid_tier, HYBRID_MAX_TIER,
-    magic_penetration_pct,
+    magic_penetration_pct, CLASS_SUBCLASSES, COMBAT_SUBCLASS_NAMES, COMBAT_SUBCLASS_DAMAGE_BONUS_PCT,
 )
 from rules.proficiency import practiced_bonus, MAX_PRACTICE_BONUS
 
@@ -3124,14 +3124,14 @@ async def _do_choose_hybrid(update: Update, text: str) -> None:
     )
 
 
-# Real subclass system, pilot (2026-07-24, per Coffee: "players can do
-# sub-classing in the first playthrough" -- Wizard's Arcane Tradition is
-# the first real slice, grounded in spells.py's already-real "school"
-# field on every spell rather than inventing new content). Every real
-# 5E school of magic is a valid pick; no in-game mechanism yet exists
-# for the other 11 classes' subclasses (same "not yet built" honesty as
-# every other documented gap in this game) -- _do_choose_subclass tells
-# a non-Wizard exactly that instead of pretending to apply something.
+# Real subclass system (2026-07-24 pilot: Wizard's Arcane Tradition,
+# grounded in spells.py's already-real "school" field. Extended
+# 2026-07-25 to the other 11 classes via rules/leveling.CLASS_SUBCLASSES
+# -- two genuine 5E archetypes per class, the first granting a real
+# +20% weapon-damage bonus (rules/combat.py's resolve_attack), the
+# second a genuine, valid, sheet-showing pick with no mechanical bonus
+# wired up yet -- honest about the gap rather than inventing one, same
+# convention as every other documented "not built yet" feature here).
 WIZARD_SCHOOLS = (
     "evocation", "abjuration", "conjuration", "divination",
     "enchantment", "illusion", "necromancy", "transmutation",
@@ -3146,24 +3146,42 @@ async def _do_choose_subclass(update: Update, text: str) -> None:
             "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
         )
         return
-    if character["char_class"] != "Wizard":
+    lowered = text.lower()
+
+    if character["char_class"] == "Wizard":
+        match = next((s for s in WIZARD_SCHOOLS if s in lowered), None)
+        if match is None:
+            await _safe_send(update, f"Which school of magic? Options: {', '.join(WIZARD_SCHOOLS)}.")
+            return
+        db.update_character(update.effective_user.id, subclass=match)
         await _safe_send(
             update,
-            f"Real subclass choice is only built for Wizards so far — {character['char_class']} doesn't "
-            f"have one to pick yet.",
+            f"📖 **{character['name']}** specializes in the **School of {match.capitalize()}** — "
+            f"spells of that school now deal {SUBCLASS_SCHOOL_DAMAGE_BONUS_PCT}% more damage.",
         )
         return
-    lowered = text.lower()
-    match = next((s for s in WIZARD_SCHOOLS if s in lowered), None)
+
+    options = CLASS_SUBCLASSES.get(character["char_class"])
+    if options is None:
+        await _safe_send(update, f"Real subclass choice isn't built for {character['char_class']} yet.")
+        return
+    match = next((s for s in options if s.lower() in lowered), None)
     if match is None:
-        await _safe_send(update, f"Which school of magic? Options: {', '.join(WIZARD_SCHOOLS)}.")
+        await _safe_send(update, f"Which subclass? Options for a {character['char_class']}: {', '.join(options)}.")
         return
     db.update_character(update.effective_user.id, subclass=match)
-    await _safe_send(
-        update,
-        f"📖 **{character['name']}** specializes in the **School of {match.capitalize()}** — "
-        f"spells of that school now deal {SUBCLASS_SCHOOL_DAMAGE_BONUS_PCT}% more damage.",
-    )
+    if match in COMBAT_SUBCLASS_NAMES:
+        await _safe_send(
+            update,
+            f"⚔️ **{character['name']}** takes up the path of the **{match}** — weapon attacks now deal "
+            f"{COMBAT_SUBCLASS_DAMAGE_BONUS_PCT}% more damage.",
+        )
+    else:
+        await _safe_send(
+            update,
+            f"📜 **{character['name']}** takes up the path of the **{match}** — a real, chosen subclass, "
+            f"though no mechanical bonus is built for it yet.",
+        )
 
 
 async def _do_level_up(update: Update, text: str) -> None:
@@ -7471,7 +7489,12 @@ def _format_character_sheet(character: dict) -> str:
                 f"🌟 Hybrid: {character['hybrid_class']} "
                 f"(tier {hybrid_tier(character['rebirth_count'])}/{HYBRID_MAX_TIER})\n"
             )
-    subclass_line = f"📖 School of {character['subclass'].capitalize()}\n" if character.get("subclass") else ""
+    subclass_line = ""
+    if character.get("subclass"):
+        if character["char_class"] == "Wizard":
+            subclass_line = f"📖 School of {character['subclass'].capitalize()}\n"
+        else:
+            subclass_line = f"📖 Subclass: {character['subclass']}\n"
     title_suffix = f" \"{character['active_title']}\"" if character.get("active_title") else ""
     name_line = f"**{character['name']}**{title_suffix}" + (" *(AI companion)*" if character.get("is_ai") else "")
     equipped_line = _format_equipped_line(character)

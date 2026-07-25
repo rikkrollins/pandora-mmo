@@ -17,6 +17,7 @@ import re
 import requests
 
 import config
+import rules.leveling as leveling
 from ai.text_cleanup import strip_think_tags
 from guilds import GUILDS
 
@@ -1133,14 +1134,17 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if re.search(r"\bdrink(?:s|ing)?\b", lowered) and "water" in lowered:
         return {**base, "action": "drink_water"}
 
-    # choose_subclass (2026-07-24, pilot: Wizard's Arcane Tradition):
-    # any of the real school names, alongside a clear pick verb, so
-    # this doesn't fire on a spell description that merely mentions a
-    # school in passing.
+    # choose_subclass (2026-07-24 pilot: Wizard's Arcane Tradition;
+    # extended 2026-07-25 to every class's real subclass names, see
+    # rules/leveling.CLASS_SUBCLASSES): any real school/subclass name,
+    # alongside a clear pick verb, so this doesn't fire on a spell
+    # description or class-features listing that merely mentions one
+    # in passing.
     schools = ("evocation", "abjuration", "conjuration", "divination",
                "enchantment", "illusion", "necromancy", "transmutation")
-    if any(s in lowered for s in schools) and any(
-        w in lowered for w in ["subclass", "specializ", "school of", "become a", "choose"]
+    subclass_names = tuple(n.lower() for pair in leveling.CLASS_SUBCLASSES.values() for n in pair)
+    if any(s in lowered for s in schools + subclass_names) and any(
+        w in lowered for w in ["subclass", "specializ", "school of", "become a", "choose", "path of"]
     ):
         return {**base, "action": "choose_subclass"}
 

@@ -6,7 +6,10 @@ structured data; the AI layer (ai/dm_agent.py) only ever narrates the
 results computed here, never decides them.
 """
 from rules.dice import roll_d20, roll_attack, roll_damage, ability_modifier
-from rules.leveling import sneak_attack_dice_count, rage_damage_bonus, wild_shape_damage_bonus, magic_penetration_pct
+from rules.leveling import (
+    sneak_attack_dice_count, rage_damage_bonus, wild_shape_damage_bonus, magic_penetration_pct,
+    COMBAT_SUBCLASS_NAMES, COMBAT_SUBCLASS_DAMAGE_BONUS_PCT,
+)
 from class_features import is_weapon_proficient
 import hybrid_features
 import races
@@ -275,6 +278,11 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         damage_dealt = apply_damage_type_modifier(
             damage_dealt, weapon.get("damage_type", "physical"), defender, attacker
         )
+        # Real subclass choice, non-Wizard classes (2026-07-25): a
+        # character whose chosen subclass is one of the "combat" picks
+        # (rules/leveling.CLASS_SUBCLASSES) deals more weapon damage.
+        if attacker.get("subclass") in COMBAT_SUBCLASS_NAMES:
+            damage_dealt = int(damage_dealt * (1 + COMBAT_SUBCLASS_DAMAGE_BONUS_PCT / 100))
         if defender.get("raging"):
             damage_dealt = damage_dealt // 2
         # Hybrid Barbarian (2026-07-22): a chance-gated, scaled-down

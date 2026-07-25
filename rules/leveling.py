@@ -122,6 +122,41 @@ def magic_penetration_pct(rebirth_count: int) -> float:
     return min(100.0, MAGIC_PENETRATION_PCT_PER_REBIRTH * max(rebirth_count, 0))
 
 
+# Real subclass choice, extended to the other 11 classes (2026-07-25,
+# following Wizard's Arcane Tradition pilot -- see bot.py's
+# _do_choose_subclass/CLASS_SUBCLASSES). Two genuine 5E archetypes per
+# class. The FIRST name in each pair is that class's "combat" pick and
+# grants the one universal mechanical hook this pass ships --
+# COMBAT_SUBCLASS_DAMAGE_BONUS_PCT more weapon damage (rules/combat.py's
+# resolve_attack, same real hook point the damage-type system uses).
+# The SECOND name is a genuine, valid, sheet-showing pick with no
+# mechanical bonus wired up yet -- honest about the gap rather than
+# inventing one, same convention as every other documented "not built
+# yet" feature in this codebase.
+CLASS_SUBCLASSES = {
+    "Barbarian": ("Berserker", "Totem Warrior"),
+    "Fighter": ("Champion", "Battle Master"),
+    "Paladin": ("Vengeance", "Devotion"),
+    "Ranger": ("Hunter", "Beast Master"),
+    "Rogue": ("Assassin", "Thief"),
+    "Cleric": ("War", "Life"),
+    "Sorcerer": ("Draconic", "Wild Magic"),
+    "Warlock": ("Fiend", "Great Old One"),
+    "Bard": ("Valor", "Lore"),
+    "Druid": ("Moon", "Land"),
+    "Monk": ("Shadow", "Open Hand"),
+}
+
+COMBAT_SUBCLASS_DAMAGE_BONUS_PCT = 20
+
+# Every class's first-listed (combat) subclass name, flattened into one
+# set -- this is the only thing rules/combat.py actually needs to know
+# (a character's own subclass is only ever set to a name valid for
+# THEIR OWN char_class by _do_choose_subclass, so a flat name check
+# here can't leak across classes).
+COMBAT_SUBCLASS_NAMES = frozenset(names[0] for names in CLASS_SUBCLASSES.values())
+
+
 def level_for_xp(xp: int) -> int:
     """Return the correct level for a given total XP amount."""
     level = 1
