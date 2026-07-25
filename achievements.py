@@ -9,7 +9,8 @@ _do_set_title / /title), shown next to their name on their sheet.
 
 check.type is one of: min_level, min_gold, min_known_monsters,
 min_completed_quests, min_board_quests_completed, has_guild,
-well_equipped (needs a weapon AND either armor or a shield equipped).
+well_equipped (needs a weapon AND either armor or a shield equipped),
+master_of_any_profession (Master rank in any of the 7 real professions).
 See bot.py's _achievement_condition_met for how each is evaluated.
 """
 
@@ -97,6 +98,12 @@ ACHIEVEMENTS = {
         "description": "Carry 500 gold at once.",
         "title": "the Wealthy",
         "check": {"type": "min_gold", "value": 500},
+    },
+    "master_of_a_trade": {
+        "name": "Master of a Trade",
+        "description": "Reach Master rank (the top practiced bonus) in any real profession.",
+        "title": "the Master Artisan",
+        "check": {"type": "master_of_any_profession"},
     },
     # Task #134, per Coffee: "Hidden emergent-synergy system: secret
     # builds discovered, not documented." Deliberately vague description

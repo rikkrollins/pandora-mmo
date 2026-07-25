@@ -2,6 +2,13 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.36] — New achievement: Master of a Trade
+
+Reaching Master rank (the top practiced bonus, 15 uses) in any of
+the 7 real professions now earns a real achievement and title ("the
+Master Artisan") — the first achievement tied to profession
+progress.
+
 ## [1.27.35] — Professions overview + fix: Zara/Bram had no traits or features
 
 New "🛠️ Professions" screen (menu button or say "check my professions")

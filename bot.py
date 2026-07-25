@@ -10206,6 +10206,15 @@ def _achievement_condition_met(character: dict, check: dict) -> bool:
         return bool(character.get("equipped_weapon")) and bool(
             character.get("equipped_armor") or character.get("equipped_shield")
         )
+    if check_type == "master_of_any_profession":
+        # Per Coffee ("continue with professions"): a real milestone
+        # for reaching the top practiced_bonus rank (rules/proficiency.
+        # MAX_PRACTICE_BONUS, 15 uses) in ANY of the 7 real professions
+        # (ALL_PROFESSIONS) -- same skill_uses data the new "check my
+        # professions" screen already reads, just the first achievement
+        # tied to it.
+        skill_uses = character.get("skill_uses") or {}
+        return any(practiced_bonus(skill_uses.get(p, 0)) >= MAX_PRACTICE_BONUS for p in ALL_PROFESSIONS)
     if check_type == "hidden_synergy":
         # Task #134: real, undocumented emergent-build achievements --
         # a genuine multi-system combo (alignment extreme + a real
