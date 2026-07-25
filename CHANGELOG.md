@@ -2,6 +2,16 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.22] — Real subclass choice (Wizard pilot)
+
+Wizards can now really specialize: "choose the school of evocation"
+(or any real school of magic) picks a genuine Arcane Tradition,
+dealing 20% more damage with spells of that school — grounded in the
+real school every spell already carries. Shows on your sheet.
+Available from your very first playthrough, no rebirth needed. Other
+classes don't have a real subclass choice built yet (honest, not
+faked) — more to come.
+
 ## [1.27.21] — Crafting splits into real named professions
 
 Crafting is no longer one shared "crafting" skill — alchemy (potions,

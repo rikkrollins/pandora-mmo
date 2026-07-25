@@ -1133,6 +1133,17 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if re.search(r"\bdrink(?:s|ing)?\b", lowered) and "water" in lowered:
         return {**base, "action": "drink_water"}
 
+    # choose_subclass (2026-07-24, pilot: Wizard's Arcane Tradition):
+    # any of the real school names, alongside a clear pick verb, so
+    # this doesn't fire on a spell description that merely mentions a
+    # school in passing.
+    schools = ("evocation", "abjuration", "conjuration", "divination",
+               "enchantment", "illusion", "necromancy", "transmutation")
+    if any(s in lowered for s in schools) and any(
+        w in lowered for w in ["subclass", "specializ", "school of", "become a", "choose"]
+    ):
+        return {**base, "action": "choose_subclass"}
+
     unconditional_shove_words = ["shove", "tackle", "trip", "push over"]
     knock_down_phrasing = "knock" in lowered and ("prone" in lowered or "down" in lowered)
     if any(w in lowered for w in unconditional_shove_words) or knock_down_phrasing:
@@ -1354,7 +1365,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "check_guild_quest", "dice_game", "fortunes_wheel", "set_alignment", "message_ai",
                 "skill_tree", "challenge_duel", "accept_duel", "check_market", "join_battle",
                 "replay_intro", "visual_map", "rebirth", "choose_hybrid", "give_offering",
-                "drink_water",
+                "drink_water", "choose_subclass",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

@@ -387,6 +387,15 @@ def init_db() -> None:
         if "cleared_locations" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN cleared_locations TEXT NOT NULL DEFAULT '[]'")
 
+        # Real subclass choice (2026-07-24, per Coffee: available from
+        # the FIRST playthrough, unlike hybrid_class -- no rebirth gate
+        # here). Wizard's Arcane Tradition is the pilot: spells.py
+        # already tags every spell's real school, so "pick a school"
+        # needs no new content, just a bonus applied where that school
+        # matches (see bot.py's _do_choose_subclass/_do_cast_spell).
+        if "subclass" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN subclass TEXT")
+
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)

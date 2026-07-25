@@ -3124,6 +3124,48 @@ async def _do_choose_hybrid(update: Update, text: str) -> None:
     )
 
 
+# Real subclass system, pilot (2026-07-24, per Coffee: "players can do
+# sub-classing in the first playthrough" -- Wizard's Arcane Tradition is
+# the first real slice, grounded in spells.py's already-real "school"
+# field on every spell rather than inventing new content). Every real
+# 5E school of magic is a valid pick; no in-game mechanism yet exists
+# for the other 11 classes' subclasses (same "not yet built" honesty as
+# every other documented gap in this game) -- _do_choose_subclass tells
+# a non-Wizard exactly that instead of pretending to apply something.
+WIZARD_SCHOOLS = (
+    "evocation", "abjuration", "conjuration", "divination",
+    "enchantment", "illusion", "necromancy", "transmutation",
+)
+SUBCLASS_SCHOOL_DAMAGE_BONUS_PCT = 20
+
+
+async def _do_choose_subclass(update: Update, text: str) -> None:
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if character["char_class"] != "Wizard":
+        await _safe_send(
+            update,
+            f"Real subclass choice is only built for Wizards so far — {character['char_class']} doesn't "
+            f"have one to pick yet.",
+        )
+        return
+    lowered = text.lower()
+    match = next((s for s in WIZARD_SCHOOLS if s in lowered), None)
+    if match is None:
+        await _safe_send(update, f"Which school of magic? Options: {', '.join(WIZARD_SCHOOLS)}.")
+        return
+    db.update_character(update.effective_user.id, subclass=match)
+    await _safe_send(
+        update,
+        f"📖 **{character['name']}** specializes in the **School of {match.capitalize()}** — "
+        f"spells of that school now deal {SUBCLASS_SCHOOL_DAMAGE_BONUS_PCT}% more damage.",
+    )
+
+
 async def _do_level_up(update: Update, text: str) -> None:
     """
     Real player-driven Ability Score Improvement (2026-07-16, per
@@ -7429,6 +7471,7 @@ def _format_character_sheet(character: dict) -> str:
                 f"🌟 Hybrid: {character['hybrid_class']} "
                 f"(tier {hybrid_tier(character['rebirth_count'])}/{HYBRID_MAX_TIER})\n"
             )
+    subclass_line = f"📖 School of {character['subclass'].capitalize()}\n" if character.get("subclass") else ""
     title_suffix = f" \"{character['active_title']}\"" if character.get("active_title") else ""
     name_line = f"**{character['name']}**{title_suffix}" + (" *(AI companion)*" if character.get("is_ai") else "")
     equipped_line = _format_equipped_line(character)
@@ -7480,6 +7523,7 @@ def _format_character_sheet(character: dict) -> str:
         f"{description_line}"
         f"Level {character['level']} | XP {character['xp']}{xp_remaining_line}\n"
         f"{rebirth_line}"
+        f"{subclass_line}"
         f"HP {character['hp_current']}/{character['hp_max']} | AC {character['armor_class']}\n"
         f"{ability_line}"
         f"Alignment: {_alignment_label(character.get('alignment_law_chaos', 0), character.get('alignment_good_evil', 0))}\n"
@@ -12267,6 +12311,12 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             target = _pick_target(text, opposing)
             result = spells_module.resolve_damage_spell(spell_id, character, target)
             result = _apply_empowered_spell(update.effective_user.id, character, spell, result)
+            # Subclass system (2026-07-24): a Wizard specialized in this
+            # spell's own school (spells.py's real "school" field) deals
+            # more with it -- the one real mechanical hook this pilot
+            # subclass system grants so far.
+            if character.get("subclass") and spell.get("school") == character["subclass"]:
+                result["damage_dealt"] = int(result["damage_dealt"] * (1 + SUBCLASS_SCHOOL_DAMAGE_BONUS_PCT / 100))
             # Damage-type system (2026-07-24): resolve_damage_spell never
             # calls resolve_attack (its own, separate pipeline -- see
             # rules/combat.py's docstring), so it needs its own call to
@@ -13353,6 +13403,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_give_offering(update, intent.get("raw_text", text))
     elif action == "drink_water":
         await _do_drink_water(update)
+    elif action == "choose_subclass":
+        await _do_choose_subclass(update, intent.get("raw_text", text))
     elif action == "equip_item":
         await _do_equip_item(update, intent.get("raw_text", text))
     elif action == "auto_equip":
