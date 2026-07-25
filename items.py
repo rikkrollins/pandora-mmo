@@ -170,7 +170,7 @@ ITEMS = {
     },
     "amulet_of_health": {
         "name": "Amulet of Health", "type": "amulet", "rarity": "rare",
-        "price": 0, "weight": 0, "constitution_set": 19,
+        "price": 0, "weight": 0, "constitution_set": 19, "regen_bonus": 1,
         "note": "Your vitality feels different the moment you put it on.",
     },
     "cloak_of_elvenkind": {

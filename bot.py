@@ -2126,7 +2126,10 @@ async def _announce_defeats(update: Update, session: sessions.Session, removed: 
             )
         else:
             if entry["is_ai"]:
-                db.update_character(entry["telegram_user_id"], is_dead=1, hp_current=0)
+                db.update_character(
+                    entry["telegram_user_id"], is_dead=1, hp_current=0,
+                    died_at=datetime.now(timezone.utc).isoformat(),
+                )
             await _safe_send(update, f"💀 **{entry['name']} has been defeated!**")
 
 
@@ -3642,7 +3645,10 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
                 # exactly where they died until revived; the player can
                 # switch to another character of theirs in the meantime.
                 if not current.get("is_ai"):
-                    db.update_character(current["telegram_user_id"], is_dead=1)
+                    db.update_character(
+                        current["telegram_user_id"], is_dead=1,
+                        died_at=datetime.now(timezone.utc).isoformat(),
+                    )
                 await _safe_send(
                     update,
                     f"💀 **{current['name']} rolls a {death_result['roll']} — "
@@ -5490,6 +5496,79 @@ WARLOCK_PACT_MAGIC_REST_HOURS = NATURAL_HEALING_FULL_REST_HOURS / 8
 # modeled as Warlocks alone using a much shorter curve for SPELL SLOTS
 # specifically (their HP still follows the normal shared curve, same
 # as every other class).
+
+
+PASSIVE_REGEN_BASE_HP = 1  # per tick of the existing 60s world loop (IDLE_CHECK_INTERVAL_SECONDS)
+PASSIVE_REGEN_SAFE_AREA_BONUS_HP = 1  # doubles the base rate at any location flagged "safe" in campaign.json
+
+
+def _equipped_regen_bonus(character: dict) -> int:
+    """Sum of regen_bonus from every currently-equipped accessory (e.g. Amulet of Health)."""
+    total = 0
+    for acc_id in character.get("equipped_accessories", []):
+        acc = items_module.get_item(acc_id)
+        if acc and acc.get("regen_bonus"):
+            total += acc["regen_bonus"]
+    return total
+
+
+def _passive_regen_amount(character: dict) -> int:
+    """
+    How much HP this character passively recovers on one world tick (see
+    _apply_passive_party_regen). "Time decreased" from Coffee's original
+    ask is modeled as MORE HP on this same tick rather than a shorter
+    per-character timer -- equivalent effect (recovers faster overall),
+    far simpler than tracking a separate clock per character on top of
+    the world loop's existing 60s cadence.
+    """
+    amount = PASSIVE_REGEN_BASE_HP
+    location = cl.get_location(CAMPAIGN, character.get("current_location"))
+    if location and location.get("safe"):
+        amount += PASSIVE_REGEN_SAFE_AREA_BONUS_HP
+    amount += _equipped_regen_bonus(character)
+    return amount
+
+
+def _apply_passive_party_regen() -> None:
+    """
+    Per Coffee (2026-07-25): "the party (if not dead) shud be able to
+    recover a bit of hp over (same as resting - if not in battle) +1
+    HP every 1 minute[,] and time can be decrease[d] and HP amount
+    raised from enchantments, spells like 'Regain' or 'Rejuvenate',
+    safe areas, consumables, and wearable items - make this work for
+    the whole party." Ticks alongside the existing 60s world loop
+    (_idle_inactivity_loop) rather than a new timer -- since that loop
+    already fires once a minute, a flat per-tick amount IS "+1 HP every
+    1 minute" with no new per-character clock needed. Applies to every
+    currently-active character in the game, human or AI companion alike
+    (_get_party_members already covers both, matching this project's
+    design philosophy that an AI-driven party member plays under the
+    same rules as a human one) -- the WHOLE party, not just whoever's
+    chatting right now. Only skips the dead and anyone actually mid-
+    fight (_in_active_combat); explicit resting (_go_inactive) is a
+    separate, bigger real-time heal (_apply_natural_healing) and this
+    trickle stacks on top of it, same as it stacks on top of ordinary
+    adventuring.
+
+    Two of the four requested boosters are wired in now: safe-area
+    locations (the existing `safe` location flag) and regen-flagged
+    equipped accessories (_equipped_regen_bonus; Amulet of Health so
+    far). Spell ("Regain"/"Rejuvenate") and consumable-granted regen
+    boosts are a deliberate follow-up, not built here as a fake,
+    unwired mechanic — this codebase has no temporary-buff/expiry
+    system anywhere yet, and one would need to be designed for real
+    rather than bolted on in this pass.
+    """
+    for character in _get_party_members():
+        if character.get("is_dead"):
+            continue
+        if character["hp_current"] >= character["hp_max"]:
+            continue
+        if _in_active_combat(character["telegram_user_id"], _LAST_KNOWN_CHAT_ID):
+            continue
+        new_hp = min(character["hp_max"], character["hp_current"] + _passive_regen_amount(character))
+        if new_hp != character["hp_current"]:
+            db.update_character(character["telegram_user_id"], hp_current=new_hp)
 
 
 def _song_of_rest_bonus(character: dict) -> int:
@@ -10910,7 +10989,7 @@ async def _do_use_item(update: Update, text: str) -> None:
             # someone who isn't their owner's active character silently
             # updated the WRONG (already-alive) character instead.
             db.update_character_by_id(
-                recipient["character_id"], hp_current=hp_max, is_dead=0,
+                recipient["character_id"], hp_current=hp_max, is_dead=0, died_at=None,
                 death_save_successes=0, death_save_failures=0,
             )
             if live_target is not None:
@@ -11242,7 +11321,7 @@ async def _apply_shrine_offering(update: Update, character: dict, target: dict) 
     # the whole party to full anyway.
     target_hp_max = target.get("hp_max", target["hp_current"])
     db.update_character_by_id(
-        target["character_id"], is_dead=0, hp_current=target_hp_max,
+        target["character_id"], is_dead=0, hp_current=target_hp_max, died_at=None,
         death_save_successes=0, death_save_failures=0,
     )
     rest_of_party = _bless_present_party_to_full(character, exclude_character_ids=target["character_id"])
@@ -11280,7 +11359,7 @@ async def _apply_shrine_offering_all(update: Update, character: dict, dead_membe
     for target in dead_members:
         target_hp_max = target.get("hp_max", target["hp_current"])
         db.update_character_by_id(
-            target["character_id"], is_dead=0, hp_current=target_hp_max,
+            target["character_id"], is_dead=0, hp_current=target_hp_max, died_at=None,
             death_save_successes=0, death_save_failures=0,
         )
         revived_lines.append(f"**{target['name']}** ({target_hp_max}/{target_hp_max} HP)")
@@ -12509,7 +12588,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                 return
         _consume_scroll_if_any()
         db.update_character(
-            target_character["telegram_user_id"], is_dead=0, hp_current=1,
+            target_character["telegram_user_id"], is_dead=0, hp_current=1, died_at=None,
             death_save_successes=0, death_save_failures=0,
         )
         await _safe_send(
@@ -15602,6 +15681,59 @@ async def _maybe_auto_roll_pending_dice(bot) -> None:
             logger.error(f"[dice] auto-roll dispatch for user={user_id} kind={pending['kind']} raised: {e!r}")
 
 
+STANDALONE_AI_REVIVE_HOURS = 3
+# Per Coffee (2026-07-25, re: Bram Ashfield dying in battle while not a
+# member of anyone's real party): a dead character can't act OR move
+# (adventure_master_handler's is_dead gate), so a standalone AI
+# companion literally cannot walk itself to a shrine, and no human is
+# around to pray for it there either -- every OTHER revival path in
+# this game (shrine offering, Revivify) requires a real party member
+# to initiate it. Left as-is, a standalone AI companion's death is
+# permanent with no possible fix short of manual DB intervention. This
+# is the real, distinct fix: after STANDALONE_AI_REVIVE_HOURS of real
+# time (not instant -- still a genuine consequence, just not
+# forever), a standalone dead AI companion recovers on its own.
+
+
+def _is_standalone_ai_companion(character: dict) -> bool:
+    """
+    True if this AI companion isn't currently partied with any real
+    human -- i.e. no one who could ever take it to a shrine or cast
+    Revivify for it. A companion recruited into an active human's party
+    (character.party_id shared with a real player) already has a real
+    revival path and should keep needing it, same as any human death --
+    this only covers the ones nothing else can ever reach.
+    """
+    party_id = character.get("party_id")
+    if not party_id:
+        return True
+    return not any(not m.get("is_ai") for m in db.get_party_members_by_id(party_id))
+
+
+def _maybe_revive_standalone_ai_companions() -> None:
+    """Runs once per world tick — see STANDALONE_AI_REVIVE_HOURS above for why this exists."""
+    now = datetime.now(timezone.utc)
+    for character in db.get_ai_controlled_characters():
+        if not character.get("is_dead") or not _is_standalone_ai_companion(character):
+            continue
+        died_at_raw = character.get("died_at")
+        # No recorded died_at (2026-07-25, real case: Bram was already
+        # stuck dead from before this fix shipped, with no timestamp to
+        # measure from) -- treat as "died an unknown, presumably long
+        # time ago" and revive on the very next tick, rather than
+        # requiring a fresh death to ever recover.
+        if died_at_raw:
+            elapsed_hours = (now - datetime.fromisoformat(died_at_raw)).total_seconds() / 3600
+            if elapsed_hours < STANDALONE_AI_REVIVE_HOURS:
+                continue
+        db.update_character(
+            character["telegram_user_id"], is_dead=0, hp_current=character["hp_max"], died_at=None,
+            death_save_successes=0, death_save_failures=0,
+        )
+        _log_world_event(character.get("current_location"), f"{character['name']} stirs and rises, alive once more.")
+        logger.info(f"[world_tick] standalone AI companion {character['name']} auto-revived after death")
+
+
 async def _ai_party_autonomous_tick(bot) -> None:
     """
     Advances ONE AI-controlled character's turn per cycle (never all at
@@ -15641,10 +15773,12 @@ async def _ai_party_autonomous_tick(bot) -> None:
     # Whoever's acted least recently goes next — a simple, fair rotation.
     roster.sort(key=lambda c: c.get("last_active_at") or "")
     actor = next(
-        (c for c in roster if not _in_active_combat(c["telegram_user_id"], _LAST_KNOWN_CHAT_ID)), None
+        (c for c in roster
+         if not c.get("is_dead") and not _in_active_combat(c["telegram_user_id"], _LAST_KNOWN_CHAT_ID)),
+        None,
     )
     if actor is None:
-        return  # everyone's currently mid-fight; nothing to do this cycle
+        return  # everyone's currently mid-fight or dead; nothing to do this cycle
 
     _LAST_AI_PARTY_TICK_AT = now
 
@@ -15697,6 +15831,14 @@ async def _idle_inactivity_loop(application: Application) -> None:
             _wander_npcs()
         except Exception as e:
             logger.error(f"[world_tick] npc wander failed this cycle: {e!r}")
+        try:
+            _apply_passive_party_regen()
+        except Exception as e:
+            logger.error(f"[world_tick] passive party regen failed this cycle: {e!r}")
+        try:
+            _maybe_revive_standalone_ai_companions()
+        except Exception as e:
+            logger.error(f"[world_tick] standalone AI companion revival check failed this cycle: {e!r}")
         try:
             await _maybe_post_world_heartbeat(application.bot)
         except Exception as e:

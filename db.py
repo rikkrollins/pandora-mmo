@@ -396,6 +396,18 @@ def init_db() -> None:
         if "subclass" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN subclass TEXT")
 
+        # died_at (2026-07-25, per Coffee: an AI companion not in anyone's
+        # real party -- e.g. Bram Ashfield -- died in battle and had no
+        # path back at all, since shrine revival only ever covers a real
+        # party and a dead character can't act OR move, so it can't even
+        # walk itself to a shrine. Timestamped whenever is_dead is set,
+        # cleared whenever a character is revived by any path, so a
+        # standalone AI companion's death can be auto-resolved by real
+        # elapsed time (see bot.py's _maybe_revive_standalone_ai_companions)
+        # instead of staying stuck forever with no human able to intervene.
+        if "died_at" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN died_at TEXT")
+
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)

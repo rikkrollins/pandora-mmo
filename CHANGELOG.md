@@ -2,6 +2,24 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.26] — Passive party HP regen + fix: standalone AI companions could die permanently
+
+The whole party (any real player or AI companion, alive and not
+currently in a fight) now slowly recovers HP on its own over real
+time — 1 HP/minute base, doubled in safe locations, and boosted
+further by regen-flagged equipped gear (Amulet of Health so far).
+This stacks on top of, not instead of, the existing rest mechanic.
+Spell- and consumable-granted regen boosts are a planned follow-up,
+not built yet.
+
+Also fixes a real bug reported from Development: an AI companion not
+in anyone's real party (e.g. Bram Ashfield) who died in battle had
+no possible path back — shrine revival and Revivify both require a
+real party member to act, and a dead character can't act or move
+itself there. Standalone AI companions now auto-recover after a few
+hours; any companion still in a real human party keeps needing an
+actual revival, same as before.
+
 ## [1.27.25] — Quest/mission rewards now shared with the whole party
 
 Completing a story quest, board quest, or branching quest choice no
