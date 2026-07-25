@@ -43,6 +43,18 @@ RECIPES = {
         "result_item": "greater_healing_potion", "result_qty": 1,
         "ability": "wisdom", "dc": 17, "profession": "alchemy",
     },
+    # Alchemy's scroll side (2026-07-25): items.py has 8 real scrolls but
+    # only scroll_magic_missile was ever craftable. Scroll of Cure Wounds
+    # is the other "common" rarity scroll (same tier/price bracket as
+    # Magic Missile's), so it's the one that belongs here -- the rare
+    # ones (Fireball, Revivify, Lightning Bolt, Invisibility, Summoning)
+    # are deliberately left as real finds/purchases only, not craftable,
+    # so scribing doesn't trivialize them.
+    "scroll_cure_wounds": {
+        "materials": {"silverleaf_herb": 2, "moonpetal": 2},
+        "result_item": "scroll_cure_wounds", "result_qty": 1,
+        "ability": "intelligence", "dc": 14, "profession": "alchemy",
+    },
     # Cooking (2026-07-15): raw_fish was gatherable but no recipe used
     # it at all -- uses wood too (cooking over a fire), producing an
     # actually usable food item now that _do_use_item exists.
@@ -84,6 +96,27 @@ RECIPES = {
         "materials": {"iron_ore": 5},
         "result_item": "chain_shirt", "result_qty": 1,
         "ability": "strength", "dc": 16, "profession": "blacksmithing",
+    },
+    # Blacksmithing, filling in the rest of the real weapon/armor gaps
+    # (2026-07-25): items.py's shortsword, wooden_shield, and chain_mail
+    # all already existed as real, buyable items with no recipe. Rounds
+    # the curve out to 6 real tiers: rusty_dagger(8) -> shortsword(10) /
+    # wooden_shield(10) -> longsword(13) -> chain_shirt(16) ->
+    # chain_mail(18, the real capstone).
+    "shortsword": {
+        "materials": {"iron_ore": 2},
+        "result_item": "shortsword", "result_qty": 1,
+        "ability": "strength", "dc": 10, "profession": "blacksmithing",
+    },
+    "wooden_shield": {
+        "materials": {"wood": 3},
+        "result_item": "wooden_shield", "result_qty": 1,
+        "ability": "strength", "dc": 10, "profession": "blacksmithing",
+    },
+    "chain_mail": {
+        "materials": {"iron_ore": 8},
+        "result_item": "chain_mail", "result_qty": 1,
+        "ability": "strength", "dc": 18, "profession": "blacksmithing",
     },
 }
 

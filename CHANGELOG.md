@@ -2,6 +2,18 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.28] — Four more profession recipes: blacksmithing's full curve + Scroll of Cure Wounds
+
+Blacksmithing now covers 6 real tiers instead of 3: Rusty Dagger,
+Shortsword, and Wooden Shield at the easy end, Longsword in the
+middle, Chain Shirt and a new Chain Mail capstone at the top —
+filling in real weapon/armor items that already existed in the shop
+but had no recipe. Alchemy also gains Scroll of Cure Wounds (the
+other common-tier scroll, same bracket as Magic Missile's). The
+rarer scrolls (Fireball, Revivify, Lightning Bolt, Invisibility,
+Summoning) stay real finds/purchases only, deliberately not
+craftable.
+
 ## [1.27.27] — Two more profession recipes: Greater Healing Potion, Rations
 
 Alchemy gets a real top-tier recipe (Greater Healing Potion, harder
