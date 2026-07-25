@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.34] — Fix: Party Sheets button showed nothing for real parties
+
+Two real bugs stacked here. Concatenating every party member's full
+sheet into one message blew straight through Telegram's real
+4096-character limit for anything past 2-3 members, so the whole
+reply silently failed to send for any real full party — confirmed
+live, `BadRequest('Message is too long')` on every attempt. On top of
+that, the lookup silently dropped any party member whose owner had
+since switched to a different character (same bug class already
+fixed for shrine revival). Now sends one message per member (no
+length ceiling) and includes every real party member, switched-away
+ones included.
+
 ## [1.27.33] — Weekly and monthly missions, separate from the storyline
 
 Every location's quest board now offers weekly and monthly missions

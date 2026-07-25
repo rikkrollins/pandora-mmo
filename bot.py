@@ -7434,11 +7434,30 @@ async def _do_check_party(update: Update, text: str = "") -> None:
                 speak=False,
             )
             return
-        members = db.get_party_members_by_id(party_id)
-        sheets = "\n\n".join(_format_character_sheet(m) for m in members)
-        await _safe_send(
-            update, f"🎗️ **Your party's sheets ({len(members)}/{db.PARTY_MAX_MEMBERS}):**\n\n{sheets}", speak=False,
+        # Real live bug (2026-07-25, Coffee: "using the party sheets in
+        # menu isnt showing me the party members"): TWO separate real
+        # bugs stacked here. (1) get_party_members_by_id's
+        # active_characters join silently drops any party member whose
+        # owner has since switched to a DIFFERENT character (same
+        # exact bug class already fixed for shrine revival, see that
+        # function's own docstring -- Laurienna's owner switched to
+        # Charvenna, so Laurienna vanished from this lookup even though
+        # she's still genuinely in the party) -- now uses the
+        # `..._including_inactive_slots` variant instead. (2)
+        # Concatenating every member's full sheet into ONE message
+        # blew straight through Telegram's real 4096-character limit
+        # for anything past 2-3 members -- confirmed live,
+        # BadRequest('Message is too long') on every single attempt --
+        # so the whole reply silently failed to send at all. Sending
+        # one message per member fixes both: no length ceiling, and
+        # each sheet arrives on its own even if a later one fails.
+        members = db.get_party_members_by_id_including_inactive_slots(party_id)
+        await update.effective_chat.send_message(
+            f"🎗️ **Your party's sheets ({len(members)}/{db.PARTY_MAX_MEMBERS}):**",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
+        for member in members:
+            await _safe_send(update, _format_character_sheet(member), speak=False)
         return
 
     # Task #161 (real live incident): "Who's here at the market with me?"
