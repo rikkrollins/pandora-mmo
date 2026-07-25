@@ -11071,10 +11071,13 @@ async def _do_shrine_offering_menu(update: Update) -> None:
     ]
     if len(dead_members) > 1:
         # Per Coffee (2026-07-24: "make it so when i pray its for all
-        # of them"): the same all-at-once revival free text now offers,
-        # as a real tap.
-        total_cost = HOLLOW_STUMP_SHRINE_OFFERING_COST * len(dead_members)
-        rows.append([InlineKeyboardButton(f"🕯️ Revive All ({total_cost}g)", callback_data="shrine|revive_all")])
+        # of them"; 2026-07-25: flat cost, not per-person): the same
+        # all-at-once revival free text now offers, as a real tap, for
+        # one flat HOLLOW_STUMP_SHRINE_OFFERING_COST no matter how many
+        # are down.
+        rows.append([InlineKeyboardButton(
+            f"🕯️ Revive All ({HOLLOW_STUMP_SHRINE_OFFERING_COST}g)", callback_data="shrine|revive_all",
+        )])
     await update.effective_chat.send_message(
         f"Who do you want to pray for? The offering calls for {HOLLOW_STUMP_SHRINE_OFFERING_COST} gold.",
         reply_markup=InlineKeyboardMarkup(rows),
@@ -11192,20 +11195,19 @@ async def _apply_shrine_offering(update: Update, character: dict, target: dict) 
 async def _apply_shrine_offering_all(update: Update, character: dict, dead_members: list[dict]) -> None:
     """
     Per Coffee (2026-07-24: "make it so when i pray its for all of
-    them"): a prayer at the shrine with more than one fallen party
-    member and no specific name now revives every one of them in a
-    single offering, rather than asking which single one was meant.
-    Cost scales per person revived (same real gold cost as reviving
-    one, just charged once per person) -- reviving three people still
-    isn't cheaper than reviving three people one at a time, it's just
-    one motion instead of three. Same full-party blessing as the
-    single-target path once everyone named is back up.
+    them"; cost fixed 2026-07-25: "i want it to cost 100 in total for
+    the whole party") -- a prayer at the shrine with more than one
+    fallen party member and no specific name now revives every one of
+    them in a single offering, rather than asking which single one was
+    meant, for one flat HOLLOW_STUMP_SHRINE_OFFERING_COST regardless of
+    how many are down -- not per person. Same full-party blessing as
+    the single-target path once everyone named is back up.
     """
-    total_cost = HOLLOW_STUMP_SHRINE_OFFERING_COST * len(dead_members)
+    total_cost = HOLLOW_STUMP_SHRINE_OFFERING_COST
     if character["gold"] < total_cost:
         await update.effective_chat.send_message(
-            f"Reviving all {len(dead_members)} calls for {total_cost} gold "
-            f"({HOLLOW_STUMP_SHRINE_OFFERING_COST} each) — you only have {character['gold']}.",
+            f"Reviving the whole party calls for {total_cost} gold — "
+            f"you only have {character['gold']}.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return

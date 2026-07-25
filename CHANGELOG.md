@@ -2,6 +2,12 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.24] — Fix: party revival at the shrine now costs a flat 100
+
+Praying for the whole fallen party at once was accidentally charging
+100 gold *per* fallen member instead of one flat 100 gold total —
+fixed on both the free-text prayer and the "Revive All" button.
+
 ## [1.27.23] — Real subclass choice for all 12 classes
 
 Every class now has two genuine 5E subclasses to choose from (e.g.
