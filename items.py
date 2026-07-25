@@ -16,48 +16,55 @@ ITEMS = {
     # a byte-for-byte copy of the full 5E weapon table (which has many
     # weapons this game doesn't). See class_features.py's
     # WEAPON_PROFICIENCIES for which classes are proficient with which.
+    # damage_type (2026-07-24): defaults to "physical" everywhere it's
+    # read (see rules/combat.py's _apply_damage_type_modifier), so every
+    # weapon below behaves exactly as before unless it's one of the two
+    # that already had a real elemental/material identity in its flavor
+    # note -- flametongue_shortsword's fire and silvered_dagger's silver
+    # were previously pure flavor text with zero mechanical effect; both
+    # are now real.
     "rusty_dagger": {
         "name": "Rusty Dagger", "type": "weapon", "rarity": "common",
         "price": 2, "weight": 1, "damage_dice": "1d4", "ability": "dexterity",
-        "weapon_category": "simple",
+        "weapon_category": "simple", "damage_type": "physical",
     },
     "shortsword": {
         "name": "Shortsword", "type": "weapon", "rarity": "common",
         "price": 10, "weight": 2, "damage_dice": "1d6", "ability": "dexterity",
-        "weapon_category": "simple",
+        "weapon_category": "simple", "damage_type": "physical",
     },
     "longsword": {
         "name": "Longsword", "type": "weapon", "rarity": "common",
         "price": 15, "weight": 3, "damage_dice": "1d8", "ability": "strength",
-        "weapon_category": "martial",
+        "weapon_category": "martial", "damage_type": "physical",
     },
     "greataxe": {
         "name": "Greataxe", "type": "weapon", "rarity": "common",
         "price": 30, "weight": 7, "damage_dice": "1d12", "ability": "strength",
-        "weapon_category": "martial",
+        "weapon_category": "martial", "damage_type": "physical",
     },
     "longbow": {
         "name": "Longbow", "type": "weapon", "rarity": "common",
         "price": 50, "weight": 2, "damage_dice": "1d8", "ability": "dexterity",
-        "weapon_category": "martial",
+        "weapon_category": "martial", "damage_type": "physical",
     },
     "silvered_dagger": {
         "name": "Silvered Dagger", "type": "weapon", "rarity": "uncommon",
         "price": 75, "weight": 1, "damage_dice": "1d4+1", "ability": "dexterity",
         "note": "Effective against creatures vulnerable to silver.",
-        "weapon_category": "simple",
+        "weapon_category": "simple", "damage_type": "silver",
     },
     "flametongue_shortsword": {
         "name": "Flametongue Shortsword", "type": "weapon", "rarity": "rare",
         "price": 0, "weight": 2, "damage_dice": "1d6+2", "ability": "dexterity",
         "note": "Warm to the touch. Wreathes itself in fire when drawn in anger.",
-        "weapon_category": "martial",
+        "weapon_category": "martial", "damage_type": "fire",
     },
     "the_last_word": {
         "name": "The Last Word", "type": "weapon", "rarity": "legendary",
         "price": 0, "weight": 3, "damage_dice": "2d8+3", "ability": "strength",
         "note": "The carving stops repeating itself the instant your hand closes around the hilt.",
-        "weapon_category": "martial",
+        "weapon_category": "martial", "damage_type": "physical",
     },
 
     # --- Armor & Shields ---
@@ -83,14 +90,16 @@ ITEMS = {
         "price": 15, "weight": 0.1, "effect": "cure_poison",
     },
     # Per Coffee (2026-07-24): "add items like tents and cabins and
-    # houses to reviving and healing characters to full" -- a stronger,
-    # pricier alternative to Revivify (which only restores 1 HP): these
-    # fully heal AND revive, priced above Scroll of Revivify's 350g
-    # since they do strictly more, and tiered by how many party members
+    # houses to reviving and healing characters to full" -- a stronger
+    # alternative to Revivify (which only restores 1 HP): these fully
+    # heal AND revive, tiered by both price and how many party members
     # they reach at once (see effect="heal_and_revive" in _do_use_item).
+    # Prices per Coffee, 2026-07-24 ("make tents 100, cabins 1000, and
+    # houses 10000"): a steep, deliberate order-of-magnitude jump per
+    # tier, not a gradual one.
     "tent": {
         "name": "Tent", "type": "consumable", "rarity": "rare",
-        "price": 500, "weight": 10, "effect": "heal_and_revive", "revive_targets": 1,
+        "price": 100, "weight": 10, "effect": "heal_and_revive", "revive_targets": 1,
         "note": "A night under real canvas mends more than a potion ever could.",
     },
     "cabin": {
@@ -100,7 +109,7 @@ ITEMS = {
     },
     "house": {
         "name": "House", "type": "consumable", "rarity": "legendary",
-        "price": 2000, "weight": 50, "effect": "heal_and_revive", "revive_targets": None,
+        "price": 10000, "weight": 50, "effect": "heal_and_revive", "revive_targets": None,
         "note": "A real roof over everyone's head. Whatever happened out there, it stays outside.",
     },
     "rations": {

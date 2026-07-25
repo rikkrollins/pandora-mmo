@@ -26,7 +26,7 @@ def spell_save_dc(caster: dict) -> int:
 SPELLS = {
     "magic_missile": {
         "name": "Magic Missile", "level": 1, "school": "evocation",
-        "effect": "damage", "damage_dice": "1d4+1", "always_hits": True,
+        "effect": "damage", "damage_dice": "1d4+1", "always_hits": True, "damage_type": "force",
     },
     "shield": {
         "name": "Shield", "level": 1, "school": "abjuration",
@@ -42,7 +42,7 @@ SPELLS = {
     },
     "burning_hands": {
         "name": "Burning Hands", "level": 1, "school": "evocation",
-        "effect": "damage", "damage_dice": "3d6", "save_ability": "dexterity",
+        "effect": "damage", "damage_dice": "3d6", "save_ability": "dexterity", "damage_type": "fire",
     },
     "invisibility": {
         "name": "Invisibility", "level": 2, "school": "illusion",
@@ -50,11 +50,11 @@ SPELLS = {
     },
     "fireball": {
         "name": "Fireball", "level": 3, "school": "evocation",
-        "effect": "damage", "damage_dice": "8d6", "save_ability": "dexterity",
+        "effect": "damage", "damage_dice": "8d6", "save_ability": "dexterity", "damage_type": "fire",
     },
     "lightning_bolt": {
         "name": "Lightning Bolt", "level": 3, "school": "evocation",
-        "effect": "damage", "damage_dice": "8d6", "save_ability": "dexterity",
+        "effect": "damage", "damage_dice": "8d6", "save_ability": "dexterity", "damage_type": "lightning",
     },
     "counterspell": {
         "name": "Counterspell", "level": 3, "school": "abjuration",
@@ -66,15 +66,15 @@ SPELLS = {
     },
     "fire_bolt": {
         "name": "Fire Bolt", "level": 0, "school": "evocation",
-        "effect": "damage", "damage_dice": "1d10",
+        "effect": "damage", "damage_dice": "1d10", "damage_type": "fire",
     },
     "sacred_flame": {
         "name": "Sacred Flame", "level": 0, "school": "evocation",
-        "effect": "damage", "damage_dice": "1d8",
+        "effect": "damage", "damage_dice": "1d8", "damage_type": "radiant",
     },
     "vicious_mockery": {
         "name": "Vicious Mockery", "level": 0, "school": "enchantment",
-        "effect": "damage", "damage_dice": "1d4",
+        "effect": "damage", "damage_dice": "1d4", "damage_type": "psychic",
     },
     "guidance": {
         "name": "Guidance", "level": 0, "school": "divination",
@@ -108,15 +108,15 @@ SPELLS = {
     # --- Cantrips added for full per-class coverage (2026-07-11) ---
     "eldritch_blast": {
         "name": "Eldritch Blast", "level": 0, "school": "evocation",
-        "effect": "damage", "damage_dice": "1d10",
+        "effect": "damage", "damage_dice": "1d10", "damage_type": "force",
     },
     "ray_of_frost": {
         "name": "Ray of Frost", "level": 0, "school": "evocation",
-        "effect": "damage", "damage_dice": "1d8",
+        "effect": "damage", "damage_dice": "1d8", "damage_type": "cold",
     },
     "produce_flame": {
         "name": "Produce Flame", "level": 0, "school": "conjuration",
-        "effect": "damage", "damage_dice": "1d8",
+        "effect": "damage", "damage_dice": "1d8", "damage_type": "fire",
     },
     "mage_hand": {
         "name": "Mage Hand", "level": 0, "school": "conjuration",
@@ -141,7 +141,7 @@ SPELLS = {
     },
     "guiding_bolt": {
         "name": "Guiding Bolt", "level": 1, "school": "evocation",
-        "effect": "damage", "damage_dice": "4d6",
+        "effect": "damage", "damage_dice": "4d6", "damage_type": "radiant",
     },
     "command": {
         "name": "Command", "level": 1, "school": "enchantment",
@@ -169,11 +169,11 @@ SPELLS = {
     },
     "scorching_ray": {
         "name": "Scorching Ray", "level": 2, "school": "evocation",
-        "effect": "damage", "damage_dice": "6d6",
+        "effect": "damage", "damage_dice": "6d6", "damage_type": "fire",
     },
     "spiritual_weapon": {
         "name": "Spiritual Weapon", "level": 2, "school": "evocation",
-        "effect": "damage", "damage_dice": "1d8+3",
+        "effect": "damage", "damage_dice": "1d8+3", "damage_type": "force",
     },
     "misty_step": {
         "name": "Misty Step", "level": 2, "school": "conjuration",
@@ -185,7 +185,7 @@ SPELLS = {
     },
     "moonbeam": {
         "name": "Moonbeam", "level": 2, "school": "evocation",
-        "effect": "damage", "damage_dice": "2d10", "save_ability": "constitution",
+        "effect": "damage", "damage_dice": "2d10", "save_ability": "constitution", "damage_type": "radiant",
     },
     "dispel_magic": {
         "name": "Dispel Magic", "level": 3, "school": "abjuration",
@@ -193,7 +193,7 @@ SPELLS = {
     },
     "call_lightning": {
         "name": "Call Lightning", "level": 3, "school": "conjuration",
-        "effect": "damage", "damage_dice": "3d10", "save_ability": "dexterity",
+        "effect": "damage", "damage_dice": "3d10", "save_ability": "dexterity", "damage_type": "lightning",
     },
     # --- 4th/5th-level spells (2026-07-15): SPELL_LEVEL_UNLOCK_CHAR_LEVEL
     # already promised these tiers at character levels 7/9, but no spell
@@ -202,7 +202,7 @@ SPELLS = {
     # classes convention already used for e.g. hold_person/dispel_magic.
     "ice_storm": {
         "name": "Ice Storm", "level": 4, "school": "evocation",
-        "effect": "damage", "damage_dice": "6d8", "save_ability": "dexterity",
+        "effect": "damage", "damage_dice": "6d8", "save_ability": "dexterity", "damage_type": "cold",
     },
     "polymorph": {
         "name": "Polymorph", "level": 4, "school": "transmutation",
@@ -222,11 +222,11 @@ SPELLS = {
     },
     "guardian_of_faith": {
         "name": "Guardian of Faith", "level": 4, "school": "conjuration",
-        "effect": "damage", "damage_dice": "2d8",
+        "effect": "damage", "damage_dice": "2d8", "damage_type": "radiant",
     },
     "cone_of_cold": {
         "name": "Cone of Cold", "level": 5, "school": "evocation",
-        "effect": "damage", "damage_dice": "8d8", "save_ability": "dexterity",
+        "effect": "damage", "damage_dice": "8d8", "save_ability": "dexterity", "damage_type": "cold",
     },
     "mass_cure_wounds": {
         "name": "Mass Cure Wounds", "level": 5, "school": "evocation",
@@ -234,11 +234,11 @@ SPELLS = {
     },
     "flame_strike": {
         "name": "Flame Strike", "level": 5, "school": "evocation",
-        "effect": "damage", "damage_dice": "8d6", "save_ability": "dexterity",
+        "effect": "damage", "damage_dice": "8d6", "save_ability": "dexterity", "damage_type": "fire",
     },
     "insect_plague": {
         "name": "Insect Plague", "level": 5, "school": "conjuration",
-        "effect": "damage", "damage_dice": "4d10", "save_ability": "constitution",
+        "effect": "damage", "damage_dice": "4d10", "save_ability": "constitution", "damage_type": "poison",
     },
     "hold_monster": {
         "name": "Hold Monster", "level": 5, "school": "enchantment",

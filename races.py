@@ -33,6 +33,7 @@ RACES = {
             "Stonecunning: double proficiency bonus on History checks about stonework",
             "Dwarven Combat Training: proficiency with battleaxe, handaxe, light hammer, and warhammer",
         ],
+        "damage_resistances": ["poison"],
     },
     "Halfling": {
         "ability_bonuses": {"dexterity": 2},
@@ -60,6 +61,15 @@ RACES = {
             "Breath Weapon: replaces one attack, damage scales with level (a real, usable action)",
             "Damage Resistance to your draconic ancestry's damage type",
         ],
+        # Real 5E lets you pick a draconic ancestry (10 options, each its
+        # own breath-weapon shape/damage type) -- this game has no
+        # subrace-choice mechanism at all (same simplification already
+        # used for Ranger's Favored Enemy/Warlock's patron: one fixed
+        # default rather than an unbuilt choice), so every Dragonborn is
+        # simplified to the most iconic ancestry, red/fire. _do_breath_weapon
+        # deals this same type, so a Dragonborn's own breath never hurts
+        # their own kind -- thematically consistent.
+        "damage_resistances": ["fire"],
     },
     "Tiefling": {
         "ability_bonuses": {"charisma": 2, "intelligence": 1},
@@ -69,6 +79,7 @@ RACES = {
             "Hellish Resistance: resistance to fire damage",
             "Infernal Legacy: knows the Thaumaturgy cantrip",
         ],
+        "damage_resistances": ["fire"],
     },
     "Gnome": {
         "ability_bonuses": {"intelligence": 2},
@@ -107,6 +118,14 @@ def get_race(race_name: str) -> dict | None:
 
 def racial_spells(race_name: str) -> list[str]:
     return list(RACIAL_CANTRIPS.get(race_name, []))
+
+
+def racial_damage_resistances(race_name: str) -> list[str]:
+    """Real, mechanical damage-type resistances this race carries -- Dwarf/poison, Dragonborn/Tiefling/fire. Empty for every other race."""
+    race = RACES.get(race_name)
+    if race is None:
+        return []
+    return list(race.get("damage_resistances", []))
 
 
 def apply_racial_bonuses(race_name: str, ability_scores: dict) -> dict:

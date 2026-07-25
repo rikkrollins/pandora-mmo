@@ -2,6 +2,39 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.18] — Real damage resistances, sequential dungeon progression, and shrine improvements
+
+A lot in this one:
+
+- **Damage types & resistances are now real.** Weapons and spells carry
+  a real damage type (physical, fire, cold, poison, radiant, and more),
+  and racial resistances that were always described but never
+  mechanically real — Dwarves resisting poison, Dragonborn and
+  Tieflings resisting fire — now actually apply, halving that damage.
+  Reaching deeper into rebirth also permanently earns back some of what
+  a resistance would otherwise block, shown on your sheet as "magic
+  penetration" — the more you've been reborn, the harder it is for
+  anything's resistance to wall you out.
+- **Certain deeper areas now require earning your way in.** Several of
+  the wilder, deeper branches of the map (parts of the Whispering
+  Wood, Greymoor Downs, the Sunken Root Caverns and what it connects
+  to, and the First City) won't let you press on farther until you've
+  actually fought through what's already there — no more strolling
+  past real danger untested.
+- **Shrine offerings go further.** Reviving a fallen party member at
+  the shrine now also blesses the rest of the present party to full
+  HP, and the offering itself is far cheaper than before. If nobody
+  needs reviving, you can instead offer a cheaper blessing — a bit of
+  holy water — to heal the whole party to full.
+- Recruited companions now actually equip the gear they carry instead
+  of fighting with their bare stats the whole time. "Auto equip the
+  party" now gears up everyone at once, not just yourself or one
+  named companion.
+- Tent/Cabin/House prices are 100/1,000/10,000 gold now, a much
+  steeper jump between tiers than before.
+- Character sheets now show your racial resistances and magic
+  penetration, when you have either.
+
 ## [1.27.17] — Fixed revival items/potions silently reviving the wrong character
 
 Fixed a serious follow-on to the previous fix: reviving or healing a

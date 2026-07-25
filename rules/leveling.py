@@ -99,6 +99,29 @@ def hybrid_tier(rebirth_count: int) -> int:
     return min(max(rebirth_count, 0), HYBRID_MAX_TIER)
 
 
+# Magic penetration (per Coffee, 2026-07-24: "work in magic bonuses to
+# counter act the magic resistences - characters can eventually use
+# this massively to their advantage" -- confirmed tied to rebirths,
+# "use the evolutions for that"): the damage-type/resistance system
+# being built alongside this (rules/combat.py's
+# _apply_damage_type_modifier) is a real, permanent wall against a
+# build that leans on the wrong damage type -- this is the earned
+# counter to it, same stacking-per-rebirth shape as the ability-score
+# cap/XP multiplier above, so surviving into deep rebirths pays off in
+# a third, independent way. Deliberately only ever closes the gap back
+# to normal damage (never grants bonus damage beyond that -- see
+# _apply_damage_type_modifier), so this counters resistance rather than
+# creating a new exploit; vulnerability and immunity are both
+# untouched by it (immunity is a real, absolute wall by design; a
+# vulnerability already favors the attacker with nothing to "counter").
+MAGIC_PENETRATION_PCT_PER_REBIRTH = 10.0
+
+
+def magic_penetration_pct(rebirth_count: int) -> float:
+    """How much of a resistant target's damage reduction this character's rebirths have earned back -- 0% normally, +10% per rebirth, capped at 100% (fully countering resistance, never past normal damage)."""
+    return min(100.0, MAGIC_PENETRATION_PCT_PER_REBIRTH * max(rebirth_count, 0))
+
+
 def level_for_xp(xp: int) -> int:
     """Return the correct level for a given total XP amount."""
     level = 1

@@ -76,7 +76,7 @@ from models import (
     STARTING_GOLD,
     BASE_ARMOR_CLASS,
 )
-from rules.combat import resolve_attack, resolve_death_save, UNDEAD_MONSTER_KEYS
+from rules.combat import resolve_attack, resolve_death_save, UNDEAD_MONSTER_KEYS, apply_damage_type_modifier
 from rules.crafting import RECIPES, get_recipe, has_materials, resolve_craft
 from rules.dice import roll, roll_damage, ability_modifier, roll_ability_check, roll_d20
 from rules.item_generator import generate_item
@@ -85,6 +85,7 @@ from rules.leveling import (
     CLASS_PRIMARY_ABILITY, CLASS_SAVE_PROFICIENCIES, is_proficient_in_skill,
     skill_check_proficiency_bonus, wild_shape_temp_hp, XP_THRESHOLDS,
     MAX_LEVEL, ability_score_cap, xp_gain_multiplier, hybrid_tier, HYBRID_MAX_TIER,
+    magic_penetration_pct,
 )
 from rules.proficiency import practiced_bonus, MAX_PRACTICE_BONUS
 
@@ -108,7 +109,7 @@ if ACTIVE_CAMPAIGN_ID not in cl.discover_campaigns():
     )
 CAMPAIGN = cl.load_campaign(ACTIVE_CAMPAIGN_ID)
 
-DEFAULT_WEAPON = {"ability": "strength", "damage_dice": "1d8", "damage_bonus": 0, "weapon_category": "simple", "name": "fists"}
+DEFAULT_WEAPON = {"ability": "strength", "damage_dice": "1d8", "damage_bonus": 0, "weapon_category": "simple", "name": "fists", "damage_type": "physical"}
 
 
 def _weapon_for_attacker(attacker: dict) -> dict:
@@ -125,6 +126,12 @@ def _weapon_for_attacker(attacker: dict) -> dict:
     skill she is using") lets a plain weapon attack's combat-resolution
     line name the real weapon actually swung, the same way a spell cast
     already names the real spell -- see _format_combat_result.
+
+    "damage_type" (2026-07-24): defaults to "physical" for any weapon
+    that doesn't set one (every weapon in items.py now sets one
+    explicitly, but this keeps a missing field harmless) -- consumed by
+    rules.combat's _apply_damage_type_modifier against a defender's
+    resistances/vulnerabilities/immunities.
     """
     equipped_id = attacker.get("equipped_weapon")
     if equipped_id:
@@ -136,6 +143,7 @@ def _weapon_for_attacker(attacker: dict) -> dict:
                 "damage_bonus": item.get("damage_bonus", 0),
                 "weapon_category": item.get("weapon_category", "simple"),
                 "name": item["name"],
+                "damage_type": item.get("damage_type", "physical"),
             }
     return DEFAULT_WEAPON
 
@@ -3414,6 +3422,7 @@ async def _try_end_stale_combat(update: Update, session: sessions.Session) -> bo
     xp_summary, level_up_notes = _award_victory_xp(session) if winner == "party" else ("", [])
     if winner == "party":
         await _check_quest_completions_defeat_monster(update, session)
+        await _mark_location_cleared_for_party(update, session)
         await _check_achievements_for_combat_party(update, session)
         await _check_guild_quest_completion(update, session)
     await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
@@ -3739,6 +3748,7 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
         xp_summary, level_up_notes = _award_victory_xp(session) if winner == "party" else ("", [])
         if winner == "party":
             await _check_quest_completions_defeat_monster(update, session)
+            await _mark_location_cleared_for_party(update, session)
             await _check_achievements_for_combat_party(update, session)
             await _check_guild_quest_completion(update, session)
         await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
@@ -4393,6 +4403,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                 xp_summary, level_up_notes = _award_victory_xp(session) if winner == "party" else ("", [])
                 if winner == "party":
                     await _check_quest_completions_defeat_monster(update, session)
+                    await _mark_location_cleared_for_party(update, session)
                     await _check_achievements_for_combat_party(update, session)
                     await _check_guild_quest_completion(update, session)
                 await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
@@ -4461,6 +4472,15 @@ async def _do_recruit_npc(update: Update, npc_name: str) -> None:
         armor_class=stats["armor_class"], gold=stats["gold"],
         inventory=dict(stats["inventory"]),
     )
+    # Real gap found live (2026-07-24, Coffee: "not sure if ai chars are
+    # equipped or not"): recruited companions carried a real weapon/
+    # armor in their starting inventory but nothing ever equipped it --
+    # equip_item was never called for them anywhere, unlike a real
+    # player's own character creation (see the matching
+    # db.auto_equip_best_gear call there). They'd fight with their bare
+    # combat stats despite owning a weapon the whole time. Same helper,
+    # same fix.
+    db.auto_equip_best_gear(companion["telegram_user_id"])
 
     # Real bug found live (2026-07-17, Coffee: "if she is recruited she
     # shud follow the party?"): a recruited companion was never actually
@@ -7432,6 +7452,19 @@ def _format_character_sheet(character: dict) -> str:
         f" ({max(next_threshold - character['xp'], 0)} XP to Level {character['level'] + 1})"
         if next_threshold is not None else " (Max level reached)"
     )
+    # Damage resistances (2026-07-24, per Coffee: "when resistences
+    # apply show it on char sheets"): racial resistances (Dwarf/poison,
+    # Dragonborn+Tiefling/fire) are the only source a PLAYER character
+    # carries today -- monsters get their own resistances/vulnerabilities/
+    # immunities lists straight from campaign.json, not shown here since
+    # this sheet is player/companion-facing. Magic penetration (the
+    # rebirth-earned counter to any resistance an ENEMY has) is shown
+    # alongside it once earned, so a reborn character can see the two
+    # sides of the same system together.
+    racial_resistances = races_module.racial_damage_resistances(character["race"])
+    resistance_line = f"Resistances: {', '.join(sorted(racial_resistances))}\n" if racial_resistances else ""
+    penetration = magic_penetration_pct(character.get("rebirth_count", 0))
+    magic_penetration_line = f"🔮 Magic penetration: {penetration:.0f}% (counters enemy resistances)\n" if penetration > 0 else ""
     return (
         f"{name_line} — {character['race']} {character['char_class']}\n"
         f"{pronouns_line}"
@@ -7449,6 +7482,8 @@ def _format_character_sheet(character: dict) -> str:
         f"Spells known: {', '.join(spell_names) if spell_names else 'None'}\n"
         f"{slot_line}"
         f"Racial traits: {'; '.join(race_data['traits']) if race_data else 'None'}\n"
+        f"{resistance_line}"
+        f"{magic_penetration_line}"
         f"Class features: {'; '.join(features) if features else 'None'}\n"
         f"{feature_use_line}"
         f"{skills_line}"
@@ -8584,6 +8619,7 @@ async def _do_breath_weapon(update: Update) -> None:
             xp_summary, level_up_notes = _award_victory_xp(session) if winner == "party" else ("", [])
             if winner == "party":
                 await _check_quest_completions_defeat_monster(update, session)
+                await _mark_location_cleared_for_party(update, session)
                 await _check_achievements_for_combat_party(update, session)
                 await _check_guild_quest_completion(update, session)
             await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
@@ -9710,6 +9746,28 @@ async def _maybe_award_streak_bonus(update: Update, streak_days: int) -> None:
     await _check_and_award_achievements(update, db.get_character(telegram_user_id))
 
 
+async def _mark_location_cleared_for_party(update: Update, session: sessions.Session) -> None:
+    """
+    Sequential dungeon gating (2026-07-24, Coffee: "make it so we cant
+    progress to certain areas ... until we complete the dungeons or
+    missions in sequence"): marks wherever this fight actually happened
+    as "cleared" for every real party-side combatant, the moment the
+    party wins -- same real combat-victory checkpoint as
+    _check_achievements_for_combat_party (called right alongside it at
+    every one of this game's 5 combat-resolution sites), never on a
+    loss or a fled fight. Consumed by _check_story_gate's
+    requires_cleared_location check so a deeper connection stays
+    blocked until whatever's in the room before it has actually been
+    fought, not just walked past.
+    """
+    for pid in session.turn_order:
+        if session.sides.get(pid) != "party":
+            continue
+        character = db.get_character(pid)
+        if character is not None:
+            db.mark_location_cleared(pid, character["current_location"])
+
+
 async def _check_achievements_for_combat_party(update: Update, session: sessions.Session) -> None:
     """Re-fetches each real party-side combatant fresh from the DB (post-XP-award) and checks them."""
     for pid in session.turn_order:
@@ -10181,10 +10239,19 @@ def _check_story_gate(character: dict, current: dict, destination_id: str) -> st
     same way locked_connections is -- read off the CURRENT location's
     story_gates dict, keyed by destination id. Returns an in-fiction
     rejection message if blocked, or None if the gate passes (or there's
-    no story_gates entry at all for this connection). Both conditions,
-    when present, must be met -- this reuses completed_quests (no new
-    "defeated" flag) and the existing npc_relationships.affinity column
-    (no new trust system).
+    no story_gates entry at all for this connection). All conditions
+    present, when present, must be met -- this reuses completed_quests
+    (no new "defeated" flag) and the existing npc_relationships.affinity
+    column (no new trust system).
+
+    A fourth condition, requires_cleared_location (2026-07-24, sequential
+    dungeon gating), reuses character["cleared_locations"] instead -- a
+    location_id the character must have actually won a real fight in
+    (see db.mark_location_cleared / bot.py's
+    _mark_location_cleared_for_party) before this connection opens.
+    Unlike requires_defeated_monster this needs no quest to exist at
+    all, so it also covers the many world-expansion branch locations
+    that were never given their own quest.
     """
     gate = current.get("story_gates", {}).get(destination_id)
     if not gate:
@@ -10202,6 +10269,13 @@ def _check_story_gate(character: dict, current: dict, destination_id: str) -> st
                 "Something down here isn't done with you yet — you can feel "
                 "it's not safe to go any further until whatever's wrong is dealt with."
             )
+
+    cleared_gate = gate.get("requires_cleared_location")
+    if cleared_gate and cleared_gate not in character.get("cleared_locations", []):
+        return (
+            "Whatever's living in here hasn't been dealt with yet — pushing on deeper "
+            "while it's still at your back doesn't feel like it'll end well."
+        )
 
     trust_gate = gate.get("requires_companion_trust")
     if trust_gate:
@@ -10693,7 +10767,13 @@ async def _do_use_item(update: Update, text: str) -> None:
                 await _resolve_ai_turns(update, session)
 
 
-HOLLOW_STUMP_SHRINE_OFFERING_COST = 300
+HOLLOW_STUMP_SHRINE_OFFERING_COST = 100
+# Blessing (2026-07-24, per Coffee: "if no players need reiving u can
+# offer a blessing for cheaper to heal the party to full like 'holy
+# water'") -- the no-one's-dead alternative to the revival offering
+# above, same shrine, same real gold cost, cheaper since it isn't
+# fighting death itself.
+HOLLOW_STUMP_SHRINE_BLESSING_COST = 50
 
 
 async def _do_give_offering(update: Update, text: str) -> None:
@@ -10761,6 +10841,12 @@ async def _do_give_offering(update: Update, text: str) -> None:
                 message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
             return
+        elif not dead_members:
+            # Nobody to revive at all -- per Coffee, this is exactly when
+            # the cheaper blessing applies instead of asking for a name
+            # that doesn't exist to give.
+            await _apply_shrine_blessing(update, character)
+            return
         else:
             await update.effective_chat.send_message(
                 "Name a dead party member to pray for — there's no one to bring back right now.",
@@ -10801,8 +10887,14 @@ async def _do_shrine_offering_menu(update: Update) -> None:
     )
     dead_members = [m for m in party_members if m.get("is_dead")]
     if not dead_members:
+        # Nobody to revive -- offer the cheaper blessing instead (per
+        # Coffee, 2026-07-24), same tap-driven convenience as the revive
+        # buttons above rather than only being reachable via free text.
         await update.effective_chat.send_message(
             "No one to bring back right now — everyone in your party is alive and well.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(
+                f"💧 Bless the Party ({HOLLOW_STUMP_SHRINE_BLESSING_COST}g)", callback_data="shrine|bless",
+            )]]),
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
@@ -10832,10 +10924,13 @@ async def shrine_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
     await _safe_answer(query)
-    if action != "revive" or len(parts) < 3:
-        return
     character = db.get_character(update.effective_user.id)
     if character is None:
+        return
+    if action == "bless":
+        await _apply_shrine_blessing(update, character)
+        return
+    if action != "revive" or len(parts) < 3:
         return
     target = db.get_character_by_id(int(parts[2]))
     if target is None or not target.get("is_dead"):
@@ -10847,8 +10942,40 @@ async def shrine_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await _apply_shrine_offering(update, character, target)
 
 
+def _bless_present_party_to_full(character: dict, exclude_character_id: int | None = None) -> list[str]:
+    """
+    Heals every real party member actually AT the shrine right now (same
+    party_id, same current_location -- identical "physically present"
+    scoping to _do_use_item's heal_and_revive multi-target case) to full
+    HP, via update_character_by_id so this never accidentally lands on
+    whichever character an owner currently has active instead of the
+    one actually standing there. exclude_character_id skips someone
+    already handled elsewhere (the just-revived target in
+    _apply_shrine_offering, healed there with its own message). Returns
+    one "Name (X/X HP)" line per person actually healed, for narration.
+    """
+    present = [
+        p for p in _get_combat_eligible_party_members(character["current_location"])
+        if character.get("party_id") and p.get("party_id") == character["party_id"]
+    ] or [character]
+    lines = []
+    for member in present:
+        if exclude_character_id is not None and member["character_id"] == exclude_character_id:
+            continue
+        hp_max = member.get("hp_max", member["hp_current"])
+        db.update_character_by_id(member["character_id"], hp_current=hp_max)
+        lines.append(f"**{member['name']}** ({hp_max}/{hp_max} HP)")
+    return lines
+
+
 async def _apply_shrine_offering(update: Update, character: dict, target: dict) -> None:
-    """Shared real logic behind both the shrine's free-text prayer and its tap-to-revive buttons -- gold cost, then the actual revival."""
+    """
+    Shared real logic behind both the shrine's free-text prayer and its
+    tap-to-revive buttons -- gold cost, the actual revival, then (per
+    Coffee, 2026-07-24: "make it so we cant... heal the players party
+    in full after reviving") blessing the whole present party to full
+    HP in the same offering, not just the one person prayed for.
+    """
     if character["gold"] < HOLLOW_STUMP_SHRINE_OFFERING_COST:
         await update.effective_chat.send_message(
             f"The offering calls for {HOLLOW_STUMP_SHRINE_OFFERING_COST} gold — "
@@ -10862,16 +10989,46 @@ async def _apply_shrine_offering(update: Update, character: dict, target: dict) 
     # -- if target isn't their owner's active slot (exactly the case
     # this whole fix exists for), this would silently revive the WRONG,
     # already-alive character instead while claiming success. Targets
-    # the exact character_id directly.
+    # the exact character_id directly. Revives straight to full HP
+    # (not the old 1-HP trickle) since the same offering now blesses
+    # the whole party to full anyway.
+    target_hp_max = target.get("hp_max", target["hp_current"])
     db.update_character_by_id(
-        target["character_id"], is_dead=0, hp_current=1,
+        target["character_id"], is_dead=0, hp_current=target_hp_max,
         death_save_successes=0, death_save_failures=0,
     )
+    rest_of_party = _bless_present_party_to_full(character, exclude_character_id=target["character_id"])
+    blessing_note = f" The rest of the party is blessed to full HP too: {'; '.join(rest_of_party)}." if rest_of_party else ""
     await _safe_send(
         update,
         f"🕯️ **{character['name']}** kneels at the shrine and lays {HOLLOW_STUMP_SHRINE_OFFERING_COST} gold "
-        f"among the offerings, praying for **{target['name']}**'s return — breath returns, and they gasp back "
-        f"to life at 1 HP.",
+        f"among the offerings, praying for **{target['name']}**'s return — breath returns, and they're "
+        f"restored to full ({target_hp_max}/{target_hp_max} HP).{blessing_note}",
+    )
+
+
+async def _apply_shrine_blessing(update: Update, character: dict) -> None:
+    """
+    The no-one's-dead alternative to _apply_shrine_offering (per Coffee:
+    "if no players need reiving u can offer a blessing for cheaper to
+    heal the party to full like 'holy water'") -- same shrine, cheaper
+    real gold cost, heals the whole present party to full HP with
+    nothing to revive.
+    """
+    if character["gold"] < HOLLOW_STUMP_SHRINE_BLESSING_COST:
+        await update.effective_chat.send_message(
+            f"The blessing calls for {HOLLOW_STUMP_SHRINE_BLESSING_COST} gold — "
+            f"you only have {character['gold']}.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    db.update_character(character["telegram_user_id"], gold=character["gold"] - HOLLOW_STUMP_SHRINE_BLESSING_COST)
+    healed = _bless_present_party_to_full(character)
+    healed_note = "; ".join(healed) if healed else f"**{character['name']}**"
+    await _safe_send(
+        update,
+        f"💧 **{character['name']}** offers {HOLLOW_STUMP_SHRINE_BLESSING_COST} gold for a blessing of holy "
+        f"water at the shrine — the party is healed to full: {healed_note}.",
     )
 
 
@@ -10939,6 +11096,9 @@ async def _do_equip_item(update: Update, text: str) -> None:
     await _check_and_award_achievements(update, db.get_character(target["telegram_user_id"]))
 
 
+_AUTO_EQUIP_PARTY_WORDS = ["party", "everyone", "everybody", "all of us", "the team", "my group"]
+
+
 async def _do_auto_equip_gear(update: Update, text: str) -> None:
     """
     Auto-equip (2026-07-15, per Coffee): picks the real best weapon/
@@ -10947,6 +11107,15 @@ async def _do_auto_equip_gear(update: Update, text: str) -> None:
     know every item's exact damage die or AC to get sensible gear on.
     Supports naming another real party member ("help Borin gear up"),
     same location-scoped lookup as _do_equip_item/_do_give_item.
+
+    Extended (2026-07-24, per Coffee: "make it so we can say 'auto
+    equip' the party"): "auto equip the party"/"equip everyone" runs
+    this for every combat-eligible party member at once (self plus any
+    present companions, real or AI) instead of requiring one name at a
+    time -- checked before the single-name match below so a party
+    member who happens to share a word with these phrases (unlikely,
+    but same discipline as other ambiguous-phrase fixes in this file)
+    doesn't accidentally shadow it.
     """
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -10955,11 +11124,23 @@ async def _do_auto_equip_gear(update: Update, text: str) -> None:
         )
         return
 
-    target = character
     others = [
         p for p in _get_combat_eligible_party_members(character["current_location"])
         if p["telegram_user_id"] != character["telegram_user_id"]
     ]
+
+    lowered = text.lower()
+    if any(w in lowered for w in _AUTO_EQUIP_PARTY_WORDS):
+        lines = []
+        for member in [character] + others:
+            summary, _ = db.auto_equip_best_gear(member["telegram_user_id"])
+            prefix = "" if member is character else f"**{member['name']}**: "
+            lines.append(f"⚔️ {prefix}{summary}")
+            await _check_and_award_achievements(update, db.get_character(member["telegram_user_id"]))
+        await _safe_send(update, "\n".join(lines))
+        return
+
+    target = character
     named_other = _match_member_by_name_or_username(text, others)
     if named_other is not None:
         target = named_other
@@ -11930,6 +12111,14 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             target = _pick_target(text, opposing)
             result = spells_module.resolve_damage_spell(spell_id, character, target)
             result = _apply_empowered_spell(update.effective_user.id, character, spell, result)
+            # Damage-type system (2026-07-24): resolve_damage_spell never
+            # calls resolve_attack (its own, separate pipeline -- see
+            # rules/combat.py's docstring), so it needs its own call to
+            # the same resistance/vulnerability/immunity + magic-
+            # penetration math a weapon hit already gets.
+            result["damage_dealt"] = apply_damage_type_modifier(
+                result["damage_dealt"], spell.get("damage_type", "physical"), target, character
+            )
             target["hp_current"] = max(target["hp_current"] - result["damage_dealt"], 0)
             _sync_player_to_db(target)
             full_result = {
@@ -11947,6 +12136,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                 xp_summary, level_up_notes = _award_victory_xp(session) if winner == "party" else ("", [])
                 if winner == "party":
                     await _check_quest_completions_defeat_monster(update, session)
+                    await _mark_location_cleared_for_party(update, session)
                     await _check_achievements_for_combat_party(update, session)
                     await _check_guild_quest_completion(update, session)
                 await update.effective_chat.send_message(
@@ -14776,6 +14966,7 @@ def _ensure_ai_party_exists() -> None:
             ability_scores=member["ability_scores"], hp_max=member["hp_max"],
             armor_class=member["armor_class"], gold=member["gold"], inventory=member["inventory"],
         )
+        db.auto_equip_best_gear(char["telegram_user_id"])
         db.mark_autonomous(char["telegram_user_id"])
         if party_id is None:
             party_id = db.create_party(char["telegram_user_id"])

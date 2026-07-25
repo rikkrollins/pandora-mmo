@@ -64,7 +64,8 @@ CREATE TABLE IF NOT EXISTS characters (
     active_quests TEXT NOT NULL DEFAULT '{}',
     feature_uses TEXT NOT NULL DEFAULT '{}',
     description TEXT,
-    known_monsters TEXT NOT NULL DEFAULT '[]'
+    known_monsters TEXT NOT NULL DEFAULT '[]',
+    cleared_locations TEXT NOT NULL DEFAULT '[]'
 );
 """
 
@@ -374,6 +375,18 @@ def init_db() -> None:
         if "hybrid_class" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN hybrid_class TEXT")
 
+        # Sequential dungeon gating (2026-07-24, Coffee: "make it so we
+        # cant progress to certain areas ... until we complete the
+        # dungeons or missions in sequence"): a location is "cleared"
+        # once a character has won a real fight there -- see
+        # _mark_location_cleared_for_party (bot.py), called from every
+        # combat-victory checkpoint. Consumed by the new
+        # requires_cleared_location story_gate (_check_story_gate) to
+        # block deeper connections until the room before them is
+        # actually fought through, not just walked past.
+        if "cleared_locations" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN cleared_locations TEXT NOT NULL DEFAULT '[]'")
+
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)
@@ -386,6 +399,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     d["feature_uses"] = json.loads(d["feature_uses"])
     d["equipped_accessories"] = json.loads(d["equipped_accessories"])
     d["known_monsters"] = json.loads(d["known_monsters"])
+    d["cleared_locations"] = json.loads(d["cleared_locations"])
     d["achievements"] = json.loads(d["achievements"])
     d["map_revealed_locations"] = json.loads(d["map_revealed_locations"])
     d["skill_tree_upgrades"] = json.loads(d["skill_tree_upgrades"])
@@ -497,7 +511,7 @@ def update_character(telegram_user_id: int, **fields) -> dict | None:
     if not fields:
         return get_character(telegram_user_id)
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "achievements", "map_revealed_locations", "skill_tree_upgrades")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -541,7 +555,7 @@ def update_character_by_id(character_id: int, **fields) -> dict | None:
             row = conn.execute("SELECT * FROM characters WHERE character_id = ?", (character_id,)).fetchone()
         return _row_to_dict(row) if row else None
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "achievements", "map_revealed_locations", "skill_tree_upgrades")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -796,6 +810,25 @@ def mark_known_monster(telegram_user_id: int, monster_key: str) -> dict | None:
         return character
     character["known_monsters"].append(monster_key)
     return update_character(telegram_user_id, known_monsters=character["known_monsters"])
+
+
+def mark_location_cleared(telegram_user_id: int, location_id: str) -> dict | None:
+    """
+    Marks a location as "cleared" -- this character has won a real fight
+    there at least once. Same fog-of-war-style pattern as mark_visited/
+    mark_known_monster, called only from a real combat-victory checkpoint
+    (see bot.py's _mark_location_cleared_for_party), never on a loss or
+    fled fight. Consumed by _check_story_gate's requires_cleared_location
+    check to block deeper connections until the room before them has
+    actually been fought through.
+    """
+    character = get_character(telegram_user_id)
+    if character is None:
+        return None
+    if location_id in character["cleared_locations"]:
+        return character
+    character["cleared_locations"].append(location_id)
+    return update_character(telegram_user_id, cleared_locations=character["cleared_locations"])
 
 
 def learn_spell(telegram_user_id: int, spell_id: str) -> dict | None:

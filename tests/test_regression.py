@@ -3062,6 +3062,12 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_compass_direction_resolves_to_the_right_location(self):
         user_id = 900550
         make_basic_character(user_id, "Compasstest", current_location="whispering_wood")
+        # Sequential dungeon gating (2026-07-24) now requires clearing
+        # whispering_wood before advancing to whispering_wood_deep_glade
+        # -- irrelevant to what THIS test actually checks (compass-word
+        # resolution), so satisfy the gate directly rather than fighting
+        # a real battle just to test unrelated direction-parsing logic.
+        db.mark_location_cleared(user_id, "whispering_wood")
         sink = []
         await bot._do_move(FakeUpdate(user_id, "", sink), "go south")
         self.assertEqual(db.get_character(user_id)["current_location"], "whispering_wood_deep_glade")

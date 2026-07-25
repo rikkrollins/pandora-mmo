@@ -139,6 +139,11 @@
             "name": "a weathered waystone",
             "description": "A trailside marker carved with a script no one in the Crossroads can read, in strokes too regular to be natural weathering."
           }
+        },
+        "story_gates": {
+          "whispering_wood_deep_glade": {
+            "requires_cleared_location": "whispering_wood"
+          }
         }
       },
       "whispering_wood_deep_glade": {
@@ -224,6 +229,11 @@
           "thicket_gap": {
             "name": "the single gap through the brambles",
             "description": "Just wide enough for one person at a time, thorns pulled back and tied off with old, sun-bleached cord."
+          }
+        },
+        "story_gates": {
+          "whispering_wood_root_hollow": {
+            "requires_cleared_location": "whispering_wood_bramble_thicket"
           }
         }
       },
@@ -340,6 +350,14 @@
             "name": "a cold, abandoned campsite",
             "description": "Ash gone stiff and grey, and a boot print frozen in old mud, pointed toward the road rather than away from it."
           }
+        },
+        "story_gates": {
+          "greymoor_downs_windswept_ridge": {
+            "requires_cleared_location": "greymoor_downs"
+          },
+          "greymoor_downs_sunken_barrow": {
+            "requires_cleared_location": "greymoor_downs"
+          }
         }
       },
       "greymoor_downs_windswept_ridge": {
@@ -363,6 +381,14 @@
           "ridge_cairn_markers": {
             "name": "a line of small stacked-stone markers",
             "description": "Spaced too evenly to be idle piling, all pointing the same direction along the ridge — toward the cairn further north."
+          }
+        },
+        "story_gates": {
+          "greymoor_downs_lonely_cairn": {
+            "requires_cleared_location": "greymoor_downs_windswept_ridge"
+          },
+          "greymoor_downs_broken_watchtower": {
+            "requires_cleared_location": "greymoor_downs_windswept_ridge"
           }
         }
       },
@@ -642,6 +668,17 @@
             "name": "a damp stone alcove",
             "description": "Old claw marks score the walls here, layered over each other by what must have been years of the same animal returning to the same spot \u2014 or several animals never learning better."
           }
+        },
+        "story_gates": {
+          "goblin_warrens": {
+            "requires_cleared_location": "sunken_root_caverns"
+          },
+          "glimmerdeep_grotto": {
+            "requires_cleared_location": "sunken_root_caverns"
+          },
+          "sunken_root_caverns_deep_tunnels": {
+            "requires_cleared_location": "sunken_root_caverns"
+          }
         }
       },
       "goblin_warrens": {
@@ -682,6 +719,11 @@
             "name": "a crude bone totem",
             "description": "Lashed together from bits of scavenged bone and wire, and kept in far better repair than anything else the goblins have bothered to maintain."
           }
+        },
+        "story_gates": {
+          "goblin_warrens_inner_den": {
+            "requires_cleared_location": "goblin_warrens"
+          }
         }
       },
       "glimmerdeep_grotto": {
@@ -716,6 +758,11 @@
             "name": "a still, black pool",
             "description": "The water is perfectly still, and reflects the ceiling above \u2014 except for one patch, near the center, that seems to reflect something else entirely."
           }
+        },
+        "story_gates": {
+          "glimmerdeep_grotto_glimmering_pool": {
+            "requires_cleared_location": "glimmerdeep_grotto"
+          }
         }
       },
       "sunken_root_caverns_deep_tunnels": {
@@ -748,6 +795,11 @@
           "tunnel_rubble_choke": {
             "name": "a passage nearly sealed by old rubble",
             "description": "Almost fully collapsed, but not quite \u2014 cleared enough times, by something or someone, to still be worth clearing again. Air moves through it from somewhere else entirely."
+          }
+        },
+        "story_gates": {
+          "sunken_root_caverns_forgotten_cistern": {
+            "requires_cleared_location": "sunken_root_caverns_deep_tunnels"
           }
         }
       },
@@ -923,6 +975,17 @@
             "name": "glyphs carved into every visible surface",
             "description": "A script that matches nothing above ground, repeated so often it starts to feel less like writing and more like counting."
           }
+        },
+        "story_gates": {
+          "the_first_city_outer_ward": {
+            "requires_cleared_location": "the_first_city"
+          },
+          "the_first_city_spire_reaches": {
+            "requires_cleared_location": "the_first_city"
+          },
+          "the_first_city_sunken_archive": {
+            "requires_cleared_location": "the_first_city"
+          }
         }
       },
       "the_first_city_outer_ward": {
@@ -1086,6 +1149,11 @@
             "name": "deep claw marks scored into the packed earth",
             "description": "Layered thick, over and over, always at the same height — whatever left them never grew any smaller."
           }
+        },
+        "story_gates": {
+          "whispering_wood_deeper_roots": {
+            "requires_cleared_location": "whispering_wood_sunken_den"
+          }
         }
       },
       "whispering_wood_deeper_roots": {
@@ -1162,6 +1230,11 @@
           "depths_breathing_wall": {
             "name": "a wide stretch of rock wall, faintly warm",
             "description": "It rises and falls under your palm, slow and even — the same rhythm audible from the bridge far above, only close enough now to feel."
+          }
+        },
+        "story_gates": {
+          "stonearch_bridge_deep_current": {
+            "requires_cleared_location": "stonearch_bridge_gorge_depths"
           }
         }
       },

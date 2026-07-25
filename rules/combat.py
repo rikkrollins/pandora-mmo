@@ -6,9 +6,10 @@ structured data; the AI layer (ai/dm_agent.py) only ever narrates the
 results computed here, never decides them.
 """
 from rules.dice import roll_d20, roll_attack, roll_damage, ability_modifier
-from rules.leveling import sneak_attack_dice_count, rage_damage_bonus, wild_shape_damage_bonus
+from rules.leveling import sneak_attack_dice_count, rage_damage_bonus, wild_shape_damage_bonus, magic_penetration_pct
 from class_features import is_weapon_proficient
 import hybrid_features
+import races
 
 # Monsters this campaign treats as undead for the Silver Wardens guild's
 # bonus_damage_vs_undead benefit (guilds.py) -- no monster template field
@@ -17,6 +18,64 @@ import hybrid_features
 # monster_keys rather than a new schema field. Shadow Wisp is this
 # campaign's one spectral/undead-flavored monster.
 UNDEAD_MONSTER_KEYS = {"shadow_wisp"}
+
+
+def _defender_resistance_profile(defender: dict) -> tuple[set, set, set]:
+    """
+    Combines a defender's racial damage resistances (real players/
+    companions -- races.py's damage_resistances field, Dwarf/poison,
+    Dragonborn+Tiefling/fire) with whatever a monster template already
+    set directly on the participant dict (resistances/vulnerabilities/
+    immunities lists, campaigns/default/campaign.json). Either side can
+    be empty/absent; this never fails on a participant with neither.
+    """
+    resistances = set(defender.get("resistances", []))
+    vulnerabilities = set(defender.get("vulnerabilities", []))
+    immunities = set(defender.get("immunities", []))
+    race = defender.get("race")
+    if race:
+        resistances |= set(races.racial_damage_resistances(race))
+    return resistances, vulnerabilities, immunities
+
+
+def apply_damage_type_modifier(damage: int, damage_type: str | None, defender: dict, attacker: dict | None = None) -> int:
+    """
+    Real damage-type resistance/vulnerability/immunity math (damage-type
+    system, 2026-07-24): immune -> 0, resistant -> half, vulnerable ->
+    double, and resistance+vulnerability on the same type cancel back to
+    normal (real 5E stacking rule). damage_type defaults to "physical"
+    everywhere it's read (items.py/spells.py/DEFAULT_WEAPON), so any
+    weapon/spell/monster with no explicit type behaves exactly as it
+    always did before this system existed.
+
+    Magic penetration (rules.leveling.magic_penetration_pct, earned
+    per rebirth -- per Coffee: "work in magic bonuses to counter act
+    the magic resistences... use the evolutions for that") closes the
+    gap a resistance leaves, proportionally: at 100% penetration a
+    resistant hit deals full damage again; at 0% it's still halved.
+    Never grants MORE than normal damage -- this counters resistance,
+    it doesn't create a new vulnerability exploit. Immunity stays a
+    real, absolute wall (untouched by penetration); vulnerability
+    already favors the attacker and has nothing to counter.
+    """
+    if damage <= 0 or not damage_type:
+        return damage
+    resistances, vulnerabilities, immunities = _defender_resistance_profile(defender)
+    if damage_type in immunities:
+        return 0
+    resistant = damage_type in resistances
+    vulnerable = damage_type in vulnerabilities
+    if resistant and vulnerable:
+        return damage
+    if resistant:
+        halved = damage // 2
+        cut_off = damage - halved
+        penetration = magic_penetration_pct(attacker.get("rebirth_count", 0) if attacker else 0) / 100.0
+        recovered = int(round(cut_off * penetration))
+        return min(damage, halved + recovered)
+    if vulnerable:
+        return damage * 2
+    return damage
 
 
 def start_combat(participants: list[dict]) -> list[dict]:
@@ -213,6 +272,9 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
                 extra_sneak_dice += 1
             sneak_dmg = roll_damage("1d6", critical=attack_result["critical_hit"], extra_dice=extra_sneak_dice)
             damage_dealt += sneak_dmg["total"]
+        damage_dealt = apply_damage_type_modifier(
+            damage_dealt, weapon.get("damage_type", "physical"), defender, attacker
+        )
         if defender.get("raging"):
             damage_dealt = damage_dealt // 2
         # Hybrid Barbarian (2026-07-22): a chance-gated, scaled-down
