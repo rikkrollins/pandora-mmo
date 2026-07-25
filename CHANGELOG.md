@@ -2,6 +2,16 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.19] — Pray at the shrine to revive your whole party at once
+
+Praying at the shrine with more than one fallen party member and no
+specific name now revives everyone in one offering instead of asking
+which single person you meant — a real "Revive All" button was added
+alongside the individual revive buttons too. Naming someone specific
+still targets just them. Also added a real "Auto Equip Party" button
+next to Leave Party on the party screen, for the same party-wide
+auto-equip command added last release.
+
 ## [1.27.18] — Real damage resistances, sequential dungeon progression, and shrine improvements
 
 A lot in this one:

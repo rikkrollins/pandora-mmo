@@ -7152,6 +7152,11 @@ def _party_keyboard(character: dict) -> InlineKeyboardMarkup | None:
     rows = []
     party_id = character.get("party_id")
     if party_id:
+        # Per Coffee (2026-07-24: "buttons in equip for that?" -- asked
+        # right after the new "auto equip the party" free-text command):
+        # a real tap over the exact same _do_auto_equip_gear party path,
+        # same convention as every other button in this file.
+        rows.append([InlineKeyboardButton("⚔️ Auto Equip Party", callback_data="party|auto_equip")])
         rows.append([InlineKeyboardButton("🚪 Leave Party", callback_data="party|leave")])
     elif character.get("pending_party_invite"):
         rows.append([InlineKeyboardButton("✅ Accept Invite", callback_data="party|accept")])
@@ -7177,6 +7182,8 @@ async def party_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         await _do_leave_party(update)
     elif action == "accept":
         await _do_accept_party_invite(update)
+    elif action == "auto_equip":
+        await _do_auto_equip_gear(update, "auto equip the party")
     elif action == "invite" and len(parts) > 2:
         try:
             target_id = int(parts[2])
@@ -10835,11 +10842,12 @@ async def _do_give_offering(update: Update, text: str) -> None:
         if target is None and len(dead_members) == 1:
             target = dead_members[0]
         elif target is None and len(dead_members) > 1:
-            names = ", ".join(m["name"] for m in dead_members)
-            await update.effective_chat.send_message(
-                f"More than one fallen party member — who do you want to pray for? ({names})",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
-            )
+            # Per Coffee (2026-07-24: "make it so when i pray its for
+            # all of them"): a prayer with no specific name now revives
+            # every fallen party member in one offering instead of
+            # asking which single one was meant -- naming someone
+            # specifically (handled above) still targets just them.
+            await _apply_shrine_offering_all(update, character, dead_members)
             return
         elif not dead_members:
             # Nobody to revive at all -- per Coffee, this is exactly when
@@ -10911,6 +10919,12 @@ async def _do_shrine_offering_menu(update: Update) -> None:
         )]
         for m in dead_members
     ]
+    if len(dead_members) > 1:
+        # Per Coffee (2026-07-24: "make it so when i pray its for all
+        # of them"): the same all-at-once revival free text now offers,
+        # as a real tap.
+        total_cost = HOLLOW_STUMP_SHRINE_OFFERING_COST * len(dead_members)
+        rows.append([InlineKeyboardButton(f"🕯️ Revive All ({total_cost}g)", callback_data="shrine|revive_all")])
     await update.effective_chat.send_message(
         f"Who do you want to pray for? The offering calls for {HOLLOW_STUMP_SHRINE_OFFERING_COST} gold.",
         reply_markup=InlineKeyboardMarkup(rows),
@@ -10930,6 +10944,20 @@ async def shrine_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if action == "bless":
         await _apply_shrine_blessing(update, character)
         return
+    if action == "revive_all":
+        party_members = (
+            db.get_party_members_by_id_including_inactive_slots(character["party_id"])
+            if character.get("party_id") else []
+        )
+        dead_members = [m for m in party_members if m.get("is_dead")]
+        if not dead_members:
+            await update.effective_chat.send_message(
+                "No one left to bring back — everyone in your party is alive and well.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+        await _apply_shrine_offering_all(update, character, dead_members)
+        return
     if action != "revive" or len(parts) < 3:
         return
     target = db.get_character_by_id(int(parts[2]))
@@ -10942,25 +10970,29 @@ async def shrine_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await _apply_shrine_offering(update, character, target)
 
 
-def _bless_present_party_to_full(character: dict, exclude_character_id: int | None = None) -> list[str]:
+def _bless_present_party_to_full(character: dict, exclude_character_ids: set[int] | int | None = None) -> list[str]:
     """
     Heals every real party member actually AT the shrine right now (same
     party_id, same current_location -- identical "physically present"
     scoping to _do_use_item's heal_and_revive multi-target case) to full
     HP, via update_character_by_id so this never accidentally lands on
     whichever character an owner currently has active instead of the
-    one actually standing there. exclude_character_id skips someone
-    already handled elsewhere (the just-revived target in
-    _apply_shrine_offering, healed there with its own message). Returns
-    one "Name (X/X HP)" line per person actually healed, for narration.
+    one actually standing there. exclude_character_ids skips anyone
+    already handled elsewhere (the just-revived target(s) in
+    _apply_shrine_offering/_apply_shrine_offering_all, healed there with
+    their own message) -- a single int or a set of them. Returns one
+    "Name (X/X HP)" line per person actually healed, for narration.
     """
+    if isinstance(exclude_character_ids, int):
+        exclude_character_ids = {exclude_character_ids}
+    exclude_character_ids = exclude_character_ids or set()
     present = [
         p for p in _get_combat_eligible_party_members(character["current_location"])
         if character.get("party_id") and p.get("party_id") == character["party_id"]
     ] or [character]
     lines = []
     for member in present:
-        if exclude_character_id is not None and member["character_id"] == exclude_character_id:
+        if member["character_id"] in exclude_character_ids:
             continue
         hp_max = member.get("hp_max", member["hp_current"])
         db.update_character_by_id(member["character_id"], hp_current=hp_max)
@@ -10997,13 +11029,54 @@ async def _apply_shrine_offering(update: Update, character: dict, target: dict) 
         target["character_id"], is_dead=0, hp_current=target_hp_max,
         death_save_successes=0, death_save_failures=0,
     )
-    rest_of_party = _bless_present_party_to_full(character, exclude_character_id=target["character_id"])
+    rest_of_party = _bless_present_party_to_full(character, exclude_character_ids=target["character_id"])
     blessing_note = f" The rest of the party is blessed to full HP too: {'; '.join(rest_of_party)}." if rest_of_party else ""
     await _safe_send(
         update,
         f"🕯️ **{character['name']}** kneels at the shrine and lays {HOLLOW_STUMP_SHRINE_OFFERING_COST} gold "
         f"among the offerings, praying for **{target['name']}**'s return — breath returns, and they're "
         f"restored to full ({target_hp_max}/{target_hp_max} HP).{blessing_note}",
+    )
+
+
+async def _apply_shrine_offering_all(update: Update, character: dict, dead_members: list[dict]) -> None:
+    """
+    Per Coffee (2026-07-24: "make it so when i pray its for all of
+    them"): a prayer at the shrine with more than one fallen party
+    member and no specific name now revives every one of them in a
+    single offering, rather than asking which single one was meant.
+    Cost scales per person revived (same real gold cost as reviving
+    one, just charged once per person) -- reviving three people still
+    isn't cheaper than reviving three people one at a time, it's just
+    one motion instead of three. Same full-party blessing as the
+    single-target path once everyone named is back up.
+    """
+    total_cost = HOLLOW_STUMP_SHRINE_OFFERING_COST * len(dead_members)
+    if character["gold"] < total_cost:
+        await update.effective_chat.send_message(
+            f"Reviving all {len(dead_members)} calls for {total_cost} gold "
+            f"({HOLLOW_STUMP_SHRINE_OFFERING_COST} each) — you only have {character['gold']}.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+    db.update_character(character["telegram_user_id"], gold=character["gold"] - total_cost)
+    revived_lines = []
+    revived_ids = set()
+    for target in dead_members:
+        target_hp_max = target.get("hp_max", target["hp_current"])
+        db.update_character_by_id(
+            target["character_id"], is_dead=0, hp_current=target_hp_max,
+            death_save_successes=0, death_save_failures=0,
+        )
+        revived_lines.append(f"**{target['name']}** ({target_hp_max}/{target_hp_max} HP)")
+        revived_ids.add(target["character_id"])
+    rest_of_party = _bless_present_party_to_full(character, exclude_character_ids=revived_ids)
+    blessing_note = f" The rest of the party is blessed to full HP too: {'; '.join(rest_of_party)}." if rest_of_party else ""
+    await _safe_send(
+        update,
+        f"🕯️ **{character['name']}** kneels at the shrine and lays {total_cost} gold among the offerings, "
+        f"praying for everyone fallen to return — breath returns to each of them: "
+        f"{'; '.join(revived_lines)}.{blessing_note}",
     )
 
 
