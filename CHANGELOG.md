@@ -2,6 +2,13 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.27] — Two more profession recipes: Greater Healing Potion, Rations
+
+Alchemy gets a real top-tier recipe (Greater Healing Potion, harder
+than the base potion) and cooking gets a real easy one (Rations,
+no fire needed, just more of the catch) — both items already existed
+and were buyable, but had no recipe until now.
+
 ## [1.27.26] — Passive party HP regen + fix: standalone AI companions could die permanently
 
 The whole party (any real player or AI companion, alive and not

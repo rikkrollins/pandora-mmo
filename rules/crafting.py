@@ -33,6 +33,16 @@ RECIPES = {
         "result_item": "scroll_magic_missile", "result_qty": 1,
         "ability": "intelligence", "dc": 15, "profession": "alchemy",
     },
+    # Alchemy progression (2026-07-25): items.py's greater_healing_potion
+    # already existed as a real, buyable item but had no recipe at all --
+    # a genuinely harder brew (more of both herbs than the base potion)
+    # gives alchemy its own top-tier recipe, same easy-to-hard curve
+    # blacksmithing already has.
+    "greater_healing_potion": {
+        "materials": {"silverleaf_herb": 3, "moonpetal": 2},
+        "result_item": "greater_healing_potion", "result_qty": 1,
+        "ability": "wisdom", "dc": 17, "profession": "alchemy",
+    },
     # Cooking (2026-07-15): raw_fish was gatherable but no recipe used
     # it at all -- uses wood too (cooking over a fire), producing an
     # actually usable food item now that _do_use_item exists.
@@ -40,6 +50,16 @@ RECIPES = {
         "materials": {"raw_fish": 1, "wood": 1},
         "result_item": "cooked_fish", "result_qty": 1,
         "ability": "wisdom", "dc": 10, "profession": "cooking",
+    },
+    # Cooking's easy end (2026-07-25): items.py's rations already
+    # existed (a real buyable item, used for travel/downtime) but had no
+    # recipe -- salting/drying fish into trail rations needs no fire,
+    # just more of the raw catch, so it's the cheap/easy cooking recipe
+    # cooked_fish's dc 10 didn't cover.
+    "rations": {
+        "materials": {"raw_fish": 2},
+        "result_item": "rations", "result_qty": 1,
+        "ability": "wisdom", "dc": 8, "profession": "cooking",
     },
     # Blacksmithing (2026-07-24): the first recipe that actually forges
     # a real weapon rather than a consumable, giving iron_ore (already
