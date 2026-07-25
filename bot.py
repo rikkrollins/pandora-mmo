@@ -8304,6 +8304,48 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
         await _check_board_quest_turnin(update, update.effective_user.id, character["current_location"])
 
 
+# All 7 real professions this game tracks: the 3 crafting ones
+# (rules/crafting.py's RECIPES "profession" field) plus the 4
+# gathering ones (resource_nodes' "skill" field) -- every character's
+# skill_uses dict is keyed by exactly these strings already, this is
+# just the first place that lists them all together in one view.
+ALL_PROFESSIONS = ["alchemy", "cooking", "blacksmithing", "herbalism", "mining", "fishing", "lumberjacking"]
+PROFESSION_RANK_TITLES = {0: "Novice", 1: "Apprentice", 2: "Adept", 3: "Master"}
+
+
+def _profession_rank_title(uses: int) -> str:
+    return PROFESSION_RANK_TITLES[practiced_bonus(uses)]
+
+
+async def _do_check_professions(update: Update) -> None:
+    """
+    Per Coffee ("continue with professions"): a real, single-screen
+    view of every profession's actual progress -- reuses the exact
+    same practiced_bonus/skill_uses data _do_craft/_do_gather already
+    read and write, just never had one consolidated place to see all
+    7 at once before. Rank titles reuse the dice-game's own
+    Novice/Adept/Master naming (rules/proficiency.MAX_PRACTICE_BONUS
+    caps out at exactly 15 uses either way, so "Master" means the same
+    real threshold in both places).
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    skill_uses = character.get("skill_uses") or {}
+    home_profession = CLASS_PROFESSIONS.get(character["char_class"])
+    lines = [f"🛠️ **{character['name']}**'s professions:"]
+    for prof in ALL_PROFESSIONS:
+        uses = skill_uses.get(prof, 0)
+        bonus = practiced_bonus(uses)
+        rank = _profession_rank_title(uses)
+        home_tag = " ⭐ *(favored trade)*" if prof == home_profession else ""
+        lines.append(f"• {prof.capitalize()}: {rank} (+{bonus}, {uses} uses){home_tag}")
+    await _safe_send(update, "\n".join(lines), speak=False)
+
+
 async def _do_craft(update: Update, text: str) -> None:
     """
     Crafting is fully resolved by rules/crafting.py — material checks and
@@ -12278,6 +12320,7 @@ def _main_menu_keyboard(character: dict) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("⚔️ Equip Gear", callback_data="menu|equip")],
         [InlineKeyboardButton("👥 Party", callback_data="menu|party")],
         [InlineKeyboardButton("🧾 Party Sheets", callback_data="menu|partysheets")],
+        [InlineKeyboardButton("🛠️ Professions", callback_data="menu|professions")],
         [InlineKeyboardButton("🎭 Switch Character", callback_data="menu|roster")],
         [InlineKeyboardButton("🧭 Waypoints", callback_data="menu|waypoints")],
         [InlineKeyboardButton("🌳 Skill Tree", callback_data="menu|skilltree")],
@@ -12415,6 +12458,8 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         # sheets" -- this button is the same real code path, just
         # actually discoverable instead of needing exact free-text.
         await _do_check_party(update, text="sheets")
+    elif section == "professions":
+        await _do_check_professions(update)
     elif section == "visualmap":
         await _do_show_visual_map(update)
     elif section == "rebirth":
@@ -13917,6 +13962,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_choose_subclass(update, intent.get("raw_text", text))
     elif action == "start_echo_trial":
         await _do_start_echo_trial(update, intent.get("raw_text", text))
+    elif action == "check_professions":
+        await _do_check_professions(update)
     elif action == "equip_item":
         await _do_equip_item(update, intent.get("raw_text", text))
     elif action == "auto_equip":
@@ -15648,7 +15695,21 @@ async def _log_unhandled_error(update: object, context: ContextTypes.DEFAULT_TYP
 # ---------------------------------------------------------------------
 AI_PARTY_ROSTER = [
     {
-        "name": "Zara Windrift", "race": "elf", "char_class": "ranger",
+        # Real live bug (2026-07-25, Coffee: "Zara doesnt have any
+        # racial traits or class traits?!"): these 2 hardcoded entries
+        # were the only place in this entire codebase using lowercase
+        # race/char_class strings -- races.get_race/class_features.
+        # get_class_features (and CLASS_PROFESSIONS/CLASS_SUBCLASSES
+        # elsewhere) all do exact-match dict lookups against real
+        # capitalized keys ("Elf", "Ranger", ...), so "elf"/"ranger"
+        # silently matched nothing: no traits, no features, and no
+        # profession-affinity line either (confirmed missing from
+        # Zara's own sheet). Every other race/class string in this
+        # codebase (campaign.json's NPCs, character creation) was
+        # already properly capitalized -- this fixes the two that
+        # weren't, at the source, rather than making every consumer
+        # case-insensitive.
+        "name": "Zara Windrift", "race": "Elf", "char_class": "Ranger",
         "ability_scores": {"strength": 12, "dexterity": 17, "constitution": 13,
                             "intelligence": 11, "wisdom": 15, "charisma": 10},
         "hp_max": 11, "armor_class": 14, "gold": 25,
@@ -15656,7 +15717,7 @@ AI_PARTY_ROSTER = [
         "personality": "curious and methodical, always wants to know what's over the next hill",
     },
     {
-        "name": "Bram Ashfield", "race": "dwarf", "char_class": "cleric",
+        "name": "Bram Ashfield", "race": "Dwarf", "char_class": "Cleric",
         "ability_scores": {"strength": 13, "dexterity": 10, "constitution": 15,
                             "intelligence": 10, "wisdom": 16, "charisma": 11},
         "hp_max": 10, "armor_class": 14, "gold": 25,

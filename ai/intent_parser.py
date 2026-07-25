@@ -1155,6 +1155,13 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     if "echo" in lowered and any(w in lowered for w in ["challenge", "trial", "fight", "start", "begin"]):
         return {**base, "action": "start_echo_trial"}
 
+    # check_professions (2026-07-25, per Coffee: "continue with
+    # professions") -- "profession(s)" is distinctive enough in this
+    # game's vocabulary to fire on its own, same convention as bare
+    # "bestiary"/"leaderboard" elsewhere in this file.
+    if re.search(r"\bprofessions?\b", lowered):
+        return {**base, "action": "check_professions"}
+
     unconditional_shove_words = ["shove", "tackle", "trip", "push over"]
     knock_down_phrasing = "knock" in lowered and ("prone" in lowered or "down" in lowered)
     if any(w in lowered for w in unconditional_shove_words) or knock_down_phrasing:
@@ -1376,7 +1383,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "check_guild_quest", "dice_game", "fortunes_wheel", "set_alignment", "message_ai",
                 "skill_tree", "challenge_duel", "accept_duel", "check_market", "join_battle",
                 "replay_intro", "visual_map", "rebirth", "choose_hybrid", "give_offering",
-                "drink_water", "choose_subclass", "start_echo_trial",
+                "drink_water", "choose_subclass", "start_echo_trial", "check_professions",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

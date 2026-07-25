@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.35] — Professions overview + fix: Zara/Bram had no traits or features
+
+New "🛠️ Professions" screen (menu button or say "check my professions")
+shows real progress in all 7 professions at once — rank title
+(Novice/Apprentice/Adept/Master), bonus, and use count — with your
+class's favored trade marked.
+
+Also fixes a real, long-standing bug: Zara Windrift and Bram Ashfield
+(the original autonomous AI party) were the only characters in the
+whole game stored with lowercase race/class ("elf"/"ranger" instead
+of "Elf"/"Ranger"), so every exact-match lookup against them —
+racial traits, class features, and the new profession-affinity line —
+silently came back empty. Fixed at the source and corrected on the 2
+existing live rows.
+
 ## [1.27.34] — Fix: Party Sheets button showed nothing for real parties
 
 Two real bugs stacked here. Concatenating every party member's full
