@@ -4760,14 +4760,34 @@ async def _do_recruit_npc(update: Update, npc_name: str) -> None:
         )
         return
 
-    already_in_party = any(
-        p["name"] == npc["name"] and p.get("is_ai") for p in _get_party_members()
+    # Real live bug (2026-07-25, Coffee: "The AI member arent showing
+    # up in my party?!"): this only ever checked "does an AI companion
+    # with this name exist ANYWHERE, active, in the whole game" --
+    # never whether they're actually in THE REQUESTER'S OWN party. Once
+    # Pip Thistledown had been recruited once (by any character, ever),
+    # EVERY other character's "invite Pip to the party" silently hit
+    # this same wrong branch and got told she was "already traveling
+    # with you" even when she was in a completely different party (or
+    # no party at all) -- a real companion can genuinely never be
+    # brought along a second time this way. Now actually checks the
+    # REQUESTER's own party_id specifically; if she's recruited but
+    # elsewhere, this falls through to the exact same real
+    # _do_invite_to_party path a fresh invite already uses (which
+    # already correctly REASSIGNS an AI companion's party_id, see
+    # db.add_ai_companion_to_party), rather than a dead end.
+    already_recruited = next(
+        (p for p in _get_party_members() if p["name"] == npc["name"] and p.get("is_ai")), None
     )
-    if already_in_party:
-        await update.effective_chat.send_message(
-            f"{npc['name']} is already traveling with you.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
-        )
+    if already_recruited is not None:
+        requester = db.get_character(update.effective_user.id)
+        if (requester and requester.get("party_id")
+                and already_recruited.get("party_id") == requester["party_id"]):
+            await update.effective_chat.send_message(
+                f"{npc['name']} is already traveling with you.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+        await _do_invite_to_party(update, npc["name"])
         return
 
     stats = npc["stats"]

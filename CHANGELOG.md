@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.39] — Fix: recruited AI companions could get permanently stuck away from you
+
+Real bug from Development ("The AI member arent showing up in my
+party?!"): once an AI companion (e.g. Pip Thistledown) had been
+recruited once by ANYONE, "invite [name] to the party" for any other
+character checked only "does a companion with this name exist,
+active, anywhere in the game" — never whether they were actually in
+THAT character's own party — so it always replied "already traveling
+with you" even when the companion was in a different party (or none
+at all), with no way to actually bring them along. Now correctly
+checks the requester's own party specifically; if the companion is
+elsewhere, they're really moved into the new party instead of hitting
+a dead end.
+
 ## [1.27.38] — Real mechanical hooks for all 11 "utility" subclasses
 
 Closes the honesty gap from the subclass system's first pass: every
