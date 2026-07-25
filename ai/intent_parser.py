@@ -1148,6 +1148,13 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     ):
         return {**base, "action": "choose_subclass"}
 
+    # start_echo_trial (2026-07-25, Silver Wardens' Colosseum echo-
+    # trials): "echo" is distinctive enough in this game's vocabulary
+    # (never used for anything else) that a bare mention alongside a
+    # clear challenge verb is unambiguous.
+    if "echo" in lowered and any(w in lowered for w in ["challenge", "trial", "fight", "start", "begin"]):
+        return {**base, "action": "start_echo_trial"}
+
     unconditional_shove_words = ["shove", "tackle", "trip", "push over"]
     knock_down_phrasing = "knock" in lowered and ("prone" in lowered or "down" in lowered)
     if any(w in lowered for w in unconditional_shove_words) or knock_down_phrasing:
@@ -1369,7 +1376,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "check_guild_quest", "dice_game", "fortunes_wheel", "set_alignment", "message_ai",
                 "skill_tree", "challenge_duel", "accept_duel", "check_market", "join_battle",
                 "replay_intro", "visual_map", "rebirth", "choose_hybrid", "give_offering",
-                "drink_water", "choose_subclass",
+                "drink_water", "choose_subclass", "start_echo_trial",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

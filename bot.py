@@ -3552,6 +3552,7 @@ async def _try_end_stale_combat(update: Update, session: sessions.Session) -> bo
         await _mark_location_cleared_for_party(update, session)
         await _check_achievements_for_combat_party(update, session)
         await _check_guild_quest_completion(update, session)
+        await _check_echo_trial_progress(update, session)
     await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
     for note in level_up_notes:
         await _notify_main_topic(update, note)
@@ -3881,6 +3882,7 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
             await _mark_location_cleared_for_party(update, session)
             await _check_achievements_for_combat_party(update, session)
             await _check_guild_quest_completion(update, session)
+            await _check_echo_trial_progress(update, session)
         await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
         for note in level_up_notes:
             await _notify_main_topic(update, note)
@@ -4214,6 +4216,156 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
         await _resolve_ai_turns(update, session)
 
 
+# Silver Wardens' Colosseum echo-trials (2026-07-25, per Coffee's
+# original plan: "a parallel, repeatable path to evolution progress
+# alongside the story dungeons... magical mirror-versions of every
+# monster the player has already fought... gain-staged: each completed
+# tier raises the echoes' stats/resistance profile"). Real monster
+# templates only (never invented), pulled from the fighter's own
+# known_monsters bestiary -- an "echo" can never be a threat this
+# character hasn't genuinely already faced for real.
+ECHO_TRIAL_TIER_STAT_BONUS_PCT = 10
+ECHO_TRIAL_TIER_XP_BONUS_PCT = 15
+ECHO_TRIAL_MAX_TIER = 10
+ECHO_TRIAL_RESISTANCE_TIER = 3
+ECHO_TRIAL_RESISTANT_TYPES = ["physical", "fire", "cold", "lightning", "poison", "necrotic", "radiant"]
+
+
+def _build_echo_enemy(monster_key: str, tier: int, index: int, total: int) -> dict | None:
+    """
+    A magical mirror-copy of a real monster template, scaled by the
+    challenger's own echo_trial_tier -- same base stats, reflavored as
+    a conjured echo, never a made-up threat. From tier
+    ECHO_TRIAL_RESISTANCE_TIER on, the echo has learned to resist ONE
+    real damage type (rules/combat.py's existing resistance system),
+    forcing real build adaptation exactly like Coffee's original plan
+    called for, instead of just bigger numbers forever.
+    """
+    template = cl.get_monster_template(CAMPAIGN, monster_key)
+    if template is None:
+        return None
+    stat_mult = 1 + tier * ECHO_TRIAL_TIER_STAT_BONUS_PCT / 100
+    resistances = []
+    if tier >= ECHO_TRIAL_RESISTANCE_TIER:
+        # Deterministic per (monster_key, tier), not re-rolled per
+        # fight -- an echo's learned resistance is a real, memorizable
+        # fact about it, not a coin flip each attempt.
+        resistances = [ECHO_TRIAL_RESISTANT_TYPES[hash((monster_key, tier)) % len(ECHO_TRIAL_RESISTANT_TYPES)]]
+    enemy_id = -3_000_000 - (abs(hash((monster_key, tier))) % 100_000) - index
+    name = f"Echo of {template['name']} {index + 1}" if total > 1 else f"Echo of {template['name']}"
+    return {
+        "telegram_user_id": enemy_id, "name": name,
+        "dexterity": template["dexterity"], "strength": template["strength"],
+        "armor_class": int(template["armor_class"] * stat_mult),
+        "hp_current": int(template["hp_max"] * stat_mult), "hp_max": int(template["hp_max"] * stat_mult),
+        "proficiency_bonus": template["proficiency_bonus"],
+        "is_ai": 1, "xp_reward": int(template.get("xp_reward", 0) * (1 + tier * ECHO_TRIAL_TIER_XP_BONUS_PCT / 100)),
+        "on_hit_condition": template.get("on_hit_condition"),
+        "monster_key": monster_key, "is_boss": template.get("is_boss", False),
+        "life_drain": template.get("life_drain", False),
+        "resistances": resistances,
+        "is_echo_trial": True,
+    }
+
+
+async def _do_start_echo_trial(update: Update, text: str) -> None:
+    """
+    Per Coffee's original plan: a Silver Wardens-only, repeatable combat
+    grind at the_colosseum against echoes of monsters the challenger has
+    genuinely already fought (character['known_monsters']) -- a real,
+    parallel path to XP/evolution progress alongside the main storyline,
+    scaling harder (and eventually resistant) each tier the challenger
+    has already earned (echo_trial_tier).
+    """
+    chat_id = update.effective_chat.id
+    async with sessions.get_lock(chat_id):
+        if sessions.get_session(chat_id) is not None:
+            await update.effective_chat.send_message(
+                "A combat session is already active!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            )
+            return
+        requester = db.get_character(update.effective_user.id)
+        if requester is None:
+            await update.effective_chat.send_message(
+                "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            )
+            return
+        if requester["current_location"] != "the_colosseum":
+            await update.effective_chat.send_message(
+                "Echo trials only happen at The Colosseum.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            )
+            return
+        if requester.get("guild") != "silver_wardens":
+            await update.effective_chat.send_message(
+                "Only Silver Wardens members can challenge an echo trial — join first.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+        known = requester.get("known_monsters") or []
+        if not known:
+            await update.effective_chat.send_message(
+                "You haven't fought anything real yet — an echo needs a real memory to mirror.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+        lowered = text.lower()
+        monster_key = next((k for k in known if k.replace("_", " ") in lowered), None) or known[-1]
+
+        all_characters = _get_real_party_combatants(requester)
+        party = [p for p in all_characters if p["hp_current"] > 0]
+        if not party:
+            await update.effective_chat.send_message(
+                "No one here is in a fit state to fight right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            )
+            return
+
+        tier = requester.get("echo_trial_tier", 0)
+        base_template = cl.get_monster_template(CAMPAIGN, monster_key)
+        count = scaled_enemy_count([p.get("level", 1) for p in party], base_template.get("xp_reward", 0)) if base_template else 1
+        enemies = [e for i in range(count) if (e := _build_echo_enemy(monster_key, tier, i, count)) is not None]
+        if not enemies:
+            await update.effective_chat.send_message(
+                "That echo can't be conjured.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            )
+            return
+
+        sides = {p["telegram_user_id"]: "party" for p in party}
+        for enemy in enemies:
+            sides[enemy["telegram_user_id"]] = "enemy"
+        session = sessions.start_session(chat_id, party + enemies, sides=sides)
+        initiative_line = ", ".join(f"{p['name']} ({p['initiative']})" for p in session.participants)
+        enemy_description = f"{count}x **{enemies[0]['name'].rsplit(' ', 1)[0]}**" if count > 1 else f"**{enemies[0]['name']}**"
+        resistance_note = ""
+        if enemies[0]["resistances"]:
+            resistance_note = f"\n⚠️ This echo resists **{enemies[0]['resistances'][0]}** damage."
+        header = (
+            f"⚔️ **Echo Trial — Tier {tier}!**\n"
+            f"Your party ({_format_party_names(party)}) faces {enemy_description}!{resistance_note}\n\n"
+            f"🎯 **Initiative order:** {initiative_line}\n\n" + _turn_announcement(session)
+        )
+        await _safe_send(update, header, reply_markup=_battle_menu_keyboard(session))
+        await _resolve_ai_turns(update, session)
+
+
+async def _check_echo_trial_progress(update: Update, session: sessions.Session) -> None:
+    """Real echo-trial victory -> +1 echo_trial_tier for every real party-side combatant who took part, capped."""
+    if not any(p.get("is_echo_trial") for p in session.participants):
+        return
+    for pid in session.turn_order:
+        if session.sides.get(pid) != "party":
+            continue
+        character = db.get_character(pid)
+        if character is None or character.get("is_ai"):
+            continue
+        current_tier = character.get("echo_trial_tier", 0)
+        if current_tier >= ECHO_TRIAL_MAX_TIER:
+            continue
+        db.update_character(pid, echo_trial_tier=current_tier + 1)
+        await _safe_send(
+            update, f"🌀 **{character['name']}**'s echo trial tier rises to **{current_tier + 1}**.",
+        )
+
+
 def _npc_combatant_from_stats(npc_id: str, npc_data: dict) -> dict:
     """
     Builds a combat participant dict for a named, alignment-driven NPC —
@@ -4536,6 +4688,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                     await _mark_location_cleared_for_party(update, session)
                     await _check_achievements_for_combat_party(update, session)
                     await _check_guild_quest_completion(update, session)
+                    await _check_echo_trial_progress(update, session)
                 await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
                 for note in level_up_notes:
                     await _notify_main_topic(update, note)
@@ -7649,6 +7802,7 @@ def _format_character_sheet(character: dict) -> str:
     # +2 bonus (class_profession_affinity_bonus) isn't invisible.
     home_profession = CLASS_PROFESSIONS.get(character["char_class"])
     profession_line = f"🔨 Favored trade: {home_profession.capitalize()} (+{CLASS_PROFESSION_AFFINITY_BONUS})\n" if home_profession else ""
+    echo_trial_line = f"🌀 Echo trial tier: {character['echo_trial_tier']}\n" if character.get("echo_trial_tier") else ""
     title_suffix = f" \"{character['active_title']}\"" if character.get("active_title") else ""
     name_line = f"**{character['name']}**{title_suffix}" + (" *(AI companion)*" if character.get("is_ai") else "")
     equipped_line = _format_equipped_line(character)
@@ -7702,6 +7856,7 @@ def _format_character_sheet(character: dict) -> str:
         f"{rebirth_line}"
         f"{subclass_line}"
         f"{profession_line}"
+        f"{echo_trial_line}"
         f"HP {character['hp_current']}/{character['hp_max']} | AC {character['armor_class']}\n"
         f"{ability_line}"
         f"Alignment: {_alignment_label(character.get('alignment_law_chaos', 0), character.get('alignment_good_evil', 0))}\n"
@@ -8907,6 +9062,7 @@ async def _do_breath_weapon(update: Update) -> None:
                 await _mark_location_cleared_for_party(update, session)
                 await _check_achievements_for_combat_party(update, session)
                 await _check_guild_quest_completion(update, session)
+                await _check_echo_trial_progress(update, session)
             await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
             for note in level_up_notes:
                 await _notify_main_topic(update, note)
@@ -12679,6 +12835,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                     await _mark_location_cleared_for_party(update, session)
                     await _check_achievements_for_combat_party(update, session)
                     await _check_guild_quest_completion(update, session)
+                    await _check_echo_trial_progress(update, session)
                 await update.effective_chat.send_message(
                     f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}",
                     message_thread_id=config.TOPIC_ADVENTURE_ID,
@@ -13739,6 +13896,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_drink_water(update)
     elif action == "choose_subclass":
         await _do_choose_subclass(update, intent.get("raw_text", text))
+    elif action == "start_echo_trial":
+        await _do_start_echo_trial(update, intent.get("raw_text", text))
     elif action == "equip_item":
         await _do_equip_item(update, intent.get("raw_text", text))
     elif action == "auto_equip":

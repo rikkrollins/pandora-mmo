@@ -2,6 +2,17 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.32] — Silver Wardens' Colosseum echo-trials
+
+A real, repeatable grind path parallel to rebirth: Silver Wardens
+members at The Colosseum can now challenge "echoes" — magical mirror-
+copies of monsters they've genuinely already fought (their own
+bestiary, never an invented threat). Each trial victory raises your
+echo trial tier permanently, scaling future echoes' HP/AC and XP
+reward higher, and from tier 3 onward an echo has learned to resist
+one real damage type, forcing real build adaptation instead of just
+bigger numbers.
+
 ## [1.27.31] — 2 more guilds: The Forge Guild, The Enchanters' Guild
 
 Two brand new guilds, each with their own real Telegram topic: The

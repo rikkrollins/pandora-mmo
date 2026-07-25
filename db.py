@@ -408,6 +408,16 @@ def init_db() -> None:
         if "died_at" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN died_at TEXT")
 
+        # echo_trial_tier (2026-07-25, per Coffee: Silver Wardens'
+        # Colosseum echo-trials -- a repeatable grind path parallel to
+        # rebirth). Increments by 1 on every real echo-trial victory
+        # (bot.py's _check_echo_trial_progress), scaling future echoes
+        # harder (more HP/AC, eventually a real damage-type resistance)
+        # -- never resets, a real, persistent measure of how many times
+        # this character has proven itself against its own echoes.
+        if "echo_trial_tier" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN echo_trial_tier INTEGER NOT NULL DEFAULT 0")
+
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)
