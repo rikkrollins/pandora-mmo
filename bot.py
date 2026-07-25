@@ -13432,7 +13432,24 @@ async def _do_switch_character(update: Update, text: str) -> None:
         )
         return
 
+    # Party seat carries over on switch (2026-07-25, per Coffee: "how
+    # about we swap out our current character from the party when we
+    # 'switch character' so the party stays the same size?"): a real
+    # confusion this closes -- switching characters used to leave your
+    # OLD character stuck occupying your party seat while your NEW one
+    # had none at all, so "my AI party isn't showing up" really meant
+    # "my other character is still the one actually in it." Only
+    # applies when the incoming character has no party of their own
+    # already (never silently overrides a real, separate membership),
+    # and only ever moves ONE seat -- net zero change to party size.
+    previously_active = db.get_character(update.effective_user.id)
     switched = db.switch_character(update.effective_user.id, match["character_id"])
+    if (previously_active and previously_active.get("party_id")
+            and switched and not switched.get("party_id")
+            and previously_active["character_id"] != switched["character_id"]):
+        db.update_character_by_id(switched["character_id"], party_id=previously_active["party_id"])
+        db.update_character_by_id(previously_active["character_id"], party_id=None)
+        switched = db.get_character(update.effective_user.id)
     await _safe_send(
         update,
         f"🎭 Switched to **{switched['name']}** the {switched['race']} {switched['char_class']} "

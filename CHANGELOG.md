@@ -2,6 +2,18 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.40] — Switching characters now carries your party seat with you
+
+Real confusion from Development ("The AI member arent showing up in
+my party?!... why are they out of the party now"): switching which
+of your own characters is active used to leave your OLD character
+still occupying your party seat while the new one had none at all —
+so "my AI party isn't showing up" really meant "my other character
+is still the one in it." Switching characters now moves your party
+seat to the character you're switching TO (and clears it from the
+one you're leaving), keeping the party's size exactly the same.
+Never overrides a character that already has its own separate party.
+
 ## [1.27.39] — Fix: recruited AI companions could get permanently stuck away from you
 
 Real bug from Development ("The AI member arent showing up in my
