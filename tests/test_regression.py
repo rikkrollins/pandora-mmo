@@ -1685,7 +1685,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         after_fighter = db.get_character(fighter_id)["xp"]
 
         self.assertEqual(after_fighter - before_fighter, 100)
-        self.assertEqual(after_absent - before_absent, 10)  # 10% of the 100 xp_each fighters earned
+        self.assertEqual(after_absent - before_absent, 50)  # INACTIVE_PARTY_XP_SHARE raised to 50% (2026-07-24)
         sessions.end_session(-999)
 
     async def test_ai_companions_never_get_the_absent_party_bonus(self):
@@ -3132,7 +3132,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_level_menu_shows_max_level_at_20(self):
         user_id = 900555
         make_basic_character(user_id, "MaxLevelTest")
-        db.update_character(user_id, level=20)
+        # MAX_LEVEL is 99, not 20, since the rebirth system shipped
+        # (2026-07-22) -- this test predates that and was never updated.
+        db.update_character(user_id, level=99)
         sink = []
         await bot._do_show_level_menu(FakeUpdate(user_id, "", sink))
         self.assertIn("Max level reached", sink[-1])
