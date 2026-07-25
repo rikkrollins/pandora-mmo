@@ -49,6 +49,22 @@ RECIPES = {
         "result_item": "longsword", "result_qty": 1,
         "ability": "strength", "dc": 13, "profession": "blacksmithing",
     },
+    # Blacksmithing progression (2026-07-25): a real easy-to-hard curve
+    # within one profession, same "the more you do it, the better you
+    # get" practiced_bonus mechanic rewarding sticking with it -- an
+    # early cheap piece, the existing mid-tier longsword above, and a
+    # genuinely hard high-DC armor piece, all from the same iron_ore
+    # mining already gathers.
+    "rusty_dagger": {
+        "materials": {"iron_ore": 1},
+        "result_item": "rusty_dagger", "result_qty": 1,
+        "ability": "strength", "dc": 8, "profession": "blacksmithing",
+    },
+    "chain_shirt": {
+        "materials": {"iron_ore": 5},
+        "result_item": "chain_shirt", "result_qty": 1,
+        "ability": "strength", "dc": 16, "profession": "blacksmithing",
+    },
 }
 
 

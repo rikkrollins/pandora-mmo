@@ -2,6 +2,18 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.25] — Quest/mission rewards now shared with the whole party
+
+Completing a story quest, board quest, or branching quest choice no
+longer only rewards whoever turned it in — every other real party
+member physically with you (including recruited/autonomous AI
+companions) now gets the same full XP and gold, so the whole party
+levels together. Party members off elsewhere still get a 50% share of
+both, same convention combat XP already used for absent members.
+Also: two new blacksmithing recipes (Rusty Dagger, easy; Chain Shirt,
+hard) round out blacksmithing's difficulty curve alongside the
+existing Longsword.
+
 ## [1.27.24] — Fix: party revival at the shrine now costs a flat 100
 
 Praying for the whole fallen party at once was accidentally charging

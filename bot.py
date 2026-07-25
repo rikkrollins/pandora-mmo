@@ -2694,6 +2694,63 @@ async def _award_xp_and_announce_level_up(update_like, telegram_user_id: int, am
     return after
 
 
+async def _share_quest_rewards_with_party(
+    update_like, character: dict, telegram_user_id: int, reward_xp: int, reward_gold: int = 0,
+) -> None:
+    """
+    Per Coffee (2026-07-25: "when doing quests and missions give the
+    party experience for it too - i need the AI party progressing with
+    us" / "all players that are active in the party shud be gettin the
+    exp and reward from the tasks the party is completing... this way
+    the party progresses together at the same rate" / "inactive players
+    shud get 50% exp and 50% the gold") -- quest/mission rewards
+    previously only ever landed on whoever personally completed the
+    objective, so the rest of the party (human or AI) never progressed
+    from story/board-quest completions at all, only from combat kills
+    (_award_victory_xp already shares those, including the same
+    present-vs-absent split this mirrors).
+
+    Every other real party_id member physically present right now
+    (_get_real_party_combatants -- same presence+party_id scoping
+    combat itself uses; AI companions included, per the design
+    philosophy that an AI-driven party member plays under the same
+    rules as a human one) gets the SAME full reward_xp/reward_gold, not
+    split -- the party progresses together at the same rate, not by
+    dividing a fixed pot thinner per member. Any other real party_id
+    member who ISN'T physically here right now (off resting, at a shop,
+    elsewhere) still gets INACTIVE_PARTY_XP_SHARE (50%) of both, same
+    "reward the party, not just whoever's standing in this exact spot"
+    principle _award_victory_xp already established for combat XP.
+    """
+    if character is None or (reward_xp <= 0 and reward_gold <= 0):
+        return
+    present = _get_real_party_combatants(character)
+    present_ids = {p["telegram_user_id"] for p in present}
+    for member in present:
+        if member["telegram_user_id"] == telegram_user_id:
+            continue
+        if reward_xp:
+            await _award_xp_and_announce_level_up(update_like, member["telegram_user_id"], reward_xp)
+        if reward_gold:
+            fresh = db.get_character(member["telegram_user_id"])
+            db.update_character(member["telegram_user_id"], gold=fresh["gold"] + reward_gold)
+
+    party_id = character.get("party_id")
+    if not party_id:
+        return
+    for member in db.get_party_members_by_id(party_id):
+        member_id = member["telegram_user_id"]
+        if member_id == telegram_user_id or member_id in present_ids:
+            continue
+        if reward_xp:
+            bonus_xp = max(int(reward_xp * INACTIVE_PARTY_XP_SHARE), 1)
+            await _award_xp_and_announce_level_up(update_like, member_id, bonus_xp)
+        if reward_gold:
+            bonus_gold = max(int(reward_gold * INACTIVE_PARTY_XP_SHARE), 1)
+            fresh = db.get_character(member_id)
+            db.update_character(member_id, gold=fresh["gold"] + bonus_gold)
+
+
 def _award_victory_xp(session: sessions.Session) -> tuple[str, list[str]]:
     """
     Awards real XP (from the defeated monster's real 5E-sourced XP value)
@@ -6056,8 +6113,10 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
     if reward_xp:
         await _award_xp_and_announce_level_up(update_like, telegram_user_id, reward_xp)
     if reward_gold:
-        character = db.get_character(telegram_user_id)
-        db.update_character(telegram_user_id, gold=character["gold"] + reward_gold)
+        fresh = db.get_character(telegram_user_id)
+        db.update_character(telegram_user_id, gold=fresh["gold"] + reward_gold)
+    if reward_xp or reward_gold:
+        await _share_quest_rewards_with_party(update_like, character, telegram_user_id, reward_xp, reward_gold)
     if reward_item:
         db.add_item(telegram_user_id, reward_item, 1)
 
@@ -6152,6 +6211,9 @@ async def _check_board_quest_turnin(update_like, telegram_user_id: int, location
         await _award_xp_and_announce_level_up(update_like, telegram_user_id, board_quest["reward_xp"])
         character = db.get_character(telegram_user_id)
         db.update_character(telegram_user_id, gold=character["gold"] + board_quest["reward_gold"])
+        await _share_quest_rewards_with_party(
+            update_like, character, telegram_user_id, board_quest["reward_xp"], board_quest["reward_gold"],
+        )
         db.increment_board_quests_completed(telegram_user_id)
         await _safe_send(
             update_like,
@@ -6401,6 +6463,7 @@ async def _do_resolve_quest_choice(update: Update, text: str) -> None:
     await _award_xp_and_announce_level_up(update, telegram_user_id, chosen["reward_xp"])
     fresh = db.get_character(telegram_user_id)
     db.update_character(telegram_user_id, gold=fresh["gold"] + chosen["reward_gold"])
+    await _share_quest_rewards_with_party(update, fresh, telegram_user_id, chosen["reward_xp"], chosen["reward_gold"])
     if chosen.get("faction_id") and chosen.get("faction_delta"):
         _adjust_faction_standing(telegram_user_id, chosen["faction_id"], chosen["faction_delta"])
 
