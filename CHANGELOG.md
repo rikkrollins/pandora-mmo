@@ -2,6 +2,12 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.20] — Some water in the world isn't just water
+
+Added a real, undisclosed effect to certain water sources in the
+world — the game will never tell you which ones, or confirm anything
+happened either way. You'll have to find out for yourself.
+
 ## [1.27.19] — Pray at the shrine to revive your whole party at once
 
 Praying at the shrine with more than one fallen party member and no

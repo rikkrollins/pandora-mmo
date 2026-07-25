@@ -10783,6 +10783,44 @@ HOLLOW_STUMP_SHRINE_OFFERING_COST = 100
 HOLLOW_STUMP_SHRINE_BLESSING_COST = 50
 
 
+async def _do_drink_water(update: Update) -> None:
+    """
+    Per Coffee (2026-07-24): "make spots in the game with 'holy water'
+    so party can heal - jus suggest there is water dont tell them if
+    its holy or not they have to find out." A location opts in via a
+    plain "healing_water": true flag never mentioned in its own
+    description/interactable text -- that's the whole point. The
+    Weeping Well is the first real one, already primed by its own
+    "strange warmth" mystery quest (the_weeping_wells_secret). The
+    narration is identical whether or not anything actually happened --
+    a player only ever finds out by noticing their own HP change (or
+    not) afterward. Limited to once per rest via the same feature_uses/
+    use_feature pattern Arcane Recovery already uses, so this can't
+    become a free substitute for potions/the shrine. Heals the same
+    real dice as an ordinary healing potion (heal_dice), not an
+    invented number.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    location = cl.get_location(CAMPAIGN, character["current_location"])
+    if location is None or not location.get("healing_water"):
+        await update.effective_chat.send_message(
+            "There's no water to drink here.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if db.get_feature_uses(update.effective_user.id, "healing_water") < 1:
+        db.use_feature(update.effective_user.id, "healing_water")
+        heal_dice = items_module.get_item("healing_potion")["heal_dice"]
+        healed = min(roll_damage(heal_dice)["total"], character["hp_max"] - character["hp_current"])
+        if healed > 0:
+            db.update_character(update.effective_user.id, hp_current=character["hp_current"] + healed)
+    await _safe_send(update, f"💧 **{character['name']}** cups a handful of water and drinks.")
+
+
 async def _do_give_offering(update: Update, text: str) -> None:
     """
     Per Coffee (2026-07-24): "a local church we can go to pray and give
@@ -13268,6 +13306,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_use_item(update, intent.get("raw_text", text))
     elif action == "give_offering":
         await _do_give_offering(update, intent.get("raw_text", text))
+    elif action == "drink_water":
+        await _do_drink_water(update)
     elif action == "equip_item":
         await _do_equip_item(update, intent.get("raw_text", text))
     elif action == "auto_equip":

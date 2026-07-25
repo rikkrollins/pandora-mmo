@@ -542,6 +542,7 @@
         "npcs": [
           "theron_the_wanderer"
         ],
+        "healing_water": true,
         "interactables": {
           "wells_rim": {
             "name": "the well's warm stone rim",
@@ -550,6 +551,10 @@
           "door_carvings": {
             "name": "carvings ringing the sealed stone door",
             "description": "Spirals cut deep into the stone, none of them repeating exactly, all of them circling inward toward the door itself."
+          },
+          "well_water": {
+            "name": "the water sitting still at the bottom of the well",
+            "description": "Clear all the way down, with nothing floating in it and nothing growing on its walls -- water that's sat this long anywhere else would be thick with algae by now."
           }
         }
       },

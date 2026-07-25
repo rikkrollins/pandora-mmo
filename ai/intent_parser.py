@@ -1123,6 +1123,16 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     ):
         return {**base, "action": "give_offering"}
 
+    # drink_water (2026-07-24, per Coffee: "make spots in the game with
+    # 'holy water' ... jus suggest there is water dont tell them if its
+    # holy or not they have to find out"): a real, undisclosed effect
+    # only some water sources in the world actually have -- bot.py's
+    # _do_drink_water is the one place that decides whether THIS
+    # location's water does anything, so this fast-path only ever needs
+    # to recognize the plain verb, never which location is special.
+    if re.search(r"\bdrink(?:s|ing)?\b", lowered) and "water" in lowered:
+        return {**base, "action": "drink_water"}
+
     unconditional_shove_words = ["shove", "tackle", "trip", "push over"]
     knock_down_phrasing = "knock" in lowered and ("prone" in lowered or "down" in lowered)
     if any(w in lowered for w in unconditional_shove_words) or knock_down_phrasing:
@@ -1344,6 +1354,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "check_guild_quest", "dice_game", "fortunes_wheel", "set_alignment", "message_ai",
                 "skill_tree", "challenge_duel", "accept_duel", "check_market", "join_battle",
                 "replay_intro", "visual_map", "rebirth", "choose_hybrid", "give_offering",
+                "drink_water",
             )
             if parsed["action"] not in valid_actions:
                 return fallback
