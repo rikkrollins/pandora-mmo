@@ -95,7 +95,7 @@ from rules.leveling import (
     magic_penetration_pct, CLASS_SUBCLASSES, COMBAT_SUBCLASS_NAMES, COMBAT_SUBCLASS_DAMAGE_BONUS_PCT,
     THIEF_SUBCLASS_STEAL_BONUS, TOTEM_WARRIOR_SUBCLASS_NAME, LIFE_SUBCLASS_HEAL_BONUS,
     UTILITY_SUBCLASS_ABILITY_CHECK_BONUS, UTILITY_SUBCLASS_CHECK_BONUS_VALUE,
-    rebirth_hp_max,
+    rebirth_hp_max, power_scale_ratio,
 )
 from rules.proficiency import practiced_bonus, MAX_PRACTICE_BONUS
 
@@ -155,6 +155,27 @@ def _weapon_for_attacker(attacker: dict) -> dict:
                 "name": item["name"],
                 "damage_type": item.get("damage_type", "physical"),
             }
+    # Monster/echo natural attack (2026-07-26, monster/area rebalance):
+    # every monster template used to deal DEFAULT_WEAPON's flat 1d8
+    # unconditionally, with zero scaling by anything -- confirmed the
+    # real reason a level-9 player could one-shot the first dungeon's
+    # own boss (goblin_boss: 21 HP) with a single hit even before
+    # accounting for the 2026-07-25 player-HP rescale. Monster templates
+    # now carry a real, tier-scaled damage_dice/damage_bonus (see the
+    # 2026-07-26 campaign.json rebalance pass and _build_echo_enemy's
+    # matching scale-up) -- copied onto the live participant dict by
+    # _do_start_combat/_build_echo_enemy, checked here before falling
+    # back to DEFAULT_WEAPON so a monster with no such data (e.g.
+    # the_unasked, deliberately left off the normal curve) is unaffected.
+    if attacker.get("damage_dice"):
+        return {
+            "ability": "strength",
+            "damage_dice": attacker["damage_dice"],
+            "damage_bonus": attacker.get("damage_bonus", 0),
+            "weapon_category": "natural",
+            "name": "attack",
+            "damage_type": attacker.get("damage_type", "physical"),
+        }
     return DEFAULT_WEAPON
 
 
@@ -4356,6 +4377,14 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 "resistances": template.get("resistances", []),
                 "vulnerabilities": template.get("vulnerabilities", []),
                 "immunities": template.get("immunities", []),
+                # Real, tier-scaled natural attack (2026-07-26 monster/
+                # area rebalance) -- see _weapon_for_attacker's matching
+                # comment. Only set for monsters the rebalance actually
+                # touched; a monster with neither field (the_unasked,
+                # deliberately untouched) safely falls back to
+                # DEFAULT_WEAPON's flat 1d8, same as always.
+                "damage_dice": template.get("damage_dice"),
+                "damage_bonus": template.get("damage_bonus", 0),
             })
         sides = {p["telegram_user_id"]: "party" for p in party}
         for enemy in enemies:
@@ -4452,6 +4481,12 @@ def _build_echo_enemy(monster_key: str, tier: int, index: int, total: int) -> di
         "life_drain": template.get("life_drain", False),
         "resistances": resistances,
         "is_echo_trial": True,
+        # Real tier-scaled damage (2026-07-26 monster/area rebalance) --
+        # same stat_mult already applied to armor_class/hp_max above, so
+        # an echo's threat keeps pace with its own inflated HP instead of
+        # the fight just taking longer with no extra bite.
+        "damage_dice": template.get("damage_dice"),
+        "damage_bonus": round(template.get("damage_bonus", 0) * stat_mult),
     }
 
 
@@ -4849,6 +4884,12 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                 smite_dmg = roll_damage(
                     DIVINE_SMITE_DICE_BY_SLOT_LEVEL[1], critical=result["critical_hit"]
                 )["total"]
+                # Real player-power rebalance (2026-07-26): this bonus
+                # damage is applied here in bot.py, outside resolve_attack,
+                # so it doesn't automatically pick up that function's own
+                # power_scale_ratio multiplier -- applied explicitly here
+                # too, same as breath weapon below.
+                smite_dmg = int(smite_dmg * power_scale_ratio(attacker.get("level", 1), attacker.get("rebirth_count", 0)))
                 result["damage_dealt"] += smite_dmg
                 target["hp_current"] = max(target["hp_current"] - smite_dmg, 0)
                 result["defender_hp_remaining"] = target["hp_current"]
@@ -9082,6 +9123,10 @@ async def _do_second_wind(update: Update) -> None:
 
     heal_dice = "2d10" if _has_skill_upgrade(character, "hardened_resolve") else "1d10"
     healed = roll_damage(heal_dice, modifier=character["level"])["total"]
+    # Real player-power rebalance (2026-07-26): keeps self-healing
+    # abilities in step with the same rescaled HP pools resolve_heal_
+    # spell now scales for real spellcasting.
+    healed = int(healed * power_scale_ratio(character["level"], character.get("rebirth_count", 0)))
     new_hp = min(character["hp_max"], character["hp_current"] + healed)
     actual_healed = new_hp - character["hp_current"]
     db.update_character(update.effective_user.id, hp_current=new_hp)
@@ -9685,10 +9730,14 @@ async def _do_breath_weapon(update: Update) -> None:
 
         dice_count = breath_weapon_dice_count(character["level"])
         dmg = roll_damage(f"{dice_count}d6")
+        # Real player-power rebalance (2026-07-26): same power_scale_ratio
+        # as weapon/spell/Divine Smite damage above -- this rolls its own
+        # damage directly rather than through resolve_attack/spells.py.
+        scaled_total = int(dmg["total"] * power_scale_ratio(character["level"], character.get("rebirth_count", 0)))
         save_dc = 8 + character["proficiency_bonus"] + ability_modifier(character["constitution"])
         save_roll = roll_d20() + ability_modifier(target.get("dexterity", 10))
         save_success = save_roll >= save_dc
-        damage_dealt = dmg["total"] // 2 if save_success else dmg["total"]
+        damage_dealt = scaled_total // 2 if save_success else scaled_total
         target["hp_current"] = max(target["hp_current"] - damage_dealt, 0)
         _sync_player_to_db(target)
         db.use_feature(update.effective_user.id, "breath_weapon")
@@ -9829,6 +9878,8 @@ async def _do_bardic_inspiration(update: Update, target_text: str) -> None:
     target_character = _find_party_target_by_name(target_text) or character
     inspiration_die = 8 if _has_skill_upgrade(character, "greater_inspiration") else 6
     boost = roll(1, inspiration_die)[0]
+    # Real player-power rebalance (2026-07-26): same healing-keeps-pace fix as above.
+    boost = int(boost * power_scale_ratio(character["level"], character.get("rebirth_count", 0)))
     new_hp = min(target_character["hp_max"], target_character["hp_current"] + boost)
     actual_boost = new_hp - target_character["hp_current"]
     db.update_character(target_character["telegram_user_id"], hp_current=new_hp)
@@ -9875,6 +9926,9 @@ async def _do_lay_on_hands(update: Update, target_text: str) -> None:
 
     pool_per_level = 6 if _has_skill_upgrade(character, "greater_mercy") else 5
     pool = pool_per_level * character["level"]
+    # Real player-power rebalance (2026-07-26): same healing-keeps-pace
+    # fix as Second Wind/resolve_heal_spell above.
+    pool = int(pool * power_scale_ratio(character["level"], character.get("rebirth_count", 0)))
     target_character = _find_party_target_by_name(target_text) or character
     new_hp = min(target_character["hp_max"], target_character["hp_current"] + pool)
     actual_healed = new_hp - target_character["hp_current"]
@@ -14197,7 +14251,7 @@ async def roster_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
-    switched = db.switch_character(telegram_user_id, character_id)
+    switched = _switch_character_with_party_carryover(telegram_user_id, character_id)
     await _safe_send(
         update,
         f"🎭 Switched to **{switched['name']}** the {switched['race']} {switched['char_class']} "
@@ -14224,6 +14278,44 @@ def _find_own_character_by_name_fragment(telegram_user_id: int, fragment: str) -
     return None
 
 
+def _switch_character_with_party_carryover(telegram_user_id: int, character_id: int) -> dict | None:
+    """
+    Makes character_id the active character for telegram_user_id, and
+    carries over the OLD active character's party seat to the new one.
+
+    Party seat carries over on switch (2026-07-25, per Coffee: "how
+    about we swap out our current character from the party when we
+    'switch character' so the party stays the same size?"): a real
+    confusion this closes -- switching characters used to leave your
+    OLD character stuck occupying your party seat while your NEW one
+    had none at all, so "my AI party isn't showing up" really meant
+    "my other character is still the one actually in it." Only
+    applies when the incoming character has no party of their own
+    already (never silently overrides a real, separate membership),
+    and only ever moves ONE seat -- net zero change to party size.
+
+    Real live bug (2026-07-26, Coffee: "I switched my player and now
+    they are no longer in my party"): this carryover logic originally
+    only lived inline inside _do_switch_character (the free-text path)
+    -- roster_menu_callback (the tap-menu "Switch Characters" button
+    Coffee explicitly asked for on 2026-07-20) called db.switch_character
+    directly, with no carryover at all, silently dropping the party
+    seat on every button-tap switch. Factored out here so BOTH real
+    switch-character entry points share the exact same fix, instead of
+    the free-text path being correct while the button path quietly
+    wasn't.
+    """
+    previously_active = db.get_character(telegram_user_id)
+    switched = db.switch_character(telegram_user_id, character_id)
+    if (previously_active and previously_active.get("party_id")
+            and switched and not switched.get("party_id")
+            and previously_active["character_id"] != switched["character_id"]):
+        db.update_character_by_id(switched["character_id"], party_id=previously_active["party_id"])
+        db.update_character_by_id(previously_active["character_id"], party_id=None)
+        switched = db.get_character(telegram_user_id)
+    return switched
+
+
 async def _do_switch_character(update: Update, text: str) -> None:
     match = _find_own_character_by_name_fragment(update.effective_user.id, text)
     if match is None:
@@ -14243,24 +14335,7 @@ async def _do_switch_character(update: Update, text: str) -> None:
         )
         return
 
-    # Party seat carries over on switch (2026-07-25, per Coffee: "how
-    # about we swap out our current character from the party when we
-    # 'switch character' so the party stays the same size?"): a real
-    # confusion this closes -- switching characters used to leave your
-    # OLD character stuck occupying your party seat while your NEW one
-    # had none at all, so "my AI party isn't showing up" really meant
-    # "my other character is still the one actually in it." Only
-    # applies when the incoming character has no party of their own
-    # already (never silently overrides a real, separate membership),
-    # and only ever moves ONE seat -- net zero change to party size.
-    previously_active = db.get_character(update.effective_user.id)
-    switched = db.switch_character(update.effective_user.id, match["character_id"])
-    if (previously_active and previously_active.get("party_id")
-            and switched and not switched.get("party_id")
-            and previously_active["character_id"] != switched["character_id"]):
-        db.update_character_by_id(switched["character_id"], party_id=previously_active["party_id"])
-        db.update_character_by_id(previously_active["character_id"], party_id=None)
-        switched = db.get_character(update.effective_user.id)
+    switched = _switch_character_with_party_carryover(update.effective_user.id, match["character_id"])
     await _safe_send(
         update,
         f"🎭 Switched to **{switched['name']}** the {switched['race']} {switched['char_class']} "
@@ -16109,11 +16184,37 @@ async def dev_topic_photo_handler(update: Update, context: ContextTypes.DEFAULT_
 
     os.makedirs(DEV_SCREENSHOTS_DIR, exist_ok=True)
     largest_photo = update.message.photo[-1]
-    file = await context.bot.get_file(largest_photo.file_id)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     filename = f"{timestamp}_{largest_photo.file_unique_id}.jpg"
     filepath = os.path.join(DEV_SCREENSHOTS_DIR, filename)
-    await file.download_to_drive(filepath)
+
+    # Real live bug (2026-07-26, Coffee: a screenshot+caption reporting
+    # a bad item image never got logged at all): get_file/download_to_
+    # drive had no retry, unlike every other Telegram call in this file
+    # (see _safe_send's own "[message] send failed, retrying" pattern)
+    # -- a transient telegram.error.TimedOut here (confirmed live,
+    # httpx.ReadTimeout under the hood) crashed the WHOLE handler before
+    # the caption was ever even logged, so the real work (and the real
+    # feedback in the caption) was silently lost, even though the global
+    # error handler caught the crash and told Coffee "something broke."
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            file = await context.bot.get_file(largest_photo.file_id)
+            await file.download_to_drive(filepath)
+            break
+        except TelegramError as e:
+            if attempt == max_attempts - 1:
+                logger.warning(f"[dev_topic_image] download failed again, giving up: {e!r}")
+                await _safe_send(
+                    update,
+                    "Couldn't download that screenshot just now (a Telegram API call kept timing "
+                    "out) — mind resending it?",
+                    thread_id=config.TOPIC_DEVELOPMENT_ID,
+                )
+                return
+            logger.warning(f"[dev_topic_image] download failed, retrying: {e!r}")
+            await asyncio.sleep(2)
 
     caption = (update.message.caption or "").strip()
     logger.info(f"[dev_topic_image] user={update.effective_user.id} path={filepath!r} caption={caption!r}")

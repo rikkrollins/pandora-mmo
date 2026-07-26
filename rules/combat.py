@@ -8,7 +8,7 @@ results computed here, never decides them.
 from rules.dice import roll_d20, roll_attack, roll_damage, ability_modifier
 from rules.leveling import (
     sneak_attack_dice_count, rage_damage_bonus, wild_shape_damage_bonus, magic_penetration_pct,
-    COMBAT_SUBCLASS_NAMES, COMBAT_SUBCLASS_DAMAGE_BONUS_PCT,
+    COMBAT_SUBCLASS_NAMES, COMBAT_SUBCLASS_DAMAGE_BONUS_PCT, power_scale_ratio,
 )
 from class_features import is_weapon_proficient
 from guilds import FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT
@@ -291,6 +291,21 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         # the subclass bonus just above.
         if attacker.get("guild") == "forge_guild":
             damage_dealt = int(damage_dealt * (1 + FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT / 100))
+        # Real player-power rebalance (2026-07-26, per Coffee: "rebalance
+        # everything... all skills and abilities and magic and spells and
+        # cantrips"): monster HP/damage were already rescaled to match
+        # EVOLUTION_HP_MULTIPLIER, but a real character's own weapon
+        # damage was never touched -- every weapon's damage_bonus tops
+        # out at +3 (items.py's rarest legendary reward) game-wide, so
+        # by late-game/rebirth tiers gear progression had gone
+        # completely flat relative to monster HP. Scales a REAL
+        # character's own weapon damage by the same ratio methodology
+        # already used for monsters -- gated on char_class so a monster/
+        # NPC attacker (no char_class field at all) is never touched,
+        # since monsters already carry their own pre-scaled damage_dice/
+        # damage_bonus directly in campaign.json.
+        if attacker.get("char_class"):
+            damage_dealt = int(damage_dealt * power_scale_ratio(attacker.get("level", 1), attacker.get("rebirth_count", 0)))
         if defender.get("raging"):
             damage_dealt = damage_dealt // 2
         # Hybrid Barbarian (2026-07-22): a chance-gated, scaled-down

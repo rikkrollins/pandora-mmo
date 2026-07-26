@@ -2219,9 +2219,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             result_low = resolve_attack(attacker_low, defender_low, weapon, advantage=True)
             defender_high = {"name": "Target", "armor_class": 1, "hp_current": 200}
             result_high = resolve_attack(attacker_high, defender_high, weapon, advantage=True)
-        # Fixed die value 4: level 1 = 1 sneak die (4), level 10 = 5 sneak dice (20) -- a +16 delta,
-        # with everything else (weapon roll, ability mod, hit/crit) identical between the two calls.
-        self.assertEqual(result_high["damage_dealt"] - result_low["damage_dealt"], 16)
+        # Fixed die value 4: level 1 = 1 sneak die (4) + weapon (4) = 8 pre-scale,
+        # level 10 = 5 sneak dice (20) + weapon (4) = 24 pre-scale -- a +16 delta
+        # before any player-power scaling. The 2026-07-26 rebalance (per Coffee:
+        # "rebalance everything... all skills and abilities") multiplies a real
+        # character's own damage by power_scale_ratio(level, rebirth_count), so
+        # each side now also scales by its OWN attacker's ratio -- recomputed
+        # here via the real function rather than hardcoded, so this stays valid
+        # if the ratio formula itself is ever retuned again.
+        from rules.leveling import power_scale_ratio
+        expected_low = int(8 * power_scale_ratio(1, 0))
+        expected_high = int(24 * power_scale_ratio(10, 0))
+        self.assertEqual(result_low["damage_dealt"], expected_low)
+        self.assertEqual(result_high["damage_dealt"], expected_high)
 
     # -- Board quest completion bugs (2026-07-16, task #93) -------------
     def test_completed_board_quest_frees_a_slot_for_a_fresh_one(self):

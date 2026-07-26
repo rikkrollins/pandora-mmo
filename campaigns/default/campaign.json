@@ -3731,135 +3731,159 @@
       "dexterity": 14,
       "strength": 8,
       "armor_class": 13,
-      "hp_max": 7,
+      "hp_max": 25,
       "proficiency_bonus": 2,
-      "xp_reward": 50
+      "xp_reward": 50,
+      "damage_dice": "1d8",
+      "damage_bonus": 12
     },
     "goblin_shaman": {
       "name": "Goblin Shaman",
       "dexterity": 13,
       "strength": 8,
       "armor_class": 12,
-      "hp_max": 14,
+      "hp_max": 57,
       "proficiency_bonus": 2,
       "xp_reward": 100,
-      "on_hit_condition": "silenced"
+      "on_hit_condition": "silenced",
+      "damage_dice": "1d8",
+      "damage_bonus": 14
     },
     "goblin_boss": {
       "name": "Goblin Boss",
       "dexterity": 15,
       "strength": 12,
       "armor_class": 15,
-      "hp_max": 21,
+      "hp_max": 93,
       "proficiency_bonus": 2,
       "xp_reward": 200,
       "is_boss": true,
-      "on_hit_condition": "paralyzed"
+      "on_hit_condition": "paralyzed",
+      "damage_dice": "1d8",
+      "damage_bonus": 15
     },
     "wolf": {
       "name": "Wolf",
       "dexterity": 15,
       "strength": 12,
       "armor_class": 13,
-      "hp_max": 11,
+      "hp_max": 36,
       "proficiency_bonus": 2,
       "xp_reward": 50,
-      "on_hit_condition": "frightened"
+      "on_hit_condition": "frightened",
+      "damage_dice": "1d8",
+      "damage_bonus": 10
     },
     "giant_spider": {
       "name": "Giant Spider",
       "dexterity": 16,
       "strength": 14,
       "armor_class": 14,
-      "hp_max": 26,
+      "hp_max": 108,
       "proficiency_bonus": 3,
       "xp_reward": 200,
-      "on_hit_condition": "poisoned"
+      "on_hit_condition": "poisoned",
+      "damage_dice": "1d8",
+      "damage_bonus": 14
     },
     "crystal_spider": {
       "name": "Crystal Spider",
       "dexterity": 15,
       "strength": 10,
       "armor_class": 15,
-      "hp_max": 18,
+      "hp_max": 77,
       "proficiency_bonus": 2,
       "xp_reward": 200,
-      "on_hit_condition": "poisoned"
+      "on_hit_condition": "poisoned",
+      "damage_dice": "1d8",
+      "damage_bonus": 15
     },
     "shadow_wisp": {
       "name": "Shadow Wisp",
       "dexterity": 18,
       "strength": 6,
       "armor_class": 16,
-      "hp_max": 22,
+      "hp_max": 101,
       "proficiency_bonus": 3,
       "xp_reward": 150,
-      "on_hit_condition": "blinded"
+      "on_hit_condition": "blinded",
+      "damage_dice": "1d8",
+      "damage_bonus": 16
     },
     "the_unspoken": {
       "name": "The Unspoken",
       "dexterity": 16,
       "strength": 14,
       "armor_class": 16,
-      "hp_max": 42,
+      "hp_max": 200,
       "proficiency_bonus": 3,
       "xp_reward": 350,
       "is_boss": true,
-      "on_hit_condition": "silenced"
+      "on_hit_condition": "silenced",
+      "damage_dice": "1d8",
+      "damage_bonus": 17
     },
     "the_waking_ember": {
       "name": "The Waking Ember",
       "dexterity": 12,
       "strength": 18,
       "armor_class": 18,
-      "hp_max": 58,
+      "hp_max": 281,
       "proficiency_bonus": 4,
       "xp_reward": 450,
       "is_boss": true,
       "on_hit_condition": "paralyzed",
-      "life_drain": true
+      "life_drain": true,
+      "damage_dice": "1d8",
+      "damage_bonus": 17
     },
     "the_waiting_shape": {
       "name": "The Waiting Shape",
       "dexterity": 14,
       "strength": 18,
       "armor_class": 17,
-      "hp_max": 65,
+      "hp_max": 318,
       "proficiency_bonus": 4,
       "xp_reward": 500,
       "is_boss": true,
       "on_hit_condition": "frightened",
-      "life_drain": true
+      "life_drain": true,
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "the_unrepeating": {
       "name": "The Unrepeating",
       "dexterity": 16,
       "strength": 20,
       "armor_class": 19,
-      "hp_max": 95,
+      "hp_max": 463,
       "proficiency_bonus": 5,
       "xp_reward": 700,
       "is_boss": true,
       "on_hit_condition": "frightened",
-      "life_drain": true
+      "life_drain": true,
+      "damage_dice": "1d8",
+      "damage_bonus": 17
     },
     "colosseum_champion": {
       "name": "The Colosseum Champion",
       "dexterity": 14,
       "strength": 17,
       "armor_class": 16,
-      "hp_max": 45,
+      "hp_max": 216,
       "proficiency_bonus": 3,
       "xp_reward": 250,
       "is_boss": true,
-      "on_hit_condition": "frightened"
+      "on_hit_condition": "frightened",
+      "damage_dice": "1d8",
+      "damage_bonus": 17
     },
     "verge_wraith": {
       "name": "Verge Wraith",
       "dexterity": 16,
       "strength": 10,
       "armor_class": 14,
-      "hp_max": 30,
+      "hp_max": 149,
       "proficiency_bonus": 2,
       "xp_reward": 400,
       "on_hit_condition": "frightened",
@@ -3868,26 +3892,30 @@
       ],
       "vulnerabilities": [
         "radiant"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "bone_legionnaire": {
       "name": "Bone Legionnaire",
       "dexterity": 12,
       "strength": 15,
       "armor_class": 15,
-      "hp_max": 35,
+      "hp_max": 174,
       "proficiency_bonus": 2,
       "xp_reward": 450,
       "vulnerabilities": [
         "fire"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "cairn_watcher": {
       "name": "Cairn Watcher",
       "dexterity": 10,
       "strength": 14,
       "armor_class": 16,
-      "hp_max": 40,
+      "hp_max": 198,
       "proficiency_bonus": 3,
       "xp_reward": 500,
       "resistances": [
@@ -3895,14 +3923,16 @@
       ],
       "vulnerabilities": [
         "radiant"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "the_verge_warden": {
       "name": "The Verge Warden",
       "dexterity": 15,
       "strength": 19,
       "armor_class": 19,
-      "hp_max": 95,
+      "hp_max": 471,
       "proficiency_bonus": 4,
       "xp_reward": 1400,
       "is_boss": true,
@@ -3914,14 +3944,16 @@
       ],
       "vulnerabilities": [
         "radiant"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "choir_remnant": {
       "name": "Choir Remnant",
       "dexterity": 14,
       "strength": 12,
       "armor_class": 15,
-      "hp_max": 45,
+      "hp_max": 223,
       "proficiency_bonus": 3,
       "xp_reward": 550,
       "on_hit_condition": "silenced",
@@ -3930,14 +3962,16 @@
       ],
       "vulnerabilities": [
         "lightning"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "still_machinery_sentinel": {
       "name": "Still Machinery Sentinel",
       "dexterity": 8,
       "strength": 20,
       "armor_class": 19,
-      "hp_max": 70,
+      "hp_max": 347,
       "proficiency_bonus": 3,
       "xp_reward": 750,
       "resistances": [
@@ -3945,14 +3979,16 @@
       ],
       "vulnerabilities": [
         "lightning"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "voiceless_warden": {
       "name": "Voiceless Warden",
       "dexterity": 12,
       "strength": 17,
       "armor_class": 18,
-      "hp_max": 85,
+      "hp_max": 422,
       "proficiency_bonus": 4,
       "xp_reward": 950,
       "on_hit_condition": "frightened",
@@ -3961,14 +3997,16 @@
       ],
       "vulnerabilities": [
         "radiant"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "the_undertone": {
       "name": "The Undertone",
       "dexterity": 17,
       "strength": 20,
       "armor_class": 20,
-      "hp_max": 120,
+      "hp_max": 596,
       "proficiency_bonus": 5,
       "xp_reward": 2200,
       "is_boss": true,
@@ -3980,14 +4018,16 @@
       ],
       "vulnerabilities": [
         "lightning"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "hollow_watcher": {
       "name": "Hollow Watcher",
       "dexterity": 16,
       "strength": 14,
       "armor_class": 17,
-      "hp_max": 60,
+      "hp_max": 298,
       "proficiency_bonus": 4,
       "xp_reward": 1000,
       "on_hit_condition": "blinded",
@@ -3996,14 +4036,16 @@
       ],
       "vulnerabilities": [
         "psychic"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "turning_stair_guardian": {
       "name": "Turning Stair Guardian",
       "dexterity": 15,
       "strength": 18,
       "armor_class": 19,
-      "hp_max": 100,
+      "hp_max": 497,
       "proficiency_bonus": 4,
       "xp_reward": 1300,
       "on_hit_condition": "prone",
@@ -4012,14 +4054,16 @@
       ],
       "vulnerabilities": [
         "force"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "loom_warden": {
       "name": "Loom Warden",
       "dexterity": 13,
       "strength": 16,
       "armor_class": 18,
-      "hp_max": 110,
+      "hp_max": 546,
       "proficiency_bonus": 4,
       "xp_reward": 1500,
       "resistances": [
@@ -4027,14 +4071,16 @@
       ],
       "vulnerabilities": [
         "radiant"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "the_unbegun": {
       "name": "The Unbegun",
       "dexterity": 18,
       "strength": 22,
       "armor_class": 21,
-      "hp_max": 160,
+      "hp_max": 795,
       "proficiency_bonus": 6,
       "xp_reward": 5000,
       "is_boss": true,
@@ -4047,26 +4093,30 @@
       ],
       "vulnerabilities": [
         "radiant"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "elder_bone_legionnaire": {
       "name": "Elder Bone Legionnaire",
       "dexterity": 13,
       "strength": 17,
       "armor_class": 16,
-      "hp_max": 45,
+      "hp_max": 223,
       "proficiency_bonus": 3,
       "xp_reward": 550,
       "vulnerabilities": [
         "fire"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "bound_verge_wraith": {
       "name": "Bound Verge Wraith",
       "dexterity": 17,
       "strength": 12,
       "armor_class": 15,
-      "hp_max": 38,
+      "hp_max": 188,
       "proficiency_bonus": 3,
       "xp_reward": 500,
       "on_hit_condition": "frightened",
@@ -4075,14 +4125,16 @@
       ],
       "vulnerabilities": [
         "radiant"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "young_cairn_watcher": {
       "name": "Young Cairn Watcher",
       "dexterity": 9,
       "strength": 12,
       "armor_class": 15,
-      "hp_max": 30,
+      "hp_max": 149,
       "proficiency_bonus": 2,
       "xp_reward": 350,
       "resistances": [
@@ -4090,14 +4142,16 @@
       ],
       "vulnerabilities": [
         "radiant"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "elder_choir_remnant": {
       "name": "Elder Choir Remnant",
       "dexterity": 15,
       "strength": 13,
       "armor_class": 16,
-      "hp_max": 55,
+      "hp_max": 273,
       "proficiency_bonus": 3,
       "xp_reward": 650,
       "on_hit_condition": "silenced",
@@ -4106,14 +4160,16 @@
       ],
       "vulnerabilities": [
         "lightning"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "bound_voiceless_warden": {
       "name": "Bound Voiceless Warden",
       "dexterity": 13,
       "strength": 18,
       "armor_class": 19,
-      "hp_max": 95,
+      "hp_max": 472,
       "proficiency_bonus": 4,
       "xp_reward": 1050,
       "on_hit_condition": "frightened",
@@ -4122,14 +4178,16 @@
       ],
       "vulnerabilities": [
         "radiant"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "young_choir_remnant": {
       "name": "Young Choir Remnant",
       "dexterity": 12,
       "strength": 10,
       "armor_class": 14,
-      "hp_max": 35,
+      "hp_max": 174,
       "proficiency_bonus": 2,
       "xp_reward": 400,
       "resistances": [
@@ -4137,14 +4195,16 @@
       ],
       "vulnerabilities": [
         "lightning"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "elder_hollow_watcher": {
       "name": "Elder Hollow Watcher",
       "dexterity": 17,
       "strength": 15,
       "armor_class": 18,
-      "hp_max": 75,
+      "hp_max": 372,
       "proficiency_bonus": 4,
       "xp_reward": 1150,
       "on_hit_condition": "blinded",
@@ -4153,14 +4213,16 @@
       ],
       "vulnerabilities": [
         "psychic"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "bound_loom_warden": {
       "name": "Bound Loom Warden",
       "dexterity": 14,
       "strength": 18,
       "armor_class": 19,
-      "hp_max": 130,
+      "hp_max": 646,
       "proficiency_bonus": 5,
       "xp_reward": 1800,
       "resistances": [
@@ -4168,14 +4230,16 @@
       ],
       "vulnerabilities": [
         "radiant"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "young_turning_stair_guardian": {
       "name": "Young Turning Stair Guardian",
       "dexterity": 13,
       "strength": 14,
       "armor_class": 16,
-      "hp_max": 55,
+      "hp_max": 273,
       "proficiency_bonus": 3,
       "xp_reward": 700,
       "on_hit_condition": "prone",
@@ -4184,176 +4248,212 @@
       ],
       "vulnerabilities": [
         "force"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "veteran_goblin": {
       "name": "Veteran Goblin",
       "dexterity": 15,
       "strength": 10,
       "armor_class": 14,
-      "hp_max": 14,
+      "hp_max": 69,
       "proficiency_bonus": 2,
-      "xp_reward": 100
+      "xp_reward": 100,
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "goblin_shaman_elder": {
       "name": "Elder Goblin Shaman",
       "dexterity": 14,
       "strength": 9,
       "armor_class": 14,
-      "hp_max": 22,
+      "hp_max": 109,
       "proficiency_bonus": 3,
       "xp_reward": 180,
-      "on_hit_condition": "silenced"
+      "on_hit_condition": "silenced",
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "young_goblin": {
       "name": "Young Goblin",
       "dexterity": 12,
       "strength": 7,
       "armor_class": 12,
-      "hp_max": 5,
+      "hp_max": 25,
       "proficiency_bonus": 1,
-      "xp_reward": 30
+      "xp_reward": 30,
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "root_bound_goblin": {
       "name": "Root-Bound Goblin",
       "dexterity": 13,
       "strength": 9,
       "armor_class": 13,
-      "hp_max": 10,
+      "hp_max": 49,
       "proficiency_bonus": 2,
-      "xp_reward": 70
+      "xp_reward": 70,
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "channel_bound_goblin": {
       "name": "Channel-Bound Goblin",
       "dexterity": 13,
       "strength": 9,
       "armor_class": 14,
-      "hp_max": 12,
+      "hp_max": 59,
       "proficiency_bonus": 2,
-      "xp_reward": 90
+      "xp_reward": 90,
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "elder_root_shaman": {
       "name": "Elder Root Shaman",
       "dexterity": 13,
       "strength": 9,
       "armor_class": 14,
-      "hp_max": 20,
+      "hp_max": 99,
       "proficiency_bonus": 3,
       "xp_reward": 160,
-      "on_hit_condition": "poisoned"
+      "on_hit_condition": "poisoned",
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "root_goblin_pup": {
       "name": "Root Goblin Pup",
       "dexterity": 11,
       "strength": 6,
       "armor_class": 11,
-      "hp_max": 4,
+      "hp_max": 20,
       "proficiency_bonus": 1,
-      "xp_reward": 25
+      "xp_reward": 25,
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "brood_spider": {
       "name": "Brood Spider",
       "dexterity": 16,
       "strength": 12,
       "armor_class": 14,
-      "hp_max": 18,
+      "hp_max": 89,
       "proficiency_bonus": 2,
       "xp_reward": 140,
-      "on_hit_condition": "poisoned"
+      "on_hit_condition": "poisoned",
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "current_bound_spider": {
       "name": "Current-Bound Spider",
       "dexterity": 17,
       "strength": 14,
       "armor_class": 15,
-      "hp_max": 30,
+      "hp_max": 148,
       "proficiency_bonus": 3,
       "xp_reward": 220,
-      "on_hit_condition": "poisoned"
+      "on_hit_condition": "poisoned",
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "elder_web_spider": {
       "name": "Elder Web Spider",
       "dexterity": 17,
       "strength": 16,
       "armor_class": 16,
-      "hp_max": 38,
+      "hp_max": 188,
       "proficiency_bonus": 4,
       "xp_reward": 350,
-      "on_hit_condition": "poisoned"
+      "on_hit_condition": "poisoned",
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "spiderling": {
       "name": "Spiderling",
       "dexterity": 14,
       "strength": 8,
       "armor_class": 12,
-      "hp_max": 8,
+      "hp_max": 39,
       "proficiency_bonus": 1,
-      "xp_reward": 40
+      "xp_reward": 40,
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "watchtower_stalker": {
       "name": "Watchtower Stalker",
       "dexterity": 16,
       "strength": 13,
       "armor_class": 14,
-      "hp_max": 16,
+      "hp_max": 79,
       "proficiency_bonus": 2,
       "xp_reward": 90,
-      "on_hit_condition": "frightened"
+      "on_hit_condition": "frightened",
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "alpha_wolf": {
       "name": "Alpha Wolf",
       "dexterity": 16,
       "strength": 15,
       "armor_class": 15,
-      "hp_max": 22,
+      "hp_max": 109,
       "proficiency_bonus": 3,
       "xp_reward": 150,
-      "on_hit_condition": "frightened"
+      "on_hit_condition": "frightened",
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "wolf_pup": {
       "name": "Wolf Pup",
       "dexterity": 13,
       "strength": 9,
       "armor_class": 11,
-      "hp_max": 5,
+      "hp_max": 25,
       "proficiency_bonus": 1,
-      "xp_reward": 30
+      "xp_reward": 30,
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "barrow_bound_wolf": {
       "name": "Barrow-Bound Wolf",
       "dexterity": 16,
       "strength": 14,
       "armor_class": 15,
-      "hp_max": 20,
+      "hp_max": 99,
       "proficiency_bonus": 3,
       "xp_reward": 140,
-      "on_hit_condition": "frightened"
+      "on_hit_condition": "frightened",
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "den_bound_wolf": {
       "name": "Den-Bound Wolf",
       "dexterity": 15,
       "strength": 13,
       "armor_class": 14,
-      "hp_max": 16,
+      "hp_max": 79,
       "proficiency_bonus": 2,
       "xp_reward": 90,
-      "on_hit_condition": "frightened"
+      "on_hit_condition": "frightened",
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "stray_wood_wolf": {
       "name": "Stray Wood Wolf",
       "dexterity": 13,
       "strength": 10,
       "armor_class": 12,
-      "hp_max": 8,
+      "hp_max": 39,
       "proficiency_bonus": 1,
-      "xp_reward": 40
+      "xp_reward": 40,
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "root_wrought_sentinel": {
       "name": "Root-Wrought Sentinel",
       "dexterity": 10,
       "strength": 16,
       "armor_class": 16,
-      "hp_max": 26,
+      "hp_max": 128,
       "proficiency_bonus": 3,
       "xp_reward": 180,
       "resistances": [
@@ -4361,14 +4461,16 @@
       ],
       "vulnerabilities": [
         "lightning"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "deep_root_warden": {
       "name": "Deep Root Warden",
       "dexterity": 11,
       "strength": 18,
       "armor_class": 17,
-      "hp_max": 34,
+      "hp_max": 168,
       "proficiency_bonus": 4,
       "xp_reward": 280,
       "resistances": [
@@ -4376,36 +4478,44 @@
       ],
       "vulnerabilities": [
         "lightning"
-      ]
+      ],
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "pool_wrought_spider": {
       "name": "Pool-Wrought Spider",
       "dexterity": 15,
       "strength": 11,
       "armor_class": 15,
-      "hp_max": 22,
+      "hp_max": 109,
       "proficiency_bonus": 3,
       "xp_reward": 220,
-      "on_hit_condition": "poisoned"
+      "on_hit_condition": "poisoned",
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "elder_crystal_spider": {
       "name": "Elder Crystal Spider",
       "dexterity": 16,
       "strength": 13,
       "armor_class": 16,
-      "hp_max": 30,
+      "hp_max": 148,
       "proficiency_bonus": 3,
       "xp_reward": 320,
-      "on_hit_condition": "poisoned"
+      "on_hit_condition": "poisoned",
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "crystal_spiderling": {
       "name": "Crystal Spiderling",
       "dexterity": 13,
       "strength": 8,
       "armor_class": 13,
-      "hp_max": 8,
+      "hp_max": 39,
       "proficiency_bonus": 1,
-      "xp_reward": 40
+      "xp_reward": 40,
+      "damage_dice": "1d8",
+      "damage_bonus": 18
     },
     "the_unasked": {
       "name": "The Unasked",

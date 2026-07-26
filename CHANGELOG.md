@@ -2,6 +2,49 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.52] — A real, full monster/area/gear rebalance, and two live bugs fixed
+
+**The big one: every monster in the game now has real, scaled HP and
+damage.** Confirmed live: the first dungeon's own boss (Goblin Boss)
+had only 21 HP while a level-5 player now has 150+ — a single hit
+one-shot it. Root cause: monster damage had ALWAYS been a flat,
+unscaled 1d8 for every monster in the game regardless of its own
+stats, and monster HP was never touched when player HP got its 5x
+rescale. Fixed both, for all 55 non-special-cased monsters (one true
+"cosmic wall" boss is deliberately left untouched): real HP and real,
+tier-scaled damage, using Coffee's own level curve (Arc 1 = level
+1-10, Arc 2 = 10-25, Arc 3 = 20-40, Arc 4 = 30-60 — "the first
+playthrough is designed to get them to the first evolution" — with
+Arcs 5-10's existing side content and the already-real rebirth
+1/2/3/10 gates carrying the same curve the rest of the way to the
+endgame).
+
+**Weapons, spells, cantrips, and healing abilities now scale with your
+own level and rebirths too** — the same gap, from the other side:
+weapon damage bonuses topped out at +3 game-wide, and spell damage
+never scaled past the level it unlocked at, so casters flatlined
+around level 9 while everything else in the game kept growing. A real
+character's own weapon attacks, spell damage, spell healing, Second
+Wind, Lay on Hands, Bardic Inspiration, Divine Smite, and Breath
+Weapon all now scale by the same real formula monster stats do —
+monsters are unaffected (their own damage is already scaled directly
+in the data).
+
+**Two real live bugs fixed:**
+- Switching characters (either by typing it or tapping the roster
+  menu) could silently drop you from your party — confirmed live,
+  traced to the tap-menu path never applying the same party-seat
+  carryover fix the typed path already had. Both paths now share one
+  fixed helper. (Anyone this hit already had their party seat manually
+  restored.)
+- A screenshot+caption bug report in the Development topic could be
+  silently lost if Telegram's photo-download API hit a transient
+  timeout — the whole report handler crashed before ever logging the
+  caption. Now retries like every other Telegram call in this game.
+  (Also fixed the specific bug that report was about: the "Bait" item
+  had no real flavor text at all, so its generated image had nothing
+  to ground it in actual fishing bait/worms.)
+
 ## [1.27.51] — Party companion dialogue, a real first-dungeon hint fix, bestiary resistances, mythic rebirth narration, and a deeper Arc 3/4
 
 **New: talking to your party, not just a named NPC.** Saying "talk"/

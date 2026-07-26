@@ -5,7 +5,7 @@ spell damage/healing numbers are rolled through rules/dice.py — the AI
 narrates what a spell looked like, but never decides its numeric effect.
 """
 from rules.dice import roll_damage, roll_d20, ability_modifier
-from rules.leveling import is_proficient_in_save, LIFE_SUBCLASS_HEAL_BONUS
+from rules.leveling import is_proficient_in_save, LIFE_SUBCLASS_HEAL_BONUS, power_scale_ratio
 from guilds import FAITH_CIRCLE_HEAL_BONUS
 import hybrid_features
 
@@ -430,6 +430,16 @@ def resolve_damage_spell(spell_id: str, caster: dict, target: dict | None = None
         raise ValueError(f"{spell_id} is not a damage spell")
     dmg = roll_damage(spell["damage_dice"])
     total = dmg["total"] + _warlock_agonizing_blast_bonus(spell_id, caster)
+    # Real player-power rebalance (2026-07-26, per Coffee: "rebalance
+    # everything... all skills and abilities and magic and spells and
+    # cantrips"): spell damage_dice never scales past its fixed value at
+    # all -- confirmed the single most consequential gap in a full
+    # creation-to-rebirth-10 audit, since casters got real power growth
+    # only through the level a spell unlocks, then flatlined for the
+    # rest of the game while monsters/HP/martial classes all now scale.
+    # Same power_scale_ratio already applied to a real character's
+    # weapon damage in rules/combat.py's resolve_attack.
+    total = int(total * power_scale_ratio(caster.get("level", 1), caster.get("rebirth_count", 0)))
 
     result = {
         "spell": spell["name"], "caster": caster.get("name", "Unknown"),
@@ -493,6 +503,13 @@ def resolve_heal_spell(spell_id: str, caster: dict, target: dict) -> dict:
     # top, same stacking convention as Faith Circle.
     if caster.get("subclass") == "Life":
         total_healed += LIFE_SUBCLASS_HEAL_BONUS
+    # Real player-power rebalance (2026-07-26): healing needs to keep
+    # pace with the same rescaled HP pools everything else now scales
+    # to -- without this, healing spells would become progressively
+    # negligible at high level/rebirth even as monster damage and max
+    # HP both keep growing. Same power_scale_ratio as weapon/damage-
+    # spell scaling above.
+    total_healed = int(total_healed * power_scale_ratio(caster.get("level", 1), caster.get("rebirth_count", 0)))
     hp_before = target["hp_current"]
     hp_max = target.get("hp_max", hp_before)
     target["hp_current"] = min(hp_before + total_healed, hp_max)

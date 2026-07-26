@@ -439,6 +439,48 @@ def rebirth_hp_max(current_hp_max: int) -> int:
     return current_hp_max * REBIRTH_HP_MULTIPLIER
 
 
+def _reference_hp_at(level: int, rebirth_count: int, evo_mult: int) -> int:
+    """Shared internal reference curve for power_scale_ratio -- same shape as full_hp_max_for, parameterized by evo_mult so old (mult=1) vs. new (mult=5) can be compared."""
+    con_mod = (12 - 10) // 2  # a neutral con=12 reference, same baseline used throughout the 2026-07-26 rebalance
+    hp_per_level = max(10 // 2 + 1 + con_mod, 1)  # Fighter hit die (10) as a neutral reference class
+    hp = max(10 + con_mod, 1)
+    for _ in range(rebirth_count):
+        hp += hp_per_level * (MAX_LEVEL - 1) * evo_mult
+        hp *= REBIRTH_HP_MULTIPLIER
+    hp += hp_per_level * (level - 1) * evo_mult
+    return hp
+
+
+def power_scale_ratio(level: int, rebirth_count: int) -> float:
+    """
+    How much a real character's own OUTGOING damage (weapon attacks,
+    spells) should be scaled up at this level/rebirth_count, to keep
+    pace with the same 2026-07-26 rebalance that already rescaled
+    every monster's HP and damage.
+
+    Real gap found 2026-07-26 (Coffee: "rebalance everything... all
+    skills and abilities and magic and spells and cantrips"): weapon
+    damage_bonus in items.py tops out at +3 (the rarest legendary
+    reward in the whole game) and spell damage_dice in spells.py never
+    scales past its fixed value at all -- both completely flat,
+    vanilla-5E-scale numbers untouched by EVOLUTION_HP_MULTIPLIER,
+    while monster HP/damage (and player HP) now both scale 4-5x+ by
+    late game. Rather than hand-retuning dozens of individual weapon/
+    spell numbers (fragile, and drifts again the next time a scaling
+    constant changes), this reuses the EXACT SAME ratio methodology
+    already proven for the monster rebalance: how much bigger a
+    same-tier reference character's own hp_max is today vs. under the
+    original (evo_mult=1) formula. Applied multiplicatively to a real
+    attacker's own weapon/spell damage in rules/combat.py and
+    spells.py -- monsters are UNAFFECTED (they carry their own already-
+    scaled damage_dice/damage_bonus directly in campaign.json, never
+    read this function).
+    """
+    new_hp = _reference_hp_at(level, rebirth_count, EVOLUTION_HP_MULTIPLIER)
+    old_hp = _reference_hp_at(level, rebirth_count, 1)
+    return new_hp / old_hp
+
+
 def full_hp_max_for(char_class: str, constitution: int, level: int, rebirth_count: int) -> int:
     """
     Reconstructs the hp_max a character WOULD have today, from scratch,
