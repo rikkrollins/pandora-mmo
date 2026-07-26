@@ -62,6 +62,7 @@ _EXAMPLE_LINES = [
     (None, "I check the quest board"),
     (None, "I accept the quest (if the facts below say something's posted or on offer)"),
     (None, "I choose [the exact label of one of your options] (if the facts below say you have a decision to make)"),
+    ("aren't carrying any healing items", "I want to buy [the exact item named in the healing-supplies fact below]"),
     ("Shop here sells", "I want to buy [something listed under Shop here sells]"),
     ("You're carrying", "sell my [something listed under You're carrying]"),
     ("Guilds you could join", "I want to join the [a guild listed under Guilds you could join]"),
@@ -98,7 +99,15 @@ that "needs you to travel to" somewhere comes right after that -- \
 heading there is how the story and \
 your own level actually move forward, and it beats every other option \
 below, including a party gather-quest need or a shop/skill-practice \
-opportunity right where you're already standing. If the facts mention \
+opportunity right where you're already standing. If the facts say \
+you aren't carrying any healing items and name one this shop sells \
+that you can afford, buying it comes right after that -- per Coffee \
+(2026-07-25): "does the AI companion kno to buy items needed for \
+battle?! they shud be able to take care of themselves," an empty-\
+handed party member walking past exactly the potion they need, right \
+when they can afford it, isn't taking care of themselves. This still \
+loses to an actual quest to accept or travel to, but beats every \
+other shopping/flavor option below. If the facts mention \
 the party's quest still needing something you can gather right here, \
 that comes second -- it directly helps the party. Otherwise, lean \
 toward whatever skill you're already practiced in (shown under "Skills \

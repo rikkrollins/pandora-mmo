@@ -16474,6 +16474,34 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
         else:
             lines.append("There is a shop here.")
 
+        # Real need-based shopping (2026-07-25, per Coffee: "does the AI
+        # companion kno to buy items needed for battle?! they shud be
+        # able to take care of themselves"): buying was already a real,
+        # grounded action (see the "Shop here sells" fact above and the
+        # "buy" example in ai/autonomous_player.py), but purely
+        # opportunistic -- nothing ever connected it to actual need, so
+        # an AI party member could walk past a shop at 0 healing
+        # potions and never think to restock. Only fires when it's
+        # GENUINELY true: carrying zero of any healing-effect item this
+        # specific shop sells, and able to afford the cheapest one.
+        healing_ids_sold_here = [
+            i for i in shop_data.get("inventory", [])
+            if (items_module.get_item(i) or {}).get("effect") == "heal"
+        ]
+        if healing_ids_sold_here and not any(inventory.get(i, 0) > 0 for i in healing_ids_sold_here):
+            affordable = [
+                i for i in healing_ids_sold_here
+                if items_module.get_item(i)["price"] <= character.get("gold", 0)
+            ]
+            if affordable:
+                cheapest_id = min(affordable, key=lambda i: items_module.get_item(i)["price"])
+                cheapest = items_module.get_item(cheapest_id)
+                lines.append(
+                    f"You aren't carrying any healing items and this shop sells "
+                    f"{cheapest['name']} for {cheapest['price']} gold, which you can afford -- "
+                    f"worth stocking up before your next fight."
+                )
+
     # Story quests (campaign.json's hand-authored catalog) are a
     # separate thing from the area quest board below, and were missing
     # here entirely — the AI party could see a board bounty posted, but

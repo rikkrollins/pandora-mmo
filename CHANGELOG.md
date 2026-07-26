@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.46] — AI party members now shop for themselves when they actually need to
+
+Per Coffee: "does the AI companion kno to buy items needed for
+battle?! they shud be able to take care of themselves." Buying was
+already a real, grounded action for AI-controlled party members, but
+purely opportunistic — nothing ever connected it to actual need, so an
+AI companion could walk past a shop at 0 healing potions and never
+think to restock. Now, whenever an AI party member is standing at a
+shop, carrying zero of any healing item that shop sells, and can
+actually afford the cheapest one, that's surfaced as a real fact
+("You aren't carrying any healing items and this shop sells Healing
+Potion for 25 gold...") and explicitly prioritized in their decision-
+making — right after actual quest progress, ahead of every other
+shopping/flavor option. Never fires when they're already carrying a
+healing item, can't afford one, or the shop in question doesn't sell
+any — this is about a genuine gap, not nagging.
+
 ## [1.27.45] — Real HP growth, a true hidden final boss, the whole story wired into cutscenes, and party-management buttons
 
 A big one. In order:
