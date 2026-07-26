@@ -8278,11 +8278,20 @@ async def _do_check_inventory(update: Update) -> None:
     # to (same presence scoping _do_give_item's own free-text already
     # uses) -- dispatches through that exact same handler.
     give_rows = _give_item_keyboard(character)
+    # Real live bug (2026-07-25, caught in bot_live_tmp.log right after
+    # this session's own give-buttons deploy): InlineKeyboardMarkup.
+    # inline_keyboard is a real tuple (confirmed directly against the
+    # installed python-telegram-bot), while _scroll_spell_buttons
+    # returns a plain list -- concatenating a tuple to a list raises
+    # TypeError, crashing this screen outright for any character with
+    # actual usable consumables or craftable recipes (item_rows/
+    # craft_rows non-None), which is the common case. list(...) on each
+    # piece normalizes everything to the same type before combining.
     combined_rows = (
-        (item_rows.inline_keyboard if item_rows else [])
-        + (craft_rows.inline_keyboard if craft_rows else [])
+        list(item_rows.inline_keyboard if item_rows else [])
+        + list(craft_rows.inline_keyboard if craft_rows else [])
         + scroll_rows
-        + (give_rows.inline_keyboard if give_rows else [])
+        + list(give_rows.inline_keyboard if give_rows else [])
     )
     keyboard = InlineKeyboardMarkup(combined_rows) if combined_rows else None
     await _safe_send(
@@ -10726,7 +10735,7 @@ async def _do_check_guild_quest(update: Update, guild_id: str) -> None:
         update,
         f"📜 **{quest['title']}**\n{quest['description']}\n"
         f"Reward: {quest['reward_gold']} gold, {quest['reward_xp']} XP\nStatus: {status}",
-        thread_id=update.message.message_thread_id, speak=False,
+        thread_id=update.effective_message.message_thread_id, speak=False,
     )
 
 
@@ -10746,7 +10755,7 @@ async def guild_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.effective_chat.send_message(
             f"This topic is for real {guild['name']} members only — join in Adventure first "
             f"(\"join {guild['name']}\") if you're eligible.",
-            message_thread_id=update.message.message_thread_id,
+            message_thread_id=update.effective_message.message_thread_id,
         )
         return
 
@@ -10776,7 +10785,7 @@ async def _do_learn_guild_spell(update: Update, text: str) -> None:
     # This is only ever reached from guild_topic_handler, so replies stay
     # in whichever real topic the request came from (the Arcane Circle's
     # own topic) rather than defaulting to Adventure.
-    reply_thread_id = update.message.message_thread_id
+    reply_thread_id = update.effective_message.message_thread_id
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
@@ -10843,7 +10852,7 @@ async def _do_commission_enchantment(update: Update) -> None:
     healing_water), gated on real Enchanters' Guild membership.
     """
     character = db.get_character(update.effective_user.id)
-    reply_thread_id = update.message.message_thread_id
+    reply_thread_id = update.effective_message.message_thread_id
     if character is None:
         await update.effective_chat.send_message(
             "You don't have a character yet!", message_thread_id=reply_thread_id
@@ -13999,7 +14008,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     """
     if update.message is None or not update.message.text:
         return
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     # Banned players (2026-07-17, per Coffee: "admins can absolutely ban
     # malicious players") get zero engagement -- checked before any
@@ -14606,117 +14615,117 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
 # ---------------------------------------------------------------------
 
 async def newcharacter_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _begin_character_creation(update, context)
 
 
 async def startcombat_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     monster_key = context.args[0].lower() if context.args else "goblin"
     await _do_start_combat(update, monster_key)
 
 
 async def attack_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     action_text = " ".join(context.args) if context.args else "I attack"
     await _do_attack(update, action_text)
 
 
 async def endturn_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _do_pass_turn(update)
 
 
 async def sheet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _do_check_sheet(update)
 
 
 async def replay_intro_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/replay_intro -- rewatch the current chapter's opening cutscene. See _do_replay_chapter_intro."""
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _do_replay_chapter_intro(update)
 
 
 async def dice_game_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/dice_game -- play your class's dice mini-game. See _do_dice_game."""
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _do_dice_game(update)
 
 
 async def fortune_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/fortune -- spin Fortune's Wheel, open to every class. See _do_fortunes_wheel."""
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _do_fortunes_wheel(update)
 
 
 async def alignment_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/alignment <text> -- set your alignment (e.g. "/alignment chaotic good"). See _do_set_alignment."""
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _do_set_alignment(update, " ".join(context.args))
 
 
 async def msg_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/msg <name> <message> -- tell an AI party member something, in or out of combat, without spending a turn. See _do_message_ai."""
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _do_message_ai(update, " ".join(context.args))
 
 
 async def skilltree_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/skilltree -- shows your class's real skill-tree upgrade and lets you unlock it. See _do_show_skill_tree."""
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _do_show_skill_tree(update)
 
 
 async def duel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/duel <name> -- challenge a real player at your location to PvP. See _do_challenge_duel."""
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _do_challenge_duel(update, " ".join(context.args))
 
 
 async def accept_duel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/accept_duel -- accept a pending duel challenge. See _do_accept_duel."""
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _do_accept_duel(update)
 
 
 async def sell_market_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/sell_market <quantity> <price> <item name> -- list an item on the player marketplace. See _do_sell_market."""
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _do_sell_market(update, context.args)
 
 
 async def market_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/market -- shows all current player marketplace listings. See _do_check_market."""
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _do_check_market(update)
 
 
 async def buy_market_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/buy_market <listing #> -- buy a player marketplace listing. See _do_buy_market."""
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _do_buy_market(update, context.args)
 
 
 async def join_battle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/join_battle -- join an in-progress fight at your current location. See _do_join_battle."""
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _do_join_battle(update)
 
@@ -14730,14 +14739,14 @@ async def map_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     just a slash-command shortcut for the exact same function "show me
     the map" already calls -- no new logic, no separate map system.
     """
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _do_show_map(update)
 
 
 async def visual_map_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/visual_map -- a real generated map image, grounded in your actual explored locations. See _do_show_visual_map."""
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _do_show_visual_map(update)
 
@@ -14750,7 +14759,7 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     a player looking something up in Support shouldn't have to switch
     topics just to peek at their sheet/quests/inventory.
     """
-    thread_id = update.message.message_thread_id or 0
+    thread_id = update.effective_message.message_thread_id or 0
     if not (topics.is_adventure(thread_id) or topics.is_support(thread_id)):
         return
     await _do_show_menu(update)
@@ -14758,42 +14767,42 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/leaderboard (2026-07-17, per Coffee, task #74) -- slash-command shortcut for _do_leaderboard."""
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _do_leaderboard(update)
 
 
 async def quests_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/quests (task #122) -- slash-command shortcut for _do_check_quests, same as "check my quests" in NL."""
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _do_check_quests(update)
 
 
 async def party_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/party (task #122), optionally "/party sheet" for the full-sheet variant -- shortcut for _do_check_party."""
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _do_check_party(update, " ".join(context.args))
 
 
 async def inventory_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/inventory (task #122) -- slash-command shortcut for _do_check_inventory."""
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _do_check_inventory(update)
 
 
 async def shop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/shop (task #122) -- slash-command shortcut for _do_list_shop, same as "what's for sale" in NL."""
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _do_list_shop(update)
 
 
 async def buy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/buy <item> (task #122) -- slash-command shortcut for _do_buy."""
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     if not context.args:
         await _safe_send(update, "Buy what? e.g. \"/buy healing potion\".")
@@ -14803,7 +14812,7 @@ async def buy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def sell_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/sell <item> (task #122) -- slash-command shortcut for _do_sell."""
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     if not context.args:
         await _safe_send(update, "Sell what? e.g. \"/sell rusty dagger\".")
@@ -14818,7 +14827,7 @@ async def cast_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     natural language ("I cast fireball on the goblin"). Shortcut for the
     exact same _do_cast_spell already used by that NL path.
     """
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     if not context.args:
         await _safe_send(update, "Cast what? e.g. \"/cast fire bolt\" or \"/cast cure wounds on Ravenloft\".")
@@ -14828,14 +14837,14 @@ async def cast_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def rest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/rest (task #122) -- slash-command shortcut for _do_rest, same as "I rest"/"heal up" in NL."""
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     await _do_rest(update)
 
 
 async def guild_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/guild (task #122) -- today's guild quest status for whichever real guild this character belongs to."""
-    if not topics.is_adventure(update.message.message_thread_id or 0):
+    if not topics.is_adventure(update.effective_message.message_thread_id or 0):
         return
     character = db.get_character(update.effective_user.id)
     if character is None or not character.get("guild"):
@@ -14847,7 +14856,7 @@ async def guild_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def version_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_chat.send_message(
         f"Pandora MMO v{version.get_version()} — powered by Pandora AI",
-        message_thread_id=update.message.message_thread_id,
+        message_thread_id=update.effective_message.message_thread_id,
     )
 
 
@@ -14861,14 +14870,14 @@ async def campaigns_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if not available:
         lines.append("(none found)")
     await update.effective_chat.send_message(
-        "\n".join(lines), message_thread_id=update.message.message_thread_id
+        "\n".join(lines), message_thread_id=update.effective_message.message_thread_id
     )
 
 
 async def changelog_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_chat.send_message(
         version.get_changelog(),
-        message_thread_id=update.message.message_thread_id,
+        message_thread_id=update.effective_message.message_thread_id,
     )
 
 
@@ -14967,16 +14976,16 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not replied_text or not replied_text.strip():
         await update.effective_chat.send_message(
             _HELP_TEXT,
-            message_thread_id=update.message.message_thread_id,
+            message_thread_id=update.effective_message.message_thread_id,
         )
         return
 
     character = db.get_character(update.effective_user.id)
     party_members = _get_party_members() if character else None
     question = f"Can you explain this: {replied_text.strip()}"
-    async with _keep_typing(update.effective_chat, update.message.message_thread_id):
+    async with _keep_typing(update.effective_chat, update.effective_message.message_thread_id):
         reply = await asyncio.to_thread(answer_support_question, question, character, party_members)
-    await update.effective_chat.send_message(reply, message_thread_id=update.message.message_thread_id)
+    await update.effective_chat.send_message(reply, message_thread_id=update.effective_message.message_thread_id)
 
 
 async def hint_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -14994,14 +15003,14 @@ async def hint_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=update.message.message_thread_id
+            "You don't have a character yet!", message_thread_id=update.effective_message.message_thread_id
         )
         return
     location = cl.get_location(CAMPAIGN, character["current_location"])
     if location is None:
         await update.effective_chat.send_message(
             f"**{character['name']}** seems to be nowhere in particular. That's... concerning.",
-            message_thread_id=update.message.message_thread_id,
+            message_thread_id=update.effective_message.message_thread_id,
         )
         return
 
@@ -15169,7 +15178,7 @@ async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     a DEV or admin can use those commands" -- deliberately not
     owner-only, so an existing trusted dev can onboard another one.
     """
-    if update.message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
+    if update.effective_message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
         return
     is_authorized = await _is_dev_topic_authorized(update, context)
     if is_authorized is None:
@@ -15194,7 +15203,7 @@ async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def remove_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
+    if update.effective_message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
         return
     is_authorized = await _is_dev_topic_authorized(update, context)
     if is_authorized is None:
@@ -15229,7 +15238,7 @@ async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     the Development topic so this can never be triggered from
     Adventure/Support by an ordinary player.
     """
-    if update.message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
+    if update.effective_message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
         return
     is_authorized = await _is_dev_topic_authorized(update, context)
     if is_authorized is None:
@@ -15254,7 +15263,7 @@ async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def unban_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
+    if update.effective_message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
         return
     is_authorized = await _is_dev_topic_authorized(update, context)
     if is_authorized is None:
@@ -15303,20 +15312,20 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.effective_chat.send_message(
             "Use /report followed by what you'd like to report, e.g. "
             '"/report Player X is harassing others in Adventure" -- it goes straight to the admins.',
-            message_thread_id=update.message.message_thread_id,
+            message_thread_id=update.effective_message.message_thread_id,
         )
         return
 
     reporter = update.effective_user
     reporter_label = f"{reporter.full_name} (@{reporter.username})" if reporter.username else reporter.full_name
-    topic_name = topics.get_topic_name(update.message.message_thread_id or 0)
+    topic_name = topics.get_topic_name(update.effective_message.message_thread_id or 0)
     report_text = (
         f"🚩 **Player report** from {reporter_label} (id {reporter.id}) in {topic_name}:\n{reason.strip()}"
     )
     await _safe_send(update, report_text, thread_id=config.TOPIC_DEVELOPMENT_ID)
     await update.effective_chat.send_message(
         "Thanks — this has been sent to the admins for review.",
-        message_thread_id=update.message.message_thread_id,
+        message_thread_id=update.effective_message.message_thread_id,
     )
 
 
@@ -15340,12 +15349,12 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if is_authorized is None:
         await update.effective_chat.send_message(
             "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
-            message_thread_id=update.message.message_thread_id,
+            message_thread_id=update.effective_message.message_thread_id,
         )
         return
     if not is_authorized:
         await update.effective_chat.send_message(
-            "Only a Dev-topic admin can issue a warning.", message_thread_id=update.message.message_thread_id
+            "Only a Dev-topic admin can issue a warning.", message_thread_id=update.effective_message.message_thread_id
         )
         return
 
@@ -15353,7 +15362,7 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if target_id is None:
         await update.effective_chat.send_message(
             "Reply to the out-of-line message with /warning [reason].",
-            message_thread_id=update.message.message_thread_id,
+            message_thread_id=update.effective_message.message_thread_id,
         )
         return
 
@@ -15361,7 +15370,7 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     count = db.add_infraction(target_id, reason, issued_by=update.effective_user.id)
     await update.effective_chat.send_message(
         f"⚠️ {target_label}, that's a warning ({count}/3): {reason}",
-        message_thread_id=update.message.message_thread_id,
+        message_thread_id=update.effective_message.message_thread_id,
     )
     if count >= 3:
         db.ban_user(target_id)
@@ -15379,26 +15388,26 @@ async def warninglist_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     if is_authorized is None:
         await update.effective_chat.send_message(
             "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
-            message_thread_id=update.message.message_thread_id,
+            message_thread_id=update.effective_message.message_thread_id,
         )
         return
     if not is_authorized:
         await update.effective_chat.send_message(
-            "Only a Dev-topic admin can view the warning list.", message_thread_id=update.message.message_thread_id
+            "Only a Dev-topic admin can view the warning list.", message_thread_id=update.effective_message.message_thread_id
         )
         return
 
     all_infractions = db.get_all_infractions()
     if not all_infractions:
         await update.effective_chat.send_message(
-            "No warnings on record.", message_thread_id=update.message.message_thread_id
+            "No warnings on record.", message_thread_id=update.effective_message.message_thread_id
         )
         return
     lines = ["⚠️ **Current warnings:**"]
     for user_id_str, records in all_infractions.items():
         latest = records[-1]
         lines.append(f"- user {user_id_str}: {len(records)}/3 — most recent: {latest['reason']}")
-    await update.effective_chat.send_message("\n".join(lines), message_thread_id=update.message.message_thread_id)
+    await update.effective_chat.send_message("\n".join(lines), message_thread_id=update.effective_message.message_thread_id)
 
 
 async def banlist_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -15407,23 +15416,23 @@ async def banlist_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if is_authorized is None:
         await update.effective_chat.send_message(
             "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
-            message_thread_id=update.message.message_thread_id,
+            message_thread_id=update.effective_message.message_thread_id,
         )
         return
     if not is_authorized:
         await update.effective_chat.send_message(
-            "Only a Dev-topic admin can view the ban list.", message_thread_id=update.message.message_thread_id
+            "Only a Dev-topic admin can view the ban list.", message_thread_id=update.effective_message.message_thread_id
         )
         return
 
     banned_ids = db.list_banned_user_ids()
     if not banned_ids:
         await update.effective_chat.send_message(
-            "No players currently banned.", message_thread_id=update.message.message_thread_id
+            "No players currently banned.", message_thread_id=update.effective_message.message_thread_id
         )
         return
     lines = ["🚫 **Currently banned:**"] + [f"- user {uid}" for uid in banned_ids]
-    await update.effective_chat.send_message("\n".join(lines), message_thread_id=update.message.message_thread_id)
+    await update.effective_chat.send_message("\n".join(lines), message_thread_id=update.effective_message.message_thread_id)
 
 
 async def redo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -15438,18 +15447,18 @@ async def redo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     the admin who typed /redo -- redo never lets an admin puppet a
     different player's character, only re-run what they already said.
     """
-    thread_id = update.message.message_thread_id or 0
+    thread_id = update.effective_message.message_thread_id or 0
     is_allowed = await _is_group_admin_or_owner(update, context)
     if is_allowed is None:
         await update.effective_chat.send_message(
             "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
-            message_thread_id=update.message.message_thread_id,
+            message_thread_id=update.effective_message.message_thread_id,
         )
         return
     if not is_allowed:
         await update.effective_chat.send_message(
             "/redo is restricted to group admins and the owner.",
-            message_thread_id=update.message.message_thread_id,
+            message_thread_id=update.effective_message.message_thread_id,
         )
         return
 
@@ -15457,7 +15466,7 @@ async def redo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if entry is None:
         await update.effective_chat.send_message(
             "Nothing to redo in this topic yet.",
-            message_thread_id=update.message.message_thread_id,
+            message_thread_id=update.effective_message.message_thread_id,
         )
         return
 
@@ -15467,9 +15476,9 @@ async def redo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.effective_chat.send_message(
         f"🔄 Redoing the last message here (asking the AI for a fresh, independent read — can take up "
         f"to ~2 minutes on this hardware): \"{stored_text}\"",
-        message_thread_id=update.message.message_thread_id,
+        message_thread_id=update.effective_message.message_thread_id,
     )
-    async with _keep_typing(update.effective_chat, update.message.message_thread_id):
+    async with _keep_typing(update.effective_chat, update.effective_message.message_thread_id):
         if entry["kind"] == "support":
             character = db.get_character(entry["user_id"])
             party_members = _get_party_members() if character else None
@@ -15502,7 +15511,7 @@ async def redo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         else:
             await update.effective_chat.send_message(
                 "(Redo produced no reply — this was likely ordinary chat, not a game action.)",
-                message_thread_id=update.message.message_thread_id,
+                message_thread_id=update.effective_message.message_thread_id,
             )
 
 
@@ -15681,7 +15690,7 @@ async def dev_topic_photo_handler(update: Update, context: ContextTypes.DEFAULT_
     the image itself here — this bot has no image-understanding
     capability of its own; it just makes the file available.
     """
-    if update.message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
+    if update.effective_message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
         return
 
     is_owner = await _is_dev_topic_authorized(update, context)
@@ -15754,7 +15763,7 @@ async def dev_topic_document_handler(update: Update, context: ContextTypes.DEFAU
     synthetic name, a real document's name is meaningful) and every
     upload is recorded in campaign_sources/INDEX.md.
     """
-    if update.message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
+    if update.effective_message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
         return
 
     is_owner = await _is_dev_topic_authorized(update, context)
@@ -15814,7 +15823,7 @@ async def dev_topic_video_handler(update: Update, context: ContextTypes.DEFAULT_
     process still never "sees" the video itself, same disclosed
     limitation as the photo handler.
     """
-    if update.message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
+    if update.effective_message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
         return
 
     is_owner = await _is_dev_topic_authorized(update, context)
@@ -16141,7 +16150,7 @@ async def voice_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
     if not transcribed:
         return
     await update.effective_chat.send_message(
-        f"🎙️ Heard: \"{transcribed}\"", message_thread_id=update.message.message_thread_id,
+        f"🎙️ Heard: \"{transcribed}\"", message_thread_id=update.effective_message.message_thread_id,
     )
     transcript_update = _VoiceTranscriptUpdate(update, transcribed)
     if update.effective_user is None:
@@ -16151,7 +16160,7 @@ async def voice_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def _route_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    raw_thread_id = update.message.message_thread_id  # may genuinely be None for Main
+    raw_thread_id = update.effective_message.message_thread_id  # may genuinely be None for Main
     thread_id = raw_thread_id or 0
 
     if topics.is_main(raw_thread_id):
@@ -16213,7 +16222,7 @@ async def _log_unhandled_error(update: object, context: ContextTypes.DEFAULT_TYP
         try:
             await update.effective_chat.send_message(
                 "Something went wrong processing that — try again in a moment.",
-                message_thread_id=update.message.message_thread_id,
+                message_thread_id=update.effective_message.message_thread_id,
             )
         except Exception:
             pass

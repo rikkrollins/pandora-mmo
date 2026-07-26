@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.47] — Two real live bugs fixed: inventory screen crash, edited-command crash
+
+**The backpack screen was completely broken.** Caught live in
+bot_live_tmp.log right after last version's deploy: any character
+with a real usable consumable or craftable recipe hit
+`TypeError: can only concatenate tuple (not "list") to tuple` opening
+their inventory — `InlineKeyboardMarkup.inline_keyboard` is a real
+tuple, but the scroll and give buttons added this session returned
+plain lists, and concatenating a tuple to a list raises. Hit
+repeatedly by both Coffee and Sheri within minutes of the deploy.
+Fixed by normalizing every piece to a list before combining.
+
+**Editing a slash-command message crashed it outright.** Also caught
+live: Coffee edited an existing `/msg ...` message, which crashed with
+`AttributeError: 'NoneType' object has no attribute 'message_thread_id'`
+— `update.message` is genuinely `None` for an edited-message update in
+python-telegram-bot; only `update.effective_message` reliably resolves
+either way. This exact unsafe pattern (`update.message.message_thread_id`)
+was used in 75 places across every slash command in this file, all
+fixed at once to the edit-safe accessor.
+
 ## [1.27.46] — AI party members now shop for themselves when they actually need to
 
 Per Coffee: "does the AI companion kno to buy items needed for
