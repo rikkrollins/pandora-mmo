@@ -439,6 +439,43 @@ def rebirth_hp_max(current_hp_max: int) -> int:
     return current_hp_max * REBIRTH_HP_MULTIPLIER
 
 
+def full_hp_max_for(char_class: str, constitution: int, level: int, rebirth_count: int) -> int:
+    """
+    Reconstructs the hp_max a character WOULD have today, from scratch,
+    under the current EVOLUTION_HP_MULTIPLIER/REBIRTH_HP_MULTIPLIER rules
+    -- i.e. as if they'd leveled from 1 through every one of their
+    real, already-completed rebirths under today's formula the whole
+    way, not whatever formula happened to be live at the moment they
+    actually leveled.
+
+    Real gap (2026-07-26, per Coffee: "fix the characters so their HP
+    matches the new HP values so previous made players can hit the
+    3200+ HP mark too"): hp_max in the database is CUMULATIVE, built up
+    incrementally one add_xp() call at a time (db.py) -- so any level-up
+    that happened before EVOLUTION_HP_MULTIPLIER existed (2026-07-25)
+    permanently baked in the OLD, unscaled HP gain for that level-up,
+    even after the multiplier shipped. This recomputes the number
+    deterministically from only real, current facts (class,
+    constitution, level, rebirth_count) -- no stored history needed,
+    same "recompute from real current data, never trust a stale stored
+    derivation" discipline as ability_score_cap/xp_gain_multiplier.
+
+    _do_rebirth only allows rebirthing at MAX_LEVEL, so every COMPLETED
+    rebirth cycle is known to have leveled 1 -> MAX_LEVEL in that life
+    before the doubling; only the CURRENT (still-in-progress) life may
+    stop short of MAX_LEVEL, at `level`.
+    """
+    con_mod = (constitution - 10) // 2
+    hit_die = CLASS_HIT_DICE.get(char_class.lower(), 8)
+    hp_per_level = hp_gain_for_level(char_class, con_mod)
+    hp = max(hit_die + con_mod, 1)
+    for _ in range(rebirth_count):
+        hp += hp_per_level * (MAX_LEVEL - 1) * EVOLUTION_HP_MULTIPLIER
+        hp *= REBIRTH_HP_MULTIPLIER
+    hp += hp_per_level * (level - 1) * EVOLUTION_HP_MULTIPLIER
+    return hp
+
+
 # Real 5E DMG "Medium difficulty" encounter XP budget, per individual
 # character, by level (2014 DMG encounter-building table).
 MEDIUM_ENCOUNTER_XP_PER_CHARACTER = {

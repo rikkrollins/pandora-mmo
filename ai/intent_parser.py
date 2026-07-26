@@ -37,7 +37,7 @@ Given a player's free-text message and some context, output ONLY a JSON object \
 (no other text, no markdown fences) with this shape:
 
 {"action": "<one of: attack, pass_turn, start_combat, create_character, check_sheet, \
-talk_npc, move, look, check_inventory, check_party, buy, sell, steal, cast_spell, join_guild, \
+talk_npc, talk_party, move, look, check_inventory, check_party, buy, sell, steal, cast_spell, join_guild, \
 recruit_npc, rest, go_inactive, skill_check, shove, show_map, gather, craft, list_characters, \
 switch_character, delete_character, fast_travel, accept_quest, check_quests, ask_clue, \
 answer_puzzle, gamble, chat, second_wind, rage, bardic_inspiration, lay_on_hands, arcane_recovery>", \
@@ -51,6 +51,9 @@ Rules:
 - "attack" is for any offensive action aimed at an enemy (attack, swing, shoot, cast at, strike).
 - "flee" is for trying to run away, escape, or retreat from an active fight (a real risk, not guaranteed).
 - "talk_npc" is for addressing a specific named NPC conversationally.
+- "talk_party" is for speaking, calling out, or addressing the party/traveling companions in general \
+(not a specific named NPC -- that's "talk_npc"), e.g. "I speak up", "let's talk about this place", \
+"I yell for the others' thoughts", "I tell the party what I think", "I shout", "I scream in frustration".
 - "start_combat" is when a player wants to begin a fight or encounter.
 - "create_character" is when a player wants to make/join with a new character.
 - "check_sheet" is for asking about their own stats/HP/level (not items), including \
@@ -1298,6 +1301,21 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
         if any(v in lowered for v in verbs):
             return {**base, "action": "skill_check", "ability": ability}
 
+    # Party companion dialogue (2026-07-26, per Coffee: "when we say
+    # 'talk' 'speak' 'say' 'tell' 'yell' 'shout' 'scream' in a location,
+    # prompt dialog from the party members"). Deliberately checked LAST,
+    # right before the silent "chat" default -- every other, more
+    # specific action above (talk_npc for a named NPC, give_item's
+    # "tell"-adjacent phrasing, skill_check's persuade/deceive verbs,
+    # etc.) must win first if it already matched. Anything that reaches
+    # this point containing one of these speaking verbs previously fell
+    # through to "chat" (silent, no reply at all) -- now it prompts a
+    # real line from whichever party companion is actually traveling
+    # with the character, instead of being ignored.
+    party_talk_words = ["talk", "speak", "say", "tell", "yell", "shout", "scream"]
+    if any(re.search(r"\b" + w + r"\b", lowered) for w in party_talk_words):
+        return {**base, "action": "talk_party"}
+
     return base
 
 
@@ -1399,6 +1417,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "skill_tree", "challenge_duel", "accept_duel", "check_market", "join_battle",
                 "replay_intro", "visual_map", "rebirth", "choose_hybrid", "give_offering",
                 "drink_water", "choose_subclass", "start_echo_trial", "check_professions",
+                "talk_party",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

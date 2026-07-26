@@ -2,6 +2,53 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.51] — Party companion dialogue, a real first-dungeon hint fix, bestiary resistances, mythic rebirth narration, and a deeper Arc 3/4
+
+**New: talking to your party, not just a named NPC.** Saying "talk"/
+"speak"/"say"/"tell"/"yell"/"shout"/"scream" without addressing anyone
+specific now prompts a real line from whichever recruited companion is
+actually traveling with you, grounded in your real current location
+and story-quest lead — not silence. A specific named NPC (`talk_npc`)
+still always takes priority.
+
+**Fixed a real, confirmed "stuck at the start" gap**: the first
+dungeon's quest clue ("the goblins under Stonearch Bridge") read like
+the entrance was AT the bridge, when it's actually one more hop away
+at The Weeping Well, reached by "descending" — a non-obvious action
+nothing else called out. The clue now says so directly.
+
+**Bestiary now shows real resistances/vulnerabilities/immunities** for
+any monster you've actually fought — the damage-type system has been
+fully wired into combat since 2026-07-24, but nothing ever surfaced a
+learned monster's real profile to players, so the whole "reward build
+diversity" point of the system was invisible until now.
+
+**Rebirth #1-3 each get a distinct, mythic narration beat** (a flash of
+deja vu, sharpening into certainty, into "this is a cycle") instead of
+the same dry mechanical reset message every time — planted, spoiler-
+free foreshadowing that pays off in Arc 14's existing rebirth-10-gated
+finale. Rebirth #4+ keeps the plain mechanical line.
+
+**Arc 3 ("What Was Buried") and Arc 4 ("What Waits Above")** — the two
+thinnest arcs in the story (1 quest each, versus 3-7 everywhere else —
+these are the climax of a first playthrough, not a footnote) each gain
+a real new quest: Arc 3 now also includes an already-written, existing
+lore/riddle quest at the Sunken Archive that was never actually linked
+into the arc, plus a new arrival quest; Arc 4 gains a new arrival quest
+for first reaching the Unmoored Isle. Both new quests reuse only
+already-existing locations/monsters — no new areas invented.
+
+**Live data fix (already applied, not part of this deploy): existing
+characters' max HP was corrected** to match the HP-scaling formula
+shipped 2026-07-25 (`EVOLUTION_HP_MULTIPLIER`) — hp_max used to
+accumulate incrementally per level-up, so anyone who'd already leveled
+before that formula existed was permanently under-scaled relative to
+a fresh character of the same level. A new, reusable
+`rules/leveling.py: full_hp_max_for()` reconstructs the correct value
+from real current facts (class, constitution, level, rebirth count)
+alone — verified against real simulated playthroughs before touching
+any live data, backed up first, never reduces anyone's HP.
+
 ## [1.27.50] — Real generated art for spells, class abilities, defeats, examined objects, and crafted/gathered/enchanted items
 
 Per Coffee's running to-do list ("create images for spells abilities

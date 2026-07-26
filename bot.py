@@ -3124,10 +3124,42 @@ async def _do_rebirth(update: Update) -> None:
     lines = [
         f"✨ **{updated['name']}** is reborn — level and XP reset to 1, but every stat, every "
         f"item, and every point already earned stays exactly as it was.",
+    ]
+    # Real, distinct mythic beat on the first few rebirths specifically
+    # (2026-07-26, per the earlier-session plan: rebirth should feel
+    # narratively TRUE, not just a dry mechanical reset) -- deliberately
+    # thin, planted foreshadowing that pays off in Arc 14's "The
+    # Answered" (rebirth-10-gated finale, campaign.json: "the same
+    # question, asked over and over by everyone who ever came back to
+    # try again"). Never spoils that arc directly -- just seeds the
+    # deja vu a repeat player will only fully recognize much later.
+    # Rebirth 4+ falls back to the plain mechanical line below; the
+    # point has already been made by then.
+    mythic_beat = {
+        1: (
+            "🌀 For just a moment, as the reset takes hold, something surfaces that isn't quite "
+            "memory — a flash of having stood exactly here before, done exactly this before, "
+            "in a life you don't remember living. It's gone before you can hold onto it. Probably "
+            "nothing."
+        ),
+        2: (
+            "🌀 The same flash again, sharper this time — not a feeling now, closer to a fact you "
+            "can't quite place. You have done this before. More than once, maybe. Something out "
+            "there is keeping count, even if you aren't."
+        ),
+        3: (
+            "🌀 There's no pretending anymore: this is a cycle, and you are not the first version "
+            "of yourself to go around it. Somewhere far past anywhere you've been, something has "
+            "been waiting this whole time for someone to finally stop forgetting."
+        ),
+    }.get(new_rebirth_count)
+    if mythic_beat:
+        lines.append(mythic_beat)
+    lines.append(
         f"This is rebirth #{new_rebirth_count}: ability scores can now climb as high as {new_cap} "
         f"(instead of the usual 20), XP gains are permanently boosted by {new_xp_bonus}%, and "
-        f"maximum HP has doubled to {new_hp_max} (fully healed).",
-    ]
+        f"maximum HP has doubled to {new_hp_max} (fully healed)."
+    )
     if new_rebirth_count == 1:
         lines.append("A hybrid class is now available — say \"become a hybrid [class]\" to pick one.")
     await _safe_send(update, "\n".join(lines))
@@ -6347,6 +6379,84 @@ def _next_step_hint_facts(character: dict) -> dict | None:
         "location_name": location_name,
         "clue": clue,
     }
+
+
+def _party_companion_context_facts(character: dict, location: dict | None) -> str | None:
+    """
+    Grounds a party companion's ambient dialogue (see _do_talk_party) in
+    the player's own real current location and story-quest state --
+    reuses _next_step_hint_facts' already-computed, non-spoiler clue
+    (the same real fact the Story So Far "What's Next" section shows),
+    never inventing new plot for a companion to reference. Returns None
+    when there's genuinely nothing real to ground -- talk_to_npc treats
+    that the same as no quest_facts at all.
+    """
+    lines = []
+    if location:
+        lines.append(f"You are currently at {location['name']}: {location['description']}")
+    next_step = _next_step_hint_facts(character)
+    if next_step and next_step.get("clue"):
+        lines.append(f"The party's current real lead to follow up on: {next_step['clue']}")
+    if not lines:
+        return None
+    return (
+        "As the player's own traveling companion, here's what's really going on right now "
+        "(use this to ground your answer if it's relevant -- never invent new plot beyond it):\n"
+        + "\n".join(lines)
+    )
+
+
+async def _do_talk_party(update: Update, action_text: str) -> None:
+    """
+    Real party-companion dialogue (2026-07-26, per Coffee: "when we say
+    'talk' 'speak' 'say' 'tell' 'yell' 'shout' 'scream' in a location,
+    prompt dialog from the party members that the player can respond to
+    to help them in the story quest or something to do with that
+    location"). Distinct from talk_npc (a specific NAMED NPC) -- this
+    addresses whichever real, recruited AI companion(s) are actually
+    traveling with this character right now, same "companions are real
+    registered NPCs under the hood" fact _offerable_quest_at_location's
+    own _find_npc_id_by_name lookup already relies on.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    party_id = character.get("party_id")
+    companions = (
+        [p for p in db.get_party_members_by_id(party_id) if p.get("is_ai")] if party_id else []
+    )
+    present = [c for c in companions if c.get("current_location") == character["current_location"]]
+    if not present:
+        await update.effective_chat.send_message(
+            f"**{character['name']}** speaks up, but there's no one from the party here to answer.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    companion = present[0]
+    npc_id = _find_npc_id_by_name(companion["name"])
+    if not npc_id or npc_id not in _NPCS:
+        await update.effective_chat.send_message(
+            f"**{companion['name']}** doesn't seem to have anything to say right now.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    location = cl.get_location(CAMPAIGN, character["current_location"])
+    context_facts = _party_companion_context_facts(character, location)
+    relationship = db.get_relationship(update.effective_user.id, npc_id)
+    reply = await asyncio.to_thread(
+        talk_to_npc, npc_id, action_text, character["name"], relationship["memory_events"], context_facts
+    )
+    npc_data = CAMPAIGN["npcs"].get(npc_id, {})
+    npc_display_name = npc_data.get("name", companion["name"])
+    await _safe_send(update, f"💬 **{npc_display_name}:** {reply}")
+    await _maybe_send_npc_portrait(update, npc_id, npc_data)
+    db.adjust_affinity(update.effective_user.id, npc_id, 1)
 
 
 def _story_arc_for_quest(quest_id: str) -> tuple[str, dict] | None:
@@ -10750,12 +10860,31 @@ def _format_bestiary_entry(monster_key: str, template: dict) -> str:
     if template.get("life_drain"):
         tags.append("drains life on hit")
     tag_text = f" ({', '.join(tags)})" if tags else ""
-    return (
-        f"**{template['name']}**{tag_text}\n"
+    lines = [
+        f"**{template['name']}**{tag_text}",
         f"  HP {template['hp_max']} | AC {template['armor_class']} | "
         f"STR {template['strength']} DEX {template['dexterity']} | "
-        f"XP {template.get('xp_reward', 0)}"
-    )
+        f"XP {template.get('xp_reward', 0)}",
+    ]
+    # Real, learned resistance profile (2026-07-26 gap audit: the
+    # damage-type system has been fully wired into combat since
+    # 2026-07-24 -- apply_damage_type_modifier, real resistances/
+    # vulnerabilities/immunities on 24+ monster templates -- but nothing
+    # ever SHOWED a player this once they'd actually fought and learned
+    # a monster, so the whole "reward build diversity" point of the
+    # system was invisible. Only shown once genuinely known, same
+    # fog-of-war boundary as every other bestiary fact here -- never a
+    # spoiler for an unfought monster.
+    resist_bits = []
+    if template.get("immunities"):
+        resist_bits.append(f"immune to {', '.join(template['immunities'])}")
+    if template.get("resistances"):
+        resist_bits.append(f"resistant to {', '.join(template['resistances'])}")
+    if template.get("vulnerabilities"):
+        resist_bits.append(f"vulnerable to {', '.join(template['vulnerabilities'])}")
+    if resist_bits:
+        lines.append(f"  {'; '.join(resist_bits)}")
+    return "\n".join(lines)
 
 
 async def _do_bestiary(update: Update) -> None:
@@ -14706,6 +14835,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
                 _adjust_faction_standing(
                     update.effective_user.id, faction_id, 1, _faction_starting_standing(faction_id)
                 )
+    elif action == "talk_party":
+        await _do_talk_party(update, text)
     elif action == "recruit_npc" and intent.get("npc_name"):
         await _do_recruit_npc(update, intent["npc_name"])
     elif action == "rest":

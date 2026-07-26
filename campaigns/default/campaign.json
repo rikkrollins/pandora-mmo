@@ -2821,7 +2821,7 @@
         "type": "defeat_monster",
         "monster": "goblin_boss"
       },
-      "clue": "Whatever's emboldened the goblins seems to answer to something bigger among them.",
+      "clue": "Whatever's emboldened the goblins seems to answer to something bigger among them -- their warrens lie underground, reached by descending into the Weeping Well past Stonearch Bridge.",
       "weight": "climactic"
     },
     "the_wrong_color": {
@@ -2875,6 +2875,18 @@
       "clue": "An old iron door, ajar, wasn't open a moment ago — whatever moved it wants to be found now.",
       "weight": "climactic"
     },
+    "first_city_arrival": {
+      "title": "Beneath Everything",
+      "description": "The tunnels give way all at once — not to more tunnel, but to towers and streets, a whole skyline swallowed and kept in the dark, far older than anything else you've found down here.",
+      "location": "the_hush_below",
+      "reward_xp": 200,
+      "reward_gold": 50,
+      "trigger": {
+        "type": "reach_location",
+        "location": "the_first_city"
+      },
+      "clue": "Whatever's down here was never meant to be found — but you've already seen it now."
+    },
     "the_first_city_quest": {
       "title": "The First City",
       "description": "Beneath everything, something predates the goblins, the roots, and the crystals — and the spire's slow, warm breathing has just changed rhythm.",
@@ -2888,6 +2900,18 @@
       },
       "clue": "Everything so far has felt like the edge of something older, further down.",
       "weight": "climactic"
+    },
+    "unmoored_isle_arrival": {
+      "title": "What the Sky Was Hiding",
+      "description": "The shard grows warm in your hand and pulls upward, past the spire's reach, into empty sky that isn't empty at all.",
+      "location": "the_first_city",
+      "reward_xp": 500,
+      "reward_gold": 200,
+      "trigger": {
+        "type": "reach_location",
+        "location": "the_unmoored_isle"
+      },
+      "clue": "Follow where the shard wants to go — up, past the spire, into open sky."
     },
     "the_unmoored_isle_quest": {
       "title": "What Waits Above",
@@ -3570,6 +3594,8 @@
       "title": "What Was Buried",
       "description": "The truth of what the surface world was built on top of.",
       "quests": [
+        "first_city_arrival",
+        "the_archives_recess",
         "the_first_city_quest"
       ],
       "required_level": 10
@@ -3578,6 +3604,7 @@
       "title": "What Waits Above",
       "description": "The final confrontation, far from where anyone thought to look.",
       "quests": [
+        "unmoored_isle_arrival",
         "the_unmoored_isle_quest"
       ],
       "required_level": 15
