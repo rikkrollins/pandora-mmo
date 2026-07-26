@@ -6277,6 +6277,58 @@ def _current_story_arc(character: dict) -> tuple[str, dict] | None:
     return None
 
 
+def _next_step_hint_facts(character: dict) -> dict | None:
+    """
+    Real, deterministic "what's next" grounding for the Story So Far
+    screen (2026-07-25, per Coffee: "have in the story so far a 'whats
+    next' section with a clear hint what to do or where to go. dont
+    give story away but be clear enough they can do it unless its a
+    puzzle then be vague and ominous but at least hint how we can
+    figure out the puzzle"). Finds the first real, not-yet-completed
+    quest in the character's CURRENT story arc -- one already accepted
+    (active_quests) first, otherwise the arc's own next quest not yet
+    even found -- and returns only real facts about it (its real
+    location and its own hand-written "clue" field, exactly the same
+    non-spoiler text /hint and /ask_clue already surface elsewhere).
+    The AI narration layer only ever phrases these facts -- it never
+    invents the quest, its location, or its clue. Returns None once
+    the whole story (all 14 arcs) is complete, or if the next quest
+    genuinely has neither a location nor a clue to ground a hint in.
+    """
+    current = _current_story_arc(character)
+    if current is None:
+        return None
+    _, arc = current
+    completed = set(character["completed_quests"])
+    active = character.get("active_quests", {})
+
+    next_quest_id = next(
+        (qid for qid in arc.get("quests", []) if qid in active and qid not in completed),
+        None,
+    )
+    if next_quest_id is None:
+        next_quest_id = next((qid for qid in arc.get("quests", []) if qid not in completed), None)
+    if next_quest_id is None:
+        return None
+
+    quest = CAMPAIGN["quests"].get(next_quest_id)
+    if quest is None:
+        return None
+
+    location_id = quest.get("location") or quest.get("objective_location")
+    location = cl.get_location(CAMPAIGN, location_id) if location_id else None
+    location_name = location["name"] if location else None
+    clue = quest.get("clue")
+    if not location_name and not clue:
+        return None
+
+    return {
+        "is_puzzle": quest.get("trigger", {}).get("type") == "solve_puzzle",
+        "location_name": location_name,
+        "clue": clue,
+    }
+
+
 def _story_arc_for_quest(quest_id: str) -> tuple[str, dict] | None:
     """
     Which story arc (if any) a quest belongs to, per campaign.json's
@@ -12988,9 +13040,41 @@ async def _do_show_story_so_far(update: Update) -> None:
         for q in character["completed_quests"] if q in CAMPAIGN["quests"]
     ]
 
+    # What's Next (2026-07-25, per Coffee: "have in the story so far a
+    # 'whats next' section with a clear hint what to do or where to go
+    # ... unless its a puzzle then be vague and ominous"). Real,
+    # deterministic grounding (_next_step_hint_facts) -- the AI layer
+    # only ever phrases it, per _story_so_far_preamble's branching
+    # instruction for puzzle vs. non-puzzle.
+    next_step = _next_step_hint_facts(character)
+
     recap = await asyncio.to_thread(
-        narrate_story_so_far, character["name"], completed_arcs, current_arc_pair, completed_quests,
+        narrate_story_so_far, character["name"], completed_arcs, current_arc_pair, completed_quests, next_step,
     )
+
+    # A real, chapter-themed image alongside the recap (2026-07-25, per
+    # Coffee: "include images too please for all that"), grounded only
+    # in the CURRENT chapter's own title/description -- same
+    # Pollinations.ai convention as every other generated image in this
+    # game, deterministic per arc so revisiting this screen mid-chapter
+    # always shows the same art. Deliberately never grounded in the
+    # next quest's own destination, so it can't visually spoil a puzzle
+    # room or a hidden location before they've actually found it.
+    if current_arc_pair:
+        prompt = (
+            f"{current_arc_pair[1]}, fantasy tabletop RPG book illustration, "
+            "epic, atmospheric, painterly, no text or labels"
+        )
+        try:
+            await update.effective_chat.send_photo(
+                photo=images_module.generate_image_url(
+                    prompt, width=768, height=512, seed=_deterministic_image_seed(f"arc:{current[0]}"),
+                ),
+                caption=f"📖 {current_arc_pair[0]}",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+        except Exception as e:
+            logger.warning(f"[images] story-so-far chapter image failed: {e!r}")
 
     await _safe_send(
         update, f"📖 **Story So Far**\n\n{recap}\n\n" + "\n".join(chapter_lines),

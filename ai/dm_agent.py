@@ -582,7 +582,30 @@ def _fallback_hourly_update(location_name: str, recent_events: list[str], activi
     return " ".join(lines)
 
 
-def _story_so_far_preamble() -> str:
+def _story_so_far_preamble(next_step: dict | None) -> str:
+    if next_step is None:
+        next_step_instruction = (
+            "End on a forward-looking note about the chapter they're currently "
+            "in, without revealing or hinting at anything from chapters still "
+            "locked ahead."
+        )
+    elif next_step["is_puzzle"]:
+        next_step_instruction = (
+            "You are ALSO given a real fact about what comes next: it's a "
+            "puzzle, and its own real clue text is provided. End with a short, "
+            "vague, ominous line about it — evoke mood and mystery, and you "
+            "may hint at HOW one might go about puzzling it out (thinking "
+            "carefully, listening, looking for a pattern), but never state or "
+            "imply the actual answer, and never make it sound simple."
+        )
+    else:
+        next_step_instruction = (
+            "You are ALSO given a real fact about what comes next: a real "
+            "location, and a real clue about what waits there. End with a "
+            "clear, confident line telling them where to go and, in broad "
+            "strokes, what to do when they get there — clear enough to act on "
+            "immediately — without spelling out plot specifics beyond that."
+        )
     return (
         "You are the Dungeon Master writing a \"story so far\" recap for a "
         "player of a Dungeons & Dragons 5th Edition game, in the voice of a "
@@ -595,15 +618,14 @@ def _story_so_far_preamble() -> str:
         "novel's chapter, weaving these real facts into one coherent "
         "throughline in the order given, never inventing a person, place, "
         f"or event beyond what's provided. {_NAMING_INSTRUCTION} "
-        f"{style_directive()} End on a forward-looking note about the "
-        "chapter they're currently in, without revealing or hinting at "
-        "anything from chapters still locked ahead."
+        f"{style_directive()} {next_step_instruction}"
     )
 
 
 def _build_story_so_far_prompt(
     character_name: str, completed_arcs: list[tuple[str, str]],
     current_arc: tuple[str, str] | None, completed_quests: list[tuple[str, str]],
+    next_step: dict | None = None,
 ) -> str:
     completed_arc_text = "; ".join(f"{title}: {desc}" for title, desc in completed_arcs) or "none yet"
     completed_quest_text = "; ".join(f"{title} ({desc})" for title, desc in completed_quests) or "none yet"
@@ -614,8 +636,15 @@ def _build_story_so_far_prompt(
         f"Current chapter: {current_arc_text}\n"
         f"Quests completed so far, in order: {completed_quest_text}"
     )
+    if next_step:
+        kind = "A puzzle" if next_step["is_puzzle"] else "A real destination"
+        facts += (
+            f"\nWhat's next ({kind}): "
+            + (f"location is {next_step['location_name']}. " if next_step.get("location_name") else "")
+            + (f"Clue: {next_step['clue']}" if next_step.get("clue") else "")
+        )
     return (
-        f"{_story_so_far_preamble()}\n\n"
+        f"{_story_so_far_preamble(next_step)}\n\n"
         f"Real facts (narrate ONLY these, faithfully):\n{facts}\n\n"
         f"Write the recap now:"
     )
@@ -624,6 +653,7 @@ def _build_story_so_far_prompt(
 def narrate_story_so_far(
     character_name: str, completed_arcs: list[tuple[str, str]],
     current_arc: tuple[str, str] | None, completed_quests: list[tuple[str, str]],
+    next_step: dict | None = None,
 ) -> str:
     """
     Task #176 menu revision, per Coffee: "I want that to be like a
@@ -633,8 +663,14 @@ def narrate_story_so_far(
     _do_show_story_so_far (never invented here); this only turns them
     into flowing prose, same rules-decide/AI-narrates split as every
     other narration call in this game.
+
+    next_step (2026-07-25, per Coffee: a real "what's next" hint --
+    clear enough to act on for a normal quest, vague and ominous for a
+    puzzle) is bot.py's _next_step_hint_facts output -- real quest
+    location/clue data, never invented here either; this only decides
+    HOW to phrase it, via _story_so_far_preamble's branching instruction.
     """
-    prompt = _build_story_so_far_prompt(character_name, completed_arcs, current_arc, completed_quests)
+    prompt = _build_story_so_far_prompt(character_name, completed_arcs, current_arc, completed_quests, next_step)
     try:
         response = requests.post(
             f"{config.OLLAMA_BASE_URL}/api/generate",
@@ -648,12 +684,13 @@ def narrate_story_so_far(
             return text
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] story-so-far narration call failed, falling back to template: {e}")
-    return _fallback_story_so_far(character_name, completed_arcs, current_arc, completed_quests)
+    return _fallback_story_so_far(character_name, completed_arcs, current_arc, completed_quests, next_step)
 
 
 def _fallback_story_so_far(
     character_name: str, completed_arcs: list[tuple[str, str]],
     current_arc: tuple[str, str] | None, completed_quests: list[tuple[str, str]],
+    next_step: dict | None = None,
 ) -> str:
     """Plain-text fallback if the narration model is unreachable."""
     lines = [f"{character_name}'s journey so far:"]
@@ -665,6 +702,12 @@ def _fallback_story_so_far(
         lines.append("The story is complete.")
     if completed_quests:
         lines.append("Quests completed: " + ", ".join(title for title, _ in completed_quests))
+    if next_step:
+        if next_step["is_puzzle"]:
+            lines.append(f"What's next: something waits, unanswered. {next_step.get('clue', '')}")
+        else:
+            where = f" at {next_step['location_name']}" if next_step.get("location_name") else ""
+            lines.append(f"What's next: head onward{where}. {next_step.get('clue', '')}")
     return "\n".join(lines)
 
 

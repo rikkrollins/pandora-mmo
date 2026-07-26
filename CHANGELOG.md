@@ -2,6 +2,24 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.48] — "What's Next" in the Story So Far screen, with a real chapter image
+
+Per Coffee: "have in the story so far a 'whats next' section with a
+clear hint what to do or where to go. dont give story away but be
+clear enough they can do it unless its a puzzle then be vague and
+ominous but at least hint how we can figure out the puzzle."
+
+The Story So Far screen (📖 in the menu) now ends its narrated recap
+with a real, grounded hint about the very next step in your current
+chapter -- a real location and a real clue, both already-written game
+data, never invented. For a normal quest, it's phrased clearly enough
+to act on immediately (where to go, roughly what to do there). For a
+puzzle, it stays deliberately vague and ominous -- mood and a nudge
+toward HOW you might puzzle it out, never the actual answer. Also now
+sends a real generated image alongside the recap, themed to your
+current chapter (never the hidden next destination itself, so it can
+never visually spoil a secret room before you've found it).
+
 ## [1.27.47] — Two real live bugs fixed: inventory screen crash, edited-command crash
 
 **The backpack screen was completely broken.** Caught live in
