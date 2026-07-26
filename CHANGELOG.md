@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.43] — The Unbegun: the true final boss, and the real ending
+
+The third and final rebirth-gated dungeon completes the set — and this
+one is the real ending. Where the waiting shape stood (this game's
+previous final boss, still a genuine, satisfying conclusion for a
+first-time player) is now just a hollow — and past it, for anyone
+who's rebirthed 3 times AND already defeated the waiting shape, lies
+The First Wait: something that was already here before there was a
+shape to wait, before the island, before the story anyone was ever
+told about this place.
+
+Four new chambers, four new monsters (a watcher that guards what the
+waiting shape stood on, an impossible turning stair, a loom whose
+threads all lead back to where they started, and — at the very center
+— **The Unbegun**, by far the strongest thing in the game), a puzzle
+about cycles and endings, a full quest chain, and 2 new items — The
+Unbegun's Crown is now the single most powerful piece of equipment in
+Pandora MMO.
+
+Defeating The Unbegun doesn't play like every other quest completion —
+it gets its own distinct message and its own new achievement
+(Cycle-Breaker), so reaching this specific moment actually feels
+different from anything else in the game. Everything before this
+remains exactly as conclusive as it already was for anyone not chasing
+it — this is genuinely optional, deep post-game content, not a
+retcon of the existing ending.
+
 ## [1.27.42] — The Wordless Choir: the second rebirth-gated dungeon
 
 The second of 3 planned post-rebirth dungeons is live: **The Wordless

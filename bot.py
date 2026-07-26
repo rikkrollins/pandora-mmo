@@ -6465,16 +6465,40 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         )
         climax_narration = f"{climax_text}\n\n"
 
-    await _safe_send(
-        update_like,
-        f"📜 **Quest complete: {quest['title']}!**\n{climax_narration}You've earned: {reward_text}.{chapter_note}{resolution_note}",
-    )
-    # Task #172 gap (per Coffee, 2026-07-19): quest ACCEPT already
-    # notifies Main (see _do_accept_quest's own _notify_main_topic
-    # calls), but quest COMPLETION never did -- the exact same class of
-    # "party members not watching Adventure miss the big moments" task
-    # #172 was meant to close, just missed at this specific site.
-    await _notify_main_topic(update_like, f"📜 **{character['name']}** completed a quest: {quest['title']}!")
+    # The true ending (2026-07-25, rebirth-3 gated content's climax):
+    # every other quest, including every other "climactic"-weighted one
+    # (the base game's own Arc 4 ending among them), shares this exact
+    # same completion message shape -- deliberately, since the base
+    # ending is meant to read as a genuine, conclusive ending to a
+    # first-time player, per CLAUDE.md's design philosophy. This one
+    # quest specifically gets its own, unmistakably different message
+    # and Main-topic announcement, so reaching it actually feels
+    # different from every quest completion that came before it.
+    if quest_id == "the_unbegun_reckoning":
+        await _safe_send(
+            update_like,
+            f"🌌 **Something Ends. Something Doesn't.**\n\n{climax_narration}"
+            f"The Unbegun falls, and for the first time, the waiting actually "
+            f"stops — not paused, not reset, stopped. Whatever kept starting "
+            f"the cycle over is finally, truly quiet.\n\n"
+            f"You've earned: {reward_text}.{chapter_note}{resolution_note}\n\n"
+            f"This is the real ending — the one nothing else in this game "
+            f"will ever announce as loudly as this.",
+        )
+        await _notify_main_topic(
+            update_like, f"🌌 **{character['name']}** has done something no one else has: ended the cycle.",
+        )
+    else:
+        await _safe_send(
+            update_like,
+            f"📜 **Quest complete: {quest['title']}!**\n{climax_narration}You've earned: {reward_text}.{chapter_note}{resolution_note}",
+        )
+        # Task #172 gap (per Coffee, 2026-07-19): quest ACCEPT already
+        # notifies Main (see _do_accept_quest's own _notify_main_topic
+        # calls), but quest COMPLETION never did -- the exact same class of
+        # "party members not watching Adventure miss the big moments" task
+        # #172 was meant to close, just missed at this specific site.
+        await _notify_main_topic(update_like, f"📜 **{character['name']}** completed a quest: {quest['title']}!")
     if chapter_note:
         # A finished STORY ARC is a bigger milestone than any one quest --
         # per Coffee (2026-07-19): "when players complete a part of the
@@ -10307,6 +10331,16 @@ def _achievement_condition_met(character: dict, check: dict) -> bool:
         # tied to it.
         skill_uses = character.get("skill_uses") or {}
         return any(practiced_bonus(skill_uses.get(p, 0)) >= MAX_PRACTICE_BONUS for p in ALL_PROFESSIONS)
+    if check_type == "completed_specific_quest":
+        # The true ending (2026-07-25, rebirth-3 gated content): unlike
+        # every other check type here, this one is tied to a single named
+        # quest rather than a general milestone -- deliberate, since the
+        # whole point is a distinct, unmistakable achievement for reaching
+        # this one specific moment (defeating The Unbegun), not a
+        # reusable threshold. Still just reads the same real
+        # completed_quests field every other quest-count check already
+        # uses.
+        return check["quest_id"] in (character.get("completed_quests") or [])
     if check_type == "hidden_synergy":
         # Task #134: real, undocumented emergent-build achievements --
         # a genuine multi-system combo (alignment extreme + a real

@@ -247,6 +247,21 @@ ITEMS = {
         "note": "It doesn't make a sound. You just stop, for a moment, being able to not hear it.",
     },
 
+    # The Unbegun dungeon rewards (2026-07-25, rebirth-3 gated content,
+    # the true final boss -- see campaign.json's unmoored_isle_* /
+    # the_unbegun_reckoning). Quest-only, never shop-buyable. The
+    # Unbegun's Crown is deliberately the strongest item in the game.
+    "hollow_watchers_eye": {
+        "name": "Hollow Watcher's Eye", "type": "amulet", "rarity": "rare",
+        "price": 0, "weight": 0, "regen_bonus": 3, "ac_bonus": 2,
+        "note": "It sees exactly as well with its eyes closed.",
+    },
+    "the_unbegun_crown": {
+        "name": "The Unbegun's Crown", "type": "wondrous", "rarity": "legendary",
+        "price": 0, "weight": 1, "regen_bonus": 5, "ac_bonus": 3,
+        "note": "Worn by whatever was here before there was a story to tell about it.",
+    },
+
     # --- Maps (task #141: buyable/discoverable, partial-reveal only --
     # see bot.py's _do_use_item "map" branch and _do_show_map's
     # revealed-but-unvisited rendering. reveals_layer/reveals_count are

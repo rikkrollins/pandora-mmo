@@ -10,7 +10,9 @@ _do_set_title / /title), shown next to their name on their sheet.
 check.type is one of: min_level, min_gold, min_known_monsters,
 min_completed_quests, min_board_quests_completed, has_guild,
 well_equipped (needs a weapon AND either armor or a shield equipped),
-master_of_any_profession (Master rank in any of the 7 real professions).
+master_of_any_profession (Master rank in any of the 7 real professions),
+completed_specific_quest (a single named quest_id, for one-off finale
+achievements rather than a reusable threshold).
 See bot.py's _achievement_condition_met for how each is evaluated.
 """
 
@@ -124,6 +126,19 @@ ACHIEVEMENTS = {
         "description": "A path few walk on purpose.",
         "title": "the Damned",
         "check": {"type": "hidden_synergy", "variant": "damned"},
+    },
+    # The true ending (2026-07-25): the 3rd and final rebirth-gated
+    # dungeon's capstone quest gets its own achievement, tied to that
+    # one specific quest (completed_specific_quest) rather than a
+    # reusable threshold -- deliberate, since reaching this one moment
+    # is meant to feel unmistakably different from every other
+    # achievement here. See bot.py's _complete_quest_and_announce for
+    # this same quest's own distinct completion message.
+    "cycle_breaker": {
+        "name": "Cycle-Breaker",
+        "description": "Defeat The Unbegun -- the thing that was waiting before the Waiting Shape ever stood watch, and the true reason the cycle never really ended.",
+        "title": "the Cycle-Breaker",
+        "check": {"type": "completed_specific_quest", "quest_id": "the_unbegun_reckoning"},
     },
 }
 

@@ -1470,7 +1470,9 @@
         "name": "The Unmoored Isle",
         "layer": "sky",
         "description": "An island of grey stone drifting slowly above the clouds, tethered to nothing anyone can see. Something on it has been waiting a very long time.",
-        "connections": [],
+        "connections": [
+          "unmoored_isle_hollow"
+        ],
         "hidden": true,
         "requires_item": "shard_of_dim_light",
         "monsters": [
@@ -1484,6 +1486,111 @@
           "isles_edge": {
             "name": "the island's crumbling edge",
             "description": "Looking over it, the clouds below part just long enough to show how very far down the world actually is."
+          }
+        },
+        "story_gates": {
+          "unmoored_isle_hollow": {
+            "requires_defeated_monster": "the_waiting_shape"
+          }
+        },
+        "directions": {
+          "down": "unmoored_isle_hollow"
+        }
+      },
+      "unmoored_isle_hollow": {
+        "name": "The Hollow Beneath the Wait",
+        "layer": "sky",
+        "description": "Where the waiting shape stood is now just a hollow in the stone — and the hollow, it turns out, goes down, not into the isle's rock but into something the isle was only ever resting on top of.",
+        "connections": [
+          "the_unmoored_isle",
+          "unmoored_isle_turning_stair"
+        ],
+        "directions": {
+          "up": "the_unmoored_isle",
+          "down": "unmoored_isle_turning_stair"
+        },
+        "requires_rebirth_count": 3,
+        "monsters": [
+          "hollow_watcher"
+        ],
+        "interactables": {
+          "the_hollow_itself": {
+            "name": "the hollow left behind",
+            "description": "Not empty so much as finally uncovered — whatever the waiting shape spent all that time standing on top of."
+          }
+        }
+      },
+      "unmoored_isle_turning_stair": {
+        "name": "The Turning Stair",
+        "layer": "sky",
+        "description": "A stair that turns back on itself in ways the eye refuses to follow — climbing it and descending it are, as far as anyone can tell, the exact same motion.",
+        "connections": [
+          "unmoored_isle_hollow",
+          "unmoored_isle_loom"
+        ],
+        "directions": {
+          "up": "unmoored_isle_hollow",
+          "down": "unmoored_isle_loom"
+        },
+        "monsters": [
+          "turning_stair_guardian"
+        ],
+        "interactables": {
+          "impossible_steps": {
+            "name": "the stair's impossible steps",
+            "description": "Every step looks identical to the one before it. Somewhere behind you, without ever turning around, you're fairly sure you've started climbing the same stair a second time."
+          }
+        },
+        "story_gates": {
+          "unmoored_isle_loom": {
+            "requires_cleared_location": "unmoored_isle_turning_stair"
+          }
+        }
+      },
+      "unmoored_isle_loom": {
+        "name": "The Loom",
+        "layer": "sky",
+        "description": "Threads run wall to wall in patterns too vast to see whole from any one place in the room — and every pattern, followed far enough, leads back to where it started.",
+        "connections": [
+          "unmoored_isle_turning_stair",
+          "unmoored_isle_first_wait"
+        ],
+        "directions": {
+          "up": "unmoored_isle_turning_stair",
+          "down": "unmoored_isle_first_wait"
+        },
+        "monsters": [
+          "loom_warden"
+        ],
+        "interactables": {
+          "the_running_threads": {
+            "name": "the loom's running threads",
+            "description": "\"I end where I began, and begin again where I ended. What am I?\" -- woven directly into the pattern itself, in threads that don't quite match the color of everything around them."
+          }
+        },
+        "story_gates": {
+          "unmoored_isle_first_wait": {
+            "requires_cleared_location": "unmoored_isle_loom"
+          }
+        }
+      },
+      "unmoored_isle_first_wait": {
+        "name": "The First Wait",
+        "layer": "sky",
+        "description": "Before there was a shape to wait, something was already waiting here — and it has been patient for far longer than the story anyone's been told about this place.",
+        "connections": [
+          "unmoored_isle_loom"
+        ],
+        "directions": {
+          "up": "unmoored_isle_loom"
+        },
+        "monsters": [
+          "the_unbegun"
+        ],
+        "interactables": {
+          "before_the_beginning": {
+            "name": "whatever was here before the beginning",
+            "description": "It was never the waiting shape's island. The waiting shape was just the latest thing it wore to keep watching."
           }
         }
       }
@@ -2223,6 +2330,58 @@
       },
       "clue": "It was never trying to be found. That's exactly why it took this long.",
       "weight": "climactic"
+    },
+    "hollow_watchers_vigil": {
+      "title": "The Hollow Watcher's Vigil",
+      "description": "Whatever kept watch beneath the waiting shape's feet isn't ready to let anyone see what it was guarding.",
+      "location": "unmoored_isle_hollow",
+      "reward_xp": 1400,
+      "reward_gold": 800,
+      "reward_item": "hollow_watchers_eye",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "hollow_watcher"
+      },
+      "clue": "It doesn't seem surprised to see you. It seems disappointed it wasn't enough to stop you here."
+    },
+    "turning_stairs_paradox": {
+      "title": "The Turning Stair's Paradox",
+      "description": "The stair won't let anyone reach the bottom while its guardian is still standing at every step of it at once.",
+      "location": "unmoored_isle_turning_stair",
+      "reward_xp": 1700,
+      "reward_gold": 1000,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "turning_stair_guardian"
+      },
+      "clue": "It attacks from the step behind you exactly as often as the one ahead -- which shouldn't be possible on a stair with only one direction."
+    },
+    "the_looms_pattern": {
+      "title": "The Loom's Pattern",
+      "description": "The Loom's threads all lead back to where they started -- and the room isn't letting anyone leave until they say so out loud.",
+      "location": "unmoored_isle_loom",
+      "trigger": {
+        "type": "solve_puzzle",
+        "puzzle_id": "unmoored_isle_loom_riddle"
+      },
+      "reward_xp": 1400,
+      "reward_gold": 600,
+      "reward_item": "weathered_surface_map",
+      "clue": "The pattern woven into the threads reads: \"I end where I began, and begin again where I ended. What am I?\""
+    },
+    "the_unbegun_reckoning": {
+      "title": "The Unbegun's Reckoning",
+      "description": "Before the waiting shape, before the island, before the story anyone was ever told about this place -- something was already here, and it has finally run out of patience.",
+      "location": "unmoored_isle_first_wait",
+      "reward_xp": 10000,
+      "reward_gold": 5000,
+      "reward_item": "the_unbegun_crown",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_unbegun"
+      },
+      "clue": "It was never waiting to be found. It was waiting to see who'd actually come looking.",
+      "weight": "climactic"
     }
   },
   "story_arcs": {
@@ -2520,6 +2679,73 @@
       "vulnerabilities": [
         "lightning"
       ]
+    },
+    "hollow_watcher": {
+      "name": "Hollow Watcher",
+      "dexterity": 16,
+      "strength": 14,
+      "armor_class": 17,
+      "hp_max": 60,
+      "proficiency_bonus": 4,
+      "xp_reward": 1000,
+      "on_hit_condition": "blinded",
+      "resistances": [
+        "force"
+      ],
+      "vulnerabilities": [
+        "psychic"
+      ]
+    },
+    "turning_stair_guardian": {
+      "name": "Turning Stair Guardian",
+      "dexterity": 15,
+      "strength": 18,
+      "armor_class": 19,
+      "hp_max": 100,
+      "proficiency_bonus": 4,
+      "xp_reward": 1300,
+      "on_hit_condition": "prone",
+      "resistances": [
+        "psychic"
+      ],
+      "vulnerabilities": [
+        "force"
+      ]
+    },
+    "loom_warden": {
+      "name": "Loom Warden",
+      "dexterity": 13,
+      "strength": 16,
+      "armor_class": 18,
+      "hp_max": 110,
+      "proficiency_bonus": 4,
+      "xp_reward": 1500,
+      "resistances": [
+        "necrotic"
+      ],
+      "vulnerabilities": [
+        "radiant"
+      ]
+    },
+    "the_unbegun": {
+      "name": "The Unbegun",
+      "dexterity": 18,
+      "strength": 22,
+      "armor_class": 21,
+      "hp_max": 160,
+      "proficiency_bonus": 6,
+      "xp_reward": 5000,
+      "is_boss": true,
+      "on_hit_condition": "paralyzed",
+      "life_drain": true,
+      "resistances": [
+        "physical",
+        "psychic",
+        "necrotic"
+      ],
+      "vulnerabilities": [
+        "radiant"
+      ]
     }
   },
   "factions": {
@@ -2597,6 +2823,16 @@
         "the silence",
         "quiet",
         "the quiet"
+      ]
+    },
+    "unmoored_isle_loom_riddle": {
+      "riddle": "I end where I began, and begin again where I ended. What am I?",
+      "accepted_answers": [
+        "a circle",
+        "the circle",
+        "a cycle",
+        "the cycle",
+        "rebirth"
       ]
     }
   }
