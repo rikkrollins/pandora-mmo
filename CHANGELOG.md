@@ -2,6 +2,24 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.44] — All 3 rebirth dungeons expanded (per Coffee: "bigger expansion")
+
+Each of the 3 rebirth-gated dungeons (Hollow Verge, The Wordless Choir,
+The Unbegun) just about doubles in size: 2 new required rooms spliced
+into each dungeon's main sequential path (using real monster variants —
+tougher named versions of that dungeon's existing creatures, not
+invented from scratch — so the extra content stays grounded in what
+each place already is), plus 1 new optional side-branch room per
+dungeon with its own weaker variant monster and bonus loot, entirely
+skippable and never blocking the main path to the boss.
+
+9 new monster variants, 9 new quests, and 6 new items across the 3
+dungeons. Every existing node, quest, and boss fight in all 3 dungeons
+is completely unchanged — this only adds new rooms in between and
+alongside what was already there, re-pointing the sequential
+story-gates through the new middle rooms rather than touching the
+start or end of any dungeon.
+
 ## [1.27.43] — The Unbegun: the true final boss, and the real ending
 
 The third and final rebirth-gated dungeon completes the set — and this

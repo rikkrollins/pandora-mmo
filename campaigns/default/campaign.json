@@ -658,11 +658,13 @@
         "description": "A field of old bone, sun-grey and half-sunk into the ground, arranged in ranks too even to be an accident. Whatever army this once was, it's still standing in formation, waiting for an order that never came.",
         "connections": [
           "hollow_verge_threshold",
-          "hollow_verge_sealed_cairn"
+          "hollow_verge_husk_orchard",
+          "hollow_verge_forgotten_nook"
         ],
         "directions": {
           "south": "hollow_verge_threshold",
-          "north": "hollow_verge_sealed_cairn"
+          "north": "hollow_verge_husk_orchard",
+          "east": "hollow_verge_forgotten_nook"
         },
         "monsters": [
           "bone_legionnaire",
@@ -675,7 +677,7 @@
           }
         },
         "story_gates": {
-          "hollow_verge_sealed_cairn": {
+          "hollow_verge_husk_orchard": {
             "requires_cleared_location": "hollow_verge_bonefield"
           }
         }
@@ -685,12 +687,12 @@
         "layer": "surface",
         "description": "A low cairn built from the same grey stone as everything else here, sealed with a door that has no visible hinge and no visible lock -- just a single line of script worn nearly smooth, still just legible.",
         "connections": [
-          "hollow_verge_bonefield",
-          "hollow_verge_inner_sanctum"
+          "hollow_verge_husk_orchard",
+          "hollow_verge_ashen_reliquary"
         ],
         "directions": {
-          "south": "hollow_verge_bonefield",
-          "north": "hollow_verge_inner_sanctum"
+          "south": "hollow_verge_husk_orchard",
+          "north": "hollow_verge_ashen_reliquary"
         },
         "monsters": [
           "cairn_watcher"
@@ -702,7 +704,7 @@
           }
         },
         "story_gates": {
-          "hollow_verge_inner_sanctum": {
+          "hollow_verge_ashen_reliquary": {
             "requires_cleared_location": "hollow_verge_sealed_cairn"
           }
         }
@@ -712,10 +714,10 @@
         "layer": "surface",
         "description": "The unfinished horizon closes in completely here, until the sanctum itself is the only clearly real thing left standing. Something has been waiting at its center for exactly as long as the field outside has been standing at attention -- and it has finally noticed you.",
         "connections": [
-          "hollow_verge_sealed_cairn"
+          "hollow_verge_ashen_reliquary"
         ],
         "directions": {
-          "south": "hollow_verge_sealed_cairn"
+          "south": "hollow_verge_ashen_reliquary"
         },
         "monsters": [
           "the_verge_warden"
@@ -724,6 +726,80 @@
           "unfinished_center": {
             "name": "the sanctum's unfinished center",
             "description": "Not empty, exactly -- more like a space the world hasn't gotten around to deciding what belongs in yet. Right now, that's the Warden."
+          }
+        }
+      },
+      "hollow_verge_husk_orchard": {
+        "name": "The Husk Orchard",
+        "layer": "surface",
+        "description": "Rows of something that used to grow here, gone dry and hollow in ranks too even to be a real orchard. Whatever's still walking between the rows remembers being planted.",
+        "connections": [
+          "hollow_verge_bonefield",
+          "hollow_verge_sealed_cairn"
+        ],
+        "directions": {
+          "south": "hollow_verge_bonefield",
+          "north": "hollow_verge_sealed_cairn"
+        },
+        "monsters": [
+          "elder_bone_legionnaire"
+        ],
+        "interactables": {
+          "dry_rows": {
+            "name": "the orchard's dry, even rows",
+            "description": "Nothing this dead should still be standing this straight."
+          }
+        },
+        "story_gates": {
+          "hollow_verge_sealed_cairn": {
+            "requires_cleared_location": "hollow_verge_husk_orchard"
+          }
+        }
+      },
+      "hollow_verge_ashen_reliquary": {
+        "name": "The Ashen Reliquary",
+        "layer": "surface",
+        "description": "Shelves of grey, ash-fine relics line every wall, none of them quite identifiable, all of them clearly meant to be kept. Something is still chained here, tending to the collection.",
+        "connections": [
+          "hollow_verge_sealed_cairn",
+          "hollow_verge_inner_sanctum"
+        ],
+        "directions": {
+          "south": "hollow_verge_sealed_cairn",
+          "north": "hollow_verge_inner_sanctum"
+        },
+        "monsters": [
+          "bound_verge_wraith"
+        ],
+        "interactables": {
+          "ash_fine_shelves": {
+            "name": "the reliquary's ash-fine shelves",
+            "description": "Everything on them has been dusted, straightened, and kept, over and over, for longer than anything should have to wait to be looked at again."
+          }
+        },
+        "story_gates": {
+          "hollow_verge_inner_sanctum": {
+            "requires_cleared_location": "hollow_verge_ashen_reliquary"
+          }
+        }
+      },
+      "hollow_verge_forgotten_nook": {
+        "name": "The Forgotten Nook",
+        "layer": "surface",
+        "description": "A side hollow off the bonefield, easy to miss and clearly not meant to be found — nothing here was ever part of the main procession the rest of the Verge seems built around.",
+        "connections": [
+          "hollow_verge_bonefield"
+        ],
+        "directions": {
+          "west": "hollow_verge_bonefield"
+        },
+        "monsters": [
+          "young_cairn_watcher"
+        ],
+        "interactables": {
+          "overlooked_hollow": {
+            "name": "the overlooked hollow itself",
+            "description": "Whatever was left here was left in a hurry, by someone who never expected to come back for it."
           }
         }
       }
@@ -1373,11 +1449,11 @@
         "description": "Past where The Unrepeating finally stopped, the black walls open into something that was never meant to be walked through twice -- not a door, exactly, more like the held breath before whatever this place used to say.",
         "connections": [
           "the_first_city_forgotten_depth",
-          "wordless_choir_machinery"
+          "wordless_choir_antechamber"
         ],
         "directions": {
           "up": "the_first_city_forgotten_depth",
-          "down": "wordless_choir_machinery"
+          "down": "wordless_choir_antechamber"
         },
         "requires_rebirth_count": 2,
         "monsters": [
@@ -1388,6 +1464,11 @@
             "name": "the held breath in the stone",
             "description": "Not a sound, not quite silence either -- the specific quiet of something about to speak that never quite does."
           }
+        },
+        "story_gates": {
+          "wordless_choir_antechamber": {
+            "requires_cleared_location": "wordless_choir_gate"
+          }
         }
       },
       "wordless_choir_machinery": {
@@ -1395,12 +1476,14 @@
         "layer": "underground",
         "description": "Vast shapes stand silent in ranks, built for a purpose no one living was ever told. Whatever they once made — sound, meaning, both — they stopped making it so long ago that stillness is the only thing they do well anymore.",
         "connections": [
-          "wordless_choir_gate",
-          "wordless_choir_hall"
+          "wordless_choir_antechamber",
+          "wordless_choir_hall",
+          "wordless_choir_forgotten_chord"
         ],
         "directions": {
-          "up": "wordless_choir_gate",
-          "down": "wordless_choir_hall"
+          "up": "wordless_choir_antechamber",
+          "down": "wordless_choir_hall",
+          "west": "wordless_choir_forgotten_chord"
         },
         "monsters": [
           "still_machinery_sentinel"
@@ -1423,11 +1506,11 @@
         "description": "A chamber shaped like a throat, built to carry a single note to every corner at once. It hasn't held one in longer than anything else down here has been keeping time.",
         "connections": [
           "wordless_choir_machinery",
-          "wordless_choir_source"
+          "wordless_choir_resonance_well"
         ],
         "directions": {
           "up": "wordless_choir_machinery",
-          "down": "wordless_choir_source"
+          "down": "wordless_choir_resonance_well"
         },
         "monsters": [
           "voiceless_warden"
@@ -1439,7 +1522,7 @@
           }
         },
         "story_gates": {
-          "wordless_choir_source": {
+          "wordless_choir_resonance_well": {
             "requires_cleared_location": "wordless_choir_hall"
           }
         }
@@ -1449,10 +1532,10 @@
         "layer": "underground",
         "description": "Where the hall's shape finally resolves into a single point, something is still, impossibly, humming — a note too low to hear and too old to have ever had a name.",
         "connections": [
-          "wordless_choir_hall"
+          "wordless_choir_resonance_well"
         ],
         "directions": {
-          "up": "wordless_choir_hall"
+          "up": "wordless_choir_resonance_well"
         },
         "monsters": [
           "the_undertone"
@@ -1461,6 +1544,80 @@
           "impossible_hum": {
             "name": "the impossible, wordless hum",
             "description": "Not a sound you hear so much as one you stop, for a moment, being able to not hear. It has been going on, unheard, for exactly as long as everything above it has been standing still."
+          }
+        }
+      },
+      "wordless_choir_antechamber": {
+        "name": "The Antechamber",
+        "layer": "underground",
+        "description": "A narrow space between the gate and whatever lies beyond it, built the way a held breath is built — meant to be passed through, never meant to be stayed in.",
+        "connections": [
+          "wordless_choir_gate",
+          "wordless_choir_machinery"
+        ],
+        "directions": {
+          "up": "wordless_choir_gate",
+          "down": "wordless_choir_machinery"
+        },
+        "monsters": [
+          "elder_choir_remnant"
+        ],
+        "interactables": {
+          "held_breath_walls": {
+            "name": "the antechamber's held-breath walls",
+            "description": "Not quite narrow enough to be a corridor, not quite wide enough to be a room -- built for passing through, not for staying."
+          }
+        },
+        "story_gates": {
+          "wordless_choir_machinery": {
+            "requires_cleared_location": "wordless_choir_antechamber"
+          }
+        }
+      },
+      "wordless_choir_resonance_well": {
+        "name": "The Resonance Well",
+        "layer": "underground",
+        "description": "A shaft that seems to answer back, faintly, if you're quiet long enough to notice — the same note, over and over, from somewhere too far down to actually be there.",
+        "connections": [
+          "wordless_choir_hall",
+          "wordless_choir_source"
+        ],
+        "directions": {
+          "up": "wordless_choir_hall",
+          "down": "wordless_choir_source"
+        },
+        "monsters": [
+          "bound_voiceless_warden"
+        ],
+        "interactables": {
+          "the_answering_shaft": {
+            "name": "the well's answering shaft",
+            "description": "Drop anything down it and you'll hear it land twice -- once from below, and once, a half-second later, from somewhere that isn't below at all."
+          }
+        },
+        "story_gates": {
+          "wordless_choir_source": {
+            "requires_cleared_location": "wordless_choir_resonance_well"
+          }
+        }
+      },
+      "wordless_choir_forgotten_chord": {
+        "name": "The Forgotten Chord",
+        "layer": "underground",
+        "description": "A side hollow off the still machinery, easy to miss between two of the silent ranks — whatever used to happen here was never part of the main performance.",
+        "connections": [
+          "wordless_choir_machinery"
+        ],
+        "directions": {
+          "east": "wordless_choir_machinery"
+        },
+        "monsters": [
+          "young_choir_remnant"
+        ],
+        "interactables": {
+          "unused_alcove": {
+            "name": "the unused alcove",
+            "description": "Built for something that never got scheduled -- or already happened, once, a very long time before anyone was around to hear it."
           }
         }
       }
@@ -1503,11 +1660,11 @@
         "description": "Where the waiting shape stood is now just a hollow in the stone — and the hollow, it turns out, goes down, not into the isle's rock but into something the isle was only ever resting on top of.",
         "connections": [
           "the_unmoored_isle",
-          "unmoored_isle_turning_stair"
+          "unmoored_isle_afterimage"
         ],
         "directions": {
           "up": "the_unmoored_isle",
-          "down": "unmoored_isle_turning_stair"
+          "down": "unmoored_isle_afterimage"
         },
         "requires_rebirth_count": 3,
         "monsters": [
@@ -1518,6 +1675,11 @@
             "name": "the hollow left behind",
             "description": "Not empty so much as finally uncovered — whatever the waiting shape spent all that time standing on top of."
           }
+        },
+        "story_gates": {
+          "unmoored_isle_afterimage": {
+            "requires_cleared_location": "unmoored_isle_hollow"
+          }
         }
       },
       "unmoored_isle_turning_stair": {
@@ -1525,12 +1687,14 @@
         "layer": "sky",
         "description": "A stair that turns back on itself in ways the eye refuses to follow — climbing it and descending it are, as far as anyone can tell, the exact same motion.",
         "connections": [
-          "unmoored_isle_hollow",
-          "unmoored_isle_loom"
+          "unmoored_isle_afterimage",
+          "unmoored_isle_loom",
+          "unmoored_isle_missed_step"
         ],
         "directions": {
-          "up": "unmoored_isle_hollow",
-          "down": "unmoored_isle_loom"
+          "up": "unmoored_isle_afterimage",
+          "down": "unmoored_isle_loom",
+          "east": "unmoored_isle_missed_step"
         },
         "monsters": [
           "turning_stair_guardian"
@@ -1553,11 +1717,11 @@
         "description": "Threads run wall to wall in patterns too vast to see whole from any one place in the room — and every pattern, followed far enough, leads back to where it started.",
         "connections": [
           "unmoored_isle_turning_stair",
-          "unmoored_isle_first_wait"
+          "unmoored_isle_last_measure"
         ],
         "directions": {
           "up": "unmoored_isle_turning_stair",
-          "down": "unmoored_isle_first_wait"
+          "down": "unmoored_isle_last_measure"
         },
         "monsters": [
           "loom_warden"
@@ -1569,7 +1733,7 @@
           }
         },
         "story_gates": {
-          "unmoored_isle_first_wait": {
+          "unmoored_isle_last_measure": {
             "requires_cleared_location": "unmoored_isle_loom"
           }
         }
@@ -1579,10 +1743,10 @@
         "layer": "sky",
         "description": "Before there was a shape to wait, something was already waiting here — and it has been patient for far longer than the story anyone's been told about this place.",
         "connections": [
-          "unmoored_isle_loom"
+          "unmoored_isle_last_measure"
         ],
         "directions": {
-          "up": "unmoored_isle_loom"
+          "up": "unmoored_isle_last_measure"
         },
         "monsters": [
           "the_unbegun"
@@ -1591,6 +1755,80 @@
           "before_the_beginning": {
             "name": "whatever was here before the beginning",
             "description": "It was never the waiting shape's island. The waiting shape was just the latest thing it wore to keep watching."
+          }
+        }
+      },
+      "unmoored_isle_afterimage": {
+        "name": "The Afterimage",
+        "layer": "sky",
+        "description": "A space that only exists because something else already passed through it — an impression left in the air itself, still holding the shape of whatever cast it.",
+        "connections": [
+          "unmoored_isle_hollow",
+          "unmoored_isle_turning_stair"
+        ],
+        "directions": {
+          "up": "unmoored_isle_hollow",
+          "down": "unmoored_isle_turning_stair"
+        },
+        "monsters": [
+          "elder_hollow_watcher"
+        ],
+        "interactables": {
+          "the_lingering_impression": {
+            "name": "the lingering impression in the air",
+            "description": "Whatever left this behind is long gone. The shape it left isn't done watching, though."
+          }
+        },
+        "story_gates": {
+          "unmoored_isle_turning_stair": {
+            "requires_cleared_location": "unmoored_isle_afterimage"
+          }
+        }
+      },
+      "unmoored_isle_last_measure": {
+        "name": "The Last Measure",
+        "layer": "sky",
+        "description": "The Loom's pattern finally runs out here, frayed at the edge into threads that don't lead anywhere else — the very last measure of something that was never going to resolve cleanly.",
+        "connections": [
+          "unmoored_isle_loom",
+          "unmoored_isle_first_wait"
+        ],
+        "directions": {
+          "up": "unmoored_isle_loom",
+          "down": "unmoored_isle_first_wait"
+        },
+        "monsters": [
+          "bound_loom_warden"
+        ],
+        "interactables": {
+          "the_frayed_edge": {
+            "name": "the pattern's frayed edge",
+            "description": "Every thread in the loom eventually reaches this exact point and simply stops -- not cut, not finished, just done."
+          }
+        },
+        "story_gates": {
+          "unmoored_isle_first_wait": {
+            "requires_cleared_location": "unmoored_isle_last_measure"
+          }
+        }
+      },
+      "unmoored_isle_missed_step": {
+        "name": "The Missed Step",
+        "layer": "sky",
+        "description": "A step on the turning stair that doesn't quite connect to any of the others — easy to fall into by accident, and just as easy to never notice was ever there at all.",
+        "connections": [
+          "unmoored_isle_turning_stair"
+        ],
+        "directions": {
+          "east": "unmoored_isle_turning_stair"
+        },
+        "monsters": [
+          "young_turning_stair_guardian"
+        ],
+        "interactables": {
+          "the_disconnected_step": {
+            "name": "the disconnected step itself",
+            "description": "It doesn't lead anywhere the rest of the stair goes. That was apparently the entire point of building it."
           }
         }
       }
@@ -2382,6 +2620,120 @@
       },
       "clue": "It was never waiting to be found. It was waiting to see who'd actually come looking.",
       "weight": "climactic"
+    },
+    "husk_orchards_reckoning": {
+      "title": "The Husk Orchard's Reckoning",
+      "description": "Whatever still walks the orchard's dry rows remembers exactly what it was planted to do.",
+      "location": "hollow_verge_husk_orchard",
+      "reward_xp": 750,
+      "reward_gold": 350,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "elder_bone_legionnaire"
+      },
+      "clue": "It doesn't fight like a straggler. It fights like something that trained the rest of the field."
+    },
+    "ashen_reliquarys_captive": {
+      "title": "The Ashen Reliquary's Captive",
+      "description": "Something has been kept here, chained to the collection, for longer than the collection has been worth keeping.",
+      "location": "hollow_verge_ashen_reliquary",
+      "reward_xp": 800,
+      "reward_gold": 400,
+      "reward_item": "bound_wraiths_chain",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "bound_verge_wraith"
+      },
+      "clue": "It doesn't try to flee when the chain finally gives. It just keeps tending the shelves."
+    },
+    "the_forgotten_nooks_secret": {
+      "title": "The Forgotten Nook's Secret",
+      "description": "Nobody was supposed to find this hollow -- which is exactly why something's still guarding it.",
+      "location": "hollow_verge_forgotten_nook",
+      "reward_xp": 400,
+      "reward_gold": 200,
+      "reward_item": "forgotten_nooks_trinket",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "young_cairn_watcher"
+      },
+      "clue": "It's smaller and quicker than its kin at the cairn -- like it grew up hiding rather than guarding."
+    },
+    "antechambers_held_breath": {
+      "title": "The Antechamber's Held Breath",
+      "description": "Whatever's meant to only pass through this space has decided to stay a while longer, specifically to stop you from doing the same.",
+      "location": "wordless_choir_antechamber",
+      "reward_xp": 950,
+      "reward_gold": 450,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "elder_choir_remnant"
+      },
+      "clue": "It's louder than the one at the gate. Whatever silence usually keeps it in check hasn't reached this far yet."
+    },
+    "resonance_wells_answer": {
+      "title": "The Resonance Well's Answer",
+      "description": "Something down the well has been answering back for longer than anyone's been listening -- and it's finally close enough to touch.",
+      "location": "wordless_choir_resonance_well",
+      "reward_xp": 1300,
+      "reward_gold": 700,
+      "reward_item": "resonance_bound_ring",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "bound_voiceless_warden"
+      },
+      "clue": "It answers half a second late, every time -- like it's not quite in the same place the sound is."
+    },
+    "the_forgotten_chords_return": {
+      "title": "The Forgotten Chord's Return",
+      "description": "Something was scheduled here once and never got to happen -- or already did, so long ago that nobody's left who remembers it.",
+      "location": "wordless_choir_forgotten_chord",
+      "reward_xp": 550,
+      "reward_gold": 250,
+      "reward_item": "unscheduled_chord_charm",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "young_choir_remnant"
+      },
+      "clue": "It hums the start of something and stops, every time, right before the part that would let you recognize it."
+    },
+    "the_afterimages_watch": {
+      "title": "The Afterimage's Watch",
+      "description": "Whatever cast this impression is long gone -- but the shape it left behind hasn't stopped watching for it to come back.",
+      "location": "unmoored_isle_afterimage",
+      "reward_xp": 1600,
+      "reward_gold": 900,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "elder_hollow_watcher"
+      },
+      "clue": "It moves like something remembering a motion, not making one."
+    },
+    "the_last_measures_end": {
+      "title": "The Last Measure's End",
+      "description": "The Loom's very last thread was never going to resolve cleanly -- and whatever's tangled in it isn't interested in an exception.",
+      "location": "unmoored_isle_last_measure",
+      "reward_xp": 2400,
+      "reward_gold": 1400,
+      "reward_item": "frayed_edge_band",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "bound_loom_warden"
+      },
+      "clue": "It doesn't attack like it's trying to win. It attacks like it's trying to finish something."
+    },
+    "the_missed_steps_fall": {
+      "title": "The Missed Step's Fall",
+      "description": "Whatever built this disconnected step built it on purpose -- and something's still down there making sure nobody climbs back out easily.",
+      "location": "unmoored_isle_missed_step",
+      "reward_xp": 900,
+      "reward_gold": 500,
+      "reward_item": "disconnected_steps_charm",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "young_turning_stair_guardian"
+      },
+      "clue": "It's smaller than the guardian on the real stair -- like it was posted here to be forgotten, not to win."
     }
   },
   "story_arcs": {
@@ -2745,6 +3097,143 @@
       ],
       "vulnerabilities": [
         "radiant"
+      ]
+    },
+    "elder_bone_legionnaire": {
+      "name": "Elder Bone Legionnaire",
+      "dexterity": 13,
+      "strength": 17,
+      "armor_class": 16,
+      "hp_max": 45,
+      "proficiency_bonus": 3,
+      "xp_reward": 550,
+      "vulnerabilities": [
+        "fire"
+      ]
+    },
+    "bound_verge_wraith": {
+      "name": "Bound Verge Wraith",
+      "dexterity": 17,
+      "strength": 12,
+      "armor_class": 15,
+      "hp_max": 38,
+      "proficiency_bonus": 3,
+      "xp_reward": 500,
+      "on_hit_condition": "frightened",
+      "resistances": [
+        "physical"
+      ],
+      "vulnerabilities": [
+        "radiant"
+      ]
+    },
+    "young_cairn_watcher": {
+      "name": "Young Cairn Watcher",
+      "dexterity": 9,
+      "strength": 12,
+      "armor_class": 15,
+      "hp_max": 30,
+      "proficiency_bonus": 2,
+      "xp_reward": 350,
+      "resistances": [
+        "necrotic"
+      ],
+      "vulnerabilities": [
+        "radiant"
+      ]
+    },
+    "elder_choir_remnant": {
+      "name": "Elder Choir Remnant",
+      "dexterity": 15,
+      "strength": 13,
+      "armor_class": 16,
+      "hp_max": 55,
+      "proficiency_bonus": 3,
+      "xp_reward": 650,
+      "on_hit_condition": "silenced",
+      "resistances": [
+        "necrotic"
+      ],
+      "vulnerabilities": [
+        "lightning"
+      ]
+    },
+    "bound_voiceless_warden": {
+      "name": "Bound Voiceless Warden",
+      "dexterity": 13,
+      "strength": 18,
+      "armor_class": 19,
+      "hp_max": 95,
+      "proficiency_bonus": 4,
+      "xp_reward": 1050,
+      "on_hit_condition": "frightened",
+      "resistances": [
+        "psychic"
+      ],
+      "vulnerabilities": [
+        "radiant"
+      ]
+    },
+    "young_choir_remnant": {
+      "name": "Young Choir Remnant",
+      "dexterity": 12,
+      "strength": 10,
+      "armor_class": 14,
+      "hp_max": 35,
+      "proficiency_bonus": 2,
+      "xp_reward": 400,
+      "resistances": [
+        "necrotic"
+      ],
+      "vulnerabilities": [
+        "lightning"
+      ]
+    },
+    "elder_hollow_watcher": {
+      "name": "Elder Hollow Watcher",
+      "dexterity": 17,
+      "strength": 15,
+      "armor_class": 18,
+      "hp_max": 75,
+      "proficiency_bonus": 4,
+      "xp_reward": 1150,
+      "on_hit_condition": "blinded",
+      "resistances": [
+        "force"
+      ],
+      "vulnerabilities": [
+        "psychic"
+      ]
+    },
+    "bound_loom_warden": {
+      "name": "Bound Loom Warden",
+      "dexterity": 14,
+      "strength": 18,
+      "armor_class": 19,
+      "hp_max": 130,
+      "proficiency_bonus": 5,
+      "xp_reward": 1800,
+      "resistances": [
+        "necrotic"
+      ],
+      "vulnerabilities": [
+        "radiant"
+      ]
+    },
+    "young_turning_stair_guardian": {
+      "name": "Young Turning Stair Guardian",
+      "dexterity": 13,
+      "strength": 14,
+      "armor_class": 16,
+      "hp_max": 55,
+      "proficiency_bonus": 3,
+      "xp_reward": 700,
+      "on_hit_condition": "prone",
+      "resistances": [
+        "psychic"
+      ],
+      "vulnerabilities": [
+        "force"
       ]
     }
   },

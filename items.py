@@ -262,6 +262,47 @@ ITEMS = {
         "note": "Worn by whatever was here before there was a story to tell about it.",
     },
 
+    # Hollow Verge expansion rewards (2026-07-25, per Coffee: "bigger
+    # expansion" -- new mid-path/side-branch nodes added to the
+    # existing rebirth-1 dungeon). Quest-only, same convention as every
+    # other dungeon reward.
+    "bound_wraiths_chain": {
+        "name": "Bound Wraith's Chain", "type": "ring", "rarity": "rare",
+        "price": 0, "weight": 0, "regen_bonus": 2,
+        "note": "It was never really what was holding the wraith in place.",
+    },
+    "forgotten_nooks_trinket": {
+        "name": "Forgotten Nook's Trinket", "type": "amulet", "rarity": "uncommon",
+        "price": 0, "weight": 0, "ac_bonus": 1,
+        "note": "Small enough to have been overlooked. That's probably why it survived.",
+    },
+
+    # Wordless Choir expansion rewards (2026-07-25, same "bigger
+    # expansion" pass as the Hollow Verge rewards above).
+    "resonance_bound_ring": {
+        "name": "Resonance-Bound Ring", "type": "ring", "rarity": "rare",
+        "price": 0, "weight": 0, "regen_bonus": 3, "ac_bonus": 1,
+        "note": "It answers back half a second after you put it on. It has been for a while now.",
+    },
+    "unscheduled_chord_charm": {
+        "name": "Unscheduled Chord Charm", "type": "amulet", "rarity": "uncommon",
+        "price": 0, "weight": 0, "ac_bonus": 1,
+        "note": "Hums the start of a tune it never finishes.",
+    },
+
+    # The Unbegun expansion rewards (2026-07-25, same "bigger expansion"
+    # pass as the other two dungeons above).
+    "frayed_edge_band": {
+        "name": "Frayed Edge Band", "type": "ring", "rarity": "very_rare",
+        "price": 0, "weight": 0, "regen_bonus": 4, "ac_bonus": 2,
+        "note": "Every thread it's woven from stops at the exact same point. None of them were ever going to finish.",
+    },
+    "disconnected_steps_charm": {
+        "name": "Disconnected Step's Charm", "type": "amulet", "rarity": "uncommon",
+        "price": 0, "weight": 0, "ac_bonus": 1,
+        "note": "Doesn't lead anywhere the rest of your gear goes. Useful anyway.",
+    },
+
     # --- Maps (task #141: buyable/discoverable, partial-reveal only --
     # see bot.py's _do_use_item "map" branch and _do_show_map's
     # revealed-but-unvisited rendering. reveals_layer/reveals_count are
