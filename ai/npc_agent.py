@@ -17,7 +17,7 @@ MAX_MEMORY_TURNS = 10
 
 def register_npc(npc_id: str, name: str, personality: str, goals: str = "",
                   alignment: str = "", disposition: str = "friendly",
-                  shop_items: list[dict] | None = None) -> None:
+                  shop_items: list[dict] | None = None, pronouns: str = "") -> None:
     """
     Register a new NPC persona. Call once per NPC at setup time.
 
@@ -31,10 +31,20 @@ def register_npc(npc_id: str, name: str, personality: str, goals: str = "",
     plausible-sounding items/prices from general D&D knowledge, same
     failure mode support_agent.py was already grounded against (see
     CRITICAL_GROUNDING_RULE there). NPC dialogue needs the same fix.
+
+    `pronouns` (2026-07-25, per Coffee: "Change Sarah's pronoun to
+    She/Her"): campaign.json's own real, hand-authored fact for an NPC,
+    when set — Sarah's own quest text already consistently wrote her as
+    "she", but nothing ever told the MODEL that explicitly, so AI-
+    generated dialogue had no real grounding for her pronouns at all,
+    same "never invent a fact that should be real data" gap this file's
+    shop-grounding fix above already closed once. Empty for any NPC
+    that doesn't set one, same as every other optional field here.
     """
     persona = (
         f"You are {name}, an NPC in a Dungeons & Dragons 5E game. "
         f"Personality: {personality}. "
+        + (f"Your pronouns are {pronouns}. " if pronouns else "")
         + (f"Alignment: {alignment}. " if alignment else "")
         + (f"Goals: {goals}. " if goals else "")
         + "Stay in character at all times. Respond conversationally, in 1-4 sentences."

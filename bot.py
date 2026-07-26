@@ -60,7 +60,7 @@ from ai.dev_agent import answer_dev_question
 from ai.dm_agent import (
     narrate_action, narrate_welcome, narrate_skill_check, narrate_hourly_update,
     narrate_examine, narrate_branching_choice_outcome, narrate_boss_decision,
-    narrate_story_so_far, narrate_chapter_climax, narrate_arc_opening,
+    narrate_story_so_far, narrate_chapter_climax, narrate_arc_opening, narrate_next_step_hint,
     _fallback_hourly_update, _fallback_narration,
 )
 from ai.intent_parser import parse_intents
@@ -1099,6 +1099,16 @@ class _AiPlayerUpdate:
         self.effective_chat = _ChatOnlyUpdate._Chat(bot, chat_id)
         self.effective_user = _AiPlayerUpdate._User(user_id)
         self.message = _AiPlayerUpdate._Message(text, config.TOPIC_ADVENTURE_ID)
+        # Real live regression (2026-07-25, caught within minutes of the
+        # update.message -> update.effective_message edit-safety fix):
+        # this shim never set effective_message at all, only .message --
+        # every autonomous AI party turn immediately crashed with
+        # "AttributeError: '_AiPlayerUpdate' object has no attribute
+        # 'effective_message'" the instant it hit any of the 75 call
+        # sites just switched over. Real Telegram Updates (and this
+        # game's own FakeUpdate test double) always keep these in sync;
+        # this shim just never did.
+        self.effective_message = self.message
 
 
 class _AiPlayerContext:
@@ -13044,13 +13054,21 @@ async def _do_show_story_so_far(update: Update) -> None:
     # 'whats next' section with a clear hint what to do or where to go
     # ... unless its a puzzle then be vague and ominous"). Real,
     # deterministic grounding (_next_step_hint_facts) -- the AI layer
-    # only ever phrases it, per _story_so_far_preamble's branching
-    # instruction for puzzle vs. non-puzzle.
+    # only ever phrases it. Generated as its OWN separate narration call
+    # (2026-07-26, per live dev-topic feedback: "make the what's next
+    # area it's own paragraph... style this up") rather than asked for
+    # as a trailing paragraph inside the recap, so it can be combined
+    # below with guaranteed, reliable Markdown structure.
     next_step = _next_step_hint_facts(character)
 
     recap = await asyncio.to_thread(
-        narrate_story_so_far, character["name"], completed_arcs, current_arc_pair, completed_quests, next_step,
+        narrate_story_so_far, character["name"], completed_arcs, current_arc_pair, completed_quests,
     )
+    next_step_block = ""
+    if next_step:
+        hint = await asyncio.to_thread(narrate_next_step_hint, next_step)
+        header = "🔮 **What's Next**" if not next_step["is_puzzle"] else "🌀 **What's Next... A Riddle**"
+        next_step_block = f"\n\n━━━━━━━━━━━━━━\n{header}\n{hint}"
 
     # A real, chapter-themed image alongside the recap (2026-07-25, per
     # Coffee: "include images too please for all that"), grounded only
@@ -13077,7 +13095,7 @@ async def _do_show_story_so_far(update: Update) -> None:
             logger.warning(f"[images] story-so-far chapter image failed: {e!r}")
 
     await _safe_send(
-        update, f"📖 **Story So Far**\n\n{recap}\n\n" + "\n".join(chapter_lines),
+        update, f"📖 **Story So Far**\n\n{recap}{next_step_block}\n\n" + "\n".join(chapter_lines),
         reply_markup=_with_menu_button(_story_chapter_keyboard(character)),
     )
 
@@ -14056,6 +14074,7 @@ def setup_default_npcs() -> None:
             alignment=npc_data.get("alignment", ""),
             disposition=npc_data.get("disposition", "friendly"),
             shop_items=_shop_items_for_npc(npc_id),
+            pronouns=npc_data.get("pronouns", ""),
         )
     _seed_npc_locations()
 
@@ -16466,6 +16485,18 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
             + ", ".join(f"{skill} +{practiced_bonus(uses)} ({uses} uses)" for skill, uses in strong)
         )
 
+    # Rebirth (2026-07-25, per Coffee: make the autonomous AI party
+    # actually able to progress all the way through several rebirths --
+    # a maxed-out AI companion previously had no idea rebirthing was
+    # even a thing it could do, and would just sit at MAX_LEVEL forever
+    # instead of ever unlocking the rebirth-gated dungeons).
+    if character.get("level", 1) >= MAX_LEVEL:
+        lines.append(
+            "You've reached the maximum level and can rebirth now for a permanent power boost "
+            "(a higher ability-score ceiling, faster XP from then on, and eventually access to places "
+            "that need rebirths to reach) -- say \"I rebirth\" to do it."
+        )
+
     npcs_here = _npcs_at_location(location_id)
     if npcs_here:
         names = [CAMPAIGN["npcs"][n]["name"] for n in npcs_here if n in CAMPAIGN["npcs"]]
@@ -16498,6 +16529,30 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
         reachable.append(location["descends_to"])
     if "ascends_to" in location:
         reachable.append(location["ascends_to"])
+    # Only genuinely open destinations (2026-07-25, per Coffee: make the
+    # autonomous AI party actually able to complete missions/dungeons in
+    # order, all the way through several rebirths) -- filters out
+    # anything gated by min_level, a required item, rebirth count, or a
+    # story gate (an undefeated prerequisite monster/uncleared
+    # location), the exact same real checks _do_move itself applies.
+    # Without this, the AI had no way to reason about why a listed
+    # destination silently refused it, and would waste turns walking
+    # into the same rejection over and over.
+    def _really_reachable(dest_id: str) -> bool:
+        dest = cl.get_location(CAMPAIGN, dest_id)
+        if dest is None:
+            return False
+        if dest.get("requires_item") and dest["requires_item"] not in character.get("inventory", {}):
+            return False
+        if not _meets_location_level(character, dest):
+            return False
+        if not _meets_rebirth_requirement(character, dest):
+            return False
+        if _check_story_gate(character, location, dest_id) is not None:
+            return False
+        return True
+
+    reachable = [r for r in reachable if _really_reachable(r)]
     if reachable:
         conn_names = [cl.get_location(CAMPAIGN, c)["name"] for c in reachable]
         lines.append(f"Places reachable from here: {', '.join(conn_names)}")
@@ -16666,17 +16721,40 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
         # trigger already fires on its own the moment they arrived, and
         # this would just be pointing at where they're already standing).
         elsewhere_quests = []
+        # Real gap (2026-07-25, per Coffee: make the autonomous AI party
+        # actually able to complete missions/dungeons in order, all the
+        # way through several rebirths): several real story quests
+        # (Hollow Verge, Wordless Choir, The Unbegun, and the true
+        # hidden final boss ALL have one) use a solve_puzzle trigger,
+        # and nothing here ever told the AI party a puzzle even
+        # existed -- an active puzzle quest was a silent, permanent
+        # dead end for it. The real riddle text (campaign.json's own
+        # puzzles data) is surfaced directly, same "let it genuinely
+        # attempt what a human would" spirit as everything else here --
+        # never the accepted_answers themselves, so this isn't handing
+        # it the solution, just the same question a player would read.
+        puzzle_quests = []
         for quest_id in character["active_quests"]:
             quest = CAMPAIGN.get("quests", {}).get(quest_id)
-            objective_id = quest.get("objective_location") if quest else None
+            if not quest:
+                continue
+            trigger = quest.get("trigger", {})
+            if trigger.get("type") == "solve_puzzle":
+                puzzle = CAMPAIGN.get("puzzles", {}).get(trigger.get("puzzle_id"))
+                if puzzle:
+                    puzzle_quests.append((quest["title"], puzzle["riddle"]))
+                continue
+            objective_id = quest.get("objective_location")
             if objective_id and objective_id != location_id:
                 objective_loc = cl.get_location(CAMPAIGN, objective_id)
                 if objective_loc:
                     elsewhere_quests.append((quest["title"], objective_loc["name"]))
+        for title, riddle in puzzle_quests:
+            lines.append(f"You're trying to solve a riddle for \"{title}\": \"{riddle}\" -- say your best guess as a direct answer.")
         if elsewhere_quests:
             for title, dest_name in elsewhere_quests:
                 lines.append(f"Your active quest \"{title}\" needs you to travel to {dest_name}.")
-        else:
+        elif not puzzle_quests:
             lines.append(f"You have {len(character['active_quests'])} active quest(s) in your journal already.")
 
     # Same reasoning as the reachable-places/shop/branching-choice facts

@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.49] — Autonomous AI party can now actually progress through rebirths/puzzles, plus real fixes
+
+**Fixed a live regression from the last deploy**: the previous
+version's edit-safety fix (`update.message` → `update.effective_message`)
+broke every autonomous AI party member's own turn outright
+(`AttributeError: '_AiPlayerUpdate' object has no attribute
+'effective_message'`), caught live within minutes. `_AiPlayerUpdate`
+(the internal shim that drives AI companions' turns) now sets both,
+same as a real Telegram update always does.
+
+**The autonomous AI party can now actually make it through the game.**
+Real, confirmed gaps found while investigating "can the AI party reach
+10 rebirths on its own": it had zero awareness that rebirthing was
+even possible (would just sit at max level forever) and zero awareness
+of puzzles (an accepted solve_puzzle quest — and Hollow Verge, Wordless
+Choir, The Unbegun, and the true hidden final boss all have one — was
+a silent, permanent dead end). Both fixed: the AI now sees a real fact
+prompting it to rebirth at max level, and sees the real riddle text
+for any puzzle it's accepted, prioritized right after quest-acceptance.
+Also: "Places reachable from here" now filters out anything actually
+gated (rebirth count, a required item, min level, an undefeated
+prerequisite) instead of listing destinations that would silently
+reject it — the same real checks `_do_move` itself applies.
+
+**Sarah's pronouns are now real, grounded data** (she/her) instead of
+implicit — NPCs can now carry a real `pronouns` field that flows into
+their AI dialogue persona, so a model generating her dialogue has an
+explicit fact to work from instead of guessing.
+
+**"What's Next" is now a real, separate section**, per live dev-topic
+feedback right after it shipped: generated as its own focused
+narration call and combined with a real visual divider, instead of
+asked for as a trailing paragraph inside the much longer recap.
+
 ## [1.27.48] — "What's Next" in the Story So Far screen, with a real chapter image
 
 Per Coffee: "have in the story so far a 'whats next' section with a

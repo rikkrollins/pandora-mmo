@@ -62,6 +62,8 @@ _EXAMPLE_LINES = [
     (None, "I check the quest board"),
     (None, "I accept the quest (if the facts below say something's posted or on offer)"),
     (None, "I choose [the exact label of one of your options] (if the facts below say you have a decision to make)"),
+    ("reached the maximum level", "I rebirth"),
+    ("trying to solve a riddle", "I say [your own real best guess at the answer to the riddle in the facts below]"),
     ("aren't carrying any healing items", "I want to buy [the exact item named in the healing-supplies fact below]"),
     ("Shop here sells", "I want to buy [something listed under Shop here sells]"),
     ("You're carrying", "sell my [something listed under You're carrying]"),
@@ -94,7 +96,17 @@ without ever once accepting it, favoring safer-looking flavor actions \
 instead. If instead the facts say a quest "is on offer back at" \
 somewhere else -- meaning you already wandered away before ever \
 accepting it -- heading back there is the same top priority; a quest \
-you never accepted can never be worked toward. A real quest of yours \
+you never accepted can never be worked toward. Right after that: if \
+the facts say you've reached the maximum level, rebirth immediately \
+("I rebirth") -- per Coffee (2026-07-25): make the autonomous party \
+actually able to complete every dungeon in order, all the way through \
+several rebirths, not stall forever at max level the way it used to. \
+Rebirthing costs nothing, is never a mistake, and is the ONLY way \
+several real places in this world ever become reachable at all. \
+Likewise, if the facts say you're trying to solve a riddle, take a \
+real guess at it right then -- it costs nothing to try, and an \
+unanswered riddle is a permanent dead end for real progress until \
+someone actually attempts it. A real quest of yours \
 that "needs you to travel to" somewhere comes right after that -- \
 heading there is how the story and \
 your own level actually move forward, and it beats every other option \
