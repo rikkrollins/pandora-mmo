@@ -2,6 +2,62 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.45] — Real HP growth, a true hidden final boss, the whole story wired into cutscenes, and party-management buttons
+
+A big one. In order:
+
+**Real HP growth with rebirths.** Leveling 1-99 now actually grows your
+max HP (a real, already-written 5E growth formula was quietly never
+connected to the level-up path before this) -- lands around ~3,200 HP
+at level 99 with no rebirths. Each rebirth then doubles your current
+max HP on top of that (and fully heals you) -- reaches six-figure HP by
+around rebirth 5, real "evolution" territory. Potions rescaled to
+match: Healing Potion now heals exactly 100, Greater Healing Potion
+exactly 1,000, and a new Supreme Healing Potion (500g, Old Maren's)
+heals exactly 10,000. Revivify/scroll_revivify's revival amount is now
+5% of max HP instead of a flat 1 -- with HP now reaching into the
+thousands, a flat 1 HP had gone from "thin" to "statistically zero."
+
+**All 6 remaining world dungeons expanded**, same treatment as last
+version's 3 rebirth dungeons: Goblin Warrens, Sunken Root Caverns,
+Stonearch Gorge (the underground gorge beneath the bridge), Greymoor
+Downs, Whispering Wood, and Glimmerdeep Grotto each gain 2-4 new rooms
+with real monster variants and rewards, without touching any existing
+room, quest, or the game's other lore-only locations (the Pandora
+marker room stays exactly as it was).
+
+**A true hidden final boss.** Past the hollow the Waiting Shape left
+behind, and now also sealed beneath the Lonely Cairn's own buried
+marker, something the game has never announced exists: The Unasked,
+100,000,000 HP, gated behind 10 rebirths AND having genuinely defeated
+every other secret final boss in the game (the Waiting Shape, the
+Unrepeating, the Unbegun) -- not reachable by grinding rebirths alone.
+Ties every one of this game's secret endings together into one real
+answer, with its own achievement and a distinct completion moment
+unlike anything else in the game.
+
+**The whole story now has real cutscenes.** Every dungeon and boss
+built this session -- the 6 world areas, the 3 rebirth dungeons, and
+the true final boss -- is now threaded into the same real story-arc
+system that already bookended the base game's 4 chapters: a genuine
+AI-narrated opening the moment you take on each area's first quest, and
+a chapter-complete beat when you finish it. 14 real chapters now, start
+to finish, one continuous line.
+
+**New party-management buttons**, per Coffee:
+- 🎯 Auto Level-Up Party: auto-spends every banked ability point (to
+  each character's primary stat) and unlocks every affordable
+  skill-tree upgrade across your WHOLE real party at once -- including
+  AI companions, who'd otherwise never get either spent. Also works by
+  just saying "auto level up the party."
+- 🤝 Give buttons on the backpack screen: tap an item, tap a party
+  member, done -- no more needing to type the exact "give X to Y"
+  phrasing.
+- Per-companion Level Up / Unlock Skill buttons on the Party Sheets
+  screen: make the SAME real ability-score choice for an AI companion
+  (or any party member) that you could already make for yourself,
+  instead of only ever being able to auto-apply it.
+
 ## [1.27.44] — All 3 rebirth dungeons expanded (per Coffee: "bigger expansion")
 
 Each of the 3 rebirth-gated dungeons (Hollow Verge, The Wordless Choir,

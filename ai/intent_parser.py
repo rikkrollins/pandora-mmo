@@ -152,6 +152,9 @@ for bonus temporary HP and clawed/bitten attack damage, at the cost of being una
 "let the game roll for me", "dice on", "dice off", "turn off manual dice").
 - "level_up" is for spending a pending Ability Score Improvement -- saying "level up", naming which ability to \
 raise, or asking the game to pick automatically ("auto", "do it for me").
+- "auto_level_up_party" is for auto-applying pending ability points AND affordable skill-tree upgrades across the \
+whole party at once (e.g. "auto level up the party", "auto assign skill points to the party", "level up everyone"), \
+never just the one character talking.
 - "chat" is for anything else — general roleplay talk with no clear game action.
 Output ONLY the JSON object, nothing else."""
 
@@ -788,6 +791,17 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
                                     "turn on physical dice", "turn off physical dice"]):
         return {**base, "action": "toggle_manual_dice"}
 
+    # Auto Level-Up Party (2026-07-25, per Coffee): checked BEFORE the
+    # generic "level up" below, since a party-wide phrasing like "auto
+    # level up the party" contains the substring "level up" too and
+    # would otherwise be misread as the single-character action.
+    if "party" in lowered and (
+        "level up" in lowered or "level-up" in lowered
+        or ("skill point" in lowered and "assign" in lowered)
+        or ("skill point" in lowered and "auto" in lowered)
+    ):
+        return {**base, "action": "auto_level_up_party"}
+
     if "level up" in lowered:
         return {**base, "action": "level_up"}
 
@@ -1378,7 +1392,8 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "arcane_recovery",
                 "make_campfire", "give_item", "use_item", "equip_item", "auto_equip", "breath_weapon",
                 "channel_divinity", "action_surge", "reckless_attack", "divine_smite",
-                "flurry_of_blows", "wild_shape", "toggle_manual_dice", "level_up", "set_description", "set_pronouns",
+                "flurry_of_blows", "wild_shape", "toggle_manual_dice", "level_up", "auto_level_up_party",
+                "set_description", "set_pronouns",
                 "bestiary", "list_shop", "leaderboard", "check_achievements", "set_title", "check_weather",
                 "check_guild_quest", "dice_game", "fortunes_wheel", "set_alignment", "message_ai",
                 "skill_tree", "challenge_duel", "accept_duel", "check_market", "join_battle",

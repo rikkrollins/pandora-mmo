@@ -414,7 +414,9 @@
         "name": "Below the Cairn",
         "layer": "underground",
         "description": "A narrow shaft under the cairn's foundation stone, dug by hand and refilled by hand, over and over, by whoever keeps coming back. Nothing down here looks like it's resting.",
-        "connections": [],
+        "connections": [
+          "greymoor_downs_the_unopened_seal"
+        ],
         "ascends_to": "greymoor_downs_lonely_cairn",
         "interactables": {
           "the_refilled_shaft": {
@@ -425,6 +427,18 @@
             "name": "a weather-stained marker, wedged sideways into the shaft wall",
             "description": "Not local stone — carried here, then left. Scratched into its face, in a hand that matches nothing else down here, is a story about someone called Pandora, who was given a box she never asked for and told only that she must never open it — and who spent the rest of her life proving that being told 'never' isn't the same as being told 'why.' The marker doesn't say what was inside. It doesn't say she opened it, either. It just says she kept the box, and kept asking, until the day she didn't need an answer anymore. Nothing else here explains why it's buried under a cairn on the far side of a world it clearly wasn't carved in."
           }
+        },
+        "directions": {
+          "down": "greymoor_downs_the_unopened_seal"
+        },
+        "story_gates": {
+          "greymoor_downs_the_unopened_seal": {
+            "requires_defeated_monster": [
+              "the_waiting_shape",
+              "the_unrepeating",
+              "the_unbegun"
+            ]
+          }
         }
       },
       "greymoor_downs_broken_watchtower": {
@@ -432,10 +446,14 @@
         "layer": "surface",
         "description": "A collapsed watchtower, half its height still standing. From the top of what's left, the bridge crossing is fully visible — every safe way across, and every way that isn't.",
         "connections": [
-          "greymoor_downs_windswept_ridge"
+          "greymoor_downs_windswept_ridge",
+          "greymoor_downs_tower_vantage_below",
+          "greymoor_downs_tower_cellar"
         ],
         "directions": {
-          "west": "greymoor_downs_windswept_ridge"
+          "west": "greymoor_downs_windswept_ridge",
+          "east": "greymoor_downs_tower_vantage_below",
+          "south": "greymoor_downs_tower_cellar"
         },
         "resource_nodes": [
           {
@@ -450,6 +468,14 @@
           "watchtower_vantage": {
             "name": "the tower's remaining upper landing",
             "description": "Rotted through in two places, but still holds — and still gives the clearest view of the bridge crossing for miles."
+          }
+        },
+        "monsters": [
+          "watchtower_stalker"
+        ],
+        "story_gates": {
+          "greymoor_downs_tower_vantage_below": {
+            "requires_cleared_location": "greymoor_downs_broken_watchtower"
           }
         }
       },
@@ -802,6 +828,86 @@
             "description": "Whatever was left here was left in a hurry, by someone who never expected to come back for it."
           }
         }
+      },
+      "greymoor_downs_tower_vantage_below": {
+        "name": "Beneath the Vantage",
+        "layer": "surface",
+        "description": "The watchtower's collapsed base opens further down than it looks from the ridge — whatever's been using the ruin as a perch clearly isn't alone up there.",
+        "connections": [
+          "greymoor_downs_broken_watchtower"
+        ],
+        "directions": {
+          "east": "greymoor_downs_broken_watchtower"
+        },
+        "monsters": [
+          "alpha_wolf"
+        ],
+        "interactables": {
+          "the_deeper_rubble": {
+            "name": "the tower's deeper rubble",
+            "description": "Whatever fell here fell a long time ago. Something's clearly made a den of it since."
+          }
+        }
+      },
+      "greymoor_downs_tower_cellar": {
+        "name": "The Tower Cellar",
+        "layer": "surface",
+        "description": "A half-buried storeroom under the watchtower's foundation, easy to miss beneath the rubble — something small has been using it to stay out of the wind.",
+        "connections": [
+          "greymoor_downs_broken_watchtower"
+        ],
+        "directions": {
+          "south": "greymoor_downs_broken_watchtower"
+        },
+        "monsters": [
+          "wolf_pup"
+        ],
+        "interactables": {
+          "the_half_buried_stores": {
+            "name": "the cellar's half-buried stores",
+            "description": "Whatever was kept down here was abandoned long before anything started denning in it."
+          }
+        }
+      },
+      "greymoor_downs_the_unopened_seal": {
+        "name": "The Unopened Seal",
+        "layer": "surface",
+        "description": "Past the shaft's carefully refilled walls, past the marker no one still living can properly read, the digging finally reaches something that was never dirt to begin with — a seal, still closed, exactly the way it was left. Whoever kept coming back down here never actually opened it. They just kept checking that it hadn't opened itself.",
+        "connections": [
+          "greymoor_downs_below_the_cairn",
+          "greymoor_downs_the_last_question"
+        ],
+        "directions": {
+          "up": "greymoor_downs_below_the_cairn",
+          "down": "greymoor_downs_the_last_question"
+        },
+        "requires_rebirth_count": 10,
+        "interactables": {
+          "the_seal_itself": {
+            "name": "the still-closed seal",
+            "description": "\"Everyone who opens me finds exactly what they were afraid of, and exactly what they needed. What am I?\" -- worn into the seal's face in the same hand as the marker up above, in a script that has, somehow, gotten easier to read the further down you've come."
+          }
+        }
+      },
+      "greymoor_downs_the_last_question": {
+        "name": "The Last Question",
+        "layer": "surface",
+        "description": "Whatever the seal was built to keep in is, impossibly, still exactly what was sealed in the first place — old beyond the world it's buried under, patient beyond every name anyone's ever given the things that came after it, and, for the first time in longer than waiting has meant anything, finally about to be asked something back.",
+        "connections": [
+          "greymoor_downs_the_unopened_seal"
+        ],
+        "directions": {
+          "up": "greymoor_downs_the_unopened_seal"
+        },
+        "monsters": [
+          "the_unasked"
+        ],
+        "interactables": {
+          "the_thing_itself": {
+            "name": "the thing the seal was built to hold",
+            "description": "Every quiet, patient, waiting thing you've ever fought before this was wearing a piece of this. This is the whole of it, finally in one place."
+          }
+        }
       }
     },
     "underground": {
@@ -868,11 +974,13 @@
         "description": "A cramped, chattering network of tunnels. Someone, or something, has been organizing the goblins here far better than goblins usually organize themselves.",
         "connections": [
           "sunken_root_caverns",
-          "goblin_warrens_inner_den"
+          "goblin_warrens_supply_tunnel",
+          "goblin_warrens_collapsed_tunnel"
         ],
         "directions": {
           "east": "sunken_root_caverns",
-          "north": "goblin_warrens_inner_den"
+          "north": "goblin_warrens_supply_tunnel",
+          "west": "goblin_warrens_collapsed_tunnel"
         },
         "npcs": [
           "grask_emberscale"
@@ -902,7 +1010,7 @@
           }
         },
         "story_gates": {
-          "goblin_warrens_inner_den": {
+          "goblin_warrens_supply_tunnel": {
             "requires_cleared_location": "goblin_warrens"
           }
         }
@@ -952,11 +1060,11 @@
         "description": "Passages that keep going long after they should have ended. Somewhere ahead, rubble chokes one of them almost shut — almost.",
         "connections": [
           "sunken_root_caverns",
-          "sunken_root_caverns_forgotten_cistern"
+          "sunken_root_caverns_flooded_gallery"
         ],
         "directions": {
           "south": "sunken_root_caverns",
-          "east": "sunken_root_caverns_forgotten_cistern"
+          "east": "sunken_root_caverns_flooded_gallery"
         },
         "lockables": [
           {
@@ -979,7 +1087,7 @@
           }
         },
         "story_gates": {
-          "sunken_root_caverns_forgotten_cistern": {
+          "sunken_root_caverns_flooded_gallery": {
             "requires_cleared_location": "sunken_root_caverns_deep_tunnels"
           }
         }
@@ -1020,15 +1128,25 @@
         "layer": "underground",
         "description": "A single channel, cut with the same exact precision as the cistern's drainage, leading further down than anything else in these caverns goes. The stonework here isn't goblin work, and it isn't natural either.",
         "connections": [
-          "sunken_root_caverns_forgotten_cistern"
+          "sunken_root_caverns_forgotten_cistern",
+          "sunken_root_caverns_hollow_wellspring"
         ],
         "directions": {
-          "south": "sunken_root_caverns_forgotten_cistern"
+          "south": "sunken_root_caverns_forgotten_cistern",
+          "north": "sunken_root_caverns_hollow_wellspring"
         },
         "interactables": {
           "channel_matching_stonework": {
             "name": "stonework that matches something else, somewhere else",
             "description": "The same exact cut, the same exact angle, as stories describe far below the earth in places no one from up here has ever actually seen."
+          }
+        },
+        "monsters": [
+          "channel_bound_goblin"
+        ],
+        "story_gates": {
+          "sunken_root_caverns_hollow_wellspring": {
+            "requires_cleared_location": "sunken_root_caverns_precise_channel"
           }
         }
       },
@@ -1037,10 +1155,12 @@
         "layer": "underground",
         "description": "Deeper into the warrens than most goblins bother going. Whatever discipline holds the outer tunnels together frays out completely back here.",
         "connections": [
-          "goblin_warrens"
+          "goblin_warrens_supply_tunnel",
+          "goblin_warrens_deep_larder"
         ],
         "directions": {
-          "south": "goblin_warrens"
+          "south": "goblin_warrens_supply_tunnel",
+          "north": "goblin_warrens_deep_larder"
         },
         "monsters": [
           "goblin",
@@ -1060,6 +1180,11 @@
             "name": "a disorganized pile of gnawed bones",
             "description": "The one thing back here that ISN'T organized — everything else in these warrens is unnervingly tidy by comparison."
           }
+        },
+        "story_gates": {
+          "goblin_warrens_deep_larder": {
+            "requires_cleared_location": "goblin_warrens_inner_den"
+          }
         }
       },
       "glimmerdeep_grotto_glimmering_pool": {
@@ -1067,10 +1192,14 @@
         "layer": "underground",
         "description": "A second, smaller pool tucked behind the grotto's main chamber, lit from below by something buried in the silt at its bottom.",
         "connections": [
-          "glimmerdeep_grotto"
+          "glimmerdeep_grotto",
+          "glimmerdeep_grotto_buried_glow",
+          "glimmerdeep_grotto_dim_hollow"
         ],
         "directions": {
-          "south": "glimmerdeep_grotto"
+          "south": "glimmerdeep_grotto",
+          "north": "glimmerdeep_grotto_buried_glow",
+          "east": "glimmerdeep_grotto_dim_hollow"
         },
         "lockables": [
           {
@@ -1087,6 +1216,14 @@
           "pool_buried_light": {
             "name": "whatever's glowing at the bottom of the pool",
             "description": "Too deep to make out clearly, and it never stops glowing, no matter how long you watch it."
+          }
+        },
+        "monsters": [
+          "pool_wrought_spider"
+        ],
+        "story_gates": {
+          "glimmerdeep_grotto_buried_glow": {
+            "requires_cleared_location": "glimmerdeep_grotto_glimmering_pool"
           }
         }
       },
@@ -1323,11 +1460,11 @@
         "description": "A low, wide den at the end of the roots, floor packed hard by years of restless pacing. Whatever den this is hasn't been abandoned long.",
         "connections": [
           "whispering_wood_root_hollow",
-          "whispering_wood_deeper_roots"
+          "whispering_wood_hollow_threshold"
         ],
         "directions": {
           "west": "whispering_wood_root_hollow",
-          "north": "whispering_wood_deeper_roots"
+          "north": "whispering_wood_hollow_threshold"
         },
         "monsters": [
           "wolf"
@@ -1339,7 +1476,7 @@
           }
         },
         "story_gates": {
-          "whispering_wood_deeper_roots": {
+          "whispering_wood_hollow_threshold": {
             "requires_cleared_location": "whispering_wood_sunken_den"
           }
         }
@@ -1349,15 +1486,25 @@
         "layer": "underground",
         "description": "Past the den, the roots stop looking like roots. They're too regular, too deliberate — less like something that grew here and more like something that was built to look grown.",
         "connections": [
-          "whispering_wood_sunken_den"
+          "whispering_wood_hollow_threshold",
+          "whispering_wood_deep_root_chamber"
         ],
         "directions": {
-          "south": "whispering_wood_sunken_den"
+          "south": "whispering_wood_hollow_threshold",
+          "north": "whispering_wood_deep_root_chamber"
         },
         "interactables": {
           "the_regular_growth": {
             "name": "a stretch of unnaturally regular root-work",
             "description": "Every join is the same angle. Whatever grew this whole forest from below, it wasn't growing at random."
+          }
+        },
+        "monsters": [
+          "root_wrought_sentinel"
+        ],
+        "story_gates": {
+          "whispering_wood_deep_root_chamber": {
+            "requires_cleared_location": "whispering_wood_deeper_roots"
           }
         }
       },
@@ -1365,7 +1512,9 @@
         "name": "The Sunken Barrow",
         "layer": "underground",
         "description": "A real camp, still warm in places, dug into the hillside below the Downs — the cold campsite up top was never anything but bait for anyone who stopped looking too soon.",
-        "connections": [],
+        "connections": [
+          "greymoor_downs_barrow_depths"
+        ],
         "ascends_to": "greymoor_downs",
         "lockables": [
           {
@@ -1387,6 +1536,14 @@
             "name": "a hidden supply cache dug into the barrow wall",
             "description": "Recently restocked, by the look of it. Whoever uses this place isn't finished with it yet."
           }
+        },
+        "directions": {
+          "down": "greymoor_downs_barrow_depths"
+        },
+        "story_gates": {
+          "greymoor_downs_barrow_depths": {
+            "requires_cleared_location": "greymoor_downs_sunken_barrow"
+          }
         }
       },
       "stonearch_bridge_gorge_depths": {
@@ -1394,11 +1551,11 @@
         "layer": "underground",
         "description": "The bottom of the gorge beneath the bridge, close and dark, the air moving in and out on a slow rhythm that has nothing to do with wind.",
         "connections": [
-          "stonearch_bridge_deep_current"
+          "stonearch_bridge_web_hollow"
         ],
         "ascends_to": "stonearch_bridge",
         "directions": {
-          "east": "stonearch_bridge_deep_current"
+          "east": "stonearch_bridge_web_hollow"
         },
         "lockables": [
           {
@@ -1421,7 +1578,7 @@
           }
         },
         "story_gates": {
-          "stonearch_bridge_deep_current": {
+          "stonearch_bridge_web_hollow": {
             "requires_cleared_location": "stonearch_bridge_gorge_depths"
           }
         }
@@ -1431,15 +1588,25 @@
         "layer": "underground",
         "description": "Where the gorge's water finally goes, funneled into a current that runs somewhere no map accounts for. It runs toward the same distant, slow rhythm that fills the depths above.",
         "connections": [
-          "stonearch_bridge_gorge_depths"
+          "stonearch_bridge_web_hollow",
+          "stonearch_bridge_undertow"
         ],
         "directions": {
-          "west": "stonearch_bridge_gorge_depths"
+          "west": "stonearch_bridge_web_hollow",
+          "east": "stonearch_bridge_undertow"
         },
         "interactables": {
           "the_vanishing_current": {
             "name": "the current itself, vanishing into darker water",
             "description": "It never resurfaces anywhere anyone's mapped. Wherever it's actually going, it's going somewhere with purpose."
+          }
+        },
+        "monsters": [
+          "current_bound_spider"
+        ],
+        "story_gates": {
+          "stonearch_bridge_undertow": {
+            "requires_cleared_location": "stonearch_bridge_deep_current"
           }
         }
       },
@@ -1618,6 +1785,340 @@
           "unused_alcove": {
             "name": "the unused alcove",
             "description": "Built for something that never got scheduled -- or already happened, once, a very long time before anyone was around to hear it."
+          }
+        }
+      },
+      "goblin_warrens_supply_tunnel": {
+        "name": "The Supply Tunnel",
+        "layer": "underground",
+        "description": "A narrow tunnel stacked with crates and stolen sacks, guarded better than the entrance ever was — whoever's really running this warren clearly cares more about what's down here.",
+        "connections": [
+          "goblin_warrens",
+          "goblin_warrens_inner_den"
+        ],
+        "directions": {
+          "south": "goblin_warrens",
+          "north": "goblin_warrens_inner_den"
+        },
+        "monsters": [
+          "veteran_goblin"
+        ],
+        "interactables": {
+          "stacked_crates": {
+            "name": "the tunnel's stacked crates",
+            "description": "Better guarded than anything at the entrance -- whatever's inside them, someone thinks it's worth protecting."
+          }
+        },
+        "story_gates": {
+          "goblin_warrens_inner_den": {
+            "requires_cleared_location": "goblin_warrens_supply_tunnel"
+          }
+        }
+      },
+      "goblin_warrens_deep_larder": {
+        "name": "The Deep Larder",
+        "layer": "underground",
+        "description": "Past the inner den, a low chamber packed floor to ceiling with hoarded supplies — enough to keep a much bigger warren fed than the one anyone's actually seen so far.",
+        "connections": [
+          "goblin_warrens_inner_den"
+        ],
+        "directions": {
+          "north": "goblin_warrens_inner_den"
+        },
+        "monsters": [
+          "goblin_shaman_elder"
+        ],
+        "interactables": {
+          "hoarded_supplies": {
+            "name": "the larder's hoarded supplies",
+            "description": "Whoever's stockpiling all this was planning for a much longer siege than the one that's actually happened so far."
+          }
+        }
+      },
+      "goblin_warrens_collapsed_tunnel": {
+        "name": "The Collapsed Tunnel",
+        "layer": "underground",
+        "description": "A side passage caved in long before the goblins ever moved in — most of it's rubble now, but something's clearly still squatting in what's left of it.",
+        "connections": [
+          "goblin_warrens"
+        ],
+        "directions": {
+          "west": "goblin_warrens"
+        },
+        "monsters": [
+          "young_goblin"
+        ],
+        "interactables": {
+          "old_cave_in": {
+            "name": "the old cave-in",
+            "description": "Whatever caused this happened long before any goblin ever set foot down here."
+          }
+        }
+      },
+      "sunken_root_caverns_flooded_gallery": {
+        "name": "The Flooded Gallery",
+        "layer": "underground",
+        "description": "Ankle-deep water covers the floor here, black with root-rot and disturbed constantly by something moving through it just out of sight.",
+        "connections": [
+          "sunken_root_caverns_deep_tunnels",
+          "sunken_root_caverns_forgotten_cistern",
+          "sunken_root_caverns_side_pool"
+        ],
+        "directions": {
+          "west": "sunken_root_caverns_deep_tunnels",
+          "east": "sunken_root_caverns_forgotten_cistern",
+          "south": "sunken_root_caverns_side_pool"
+        },
+        "monsters": [
+          "root_bound_goblin"
+        ],
+        "interactables": {
+          "root_rot_water": {
+            "name": "the root-rotted floodwater",
+            "description": "Black enough that whatever's moving through it never actually breaks the surface to be seen."
+          }
+        },
+        "story_gates": {
+          "sunken_root_caverns_forgotten_cistern": {
+            "requires_cleared_location": "sunken_root_caverns_flooded_gallery"
+          }
+        }
+      },
+      "sunken_root_caverns_hollow_wellspring": {
+        "name": "The Hollow Wellspring",
+        "layer": "underground",
+        "description": "Past the channel, the water finally pools somewhere real — a wellspring sunk so deep that whatever drinks from it hasn't seen the surface in longer than anyone's kept track.",
+        "connections": [
+          "sunken_root_caverns_precise_channel"
+        ],
+        "directions": {
+          "south": "sunken_root_caverns_precise_channel"
+        },
+        "monsters": [
+          "elder_root_shaman"
+        ],
+        "interactables": {
+          "the_deep_pool": {
+            "name": "the wellspring's deep, still pool",
+            "description": "Whatever lives down here has clearly been drinking from the same water for a very long time."
+          }
+        }
+      },
+      "sunken_root_caverns_side_pool": {
+        "name": "The Side Pool",
+        "layer": "underground",
+        "description": "A smaller offshoot of the flooded gallery, easy to wade past without noticing — something small has been squatting here, well out of the way of the main tunnels.",
+        "connections": [
+          "sunken_root_caverns_flooded_gallery"
+        ],
+        "directions": {
+          "north": "sunken_root_caverns_flooded_gallery"
+        },
+        "monsters": [
+          "root_goblin_pup"
+        ],
+        "interactables": {
+          "shallow_offshoot": {
+            "name": "the shallow offshoot itself",
+            "description": "Barely deep enough to be worth calling a pool at all -- which is probably exactly why nothing's bothered clearing it out."
+          }
+        }
+      },
+      "stonearch_bridge_web_hollow": {
+        "name": "The Web Hollow",
+        "layer": "underground",
+        "description": "A hollow in the gorge wall gone almost entirely to silk — layer over layer of it, thick enough that whatever's still spinning down here has clearly had a long time to work.",
+        "connections": [
+          "stonearch_bridge_gorge_depths",
+          "stonearch_bridge_deep_current",
+          "stonearch_bridge_silked_nook"
+        ],
+        "directions": {
+          "west": "stonearch_bridge_gorge_depths",
+          "east": "stonearch_bridge_deep_current",
+          "north": "stonearch_bridge_silked_nook"
+        },
+        "monsters": [
+          "brood_spider"
+        ],
+        "interactables": {
+          "layered_silk": {
+            "name": "the hollow's layered silk",
+            "description": "Thick enough in places to walk on -- if you were willing to find out the hard way whether that's actually true."
+          }
+        },
+        "story_gates": {
+          "stonearch_bridge_deep_current": {
+            "requires_cleared_location": "stonearch_bridge_web_hollow"
+          }
+        }
+      },
+      "stonearch_bridge_undertow": {
+        "name": "The Undertow",
+        "layer": "underground",
+        "description": "Past the deep current, the water finally drags at something solid — a den built low against the pull, exactly where nothing swept downstream would ever be able to climb back out.",
+        "connections": [
+          "stonearch_bridge_deep_current"
+        ],
+        "directions": {
+          "east": "stonearch_bridge_deep_current"
+        },
+        "monsters": [
+          "elder_web_spider"
+        ],
+        "interactables": {
+          "the_dragging_pull": {
+            "name": "the undertow's dragging pull",
+            "description": "Everything that's ever gone into the deep current from up above ends up here eventually. Most of it doesn't leave again."
+          }
+        }
+      },
+      "stonearch_bridge_silked_nook": {
+        "name": "The Silked Nook",
+        "layer": "underground",
+        "description": "A narrow gap in the web hollow's silk, easy to miss — something small has been left here to grow, well away from the rest of the brood.",
+        "connections": [
+          "stonearch_bridge_web_hollow"
+        ],
+        "directions": {
+          "south": "stonearch_bridge_web_hollow"
+        },
+        "monsters": [
+          "spiderling"
+        ],
+        "interactables": {
+          "the_narrow_gap": {
+            "name": "the silk's narrow gap",
+            "description": "Barely big enough to squeeze into -- which is probably exactly why something small chose it."
+          }
+        }
+      },
+      "greymoor_downs_barrow_depths": {
+        "name": "The Barrow Depths",
+        "layer": "underground",
+        "description": "Past the sunken barrow's supply cache, the hillside opens into a real den — deeper, older, and considerably less willing to share its territory.",
+        "connections": [
+          "greymoor_downs_sunken_barrow"
+        ],
+        "directions": {
+          "down": "greymoor_downs_sunken_barrow"
+        },
+        "monsters": [
+          "barrow_bound_wolf"
+        ],
+        "interactables": {
+          "the_real_den": {
+            "name": "the depths' real den",
+            "description": "The camp up above was never anything but bait. This is where whoever's actually in charge down here has been living the whole time."
+          }
+        }
+      },
+      "whispering_wood_hollow_threshold": {
+        "name": "The Hollow Threshold",
+        "layer": "underground",
+        "description": "The passage between the den and whatever's past the deeper roots narrows here to almost nothing — easy to defend, and clearly being defended.",
+        "connections": [
+          "whispering_wood_sunken_den",
+          "whispering_wood_deeper_roots",
+          "whispering_wood_stray_den"
+        ],
+        "directions": {
+          "south": "whispering_wood_sunken_den",
+          "north": "whispering_wood_deeper_roots",
+          "east": "whispering_wood_stray_den"
+        },
+        "monsters": [
+          "den_bound_wolf"
+        ],
+        "interactables": {
+          "the_narrow_passage": {
+            "name": "the threshold's narrow passage",
+            "description": "Barely wide enough for one at a time -- which is clearly exactly the point."
+          }
+        },
+        "story_gates": {
+          "whispering_wood_deeper_roots": {
+            "requires_cleared_location": "whispering_wood_hollow_threshold"
+          }
+        }
+      },
+      "whispering_wood_stray_den": {
+        "name": "The Stray Den",
+        "layer": "underground",
+        "description": "A smaller den branching off the threshold, half-collapsed and clearly not the pack's main territory — something's still using it anyway.",
+        "connections": [
+          "whispering_wood_hollow_threshold"
+        ],
+        "directions": {
+          "west": "whispering_wood_hollow_threshold"
+        },
+        "monsters": [
+          "stray_wood_wolf"
+        ],
+        "interactables": {
+          "the_half_collapsed_den": {
+            "name": "the half-collapsed den",
+            "description": "Too small and too damaged to be worth the main pack's time -- which is probably exactly why something's still squatting in it."
+          }
+        }
+      },
+      "whispering_wood_deep_root_chamber": {
+        "name": "The Deep Root Chamber",
+        "layer": "underground",
+        "description": "Past the deeper roots, the regular, deliberate root-work finally resolves into an actual chamber — built, not grown, by something that clearly wanted this exact shape.",
+        "connections": [
+          "whispering_wood_deeper_roots"
+        ],
+        "directions": {
+          "north": "whispering_wood_deeper_roots"
+        },
+        "monsters": [
+          "deep_root_warden"
+        ],
+        "interactables": {
+          "the_deliberate_chamber": {
+            "name": "the chamber's deliberate shape",
+            "description": "Nothing about this room happened by accident. Whatever wanted it built this way, it clearly still wants it kept that way."
+          }
+        }
+      },
+      "glimmerdeep_grotto_buried_glow": {
+        "name": "The Buried Glow",
+        "layer": "underground",
+        "description": "Past the glimmering pool, whatever's buried in the silt finally surfaces enough to see — barely — and it's not alone down here anymore.",
+        "connections": [
+          "glimmerdeep_grotto_glimmering_pool"
+        ],
+        "directions": {
+          "north": "glimmerdeep_grotto_glimmering_pool"
+        },
+        "monsters": [
+          "elder_crystal_spider"
+        ],
+        "interactables": {
+          "the_surfacing_light": {
+            "name": "the light finally surfacing from the silt",
+            "description": "Close enough to see now that it's clearly not a crystal at all -- just something that glows like one."
+          }
+        }
+      },
+      "glimmerdeep_grotto_dim_hollow": {
+        "name": "The Dim Hollow",
+        "layer": "underground",
+        "description": "A narrow side-hollow off the glimmering pool, lit only by whatever light bleeds through from the crystals nearby — dim enough that something small has made a home of it.",
+        "connections": [
+          "glimmerdeep_grotto_glimmering_pool"
+        ],
+        "directions": {
+          "east": "glimmerdeep_grotto_glimmering_pool"
+        },
+        "monsters": [
+          "crystal_spiderling"
+        ],
+        "interactables": {
+          "the_bled_light": {
+            "name": "the hollow's bled-through light",
+            "description": "Just enough to see by, and clearly just enough to live by too."
           }
         }
       }
@@ -2074,6 +2575,7 @@
         "scroll_magic_missile",
         "iron_ore",
         "greater_healing_potion",
+        "supreme_healing_potion",
         "silvered_dagger",
         "fishing_pole",
         "bait",
@@ -2734,6 +3236,311 @@
         "monster": "young_turning_stair_guardian"
       },
       "clue": "It's smaller than the guardian on the real stair -- like it was posted here to be forgotten, not to win."
+    },
+    "supply_tunnels_veteran": {
+      "title": "The Supply Tunnel's Veteran",
+      "description": "Whoever's better-guarded stash this is, the veteran watching it isn't giving up the tunnel without a real fight.",
+      "location": "goblin_warrens_supply_tunnel",
+      "reward_xp": 150,
+      "reward_gold": 60,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "veteran_goblin"
+      },
+      "clue": "It fights smarter than anything else in the warren -- like it's actually been trained, not just armed."
+    },
+    "deep_larders_elder": {
+      "title": "The Deep Larder's Elder",
+      "description": "Someone's been stockpiling far more than this warren could ever need -- and the one guarding it clearly knows why.",
+      "location": "goblin_warrens_deep_larder",
+      "reward_xp": 220,
+      "reward_gold": 90,
+      "reward_item": "deep_larders_charm",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "goblin_shaman_elder"
+      },
+      "clue": "It keeps glancing at the stockpile like it's protecting the supplies, not itself."
+    },
+    "the_collapsed_tunnels_survivor": {
+      "title": "The Collapsed Tunnel's Survivor",
+      "description": "Something's been squatting in the rubble since long before the goblins ever moved in next door.",
+      "location": "goblin_warrens_collapsed_tunnel",
+      "reward_xp": 80,
+      "reward_gold": 30,
+      "reward_item": "collapsed_tunnels_keepsake",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "young_goblin"
+      },
+      "clue": "It's scrawnier and quicker than anything in the main warren -- like it's been surviving alone here for a while."
+    },
+    "flooded_gallerys_hold": {
+      "title": "The Flooded Gallery's Hold",
+      "description": "Whatever's moving through the black water isn't going to let anyone wade past it unnoticed.",
+      "location": "sunken_root_caverns_flooded_gallery",
+      "reward_xp": 100,
+      "reward_gold": 40,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "root_bound_goblin"
+      },
+      "clue": "It never actually surfaces -- it just keeps disturbing the water closer and closer to your feet."
+    },
+    "the_channels_keeper": {
+      "title": "The Channel's Keeper",
+      "description": "The precise channel isn't as empty as it first looks -- something's been keeping it clear this whole time.",
+      "location": "sunken_root_caverns_precise_channel",
+      "reward_xp": 130,
+      "reward_gold": 55,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "channel_bound_goblin"
+      },
+      "clue": "It moves like it's done this exact fight before, in this exact spot, more than once."
+    },
+    "the_hollow_wellsprings_elder": {
+      "title": "The Hollow Wellspring's Elder",
+      "description": "Whatever's been drinking from this wellspring hasn't seen the surface in longer than anyone can guess -- and it's not interested in sharing.",
+      "location": "sunken_root_caverns_hollow_wellspring",
+      "reward_xp": 200,
+      "reward_gold": 90,
+      "reward_item": "hollow_wellsprings_charm",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "elder_root_shaman"
+      },
+      "clue": "Its magic tastes like the water itself -- old, still, and a lot deeper than it looks."
+    },
+    "the_side_pools_straggler": {
+      "title": "The Side Pool's Straggler",
+      "description": "Something small has been squatting in the shallow offshoot, well out of the way of the main tunnels.",
+      "location": "sunken_root_caverns_side_pool",
+      "reward_xp": 60,
+      "reward_gold": 25,
+      "reward_item": "side_pools_trinket",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "root_goblin_pup"
+      },
+      "clue": "It's barely grown -- like it's been hiding here since long before it could've kept up with the rest of the tunnels."
+    },
+    "web_hollows_brood": {
+      "title": "The Web Hollow's Brood",
+      "description": "Whatever's been spinning silk down here has had a long time to work, and it isn't done yet.",
+      "location": "stonearch_bridge_web_hollow",
+      "reward_xp": 160,
+      "reward_gold": 60,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "brood_spider"
+      },
+      "clue": "It doesn't chase -- it just keeps spinning, patient enough to let the silk do most of the work."
+    },
+    "deep_currents_keeper": {
+      "title": "The Deep Current's Keeper",
+      "description": "The current isn't empty the way it looks from the gorge above -- something's been keeping it that way on purpose.",
+      "location": "stonearch_bridge_deep_current",
+      "reward_xp": 240,
+      "reward_gold": 100,
+      "reward_item": "deep_currents_charm",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "current_bound_spider"
+      },
+      "clue": "It moves with the water instead of against it -- like it's been doing this for as long as the current's existed."
+    },
+    "the_undertows_elder": {
+      "title": "The Undertow's Elder",
+      "description": "Everything the deep current has ever dragged down eventually ends up here -- and whatever's waiting has had all of it to grow on.",
+      "location": "stonearch_bridge_undertow",
+      "reward_xp": 380,
+      "reward_gold": 150,
+      "reward_item": "undertows_band",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "elder_web_spider"
+      },
+      "clue": "Nothing that's gone into the current has ever climbed back out. This is apparently where it all went."
+    },
+    "silked_nooks_hatchling": {
+      "title": "The Silked Nook's Hatchling",
+      "description": "Something small has been left to grow in the web hollow's quietest corner, well away from the rest of the brood.",
+      "location": "stonearch_bridge_silked_nook",
+      "reward_xp": 70,
+      "reward_gold": 30,
+      "reward_item": "silked_nooks_keepsake",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "spiderling"
+      },
+      "clue": "It's barely out of the egg -- and still more than willing to fight for the corner it was left in."
+    },
+    "watchtowers_stalker": {
+      "title": "The Watchtower's Stalker",
+      "description": "Something's been using the collapsed tower as a perch, and it isn't interested in sharing the view.",
+      "location": "greymoor_downs_broken_watchtower",
+      "reward_xp": 110,
+      "reward_gold": 45,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "watchtower_stalker"
+      },
+      "clue": "It watches the bridge crossing the same way the tower's builders must have, once."
+    },
+    "the_vantage_belows_alpha": {
+      "title": "Beneath the Vantage's Alpha",
+      "description": "The tower's collapsed base goes deeper than the ridge lets on -- and whatever's denning down there answers to something bigger.",
+      "location": "greymoor_downs_tower_vantage_below",
+      "reward_xp": 190,
+      "reward_gold": 80,
+      "reward_item": "vantage_belows_charm",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "alpha_wolf"
+      },
+      "clue": "The stalker up top was clearly reporting to this one, not the other way around."
+    },
+    "the_tower_cellars_pup": {
+      "title": "The Tower Cellar's Pup",
+      "description": "Something small has been using the half-buried storeroom to stay out of the wind.",
+      "location": "greymoor_downs_tower_cellar",
+      "reward_xp": 60,
+      "reward_gold": 25,
+      "reward_item": "tower_cellars_keepsake",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "wolf_pup"
+      },
+      "clue": "It's barely weaned -- and still willing to bare its teeth over a storeroom nobody else wants anymore."
+    },
+    "the_barrow_depths_bound": {
+      "title": "The Barrow Depths' Bound",
+      "description": "The sunken barrow's cold campsite was never anything but bait -- whatever's actually running this den is considerably further in.",
+      "location": "greymoor_downs_barrow_depths",
+      "reward_xp": 180,
+      "reward_gold": 75,
+      "reward_item": "barrow_depths_band",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "barrow_bound_wolf"
+      },
+      "clue": "The supply cache up above was being restocked for this one, not for whoever was camping at the entrance."
+    },
+    "hollow_thresholds_bound_wolf": {
+      "title": "The Hollow Threshold's Bound Wolf",
+      "description": "The passage narrows to almost nothing here -- and whatever's guarding it clearly isn't leaving without a fight.",
+      "location": "whispering_wood_hollow_threshold",
+      "reward_xp": 110,
+      "reward_gold": 45,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "den_bound_wolf"
+      },
+      "clue": "It's positioned exactly where the passage is narrowest -- like it was placed there on purpose, not just denning nearby."
+    },
+    "the_stray_dens_wolf": {
+      "title": "The Stray Den's Wolf",
+      "description": "Something's still using the half-collapsed den, even though it's clearly not the main pack's territory anymore.",
+      "location": "whispering_wood_stray_den",
+      "reward_xp": 60,
+      "reward_gold": 25,
+      "reward_item": "stray_dens_keepsake",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "stray_wood_wolf"
+      },
+      "clue": "It's smaller and warier than the ones guarding the real threshold -- like it got pushed out here, not posted here."
+    },
+    "the_deeper_roots_sentinel": {
+      "title": "The Deeper Roots' Sentinel",
+      "description": "The unnaturally regular root-work finally makes sense: something was built here, and it's still doing its job.",
+      "location": "whispering_wood_deeper_roots",
+      "reward_xp": 220,
+      "reward_gold": 90,
+      "reward_item": "root_wroughts_charm",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "root_wrought_sentinel"
+      },
+      "clue": "It doesn't move like anything alive. It moves like something that was told exactly how to move, a very long time ago."
+    },
+    "the_deep_root_chambers_warden": {
+      "title": "The Deep Root Chamber's Warden",
+      "description": "Whatever built this chamber wanted it kept exactly this way -- and the warden still guarding it hasn't gotten the memo that its makers are long gone.",
+      "location": "whispering_wood_deep_root_chamber",
+      "reward_xp": 340,
+      "reward_gold": 140,
+      "reward_item": "deep_root_wardens_band",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "deep_root_warden"
+      },
+      "clue": "It's bigger, slower, and far more deliberate than the sentinel outside -- built for exactly this room, and nowhere else."
+    },
+    "pools_wrought_spider": {
+      "title": "The Pool's Wrought Spider",
+      "description": "The glimmering pool isn't as empty as the sunken coffer made it look -- something's been guarding whatever's really down there.",
+      "location": "glimmerdeep_grotto_glimmering_pool",
+      "reward_xp": 220,
+      "reward_gold": 90,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "pool_wrought_spider"
+      },
+      "clue": "It moves like it's spent its whole life in that light -- like the glow itself taught it how."
+    },
+    "the_buried_glows_elder": {
+      "title": "The Buried Glow's Elder",
+      "description": "Whatever's buried in the silt isn't a crystal at all -- and it's not interested in being dug up.",
+      "location": "glimmerdeep_grotto_buried_glow",
+      "reward_xp": 340,
+      "reward_gold": 140,
+      "reward_item": "buried_glows_band",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "elder_crystal_spider"
+      },
+      "clue": "It glows exactly like the crystals up above -- close enough that whoever named this place probably never noticed the difference."
+    },
+    "the_dim_hollows_spiderling": {
+      "title": "The Dim Hollow's Spiderling",
+      "description": "Something small has made a home out of whatever light bleeds through into the dim hollow.",
+      "location": "glimmerdeep_grotto_dim_hollow",
+      "reward_xp": 70,
+      "reward_gold": 30,
+      "reward_item": "dim_hollows_keepsake",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "crystal_spiderling"
+      },
+      "clue": "It's barely grown into its own glow yet -- and still willing to defend the little of it that's made it this far."
+    },
+    "the_unopened_seals_riddle": {
+      "title": "The Unopened Seal's Riddle",
+      "description": "The seal has never been opened -- only checked, over and over, by whoever kept coming back to make sure it still held.",
+      "location": "greymoor_downs_the_unopened_seal",
+      "trigger": {
+        "type": "solve_puzzle",
+        "puzzle_id": "unopened_seal_riddle"
+      },
+      "reward_xp": 50000,
+      "reward_gold": 10000,
+      "clue": "The question worn into the seal reads: \"Everyone who opens me finds exactly what they were afraid of, and exactly what they needed. What am I?\""
+    },
+    "the_unaskeds_reckoning": {
+      "title": "The Unasked's Reckoning",
+      "description": "Every quiet thing this world never explained -- the wait, the silence, the resonance, the threshold, the thing before the beginning -- was always the same question, asked over and over by everyone who ever came back to try again.",
+      "location": "greymoor_downs_the_last_question",
+      "reward_xp": 1000000,
+      "reward_gold": 100000,
+      "reward_item": "pandoras_answer",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_unasked"
+      },
+      "clue": "It was never waiting to be defeated. It was waiting to see who'd actually finish the question.",
+      "weight": "climactic"
     }
   },
   "story_arcs": {
@@ -2773,6 +3580,121 @@
         "the_unmoored_isle_quest"
       ],
       "required_level": 15
+    },
+    "arc_5_goblin_warrens": {
+      "title": "What the Warren Was Hiding",
+      "description": "The goblins were never the whole story -- just the part that was easiest to notice first.",
+      "quests": [
+        "supply_tunnels_veteran",
+        "the_collapsed_tunnels_survivor",
+        "deep_larders_elder"
+      ],
+      "required_level": 99
+    },
+    "arc_6_sunken_root_caverns": {
+      "title": "What the Roots Kept",
+      "description": "Water finds every gap a root leaves behind, and something's been using every one of them.",
+      "quests": [
+        "flooded_gallerys_hold",
+        "the_side_pools_straggler",
+        "the_channels_keeper",
+        "the_hollow_wellsprings_elder"
+      ],
+      "required_level": 99
+    },
+    "arc_7_stonearch_gorge": {
+      "title": "What the Gorge Swallowed",
+      "description": "Everything that's ever gone into the current eventually ends up somewhere. This is where.",
+      "quests": [
+        "web_hollows_brood",
+        "silked_nooks_hatchling",
+        "deep_currents_keeper",
+        "the_undertows_elder"
+      ],
+      "required_level": 99
+    },
+    "arc_8_greymoor_downs": {
+      "title": "What the Downs Still Watches",
+      "description": "A watchtower and a burial mound, both still doing the job they were built for, long after anyone thought to check.",
+      "quests": [
+        "watchtowers_stalker",
+        "the_tower_cellars_pup",
+        "the_vantage_belows_alpha",
+        "the_barrow_depths_bound"
+      ],
+      "required_level": 99
+    },
+    "arc_9_whispering_wood": {
+      "title": "What Was Built, Not Grown",
+      "description": "Somewhere under the Wood, the roots stopped being roots a long time before anyone noticed.",
+      "quests": [
+        "hollow_thresholds_bound_wolf",
+        "the_stray_dens_wolf",
+        "the_deeper_roots_sentinel",
+        "the_deep_root_chambers_warden"
+      ],
+      "required_level": 99
+    },
+    "arc_10_glimmerdeep_grotto": {
+      "title": "What the Glow Isn't",
+      "description": "Not everything down here that shines is a crystal.",
+      "quests": [
+        "pools_wrought_spider",
+        "the_dim_hollows_spiderling",
+        "the_buried_glows_elder"
+      ],
+      "required_level": 99
+    },
+    "arc_11_hollow_verge": {
+      "title": "The Hollow Verge",
+      "description": "The first rebirth doesn't just raise a ceiling -- it opens a door nobody could reach before.",
+      "quests": [
+        "verge_wraiths_unrest",
+        "bonefields_march",
+        "husk_orchards_reckoning",
+        "cairns_silence",
+        "ashen_reliquarys_captive",
+        "the_forgotten_nooks_secret",
+        "the_verge_wardens_toll"
+      ],
+      "required_level": 99
+    },
+    "arc_12_wordless_choir": {
+      "title": "The Wordless Choir",
+      "description": "Past The Unrepeating, something built entirely around silence is still, somehow, being heard.",
+      "quests": [
+        "choir_remnants_echo",
+        "antechambers_held_breath",
+        "still_machinery_wakes",
+        "the_forgotten_chords_return",
+        "wordless_choirs_silence",
+        "resonance_wells_answer",
+        "the_undertones_reckoning"
+      ],
+      "required_level": 99
+    },
+    "arc_13_the_unbegun": {
+      "title": "The Unbegun",
+      "description": "Before the waiting shape, before the island, before the story anyone was ever told -- something was already here.",
+      "quests": [
+        "hollow_watchers_vigil",
+        "the_afterimages_watch",
+        "turning_stairs_paradox",
+        "the_missed_steps_fall",
+        "the_looms_pattern",
+        "the_last_measures_end",
+        "the_unbegun_reckoning"
+      ],
+      "required_level": 99
+    },
+    "arc_14_the_answered": {
+      "title": "The Answered",
+      "description": "Every quiet thing this world ever tried not to explain was always the same question, sealed the same way, waiting for someone who'd already been asked it enough times to finally answer back.",
+      "quests": [
+        "the_unopened_seals_riddle",
+        "the_unaskeds_reckoning"
+      ],
+      "required_level": 99
     }
   },
   "monsters": {
@@ -3235,6 +4157,251 @@
       "vulnerabilities": [
         "force"
       ]
+    },
+    "veteran_goblin": {
+      "name": "Veteran Goblin",
+      "dexterity": 15,
+      "strength": 10,
+      "armor_class": 14,
+      "hp_max": 14,
+      "proficiency_bonus": 2,
+      "xp_reward": 100
+    },
+    "goblin_shaman_elder": {
+      "name": "Elder Goblin Shaman",
+      "dexterity": 14,
+      "strength": 9,
+      "armor_class": 14,
+      "hp_max": 22,
+      "proficiency_bonus": 3,
+      "xp_reward": 180,
+      "on_hit_condition": "silenced"
+    },
+    "young_goblin": {
+      "name": "Young Goblin",
+      "dexterity": 12,
+      "strength": 7,
+      "armor_class": 12,
+      "hp_max": 5,
+      "proficiency_bonus": 1,
+      "xp_reward": 30
+    },
+    "root_bound_goblin": {
+      "name": "Root-Bound Goblin",
+      "dexterity": 13,
+      "strength": 9,
+      "armor_class": 13,
+      "hp_max": 10,
+      "proficiency_bonus": 2,
+      "xp_reward": 70
+    },
+    "channel_bound_goblin": {
+      "name": "Channel-Bound Goblin",
+      "dexterity": 13,
+      "strength": 9,
+      "armor_class": 14,
+      "hp_max": 12,
+      "proficiency_bonus": 2,
+      "xp_reward": 90
+    },
+    "elder_root_shaman": {
+      "name": "Elder Root Shaman",
+      "dexterity": 13,
+      "strength": 9,
+      "armor_class": 14,
+      "hp_max": 20,
+      "proficiency_bonus": 3,
+      "xp_reward": 160,
+      "on_hit_condition": "poisoned"
+    },
+    "root_goblin_pup": {
+      "name": "Root Goblin Pup",
+      "dexterity": 11,
+      "strength": 6,
+      "armor_class": 11,
+      "hp_max": 4,
+      "proficiency_bonus": 1,
+      "xp_reward": 25
+    },
+    "brood_spider": {
+      "name": "Brood Spider",
+      "dexterity": 16,
+      "strength": 12,
+      "armor_class": 14,
+      "hp_max": 18,
+      "proficiency_bonus": 2,
+      "xp_reward": 140,
+      "on_hit_condition": "poisoned"
+    },
+    "current_bound_spider": {
+      "name": "Current-Bound Spider",
+      "dexterity": 17,
+      "strength": 14,
+      "armor_class": 15,
+      "hp_max": 30,
+      "proficiency_bonus": 3,
+      "xp_reward": 220,
+      "on_hit_condition": "poisoned"
+    },
+    "elder_web_spider": {
+      "name": "Elder Web Spider",
+      "dexterity": 17,
+      "strength": 16,
+      "armor_class": 16,
+      "hp_max": 38,
+      "proficiency_bonus": 4,
+      "xp_reward": 350,
+      "on_hit_condition": "poisoned"
+    },
+    "spiderling": {
+      "name": "Spiderling",
+      "dexterity": 14,
+      "strength": 8,
+      "armor_class": 12,
+      "hp_max": 8,
+      "proficiency_bonus": 1,
+      "xp_reward": 40
+    },
+    "watchtower_stalker": {
+      "name": "Watchtower Stalker",
+      "dexterity": 16,
+      "strength": 13,
+      "armor_class": 14,
+      "hp_max": 16,
+      "proficiency_bonus": 2,
+      "xp_reward": 90,
+      "on_hit_condition": "frightened"
+    },
+    "alpha_wolf": {
+      "name": "Alpha Wolf",
+      "dexterity": 16,
+      "strength": 15,
+      "armor_class": 15,
+      "hp_max": 22,
+      "proficiency_bonus": 3,
+      "xp_reward": 150,
+      "on_hit_condition": "frightened"
+    },
+    "wolf_pup": {
+      "name": "Wolf Pup",
+      "dexterity": 13,
+      "strength": 9,
+      "armor_class": 11,
+      "hp_max": 5,
+      "proficiency_bonus": 1,
+      "xp_reward": 30
+    },
+    "barrow_bound_wolf": {
+      "name": "Barrow-Bound Wolf",
+      "dexterity": 16,
+      "strength": 14,
+      "armor_class": 15,
+      "hp_max": 20,
+      "proficiency_bonus": 3,
+      "xp_reward": 140,
+      "on_hit_condition": "frightened"
+    },
+    "den_bound_wolf": {
+      "name": "Den-Bound Wolf",
+      "dexterity": 15,
+      "strength": 13,
+      "armor_class": 14,
+      "hp_max": 16,
+      "proficiency_bonus": 2,
+      "xp_reward": 90,
+      "on_hit_condition": "frightened"
+    },
+    "stray_wood_wolf": {
+      "name": "Stray Wood Wolf",
+      "dexterity": 13,
+      "strength": 10,
+      "armor_class": 12,
+      "hp_max": 8,
+      "proficiency_bonus": 1,
+      "xp_reward": 40
+    },
+    "root_wrought_sentinel": {
+      "name": "Root-Wrought Sentinel",
+      "dexterity": 10,
+      "strength": 16,
+      "armor_class": 16,
+      "hp_max": 26,
+      "proficiency_bonus": 3,
+      "xp_reward": 180,
+      "resistances": [
+        "physical"
+      ],
+      "vulnerabilities": [
+        "lightning"
+      ]
+    },
+    "deep_root_warden": {
+      "name": "Deep Root Warden",
+      "dexterity": 11,
+      "strength": 18,
+      "armor_class": 17,
+      "hp_max": 34,
+      "proficiency_bonus": 4,
+      "xp_reward": 280,
+      "resistances": [
+        "physical"
+      ],
+      "vulnerabilities": [
+        "lightning"
+      ]
+    },
+    "pool_wrought_spider": {
+      "name": "Pool-Wrought Spider",
+      "dexterity": 15,
+      "strength": 11,
+      "armor_class": 15,
+      "hp_max": 22,
+      "proficiency_bonus": 3,
+      "xp_reward": 220,
+      "on_hit_condition": "poisoned"
+    },
+    "elder_crystal_spider": {
+      "name": "Elder Crystal Spider",
+      "dexterity": 16,
+      "strength": 13,
+      "armor_class": 16,
+      "hp_max": 30,
+      "proficiency_bonus": 3,
+      "xp_reward": 320,
+      "on_hit_condition": "poisoned"
+    },
+    "crystal_spiderling": {
+      "name": "Crystal Spiderling",
+      "dexterity": 13,
+      "strength": 8,
+      "armor_class": 13,
+      "hp_max": 8,
+      "proficiency_bonus": 1,
+      "xp_reward": 40
+    },
+    "the_unasked": {
+      "name": "The Unasked",
+      "dexterity": 26,
+      "strength": 30,
+      "armor_class": 30,
+      "hp_max": 100000000,
+      "proficiency_bonus": 10,
+      "xp_reward": 1000000,
+      "is_boss": true,
+      "on_hit_condition": "paralyzed",
+      "life_drain": true,
+      "resistances": [
+        "physical",
+        "fire",
+        "cold",
+        "lightning",
+        "poison",
+        "necrotic",
+        "psychic"
+      ],
+      "vulnerabilities": [
+        "radiant"
+      ]
     }
   },
   "factions": {
@@ -3322,6 +4489,17 @@
         "a cycle",
         "the cycle",
         "rebirth"
+      ]
+    },
+    "unopened_seal_riddle": {
+      "riddle": "Everyone who opens me finds exactly what they were afraid of, and exactly what they needed. What am I?",
+      "accepted_answers": [
+        "the box",
+        "a box",
+        "pandoras box",
+        "pandora's box",
+        "the truth",
+        "the answer"
       ]
     }
   }

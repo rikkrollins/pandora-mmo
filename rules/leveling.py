@@ -420,6 +420,25 @@ def hp_gain_for_level(char_class: str, constitution_modifier: int) -> int:
     return max(hit_die // 2 + 1 + constitution_modifier, 1)
 
 
+# HP scaling for evolutions/rebirths (2026-07-25, per Coffee: "by level
+# 99 the first playthrough before evolution the HP would be apx 3200 -
+# then scale that"). EVOLUTION_HP_MULTIPLIER scales every level-up's HP
+# gain (db.py's add_xp) well past the vanilla-5E hp_gain_for_level
+# above, landing an average level-1-to-99 climb around ~3200 max HP
+# with no rebirths yet. REBIRTH_HP_MULTIPLIER then doubles current
+# hp_max at each rebirth (bot.py's _do_rebirth, on top of that life's
+# own level-up growth) -- reaches six-figure HP by roughly rebirth 5,
+# matching the scale potions were re-tuned for (2026-07-25: Healing
+# Potion 100, Greater 1,000, Supreme 10,000).
+EVOLUTION_HP_MULTIPLIER = 5
+REBIRTH_HP_MULTIPLIER = 2
+
+
+def rebirth_hp_max(current_hp_max: int) -> int:
+    """New hp_max on rebirth -- a straight doubling, never a power loss."""
+    return current_hp_max * REBIRTH_HP_MULTIPLIER
+
+
 # Real 5E DMG "Medium difficulty" encounter XP budget, per individual
 # character, by level (2014 DMG encounter-building table).
 MEDIUM_ENCOUNTER_XP_PER_CHARACTER = {

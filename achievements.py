@@ -140,6 +140,17 @@ ACHIEVEMENTS = {
         "title": "the Cycle-Breaker",
         "check": {"type": "completed_specific_quest", "quest_id": "the_unbegun_reckoning"},
     },
+    # The true hidden final boss (2026-07-25): gated on 10 rebirths AND
+    # having already defeated every other secret final boss in the game
+    # (the Waiting Shape, the Unrepeating, the Unbegun) -- the genuine,
+    # game-completing capstone this achievement list has been building
+    # toward.
+    "the_answered": {
+        "name": "The Answered",
+        "description": "Defeat The Unasked -- the thing Pandora's box was always going to hold, sealed by a question nobody before you was willing to finish asking.",
+        "title": "the Answered",
+        "check": {"type": "completed_specific_quest", "quest_id": "the_unaskeds_reckoning"},
+    },
 }
 
 

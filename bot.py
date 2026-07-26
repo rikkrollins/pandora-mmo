@@ -95,6 +95,7 @@ from rules.leveling import (
     magic_penetration_pct, CLASS_SUBCLASSES, COMBAT_SUBCLASS_NAMES, COMBAT_SUBCLASS_DAMAGE_BONUS_PCT,
     THIEF_SUBCLASS_STEAL_BONUS, TOTEM_WARRIOR_SUBCLASS_NAME, LIFE_SUBCLASS_HEAL_BONUS,
     UTILITY_SUBCLASS_ABILITY_CHECK_BONUS, UTILITY_SUBCLASS_CHECK_BONUS_VALUE,
+    rebirth_hp_max,
 )
 from rules.proficiency import practiced_bonus, MAX_PRACTICE_BONUS
 
@@ -3095,9 +3096,17 @@ async def _do_rebirth(update: Update) -> None:
         return
 
     new_rebirth_count = character.get("rebirth_count", 0) + 1
+    # HP doubling on rebirth (2026-07-25, per Coffee's evolution/HP-scaling
+    # pass): the one real exception to "level and XP reset, everything else
+    # stays as it was" -- hp_max doesn't just stay, it doubles, and the
+    # character comes back at full health on top of that. See rules/
+    # leveling.py's rebirth_hp_max for how this compounds with each life's
+    # own level-up HP growth (EVOLUTION_HP_MULTIPLIER) toward six-figure HP
+    # by around rebirth 5.
+    new_hp_max = rebirth_hp_max(character["hp_max"])
     updated = db.update_character(
         update.effective_user.id,
-        level=1, xp=0, rebirth_count=new_rebirth_count,
+        level=1, xp=0, rebirth_count=new_rebirth_count, hp_max=new_hp_max, hp_current=new_hp_max,
     )
     new_cap = ability_score_cap(new_rebirth_count)
     new_xp_bonus = int(round((xp_gain_multiplier(new_rebirth_count) - 1.0) * 100))
@@ -3105,7 +3114,8 @@ async def _do_rebirth(update: Update) -> None:
         f"✨ **{updated['name']}** is reborn — level and XP reset to 1, but every stat, every "
         f"item, and every point already earned stays exactly as it was.",
         f"This is rebirth #{new_rebirth_count}: ability scores can now climb as high as {new_cap} "
-        f"(instead of the usual 20), and XP gains are permanently boosted by {new_xp_bonus}%.",
+        f"(instead of the usual 20), XP gains are permanently boosted by {new_xp_bonus}%, and "
+        f"maximum HP has doubled to {new_hp_max} (fully healed).",
     ]
     if new_rebirth_count == 1:
         lines.append("A hybrid class is now available — say \"become a hybrid [class]\" to pick one.")
@@ -3334,6 +3344,68 @@ async def _do_level_up(update: Update, text: str) -> None:
         f"like to raise — Strength, Dexterity, Constitution, Intelligence, Wisdom, or Charisma? "
         f"(Say \"auto\" or \"do it for me\" to let the game choose.)",
     )
+
+
+async def _do_auto_level_up_party(update: Update) -> None:
+    """
+    Auto-applies every pending ability-score improvement (to each
+    character's own class-primary ability, same default _apply_asi_
+    choice's "auto"/"do it for me" phrasing already uses for a single
+    character) AND every affordable, not-yet-owned skill-tree upgrade
+    (each class has exactly one real upgrade right now -- see
+    SKILL_TREE_UPGRADES -- so "auto" here is never a real judgment call,
+    just "buy the one thing that exists if you can afford it") across
+    the requester's WHOLE real party -- every member sharing the same
+    party_id, not just whoever's typing. Real players' own characters
+    get the same free, no-real-choice-to-make treatment healing/
+    blessing actions already give the whole party (see
+    _bless_present_party_to_full) -- this never spends anything a
+    player would plausibly rather keep banked, since the ability
+    target and the skill upgrade are both fixed, not optional builds.
+    Uses update_character_by_id throughout (never update_character) so
+    this can never land on the wrong character if a party member isn't
+    currently their owner's active slot.
+    """
+    requester = db.get_character(update.effective_user.id)
+    if requester is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    if requester.get("party_id"):
+        members = [p for p in _get_party_members() if p.get("party_id") == requester["party_id"]]
+    else:
+        members = [requester]
+
+    lines = []
+    for member in members:
+        pending = member.get("pending_asi_points", 0)
+        if pending > 0:
+            ability = CLASS_PRIMARY_ABILITY.get(member["char_class"].lower(), "strength")
+            cap = ability_score_cap(member.get("rebirth_count", 0))
+            before_value = member[ability]
+            after_value = min(before_value + pending, cap)
+            db.update_character_by_id(
+                member["character_id"], **{ability: after_value}, pending_asi_points=0,
+            )
+            lines.append(f"📈 **{member['name']}**: +{after_value - before_value} {ability.capitalize()} (now {after_value})")
+
+        upgrade = SKILL_TREE_UPGRADES.get(member["char_class"])
+        if upgrade and not _has_skill_upgrade(member, upgrade["id"]) and member.get("skill_points", 0) >= upgrade["cost"]:
+            updates = {
+                "skill_points": member["skill_points"] - upgrade["cost"],
+                "skill_tree_upgrades": member["skill_tree_upgrades"] + [upgrade["id"]],
+            }
+            if upgrade["id"] == "draconic_hide":
+                updates["armor_class"] = member["armor_class"] + 1
+            db.update_character_by_id(member["character_id"], **updates)
+            lines.append(f"🌳 **{member['name']}** unlocks **{upgrade['name']}**!")
+
+    if not lines:
+        await _safe_send(update, "Nothing to auto-apply right now — no one in the party has ability points or an affordable skill upgrade banked.")
+        return
+    await _safe_send(update, "🎯 **Auto Level-Up: Party**\n" + "\n".join(lines))
 
 
 _INLINE_DESCRIPTION_RE = re.compile(
@@ -6474,7 +6546,32 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
     # quest specifically gets its own, unmistakably different message
     # and Main-topic announcement, so reaching it actually feels
     # different from every quest completion that came before it.
-    if quest_id == "the_unbegun_reckoning":
+    if quest_id == "the_unaskeds_reckoning":
+        # The true hidden final boss (2026-07-25, per Coffee: an FF6/FF7-
+        # style ultimate secret superboss). Its own distinct completion
+        # message, one tier more unmistakable than even the_unbegun_
+        # reckoning's -- reaching this is meant to feel like finishing
+        # the actual game, ties together every other secret final boss
+        # (the Waiting Shape, the Unrepeating, the Unbegun) and the
+        # Pandora-marker lore thread they were all built on top of.
+        await _safe_send(
+            update_like,
+            f"🌌✨ **The Box Is Finally Empty.**\n\n{climax_narration}"
+            f"Every quiet thing this world never explained — the wait, the "
+            f"silence, the resonance, the threshold, the thing before the "
+            f"beginning — was always The Unasked, asked over and over by "
+            f"everyone who ever came back to try again. It doesn't fall so "
+            f"much as finally, after all this time, get to stop holding the "
+            f"question.\n\n"
+            f"You've earned: {reward_text}.{chapter_note}{resolution_note}\n\n"
+            f"Pandora kept the box until she didn't need an answer anymore. "
+            f"Now, so do you.",
+        )
+        await _notify_main_topic(
+            update_like,
+            f"🌌✨ **{character['name']}** found what was actually inside Pandora's box — and answered it.",
+        )
+    elif quest_id == "the_unbegun_reckoning":
         await _safe_send(
             update_like,
             f"🌌 **Something Ends. Something Doesn't.**\n\n{climax_narration}"
@@ -7564,7 +7661,10 @@ async def _do_check_party(update: Update, text: str = "") -> None:
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         for member in members:
-            await _safe_send(update, _format_character_sheet(member), speak=False)
+            await _safe_send(
+                update, _format_character_sheet(member), speak=False,
+                reply_markup=_member_level_skill_keyboard(member),
+            )
         return
 
     # Task #161 (real live incident): "Who's here at the market with me?"
@@ -7623,6 +7723,98 @@ async def _do_check_party(update: Update, text: str = "") -> None:
 
     keyboard = _party_keyboard(character) if character else None
     await _safe_send(update, "\n".join(lines), reply_markup=keyboard, speak=False)
+
+
+def _member_level_skill_keyboard(member: dict) -> InlineKeyboardMarkup | None:
+    """
+    Per Coffee (2026-07-25: "make sure i can use buttons to assign my
+    own level ups and skills to the AIs also") -- real per-member
+    buttons on the Party Sheets screen, alongside _do_auto_level_up_
+    party's bulk auto-apply button, so a human can make the SAME
+    genuine ability-score choice for an AI companion (or any other real
+    party member) that _do_level_up already lets them make for
+    themselves, rather than only ever being able to auto-apply it.
+    Shown only when there's actually something to act on for this
+    specific member -- same "don't show a pointless tap" discipline as
+    every other conditional button in this file.
+    """
+    buttons = []
+    if member.get("pending_asi_points", 0) > 0:
+        buttons.append([InlineKeyboardButton(
+            f"📈 Level Up {member['name']}", callback_data=f"memberlvl|asi|{member['character_id']}",
+        )])
+    upgrade = SKILL_TREE_UPGRADES.get(member["char_class"])
+    if upgrade and not _has_skill_upgrade(member, upgrade["id"]) and member.get("skill_points", 0) >= upgrade["cost"]:
+        buttons.append([InlineKeyboardButton(
+            f"🌳 Unlock {upgrade['name']} for {member['name']}", callback_data=f"memberlvl|skill|{member['character_id']}",
+        )])
+    return InlineKeyboardMarkup(buttons) if buttons else None
+
+
+async def member_level_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Handles taps on _member_level_skill_keyboard. "asi" shows a real
+    ability picker (same six abilities _do_level_up's own free-text
+    path offers); "asiapply" spends it; "skill" unlocks the one real
+    upgrade that class has, same as _do_auto_level_up_party's per-member
+    logic. Always via update_character_by_id, targeting the tapped
+    character_id directly -- never update_character, which would land
+    on whichever character its OWNER currently has active instead
+    (the same real bug class already fixed for shrine revival/party
+    sheets elsewhere in this file).
+    """
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    await _safe_answer(query)
+
+    if action == "asi":
+        character_id = int(parts[2]) if len(parts) > 2 else None
+        member = db.get_character_by_id(character_id) if character_id else None
+        if member is None or member.get("pending_asi_points", 0) <= 0:
+            return
+        buttons = [
+            [InlineKeyboardButton(a.capitalize(), callback_data=f"memberlvl|asiapply|{character_id}|{a}")]
+            for a in _ABILITY_NAMES
+        ]
+        await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+        return
+
+    if action == "asiapply":
+        character_id = int(parts[2]) if len(parts) > 2 else None
+        ability = parts[3] if len(parts) > 3 else None
+        member = db.get_character_by_id(character_id) if character_id else None
+        if member is None or ability not in _ABILITY_NAMES:
+            return
+        pending = member.get("pending_asi_points", 0)
+        if pending <= 0:
+            return
+        spend = min(pending, 2)  # real 5E: at most +2 into a single ability per ASI
+        cap = ability_score_cap(member.get("rebirth_count", 0))
+        before_value = member[ability]
+        after_value = min(before_value + spend, cap)
+        db.update_character_by_id(
+            character_id, **{ability: after_value}, pending_asi_points=pending - spend,
+        )
+        await _safe_send(update, f"📈 **{member['name']}**: +{after_value - before_value} {ability.capitalize()} (now {after_value})")
+        return
+
+    if action == "skill":
+        character_id = int(parts[2]) if len(parts) > 2 else None
+        member = db.get_character_by_id(character_id) if character_id else None
+        if member is None:
+            return
+        upgrade = SKILL_TREE_UPGRADES.get(member["char_class"])
+        if upgrade is None or _has_skill_upgrade(member, upgrade["id"]) or member.get("skill_points", 0) < upgrade["cost"]:
+            return
+        updates = {
+            "skill_points": member["skill_points"] - upgrade["cost"],
+            "skill_tree_upgrades": member["skill_tree_upgrades"] + [upgrade["id"]],
+        }
+        if upgrade["id"] == "draconic_hide":
+            updates["armor_class"] = member["armor_class"] + 1
+        db.update_character_by_id(character_id, **updates)
+        await _safe_send(update, f"🌳 **{member['name']}** unlocks **{upgrade['name']}**!")
 
 
 def _party_keyboard(character: dict) -> InlineKeyboardMarkup | None:
@@ -8079,10 +8271,18 @@ async def _do_check_inventory(update: Update) -> None:
     # spells already have their own buttons on the character sheet, so
     # only the scroll-derived ones show up here, not a duplicate set.
     scroll_rows = _scroll_spell_buttons(character)
+    # Give buttons (2026-07-25, per Coffee: "anything the party might
+    # need we need buttons for - like giving them item for their
+    # backpack so they can use or cast them"). One per carried item,
+    # only shown at all when someone real is actually here to give it
+    # to (same presence scoping _do_give_item's own free-text already
+    # uses) -- dispatches through that exact same handler.
+    give_rows = _give_item_keyboard(character)
     combined_rows = (
         (item_rows.inline_keyboard if item_rows else [])
         + (craft_rows.inline_keyboard if craft_rows else [])
         + scroll_rows
+        + (give_rows.inline_keyboard if give_rows else [])
     )
     keyboard = InlineKeyboardMarkup(combined_rows) if combined_rows else None
     await _safe_send(
@@ -8181,6 +8381,69 @@ async def item_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if target_character is None:
             return
         await _do_use_item(update, f"use {item['name']} on {target_character['name']}")
+
+
+def _give_item_keyboard(character: dict) -> InlineKeyboardMarkup | None:
+    """
+    Give buttons (2026-07-25, per Coffee: "anything the party might
+    need we need buttons for - like giving them item for their
+    backpack so they can use or cast them"). One button per carried
+    item (any type, not just consumables -- a scroll or a piece of gear
+    is just as giveable as a potion), only built when someone real is
+    actually here to receive it (same presence scoping _do_give_item's
+    own free-text path already uses) -- an empty room means no give
+    buttons at all, same as _target_picker_keyboard's own "nothing to
+    pick" case.
+    """
+    others = [
+        p for p in _get_combat_eligible_party_members(character["current_location"])
+        if p["telegram_user_id"] != character["telegram_user_id"]
+    ]
+    if not others or not character.get("inventory"):
+        return None
+    buttons = [
+        [InlineKeyboardButton(f"🤝 Give {items_module.get_item(i)['name']}", callback_data=f"give|pick|{i}")]
+        for i, qty in character["inventory"].items() if qty > 0 and items_module.get_item(i)
+    ]
+    return InlineKeyboardMarkup(buttons) if buttons else None
+
+
+async def give_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _give_item_keyboard -- picks an item, then a recipient, then dispatches through the exact same _do_give_item free text already uses."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    await _safe_answer(query)
+
+    if action == "pick":
+        item_id = parts[2] if len(parts) > 2 else None
+        item = items_module.get_item(item_id) if item_id else None
+        character = db.get_character(update.effective_user.id)
+        if item is None or character is None:
+            return
+        others = [
+            p for p in _get_combat_eligible_party_members(character["current_location"])
+            if p["telegram_user_id"] != character["telegram_user_id"]
+        ]
+        if not others:
+            return
+        buttons = [
+            [InlineKeyboardButton(p["name"], callback_data=f"give|to|{item_id}|{p['telegram_user_id']}")]
+            for p in others
+        ]
+        await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+        return
+
+    if action == "to":
+        item_id = parts[2] if len(parts) > 2 else None
+        target_token = parts[3] if len(parts) > 3 else None
+        item = items_module.get_item(item_id) if item_id else None
+        if item is None or target_token is None:
+            return
+        target_character = db.get_character(int(target_token))
+        if target_character is None:
+            return
+        await _do_give_item(update, f"give {item['name']} to {target_character['name']}")
 
 
 def _find_resource_node(location: dict, action_text: str) -> dict | None:
@@ -11014,23 +11277,34 @@ def _check_story_gate(character: dict, current: dict, destination_id: str) -> st
     Unlike requires_defeated_monster this needs no quest to exist at
     all, so it also covers the many world-expansion branch locations
     that were never given their own quest.
+
+    requires_defeated_monster also accepts a LIST of monster ids, not
+    just a single one (2026-07-25, the true hidden final boss: gated on
+    having genuinely defeated every one of this game's other secret
+    final bosses first, not just one) -- ALL of them must be defeated,
+    each checked exactly like the single-monster case above. A plain
+    string still works identically to before (wrapped into a one-item
+    list), so every existing single-monster gate is unaffected.
     """
     gate = current.get("story_gates", {}).get(destination_id)
     if not gate:
         return None
 
-    monster_id = gate.get("requires_defeated_monster")
-    if monster_id:
-        defeating_quest_ids = {
-            quest_id for quest_id, quest in CAMPAIGN["quests"].items()
-            if quest.get("trigger", {}).get("type") == "defeat_monster"
-            and quest["trigger"].get("monster") == monster_id
-        }
-        if not defeating_quest_ids & set(character["completed_quests"]):
-            return (
-                "Something down here isn't done with you yet — you can feel "
-                "it's not safe to go any further until whatever's wrong is dealt with."
-            )
+    monster_ids = gate.get("requires_defeated_monster")
+    if monster_ids:
+        if isinstance(monster_ids, str):
+            monster_ids = [monster_ids]
+        for monster_id in monster_ids:
+            defeating_quest_ids = {
+                quest_id for quest_id, quest in CAMPAIGN["quests"].items()
+                if quest.get("trigger", {}).get("type") == "defeat_monster"
+                and quest["trigger"].get("monster") == monster_id
+            }
+            if not defeating_quest_ids & set(character["completed_quests"]):
+                return (
+                    "Something down here isn't done with you yet — you can feel "
+                    "it's not safe to go any further until whatever's wrong is dealt with."
+                )
 
     cleared_gate = gate.get("requires_cleared_location")
     if cleared_gate and cleared_gate not in character.get("cleared_locations", []):
@@ -12506,6 +12780,15 @@ def _main_menu_keyboard(character: dict) -> InlineKeyboardMarkup:
     ]
     if character.get("pending_asi_points", 0) > 0:
         rows.append([InlineKeyboardButton("📈 Level Up", callback_data="menu|level")])
+    # Auto Level-Up Party (2026-07-25, per Coffee: "does me saying auto
+    # level up the party... work? make a button for us"). Shown
+    # whenever the requester either has their own points banked, or is
+    # in a real party at all (cheap to check -- whether OTHER members
+    # have something banked isn't checked here just to decide button
+    # visibility; the button itself is a no-op with a plain message if
+    # there's genuinely nothing to apply).
+    if character.get("pending_asi_points", 0) > 0 or character.get("party_id"):
+        rows.append([InlineKeyboardButton("🎯 Auto Level-Up Party", callback_data="menu|autolevelparty")])
     # Rebirth/hybrid (2026-07-22): same "only show it when it actually
     # applies" convention as Level Up above -- Rebirth only appears at
     # MAX_LEVEL (it would just reject the tap otherwise), and Hybrid
@@ -12639,6 +12922,8 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await _do_rebirth(update)
     elif section == "hybrid":
         await _do_show_hybrid_menu(update)
+    elif section == "autolevelparty":
+        await _do_auto_level_up_party(update)
 
 
 async def story_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -12925,6 +13210,13 @@ async def spell_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         await _do_cast_spell(update, f"cast {spell['name']} on {target_character['name']}")
 
 
+# Revivify/scroll_revivify's revival amount (2026-07-25, per Coffee's
+# HP-scaling pass) -- a real fraction of max HP, not a flat number, so
+# it stays meaningful regardless of how large a character's own hp_max
+# has grown with rebirths.
+REVIVE_HP_FRACTION = 0.05
+
+
 async def _do_cast_spell(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -13171,7 +13463,15 @@ async def _do_cast_spell(update: Update, text: str) -> None:
         # minutes tightly enough nor material components at all, so
         # both are deliberately skipped, same simplification style as
         # every other adapted spell/feature in this file. Restores to
-        # 1 HP, matching Revivify's real effect exactly.
+        # 5% of max HP (2026-07-25, per Coffee, revisited once real HP
+        # totals started reaching the thousands/hundreds-of-thousands
+        # with rebirths -- a flat 1 HP had gone from "thin but workable"
+        # to "statistically zero," reviving someone directly back into
+        # a near-certain second death). 5% is deliberately still a real
+        # heal, not a full one -- enough of a foothold that the rest of
+        # the party gets a genuine chance to top them up afterward,
+        # same tiering logic that already separates this from the
+        # pricier, full-heal Tent/Cabin/House items.
         target_character = _find_party_target_by_name(text)
         if target_character is None or not target_character.get("is_dead"):
             await update.effective_chat.send_message(
@@ -13190,14 +13490,15 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                 )
                 return
         _consume_scroll_if_any()
+        revive_hp = max(1, round(target_character["hp_max"] * REVIVE_HP_FRACTION))
         db.update_character(
-            target_character["telegram_user_id"], is_dead=0, hp_current=1, died_at=None,
+            target_character["telegram_user_id"], is_dead=0, hp_current=revive_hp, died_at=None,
             death_save_successes=0, death_save_failures=0,
         )
         await _safe_send(
             update,
             f"✨ **{character['name']}** casts {spell['name']} on **{target_character['name']}** — "
-            f"breath returns, and they gasp back to life at 1 HP.",
+            f"breath returns, and they gasp back to life at {revive_hp}/{target_character['hp_max']} HP.",
         )
 
     elif spell["effect"] == "summon":
@@ -14236,6 +14537,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_toggle_manual_dice(update, intent.get("raw_text", text))
     elif action == "level_up":
         await _do_level_up(update, intent.get("raw_text", text))
+    elif action == "auto_level_up_party":
+        await _do_auto_level_up_party(update)
     elif action == "set_description":
         await _do_set_description(update, intent.get("raw_text", text))
     elif action == "set_pronouns":
@@ -16745,6 +17048,8 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(quest_menu_callback, pattern=r"^quest\|"))
     application.add_handler(CallbackQueryHandler(item_menu_callback, pattern=r"^item\|"))
     application.add_handler(CallbackQueryHandler(craft_menu_callback, pattern=r"^craft\|"))
+    application.add_handler(CallbackQueryHandler(give_menu_callback, pattern=r"^give\|"))
+    application.add_handler(CallbackQueryHandler(member_level_callback, pattern=r"^memberlvl\|"))
     application.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu\|"))
     application.add_handler(CallbackQueryHandler(equip_menu_callback, pattern=r"^equip\|"))
     application.add_handler(CallbackQueryHandler(level_menu_callback, pattern=r"^level\|"))

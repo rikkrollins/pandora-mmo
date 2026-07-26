@@ -22,7 +22,7 @@ import items as items_module
 from rules.dice import ability_modifier, average_damage
 from rules.leveling import (
     level_for_xp, proficiency_bonus_for_level,
-    hp_gain_for_level, ASI_LEVELS, xp_gain_multiplier,
+    hp_gain_for_level, ASI_LEVELS, xp_gain_multiplier, EVOLUTION_HP_MULTIPLIER,
 )
 import spells as spells_module
 
@@ -1132,7 +1132,11 @@ def add_xp(telegram_user_id: int, amount: int) -> dict | None:
         con_mod = (character["constitution"] - 10) // 2
         hp_per_level = hp_gain_for_level(character["char_class"], con_mod)
         levels_gained = new_level - old_level
-        hp_gain_total = hp_per_level * levels_gained
+        # EVOLUTION_HP_MULTIPLIER (2026-07-25, per Coffee: "by level 99
+        # the first playthrough before evolution the HP would be apx
+        # 3200 -- then scale that"): scales real 5E average HP gain up
+        # to this game's own much larger power curve.
+        hp_gain_total = hp_per_level * levels_gained * EVOLUTION_HP_MULTIPLIER
         new_hp_max = character["hp_max"] + hp_gain_total
         updates["hp_max"] = new_hp_max
         # Leveling up also heals you back up by the same amount gained,

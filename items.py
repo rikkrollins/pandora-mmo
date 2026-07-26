@@ -77,13 +77,24 @@ ITEMS = {
     "wooden_shield": {"name": "Wooden Shield", "type": "shield", "rarity": "common", "price": 10, "weight": 6, "ac_bonus": 2, "armor_category": "shield"},
 
     # --- Consumables ---
+    # Potion healing (2026-07-25, per Coffee's evolution/HP-scaling pass):
+    # rescaled from real dice rolls to guaranteed flat amounts (a d1
+    # always rolls exactly 1, so "1d1+99" always totals exactly 100 --
+    # no new schema needed) to match character HP now reaching into the
+    # thousands/hundreds of thousands with rebirths (see rules/leveling.py's
+    # EVOLUTION_HP_MULTIPLIER/rebirth_hp_max).
     "healing_potion": {
         "name": "Healing Potion", "type": "consumable", "rarity": "common",
-        "price": 25, "weight": 0.5, "effect": "heal", "heal_dice": "2d4+2",
+        "price": 25, "weight": 0.5, "effect": "heal", "heal_dice": "1d1+99",
     },
     "greater_healing_potion": {
         "name": "Greater Healing Potion", "type": "consumable", "rarity": "uncommon",
-        "price": 100, "weight": 0.5, "effect": "heal", "heal_dice": "4d4+4",
+        "price": 100, "weight": 0.5, "effect": "heal", "heal_dice": "1d1+999",
+    },
+    "supreme_healing_potion": {
+        "name": "Supreme Healing Potion", "type": "consumable", "rarity": "rare",
+        "price": 500, "weight": 0.5, "effect": "heal", "heal_dice": "1d1+9999",
+        "note": "Brewed for someone who's rebirthed more times than most people have leveled up.",
     },
     "antitoxin": {
         "name": "Antitoxin", "type": "consumable", "rarity": "common",
@@ -301,6 +312,112 @@ ITEMS = {
         "name": "Disconnected Step's Charm", "type": "amulet", "rarity": "uncommon",
         "price": 0, "weight": 0, "ac_bonus": 1,
         "note": "Doesn't lead anywhere the rest of your gear goes. Useful anyway.",
+    },
+
+    # Goblin Warrens expansion rewards (2026-07-25, same "bigger
+    # expansion" pass, extended to the wider world per Coffee: "do this
+    # for every dungeon in the game" -- this is an early-game area, so
+    # rewards stay proportionately modest next to the rebirth-dungeon
+    # gear above).
+    "deep_larders_charm": {
+        "name": "Deep Larder's Charm", "type": "amulet", "rarity": "uncommon",
+        "price": 0, "weight": 0, "regen_bonus": 1,
+        "note": "Smells faintly of everything it was stacked next to.",
+    },
+    "collapsed_tunnels_keepsake": {
+        "name": "Collapsed Tunnel's Keepsake", "type": "amulet", "rarity": "common",
+        "price": 0, "weight": 0, "ac_bonus": 1,
+        "note": "Whoever it belonged to before the cave-in never came back for it.",
+    },
+
+    # Sunken Root Caverns expansion rewards (2026-07-25, same pass).
+    "hollow_wellsprings_charm": {
+        "name": "Hollow Wellspring's Charm", "type": "amulet", "rarity": "uncommon",
+        "price": 0, "weight": 0, "regen_bonus": 1,
+        "note": "Always feels faintly damp, no matter how long it's been out of the water.",
+    },
+    "side_pools_trinket": {
+        "name": "Side Pool's Trinket", "type": "amulet", "rarity": "common",
+        "price": 0, "weight": 0, "ac_bonus": 1,
+        "note": "Small enough that whatever was guarding it barely noticed it was gone.",
+    },
+
+    # Stonearch Bridge (gorge) expansion rewards (2026-07-25, same pass).
+    "deep_currents_charm": {
+        "name": "Deep Current's Charm", "type": "amulet", "rarity": "uncommon",
+        "price": 0, "weight": 0, "regen_bonus": 1,
+        "note": "Always feels like it's being pulled gently in one direction.",
+    },
+    "undertows_band": {
+        "name": "Undertow's Band", "type": "ring", "rarity": "rare",
+        "price": 0, "weight": 0, "regen_bonus": 1, "ac_bonus": 1,
+        "note": "Everything that's ever been dragged down here eventually stops fighting the pull. This didn't.",
+    },
+    "silked_nooks_keepsake": {
+        "name": "Silked Nook's Keepsake", "type": "amulet", "rarity": "common",
+        "price": 0, "weight": 0, "ac_bonus": 1,
+        "note": "Still faintly sticky. Best not to think about why.",
+    },
+
+    # Greymoor Downs expansion rewards (2026-07-25, same pass -- the
+    # Lonely Cairn / Below the Cairn lore location was deliberately
+    # left untouched, no reward items added there).
+    "vantage_belows_charm": {
+        "name": "Beneath-the-Vantage Charm", "type": "amulet", "rarity": "uncommon",
+        "price": 0, "weight": 0, "regen_bonus": 1,
+        "note": "Still smells faintly of wind, even indoors.",
+    },
+    "tower_cellars_keepsake": {
+        "name": "Tower Cellar's Keepsake", "type": "amulet", "rarity": "common",
+        "price": 0, "weight": 0, "ac_bonus": 1,
+        "note": "Whatever it was keeping safe down there, it isn't anymore.",
+    },
+    "barrow_depths_band": {
+        "name": "Barrow Depths Band", "type": "ring", "rarity": "uncommon",
+        "price": 0, "weight": 0, "ac_bonus": 1,
+        "note": "The cold campsite up top was always bait. This was never meant to be found.",
+    },
+
+    # Whispering Wood expansion rewards (2026-07-25, same pass -- the
+    # Mossy Creek, Elder Glen, and Root Hollow gathering/lore spots were
+    # deliberately left untouched, no combat or rewards added there).
+    "stray_dens_keepsake": {
+        "name": "Stray Den's Keepsake", "type": "amulet", "rarity": "common",
+        "price": 0, "weight": 0, "ac_bonus": 1,
+        "note": "Pushed out of the main pack's territory, same as whatever carried it here.",
+    },
+    "root_wroughts_charm": {
+        "name": "Root-Wrought Charm", "type": "amulet", "rarity": "uncommon",
+        "price": 0, "weight": 0, "regen_bonus": 1,
+        "note": "Every join is the same angle. Nothing about it grew.",
+    },
+    "deep_root_wardens_band": {
+        "name": "Deep Root Warden's Band", "type": "ring", "rarity": "rare",
+        "price": 0, "weight": 0, "ac_bonus": 1, "regen_bonus": 1,
+        "note": "Built for exactly one chamber, and nowhere else -- and it still remembers which one.",
+    },
+
+    # Glimmerdeep Grotto expansion rewards (2026-07-25, same pass --
+    # the last of the 6 areas Coffee asked to expand this pass).
+    "buried_glows_band": {
+        "name": "Buried Glow's Band", "type": "ring", "rarity": "rare",
+        "price": 0, "weight": 0, "ac_bonus": 1, "regen_bonus": 1,
+        "note": "Glows exactly like the crystals up above. It isn't one.",
+    },
+    "dim_hollows_keepsake": {
+        "name": "Dim Hollow's Keepsake", "type": "amulet", "rarity": "common",
+        "price": 0, "weight": 0, "ac_bonus": 1,
+        "note": "Just enough light left in it to see by.",
+    },
+
+    # The true hidden final boss (2026-07-25, per Coffee: an FF6/FF7-
+    # style ultimate secret superboss, gated on 10 rebirths AND having
+    # already defeated every other secret final boss in the game). The
+    # single strongest item that exists.
+    "pandoras_answer": {
+        "name": "Pandora's Answer", "type": "wondrous", "rarity": "legendary",
+        "price": 0, "weight": 0, "regen_bonus": 10, "ac_bonus": 5,
+        "note": "Not a weapon. Not really armor, either. Just an answer, finally given to whoever was willing to ask the question one more time than everyone before them.",
     },
 
     # --- Maps (task #141: buyable/discoverable, partial-reveal only --
