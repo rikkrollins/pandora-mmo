@@ -76,11 +76,17 @@ class FakeChat:
         self.id = -999
         self._sink = sink
         self.last_sent_message = None
+        self.sent_photos = []
 
     async def send_message(self, text, **kwargs):
         self._sink.append(text)
         self.last_sent_message = FakeSentMessage(self._sink)
         return self.last_sent_message
+
+    async def send_photo(self, photo, caption=None, **kwargs):
+        self.sent_photos.append({"photo": photo, "caption": caption})
+        self._sink.append(f"<photo:{caption}>")
+        return FakeSentMessage(self._sink)
 
 
 class FakeUser:

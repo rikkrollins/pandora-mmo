@@ -2151,6 +2151,7 @@ async def _announce_defeats(update: Update, session: sessions.Session, removed: 
                     died_at=datetime.now(timezone.utc).isoformat(),
                 )
             await _safe_send(update, f"💀 **{entry['name']} has been defeated!**")
+        await _maybe_send_defeat_image(update, entry)
 
 
 def _utf16_len(s: str) -> int:
@@ -3932,6 +3933,15 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
             if current.get("is_boss") and attack_num == 0 and not narration_budget_spent and not _ollama_congested():
                 decision_flavor = await asyncio.to_thread(narrate_boss_decision, current, target)
                 await _safe_send(update, f"👁️ {decision_flavor}")
+            # Per Coffee (2026-07-26): "same with enemy/boss attacks and
+            # actions" -- show the same real monster art already used at
+            # encounter start again at the moment it actually attacks.
+            # Once per turn (attack_num == 0), not per Multiattack swing,
+            # same spam-avoidance shape as the boss decision flavor above.
+            if attack_num == 0 and current.get("monster_key"):
+                monster_template = cl.get_monster_template(CAMPAIGN, current["monster_key"])
+                if monster_template:
+                    await _maybe_send_monster_image(update, current["monster_key"], monster_template)
             adv, disadv = _attack_advantage_disadvantage(current, target)
             _refresh_real_player_spell_slots(target)
             result = resolve_attack(
@@ -8739,6 +8749,13 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
             break
 
     await _safe_send(update, message)
+    if success:
+        # Real image of what was actually gathered (2026-07-25/26, per
+        # Coffee: "i want to see the silverleaf herb i gather and such
+        # other actions" -- reuses the exact same real item-icon
+        # function/convention _do_equip_item already sends on, just
+        # triggered by a successful gather instead of an equip).
+        await _maybe_send_item_image(update, node["material"], material)
     # Task #152, 2026-07-17: gathering always happens AT the quest's own
     # location (the crediting match above requires it), so a player who
     # completes the objective without ever having left never gets an
@@ -8868,6 +8885,11 @@ async def _do_craft(update: Update, text: str) -> None:
     else:
         message += "\n⚗️ The attempt fails, but your materials aren't wasted — you can try again."
     await _safe_send(update, message)
+    if success:
+        # Real image of what was actually crafted (2026-07-25/26, per
+        # Coffee: images for professions/actions too) -- same reuse of
+        # the existing item-icon convention as the gather fix above.
+        await _maybe_send_item_image(update, result["result_item"], result_item)
 
 
 async def _do_make_campfire(update: Update) -> None:
@@ -8960,6 +8982,7 @@ async def _do_second_wind(update: Update) -> None:
         f"💨 **{character['name']}** catches their breath with Second Wind, recovering "
         f"**{actual_healed} HP** ({new_hp}/{character['hp_max']}).",
     )
+    await _maybe_send_ability_image(update, "Second Wind", "a warrior catching their breath in a burst of healing energy", "💨")
 
 
 RAGE_MAX_USES = 2
@@ -9030,6 +9053,7 @@ async def _do_rage(update: Update) -> None:
         f"😡 **{character['name']}** flies into a rage — bonus damage and resistance to "
         f"physical harm for the rest of this fight!",
     )
+    await _maybe_send_ability_image(update, "Rage", "a barbarian roaring in a furious battle rage", "😡")
 
 
 async def _do_join_battle(update: Update) -> None:
@@ -9168,6 +9192,7 @@ async def _do_wild_shape(update: Update) -> None:
         f"🐾 **{character['name']}** shifts into a beast — {bonus_temp_hp} temporary HP and "
         f"clawed, biting attacks for the rest of this fight, but no spellcasting while shifted!",
     )
+    await _maybe_send_ability_image(update, "Wild Shape", "a druid shifting into a wild beast form", "🐾")
 
 
 async def _do_action_surge(update: Update) -> None:
@@ -9235,6 +9260,7 @@ async def _do_action_surge(update: Update) -> None:
         f"⚡ **{character['name']}** surges with action — their next attack this turn "
         f"comes as a full extra sequence!",
     )
+    await _maybe_send_ability_image(update, "Action Surge", "a fighter surging with sudden explosive energy", "⚡")
 
 
 async def _do_reckless_attack(update: Update) -> None:
@@ -9282,6 +9308,7 @@ async def _do_reckless_attack(update: Update) -> None:
         update,
         f"💥 **{character['name']}** attacks recklessly — advantage on their next attack this turn!",
     )
+    await _maybe_send_ability_image(update, "Reckless Attack", "a barbarian charging recklessly into battle", "💥")
 
 
 DIVINE_SMITE_DICE_BY_SLOT_LEVEL = {1: "2d8", 2: "3d8", 3: "4d8", 4: "5d8", 5: "5d8"}
@@ -9352,6 +9379,7 @@ async def _do_divine_smite(update: Update) -> None:
         update,
         f"🌟 **{character['name']}** channels divine wrath — their next hit will smite for bonus radiant damage!",
     )
+    await _maybe_send_ability_image(update, "Divine Smite", "a paladin's blade blazing with radiant holy light", "🌟")
 
 
 async def _do_flurry_of_blows(update: Update) -> None:
@@ -9420,6 +9448,7 @@ async def _do_flurry_of_blows(update: Update) -> None:
         f"👊 **{character['name']}** spends a ki point — their next attack this turn comes with "
         f"2 bonus unarmed strikes!",
     )
+    await _maybe_send_ability_image(update, "Flurry of Blows", "a monk unleashing a flurry of rapid unarmed strikes", "👊")
 
 
 async def _do_toggle_manual_dice(update: Update, action_text: str, thread_id: int | None = None) -> None:
@@ -9561,6 +9590,7 @@ async def _do_breath_weapon(update: Update) -> None:
             f"({dice_count}d6 → {dmg['total']})! {target['name']}'s save {save_text} — "
             f"**{damage_dealt} damage** ({target['hp_current']}/{target.get('hp_max', target['hp_current'])} HP).",
         )
+        await _maybe_send_ability_image(update, "Breath Weapon", "a dragonborn unleashing a blast of elemental breath", "🔥")
 
         removed = session.remove_defeated()
         await _announce_defeats(update, session, removed)
@@ -9648,6 +9678,7 @@ async def _do_channel_divinity(update: Update) -> None:
         f"✨ **{character['name']}** channels divine power at **{target['name']}** — "
         f"it recoils, **FRIGHTENED**!",
     )
+    await _maybe_send_ability_image(update, "Channel Divinity", "a cleric channeling radiant divine power to turn away undead", "✨")
 
 
 BARDIC_INSPIRATION_DIE = "1d6"
@@ -9700,6 +9731,7 @@ async def _do_bardic_inspiration(update: Update, target_text: str) -> None:
         f"🎵 **{character['name']}** inspires {target_note} with a stirring word — "
         f"a bolstering **+{actual_boost} HP** ({new_hp}/{target_character['hp_max']}).",
     )
+    await _maybe_send_ability_image(update, "Bardic Inspiration", "a bard playing an inspiring, rousing tune", "🎵")
 
 
 async def _do_lay_on_hands(update: Update, target_text: str) -> None:
@@ -9746,6 +9778,7 @@ async def _do_lay_on_hands(update: Update, target_text: str) -> None:
         f"🙏 **{character['name']}** lays hands on {target_note}, channeling divine healing — "
         f"**{actual_healed} HP** restored ({new_hp}/{target_character['hp_max']}).",
     )
+    await _maybe_send_ability_image(update, "Lay on Hands", "a paladin's healing touch glowing with divine light", "🙏")
 
 
 async def _do_arcane_recovery(update: Update) -> None:
@@ -9804,6 +9837,7 @@ async def _do_arcane_recovery(update: Update) -> None:
         f"📖 **{character['name']}** studies for a moment, recovering **{recovered} spell {slot_word}** "
         f"through Arcane Recovery ({new_current}/{character['spell_slots_max']}).",
     )
+    await _maybe_send_ability_image(update, "Arcane Recovery", "a wizard studying arcane tomes to recover spent magic", "📖")
 
 
 def _look_action_keyboard(location: dict, unclaimed_board_quests: list) -> InlineKeyboardMarkup | None:
@@ -9952,11 +9986,22 @@ def _npc_portrait_prompt(npc_data: dict) -> str:
 
 
 def _item_image_prompt(item_data: dict) -> str:
-    """Grounded only in the item's own real name/type/rarity fields -- no invented material/design detail."""
+    """
+    Grounded only in the item's own real name/type/rarity fields, plus
+    its own hand-written "note" flavor text when it has one (2026-07-26,
+    per Coffee: "make the weapons u created already look awesome with
+    the customizations it creates" -- an enchanted/forged item's real
+    note, e.g. "Warm to the touch, like a coal that never quite goes
+    out," is exactly the customization detail that should shape its own
+    generated image, not a generic same-look icon for every ring). Never
+    invents a material/design detail beyond what's already written.
+    """
     rarity = item_data.get("rarity", "common")
     item_type = item_data.get("type", "item")
+    note = item_data.get("note")
+    detail = f", {note}" if note else ""
     return (
-        f"fantasy RPG {rarity} {item_type} icon, {item_data['name']}, "
+        f"fantasy RPG {rarity} {item_type} icon, {item_data['name']}{detail}, "
         "isolated on a plain background, digital game art, no text or labels"
     )
 
@@ -10008,6 +10053,122 @@ async def _maybe_send_monster_image(update: Update, monster_key: str, template: 
         )
     except Exception as e:
         logger.warning(f"[images] monster image failed for {monster_key!r}: {e!r}")
+
+
+def _spell_image_prompt(spell: dict) -> str:
+    """Grounded only in the spell's own real name/effect/damage_type -- no invented visual detail beyond generic fantasy spell-effect framing."""
+    damage_type = spell.get("damage_type")
+    if spell.get("effect") == "damage" and damage_type:
+        flavor = f"a {damage_type} elemental magical effect"
+    elif spell.get("effect") == "heal":
+        flavor = "a warm, restorative golden magical light"
+    else:
+        flavor = "a swirling magical effect"
+    return f"fantasy RPG spellcasting, {spell['name']}, {flavor}, dramatic magical energy, digital painting, no text or labels"
+
+
+async def _maybe_send_spell_image(update: Update, spell: dict) -> None:
+    """
+    Real spell-cast art (2026-07-25/26, per Coffee: "create images for
+    spells abilities and items... maybe show the image as u explain the
+    action"). Sent every time this spell is actually cast, same
+    deterministic-per-spell convention as monsters/locations/NPCs -- the
+    same spell always shows the same generated depiction.
+    """
+    prompt = _spell_image_prompt(spell)
+    try:
+        await update.effective_chat.send_photo(
+            photo=images_module.generate_image_url(
+                prompt, width=512, height=512, seed=_deterministic_image_seed(f"spell:{spell['name']}"),
+            ),
+            caption=f"✨ {spell['name']}",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+    except Exception as e:
+        logger.warning(f"[images] spell image failed for {spell['name']!r}: {e!r}")
+
+
+def _defeat_image_prompt(entry: dict) -> str:
+    """Grounded only in the defeated participant's own real name and (for a real monster) its template's is_boss flag -- never invented appearance detail."""
+    template = cl.get_monster_template(CAMPAIGN, entry["monster_key"]) if entry.get("monster_key") else None
+    if template:
+        creature_desc = "a fearsome boss monster, defeated and falling" if template.get("is_boss") else "a monster, defeated and falling"
+        return f"fantasy RPG {creature_desc}, {entry['name']}, dramatic lighting, digital painting, no text or labels"
+    return f"fantasy RPG adventurer, {entry['name']}, fallen in battle, dramatic lighting, digital painting, no text or labels"
+
+
+async def _maybe_send_defeat_image(update: Update, entry: dict) -> None:
+    """
+    Real defeat art (2026-07-25, per Coffee: "same when an enemy dies
+    or does an action. show an image for it" / "and players too").
+    Sent for every real defeat on EITHER side of a fight -- deterministic
+    per monster_key for a real monster, or per character name for a
+    fallen player/companion, same convention as every other generated
+    image here.
+    """
+    seed_key = f"defeat:{entry.get('monster_key') or entry['name']}"
+    prompt = _defeat_image_prompt(entry)
+    try:
+        await update.effective_chat.send_photo(
+            photo=images_module.generate_image_url(
+                prompt, width=512, height=512, seed=_deterministic_image_seed(seed_key),
+            ),
+            caption=f"💀 {entry['name']} has fallen",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+    except Exception as e:
+        logger.warning(f"[images] defeat image failed for {entry['name']!r}: {e!r}")
+
+
+def _ability_image_prompt(ability_name: str, flavor: str) -> str:
+    """Grounded only in the ability's own real name and its own one-line mechanical flavor -- no invented visual detail."""
+    return f"fantasy RPG character using a special ability, {ability_name}, {flavor}, dynamic action pose, digital painting, no text or labels"
+
+
+async def _maybe_send_ability_image(update: Update, ability_name: str, flavor: str, emoji: str = "✨") -> None:
+    """
+    Real class-ability/racial-trait action art (2026-07-26, per Coffee:
+    "go through all classes and make images for the actions also"). Sent
+    every time a character actually uses this specific ability, same
+    deterministic-per-ability convention as spells/monsters/items -- the
+    same ability always shows the same generated depiction.
+    """
+    prompt = _ability_image_prompt(ability_name, flavor)
+    try:
+        await update.effective_chat.send_photo(
+            photo=images_module.generate_image_url(
+                prompt, width=512, height=512, seed=_deterministic_image_seed(f"ability:{ability_name}"),
+            ),
+            caption=f"{emoji} {ability_name}",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+    except Exception as e:
+        logger.warning(f"[images] ability image failed for {ability_name!r}: {e!r}")
+
+
+def _interactable_image_prompt(obj_data: dict) -> str:
+    """Grounded only in the interactable's own real name/description -- never invented detail beyond what's already written."""
+    return f"fantasy RPG environment detail, {obj_data['name']}, {obj_data['description']}, close-up, atmospheric, digital painting, no text or labels"
+
+
+async def _maybe_send_interactable_image(update: Update, obj_data: dict) -> None:
+    """
+    Real examine-object art (2026-07-25, per Coffee: "looking into the
+    wide-boled tree - show us what we need to see to help the player").
+    Sent every time this specific interactable is examined, same
+    deterministic-per-name convention as everything else here.
+    """
+    prompt = _interactable_image_prompt(obj_data)
+    try:
+        await update.effective_chat.send_photo(
+            photo=images_module.generate_image_url(
+                prompt, width=640, height=480, seed=_deterministic_image_seed(f"interactable:{obj_data['name']}"),
+            ),
+            caption=f"🔍 {obj_data['name']}",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+    except Exception as e:
+        logger.warning(f"[images] interactable image failed for {obj_data['name']!r}: {e!r}")
 
 
 async def _maybe_send_npc_portrait(update: Update, npc_id: str, npc_data: dict) -> None:
@@ -10468,6 +10629,7 @@ async def _do_examine(update: Update, target_text: str) -> None:
         narrate_examine, character, location["name"], obj_data["name"], obj_data["description"]
     )
     await _safe_send(update, f"🔍 **{character['name']}** examines {obj_data['name']}: {narration}")
+    await _maybe_send_interactable_image(update, obj_data)
 
 
 async def _do_show_map(update: Update) -> None:
@@ -10945,6 +11107,7 @@ async def _do_commission_enchantment(update: Update) -> None:
         f"+ {total - roll_result} ({ability}) = **{total}**. The Guild delivers: **{item['name']}**.",
         thread_id=reply_thread_id,
     )
+    await _maybe_send_item_image(update, item_id, item)
 
 
 async def _check_and_award_achievements(update: Update, character: dict | None) -> None:
@@ -13404,6 +13567,12 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                 message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
             return
+
+    # Real spell-cast art (2026-07-25/26, per Coffee: images for
+    # spells/abilities). Both blocking checks above have already passed
+    # by this point, so the cast is genuinely going ahead -- sent once
+    # per cast attempt, same as every other combat image in this game.
+    await _maybe_send_spell_image(update, spell)
 
     def _consume_scroll_if_any() -> None:
         if via_scroll:

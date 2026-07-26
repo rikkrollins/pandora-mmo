@@ -2,6 +2,44 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.50] — Real generated art for spells, class abilities, defeats, examined objects, and crafted/gathered/enchanted items
+
+Per Coffee's running to-do list ("create images for spells abilities
+and items and actions... fill the gaps with appropriate imagery",
+extended over several follow-ups to cover both sides of combat, story
+interactables, professions, and every class), this game's real
+generated-art coverage (Pollinations.ai, same deterministic-per-thing
+convention already used for locations/monsters/NPCs) now extends to:
+
+- **Every spell cast** gets its own generated art, grounded in the
+  spell's own real damage type/effect.
+- **A defeat, on either side of a fight** (a fallen player, companion,
+  or monster) now shows real art of the moment, not just text.
+- **Examining a story interactable** (e.g. the wide-boled tree in the
+  Whispering Wood) now shows a real generated depiction alongside the
+  narration.
+- **Gathering and crafting** a real material/item (the silverleaf herb
+  you actually picked, the potion you actually brewed) now shows that
+  exact item's own art — reusing the existing equip-image convention.
+  Item art prompts now also fold in the item's own flavor/`note` text,
+  so an enchanted or forged item's generated image reflects its real
+  customization instead of a generic same-look icon per rarity.
+- **Commissioning an Enchanters' Guild enchantment** now shows the
+  granted item's real art.
+- **Every class ability and racial trait** (Second Wind, Rage, Wild
+  Shape, Action Surge, Reckless Attack, Divine Smite, Flurry of Blows,
+  Breath Weapon, Channel Divinity, Bardic Inspiration, Lay on Hands,
+  Arcane Recovery) now shows a generated depiction of the character
+  using it.
+- **Enemy/boss attacks**, not just their deaths, now re-show that
+  monster's own real art at the moment it strikes (once per turn, not
+  per Multiattack swing, to avoid spamming the chat).
+
+All grounded only in real, already-existing game data (name, effect,
+damage type, description) — never inventing visual details, same
+discipline as every other image call in this game. An image failure
+never blocks the real action; it only logs a warning, same as before.
+
 ## [1.27.49] — Autonomous AI party can now actually progress through rebirths/puzzles, plus real fixes
 
 **Fixed a live regression from the last deploy**: the previous

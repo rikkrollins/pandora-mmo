@@ -3022,7 +3022,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
              patch("bot.roll_d20", return_value=3):
             sink = []
             await bot._do_gather(FakeUpdate(user_id, "", sink), "fish in the stream")
-            self.assertIn("bait comes free", sink[-1])
+            self.assertIn("bait comes free", "\n".join(sink))
             self.assertEqual(db.get_character(user_id)["inventory"].get("bait", 0), 0)
 
         db.add_item(user_id, "bait", 1)
@@ -3032,7 +3032,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
              patch("bot.roll_d20", return_value=18):
             sink = []
             await bot._do_gather(FakeUpdate(user_id, "", sink), "fish in the stream")
-            self.assertNotIn("bait comes free", sink[-1])
+            self.assertNotIn("bait comes free", "\n".join(sink))
             self.assertEqual(db.get_character(user_id)["inventory"].get("bait", 0), 1)
 
     # -- Real live bug (2026-07-19, Sugar): "Create character" (no
@@ -3097,7 +3097,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         make_basic_character(user_id, "Compasstest3", current_location="greymoor_downs")
         sink = []
         await bot._do_look(FakeUpdate(user_id, "", sink))
-        reply = sink[-1]
+        # _do_look also sends a real location image after the text (see
+        # _maybe_send_location_image) -- skip past any trailing <photo:...>
+        # sink entries to get the actual narration text.
+        reply = next(s for s in reversed(sink) if not s.startswith("<photo:"))
         self.assertIn("North:", reply)
         self.assertIn("West:", reply)
 
