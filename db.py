@@ -1123,7 +1123,15 @@ def add_xp(telegram_user_id: int, amount: int) -> dict | None:
     # same XP as before (multiplier 1.0).
     amount = round(amount * xp_gain_multiplier(character.get("rebirth_count", 0)))
     new_xp = character["xp"] + amount
-    new_level = level_for_xp(new_xp)
+    # Defensive floor (2026-07-27, found via real playthrough testing,
+    # not yet seen live): level_for_xp recomputes level from xp alone
+    # with no memory of the stored level, so if xp/level were EVER out
+    # of sync for any reason (an out-of-band DB write, a future
+    # migration script that touches one field but not the other), the
+    # very next XP award of any size -- even 1 XP -- would silently
+    # demote the character back down to whatever their (lagging) xp
+    # implies. Gaining XP should never be able to LOWER a level.
+    new_level = max(old_level, level_for_xp(new_xp))
     new_prof = proficiency_bonus_for_level(new_level)
 
     updates = {"xp": new_xp, "level": new_level, "proficiency_bonus": new_prof}

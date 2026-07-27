@@ -209,7 +209,7 @@ def _normalize_common_typos(lowered: str) -> str:
     return " ".join(words)
 
 
-def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
+def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: str | None = None) -> dict:
     """
     Plain keyword-based classification used when the model is unreachable
     or returns something we can't parse. Deliberately simple and
@@ -560,6 +560,32 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # non-actionable flavor text, rather than guessing wrong.
     conditional_words = ["in case", " if ", "if the", "if they", "should they", "in the event"]
     attack_words = ["attack", "swing", "shoot", "strike", "hit", "stab", "cast at", "fire at"]
+
+    # Real design fix (2026-07-27, per Coffee: "use the environment" is
+    # too vague -- players should be able to act on the actual named
+    # scenery/object in the room directly, the same natural way they'd
+    # attack a monster ("attack the rock cliff", "I hit the tunnel
+    # supports"), not a fixed meta-phrase. Checked BEFORE the generic
+    # attack_words match just below (which would otherwise misclassify
+    # this as an ordinary "attack" aimed at a nonexistent monster target)
+    # and BEFORE use_item's "use (the|my|a|an)" regex further down.
+    # Grounded in the CURRENT location's own real combat_environment
+    # name (passed in by bot.py, never invented here) -- a stopword-
+    # filtered word overlap with an interaction-style verb, so "I attack
+    # the sagging tunnel supports", "bring down the tunnel supports", and
+    # "I hit the cliff" all resolve the same real way. The generic
+    # environment_words phrases below still work too, for a player who
+    # doesn't remember/use the object's exact name.
+    if environment_name:
+        _env_stopwords = {"the", "a", "an", "of", "at", "in", "on", "overhead", "nearby", "loose", "hanging"}
+        env_words = [w for w in re.findall(r"[a-z']+", environment_name.lower())
+                     if w not in _env_stopwords and len(w) > 2]
+        interact_verbs = ["attack", "hit", "strike", "smash", "throw", "pull", "kick", "bring down",
+                           "topple", "collapse", "knock", "shoot", "cut", "break", "drop", "shove", "use",
+                           "target", "trigger", "bring the"]
+        if env_words and any(w in lowered for w in env_words) and any(v in lowered for v in interact_verbs):
+            return {**base, "action": "use_environment"}
+
     if any(w in lowered for w in attack_words) and not any(c in lowered for c in conditional_words):
         return {**base, "action": "attack"}
 
@@ -1334,7 +1360,8 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     return base
 
 
-def parse_intent(text: str, known_npc_names: list[str] | None = None, force_model: bool = False) -> dict:
+def parse_intent(text: str, known_npc_names: list[str] | None = None, force_model: bool = False,
+                  environment_name: str | None = None) -> dict:
     """
     Classify free text into a structured intent dict. Uses the build
     model (better at structured/JSON output) rather than the narration
@@ -1360,7 +1387,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
     back the same answer as the very first attempt.
     """
     known_npc_names = known_npc_names or []
-    fallback = _keyword_fallback(text, known_npc_names)
+    fallback = _keyword_fallback(text, known_npc_names, environment_name=environment_name)
 
     # Real perf fix (2026-07-17, per Coffee -- investigated after a
     # night of watching real Ollama latency firsthand): every dispatch
@@ -1384,12 +1411,18 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
     if fallback["action"] != "chat" and not force_model:
         return fallback
 
+    env_hint = (
+        f"\n\nInteractive scenery here: \"{environment_name}\" -- if the player's message attacks, "
+        f"hits, throws at, pulls, or otherwise targets THIS object by name (not a monster), "
+        f"classify as use_environment, not attack."
+        if environment_name else ""
+    )
     try:
         response = requests.post(
             f"{config.OLLAMA_BASE_URL}/api/generate",
             json={
                 "model": config.BUILD_MODEL,
-                "prompt": f"{INTENT_SYSTEM_PROMPT}\n\nKnown NPCs: {known_npc_names}\n\nPlayer message: {text}",
+                "prompt": f"{INTENT_SYSTEM_PROMPT}\n\nKnown NPCs: {known_npc_names}{env_hint}\n\nPlayer message: {text}",
                 "stream": False,
                 "format": "json",
                 # Real perf fix (2026-07-17): bounds worst-case
@@ -1534,7 +1567,8 @@ def _split_compound_message(text: str) -> list[str]:
     return cleaned
 
 
-def parse_intents(text: str, known_npc_names: list[str] | None = None, force_model: bool = False) -> list[dict]:
+def parse_intents(text: str, known_npc_names: list[str] | None = None, force_model: bool = False,
+                   environment_name: str | None = None) -> list[dict]:
     """
     Like parse_intent, but detects genuinely compound player messages
     ("recruit Sarah, look at the quest board, and leave the tavern") and
@@ -1581,7 +1615,7 @@ def parse_intents(text: str, known_npc_names: list[str] | None = None, force_mod
     known_npc_names = known_npc_names or []
     segments = _split_compound_message(text)
     if len(segments) > 1:
-        segment_intents = [_keyword_fallback(seg, known_npc_names) for seg in segments]
+        segment_intents = [_keyword_fallback(seg, known_npc_names, environment_name=environment_name) for seg in segments]
 
         # Real live bug (2026-07-17, Coffee): "Buy 10 torches, 1 shears,
         # 1 pickaxe, 1 fishing pole, 5 bait." only ever bought the
@@ -1606,10 +1640,10 @@ def parse_intents(text: str, known_npc_names: list[str] | None = None, force_mod
             i["action"] == first_action or i["action"] in _BARE_ITEM_MISFIRES
             for i in segment_intents[1:]
         ):
-            return [parse_intent(text, known_npc_names, force_model=force_model)]
+            return [parse_intent(text, known_npc_names, force_model=force_model, environment_name=environment_name)]
 
         real_segment_intents = [i for i in segment_intents if i["action"] != "chat"]
         if len(real_segment_intents) >= 2:
             return real_segment_intents
 
-    return [parse_intent(text, known_npc_names, force_model=force_model)]
+    return [parse_intent(text, known_npc_names, force_model=force_model, environment_name=environment_name)]

@@ -2,6 +2,54 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.55] — Real human-style playthrough testing: a boss-fight bug, environment targeting, and a lethal starter fight
+
+Ran a full, real (non-mocked) simulated playthrough — real dice, real
+DB, real Ollama calls for both intent classification and narration —
+the same way a human actually plays, to hunt for issues no unit test
+in isolation would catch. It found a real one, plus feedback prompted
+two more fixes:
+
+**Fixed: "fight the goblin boss" was fighting a plain goblin.**
+`_dispatch_intent`'s own `start_combat` resolution did a naive
+first-substring-match scan over every monster in the game, and since
+"goblin boss" contains the bare substring "goblin", it locked onto the
+wrong, non-boss monster every time — silently making `clear_the_warrens`
+uncompletable and the entire new Boss Enrage/environment/cutscene
+system from 1.27.54 unreachable by the most obvious phrasing a player
+would type. The exact same bug was already found and fixed in a sibling
+code path (`_do_attack`'s auto-start-combat) back on 2026-07-23, but
+that fix never made it to this second path. Now reuses the same
+proven, location-scoped, longest-name-first matcher both paths should
+always have shared.
+
+**Interactive combat environments: no more guessing a magic phrase.**
+Per feedback, "use the environment" was too vague — a player had no way
+to know a room even had one, or what to say. Now, when a fight starts
+in a room with a real environmental hazard, it's clearly narrated as
+plain scenery up front (e.g. "The sagging tunnel supports — old timber
+groaning under the weight of everything above"), and you can act on it
+by naming the object directly, the same way you'd attack a monster —
+"I attack the tunnel supports," "I hit the cliff" — no meta-phrase
+required (the old generic phrasing still works too).
+
+**Fixed: a level-1 character's very first fight was unsurvivable.** The
+Whispering Wood's wandering goblin — the destination of the story's own
+opening quest — had a minimum possible hit of 13 damage against a real
+level-1 character's actual max HP of 12 or less: every class, on any
+connecting hit, was guaranteed to go down, with zero chance of a lucky
+roll saving them. Confirmed live, then softened (its flat damage bonus
+dropped from +12 to +2) so the very first fight in the game is still a
+real, dangerous encounter — just no longer a coin a player can never
+win.
+
+**Hardened: XP awards can no longer lower a level.** `db.add_xp`
+recomputes level from total XP with no floor against the character's
+current level — found no live path that can actually desync the two,
+but the very next XP award after any such desync (even 1 XP) would
+otherwise have silently demoted the character. Added a floor so gaining
+XP can never reduce a level.
+
 ## [1.27.54] — Boss Enrage, interactive combat environments, and epic boss cutscenes
 
 A real playthrough simulation right after the last balance pass

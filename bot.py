@@ -4456,8 +4456,8 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
         # header every fight already gets, grounded only in the boss's
         # own real name and the real location's own already-written
         # description.
+        fight_location = cl.get_location(CAMPAIGN, requester["current_location"])
         if template.get("is_boss"):
-            fight_location = cl.get_location(CAMPAIGN, requester["current_location"])
             intro = await asyncio.to_thread(
                 narrate_boss_intro, template["name"], fight_location["name"], fight_location["description"]
             )
@@ -4472,6 +4472,20 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             f"🎯 **Initiative order:** {initiative_line}\n\n"
             + _turn_announcement(session)
         )
+        # Real design fix (2026-07-27, per Coffee: "use the environment
+        # sounds way too vague... [it] shudd be clearly stated" -- and,
+        # clarified further, plain scenery description, not an
+        # instruction to "attack the X"). Announced once, here, at the
+        # start of any fight in a location with a real combat_environment
+        # (campaign.json), so a player can actually discover and act on
+        # it in their own words instead of needing to already know it
+        # exists or guess the old "use the environment" meta-phrase.
+        combat_env = fight_location.get("combat_environment") if fight_location else None
+        if combat_env:
+            env_name = combat_env["name"]
+            header += (
+                f"\n\n⚠️ {env_name[0].upper()}{env_name[1:]} — {combat_env['description']}"
+            )
         # Combat-join nudge (task #144): real players elsewhere who are
         # currently online and haven't opted into Do Not Disturb get
         # named here so they know a fight just started and can travel
@@ -4762,6 +4776,10 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
                 f"🎯 **Initiative order:** {initiative_line}\n\n"
                 + _turn_announcement(session)
             )
+            combat_env = location.get("combat_environment")
+            if combat_env:
+                env_name = combat_env["name"]
+                header += f"\n\n⚠️ {env_name[0].upper()}{env_name[1:]} — {combat_env['description']}"
             await _safe_send(update, header, reply_markup=_battle_menu_keyboard(session))
             await _notify_main_topic(update, f"⚔️ {_format_party_names(party)} entered battle against **{npc_data['name']}**!")
             await _resolve_ai_turns(update, session)
@@ -14860,6 +14878,23 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         "timestamp": datetime.now(timezone.utc),
     }
     known_npcs = [data["name"] for data in CAMPAIGN["npcs"].values()]
+    # Real design fix (2026-07-27, per Coffee: "use the environment"
+    # sounds too vague -- players should attack/target the actual named
+    # scenery, the same natural way they'd attack a monster). Only
+    # looked up while combat is genuinely active in this chat (a real
+    # combat_environment only ever means anything mid-fight); the
+    # object's own real name (never invented) is handed to the parser so
+    # both the deterministic keyword fallback and the model itself can
+    # recognize "attack the sagging tunnel supports" / "I hit the
+    # cliff" without the player ever needing to say the meta-phrase
+    # "use the environment".
+    environment_name = None
+    if sessions.get_session(update.effective_chat.id) is not None:
+        requester = db.get_character(update.effective_user.id)
+        location = cl.get_location(CAMPAIGN, requester["current_location"]) if requester else None
+        env = location.get("combat_environment") if location else None
+        if env:
+            environment_name = env.get("name")
     # A genuinely compound message ("recruit Sarah, look at the quest
     # board, and leave the tavern") returns more than one intent here --
     # see ai.intent_parser.parse_intents's own docstring for exactly how
@@ -14868,7 +14903,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # An ordinary single-action message still returns exactly one intent,
     # identical to what parse_intent alone would have returned before
     # this existed.
-    intents = await asyncio.to_thread(parse_intents, text, known_npc_names=known_npcs)
+    intents = await asyncio.to_thread(parse_intents, text, known_npc_names=known_npcs, environment_name=environment_name)
     action = intents[0]["action"]
     # Player-facing message CONTENT is never logged elsewhere (only HTTP
     # metadata is, via httpx's own logging) — without this, a
@@ -15040,10 +15075,31 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     elif action == "start_combat":
         monster_key = None
         lowered = text.lower()
-        for key in CAMPAIGN["monsters"]:
-            if _text_mentions_monster(key, lowered):
-                monster_key = key
-                break
+        # Real live bug (caught by the human-style playthrough
+        # simulation, 2026-07-27): "fight the goblin boss" at the
+        # Goblin Warrens started a fight against a plain "goblin"
+        # instead of the actual boss -- this branch used its own naive
+        # global scan over CAMPAIGN["monsters"] (first substring match
+        # wins, "goblin boss" contains the bare substring "goblin"),
+        # never reusing the location-scoped, longest-name-first
+        # _find_monster_mentioned_in_text fix that _do_attack's own
+        # auto-start-combat path already got for this EXACT bug back on
+        # 2026-07-23 (see that comment for the full history) -- this
+        # sibling path was simply never patched. Preferring the real,
+        # already-proven matcher here too; only falling back to the old
+        # global scan if there's no character/location context or it
+        # finds nothing, so behavior for any edge case that fix doesn't
+        # cover is unchanged from before.
+        requester = db.get_character(update.effective_user.id)
+        location = cl.get_location(CAMPAIGN, requester["current_location"]) if requester else None
+        match = _find_monster_mentioned_in_text(location, text) if location else None
+        if match:
+            monster_key = match[0]
+        else:
+            for key in CAMPAIGN["monsters"]:
+                if _text_mentions_monster(key, lowered):
+                    monster_key = key
+                    break
         enemy_count = _parse_enemy_count(lowered)
         await _do_start_combat(update, monster_key, count=enemy_count)
     elif action == "attack":
@@ -16168,6 +16224,13 @@ async def redo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         # since the original message) and re-dispatch, same combined-reply
         # shape a genuinely compound message already gets.
         known_npcs = [data["name"] for data in CAMPAIGN["npcs"].values()]
+        environment_name = None
+        if sessions.get_session(stored_update.effective_chat.id) is not None:
+            redo_requester = db.get_character(entry["user_id"])
+            redo_location = cl.get_location(CAMPAIGN, redo_requester["current_location"]) if redo_requester else None
+            redo_env = redo_location.get("combat_environment") if redo_location else None
+            if redo_env:
+                environment_name = redo_env.get("name")
         # force_model=True (2026-07-17, per Coffee: "make it so /redo
         # actually tries to handle it differently") -- re-running the plain
         # deterministic keyword fallback on the exact same text would
@@ -16175,7 +16238,7 @@ async def redo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         # defeating the point of a manual redo. Forcing a real model call
         # here gives it a genuinely independent second read instead.
         intents = await asyncio.to_thread(
-            parse_intents, stored_text, known_npc_names=known_npcs, force_model=True
+            parse_intents, stored_text, known_npc_names=known_npcs, force_model=True, environment_name=environment_name
         )
         for i in intents:
             logger.info(f"[redo] user={entry['user_id']} action={i['action']!r} text={i['raw_text']!r}")
