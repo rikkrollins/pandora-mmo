@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.53] — Every monster now deals a real elemental damage type
+
+Every monster in the game (55 of 56 — one true "cosmic wall" boss is
+deliberately left untouched) now has a real, thematic `damage_type`
+for its own attacks, grounded in its actual name/theme (goblins and
+wolves hit physical; spiders deal poison; goblin shamans deal poison
+from their brews; the Hush Below's Shadow Wisp and The Unspoken deal
+necrotic/psychic; The Waking Ember deals fire; the wraiths/legionnaires/
+watchers of the Hollow Verge deal necrotic; the Wordless Choir's
+remnants/wardens deal psychic; the constructs and paradox-guardians of
+The Unbegun deal force) — previously every monster attack silently
+defaulted to plain physical damage, meaning racial resistances (Dwarf
+poison resistance, Dragonborn/Tiefling fire resistance) and any
+resistance/vulnerability profile only ever mattered for damage a
+player was DEALING, never damage a monster was dealing back. Now both
+directions of the damage-type system are real.
+
 ## [1.27.52] — A real, full monster/area/gear rebalance, and two live bugs fixed
 
 **The big one: every monster in the game now has real, scaled HP and

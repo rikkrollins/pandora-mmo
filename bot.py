@@ -4385,6 +4385,11 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 # DEFAULT_WEAPON's flat 1d8, same as always.
                 "damage_dice": template.get("damage_dice"),
                 "damage_bonus": template.get("damage_bonus", 0),
+                # Real elemental flavor per monster (2026-07-26 damage-
+                # type pass) -- read by _weapon_for_attacker's natural-
+                # attack branch, then apply_damage_type_modifier against
+                # the DEFENDER's own resistances/vulnerabilities/immunities.
+                "damage_type": template.get("damage_type", "physical"),
             })
         sides = {p["telegram_user_id"]: "party" for p in party}
         for enemy in enemies:
@@ -4487,6 +4492,7 @@ def _build_echo_enemy(monster_key: str, tier: int, index: int, total: int) -> di
         # the fight just taking longer with no extra bite.
         "damage_dice": template.get("damage_dice"),
         "damage_bonus": round(template.get("damage_bonus", 0) * stat_mult),
+        "damage_type": template.get("damage_type", "physical"),
     }
 
 

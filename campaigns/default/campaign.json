@@ -3735,7 +3735,8 @@
       "proficiency_bonus": 2,
       "xp_reward": 50,
       "damage_dice": "1d8",
-      "damage_bonus": 12
+      "damage_bonus": 12,
+      "damage_type": "physical"
     },
     "goblin_shaman": {
       "name": "Goblin Shaman",
@@ -3747,7 +3748,8 @@
       "xp_reward": 100,
       "on_hit_condition": "silenced",
       "damage_dice": "1d8",
-      "damage_bonus": 14
+      "damage_bonus": 14,
+      "damage_type": "poison"
     },
     "goblin_boss": {
       "name": "Goblin Boss",
@@ -3760,7 +3762,8 @@
       "is_boss": true,
       "on_hit_condition": "paralyzed",
       "damage_dice": "1d8",
-      "damage_bonus": 15
+      "damage_bonus": 15,
+      "damage_type": "physical"
     },
     "wolf": {
       "name": "Wolf",
@@ -3772,7 +3775,8 @@
       "xp_reward": 50,
       "on_hit_condition": "frightened",
       "damage_dice": "1d8",
-      "damage_bonus": 10
+      "damage_bonus": 10,
+      "damage_type": "physical"
     },
     "giant_spider": {
       "name": "Giant Spider",
@@ -3784,7 +3788,8 @@
       "xp_reward": 200,
       "on_hit_condition": "poisoned",
       "damage_dice": "1d8",
-      "damage_bonus": 14
+      "damage_bonus": 14,
+      "damage_type": "poison"
     },
     "crystal_spider": {
       "name": "Crystal Spider",
@@ -3796,7 +3801,8 @@
       "xp_reward": 200,
       "on_hit_condition": "poisoned",
       "damage_dice": "1d8",
-      "damage_bonus": 15
+      "damage_bonus": 15,
+      "damage_type": "poison"
     },
     "shadow_wisp": {
       "name": "Shadow Wisp",
@@ -3808,7 +3814,8 @@
       "xp_reward": 150,
       "on_hit_condition": "blinded",
       "damage_dice": "1d8",
-      "damage_bonus": 16
+      "damage_bonus": 16,
+      "damage_type": "necrotic"
     },
     "the_unspoken": {
       "name": "The Unspoken",
@@ -3821,7 +3828,8 @@
       "is_boss": true,
       "on_hit_condition": "silenced",
       "damage_dice": "1d8",
-      "damage_bonus": 17
+      "damage_bonus": 17,
+      "damage_type": "psychic"
     },
     "the_waking_ember": {
       "name": "The Waking Ember",
@@ -3835,7 +3843,8 @@
       "on_hit_condition": "paralyzed",
       "life_drain": true,
       "damage_dice": "1d8",
-      "damage_bonus": 17
+      "damage_bonus": 17,
+      "damage_type": "fire"
     },
     "the_waiting_shape": {
       "name": "The Waiting Shape",
@@ -3849,7 +3858,8 @@
       "on_hit_condition": "frightened",
       "life_drain": true,
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "necrotic"
     },
     "the_unrepeating": {
       "name": "The Unrepeating",
@@ -3863,7 +3873,8 @@
       "on_hit_condition": "frightened",
       "life_drain": true,
       "damage_dice": "1d8",
-      "damage_bonus": 17
+      "damage_bonus": 17,
+      "damage_type": "force"
     },
     "colosseum_champion": {
       "name": "The Colosseum Champion",
@@ -3876,7 +3887,8 @@
       "is_boss": true,
       "on_hit_condition": "frightened",
       "damage_dice": "1d8",
-      "damage_bonus": 17
+      "damage_bonus": 17,
+      "damage_type": "physical"
     },
     "verge_wraith": {
       "name": "Verge Wraith",
@@ -3894,7 +3906,8 @@
         "radiant"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "necrotic"
     },
     "bone_legionnaire": {
       "name": "Bone Legionnaire",
@@ -3908,7 +3921,8 @@
         "fire"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "necrotic"
     },
     "cairn_watcher": {
       "name": "Cairn Watcher",
@@ -3925,7 +3939,8 @@
         "radiant"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "necrotic"
     },
     "the_verge_warden": {
       "name": "The Verge Warden",
@@ -3946,7 +3961,8 @@
         "radiant"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "necrotic"
     },
     "choir_remnant": {
       "name": "Choir Remnant",
@@ -3964,7 +3980,8 @@
         "lightning"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "psychic"
     },
     "still_machinery_sentinel": {
       "name": "Still Machinery Sentinel",
@@ -3981,7 +3998,8 @@
         "lightning"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "force"
     },
     "voiceless_warden": {
       "name": "Voiceless Warden",
@@ -3999,7 +4017,8 @@
         "radiant"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "psychic"
     },
     "the_undertone": {
       "name": "The Undertone",
@@ -4020,7 +4039,8 @@
         "lightning"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "psychic"
     },
     "hollow_watcher": {
       "name": "Hollow Watcher",
@@ -4038,7 +4058,8 @@
         "psychic"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "necrotic"
     },
     "turning_stair_guardian": {
       "name": "Turning Stair Guardian",
@@ -4056,7 +4077,8 @@
         "force"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "force"
     },
     "loom_warden": {
       "name": "Loom Warden",
@@ -4073,7 +4095,8 @@
         "radiant"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "psychic"
     },
     "the_unbegun": {
       "name": "The Unbegun",
@@ -4095,7 +4118,8 @@
         "radiant"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "force"
     },
     "elder_bone_legionnaire": {
       "name": "Elder Bone Legionnaire",
@@ -4109,7 +4133,8 @@
         "fire"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "necrotic"
     },
     "bound_verge_wraith": {
       "name": "Bound Verge Wraith",
@@ -4127,7 +4152,8 @@
         "radiant"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "necrotic"
     },
     "young_cairn_watcher": {
       "name": "Young Cairn Watcher",
@@ -4144,7 +4170,8 @@
         "radiant"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "necrotic"
     },
     "elder_choir_remnant": {
       "name": "Elder Choir Remnant",
@@ -4162,7 +4189,8 @@
         "lightning"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "psychic"
     },
     "bound_voiceless_warden": {
       "name": "Bound Voiceless Warden",
@@ -4180,7 +4208,8 @@
         "radiant"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "psychic"
     },
     "young_choir_remnant": {
       "name": "Young Choir Remnant",
@@ -4197,7 +4226,8 @@
         "lightning"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "psychic"
     },
     "elder_hollow_watcher": {
       "name": "Elder Hollow Watcher",
@@ -4215,7 +4245,8 @@
         "psychic"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "necrotic"
     },
     "bound_loom_warden": {
       "name": "Bound Loom Warden",
@@ -4232,7 +4263,8 @@
         "radiant"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "psychic"
     },
     "young_turning_stair_guardian": {
       "name": "Young Turning Stair Guardian",
@@ -4250,7 +4282,8 @@
         "force"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "force"
     },
     "veteran_goblin": {
       "name": "Veteran Goblin",
@@ -4261,7 +4294,8 @@
       "proficiency_bonus": 2,
       "xp_reward": 100,
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "physical"
     },
     "goblin_shaman_elder": {
       "name": "Elder Goblin Shaman",
@@ -4273,7 +4307,8 @@
       "xp_reward": 180,
       "on_hit_condition": "silenced",
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "poison"
     },
     "young_goblin": {
       "name": "Young Goblin",
@@ -4284,7 +4319,8 @@
       "proficiency_bonus": 1,
       "xp_reward": 30,
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "physical"
     },
     "root_bound_goblin": {
       "name": "Root-Bound Goblin",
@@ -4295,7 +4331,8 @@
       "proficiency_bonus": 2,
       "xp_reward": 70,
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "physical"
     },
     "channel_bound_goblin": {
       "name": "Channel-Bound Goblin",
@@ -4306,7 +4343,8 @@
       "proficiency_bonus": 2,
       "xp_reward": 90,
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "physical"
     },
     "elder_root_shaman": {
       "name": "Elder Root Shaman",
@@ -4318,7 +4356,8 @@
       "xp_reward": 160,
       "on_hit_condition": "poisoned",
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "poison"
     },
     "root_goblin_pup": {
       "name": "Root Goblin Pup",
@@ -4329,7 +4368,8 @@
       "proficiency_bonus": 1,
       "xp_reward": 25,
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "physical"
     },
     "brood_spider": {
       "name": "Brood Spider",
@@ -4341,7 +4381,8 @@
       "xp_reward": 140,
       "on_hit_condition": "poisoned",
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "poison"
     },
     "current_bound_spider": {
       "name": "Current-Bound Spider",
@@ -4353,7 +4394,8 @@
       "xp_reward": 220,
       "on_hit_condition": "poisoned",
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "poison"
     },
     "elder_web_spider": {
       "name": "Elder Web Spider",
@@ -4365,7 +4407,8 @@
       "xp_reward": 350,
       "on_hit_condition": "poisoned",
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "poison"
     },
     "spiderling": {
       "name": "Spiderling",
@@ -4376,7 +4419,8 @@
       "proficiency_bonus": 1,
       "xp_reward": 40,
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "poison"
     },
     "watchtower_stalker": {
       "name": "Watchtower Stalker",
@@ -4388,7 +4432,8 @@
       "xp_reward": 90,
       "on_hit_condition": "frightened",
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "physical"
     },
     "alpha_wolf": {
       "name": "Alpha Wolf",
@@ -4400,7 +4445,8 @@
       "xp_reward": 150,
       "on_hit_condition": "frightened",
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "physical"
     },
     "wolf_pup": {
       "name": "Wolf Pup",
@@ -4411,7 +4457,8 @@
       "proficiency_bonus": 1,
       "xp_reward": 30,
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "physical"
     },
     "barrow_bound_wolf": {
       "name": "Barrow-Bound Wolf",
@@ -4423,7 +4470,8 @@
       "xp_reward": 140,
       "on_hit_condition": "frightened",
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "physical"
     },
     "den_bound_wolf": {
       "name": "Den-Bound Wolf",
@@ -4435,7 +4483,8 @@
       "xp_reward": 90,
       "on_hit_condition": "frightened",
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "physical"
     },
     "stray_wood_wolf": {
       "name": "Stray Wood Wolf",
@@ -4446,7 +4495,8 @@
       "proficiency_bonus": 1,
       "xp_reward": 40,
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "physical"
     },
     "root_wrought_sentinel": {
       "name": "Root-Wrought Sentinel",
@@ -4463,7 +4513,8 @@
         "lightning"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "force"
     },
     "deep_root_warden": {
       "name": "Deep Root Warden",
@@ -4480,7 +4531,8 @@
         "lightning"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "force"
     },
     "pool_wrought_spider": {
       "name": "Pool-Wrought Spider",
@@ -4492,7 +4544,8 @@
       "xp_reward": 220,
       "on_hit_condition": "poisoned",
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "poison"
     },
     "elder_crystal_spider": {
       "name": "Elder Crystal Spider",
@@ -4504,7 +4557,8 @@
       "xp_reward": 320,
       "on_hit_condition": "poisoned",
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "poison"
     },
     "crystal_spiderling": {
       "name": "Crystal Spiderling",
@@ -4515,7 +4569,8 @@
       "proficiency_bonus": 1,
       "xp_reward": 40,
       "damage_dice": "1d8",
-      "damage_bonus": 18
+      "damage_bonus": 18,
+      "damage_type": "poison"
     },
     "the_unasked": {
       "name": "The Unasked",
