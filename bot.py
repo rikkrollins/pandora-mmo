@@ -61,6 +61,7 @@ from ai.dm_agent import (
     narrate_action, narrate_welcome, narrate_skill_check, narrate_hourly_update,
     narrate_examine, narrate_branching_choice_outcome, narrate_boss_decision,
     narrate_story_so_far, narrate_chapter_climax, narrate_arc_opening, narrate_next_step_hint,
+    narrate_boss_intro, narrate_boss_defeat,
     _fallback_hourly_update, _fallback_narration,
 )
 from ai.intent_parser import parse_intents
@@ -80,7 +81,10 @@ from models import (
     STARTING_GOLD,
     BASE_ARMOR_CLASS,
 )
-from rules.combat import resolve_attack, resolve_death_save, UNDEAD_MONSTER_KEYS, apply_damage_type_modifier
+from rules.combat import (
+    resolve_attack, resolve_death_save, UNDEAD_MONSTER_KEYS, apply_damage_type_modifier,
+    ENRAGE_HP_THRESHOLD, ENRAGE_DAMAGE_BONUS_PCT, ENRAGE_WARNING_ROUND, ENRAGE_ROUND_THRESHOLD,
+)
 from rules.crafting import (
     RECIPES, get_recipe, has_materials, resolve_craft,
     CLASS_PROFESSIONS, CLASS_PROFESSION_AFFINITY_BONUS, class_profession_affinity_bonus,
@@ -1848,8 +1852,15 @@ def _format_combat_result(flavor_text: str, result: dict, actor_label: str, defe
     dmg = result.get("damage_dealt", 0)
     verb = f"casts **{action_label}** at" if action_label else "attacks"
     weapon_suffix = f" with their **{weapon_name}**" if (weapon_name and not action_label) else ""
+    # Real damage type (2026-07-27, per Coffee: surface the damage-type
+    # system in narration, not just apply it silently) -- only called
+    # out for non-physical damage, same "only state the non-default,
+    # interesting fact" convention as everything else in this line
+    # (weapon_name only shown when there's no action_label, etc.).
+    damage_type = result.get("damage_type")
+    type_suffix = f" **{damage_type}**" if damage_type and damage_type != "physical" else ""
     if result.get("hit", True):
-        lines.append(f"- 🗡️ **{actor_label}** {verb} **{defender_label}**{weapon_suffix} → **Hits for {dmg} damage!**")
+        lines.append(f"- 🗡️ **{actor_label}** {verb} **{defender_label}**{weapon_suffix} → **Hits for {dmg}{type_suffix} damage!**")
     else:
         lines.append(f"- 🗡️ **{actor_label}** {verb} **{defender_label}**{weapon_suffix} → **Misses!**")
 
@@ -2172,6 +2183,18 @@ async def _announce_defeats(update: Update, session: sessions.Session, removed: 
                     died_at=datetime.now(timezone.utc).isoformat(),
                 )
             await _safe_send(update, f"💀 **{entry['name']} has been defeated!**")
+        if entry.get("is_boss"):
+            # Epic boss defeat (2026-07-27, per Coffee: "make it epic...
+            # I want to be blown away") -- a real, distinct cinematic
+            # beat replacing the plain defeat line above for a boss
+            # specifically, grounded only in the boss's own real name
+            # and the real location the fight actually happened at.
+            party_members = [p for p in session.participants if session.sides.get(p["telegram_user_id"]) == "party"]
+            battle_location_id = next((p.get("current_location") for p in party_members if p.get("current_location")), None)
+            battle_location = cl.get_location(CAMPAIGN, battle_location_id) if battle_location_id else None
+            location_name = battle_location["name"] if battle_location else "this place"
+            defeat_line = await asyncio.to_thread(narrate_boss_defeat, entry["name"], location_name)
+            await _safe_send(update, f"🎬 {defeat_line}")
         await _maybe_send_defeat_image(update, entry)
 
 
@@ -3983,6 +4006,25 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
             # narrates a real decision rather than inventing one, and the
             # roll+outcome narration below is completely unaffected.
             narration_budget_spent = time.monotonic() - turns_started_at > AI_TURN_NARRATION_BUDGET_SECONDS
+            # Real time pressure (2026-07-27, per Coffee: "use time
+            # mechanics in battles too with the environments and
+            # bosses") -- a boss fight dragging past ENRAGE_ROUND_
+            # THRESHOLD enrages automatically, same one-time state flip
+            # as the HP-based enrage trigger (rules/combat.py). Warned
+            # a few rounds ahead so this is real pressure, not a silent
+            # gotcha the player had no way to see coming.
+            if current.get("is_boss") and attack_num == 0:
+                if (session.round_number >= ENRAGE_WARNING_ROUND and not current.get("enraged")
+                        and not current.get("enrage_warned")):
+                    current["enrage_warned"] = True
+                    await _safe_send(update, f"⚠️ **{current['name']}** is starting to falter — dragging this out further looks dangerous.")
+                if session.round_number >= ENRAGE_ROUND_THRESHOLD and not current.get("enraged"):
+                    current["enraged"] = True
+                    await _safe_send(
+                        update,
+                        f"🔥 **{current['name']} flies into a desperate rage — its attacks hit "
+                        f"even harder for the rest of this fight!**",
+                    )
             if current.get("is_boss") and attack_num == 0 and not narration_budget_spent and not _ollama_congested():
                 decision_flavor = await asyncio.to_thread(narrate_boss_decision, current, target)
                 await _safe_send(update, f"👁️ {decision_flavor}")
@@ -4408,6 +4450,18 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             f"{p['name']} ({p['initiative']})" for p in session.participants
         )
         enemy_description = f"{count}x **{template['name']}**" if count > 1 else f"**{template['name']}**"
+        # Epic boss intro (2026-07-27, per Coffee: "make sure all boss
+        # sequences are creative and scary... make it epic") -- a real,
+        # distinct cinematic beat before the plain "Combat Begins!"
+        # header every fight already gets, grounded only in the boss's
+        # own real name and the real location's own already-written
+        # description.
+        if template.get("is_boss"):
+            fight_location = cl.get_location(CAMPAIGN, requester["current_location"])
+            intro = await asyncio.to_thread(
+                narrate_boss_intro, template["name"], fight_location["name"], fight_location["description"]
+            )
+            await _safe_send(update, f"🎬 {intro}")
         header = (
             f"⚔️ **Combat Begins!**\n"
             # Per Coffee (2026-07-14): must reflect who's ACTUALLY in
@@ -4906,6 +4960,12 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
             _sync_player_to_db(target)
             if result["shield_reaction_triggered"] or result["uncanny_dodge_triggered"]:
                 await _announce_reaction(update, target, result)
+            if result.get("enrage_triggered"):
+                await _safe_send(
+                    update,
+                    f"🔥 **{target['name']} flies into a desperate rage — its attacks hit "
+                    f"even harder for the rest of this fight!**",
+                )
             attack_label = (
                 action_text if attack_count == 1 else f"{action_text} ({attack_num + 1}/{attack_count})"
             )
@@ -9779,6 +9839,114 @@ async def _do_breath_weapon(update: Update) -> None:
         await _resolve_ai_turns(update, session)
 
 
+async def _do_use_environment(update: Update) -> None:
+    """
+    Interactive combat environments (2026-07-27, per Coffee: "I want
+    interactive environments" in battles). A handful of major boss
+    rooms have a real, hand-written `combat_environment` (campaign.json
+    -- e.g. the Goblin Warrens' sagging tunnel supports, the Hush
+    Below's loose stalactite) that can be turned against every living
+    enemy at once, real AOE damage this engine otherwise has no other
+    source of, exactly once per fight -- a real strategic timing
+    decision (use it early for a guaranteed hit on full-HP enemies, or
+    save it for a cleanup swing later), not a flat repeatable attack.
+    Grounded only in that location's own already-written description
+    (see add_combat_environments.py's authoring) -- never invents a
+    new physical feature a room hasn't already been given.
+    """
+    chat_id = update.effective_chat.id
+    async with sessions.get_lock(chat_id):
+        session = sessions.get_session(chat_id)
+        if session is None:
+            await update.effective_chat.send_message(
+                "No combat is active right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            )
+            return
+
+        user_id = update.effective_user.id
+        if session.current_participant_id() != user_id:
+            current_name = session.current_participant()["name"]
+            await update.effective_chat.send_message(
+                f"It's not your turn — it's **{current_name}**'s turn.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+
+        character = db.get_character(user_id)
+        if character is None:
+            await update.effective_chat.send_message(
+                "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            )
+            return
+
+        location = cl.get_location(CAMPAIGN, character["current_location"])
+        environment = location.get("combat_environment") if location else None
+        if environment is None:
+            await update.effective_chat.send_message(
+                f"**{character['name']}** looks around, but there's nothing usable against an enemy here.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+        if session.environment_used:
+            await update.effective_chat.send_message(
+                f"**{character['name']}** already used {environment['name']} — it's spent for this fight.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
+
+        opposing = session.living_on_side(session.opposing_side(user_id))
+        if not opposing:
+            if not await _try_end_stale_combat(update, session):
+                await update.effective_chat.send_message(
+                    "No valid targets remain.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                )
+            return
+
+        session.environment_used = True
+        dmg = roll_damage(environment["damage_dice"])
+        scaled_total = int(dmg["total"] * power_scale_ratio(character["level"], character.get("rebirth_count", 0)))
+
+        lines = [
+            f"🌍 **{character['name']}** turns {environment['name']} against the fight — "
+            f"{environment['description']}"
+        ]
+        for enemy in opposing:
+            enemy["hp_current"] = max(enemy["hp_current"] - scaled_total, 0)
+            lines.append(
+                f"💥 **{enemy['name']}** takes **{scaled_total} damage** "
+                f"({enemy['hp_current']}/{enemy.get('hp_max', enemy['hp_current'])} HP)."
+            )
+            if (enemy.get("is_boss") and not enemy.get("enraged") and enemy["hp_current"] > 0
+                    and enemy["hp_current"] <= enemy.get("hp_max", enemy["hp_current"]) * ENRAGE_HP_THRESHOLD):
+                enemy["enraged"] = True
+                lines.append(
+                    f"🔥 **{enemy['name']} flies into a desperate rage — its attacks hit "
+                    f"even harder for the rest of this fight!**"
+                )
+        await _safe_send(update, "\n".join(lines))
+
+        removed = session.remove_defeated()
+        await _announce_defeats(update, session, removed)
+
+        if session.is_combat_over():
+            winner = _determine_winner(session)
+            xp_summary, level_up_notes = _award_victory_xp(session) if winner == "party" else ("", [])
+            if winner == "party":
+                await _check_quest_completions_defeat_monster(update, session)
+                await _mark_location_cleared_for_party(update, session)
+                await _check_achievements_for_combat_party(update, session)
+                await _check_guild_quest_completion(update, session)
+                await _check_echo_trial_progress(update, session)
+            await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
+            for note in level_up_notes:
+                await _notify_main_topic(update, note)
+            sessions.end_session(chat_id)
+            return
+
+        session.advance_turn()
+        await _resolve_ai_turns(update, session)
+
+
 async def _do_channel_divinity(update: Update) -> None:
     """
     Real Cleric class feature (level 2+, 2026-07-16 class-features
@@ -13857,12 +14025,35 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                 result["damage_dealt"] = result["damage_dealt"] // 2
             target["hp_current"] = max(target["hp_current"] - result["damage_dealt"], 0)
             _sync_player_to_db(target)
+            # Boss Enrage (2026-07-27) -- resolve_damage_spell is its own
+            # separate pipeline (spells.py), so it doesn't go through
+            # resolve_attack's own enrage-threshold check; mirrored here
+            # so a boss can still enrage from spell damage, not just
+            # weapon hits. No enraged-attacker bonus needed on this path
+            # -- monsters never cast spells in this game (CLAUDE.md's own
+            # documented limitation), so the attacker here is always a
+            # real player, never an enraged boss.
+            enrage_triggered = False
+            if (target.get("is_boss") and not target.get("enraged") and target["hp_current"] > 0
+                    and target["hp_current"] <= target.get("hp_max", target["hp_current"]) * ENRAGE_HP_THRESHOLD):
+                target["enraged"] = True
+                enrage_triggered = True
             full_result = {
                 **result, "attacker": character["name"], "defender": target["name"],
                 "hit": True, "defender_hp_remaining": target["hp_current"],
                 "defender_hp_max": target.get("hp_max", target["hp_current"]),
+                # Surfaces the spell's real damage type in narration
+                # (2026-07-27), same convention _format_combat_result
+                # now applies to a real weapon hit's damage_type.
+                "damage_type": spell.get("damage_type", "physical"),
             }
             await _post_narrated(update, character, text, full_result, session, action_label=spell["name"])
+            if enrage_triggered:
+                await _safe_send(
+                    update,
+                    f"🔥 **{target['name']} flies into a desperate rage — its attacks hit "
+                    f"even harder for the rest of this fight!**",
+                )
 
             removed = session.remove_defeated()
             await _announce_defeats(update, session, removed)
@@ -14918,6 +15109,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
                 )
     elif action == "talk_party":
         await _do_talk_party(update, text)
+    elif action == "use_environment":
+        await _do_use_environment(update)
     elif action == "recruit_npc" and intent.get("npc_name"):
         await _do_recruit_npc(update, intent["npc_name"])
     elif action == "rest":

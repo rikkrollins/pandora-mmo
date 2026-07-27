@@ -37,7 +37,7 @@ Given a player's free-text message and some context, output ONLY a JSON object \
 (no other text, no markdown fences) with this shape:
 
 {"action": "<one of: attack, pass_turn, start_combat, create_character, check_sheet, \
-talk_npc, talk_party, move, look, check_inventory, check_party, buy, sell, steal, cast_spell, join_guild, \
+talk_npc, talk_party, use_environment, move, look, check_inventory, check_party, buy, sell, steal, cast_spell, join_guild, \
 recruit_npc, rest, go_inactive, skill_check, shove, show_map, gather, craft, list_characters, \
 switch_character, delete_character, fast_travel, accept_quest, check_quests, ask_clue, \
 answer_puzzle, gamble, chat, second_wind, rage, bardic_inspiration, lay_on_hands, arcane_recovery>", \
@@ -54,6 +54,8 @@ Rules:
 - "talk_party" is for speaking, calling out, or addressing the party/traveling companions in general \
 (not a specific named NPC -- that's "talk_npc"), e.g. "I speak up", "let's talk about this place", \
 "I yell for the others' thoughts", "I tell the party what I think", "I shout", "I scream in frustration".
+- "use_environment" is for using the surroundings/environment against an enemy in combat (e.g. "use the \
+environment", "use my surroundings against it", "interact with the environment") -- not a specific named object.
 - "start_combat" is when a player wants to begin a fight or encounter.
 - "create_character" is when a player wants to make/join with a new character.
 - "check_sheet" is for asking about their own stats/HP/level (not items), including \
@@ -1062,6 +1064,19 @@ def _keyword_fallback(text: str, known_npc_names: list[str]) -> dict:
     # wrong. Same word-boundary "use (the|my|a|an)" now matches
     # regardless of a leading pronoun; \b keeps it from false-positiving
     # on words that merely CONTAIN "use" ("because the", "used the").
+    # Interactive combat environments (2026-07-27, per Coffee: "I want
+    # interactive environments" in battles) -- checked BEFORE use_item's
+    # own "use (the|my|a|an)" pattern just below, which would otherwise
+    # always win first ("I use the environment" contains "use the").
+    # Deliberately generic (not tied to any one room's own named
+    # feature) -- _do_use_environment itself checks whether the current
+    # location actually has a usable one.
+    environment_words = ["use the environment", "use my surroundings", "use the surroundings",
+                          "interact with the environment", "use the room against", "environment attack",
+                          "use the area against"]
+    if any(w in lowered for w in environment_words):
+        return {**base, "action": "use_environment"}
+
     if any(w in lowered for w in ["drink ", "quaff"]) \
             or re.search(r"\buse (the|my|a|an)\b", lowered) \
             or re.search(r"\beats?\b", lowered):
@@ -1417,7 +1432,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "skill_tree", "challenge_duel", "accept_duel", "check_market", "join_battle",
                 "replay_intro", "visual_map", "rebirth", "choose_hybrid", "give_offering",
                 "drink_water", "choose_subclass", "start_echo_trial", "check_professions",
-                "talk_party",
+                "talk_party", "use_environment",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

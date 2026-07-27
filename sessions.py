@@ -49,6 +49,13 @@ class Session:
     event_log: list = field(default_factory=list)
     active: bool = True
     stabilized_ids: set = field(default_factory=set)
+    # Interactive combat environments (2026-07-27, per Coffee: "I want
+    # interactive environments" -- battles beyond just attack/spell/
+    # ability). A real, location-authored environmental feature (see
+    # campaign.json's "combat_environment" field) can be used once per
+    # fight, tracked here rather than on any single participant, since
+    # it's a real fact about the BATTLEFIELD, not any one combatant.
+    environment_used: bool = False
 
     def current_participant_id(self) -> int:
         return self.turn_order[self.current_turn_index]
@@ -168,6 +175,7 @@ class Session:
             "event_log": self.event_log,
             "active": self.active,
             "stabilized_ids": list(self.stabilized_ids),
+            "environment_used": self.environment_used,
         }
 
     @classmethod
@@ -182,6 +190,10 @@ class Session:
             event_log=data["event_log"],
             active=data["active"],
             stabilized_ids=set(data["stabilized_ids"]),
+            # .get(...) with a default (2026-07-27): a snapshot written
+            # by an older running process, mid-restart, won't have this
+            # key yet -- must not crash restoring a real in-progress fight.
+            environment_used=data.get("environment_used", False),
         )
 
 

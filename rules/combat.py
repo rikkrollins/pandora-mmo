@@ -19,9 +19,50 @@ import races
 # bonus_damage_vs_undead benefit (guilds.py) -- no monster template field
 # for creature type exists in this game, so, same convention as Ranger's
 # Favored Enemy matching on monster_key prefix, this is a fixed set of
-# monster_keys rather than a new schema field. Shadow Wisp is this
-# campaign's one spectral/undead-flavored monster.
-UNDEAD_MONSTER_KEYS = {"shadow_wisp"}
+# monster_keys rather than a new schema field.
+#
+# Expanded 2026-07-27 (per Coffee, follow-up to the 2026-07-26 damage-
+# type pass): Shadow Wisp was the only monster ever in this set, making
+# Silver Wardens' signature guild perk relevant against exactly one of
+# 56 monsters game-wide. The Hollow Verge's own wraith/bone/cairn line
+# (verge_wraith and its bound variant, The Verge Warden who leads them,
+# bone_legionnaire and its elder variant, cairn_watcher and its young
+# variant) are unambiguously undead by name/theme (wraith, bone,
+# burial cairn) -- added here, grounded in that naming, not just "has
+# necrotic resistance" (several non-undead monsters elsewhere also
+# resist necrotic without being undead, e.g. The Unbegun's cosmic/
+# paradox theme).
+UNDEAD_MONSTER_KEYS = {
+    "shadow_wisp",
+    "verge_wraith", "bound_verge_wraith", "the_verge_warden",
+    "bone_legionnaire", "elder_bone_legionnaire",
+    "cairn_watcher", "young_cairn_watcher",
+}
+
+# Boss Enrage (2026-07-27, per Coffee: "I want the battles to be
+# difficult with interesting mechanics"). A real playthrough simulation
+# right after the 2026-07-26 monster rebalance confirmed even dungeon
+# bosses were dying in 1 round for a sliver of the player's HP -- that
+# pass deliberately preserved the ORIGINAL relative difficulty (which
+# was already soft) onto the new absolute scale, rather than making
+# anything genuinely dangerous. A boss crossing this HP threshold once
+# permanently gains bonus damage for the rest of that fight -- a real,
+# one-time, in-memory-only state flip (never reverts, never re-fires),
+# giving every boss fight a real "the fight gets harder as it goes"
+# second phase instead of a flat difficulty the whole way through.
+ENRAGE_HP_THRESHOLD = 0.3
+ENRAGE_DAMAGE_BONUS_PCT = 50
+
+# Real time pressure (2026-07-27, per Coffee: "use time mechanics in
+# battles too with the environments and bosses") -- a boss fight that
+# drags on past ENRAGE_ROUND_THRESHOLD rounds enrages automatically,
+# even if the boss is still above the HP-based threshold above, same
+# bonus, same one-time flip. ENRAGE_WARNING_ROUND gives a real, fair
+# heads-up a few rounds ahead (checked in bot.py's _resolve_ai_turns),
+# so this reads as "don't stall too long" pressure, never an
+# unannounced gotcha.
+ENRAGE_WARNING_ROUND = 8
+ENRAGE_ROUND_THRESHOLD = 12
 
 
 def _defender_resistance_profile(defender: dict) -> tuple[set, set, set]:
@@ -233,6 +274,7 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     hybrid_bonus_gained = 0
     hybrid_temp_hp_gained = 0
     hybrid_self_heal_gained = 0
+    enrage_triggered = False
     if attack_result["hit"]:
         savage_attacks_die = 1 if (attacker.get("race") == "Half-Orc" and attack_result["critical_hit"]) else 0
         sneak_attack_die = 1 if (attacker.get("char_class") == "Rogue" and advantage) else 0
@@ -306,6 +348,11 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         # damage_bonus directly in campaign.json.
         if attacker.get("char_class"):
             damage_dealt = int(damage_dealt * power_scale_ratio(attacker.get("level", 1), attacker.get("rebirth_count", 0)))
+        # Boss Enrage bonus (2026-07-27) -- see ENRAGE_HP_THRESHOLD's own
+        # docstring above. Applies once the ATTACKING boss has already
+        # crossed its own enrage threshold on a previous hit taken.
+        if attacker.get("enraged"):
+            damage_dealt = int(damage_dealt * (1 + ENRAGE_DAMAGE_BONUS_PCT / 100))
         if defender.get("raging"):
             damage_dealt = damage_dealt // 2
         # Hybrid Barbarian (2026-07-22): a chance-gated, scaled-down
@@ -358,6 +405,23 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
             relentless_endurance_triggered = True
         defender["hp_current"] = hp_after
 
+        # Boss Enrage (2026-07-27, per Coffee: "I want the battles to be
+        # difficult" -- a real playthrough simulation confirmed even
+        # dungeon bosses were dying in 1 round for a sliver of the
+        # player's HP after the 2026-07-26 rebalance, since that pass
+        # deliberately preserved the ORIGINAL, already-soft relative
+        # difficulty rather than making anything genuinely dangerous).
+        # Once a boss drops to or below ENRAGE_HP_THRESHOLD of its own
+        # max HP, it permanently gains ENRAGE_DAMAGE_BONUS_PCT bonus
+        # damage for the rest of the fight -- a real, one-time,
+        # persistent state flip (never re-triggers, never reverts),
+        # same "combat-only, in-memory, resets when combat ends"
+        # convention as raging/wild_shaped.
+        if (defender.get("is_boss") and not defender.get("enraged") and hp_after > 0
+                and hp_after <= defender.get("hp_max", hp_after) * ENRAGE_HP_THRESHOLD):
+            defender["enraged"] = True
+            enrage_triggered = True
+
         # Dark One's Blessing: reducing a hostile creature to 0 HP grants
         # the Warlock temp HP = CHA modifier + level (minimum 1, real 5E
         # formula). Temp HP doesn't stack with itself -- take the higher
@@ -400,6 +464,11 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         "hybrid_self_heal_gained": hybrid_self_heal_gained,
         "defender_hp_remaining": defender["hp_current"],
         "defender_hp_max": defender.get("hp_max", defender["hp_current"]),
+        # Real damage type actually used (2026-07-27, per Coffee's
+        # damage-type follow-up: surface it in narration, not just
+        # apply it silently) -- only meaningful on an actual hit.
+        "damage_type": weapon.get("damage_type", "physical") if attack_result["hit"] else None,
+        "enrage_triggered": enrage_triggered,
     }
 
 

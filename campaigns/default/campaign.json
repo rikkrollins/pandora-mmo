@@ -85,7 +85,12 @@
         "monsters": [
           "colosseum_champion"
         ],
-        "safe": false
+        "safe": false,
+        "combat_environment": {
+          "name": "the arena's dark-stained sand",
+          "description": "Ground in over years of bouts nobody talks about after -- kicked up hard enough, it blinds and cuts.",
+          "damage_dice": "4d6"
+        }
       },
       "whispering_wood": {
         "name": "The Whispering Wood",
@@ -753,6 +758,11 @@
             "name": "the sanctum's unfinished center",
             "description": "Not empty, exactly -- more like a space the world hasn't gotten around to deciding what belongs in yet. Right now, that's the Warden."
           }
+        },
+        "combat_environment": {
+          "name": "the sanctum's own unfinished boundary",
+          "description": "The horizon that closes in here isn't just atmosphere -- it's an edge, and edges can be pushed.",
+          "damage_dice": "4d6"
         }
       },
       "hollow_verge_husk_orchard": {
@@ -1013,6 +1023,11 @@
           "goblin_warrens_supply_tunnel": {
             "requires_cleared_location": "goblin_warrens"
           }
+        },
+        "combat_environment": {
+          "name": "the sagging tunnel supports",
+          "description": "Old timber props groaning under the weight of everything above -- a hard enough blow could bring the roof down on whatever's standing beneath it.",
+          "damage_dice": "4d6"
         }
       },
       "glimmerdeep_grotto": {
@@ -1258,6 +1273,11 @@
             "name": "an old iron door, ajar",
             "description": "Rusted through in places, standing open just enough to see there's nothing but more dark on the other side. It wasn't open a moment ago."
           }
+        },
+        "combat_environment": {
+          "name": "a jagged stalactite hanging loose overhead",
+          "description": "Loose enough that the cavern's own dead silence hasn't been enough to bring it down yet -- but a real shock might finish the job.",
+          "damage_dice": "4d6"
         }
       },
       "the_first_city": {
@@ -1304,6 +1324,11 @@
           "the_first_city_sunken_archive": {
             "requires_cleared_location": "the_first_city"
           }
+        },
+        "combat_environment": {
+          "name": "a cracked vent in the spire's warm stone floor",
+          "description": "Whatever keeps the spire faintly warm vents here too -- crack it open further and it becomes something far less gentle.",
+          "damage_dice": "4d6"
         }
       },
       "the_first_city_outer_ward": {
@@ -1425,6 +1450,11 @@
         ],
         "directions": {
           "down": "wordless_choir_gate"
+        },
+        "combat_environment": {
+          "name": "the smooth black walls themselves",
+          "description": "Warm in a way stone shouldn't be -- disturbed hard enough, they answer back.",
+          "damage_dice": "4d6"
         }
       },
       "whispering_wood_root_hollow": {
@@ -1712,6 +1742,11 @@
             "name": "the impossible, wordless hum",
             "description": "Not a sound you hear so much as one you stop, for a moment, being able to not hear. It has been going on, unheard, for exactly as long as everything above it has been standing still."
           }
+        },
+        "combat_environment": {
+          "name": "the impossibly low, impossibly old note itself",
+          "description": "A note too low to hear and too old to have ever really stopped -- forcing it to resolve, even for a moment, isn't quiet.",
+          "damage_dice": "4d6"
         }
       },
       "wordless_choir_antechamber": {
@@ -2153,6 +2188,11 @@
         },
         "directions": {
           "down": "unmoored_isle_hollow"
+        },
+        "combat_environment": {
+          "name": "the crumbling edge of the isle itself",
+          "description": "Grey stone that was never meant to hold this much weight, tethered to nothing -- kicking loose a real piece of it is a real risk to everyone standing near the edge.",
+          "damage_dice": "4d6"
         }
       },
       "unmoored_isle_hollow": {
@@ -2257,6 +2297,11 @@
             "name": "whatever was here before the beginning",
             "description": "It was never the waiting shape's island. The waiting shape was just the latest thing it wore to keep watching."
           }
+        },
+        "combat_environment": {
+          "name": "the ground that was never meant to hold anything",
+          "description": "Something was waiting here before there was a shape to wait -- the ground itself remembers that, and it's not stable.",
+          "damage_dice": "4d6"
         }
       },
       "unmoored_isle_afterimage": {

@@ -944,6 +944,104 @@ def narrate_chapter_climax(quest_title: str, quest_description: str, reward_text
     return f"This was a turning point. {quest_description}"
 
 
+def _boss_intro_preamble() -> str:
+    return (
+        "You are the Dungeon Master narrating the dramatic ENTRANCE of a "
+        "real boss monster the party is about to fight -- a genuinely "
+        "epic, tense moment, not a routine encounter. You are given the "
+        "boss's real name, the real place this is happening, and that "
+        "place's own real description; narrate ONLY these facts "
+        f"({scaled_sentences(3, 5, boost=3)}), building real dread and "
+        "stakes without resolving the fight or inventing a new plot "
+        f"detail, character, or twist beyond what's given. {_NAMING_INSTRUCTION} "
+        f"{style_directive(boost=3)}"
+    )
+
+
+def _build_boss_intro_prompt(monster_name: str, location_name: str, location_description: str) -> str:
+    return (
+        f"{_boss_intro_preamble()}\n\n"
+        f"Real facts (narrate ONLY these, faithfully):\n"
+        f"The boss: {monster_name}\n"
+        f"Where this is happening: {location_name}\n"
+        f"What this place is really like: {location_description}\n\n"
+        f"Write the entrance now:"
+    )
+
+
+def narrate_boss_intro(monster_name: str, location_name: str, location_description: str) -> str:
+    """
+    A real, distinct cinematic beat the moment a fight against an
+    is_boss monster actually begins (2026-07-27, per Coffee: "make
+    sure all boss sequences are creative and scary... make it epic").
+    Separate from the plain "Combat Begins!" header every fight
+    already gets -- grounded only in the boss's own real name and the
+    real location's own already-written description, never inventing
+    new lore for the moment.
+    """
+    prompt = _build_boss_intro_prompt(monster_name, location_name, location_description)
+    try:
+        response = requests.post(
+            f"{config.OLLAMA_BASE_URL}/api/generate",
+            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False, "options": _NARRATION_OPTIONS},
+            timeout=200,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = strip_think_tags(data.get("response", ""))
+        if text:
+            return text
+    except (requests.RequestException, ValueError) as e:
+        print(f"[dm_agent] boss intro narration failed, falling back to template: {e}")
+    return f"**{monster_name}** makes its presence known. This is going to be a real fight."
+
+
+def _boss_defeat_preamble() -> str:
+    return (
+        "You are the Dungeon Master narrating the dramatic DEFEAT of a "
+        "real boss monster the party just won a real fight against -- a "
+        "genuinely epic, satisfying moment, not a routine kill. You are "
+        "given the boss's real name and the real place this happened; "
+        f"narrate ONLY these facts ({scaled_sentences(3, 5, boost=3)}), "
+        "giving this victory real weight without inventing a new plot "
+        f"detail, character, or twist beyond what's given. {_NAMING_INSTRUCTION} "
+        f"{style_directive(boost=3)}"
+    )
+
+
+def _build_boss_defeat_prompt(monster_name: str, location_name: str) -> str:
+    return (
+        f"{_boss_defeat_preamble()}\n\n"
+        f"Real facts (narrate ONLY these, faithfully):\n"
+        f"The boss just defeated: {monster_name}\n"
+        f"Where this happened: {location_name}\n\n"
+        f"Write the defeat now:"
+    )
+
+
+def narrate_boss_defeat(monster_name: str, location_name: str) -> str:
+    """
+    The epic counterpart to narrate_boss_intro -- fires the moment an
+    is_boss monster is actually defeated, distinct from the plain
+    "X has been defeated!" line every other monster gets.
+    """
+    prompt = _build_boss_defeat_prompt(monster_name, location_name)
+    try:
+        response = requests.post(
+            f"{config.OLLAMA_BASE_URL}/api/generate",
+            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False, "options": _NARRATION_OPTIONS},
+            timeout=200,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = strip_think_tags(data.get("response", ""))
+        if text:
+            return text
+    except (requests.RequestException, ValueError) as e:
+        print(f"[dm_agent] boss defeat narration failed, falling back to template: {e}")
+    return f"**{monster_name}** falls. A real, hard-won victory."
+
+
 def _arc_opening_preamble() -> str:
     return (
         "You are the Dungeon Master narrating the OPENING of a brand new "

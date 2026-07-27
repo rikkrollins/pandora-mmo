@@ -2,6 +2,39 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.54] — Boss Enrage, interactive combat environments, and epic boss cutscenes
+
+A real playthrough simulation right after the last balance pass
+confirmed even dungeon bosses were dying in 1 round for a sliver of a
+player's HP — the numbers were correct, but nothing was actually
+dangerous. Three real, interconnected additions fix that and make
+battles genuinely interactive:
+
+**Boss Enrage.** Any boss dropping to 30% HP or below permanently
+gains +50% damage for the rest of that fight — a real, one-time
+"second phase," not a flat difficulty the whole way through. A fight
+that drags past round 12 triggers the same enrage automatically even
+above that HP threshold, with a fair warning at round 8 ("dragging
+this out further looks dangerous") — real time pressure, never a
+silent gotcha.
+
+**Interactive combat environments.** 9 of the game's 10 boss rooms
+(every real boss except the deliberately untouched final "cosmic
+wall") now have a real, once-per-fight environmental attack you can
+turn against every living enemy at once — the Goblin Warrens' sagging
+tunnel supports, a loose stalactite in the Hush Below, a cracked steam
+vent in the First City, the crumbling edge of the Unmoored Isle, the
+Colosseum's dark-stained sand, and more — each grounded in that room's
+own already-written description. Say "use the environment" in combat
+to trigger it; timing when to use it is a real strategic choice.
+
+**Epic boss cutscenes.** Every boss fight now gets a real, distinct
+AI-narrated entrance the moment it begins, and a real, distinct
+AI-narrated defeat line when it falls — separate from the plain
+"Combat Begins!"/"has been defeated!" text every other monster gets,
+grounded only in the boss's own real name and the real location's own
+already-written description.
+
 ## [1.27.53] — Every monster now deals a real elemental damage type
 
 Every monster in the game (55 of 56 — one true "cosmic wall" boss is
