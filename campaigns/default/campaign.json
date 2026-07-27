@@ -3793,7 +3793,7 @@
       "xp_reward": 100,
       "on_hit_condition": "silenced",
       "damage_dice": "1d8",
-      "damage_bonus": 14,
+      "damage_bonus": 4,
       "damage_type": "poison"
     },
     "goblin_boss": {
@@ -3820,7 +3820,7 @@
       "xp_reward": 50,
       "on_hit_condition": "frightened",
       "damage_dice": "1d8",
-      "damage_bonus": 10,
+      "damage_bonus": 1,
       "damage_type": "physical"
     },
     "giant_spider": {

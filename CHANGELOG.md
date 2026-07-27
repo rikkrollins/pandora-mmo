@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.56] — Softened the other two very-early monsters the same way
+
+Follow-up to 1.27.55's goblin fix: the same "damage tuned for the
+monster's intended level, catastrophic against a fresh level-1
+character" problem also applied to the Whispering Wood's wolf and the
+Sunken Root Caverns/Goblin Warrens' goblin shaman — both had a flat
+damage bonus high enough to guarantee-drop a level-1 character on any
+connecting hit. Softened both the same way (wolf's damage_bonus 10->1,
+goblin shaman's 14->4), keeping their relative danger ordering (goblin
+shaman still hits hardest, matching its higher intended tier) while
+removing the guaranteed-instant-knockout math. Confirmed live before
+shipping; full 285-test regression suite green.
+
 ## [1.27.55] — Real human-style playthrough testing: a boss-fight bug, environment targeting, and a lethal starter fight
 
 Ran a full, real (non-mocked) simulated playthrough — real dice, real
