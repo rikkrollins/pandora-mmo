@@ -2,6 +2,37 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.57] — Paralysis can no longer permanently soft-lock a boss fight
+
+Found by the full beginning-to-end playthrough simulation: `paralyzed`
+is the one on_hit_condition used exclusively by bosses (goblin_boss,
+the_waking_ember, the_unbegun, the_unasked), and this engine has never
+tracked a duration for any condition — so a single paralyzing hit
+against a solo player used to be permanent for the rest of that fight.
+The game's own stalemate-safety mechanism would then correctly detect
+"the party can never act again" and end combat in a no-win, no-loss
+draw... which meant the boss was never actually defeated, no matter how
+many times the fight was retried, since the exact same risk was there
+every single attempt. This is very likely why an old prior-session
+playthrough log shows the identical symptom against this same boss.
+
+Paralyzed now works the way real 5E "paralyzed until a save succeeds"
+effects do: a Constitution saving throw (same fixed DC 13 this game
+already uses for every other check, not a new invented number) at the
+start of the paralyzed creature's own turn. Success breaks the
+condition and lets them act normally that same turn; failure skips the
+turn as before. The other, unrelated stalemate-safety check that used
+to treat "currently paralyzed" as an automatic permanent incapacitation
+(written back when that was actually true) has been corrected too —
+otherwise it would end the fight before the save attempt ever got a
+chance to run, which is exactly how a real regression test caught this
+during verification, before it ever shipped.
+
+Verified with a dedicated real-dice test (failed save keeps the
+condition, successful save frees and hands back the turn, and a real,
+unforced loop confirming paralysis is no longer an unbreakable dead
+end) plus the full 285-test regression suite, green.
+
 ## [1.27.56] — Softened the other two very-early monsters the same way
 
 Follow-up to 1.27.55's goblin fix: the same "damage tuned for the

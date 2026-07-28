@@ -93,7 +93,7 @@ from rules.dice import roll, roll_damage, ability_modifier, roll_ability_check, 
 from rules.item_generator import generate_item
 from rules.leveling import (
     CLASS_HIT_DICE, scaled_enemy_count, breath_weapon_dice_count,
-    CLASS_PRIMARY_ABILITY, CLASS_SAVE_PROFICIENCIES, is_proficient_in_skill,
+    CLASS_PRIMARY_ABILITY, CLASS_SAVE_PROFICIENCIES, is_proficient_in_skill, is_proficient_in_save,
     skill_check_proficiency_bonus, wild_shape_temp_hp, XP_THRESHOLDS,
     MAX_LEVEL, ability_score_cap, xp_gain_multiplier, hybrid_tier, HYBRID_MAX_TIER,
     magic_penetration_pct, CLASS_SUBCLASSES, COMBAT_SUBCLASS_NAMES, COMBAT_SUBCLASS_DAMAGE_BONUS_PCT,
@@ -3812,25 +3812,34 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
         stall_threshold = max(len(session.turn_order) * 2, 4)
         # Real bug caught by the full-playthrough simulation (2026-07-24):
         # a monster with on_hit_condition="paralyzed" (e.g. the_waking_
-        # ember) can permanently paralyze a real player -- this engine has
-        # no duration tracking for ANY condition (see the paralyzed branch
-        # below), so once paralyzed, a solo player NEVER gets another turn
-        # for the rest of this fight. consecutive_noop_turns alone doesn't
-        # catch this: it keeps resetting to 0 every time the ENEMY takes a
-        # normal turn, so it can cycle forever between "player paralyzed
-        # (+1)" and "enemy acts normally (reset to 0)" without ever
-        # reaching stall_threshold -- the fight hit the hard 200-iteration
-        # safety cap and force-ended with an ugly "stuck in a loop"
-        # message instead of resolving gracefully. If literally every
-        # party-side member still in the fight is either paralyzed or
-        # already stabilized (both are permanent, no-recovery-within-
-        # combat states, unlike a live death-save still in progress),
-        # the party side can never act again regardless of what the enemy
-        # does -- that alone is real, complete proof of a stalemate.
+        # ember) can paralyze a real player -- with no duration tracking
+        # for any OTHER condition, a solo paralyzed player used to never
+        # get another turn for the rest of the fight, and this exact
+        # check below used to treat that as an unconditional, permanent
+        # incapacitation (same footing as an already-stabilized downed
+        # player) and immediately called it a stalemate.
+        #
+        # Paralyzed is NOT that anymore (2026-07-27, per Coffee, after
+        # the same full-playthrough simulation found this could
+        # permanently soft-lock any of the 4 bosses that use it): the
+        # paralyzed branch just below now gives a real Constitution
+        # save-ends attempt every turn, so "currently paralyzed" no
+        # longer means "can never act again" -- it means "gets a real
+        # chance to break free THIS turn." Counting it here, before that
+        # chance is even rolled, would short-circuit the save attempt
+        # every single time (confirmed: this was originally caught by a
+        # real regression test that failed for exactly this reason).
+        # Only `stabilized_ids` (an actually permanent, zero-recovery-
+        # within-combat state, unlike a live death-save still in
+        # progress) still qualifies as unconditional incapacitation here.
+        # A paralyzed player who keeps failing their save is still
+        # caught, safely, by the existing consecutive_noop_turns counter
+        # below (each failed save increments it same as before) -- this
+        # doesn't reintroduce the original infinite-loop risk, it just
+        # stops preempting the fix meant to solve it.
         party_ids_in_combat = [pid for pid in session.turn_order if session.sides.get(pid) == "party"]
         party_all_incapacitated = bool(party_ids_in_combat) and all(
-            "paralyzed" in next(p for p in session.participants if p["telegram_user_id"] == pid).get("conditions", [])
-            or pid in session.stabilized_ids
+            pid in session.stabilized_ids
             for pid in party_ids_in_combat
         )
         if consecutive_noop_turns >= stall_threshold or party_all_incapacitated:
@@ -3921,22 +3930,54 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
         # Paralyzed (2026-07-14, second new on_hit_condition batch after
         # blinded/silenced): real 5E fully incapacitates a paralyzed
         # creature -- no actions, no reactions. This engine has no
-        # duration tracking for ANY condition (prone/poisoned/blinded/
-        # silenced all persist until combat ends too), so paralyzed
-        # follows the same simplification rather than inventing a
-        # save-ends mechanic just for this one. Checked here, before the
-        # real-player announce-and-return below, so it uniformly skips
-        # BOTH AI and real-player turns from one place -- a paralyzed
-        # real player never even gets prompted to act, so there's
-        # nothing for _do_attack/etc.'s "not your turn" checks to have
-        # to separately guard against.
+        # duration tracking for ANY OTHER condition (prone/poisoned/
+        # blinded/silenced all still persist until combat ends), but
+        # paralyzed got its own real save-ends mechanic (2026-07-27, per
+        # Coffee, option 1 of 3 after a real playthrough found it could
+        # permanently soft-lock a solo fight: paralyzed is the only
+        # on_hit_condition currently used exclusively by BOSSES --
+        # goblin_boss, the_waking_ember, the_unbegun, the_unasked -- and
+        # with zero recovery path, one lucky paralyzing hit against a
+        # lone player made that boss literally undefeatable for the rest
+        # of that attempt: _resolve_ai_turns's own stalemate detection
+        # (this function, `party_all_incapacitated`) correctly ends
+        # combat the instant every party member present is paralyzed or
+        # stabilized -- but a stalemate is neither a win nor a loss, so
+        # the quest could never complete no matter how many times the
+        # player retried, since the exact same risk is still there every
+        # single attempt). Real 5E precedent: most "paralyzed until a
+        # save succeeds" effects use a Constitution save, repeated at
+        # the start of the paralyzed creature's own turn -- same fixed
+        # SKILL_CHECK_DC (13) this game already uses everywhere else
+        # rather than inventing a new deliberate difficulty number.
         if "paralyzed" in current.get("conditions", []):
-            consecutive_noop_turns += 1
-            await _safe_send(update, f"⛓️ **{current['name']} is paralyzed and can't act this turn.**")
-            if session.is_combat_over():
-                break
-            session.advance_turn()
-            continue
+            save_roll = roll_d20()
+            save_bonus = ability_modifier(current.get("constitution", 10))
+            if is_proficient_in_save(current.get("char_class"), "constitution"):
+                save_bonus += current.get("proficiency_bonus", 2)
+            save_total = save_roll + save_bonus
+            if save_total >= SKILL_CHECK_DC:
+                current["conditions"] = [c for c in current["conditions"] if c != "paralyzed"]
+                await _safe_send(
+                    update,
+                    f"⛓️‍💥 **{current['name']} grits through the paralysis and breaks free!** "
+                    f"(Constitution save: {save_roll}+{save_bonus}={save_total} vs DC {SKILL_CHECK_DC})",
+                )
+                # Falls through to act normally this turn -- breaking
+                # free happens at the start of the turn it recovers, per
+                # the same real 5E precedent, not a wasted turn spent
+                # only escaping.
+            else:
+                consecutive_noop_turns += 1
+                await _safe_send(
+                    update,
+                    f"⛓️ **{current['name']} strains against the paralysis and can't break free** "
+                    f"(Constitution save: {save_roll}+{save_bonus}={save_total} vs DC {SKILL_CHECK_DC}) — no action this turn.",
+                )
+                if session.is_combat_over():
+                    break
+                session.advance_turn()
+                continue
 
         if not current.get("is_ai"):
             await _safe_send(update, _turn_announcement(session), reply_markup=_battle_menu_keyboard(session))
