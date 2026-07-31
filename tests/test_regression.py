@@ -1729,6 +1729,81 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(companion_xp_after, companion_xp_before)
         sessions.end_session(-999)
 
+    # -- Party bench + active-combat cap (2026-07-31, per Coffee: "cap it
+    #    at 6 per fight, all members in party get experience and gold
+    #    tho") -----------------------------------------------------------
+    async def test_active_combat_roster_caps_at_six_leader_always_included(self):
+        leader_id = 950001
+        make_basic_character(leader_id, "BenchLeader", current_location="crossroads_tavern")
+        party_id = db.create_party(leader_id)
+        for i, name in enumerate(["A1", "A2", "A3", "A4", "A5", "A6"]):
+            uid = 950002 + i
+            make_basic_character(uid, name, current_location="crossroads_tavern")
+            db.update_character(uid, party_id=party_id)
+
+        leader = db.get_character(leader_id)
+        combatants = bot._get_real_party_combatants(leader)
+        self.assertEqual(len(combatants), bot.config.PARTY_ACTIVE_COMBAT_CAP)
+        self.assertTrue(any(c["telegram_user_id"] == leader_id for c in combatants))
+
+    async def test_benched_member_excluded_from_combat_but_stays_in_party(self):
+        leader_id = 950101
+        member_id = 950102
+        make_basic_character(leader_id, "BenchLeader2", current_location="crossroads_tavern")
+        make_basic_character(member_id, "Benchee", current_location="crossroads_tavern")
+        party_id = db.create_party(leader_id)
+        db.update_character(member_id, party_id=party_id)
+
+        await bot._do_bench_member(FakeUpdate(leader_id, "bench Benchee", []), "Benchee")
+        benched = db.get_character(member_id)
+        self.assertTrue(benched.get("is_benched"))
+        self.assertEqual(benched.get("party_id"), party_id)  # still a real party member
+
+        combatants = bot._get_real_party_combatants(db.get_character(leader_id))
+        self.assertNotIn(member_id, {c["telegram_user_id"] for c in combatants})
+
+    async def test_unbench_refused_when_active_roster_already_full(self):
+        leader_id = 950201
+        make_basic_character(leader_id, "BenchLeader3", current_location="crossroads_tavern")
+        party_id = db.create_party(leader_id)
+        names = ["B1", "B2", "B3", "B4", "B5", "Extra"]
+        ids = {}
+        for i, name in enumerate(names):
+            uid = 950202 + i
+            ids[name] = uid
+            make_basic_character(uid, name, current_location="crossroads_tavern")
+            db.update_character(uid, party_id=party_id)
+        db.update_character(ids["Extra"], is_benched=1)  # 6 already active (leader + B1-B5)
+
+        sink = []
+        await bot._do_unbench_member(FakeUpdate(leader_id, "unbench Extra", sink), "Extra")
+        reply = "\n".join(sink)
+        self.assertIn("already full", reply.lower())
+        self.assertTrue(db.get_character(ids["Extra"]).get("is_benched"))
+
+    async def test_benched_member_still_gets_xp_and_gold_share(self):
+        import sessions
+        sessions.end_session(-999)
+        leader_id = 950301
+        benched_id = 950302
+        make_basic_character(leader_id, "BenchLeader4", current_location="crossroads_tavern")
+        make_basic_character(benched_id, "BenchedEarner", current_location="crossroads_tavern")
+        party_id = db.create_party(leader_id)
+        db.update_character(benched_id, party_id=party_id, is_benched=1)
+
+        enemy_id = -2_600_101
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "dexterity": 10, "xp_reward": 100}
+        leader = db.get_character(leader_id)
+        leader["telegram_user_id"] = leader_id
+        session = sessions.start_session(-999, [leader, enemy], {enemy_id: "enemy", leader_id: "party"})
+        session.turn_order = [leader_id, enemy_id]
+
+        before = db.get_character(benched_id)["xp"]
+        bot._award_victory_xp(session)
+        after = db.get_character(benched_id)["xp"]
+        self.assertEqual(after - before, int(100 * bot.INACTIVE_PARTY_XP_SHARE))
+        sessions.end_session(-999)
+
     # -- Dev-topic video handling (2026-07-15, per Coffee): videos had NO
     #    handler at all before this (only TEXT/PHOTO/Document.ALL were
     #    registered) -- same silent-failure gap photos had before

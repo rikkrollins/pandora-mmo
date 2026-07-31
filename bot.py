@@ -1205,13 +1205,26 @@ def _get_real_party_combatants(requester: dict) -> list[dict]:
     happening to share a room. A character with no real party_id at all
     (the common case -- most characters never form or join one) fights
     solo: everyone else here, even another solo character, sits it out.
+
+    Also excludes benched members (2026-07-31, per Coffee: "cap it at 6
+    per fight" -- see is_benched) and caps the result at
+    config.PARTY_ACTIVE_COMBAT_CAP, so a party that's grown past a
+    comfortable battle size still only ever puts that many combatants
+    into the actual fight regardless of button/data state. The requester
+    is never the one dropped by that cap -- they're the one starting
+    the fight.
     """
     location_id = requester["current_location"]
     eligible = _get_combat_eligible_party_members(location_id)
     party_id = requester.get("party_id")
     if not party_id:
         return [p for p in eligible if p["telegram_user_id"] == requester["telegram_user_id"]]
-    return [p for p in eligible if p.get("party_id") == party_id]
+    combatants = [p for p in eligible if p.get("party_id") == party_id and not p.get("is_benched")]
+    if len(combatants) > config.PARTY_ACTIVE_COMBAT_CAP:
+        requester_id = requester["telegram_user_id"]
+        others = [p for p in combatants if p["telegram_user_id"] != requester_id]
+        combatants = [requester] + others[:config.PARTY_ACTIVE_COMBAT_CAP - 1]
+    return combatants
 
 
 def _presence_status(character: dict, now: datetime | None = None) -> str:
@@ -8186,6 +8199,27 @@ def _party_keyboard(character: dict) -> InlineKeyboardMarkup | None:
         # same convention as every other button in this file.
         rows.append([InlineKeyboardButton("⚔️ Auto Equip Party", callback_data="party|auto_equip")])
         rows.append([InlineKeyboardButton("🚪 Leave Party", callback_data="party|leave")])
+
+        # Bench/un-bench toggles (2026-07-31, per Coffee: "cap it at 6
+        # per fight" -- battle-planning roster picker, real party_id
+        # membership only, regardless of current location since this is
+        # planning ahead, not "who's here right now"). Never offered for
+        # yourself -- matches _do_bench_member's own refusal.
+        members = [
+            m for m in db.get_party_members_by_id(party_id)
+            if m["telegram_user_id"] != character["telegram_user_id"]
+        ]
+        for m in members:
+            if m.get("is_benched"):
+                rows.append([InlineKeyboardButton(
+                    f"⬜ {m['name']} (benched — tap to activate)",
+                    callback_data=f"party|unbench|{m['telegram_user_id']}",
+                )])
+            else:
+                rows.append([InlineKeyboardButton(
+                    f"✅ {m['name']} (active — tap to bench)",
+                    callback_data=f"party|bench|{m['telegram_user_id']}",
+                )])
     elif character.get("pending_party_invite"):
         rows.append([InlineKeyboardButton("✅ Accept Invite", callback_data="party|accept")])
 
@@ -8221,6 +8255,18 @@ async def party_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         if target is None:
             return
         await _do_invite_to_party(update, target["name"])
+    elif action in ("bench", "unbench") and len(parts) > 2:
+        try:
+            target_id = int(parts[2])
+        except ValueError:
+            return
+        target = db.get_character(target_id)
+        if target is None:
+            return
+        if action == "bench":
+            await _do_bench_member(update, target["name"])
+        else:
+            await _do_unbench_member(update, target["name"])
 
 
 async def _do_invite_to_party(update: Update, target_name: str) -> None:
@@ -8290,6 +8336,74 @@ async def _do_leave_party(update: Update) -> None:
     left = db.leave_party(update.effective_user.id)
     message = "You've left your party." if left else "You're not in a party right now."
     await _safe_send(update, message)
+
+
+async def _do_bench_member(update: Update, target_name: str) -> None:
+    """
+    Benches a real party member out of the next fight without them
+    leaving the party (2026-07-31, per Coffee: "cap it at 6 per fight,
+    all members in party get experience and gold tho"). Doesn't touch
+    location or is_inactive -- a benched member can be standing right
+    next to the battle, just choosing to sit it out. They still share
+    in combat/quest rewards at the existing INACTIVE_PARTY_XP_SHARE
+    rate (_award_victory_xp / _share_quest_rewards_with_party), same as
+    any other real party_id member not physically in a given fight --
+    no new reward logic needed, benching just adds a third reason
+    (alongside being elsewhere or resting) a member can fall into that
+    already-established "absent" bucket.
+    """
+    telegram_user_id = update.effective_user.id
+    character = db.get_character(telegram_user_id)
+    party_id = character.get("party_id") if character else None
+    if character is None or not party_id:
+        await _safe_send(update, "You're not in a party right now.")
+        return
+    if not target_name:
+        await _safe_send(update, "Bench who, exactly? Try \"bench [name]\".")
+        return
+    target = _find_party_target_by_name(target_name)
+    if target is None or target.get("party_id") != party_id:
+        await _safe_send(update, f"No one named \"{target_name}\" is in your party.")
+        return
+    if target["telegram_user_id"] == telegram_user_id:
+        await _safe_send(update, "You can't bench yourself.")
+        return
+    db.update_character(target["telegram_user_id"], is_benched=1)
+    await _safe_send(update, f"🪑 **{target['name']}** is benched — sitting out the next fight, "
+                              f"still earning their share of the party's XP and gold.")
+
+
+async def _do_unbench_member(update: Update, target_name: str) -> None:
+    """Reverses _do_bench_member. Refuses if the party's active (non-benched) roster is already at the combat cap -- bench someone else first, matches the existing "party is already full" UX _do_invite_to_party already uses."""
+    telegram_user_id = update.effective_user.id
+    character = db.get_character(telegram_user_id)
+    party_id = character.get("party_id") if character else None
+    if character is None or not party_id:
+        await _safe_send(update, "You're not in a party right now.")
+        return
+    if not target_name:
+        await _safe_send(update, "Un-bench who, exactly? Try \"bring [name] back\".")
+        return
+    target = _find_party_target_by_name(target_name)
+    if target is None or target.get("party_id") != party_id:
+        await _safe_send(update, f"No one named \"{target_name}\" is in your party.")
+        return
+    if not target.get("is_benched"):
+        await _safe_send(update, f"{target['name']} isn't benched.")
+        return
+    active_count = sum(
+        1 for m in db.get_party_members_by_id(party_id)
+        if not m.get("is_benched") and m["telegram_user_id"] != target["telegram_user_id"]
+    )
+    if active_count >= config.PARTY_ACTIVE_COMBAT_CAP:
+        await _safe_send(
+            update,
+            f"Your active party is already full ({config.PARTY_ACTIVE_COMBAT_CAP}/"
+            f"{config.PARTY_ACTIVE_COMBAT_CAP}) — bench someone else first.",
+        )
+        return
+    db.update_character(target["telegram_user_id"], is_benched=0)
+    await _safe_send(update, f"🪑 **{target['name']}** is back in the active party.")
 
 
 def _feature_use_status(character: dict) -> str | None:
@@ -11011,6 +11125,28 @@ async def _do_examine(update: Update, target_text: str) -> None:
                     f"🔍 **{character['name']}** spots a real threat here — a {template['name'].lower()} — "
                     f"but hasn't fought one yet to know more. Check the bestiary once you have.",
                 )
+            return
+
+        # Real bug, confirmed live via a Development-topic screenshot
+        # (Coffee, 2026-07-30: "Look at the tattered underground chart"
+        # -- an item he actually owned -- got "doesn't spot anything
+        # like that here" every time): examine only ever checked
+        # location interactables and monsters present, never the
+        # character's own carried inventory at all, so a real item you
+        # own could never be examined, regardless of phrasing. Fixed by
+        # falling back to a real inventory-item match (items.py's own
+        # find_item_mentioned_in_text, scoped to only what this
+        # character actually carries) before giving up -- narrated the
+        # same way an interactable is, using the item's own real
+        # description (every item in items.py now has one).
+        owned_item_ids = list((character.get("inventory") or {}).keys())
+        item_match = items_module.find_item_mentioned_in_text(target_text, candidate_ids=owned_item_ids)
+        if item_match:
+            item_data = items_module.get_item(item_match)
+            narration = await asyncio.to_thread(
+                narrate_examine, character, location["name"], item_data["name"], item_data["description"]
+            )
+            await _safe_send(update, f"🔍 **{character['name']}** examines their {item_data['name']}: {narration}")
             return
 
         names = [i["name"] for i in interactables.values()]
@@ -15264,6 +15400,10 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_accept_party_invite(update)
     elif action == "leave_party":
         await _do_leave_party(update)
+    elif action == "bench_party_member":
+        await _do_bench_member(update, intent.get("target") or "")
+    elif action == "unbench_party_member":
+        await _do_unbench_member(update, intent.get("target") or "")
     elif action == "find_merchant":
         await _do_find_merchant(update)
     elif action == "give_item":

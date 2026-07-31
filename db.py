@@ -429,6 +429,20 @@ def init_db() -> None:
         if "echo_trial_tier" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN echo_trial_tier INTEGER NOT NULL DEFAULT 0")
 
+        # is_benched (2026-07-31, per Coffee: parties can now grow past a
+        # comfortable battle size -- "cap it at 6 per fight, all members
+        # in party get experience and gold tho"). A real party member
+        # (party_id set) can be manually benched out of THIS fight
+        # without leaving the party -- _get_real_party_combatants
+        # (bot.py) excludes benched members from who actually fights,
+        # same choke point already used for location/resting filtering,
+        # so they fall through to the existing "absent party member"
+        # INACTIVE_PARTY_XP_SHARE reward path with no new reward logic
+        # needed. Independent of is_inactive (resting) -- a benched
+        # member can be wide awake and standing right next to the fight.
+        if "is_benched" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN is_benched INTEGER NOT NULL DEFAULT 0")
+
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)

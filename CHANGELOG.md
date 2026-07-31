@@ -2,6 +2,46 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.59] — Items now have real descriptions, and you can finally examine what you're carrying
+
+Found from a real Development-topic screenshot: "Look at the tattered
+underground chart" — an item Coffee actually owned — got "doesn't spot
+anything like that here," every time, regardless of phrasing. Root
+cause: examining something only ever checked the current location's
+objects and monsters, never the character's own inventory at all, so a
+carried item could never be examined, full stop.
+
+Fixed: `_do_examine` now also checks your real inventory (via items.py's
+own name-matching) before giving up. All 87 items in the catalog now
+have a real `description` — and wherever an item actually heals or
+deals damage, the description states the exact mechanic: real dice
+notation and damage type (e.g. "Heals 1d1+99 HP (100 flat)", "Deals
+8d6 fire damage (Dexterity save for half)"), not just flavor text.
+
+## [1.27.58] — Pick who's in the fight: party bench + a real active-combat cap
+
+Per Coffee: parties can grow past a comfortable battle size, so pick
+who's actually fighting. A real party member can now be **benched**
+out of the next fight without leaving the party — "bench Zara" / a new
+✅/⬜ toggle button on the Party menu, "unbench Zara" / "bring Zara
+back" to bring them back in. Benching doesn't touch location or
+resting; a benched member can be standing right next to the fight,
+just sitting it out.
+
+A party's active (non-benched) fighting roster is now hard-capped at
+`PARTY_ACTIVE_COMBAT_CAP` (6, env-configurable, independent of
+`PARTY_MAX_MEMBERS` which still caps total party membership) —
+enforced at the one real choke point, `_get_real_party_combatants`, so
+this holds regardless of button state or party size. Un-benching
+refuses once the active roster is already full, with the same "your
+party is already full" style message invites already use.
+
+Benched members still share fully in the party's progress: they fall
+into the existing "absent party member" reward path
+(`INACTIVE_PARTY_XP_SHARE`, 50% of XP and gold) already shipped for
+anyone off resting or elsewhere — no new reward logic needed, benching
+just adds a third reason a real party member can land in that bucket.
+
 ## [1.27.57] — Paralysis can no longer permanently soft-lock a boss fight
 
 Found by the full beginning-to-end playthrough simulation: `paralyzed`

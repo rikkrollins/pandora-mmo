@@ -27,43 +27,51 @@ ITEMS = {
         "name": "Rusty Dagger", "type": "weapon", "rarity": "common",
         "price": 2, "weight": 1, "damage_dice": "1d4", "ability": "dexterity",
         "weapon_category": "simple", "damage_type": "physical",
+        "description": "Deals 1d4 physical damage. Pitted along the blade, the edge still holds well enough to do the job.",
     },
     "shortsword": {
         "name": "Shortsword", "type": "weapon", "rarity": "common",
         "price": 10, "weight": 2, "damage_dice": "1d6", "ability": "dexterity",
         "weapon_category": "simple", "damage_type": "physical",
+        "description": "Deals 1d6 physical damage. A plain, honest blade — nothing about it stands out, and nothing about it fails you.",
     },
     "longsword": {
         "name": "Longsword", "type": "weapon", "rarity": "common",
         "price": 15, "weight": 3, "damage_dice": "1d8", "ability": "strength",
         "weapon_category": "martial", "damage_type": "physical",
+        "description": "Deals 1d8 physical damage. Well-balanced steel, the kind every armory keeps in stock because it never stops selling.",
     },
     "greataxe": {
         "name": "Greataxe", "type": "weapon", "rarity": "common",
         "price": 30, "weight": 7, "damage_dice": "1d12", "ability": "strength",
         "weapon_category": "martial", "damage_type": "physical",
+        "description": "Deals 1d12 physical damage. Heavy enough that swinging it wrong would hurt you as much as anything else.",
     },
     "longbow": {
         "name": "Longbow", "type": "weapon", "rarity": "common",
         "price": 50, "weight": 2, "damage_dice": "1d8", "ability": "dexterity",
         "weapon_category": "martial", "damage_type": "physical",
+        "description": "Deals 1d8 physical damage. Strung tight, the wood still flexes like it was cut yesterday.",
     },
     "silvered_dagger": {
         "name": "Silvered Dagger", "type": "weapon", "rarity": "uncommon",
         "price": 75, "weight": 1, "damage_dice": "1d4+1", "ability": "dexterity",
         "note": "Effective against creatures vulnerable to silver.",
+        "description": "Deals 1d4+1 silver damage. Effective against creatures vulnerable to silver.",
         "weapon_category": "simple", "damage_type": "silver",
     },
     "flametongue_shortsword": {
         "name": "Flametongue Shortsword", "type": "weapon", "rarity": "rare",
         "price": 0, "weight": 2, "damage_dice": "1d6+2", "ability": "dexterity",
         "note": "Warm to the touch. Wreathes itself in fire when drawn in anger.",
+        "description": "Deals 1d6+2 fire damage. Warm to the touch. Wreathes itself in fire when drawn in anger.",
         "weapon_category": "martial", "damage_type": "fire",
     },
     "the_last_word": {
         "name": "The Last Word", "type": "weapon", "rarity": "legendary",
         "price": 0, "weight": 3, "damage_dice": "2d8+3", "ability": "strength",
         "note": "The carving stops repeating itself the instant your hand closes around the hilt.",
+        "description": "Deals 2d8+3 physical damage. The carving stops repeating itself the instant your hand closes around the hilt.",
         "weapon_category": "martial", "damage_type": "physical",
     },
 
@@ -71,10 +79,10 @@ ITEMS = {
     # armor_category (task #223): "light"/"medium"/"heavy", or "shield"
     # for the shield itself -- same real-consequence system as
     # weapon_category above (see class_features.py's ARMOR_PROFICIENCIES).
-    "leather_armor": {"name": "Leather Armor", "type": "armor", "rarity": "common", "price": 10, "weight": 10, "ac_base": 11, "armor_category": "light"},
-    "chain_shirt": {"name": "Chain Shirt", "type": "armor", "rarity": "common", "price": 50, "weight": 20, "ac_base": 13, "armor_category": "medium"},
-    "chain_mail": {"name": "Chain Mail", "type": "armor", "rarity": "uncommon", "price": 75, "weight": 55, "ac_base": 16, "armor_category": "heavy"},
-    "wooden_shield": {"name": "Wooden Shield", "type": "shield", "rarity": "common", "price": 10, "weight": 6, "ac_bonus": 2, "armor_category": "shield"},
+    "leather_armor": {"name": "Leather Armor", "type": "armor", "rarity": "common", "price": 10, "weight": 10, "ac_base": 11, "armor_category": "light", "description": "Boiled and cured stiff enough to turn a glancing blow, soft enough not to slow you down."},
+    "chain_shirt": {"name": "Chain Shirt", "type": "armor", "rarity": "common", "price": 50, "weight": 20, "ac_base": 13, "armor_category": "medium", "description": "Rings of iron, close-linked and heavier than they look at a glance."},
+    "chain_mail": {"name": "Chain Mail", "type": "armor", "rarity": "uncommon", "price": 75, "weight": 55, "ac_base": 16, "armor_category": "heavy", "description": "A real suit of it, head to knee — the kind of weight you stop noticing after the first hour."},
+    "wooden_shield": {"name": "Wooden Shield", "type": "shield", "rarity": "common", "price": 10, "weight": 6, "ac_bonus": 2, "armor_category": "shield", "description": "Banded oak, scarred along the rim from blows that never got any further."},
 
     # --- Consumables ---
     # Potion healing (2026-07-25, per Coffee's evolution/HP-scaling pass):
@@ -86,19 +94,23 @@ ITEMS = {
     "healing_potion": {
         "name": "Healing Potion", "type": "consumable", "rarity": "common",
         "price": 25, "weight": 0.5, "effect": "heal", "heal_dice": "1d1+99",
+        "description": "Heals 1d1+99 HP (100 flat). A dull red liquid in a corked glass vial. Tastes worse than it works.",
     },
     "greater_healing_potion": {
         "name": "Greater Healing Potion", "type": "consumable", "rarity": "uncommon",
         "price": 100, "weight": 0.5, "effect": "heal", "heal_dice": "1d1+999",
+        "description": "Heals 1d1+999 HP (1,000 flat). Thicker and darker than the common brew, and it goes down just as badly.",
     },
     "supreme_healing_potion": {
         "name": "Supreme Healing Potion", "type": "consumable", "rarity": "rare",
         "price": 500, "weight": 0.5, "effect": "heal", "heal_dice": "1d1+9999",
         "note": "Brewed for someone who's rebirthed more times than most people have leveled up.",
+        "description": "Heals 1d1+9999 HP (10,000 flat). Brewed for someone who's rebirthed more times than most people have leveled up.",
     },
     "antitoxin": {
         "name": "Antitoxin", "type": "consumable", "rarity": "common",
         "price": 15, "weight": 0.1, "effect": "cure_poison",
+        "description": "Cures poison. A thin, bitter tonic. Smells like it's already working before you drink it.",
     },
     # Per Coffee (2026-07-24): "add items like tents and cabins and
     # houses to reviving and healing characters to full" -- a stronger
@@ -112,65 +124,79 @@ ITEMS = {
         "name": "Tent", "type": "consumable", "rarity": "rare",
         "price": 100, "weight": 10, "effect": "heal_and_revive", "revive_targets": 1,
         "note": "A night under real canvas mends more than a potion ever could.",
+        "description": "Fully heals and revives 1 fallen party member to full HP. A night under real canvas mends more than a potion ever could.",
     },
     "cabin": {
         "name": "Cabin", "type": "consumable", "rarity": "rare",
         "price": 1000, "weight": 20, "effect": "heal_and_revive", "revive_targets": 3,
         "note": "Four walls and a hearth -- room enough for the whole party to actually rest.",
+        "description": "Fully heals and revives up to 3 fallen party members to full HP. Four walls and a hearth -- room enough for the whole party to actually rest.",
     },
     "house": {
         "name": "House", "type": "consumable", "rarity": "legendary",
         "price": 10000, "weight": 50, "effect": "heal_and_revive", "revive_targets": None,
         "note": "A real roof over everyone's head. Whatever happened out there, it stays outside.",
+        "description": "Fully heals and revives the entire party to full HP. A real roof over everyone's head. Whatever happened out there, it stays outside.",
     },
     "rations": {
         "name": "Rations (1 day)", "type": "consumable", "rarity": "common",
         "price": 2, "weight": 2, "effect": "none",
+        "description": "Hardtack, dried meat, a little salt. Filling in the way that word technically means.",
     },
-    "torch": {"name": "Torch", "type": "consumable", "rarity": "common", "price": 1, "weight": 1, "effect": "light"},
+    "torch": {"name": "Torch", "type": "consumable", "rarity": "common", "price": 1, "weight": 1, "effect": "light", "description": "Pitch-wrapped wood, ready to catch. Burns longer than it has any right to."},
     "ale": {
         "name": "Mug of Ale", "type": "consumable", "rarity": "common",
         "price": 1, "weight": 1, "effect": "none",
         "note": "Grimsby's own brew. Doesn't heal anything, but it isn't meant to.",
+        "description": "Grimsby's own brew. Doesn't heal anything, but it isn't meant to.",
     },
 
     # --- Scrolls (single-use spells for non-casters — or anyone, once bought) ---
     "scroll_magic_missile": {
         "name": "Scroll of Magic Missile", "type": "scroll", "rarity": "common",
         "price": 30, "weight": 0.1, "spell": "magic_missile",
+        "description": "Deals 1d4+1 force damage (always hits). The ink shifts faintly on the page, like it's still deciding where to strike.",
     },
     "scroll_fireball": {
         "name": "Scroll of Fireball", "type": "scroll", "rarity": "rare",
         "price": 300, "weight": 0.1, "spell": "fireball",
+        "description": "Deals 8d6 fire damage (Dexterity save for half). Warm to the touch even rolled up. Whoever wrote this one meant it.",
     },
     "scroll_cure_wounds": {
         "name": "Scroll of Cure Wounds", "type": "scroll", "rarity": "common",
         "price": 35, "weight": 0.1, "spell": "cure_wounds",
+        "description": "Heals 1d8+2 HP. The handwriting is steadier than most healing scrolls bother to be.",
     },
     "scroll_revivify": {
         "name": "Scroll of Revivify", "type": "scroll", "rarity": "rare",
         "price": 350, "weight": 0.1, "spell": "revivify",
         "note": "Brings a fallen ally back from death itself, at real cost — not to be used lightly.",
+        "description": "Revives a fallen ally at 5% of their max HP. Brings a fallen ally back from death itself, at real cost — not to be used lightly.",
     },
     "scroll_shield": {
         "name": "Scroll of Shield", "type": "scroll", "rarity": "uncommon",
         "price": 60, "weight": 0.1, "spell": "shield",
+        "description": "A short scroll, meant to be read fast — there's never much time to spare when you need it.",
     },
     "scroll_bless": {
         "name": "Scroll of Bless", "type": "scroll", "rarity": "uncommon",
         "price": 55, "weight": 0.1, "spell": "bless",
+        "description": "The kind of scroll a priest presses into your hand and tells you to save.",
     },
     "scroll_invisibility": {
         "name": "Scroll of Invisibility", "type": "scroll", "rarity": "rare",
         "price": 175, "weight": 0.1, "spell": "invisibility",
+        "description": "The parchment is faintly hard to look straight at, even before it's read.",
     },
     "scroll_lightning_bolt": {
         "name": "Scroll of Lightning Bolt", "type": "scroll", "rarity": "rare",
         "price": 275, "weight": 0.1, "spell": "lightning_bolt",
+        "description": "Deals 8d6 lightning damage (Dexterity save for half). It crackles faintly against your fingers, like it hasn't fully settled since it was written.",
     },
     "scroll_summon_spirit": {
         "name": "Scroll of Summoning", "type": "scroll", "rarity": "rare",
         "price": 200, "weight": 0.1, "spell": "summon_lesser_spirit",
+        "description": "The final line of the ritual text is written smaller, like the scribe wasn't sure they should include it.",
     },
 
     # --- Rings, Amulets, Wondrous Items ---
@@ -178,32 +204,39 @@ ITEMS = {
         "name": "Ring of Protection", "type": "ring", "rarity": "rare",
         "price": 0, "weight": 0, "ac_bonus": 1,
         "note": "A faint shimmer surrounds it.",
+        "description": "A faint shimmer surrounds it.",
     },
     "amulet_of_health": {
         "name": "Amulet of Health", "type": "amulet", "rarity": "rare",
         "price": 0, "weight": 0, "constitution_set": 19, "regen_bonus": 1,
         "note": "Your vitality feels different the moment you put it on.",
+        "description": "Your vitality feels different the moment you put it on.",
     },
     "cloak_of_elvenkind": {
         "name": "Cloak of Elvenkind", "type": "wondrous", "rarity": "uncommon",
         "price": 0, "weight": 1, "stealth_advantage": True,
+        "description": "The color of it shifts a little depending on where you're standing, never quite matching what it's actually near.",
     },
     "boots_of_the_winterlands": {
         "name": "Boots of the Winterlands", "type": "wondrous", "rarity": "uncommon",
         "price": 0, "weight": 1, "note": "Cold never seems to trouble the wearer.",
+        "description": "Cold never seems to trouble the wearer.",
     },
     "bracers_of_the_steady_hand": {
         "name": "Bracers of the Steady Hand", "type": "wondrous", "rarity": "uncommon",
         "price": 90, "weight": 1, "note": "Your hands never shake, even when the rest of you wants to.",
+        "description": "Your hands never shake, even when the rest of you wants to.",
     },
     "lantern_of_true_sight": {
         "name": "Lantern of True Sight", "type": "wondrous", "rarity": "rare",
         "price": 220, "weight": 2, "note": "Its flame burns a color no ordinary fire does, and shows things exactly as they are, not as they'd rather look.",
+        "description": "Its flame burns a color no ordinary fire does, and shows things exactly as they are, not as they'd rather look.",
     },
     "ring_of_the_undertow": {
         "name": "Ring of the Undertow", "type": "ring", "rarity": "uncommon",
         "price": 110, "weight": 0, "ac_bonus": 1,
         "note": "Cold as riverwater no matter how long it's worn.",
+        "description": "Cold as riverwater no matter how long it's worn.",
     },
     # Enchanters' Guild commissions (2026-07-25, per Coffee: "a guild
     # for enchanting wearable items and making items magic items"): 3
@@ -216,16 +249,19 @@ ITEMS = {
         "name": "Band of Ember", "type": "ring", "rarity": "uncommon",
         "price": 0, "weight": 0, "regen_bonus": 1,
         "note": "Warm to the touch, like a coal that never quite goes out.",
+        "description": "Warm to the touch, like a coal that never quite goes out.",
     },
     "sigil_of_the_deep": {
         "name": "Sigil of the Deep", "type": "amulet", "rarity": "rare",
         "price": 0, "weight": 0, "regen_bonus": 2, "ac_bonus": 1,
         "note": "Carved from something that was never meant to see the surface.",
+        "description": "Carved from something that was never meant to see the surface.",
     },
     "crown_of_the_unmoored": {
         "name": "Crown of the Unmoored", "type": "wondrous", "rarity": "very_rare",
         "price": 0, "weight": 1, "regen_bonus": 2, "ac_bonus": 2,
         "note": "It doesn't quite sit still on your head, like it's listening for something.",
+        "description": "It doesn't quite sit still on your head, like it's listening for something.",
     },
 
     # Hollow Verge dungeon rewards (2026-07-25, rebirth-1 gated content --
@@ -236,11 +272,13 @@ ITEMS = {
         "name": "Verge-Ashbound Band", "type": "ring", "rarity": "rare",
         "price": 0, "weight": 0, "regen_bonus": 2, "ac_bonus": 1,
         "note": "Ash that never finished falling, cooled into a ring shape and left to be found.",
+        "description": "Ash that never finished falling, cooled into a ring shape and left to be found.",
     },
     "wardens_reprieve": {
         "name": "Warden's Reprieve", "type": "wondrous", "rarity": "very_rare",
         "price": 0, "weight": 1, "regen_bonus": 3,
         "note": "Whatever waited that long to be defeated leaves behind something that knows how to wait, too.",
+        "description": "Whatever waited that long to be defeated leaves behind something that knows how to wait, too.",
     },
 
     # The Wordless Choir dungeon rewards (2026-07-25, rebirth-2 gated
@@ -251,11 +289,13 @@ ITEMS = {
         "name": "Echo-Bound Signet", "type": "ring", "rarity": "rare",
         "price": 0, "weight": 0, "regen_bonus": 3, "ac_bonus": 1,
         "note": "Whatever it echoes back was never quite what you said.",
+        "description": "Whatever it echoes back was never quite what you said.",
     },
     "the_undertones_hum": {
         "name": "The Undertone's Hum", "type": "wondrous", "rarity": "legendary",
         "price": 0, "weight": 1, "regen_bonus": 4, "ac_bonus": 2,
         "note": "It doesn't make a sound. You just stop, for a moment, being able to not hear it.",
+        "description": "It doesn't make a sound. You just stop, for a moment, being able to not hear it.",
     },
 
     # The Unbegun dungeon rewards (2026-07-25, rebirth-3 gated content,
@@ -266,11 +306,13 @@ ITEMS = {
         "name": "Hollow Watcher's Eye", "type": "amulet", "rarity": "rare",
         "price": 0, "weight": 0, "regen_bonus": 3, "ac_bonus": 2,
         "note": "It sees exactly as well with its eyes closed.",
+        "description": "It sees exactly as well with its eyes closed.",
     },
     "the_unbegun_crown": {
         "name": "The Unbegun's Crown", "type": "wondrous", "rarity": "legendary",
         "price": 0, "weight": 1, "regen_bonus": 5, "ac_bonus": 3,
         "note": "Worn by whatever was here before there was a story to tell about it.",
+        "description": "Worn by whatever was here before there was a story to tell about it.",
     },
 
     # Hollow Verge expansion rewards (2026-07-25, per Coffee: "bigger
@@ -281,11 +323,13 @@ ITEMS = {
         "name": "Bound Wraith's Chain", "type": "ring", "rarity": "rare",
         "price": 0, "weight": 0, "regen_bonus": 2,
         "note": "It was never really what was holding the wraith in place.",
+        "description": "It was never really what was holding the wraith in place.",
     },
     "forgotten_nooks_trinket": {
         "name": "Forgotten Nook's Trinket", "type": "amulet", "rarity": "uncommon",
         "price": 0, "weight": 0, "ac_bonus": 1,
         "note": "Small enough to have been overlooked. That's probably why it survived.",
+        "description": "Small enough to have been overlooked. That's probably why it survived.",
     },
 
     # Wordless Choir expansion rewards (2026-07-25, same "bigger
@@ -294,11 +338,13 @@ ITEMS = {
         "name": "Resonance-Bound Ring", "type": "ring", "rarity": "rare",
         "price": 0, "weight": 0, "regen_bonus": 3, "ac_bonus": 1,
         "note": "It answers back half a second after you put it on. It has been for a while now.",
+        "description": "It answers back half a second after you put it on. It has been for a while now.",
     },
     "unscheduled_chord_charm": {
         "name": "Unscheduled Chord Charm", "type": "amulet", "rarity": "uncommon",
         "price": 0, "weight": 0, "ac_bonus": 1,
         "note": "Hums the start of a tune it never finishes.",
+        "description": "Hums the start of a tune it never finishes.",
     },
 
     # The Unbegun expansion rewards (2026-07-25, same "bigger expansion"
@@ -307,11 +353,13 @@ ITEMS = {
         "name": "Frayed Edge Band", "type": "ring", "rarity": "very_rare",
         "price": 0, "weight": 0, "regen_bonus": 4, "ac_bonus": 2,
         "note": "Every thread it's woven from stops at the exact same point. None of them were ever going to finish.",
+        "description": "Every thread it's woven from stops at the exact same point. None of them were ever going to finish.",
     },
     "disconnected_steps_charm": {
         "name": "Disconnected Step's Charm", "type": "amulet", "rarity": "uncommon",
         "price": 0, "weight": 0, "ac_bonus": 1,
         "note": "Doesn't lead anywhere the rest of your gear goes. Useful anyway.",
+        "description": "Doesn't lead anywhere the rest of your gear goes. Useful anyway.",
     },
 
     # Goblin Warrens expansion rewards (2026-07-25, same "bigger
@@ -323,11 +371,13 @@ ITEMS = {
         "name": "Deep Larder's Charm", "type": "amulet", "rarity": "uncommon",
         "price": 0, "weight": 0, "regen_bonus": 1,
         "note": "Smells faintly of everything it was stacked next to.",
+        "description": "Smells faintly of everything it was stacked next to.",
     },
     "collapsed_tunnels_keepsake": {
         "name": "Collapsed Tunnel's Keepsake", "type": "amulet", "rarity": "common",
         "price": 0, "weight": 0, "ac_bonus": 1,
         "note": "Whoever it belonged to before the cave-in never came back for it.",
+        "description": "Whoever it belonged to before the cave-in never came back for it.",
     },
 
     # Sunken Root Caverns expansion rewards (2026-07-25, same pass).
@@ -335,11 +385,13 @@ ITEMS = {
         "name": "Hollow Wellspring's Charm", "type": "amulet", "rarity": "uncommon",
         "price": 0, "weight": 0, "regen_bonus": 1,
         "note": "Always feels faintly damp, no matter how long it's been out of the water.",
+        "description": "Always feels faintly damp, no matter how long it's been out of the water.",
     },
     "side_pools_trinket": {
         "name": "Side Pool's Trinket", "type": "amulet", "rarity": "common",
         "price": 0, "weight": 0, "ac_bonus": 1,
         "note": "Small enough that whatever was guarding it barely noticed it was gone.",
+        "description": "Small enough that whatever was guarding it barely noticed it was gone.",
     },
 
     # Stonearch Bridge (gorge) expansion rewards (2026-07-25, same pass).
@@ -347,16 +399,19 @@ ITEMS = {
         "name": "Deep Current's Charm", "type": "amulet", "rarity": "uncommon",
         "price": 0, "weight": 0, "regen_bonus": 1,
         "note": "Always feels like it's being pulled gently in one direction.",
+        "description": "Always feels like it's being pulled gently in one direction.",
     },
     "undertows_band": {
         "name": "Undertow's Band", "type": "ring", "rarity": "rare",
         "price": 0, "weight": 0, "regen_bonus": 1, "ac_bonus": 1,
         "note": "Everything that's ever been dragged down here eventually stops fighting the pull. This didn't.",
+        "description": "Everything that's ever been dragged down here eventually stops fighting the pull. This didn't.",
     },
     "silked_nooks_keepsake": {
         "name": "Silked Nook's Keepsake", "type": "amulet", "rarity": "common",
         "price": 0, "weight": 0, "ac_bonus": 1,
         "note": "Still faintly sticky. Best not to think about why.",
+        "description": "Still faintly sticky. Best not to think about why.",
     },
 
     # Greymoor Downs expansion rewards (2026-07-25, same pass -- the
@@ -366,16 +421,19 @@ ITEMS = {
         "name": "Beneath-the-Vantage Charm", "type": "amulet", "rarity": "uncommon",
         "price": 0, "weight": 0, "regen_bonus": 1,
         "note": "Still smells faintly of wind, even indoors.",
+        "description": "Still smells faintly of wind, even indoors.",
     },
     "tower_cellars_keepsake": {
         "name": "Tower Cellar's Keepsake", "type": "amulet", "rarity": "common",
         "price": 0, "weight": 0, "ac_bonus": 1,
         "note": "Whatever it was keeping safe down there, it isn't anymore.",
+        "description": "Whatever it was keeping safe down there, it isn't anymore.",
     },
     "barrow_depths_band": {
         "name": "Barrow Depths Band", "type": "ring", "rarity": "uncommon",
         "price": 0, "weight": 0, "ac_bonus": 1,
         "note": "The cold campsite up top was always bait. This was never meant to be found.",
+        "description": "The cold campsite up top was always bait. This was never meant to be found.",
     },
 
     # Whispering Wood expansion rewards (2026-07-25, same pass -- the
@@ -385,16 +443,19 @@ ITEMS = {
         "name": "Stray Den's Keepsake", "type": "amulet", "rarity": "common",
         "price": 0, "weight": 0, "ac_bonus": 1,
         "note": "Pushed out of the main pack's territory, same as whatever carried it here.",
+        "description": "Pushed out of the main pack's territory, same as whatever carried it here.",
     },
     "root_wroughts_charm": {
         "name": "Root-Wrought Charm", "type": "amulet", "rarity": "uncommon",
         "price": 0, "weight": 0, "regen_bonus": 1,
         "note": "Every join is the same angle. Nothing about it grew.",
+        "description": "Every join is the same angle. Nothing about it grew.",
     },
     "deep_root_wardens_band": {
         "name": "Deep Root Warden's Band", "type": "ring", "rarity": "rare",
         "price": 0, "weight": 0, "ac_bonus": 1, "regen_bonus": 1,
         "note": "Built for exactly one chamber, and nowhere else -- and it still remembers which one.",
+        "description": "Built for exactly one chamber, and nowhere else -- and it still remembers which one.",
     },
 
     # Glimmerdeep Grotto expansion rewards (2026-07-25, same pass --
@@ -403,11 +464,13 @@ ITEMS = {
         "name": "Buried Glow's Band", "type": "ring", "rarity": "rare",
         "price": 0, "weight": 0, "ac_bonus": 1, "regen_bonus": 1,
         "note": "Glows exactly like the crystals up above. It isn't one.",
+        "description": "Glows exactly like the crystals up above. It isn't one.",
     },
     "dim_hollows_keepsake": {
         "name": "Dim Hollow's Keepsake", "type": "amulet", "rarity": "common",
         "price": 0, "weight": 0, "ac_bonus": 1,
         "note": "Just enough light left in it to see by.",
+        "description": "Just enough light left in it to see by.",
     },
 
     # The true hidden final boss (2026-07-25, per Coffee: an FF6/FF7-
@@ -418,6 +481,7 @@ ITEMS = {
         "name": "Pandora's Answer", "type": "wondrous", "rarity": "legendary",
         "price": 0, "weight": 0, "regen_bonus": 10, "ac_bonus": 5,
         "note": "Not a weapon. Not really armor, either. Just an answer, finally given to whoever was willing to ask the question one more time than everyone before them.",
+        "description": "Not a weapon. Not really armor, either. Just an answer, finally given to whoever was willing to ask the question one more time than everyone before them.",
     },
 
     # --- Maps (task #141: buyable/discoverable, partial-reveal only --
@@ -430,33 +494,38 @@ ITEMS = {
     "weathered_surface_map": {
         "name": "Weathered Surface Map", "type": "map", "rarity": "uncommon",
         "price": 35, "weight": 0.2, "reveals_layer": "surface", "reveals_count": 3,
+        "description": "Water-stained at the corners, marked in a hand that clearly knew this ground well.",
     },
     "tattered_underground_chart": {
         "name": "Tattered Underground Chart", "type": "map", "rarity": "rare",
         "price": 60, "weight": 0.2, "reveals_layer": "underground", "reveals_count": 3,
+        "description": "Torn along one edge, the surviving ink tracing passages that never see daylight.",
     },
 
     # --- Quest items (never sellable, never have a price) ---
     "waterlogged_journal": {
         "name": "Waterlogged Journal", "type": "quest_item", "rarity": "unique",
         "price": 0, "weight": 0.5,
+        "description": "Most of the pages are ruined, swollen and stuck together. A few words still survive here and there.",
     },
     "shard_of_dim_light": {
         "name": "Shard of Dim Light", "type": "quest_item", "rarity": "unique",
         "price": 0, "weight": 0.1,
+        "description": "A sliver of something that glows just barely enough to notice, and no brighter no matter how you turn it.",
     },
     "brass_key_no_lock": {
         "name": "Brass Key That Fits No Lock", "type": "quest_item", "rarity": "unique",
         "price": 0, "weight": 0.1,
+        "description": "Worn smooth from use, though nothing you've found yet has ever turned for it.",
     },
 
     # --- Crafting / trade materials ---
-    "iron_ore": {"name": "Iron Ore", "type": "material", "rarity": "common", "price": 5, "weight": 2},
-    "moonpetal": {"name": "Moonpetal Flower", "type": "material", "rarity": "uncommon", "price": 20, "weight": 0.05},
-    "silverleaf_herb": {"name": "Silverleaf Herb", "type": "material", "rarity": "common", "price": 4, "weight": 0.1},
-    "sulfur_dust": {"name": "Sulfur Dust", "type": "material", "rarity": "common", "price": 6, "weight": 0.1},
-    "raw_fish": {"name": "Raw Fish", "type": "material", "rarity": "common", "price": 3, "weight": 0.3},
-    "wood": {"name": "Wood", "type": "material", "rarity": "common", "price": 2, "weight": 1},
+    "iron_ore": {"name": "Iron Ore", "type": "material", "rarity": "common", "price": 5, "weight": 2, "description": "A rough, heavy chunk, veined with metal not yet worth calling ore-grade."},
+    "moonpetal": {"name": "Moonpetal Flower", "type": "material", "rarity": "uncommon", "price": 20, "weight": 0.05, "description": "Pale petals that seem to hold on to whatever light they last caught."},
+    "silverleaf_herb": {"name": "Silverleaf Herb", "type": "material", "rarity": "common", "price": 4, "weight": 0.1, "description": "Thin, pale leaves with a faint metallic sheen along the edges."},
+    "sulfur_dust": {"name": "Sulfur Dust", "type": "material", "rarity": "common", "price": 6, "weight": 0.1, "description": "A fine yellow powder that smells exactly as bad as you'd expect."},
+    "raw_fish": {"name": "Raw Fish", "type": "material", "rarity": "common", "price": 3, "weight": 0.3, "description": "Still cold from the water. Best cooked before eating."},
+    "wood": {"name": "Wood", "type": "material", "rarity": "common", "price": 2, "weight": 1, "description": "A few solid, unremarkable logs — good for a fire or a repair."},
 
     # --- Cooking (2026-07-15: raw_fish was gatherable but had zero
     # recipe using it -- a real cooking recipe below turns it, plus
@@ -464,6 +533,7 @@ ITEMS = {
     "cooked_fish": {
         "name": "Cooked Fish", "type": "consumable", "rarity": "common",
         "price": 8, "weight": 0.3, "effect": "heal", "heal_dice": "1d4+1",
+        "description": "Heals 1d4+1 HP. Simple, filling, and still warm off the fire.",
     },
 
     # --- Gathering tools (2026-07-16, per Coffee): fishing/lumberjacking/
@@ -473,16 +543,16 @@ ITEMS = {
     # is the gathering skill this tool gates (see bot.py's _do_gather);
     # Shears instead uses "boosts_quantity_for" since it's optional, not
     # gating access at all.
-    "fishing_pole": {"name": "Fishing Pole", "type": "tool", "rarity": "common", "price": 8, "weight": 2, "required_for": "fishing"},
-    "bait": {"name": "Bait", "type": "tool", "rarity": "common", "price": 2, "weight": 0.1, "required_for": "fishing", "note": "A small tin of squirming earthworms and grubs, dug fresh from damp soil."},
-    "woodcutters_axe": {"name": "Woodcutter's Axe", "type": "tool", "rarity": "common", "price": 10, "weight": 4, "required_for": "lumberjacking"},
-    "pickaxe": {"name": "Pickaxe", "type": "tool", "rarity": "common", "price": 10, "weight": 5, "required_for": "mining"},
-    "shears": {"name": "Shears", "type": "tool", "rarity": "common", "price": 6, "weight": 0.5, "boosts_quantity_for": "herbalism"},
+    "fishing_pole": {"name": "Fishing Pole", "type": "tool", "rarity": "common", "price": 8, "weight": 2, "required_for": "fishing", "description": "A simple rod and line. Required to fish anywhere."},
+    "bait": {"name": "Bait", "type": "tool", "rarity": "common", "price": 2, "weight": 0.1, "required_for": "fishing", "note": "A small tin of squirming earthworms and grubs, dug fresh from damp soil.", "description": "A small tin of squirming earthworms and grubs, dug fresh from damp soil."},
+    "woodcutters_axe": {"name": "Woodcutter's Axe", "type": "tool", "rarity": "common", "price": 10, "weight": 4, "required_for": "lumberjacking", "description": "A well-worn axe, single-bladed and heavy in the head. Required to chop wood."},
+    "pickaxe": {"name": "Pickaxe", "type": "tool", "rarity": "common", "price": 10, "weight": 5, "required_for": "mining", "description": "Iron-headed and solid. Required to mine ore."},
+    "shears": {"name": "Shears", "type": "tool", "rarity": "common", "price": 6, "weight": 0.5, "boosts_quantity_for": "herbalism", "description": "Sharp, spring-hinged blades. Not required to gather herbs, but they let you harvest more per attempt."},
     # Task, per Coffee (2026-07-21): "add shovels to increase the
     # amount of bait we can get?! Have it use a dice roll." Same
     # optional, dice-rolled quantity-boost shape as Shears above, just
     # for bait_gathering instead of herbalism.
-    "shovel": {"name": "Shovel", "type": "tool", "rarity": "common", "price": 5, "weight": 3, "boosts_quantity_for": "bait_gathering"},
+    "shovel": {"name": "Shovel", "type": "tool", "rarity": "common", "price": 5, "weight": 3, "boosts_quantity_for": "bait_gathering", "description": "A plain digging shovel. Not required to dig for bait, but it lets you turn up more per attempt."},
 }
 
 

@@ -123,6 +123,10 @@ without naming a specific item (e.g. "auto equip my character", "put on my gear 
 - "invite_to_party" is for inviting another player's or AI companion's character into their own formed party. Set "target" to the invitee's name.
 - "accept_party_invite" is for accepting a pending party invite.
 - "leave_party" is for leaving a party the character is currently in.
+- "bench_party_member" is for sitting a real party member out of the next fight without them leaving the party \
+(e.g. "bench Zara", "sit Grimsby out", "Zara stays out of this one"). Set "target" to their name.
+- "unbench_party_member" is for putting a benched party member back into the active fighting roster \
+(e.g. "unbench Zara", "bring Zara back", "Zara's back in"). Set "target" to their name.
 - "find_merchant" is for asking where to get supplies or find the nearest shop/merchant.
 - "give_item" is for handing/giving/trading a carried item to another real player or AI companion, \
 not a shop transaction (e.g. "give my healing potion to Sarah", "hand Borin the torch"). Set "target" to the recipient's name.
@@ -545,6 +549,27 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
 
     if any(w in lowered for w in ["leave the party", "leave my party", "quit the party", "i quit my party"]):
         return {**base, "action": "leave_party"}
+
+    # Bench/un-bench (2026-07-31, per Coffee: battle-planning roster
+    # picker) -- checked before "unbench" would ever risk matching a
+    # bare "bench" substring check, since "un" isn't a substring of
+    # "bench" this ordering doesn't actually matter, but keeping
+    # unbench first reads clearer next to its own trigger list.
+    for trigger in ["unbench ", "un-bench ", "bring back ", "add back "]:
+        if trigger in lowered:
+            name = text[lowered.index(trigger) + len(trigger):].strip()
+            return {**base, "action": "unbench_party_member", "target": name or None}
+    if "bring" in lowered and "back" in lowered and lowered.index("bring") < lowered.index("back"):
+        name = text[lowered.index("bring") + len("bring"):lowered.index("back")].strip()
+        return {**base, "action": "unbench_party_member", "target": name or None}
+    for trigger in ["bench "]:
+        if trigger in lowered:
+            name = text[lowered.index(trigger) + len(trigger):].strip()
+            for cut in (" from the fight", " from this fight", " for this one", " this one"):
+                if cut in name.lower():
+                    name = name[:name.lower().index(cut)].strip()
+                    break
+            return {**base, "action": "bench_party_member", "target": name or None}
 
     # Checked BEFORE the attack-word match below: a hypothetical/defensive
     # statement like "Stand on guard in case the wolves attack" contains
@@ -1454,7 +1479,8 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "list_characters", "switch_character", "delete_character",
                 "fast_travel", "accept_quest", "check_quests", "ask_clue",
                 "answer_puzzle", "gamble", "chat", "examine", "flee", "resolve_choice",
-                "invite_to_party", "accept_party_invite", "leave_party", "find_merchant",
+                "invite_to_party", "accept_party_invite", "leave_party", "bench_party_member",
+                "unbench_party_member", "find_merchant",
                 "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "arcane_recovery",
                 "make_campfire", "give_item", "use_item", "equip_item", "auto_equip", "breath_weapon",
                 "channel_divinity", "action_surge", "reckless_attack", "divine_smite",

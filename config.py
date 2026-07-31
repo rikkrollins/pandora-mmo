@@ -94,6 +94,15 @@ NATURAL_HEALING_FULL_REST_HOURS = float(os.getenv("NATURAL_HEALING_FULL_REST_HOU
 # reason as SKILL_CHECK_DC.
 PARTY_MAX_MEMBERS = int(os.getenv("PARTY_MAX_MEMBERS", "6"))
 
+# Largest a party's ACTIVE (non-benched) roster can be for a single
+# fight (2026-07-31, per Coffee: parties can now grow past a
+# comfortable battle size, so pick who's actually fighting -- everyone
+# else in the party still shares in quest/combat rewards at the
+# existing INACTIVE_PARTY_XP_SHARE rate, same as anyone off resting or
+# elsewhere). Independent of PARTY_MAX_MEMBERS, which caps total
+# membership, not how many of them fight at once.
+PARTY_ACTIVE_COMBAT_CAP = int(os.getenv("PARTY_ACTIVE_COMBAT_CAP", "6"))
+
 # Which campaigns/<id>/campaign.json to load (task #56). Previously
 # hardcoded directly in bot.py with no .env override at all -- moved
 # here so a new campaign folder can actually be activated without a
