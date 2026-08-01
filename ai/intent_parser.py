@@ -127,6 +127,12 @@ without naming a specific item (e.g. "auto equip my character", "put on my gear 
 (e.g. "bench Zara", "sit Grimsby out", "Zara stays out of this one"). Set "target" to their name.
 - "unbench_party_member" is for putting a benched party member back into the active fighting roster \
 (e.g. "unbench Zara", "bring Zara back", "Zara's back in"). Set "target" to their name.
+- "set_front_row" is for moving a character to the front row battle formation (takes point, gets targeted \
+first, but no evade bonus) (e.g. "move Zara to the front", "put me in front", "Zara takes point"). \
+Set "target" to their name, or omit/self if unnamed.
+- "set_back_row" is for moving a character to the back row battle formation (less likely to be targeted, \
+harder to hit, free to heal/cast/shoot from safety) (e.g. "put Zara in the back row", "I'll hang back", \
+"move me to the back", "Zara stays behind me"). Set "target" to their name, or omit/self if unnamed.
 - "find_merchant" is for asking where to get supplies or find the nearest shop/merchant.
 - "give_item" is for handing/giving/trading a carried item to another real player or AI companion, \
 not a shop transaction (e.g. "give my healing potion to Sarah", "hand Borin the torch"). Set "target" to the recipient's name.
@@ -570,6 +576,36 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
                     name = name[:name.lower().index(cut)].strip()
                     break
             return {**base, "action": "bench_party_member", "target": name or None}
+
+    # Battle formations (2026-08-01, per Coffee: "character placement
+    # has an effect in battle" + "allow us to customize the
+    # formations"). Checked as an explicit move-to-row phrasing first
+    # (name extracted between "move "/"put " and "to the front/back"),
+    # then a same-clause "X to the front/back" fallback, then a bare
+    # "front row"/"back row" mention defaulting to self -- same layered
+    # pattern as the invite-to-party trigger above.
+    for trigger in ["move ", "put "]:
+        if trigger in lowered:
+            for row, cuts in (
+                ("back", (" to the back row", " to the back", " in the back row", " in the back", " behind")),
+                ("front", (" to the front row", " to the front", " in the front row", " in the front", " up front")),
+            ):
+                for cut in cuts:
+                    if cut in lowered:
+                        name = text[lowered.index(trigger) + len(trigger):lowered.index(cut)].strip()
+                        action = "set_back_row" if row == "back" else "set_front_row"
+                        return {**base, "action": action, "target": name or None}
+    for trigger in ("takes point", "take point"):
+        if trigger in lowered:
+            name = text[:lowered.index(trigger)].strip()
+            for cut in (" takes", " take"):
+                if name.lower().endswith(cut):
+                    name = name[:-len(cut)].strip()
+            return {**base, "action": "set_front_row", "target": name or None}
+    if any(w in lowered for w in ["front row", "up front", "take the front"]):
+        return {**base, "action": "set_front_row", "target": None}
+    if any(w in lowered for w in ["back row", "hang back", "stay behind", "stays behind"]):
+        return {**base, "action": "set_back_row", "target": None}
 
     # Checked BEFORE the attack-word match below: a hypothetical/defensive
     # statement like "Stand on guard in case the wolves attack" contains
@@ -1480,7 +1516,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "fast_travel", "accept_quest", "check_quests", "ask_clue",
                 "answer_puzzle", "gamble", "chat", "examine", "flee", "resolve_choice",
                 "invite_to_party", "accept_party_invite", "leave_party", "bench_party_member",
-                "unbench_party_member", "find_merchant",
+                "unbench_party_member", "set_front_row", "set_back_row", "find_merchant",
                 "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "arcane_recovery",
                 "make_campfire", "give_item", "use_item", "equip_item", "auto_equip", "breath_weapon",
                 "channel_divinity", "action_surge", "reckless_attack", "divine_smite",

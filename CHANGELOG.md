@@ -2,6 +2,56 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.61] — Active AI companions now actually show up to fight
+
+Real live report: Coffee had Grask Emberscale — a real, active,
+non-benched party member — sit out a fight entirely because he'd
+wandered to a different location under the living-world system.
+"I want the AI players that are in the party to be in the battles —
+that's the point of picking the active party members for combats."
+
+Fixed at the real choke point (`_get_real_party_combatants`): an AI
+companion's own location was never a deliberate choice to skip a
+fight the way a real human's is — a human genuinely has to be standing
+here (can't be teleported into a fight they never walked into), but
+an AI companion in your active roster now rushes to your location the
+moment combat starts, regardless of where they'd wandered off to.
+Being in the active roster (not benched, not resting) is what
+actually decides who fights, matching what "active party" was always
+supposed to mean. Benching still works exactly as before — a benched
+companion still sits out no matter where they are. The fight's opening
+message now says who rushed in, so this is visible instead of a
+silent database write.
+
+## [1.27.60] — Battle formations: front row tanks, back row is safer
+
+Per Coffee: "character placement has an effect in battle." Every
+character (and now every enemy too) has a real front/back row. Front
+row is the enemy's primary target; back row is genuinely safer — a
+real AC/evade bonus (`BACK_ROW_AC_BONUS`, +2 by default) applied right
+where every other AC bonus in this game already lives, plus a lower
+chance of being targeted at all while anyone's still standing up
+front. Nobody's ever fully safe — there's still a real, if smaller,
+chance the enemy targets the back row directly (`FRONT_ROW_TARGET_
+CHANCE`, 80% front by default), and once the front row is wiped, the
+back row becomes the only target left, same as it would in a real
+fight.
+
+This runs both directions: enemies target the party by row, and AI
+party members/companions target enemies by row too — a handful of
+real monsters (goblin shamans, and any future caster/ranged archetype)
+default to their own back row, so a smart player can choose to focus
+the real threat instead of whichever monster the game happens to
+list first. Every fight's opening message now spells out both
+formations by name so there's never any guessing who's where.
+
+Fully player-customizable: "move Zara to the back row" / "put me up
+front" / a real ✅ Front / 🔮 Back toggle button on the Party menu for
+yourself and every real party member. No hard restriction on what a
+front-row character can carry or cast — row only changes targeting
+odds and AC, so a melee character stuck up front (or a caster who
+wants to hang back) never has an action blocked outright.
+
 ## [1.27.59] — Items now have real descriptions, and you can finally examine what you're carrying
 
 Found from a real Development-topic screenshot: "Look at the tattered

@@ -103,6 +103,28 @@ PARTY_MAX_MEMBERS = int(os.getenv("PARTY_MAX_MEMBERS", "6"))
 # membership, not how many of them fight at once.
 PARTY_ACTIVE_COMBAT_CAP = int(os.getenv("PARTY_ACTIVE_COMBAT_CAP", "6"))
 
+# Battle formations (2026-08-01, per Coffee: "character placement has
+# an effect in battle... players in the back row have a higher evade%"
+# + "allow us to customize the formations" + "enemies use battle
+# formations too"). Applies symmetrically to party members AND enemies,
+# since both sides' combat participant dicts carry the same
+# formation_row field and go through the same targeting helper
+# (_pick_formation_weighted_target in bot.py).
+#
+# FRONT_ROW_TARGET_CHANCE: odds an attacker's target pool is drawn from
+# the front row when the front row still has anyone standing. The
+# remainder is a real chance to still snipe the back row even then --
+# matches Coffee's own "all players can still be targeted" -- and back
+# row becomes the only pool once front row is wiped, same as before.
+FRONT_ROW_TARGET_CHANCE = float(os.getenv("FRONT_ROW_TARGET_CHANCE", "0.8"))
+
+# Flat AC bonus applied to a defender standing in the back row (rules/
+# combat.py's resolve_attack, same additive slot hybrid_features.
+# hybrid_ac_bonus already uses) -- this IS the "higher evade%" in this
+# game's existing AC-based hit-resolution model, not a separate dodge
+# mechanic.
+BACK_ROW_AC_BONUS = int(os.getenv("BACK_ROW_AC_BONUS", "2"))
+
 # Which campaigns/<id>/campaign.json to load (task #56). Previously
 # hardcoded directly in bot.py with no .env override at all -- moved
 # here so a new campaign folder can actually be activated without a

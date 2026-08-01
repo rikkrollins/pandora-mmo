@@ -443,6 +443,17 @@ def init_db() -> None:
         if "is_benched" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN is_benched INTEGER NOT NULL DEFAULT 0")
 
+        # formation_row (2026-08-01, per Coffee: "character placement has
+        # an effect in battle... allow us to customize the formations").
+        # 'front' (default, matches every existing character's
+        # undifferentiated behavior today -- no data migration risk) or
+        # 'back'. Read directly off the combat participant dict the same
+        # way is_benched already is -- see bot.py's
+        # _pick_formation_weighted_target and rules/combat.py's
+        # resolve_attack back-row AC bonus.
+        if "formation_row" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN formation_row TEXT NOT NULL DEFAULT 'front'")
+
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)

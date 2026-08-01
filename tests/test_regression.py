@@ -1804,6 +1804,134 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(after - before, int(100 * bot.INACTIVE_PARTY_XP_SHARE))
         sessions.end_session(-999)
 
+    # -- Battle formations (2026-08-01, per Coffee: "character placement
+    #    has an effect in battle... front row get targeted... back row
+    #    have a higher evade%... allow us to customize the formations...
+    #    enemies use battle formations too") -----------------------------
+    def test_back_row_gets_the_configured_ac_bonus_in_resolve_attack(self):
+        import rules.combat as combat
+        front = {"armor_class": 15, "formation_row": "front"}
+        back = {"armor_class": 15, "formation_row": "back"}
+        self.assertEqual(combat.formation_ac_bonus(front), 0)
+        self.assertEqual(combat.formation_ac_bonus(back), bot.config.BACK_ROW_AC_BONUS)
+        self.assertGreater(bot.config.BACK_ROW_AC_BONUS, 0)
+
+    def test_formation_targeting_prefers_front_row_but_can_still_hit_back(self):
+        import random
+        front_alive = {"telegram_user_id": 1, "name": "Tank", "hp_current": 50, "formation_row": "front"}
+        back_alive = {"telegram_user_id": 2, "name": "Mage", "hp_current": 50, "formation_row": "back"}
+        random.seed(7)
+        picks = [bot._pick_formation_weighted_target([front_alive, back_alive])["name"] for _ in range(300)]
+        front_share = picks.count("Tank") / len(picks)
+        self.assertAlmostEqual(front_share, bot.config.FRONT_ROW_TARGET_CHANCE, delta=0.1)
+        self.assertGreater(picks.count("Mage"), 0)  # still targetable, never immune
+
+    def test_formation_targeting_falls_back_to_back_row_when_front_wiped(self):
+        back_alive = {"telegram_user_id": 2, "name": "Mage", "hp_current": 50, "formation_row": "back"}
+        target = bot._pick_formation_weighted_target([back_alive])
+        self.assertEqual(target["name"], "Mage")
+
+    def test_enemy_formation_row_heuristic_grounded_in_real_monster_data(self):
+        self.assertEqual(bot._enemy_formation_row("goblin", {"name": "Goblin"}), "front")
+        self.assertEqual(bot._enemy_formation_row("goblin_shaman", {"name": "Goblin Shaman"}), "back")
+        # Explicit content-authored field always wins over the heuristic.
+        self.assertEqual(
+            bot._enemy_formation_row("goblin", {"name": "Goblin", "formation_row": "back"}), "back",
+        )
+
+    async def test_set_formation_row_persists_and_defaults_to_self(self):
+        uid = 950401
+        make_basic_character(uid, "FormationSolo", current_location="crossroads_tavern")
+        sink = []
+        await bot._do_set_formation_row(FakeUpdate(uid, "move me to the back", sink), "", "back")
+        self.assertEqual(db.get_character(uid).get("formation_row"), "back")
+        self.assertIn("back row", "\n".join(sink).lower())
+
+    async def test_set_formation_row_targets_named_party_member_not_requester(self):
+        leader_id = 950402
+        member_id = 950403
+        make_basic_character(leader_id, "FormationLeader", current_location="crossroads_tavern")
+        make_basic_character(member_id, "FormationMember", current_location="crossroads_tavern")
+        party_id = db.create_party(leader_id)
+        db.update_character(member_id, party_id=party_id)
+
+        await bot._do_set_formation_row(
+            FakeUpdate(leader_id, "move FormationMember to the back row", []), "FormationMember", "back",
+        )
+        self.assertEqual(db.get_character(member_id).get("formation_row"), "back")
+        self.assertEqual(db.get_character(leader_id).get("formation_row", "front"), "front")
+
+    async def test_set_formation_row_refuses_a_non_party_member(self):
+        leader_id = 950404
+        stranger_id = 950405
+        make_basic_character(leader_id, "FormationLeader2", current_location="crossroads_tavern")
+        make_basic_character(stranger_id, "Stranger", current_location="crossroads_tavern")
+        db.create_party(leader_id)  # stranger is deliberately NOT added
+
+        sink = []
+        await bot._do_set_formation_row(
+            FakeUpdate(leader_id, "move Stranger to the back row", sink), "Stranger", "back",
+        )
+        self.assertIn("no one named", "\n".join(sink).lower())
+        self.assertEqual(db.get_character(stranger_id).get("formation_row", "front"), "front")
+
+    # -- AI companions rush to the fight regardless of location (2026-08-01,
+    #    real live report: Coffee had Grask Emberscale (a real, active,
+    #    non-benched party member) sit out a fight purely because he'd
+    #    wandered to a different location under the living-world system --
+    #    "I want the AI players that are in the party to be in the
+    #    battles... that's the point of picking the active party members
+    #    for combats"). ---------------------------------------------------
+    async def test_active_ai_companion_joins_combat_despite_being_elsewhere(self):
+        leader_id = 950501
+        make_basic_character(leader_id, "RushLeader", current_location="crossroads_tavern")
+        party_id = db.create_party(leader_id)
+        companion = db.create_ai_companion(
+            "RushCompanion", "Dragonborn", "Fighter",
+            ability_scores={"strength": 16, "dexterity": 12, "constitution": 14,
+                             "intelligence": 8, "wisdom": 10, "charisma": 10},
+            hp_max=61, armor_class=16, gold=0, inventory={},
+        )
+        db.add_ai_companion_to_party(companion["telegram_user_id"], party_id)
+        db.update_character_by_id(companion["character_id"], current_location="whispering_woods")
+
+        combatants = bot._get_real_party_combatants(db.get_character(leader_id))
+        self.assertIn(companion["telegram_user_id"], {c["telegram_user_id"] for c in combatants})
+        self.assertEqual(
+            db.get_character_by_id(companion["character_id"])["current_location"], "crossroads_tavern",
+        )
+        rushed = next(c for c in combatants if c["telegram_user_id"] == companion["telegram_user_id"])
+        self.assertTrue(rushed.get("_rushed_in"))
+        self.assertIn("RushCompanion", bot._rushed_in_note(combatants))
+
+    async def test_benched_ai_companion_still_sits_out_regardless_of_location(self):
+        leader_id = 950502
+        make_basic_character(leader_id, "RushLeader2", current_location="crossroads_tavern")
+        party_id = db.create_party(leader_id)
+        companion = db.create_ai_companion(
+            "BenchedRushCompanion", "Dragonborn", "Fighter",
+            ability_scores={"strength": 16, "dexterity": 12, "constitution": 14,
+                             "intelligence": 8, "wisdom": 10, "charisma": 10},
+            hp_max=61, armor_class=16, gold=0, inventory={},
+        )
+        db.add_ai_companion_to_party(companion["telegram_user_id"], party_id)
+        db.update_character_by_id(companion["character_id"], current_location="whispering_woods", is_benched=1)
+
+        combatants = bot._get_real_party_combatants(db.get_character(leader_id))
+        self.assertNotIn(companion["telegram_user_id"], {c["telegram_user_id"] for c in combatants})
+
+    async def test_real_human_party_member_elsewhere_is_not_teleported(self):
+        leader_id = 950503
+        human_id = 950504
+        make_basic_character(leader_id, "RushLeader3", current_location="crossroads_tavern")
+        make_basic_character(human_id, "RushHuman", current_location="whispering_woods")
+        party_id = db.create_party(leader_id)
+        db.update_character(human_id, party_id=party_id)
+
+        combatants = bot._get_real_party_combatants(db.get_character(leader_id))
+        self.assertNotIn(human_id, {c["telegram_user_id"] for c in combatants})
+        self.assertEqual(db.get_character(human_id)["current_location"], "whispering_woods")
+
     # -- Dev-topic video handling (2026-07-15, per Coffee): videos had NO
     #    handler at all before this (only TEXT/PHOTO/Document.ALL were
     #    registered) -- same silent-failure gap photos had before

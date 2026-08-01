@@ -12,8 +12,22 @@ from rules.leveling import (
 )
 from class_features import is_weapon_proficient
 from guilds import FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT
+import config
 import hybrid_features
 import races
+
+
+def formation_ac_bonus(defender: dict) -> int:
+    """
+    Back-row evade bonus (2026-08-01, per Coffee: "players in the back
+    row have a higher evade%"). This game's hit resolution is entirely
+    AC-based, so "higher evade%" IS a flat AC bonus here -- same
+    additive slot hybrid_ac_bonus already occupies, not a separate
+    dodge-chance system. Front row (and anyone with no formation_row
+    set at all, e.g. a solo fight or a monster template that never
+    opted in) gets 0, identical to today's behavior.
+    """
+    return config.BACK_ROW_AC_BONUS if defender.get("formation_row") == "back" else 0
 
 # Monsters this campaign treats as undead for the Silver Wardens guild's
 # bonus_damage_vs_undead benefit (guilds.py) -- no monster template field
@@ -52,6 +66,15 @@ UNDEAD_MONSTER_KEYS = {
 # second phase instead of a flat difficulty the whole way through.
 ENRAGE_HP_THRESHOLD = 0.3
 ENRAGE_DAMAGE_BONUS_PCT = 50
+
+# Bloodied beat (2026-08-01, task #244, from this session's own COMPLETE
+# GAME playthrough QoL audit: long fights had no mid-fight story beat at
+# all, just a flat stream of attack rolls). Purely narrational -- unlike
+# Enrage, crossing this threshold changes nothing mechanically, on
+# either side of the fight, just gives it a real, one-time, grounded-in-
+# actual-HP "the tide is turning" moment. Deliberately a flat 50%
+# (distinct from ENRAGE_HP_THRESHOLD, which is lower and boss-only).
+BLOODIED_HP_THRESHOLD = 0.5
 
 # Real time pressure (2026-07-27, per Coffee: "use time mechanics in
 # battles too with the environments and bosses") -- a boss fight that
@@ -244,7 +267,9 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     # computed live here rather than stored on the character -- see
     # hybrid_features.hybrid_ac_bonus's own docstring for why (freely
     # switching hybrid flavors can never leave a stale bonus behind).
-    effective_defender_ac = defender["armor_class"] + hybrid_features.hybrid_ac_bonus(defender)
+    effective_defender_ac = (
+        defender["armor_class"] + hybrid_features.hybrid_ac_bonus(defender) + formation_ac_bonus(defender)
+    )
     attack_result = roll_attack(
         attacker,
         target_ac=effective_defender_ac,
@@ -275,6 +300,7 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     hybrid_temp_hp_gained = 0
     hybrid_self_heal_gained = 0
     enrage_triggered = False
+    bloodied_triggered = False
     if attack_result["hit"]:
         savage_attacks_die = 1 if (attacker.get("race") == "Half-Orc" and attack_result["critical_hit"]) else 0
         sneak_attack_die = 1 if (attacker.get("char_class") == "Rogue" and advantage) else 0
@@ -422,6 +448,15 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
             defender["enraged"] = True
             enrage_triggered = True
 
+        # Bloodied (2026-08-01, task #244) -- one-time, either side,
+        # crossing half HP for the first time. Never re-fires (same
+        # "flag on the participant dict, checked before setting"
+        # pattern as enraged), never reverts even if healed back up.
+        if (not defender.get("bloodied") and hp_after > 0
+                and hp_after <= defender.get("hp_max", hp_after) * BLOODIED_HP_THRESHOLD):
+            defender["bloodied"] = True
+            bloodied_triggered = True
+
         # Dark One's Blessing: reducing a hostile creature to 0 HP grants
         # the Warlock temp HP = CHA modifier + level (minimum 1, real 5E
         # formula). Temp HP doesn't stack with itself -- take the higher
@@ -469,6 +504,7 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         # apply it silently) -- only meaningful on an actual hit.
         "damage_type": weapon.get("damage_type", "physical") if attack_result["hit"] else None,
         "enrage_triggered": enrage_triggered,
+        "bloodied_triggered": bloodied_triggered,
     }
 
 

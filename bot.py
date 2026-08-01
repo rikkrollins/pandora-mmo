@@ -84,6 +84,7 @@ from models import (
 from rules.combat import (
     resolve_attack, resolve_death_save, UNDEAD_MONSTER_KEYS, apply_damage_type_modifier,
     ENRAGE_HP_THRESHOLD, ENRAGE_DAMAGE_BONUS_PCT, ENRAGE_WARNING_ROUND, ENRAGE_ROUND_THRESHOLD,
+    BLOODIED_HP_THRESHOLD,
 )
 from rules.crafting import (
     RECIPES, get_recipe, has_materials, resolve_craft,
@@ -1213,13 +1214,40 @@ def _get_real_party_combatants(requester: dict) -> list[dict]:
     into the actual fight regardless of button/data state. The requester
     is never the one dropped by that cap -- they're the one starting
     the fight.
+
+    AI companions rush to the fight regardless of location (2026-08-01,
+    per Coffee: "I want the AI players that are in the party to be in
+    the battles -- that's the point of picking the active party members
+    for combats" -- reported live after Grask, a real active/non-
+    benched party member, sat out a fight purely because he'd wandered
+    to a different location under the living-world system while
+    levelling wasn't even in progress). A real human party member
+    genuinely has to be standing here -- they can't be teleported into
+    a fight they never walked into -- but an AI companion's own
+    location is just flavor/wandering, not a deliberate choice to sit a
+    fight out. Being in the active roster (not benched, not resting) IS
+    the commitment, so an AI party member's current_location is pulled
+    to the requester's on the way in (persisted, not just for this
+    fight) rather than silently fighting from two places at once.
+    _rushed_in is a transient, in-memory-only marker (never a DB
+    column) so _do_start_combat's header can name who just rushed in.
     """
     location_id = requester["current_location"]
-    eligible = _get_combat_eligible_party_members(location_id)
     party_id = requester.get("party_id")
     if not party_id:
-        return [p for p in eligible if p["telegram_user_id"] == requester["telegram_user_id"]]
-    combatants = [p for p in eligible if p.get("party_id") == party_id and not p.get("is_benched")]
+        return [requester]
+    combatants = []
+    for m in db.get_party_members_by_id(party_id):
+        if m.get("is_benched") or m.get("is_inactive"):
+            continue
+        if m.get("is_ai"):
+            if m["current_location"] != location_id:
+                db.update_character_by_id(m["character_id"], current_location=location_id)
+                m["current_location"] = location_id
+                m["_rushed_in"] = True
+            combatants.append(m)
+        elif m["current_location"] == location_id:
+            combatants.append(m)
     if len(combatants) > config.PARTY_ACTIVE_COMBAT_CAP:
         requester_id = requester["telegram_user_id"]
         others = [p for p in combatants if p["telegram_user_id"] != requester_id]
@@ -4050,7 +4078,7 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
             opposing = session.living_on_side(session.opposing_side(current["telegram_user_id"]))
             if not opposing:
                 break
-            target = min(opposing, key=lambda p: p["hp_current"])
+            target = _pick_formation_weighted_target(opposing)
             # Task #167 (per Coffee, 2026-07-18, scoped to boss-tier enemies
             # only after he flagged the latency cost of doing this for every
             # regular monster too): a pre-roll "sizing up its target" beat,
@@ -4103,6 +4131,8 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
             _sync_player_to_db(target)
             if result["shield_reaction_triggered"] or result["uncanny_dodge_triggered"]:
                 await _announce_reaction(update, target, result)
+            if result.get("bloodied_triggered"):
+                await _safe_send(update, f"🩸 **{target['name']} is bloodied!**")
 
             applied_condition = None
             resisted_condition = None
@@ -4358,6 +4388,123 @@ async def _do_accept_duel(update: Update) -> None:
     await _safe_send(update, _turn_announcement(session), reply_markup=_battle_menu_keyboard(session))
 
 
+# Battle formations (2026-08-01, per Coffee: "character placement has
+# an effect in battle" + "enemies use battle formations too"). No
+# campaign.json monster template has an explicit formation_row field
+# yet (a real content author can add one later and it's respected
+# here first, before this heuristic ever runs) -- so, grounded only in
+# real data that already exists (no invented "caster" flag), any
+# monster whose own name/key reads as a caster/ranged archetype is
+# placed in the back row; every other real monster in the bestiary
+# (goblins, wolves, spiders, undead melee types, the story bosses) is
+# front row, same as their undifferentiated behavior before this
+# feature existed.
+_ENEMY_BACK_ROW_KEYWORDS = ("shaman", "mage", "witch", "archer", "sniper", "sorcer", "warlock", "priest")
+
+
+def _enemy_formation_row(monster_key: str, template: dict) -> str:
+    if template.get("formation_row") in ("front", "back"):
+        return template["formation_row"]
+    haystack = f"{monster_key} {template.get('name', '')}".lower()
+    return "back" if any(kw in haystack for kw in _ENEMY_BACK_ROW_KEYWORDS) else "front"
+
+
+def _pick_formation_weighted_target(opposing: list[dict]) -> dict:
+    """
+    Formation-aware target selection (2026-08-01, per Coffee: "front
+    row get targeted... back row have a higher evade%... all players
+    can still be targeted"). This is the single real choke point both
+    directions of AI-controlled targeting go through -- an enemy
+    attacking the party, or an AI companion attacking enemies -- since
+    both sides' participant dicts carry the same formation_row field
+    (party members from their own DB column, enemies from
+    _enemy_formation_row above). Front row is the primary pool; back
+    row is only drawn from at a FRONT_ROW_TARGET_CHANCE-complement
+    chance while front row still has someone standing (a real, if
+    lower, chance to be targeted -- not immunity), or unconditionally
+    once front row is wiped. Whichever pool is chosen keeps the exact
+    same lowest-HP deterministic tie-break this always used.
+    """
+    front = [p for p in opposing if p.get("formation_row", "front") != "back"]
+    back = [p for p in opposing if p.get("formation_row") == "back"]
+    if front and back and random.random() >= config.FRONT_ROW_TARGET_CHANCE:
+        pool = back
+    elif front:
+        pool = front
+    else:
+        pool = back
+    return min(pool, key=lambda p: p["hp_current"])
+
+
+def _format_formation_line(combatants: list[dict]) -> str | None:
+    """
+    Real, explicit formation description (2026-08-01, per Coffee:
+    "make it clear so characters know who to target") -- shown once
+    per fight rather than left implicit, so a player can actually
+    decide to focus the back-row caster instead of just attacking
+    whoever the menu defaults to. Omitted entirely when every
+    combatant is front row (a solo fight, or nobody's customized
+    formations yet) -- nothing new to say.
+    """
+    back = [c["name"] for c in combatants if c.get("formation_row") == "back"]
+    if not back:
+        return None
+    front = [c["name"] for c in combatants if c.get("formation_row", "front") != "back"]
+    front_part = f"🛡️ Front: {', '.join(front)}" if front else "🛡️ Front: (none)"
+    back_part = f"🔮 Back: {', '.join(back)}"
+    return f"{front_part} — {back_part}"
+
+
+def _rushed_in_note(party: list[dict]) -> str:
+    """
+    Names any AI companion _get_real_party_combatants just teleported
+    in from a different location (2026-08-01, task: "I want the AI
+    players that are in the party to be in the battles"). Purely
+    cosmetic -- the actual location pull already happened by the time
+    this renders -- just makes it visible instead of a silent DB write.
+    """
+    rushed = [p["name"] for p in party if p.get("_rushed_in")]
+    if not rushed:
+        return ""
+    return f"\n🏃 {', '.join(rushed)} rushed here to join the fight!\n"
+
+
+def _absent_party_members_note(requester: dict, party: list[dict]) -> str:
+    """
+    Task #241 (per Coffee's own dev-topic feedback from this session's
+    QoL audit): a real party member missing from a fight used to just
+    ... not be there, with no explanation anywhere -- easy to mistake
+    for a bug ("where's Zara?"). Grounded only in each missing member's
+    own real, already-tracked state (is_benched/is_inactive/current_
+    location/hp_current), same facts _get_real_party_combatants itself
+    filters on -- never invented. All of them still share fully in
+    quest/combat rewards regardless of the reason (INACTIVE_PARTY_XP_
+    SHARE), so the note says that plainly too instead of reading like a
+    penalty.
+    """
+    party_id = requester.get("party_id")
+    if not party_id:
+        return ""
+    present_ids = {p["telegram_user_id"] for p in party}
+    reasons = []
+    for m in db.get_party_members_by_id(party_id):
+        if m["telegram_user_id"] in present_ids:
+            continue
+        if m.get("is_benched"):
+            reasons.append(f"{m['name']} (benched)")
+        elif m.get("hp_current", 1) <= 0:
+            reasons.append(f"{m['name']} (down, needs rest)")
+        elif m.get("is_inactive"):
+            reasons.append(f"{m['name']} (resting)")
+        elif m.get("current_location") != requester["current_location"]:
+            reasons.append(f"{m['name']} (elsewhere)")
+        else:
+            reasons.append(f"{m['name']} (active roster full)")
+    if not reasons:
+        return ""
+    return f"\n👥 Not in this fight: {', '.join(reasons)} — still sharing in the rewards."
+
+
 async def _do_start_combat(update: Update, monster_key: str | None = None, count: int | None = None) -> None:
     chat_id = update.effective_chat.id
     async with sessions.get_lock(chat_id):
@@ -4450,6 +4597,7 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             enemy_id = -2_000_000 - (abs(hash(monster_key)) % 100_000) - i
             enemy_name = f"{template['name']} {i + 1}" if count > 1 else template["name"]
             enemies.append({
+                "formation_row": _enemy_formation_row(monster_key, template),
                 "telegram_user_id": enemy_id, "name": enemy_name,
                 "dexterity": template["dexterity"], "strength": template["strength"],
                 "armor_class": template["armor_class"], "hp_current": template["hp_max"],
@@ -4504,6 +4652,14 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             f"{p['name']} ({p['initiative']})" for p in session.participants
         )
         enemy_description = f"{count}x **{template['name']}**" if count > 1 else f"**{template['name']}**"
+        formation_lines = []
+        party_formation_line = _format_formation_line(party)
+        if party_formation_line:
+            formation_lines.append(f"Your formation — {party_formation_line}")
+        enemy_formation_line = _format_formation_line(enemies)
+        if enemy_formation_line:
+            formation_lines.append(f"Enemy formation — {enemy_formation_line}")
+        formation_block = ("\n".join(formation_lines) + "\n\n") if formation_lines else ""
         # Epic boss intro (2026-07-27, per Coffee: "make sure all boss
         # sequences are creative and scary... make it epic") -- a real,
         # distinct cinematic beat before the plain "Combat Begins!"
@@ -4524,7 +4680,10 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             # people who aren't really here.
             f"Your party ({_format_party_names(party)}) faces {enemy_description}!\n\n"
             f"🎯 **Initiative order:** {initiative_line}\n\n"
+            + formation_block
+            + _rushed_in_note(party)
             + _turn_announcement(session)
+            + _absent_party_members_note(requester, party)
         )
         # Real design fix (2026-07-27, per Coffee: "use the environment
         # sounds way too vague... [it] shudd be clearly stated" -- and,
@@ -4598,6 +4757,7 @@ def _build_echo_enemy(monster_key: str, tier: int, index: int, total: int) -> di
     name = f"Echo of {template['name']} {index + 1}" if total > 1 else f"Echo of {template['name']}"
     return {
         "telegram_user_id": enemy_id, "name": name,
+        "formation_row": _enemy_formation_row(monster_key, template),
         "dexterity": template["dexterity"], "strength": template["strength"],
         "armor_class": int(template["armor_class"] * stat_mult),
         "hp_current": int(template["hp_max"] * stat_mult), "hp_max": int(template["hp_max"] * stat_mult),
@@ -4688,10 +4848,19 @@ async def _do_start_echo_trial(update: Update, text: str) -> None:
         resistance_note = ""
         if enemies[0]["resistances"]:
             resistance_note = f"\n⚠️ This echo resists **{enemies[0]['resistances'][0]}** damage."
+        echo_formation_lines = []
+        echo_party_formation_line = _format_formation_line(party)
+        if echo_party_formation_line:
+            echo_formation_lines.append(f"Your formation — {echo_party_formation_line}")
+        echo_enemy_formation_line = _format_formation_line(enemies)
+        if echo_enemy_formation_line:
+            echo_formation_lines.append(f"Enemy formation — {echo_enemy_formation_line}")
+        echo_formation_block = ("\n".join(echo_formation_lines) + "\n\n") if echo_formation_lines else ""
         header = (
             f"⚔️ **Echo Trial — Tier {tier}!**\n"
             f"Your party ({_format_party_names(party)}) faces {enemy_description}!{resistance_note}\n\n"
-            f"🎯 **Initiative order:** {initiative_line}\n\n" + _turn_announcement(session)
+            f"🎯 **Initiative order:** {initiative_line}\n\n"
+            + echo_formation_block + _rushed_in_note(party) + _turn_announcement(session)
         )
         await _safe_send(update, header, reply_markup=_battle_menu_keyboard(session))
         await _resolve_ai_turns(update, session)
@@ -4819,6 +4988,8 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
                 f"{p['name']} ({p['initiative']})" for p in session.participants
             )
             taunt_line = f"> *\"{taunt}\"*\n\n" if taunt else ""
+            ambush_formation_line = _format_formation_line(party)
+            ambush_formation_block = f"Your formation — {ambush_formation_line}\n\n" if ambush_formation_line else ""
             header = (
                 f"⚠️ **{npc_data['name']} ({npc_data.get('alignment', 'unknown alignment')}) "
                 f"blocks your path!**\n{taunt_line}"
@@ -4828,6 +4999,8 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
                 # `party`), not the global party summary.
                 f"Your party ({_format_party_names(party)}) faces **{npc_data['name']}**!\n\n"
                 f"🎯 **Initiative order:** {initiative_line}\n\n"
+                + ambush_formation_block
+                + _rushed_in_note(party)
                 + _turn_announcement(session)
             )
             combat_env = location.get("combat_environment")
@@ -5038,6 +5211,8 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                     f"🔥 **{target['name']} flies into a desperate rage — its attacks hit "
                     f"even harder for the rest of this fight!**",
                 )
+            if result.get("bloodied_triggered"):
+                await _safe_send(update, f"🩸 **{target['name']} is bloodied!**")
             attack_label = (
                 action_text if attack_count == 1 else f"{action_text} ({attack_num + 1}/{attack_count})"
             )
@@ -8192,6 +8367,24 @@ def _party_keyboard(character: dict) -> InlineKeyboardMarkup | None:
     """
     rows = []
     party_id = character.get("party_id")
+
+    # Formation row toggle (2026-08-01, per Coffee: "allow us to
+    # customize the formations") -- offered for yourself regardless of
+    # party status (unlike bench, which never applies to yourself),
+    # since your own row matters the moment you're in ANY fight, solo
+    # or partied.
+    self_row = character.get("formation_row", "front")
+    if self_row == "back":
+        rows.append([InlineKeyboardButton(
+            "🔮 You: Back row (tap for Front)",
+            callback_data=f"party|setrow|{character['telegram_user_id']}|front",
+        )])
+    else:
+        rows.append([InlineKeyboardButton(
+            "🛡️ You: Front row (tap for Back)",
+            callback_data=f"party|setrow|{character['telegram_user_id']}|back",
+        )])
+
     if party_id:
         # Per Coffee (2026-07-24: "buttons in equip for that?" -- asked
         # right after the new "auto equip the party" free-text command):
@@ -8219,6 +8412,17 @@ def _party_keyboard(character: dict) -> InlineKeyboardMarkup | None:
                 rows.append([InlineKeyboardButton(
                     f"✅ {m['name']} (active — tap to bench)",
                     callback_data=f"party|bench|{m['telegram_user_id']}",
+                )])
+            m_row = m.get("formation_row", "front")
+            if m_row == "back":
+                rows.append([InlineKeyboardButton(
+                    f"🔮 {m['name']}: Back row (tap for Front)",
+                    callback_data=f"party|setrow|{m['telegram_user_id']}|front",
+                )])
+            else:
+                rows.append([InlineKeyboardButton(
+                    f"🛡️ {m['name']}: Front row (tap for Back)",
+                    callback_data=f"party|setrow|{m['telegram_user_id']}|back",
                 )])
     elif character.get("pending_party_invite"):
         rows.append([InlineKeyboardButton("✅ Accept Invite", callback_data="party|accept")])
@@ -8267,6 +8471,18 @@ async def party_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             await _do_bench_member(update, target["name"])
         else:
             await _do_unbench_member(update, target["name"])
+    elif action == "setrow" and len(parts) > 3:
+        try:
+            target_id = int(parts[2])
+        except ValueError:
+            return
+        row = parts[3]
+        if row not in ("front", "back"):
+            return
+        target = db.get_character(target_id)
+        if target is None:
+            return
+        await _do_set_formation_row(update, target["name"], row)
 
 
 async def _do_invite_to_party(update: Update, target_name: str) -> None:
@@ -8404,6 +8620,50 @@ async def _do_unbench_member(update: Update, target_name: str) -> None:
         return
     db.update_character(target["telegram_user_id"], is_benched=0)
     await _safe_send(update, f"🪑 **{target['name']}** is back in the active party.")
+
+
+async def _do_set_formation_row(update: Update, target_name: str, row: str) -> None:
+    """
+    Real battle-formation customization (2026-08-01, per Coffee: "allow
+    us to customize the formations"). Unlike bench/unbench, this
+    DOES apply to yourself -- setting your own row is exactly as valid
+    a choice as setting anyone else's. No party required either: a
+    solo character can still set their own row (matters the moment
+    they team up, or against a multi-enemy fight where formation still
+    affects who gets targeted). A named target must be a real party
+    member if the requester IS in a party; with no name given, it
+    defaults to the requester themselves.
+    """
+    telegram_user_id = update.effective_user.id
+    character = db.get_character(telegram_user_id)
+    if character is None:
+        await _safe_send(update, "You don't have a character yet!")
+        return
+    if not target_name or target_name.strip().lower() in ("me", "myself", "my own"):
+        target = character
+    else:
+        target = _find_party_target_by_name(target_name)
+        party_id = character.get("party_id")
+        if target is None or (party_id and target.get("party_id") != party_id) or (
+            not party_id and target["telegram_user_id"] != telegram_user_id
+        ):
+            await _safe_send(update, f"No one named \"{target_name}\" is in your party.")
+            return
+    if target.get("formation_row", "front") == row:
+        await _safe_send(update, f"{target['name']} is already in the {row} row.")
+        return
+    db.update_character(target["telegram_user_id"], formation_row=row)
+    if row == "back":
+        await _safe_send(
+            update,
+            f"🔮 **{target['name']}** moves to the **back row** — less likely to be targeted, "
+            f"harder to hit, free to heal, cast, or shoot from safety.",
+        )
+    else:
+        await _safe_send(
+            update,
+            f"🛡️ **{target['name']}** moves to the **front row** — takes point, the enemy's first target.",
+        )
 
 
 def _feature_use_status(character: dict) -> str | None:
@@ -8805,6 +9065,15 @@ def _item_keyboard(character: dict) -> InlineKeyboardMarkup | None:
     Grounded in this character's actual carried consumables (qty > 0),
     same convention _battle_menu_keyboard's Items button already uses.
     Tapping opens the same shared _target_picker_keyboard as spells.
+
+    Scrolls deliberately do NOT belong in this list (2026-08-01,
+    confirmed while investigating a suspected gap here): they're cast,
+    not "used" -- _do_use_item only ever accepts type in
+    ("consumable", "map"), so a scroll button routed through this same
+    item|use path would always fail with "Use what, exactly?". Scrolls
+    already get their own real buttons via _scroll_spell_buttons
+    (2026-07-25), shown on this exact same backpack screen through the
+    spell|cast path instead -- see _do_show_inventory's combined_rows.
     """
     consumable_ids = [
         item_id for item_id, qty in character.get("inventory", {}).items()
@@ -10096,6 +10365,10 @@ async def _do_use_environment(update: Update) -> None:
                     f"🔥 **{enemy['name']} flies into a desperate rage — its attacks hit "
                     f"even harder for the rest of this fight!**"
                 )
+            if (not enemy.get("bloodied") and enemy["hp_current"] > 0
+                    and enemy["hp_current"] <= enemy.get("hp_max", enemy["hp_current"]) * BLOODIED_HP_THRESHOLD):
+                enemy["bloodied"] = True
+                lines.append(f"🩸 **{enemy['name']} is bloodied!**")
         await _safe_send(update, "\n".join(lines))
 
         removed = session.remove_defeated()
@@ -13749,6 +14022,13 @@ async def _do_show_story_so_far(update: Update) -> None:
 
     completed_arcs = []
     chapter_lines = ["**Chapters:**"]
+    # Locked chapters (2026-08-01, per Coffee's dev-topic feedback: the
+    # "???" listing for later chapters read as an unbroken wall,
+    # especially once rebirth-gated arcs 5-14 stack up). Collapsed into
+    # one summary line instead of one "🔒 ???" per locked arc -- same
+    # fog-of-war principle as before (no title/description leaked),
+    # just not repeated N times.
+    locked_count = 0
     for arc_id, arc in CAMPAIGN.get("story_arcs", {}).items():
         arc_quests = set(arc.get("quests", []))
         if arc_quests and arc_quests.issubset(completed_ids):
@@ -13757,7 +14037,11 @@ async def _do_show_story_so_far(update: Update) -> None:
         elif arc_id == current_arc_id:
             chapter_lines.append(f"▶️ {arc['title']} *(current)*")
         else:
-            chapter_lines.append("🔒 ???")
+            locked_count += 1
+    if locked_count == 1:
+        chapter_lines.append("🔒 1 more chapter — still locked")
+    elif locked_count > 1:
+        chapter_lines.append(f"🔒 {locked_count} more chapters — still locked")
 
     current_arc_pair = (current[1]["title"], current[1]["description"]) if current else None
     completed_quests = [
@@ -14233,6 +14517,14 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                     and target["hp_current"] <= target.get("hp_max", target["hp_current"]) * ENRAGE_HP_THRESHOLD):
                 target["enraged"] = True
                 enrage_triggered = True
+            # Bloodied (2026-08-01, task #244) -- same manual mirror of
+            # rules/combat.py's check as Boss Enrage just above, for the
+            # same reason (resolve_damage_spell is its own pipeline).
+            bloodied_triggered = False
+            if (not target.get("bloodied") and target["hp_current"] > 0
+                    and target["hp_current"] <= target.get("hp_max", target["hp_current"]) * BLOODIED_HP_THRESHOLD):
+                target["bloodied"] = True
+                bloodied_triggered = True
             full_result = {
                 **result, "attacker": character["name"], "defender": target["name"],
                 "hit": True, "defender_hp_remaining": target["hp_current"],
@@ -14249,6 +14541,8 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                     f"🔥 **{target['name']} flies into a desperate rage — its attacks hit "
                     f"even harder for the rest of this fight!**",
                 )
+            if bloodied_triggered:
+                await _safe_send(update, f"🩸 **{target['name']} is bloodied!**")
 
             removed = session.remove_defeated()
             await _announce_defeats(update, session, removed)
@@ -14643,12 +14937,40 @@ async def roster_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
+    previously_active = db.get_character(telegram_user_id)
+    incoming = db.get_character_by_id(character_id)
+    had_own_party_already = bool(incoming.get("party_id")) if incoming else False
     switched = _switch_character_with_party_carryover(telegram_user_id, character_id)
+    party_note = _party_switch_note(previously_active, switched, had_own_party_already)
     await _safe_send(
         update,
         f"🎭 Switched to **{switched['name']}** the {switched['race']} {switched['char_class']} "
-        f"(Level {switched['level']}).",
+        f"(Level {switched['level']}).{party_note}",
     )
+
+
+def _party_switch_note(previously_active: dict | None, switched: dict, had_own_party_already: bool) -> str:
+    """
+    Party-per-character clarity (2026-08-01, task #245, per Coffee's
+    own dev-topic confusion: "I switched my player and now they are no
+    longer in my party"). _switch_character_with_party_carryover
+    already carries the party seat over automatically for the common
+    case -- but party membership is still a real per-CHARACTER fact,
+    not per-account, so the two cases where that carryover deliberately
+    does NOT happen are called out explicitly instead of leaving the
+    player to guess why: the new character already had its OWN,
+    separate party (never silently overridden), or it simply has no
+    party at all after the switch. Shared by both real switch entry
+    points (free text and the roster tap-menu button), same reasoning
+    _switch_character_with_party_carryover's own docstring gives for
+    sharing that function.
+    """
+    if (had_own_party_already and previously_active
+            and previously_active["character_id"] != switched["character_id"]):
+        return " (they're already in their own separate party — party membership follows the character, not your account.)"
+    if not switched.get("party_id"):
+        return " They're not in a party — party membership is per-character, so invite someone (or accept an invite) again for this one."
+    return ""
 
 
 def _find_own_character_by_name_fragment(telegram_user_id: int, fragment: str) -> dict | None:
@@ -14727,11 +15049,14 @@ async def _do_switch_character(update: Update, text: str) -> None:
         )
         return
 
+    previously_active = db.get_character(update.effective_user.id)
+    had_own_party_already = bool(match.get("party_id"))
     switched = _switch_character_with_party_carryover(update.effective_user.id, match["character_id"])
+    party_note = _party_switch_note(previously_active, switched, had_own_party_already)
     await _safe_send(
         update,
         f"🎭 Switched to **{switched['name']}** the {switched['race']} {switched['char_class']} "
-        f"(Level {switched['level']}).",
+        f"(Level {switched['level']}).{party_note}",
     )
 
 
@@ -15404,6 +15729,10 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_bench_member(update, intent.get("target") or "")
     elif action == "unbench_party_member":
         await _do_unbench_member(update, intent.get("target") or "")
+    elif action == "set_front_row":
+        await _do_set_formation_row(update, intent.get("target") or "", "front")
+    elif action == "set_back_row":
+        await _do_set_formation_row(update, intent.get("target") or "", "back")
     elif action == "find_merchant":
         await _do_find_merchant(update)
     elif action == "give_item":
