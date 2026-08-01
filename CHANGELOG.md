@@ -2,6 +2,13 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.62] — A quieter thread through the post-story dungeons
+
+A small, deliberate addition to the six grind dungeons that open up
+after the main story (Arc 5-10) — no new mechanics, no spoilers here.
+Nothing that changes how any of these fights play, and nothing a
+first-time player needs to notice. Attentive players might.
+
 ## [1.27.61] — Active AI companions now actually show up to fight
 
 Real live report: Coffee had Grask Emberscale — a real, active,

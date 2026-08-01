@@ -3330,7 +3330,7 @@
         "type": "defeat_monster",
         "monster": "goblin_shaman_elder"
       },
-      "clue": "It keeps glancing at the stockpile like it's protecting the supplies, not itself."
+      "clue": "It keeps glancing at the stockpile like it's protecting the supplies, not itself -- and for one long second before it moves, it looks right at you like it already knew you'd come."
     },
     "the_collapsed_tunnels_survivor": {
       "title": "The Collapsed Tunnel's Survivor",
@@ -3380,7 +3380,7 @@
         "type": "defeat_monster",
         "monster": "elder_root_shaman"
       },
-      "clue": "Its magic tastes like the water itself -- old, still, and a lot deeper than it looks."
+      "clue": "Its magic tastes like the water itself -- old, still, and a lot deeper than it looks. It doesn't flinch when it sees you, either -- like it's been waiting this deep for exactly this long."
     },
     "the_side_pools_straggler": {
       "title": "The Side Pool's Straggler",
@@ -3431,7 +3431,7 @@
         "type": "defeat_monster",
         "monster": "elder_web_spider"
       },
-      "clue": "Nothing that's gone into the current has ever climbed back out. This is apparently where it all went."
+      "clue": "Nothing that's gone into the current has ever climbed back out. This is apparently where it all went. It watches you cross the last stretch of water without once looking surprised."
     },
     "silked_nooks_hatchling": {
       "title": "The Silked Nook's Hatchling",
@@ -3495,7 +3495,7 @@
         "type": "defeat_monster",
         "monster": "barrow_bound_wolf"
       },
-      "clue": "The supply cache up above was being restocked for this one, not for whoever was camping at the entrance."
+      "clue": "The supply cache up above was being restocked for this one, not for whoever was camping at the entrance. It's already facing the entrance when you arrive, like it heard you coming from somewhere further back than footsteps."
     },
     "hollow_thresholds_bound_wolf": {
       "title": "The Hollow Threshold's Bound Wolf",
@@ -3546,7 +3546,7 @@
         "type": "defeat_monster",
         "monster": "deep_root_warden"
       },
-      "clue": "It's bigger, slower, and far more deliberate than the sentinel outside -- built for exactly this room, and nowhere else."
+      "clue": "It's bigger, slower, and far more deliberate than the sentinel outside -- built for exactly this room, and nowhere else. It doesn't so much notice you as confirm you."
     },
     "pools_wrought_spider": {
       "title": "The Pool's Wrought Spider",
@@ -3571,7 +3571,7 @@
         "type": "defeat_monster",
         "monster": "elder_crystal_spider"
       },
-      "clue": "It glows exactly like the crystals up above -- close enough that whoever named this place probably never noticed the difference."
+      "clue": "It glows exactly like the crystals up above -- close enough that whoever named this place probably never noticed the difference. And for exactly as long as it takes to notice, it glows brighter when you walk in -- like it recognizes you, not just the light."
     },
     "the_dim_hollows_spiderling": {
       "title": "The Dim Hollow's Spiderling",
