@@ -2,6 +2,57 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.64] — Battle formations mid-fight, and AI companions actually earn combat XP now
+
+Per Coffee: "let the party use formations to move forward and pull
+back in battle... it shudnt cost them a turn... this can be very
+useful in boss battles and defending players." Front/back row can now
+be changed in real time, mid-fight, by anyone — free-text ("pull
+back", "cover me", "fall back", "push up", "hold the line", "pull Zara
+back") or a button, and it takes effect immediately for the fight
+already in progress, not just the next one. The old flat "Run" button
+is now a "⚙️ More" submenu (Run, Give, Formation, Equip) so the
+primary Fight/Skills/Items row stays clean — every action in that
+submenu is a genuinely free, no-turn-cost utility, confirmed by
+reading each one.
+
+Also fixed a real, significant bug found while investigating Coffee's
+live report ("They didn't get experience for being in battle" — Wren
+Hollowbrook, a real, present, actively-fighting AI companion, had 0 XP
+after a genuine combat win): AI companions were being excluded from
+combat XP entirely, even when they were actually in the fight —
+contradicting this game's own design (quest-reward sharing already
+correctly included them). A present, fighting AI companion now earns
+the same real combat XP share as a human party member. An absent
+companion (not in this specific fight) still correctly gets nothing —
+that rule is unchanged.
+
+## [1.27.63] — New AI companions join at the party's level, and "look around" now shows enemy difficulty
+
+Per Coffee: "when we get a new AI party member to the party, make
+their level when joining the party's avg lvl, so players stay
+balanced with the party." A freshly recruited companion (or an
+existing one invited into a new party) now joins at the real average
+level of the party they're entering — recomputed from scratch with
+the same formulas a genuine level-up uses (HP, proficiency bonus, XP),
+never just a bigger number with stale level-1 stats behind it.
+One-directional: a companion already ABOVE the party's average keeps
+their own higher level rather than getting nerfed down.
+
+Also, per Coffee: "show the lv of the enemies when we look in areas —
+it will give us an idea if we're over our heads or not. If it's a
+boss show it as '???'." "Look around" now shows a real inferred level
+per monster present (grounded in the same real 5E medium-encounter XP
+math the game already uses to scale fights) — a boss shows "???"
+instead, same spoiler-avoidance convention as the locked chapter list.
+
+Two real bugs turned up while testing these: a companion's "joins your
+party!" message was listing every active character in the entire
+game, not just their actual party, whenever more than one real party
+existed at once; and "look around" was showing a monster's raw
+internal key (e.g. "colosseum_champion") instead of its real display
+name.
+
 ## [1.27.62] — A quieter thread through the post-story dungeons
 
 A small, deliberate addition to the six grind dungeons that open up

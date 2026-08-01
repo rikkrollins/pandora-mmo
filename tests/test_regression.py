@@ -1729,6 +1729,56 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(companion_xp_after, companion_xp_before)
         sessions.end_session(-999)
 
+    async def test_ai_companion_actually_fighting_gets_real_combat_xp(self):
+        """
+        Real live bug (2026-08-01, Coffee: "They didn't get experience
+        for being in battle" -- Wren Hollowbrook, a real, present,
+        actively-fighting AI companion, had 0 XP after a genuine combat
+        win). _award_victory_xp used to exclude EVERY is_ai participant
+        from combat XP outright, even ones actually in session.turn_order
+        fighting alongside a human -- contradicting
+        _share_quest_rewards_with_party's own correct "AI companions
+        included" design. Distinct from the test above: THIS companion
+        is a real combat PARTICIPANT (in turn_order), not merely a party
+        member sitting out this fight.
+        """
+        import sessions
+        sessions.end_session(-999)
+        leader_id = 900490
+        make_basic_character(leader_id, "XpLeader", current_location="crossroads_tavern")
+        party_id = db.create_party(leader_id)
+        companion = db.create_ai_companion(
+            "XpBuddy", "Elf", "Ranger",
+            ability_scores={"strength": 12, "dexterity": 17, "constitution": 13,
+                             "intelligence": 11, "wisdom": 15, "charisma": 10},
+            hp_max=30, armor_class=14, gold=0, inventory={},
+        )
+        db.add_ai_companion_to_party(companion["telegram_user_id"], party_id)
+        companion_id = companion["telegram_user_id"]
+
+        enemy_id = -2_500_060
+        enemy = {"telegram_user_id": enemy_id, "name": "XpGoblin", "dexterity": 10, "xp_reward": 90}
+        leader = db.get_character(leader_id)
+        leader["telegram_user_id"] = leader_id
+        companion_p = db.get_character(companion_id)
+        companion_p["telegram_user_id"] = companion_id
+        session = sessions.start_session(
+            -999, [leader, companion_p, enemy],
+            {leader_id: "party", companion_id: "party", enemy_id: "enemy"},
+        )
+        session.turn_order = [leader_id, companion_id, enemy_id]
+
+        leader_xp_before = db.get_character(leader_id)["xp"]
+        companion_xp_before = db.get_character(companion_id)["xp"]
+        bot._award_victory_xp(session)
+        leader_xp_after = db.get_character(leader_id)["xp"]
+        companion_xp_after = db.get_character(companion_id)["xp"]
+
+        self.assertGreater(leader_xp_after, leader_xp_before)
+        self.assertGreater(companion_xp_after, companion_xp_before)
+        self.assertEqual(leader_xp_after - leader_xp_before, companion_xp_after - companion_xp_before)
+        sessions.end_session(-999)
+
     # -- Party bench + active-combat cap (2026-07-31, per Coffee: "cap it
     #    at 6 per fight, all members in party get experience and gold
     #    tho") -----------------------------------------------------------
@@ -1874,6 +1924,97 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("no one named", "\n".join(sink).lower())
         self.assertEqual(db.get_character(stranger_id).get("formation_row", "front"), "front")
+
+    # -- Real-time mid-fight formation switching (2026-08-01, per Coffee:
+    #    "let the party use formations to move forward and pull back in
+    #    battle... it shudnt cost them a turn... Run, Give, Formation,
+    #    Equip"). ---------------------------------------------------------
+    def test_tactical_phrasing_maps_to_formation_not_flee(self):
+        self.assertEqual(_keyword_fallback("pull back", [])["action"], "set_back_row")
+        result = _keyword_fallback("pull Zara back", [])
+        self.assertEqual(result["action"], "set_back_row")
+        self.assertEqual(result["target"], "Zara")
+        self.assertEqual(_keyword_fallback("cover me", [])["action"], "set_back_row")
+        self.assertEqual(_keyword_fallback("fall back", [])["action"], "set_back_row")
+        self.assertEqual(_keyword_fallback("push up", [])["action"], "set_front_row")
+        self.assertEqual(_keyword_fallback("hold the line", [])["action"], "set_front_row")
+        self.assertEqual(_keyword_fallback("move up", [])["action"], "set_front_row")
+        # No regression: real flee phrasing is unaffected.
+        self.assertEqual(_keyword_fallback("flee the fight", [])["action"], "flee")
+        self.assertEqual(_keyword_fallback("run away", [])["action"], "flee")
+        # False-positive guard: an unrelated sentence ending in "back"
+        # after an earlier "pull " must not misfire as a formation command.
+        self.assertNotEqual(
+            _keyword_fallback("I pull the lever, then head back to the tavern.", [])["action"],
+            "set_back_row",
+        )
+
+    async def test_formation_change_mid_fight_updates_the_live_session_not_just_the_db(self):
+        import sessions
+        sessions.end_session(-999)
+        leader_id = 950601
+        make_basic_character(leader_id, "MidFightLeader", current_location="crossroads_tavern",
+                              hp_max=100, armor_class=15)
+        db.update_character(leader_id, hp_current=100)
+        enemy = {"telegram_user_id": -5100001, "name": "MidFightGoblin", "dexterity": 10,
+                 "hp_current": 200, "hp_max": 200, "armor_class": 12}
+        leader = db.get_character(leader_id)
+        leader["telegram_user_id"] = leader_id
+        session = sessions.start_session(-999, [leader, enemy], {leader_id: "party", -5100001: "enemy"})
+        session.turn_order = [leader_id, -5100001]
+
+        await bot._do_set_formation_row(FakeUpdate(leader_id, "pull back", []), "", "back")
+
+        live = next(p for p in session.participants if p["telegram_user_id"] == leader_id)
+        self.assertEqual(live.get("formation_row"), "back")
+        self.assertEqual(db.get_character(leader_id).get("formation_row"), "back")
+        self.assertEqual(session.current_participant_id(), leader_id)  # turn unchanged
+        sessions.end_session(-999)
+
+    def test_battle_menu_shows_more_button_not_a_bare_run_button(self):
+        import sessions
+        sessions.end_session(-999)
+        leader_id = 950602
+        make_basic_character(leader_id, "MenuLeader", current_location="crossroads_tavern")
+        enemy = {"telegram_user_id": -5100002, "name": "MenuGoblin", "dexterity": 10, "hp_current": 20, "hp_max": 20}
+        leader = db.get_character(leader_id)
+        leader["telegram_user_id"] = leader_id
+        session = sessions.start_session(-999, [leader, enemy], {leader_id: "party", -5100002: "enemy"})
+        session.turn_order = [leader_id, -5100002]
+        kb = bot._battle_menu_keyboard(session)
+        labels = [btn.text for row in kb.inline_keyboard for btn in row]
+        self.assertFalse(any("Run" in l for l in labels))
+        self.assertTrue(any("More" in l for l in labels))
+        sessions.end_session(-999)
+
+    async def test_give_via_battle_menu_more_submenu_does_not_cost_a_turn(self):
+        import sessions
+        sessions.end_session(-999)
+        leader_id = 950603
+        ally_id = 950604
+        make_basic_character(leader_id, "GiveMenuLeader", current_location="crossroads_tavern")
+        make_basic_character(ally_id, "GiveMenuAlly", current_location="crossroads_tavern")
+        db.update_character(leader_id, inventory={"healing_potion": 1})
+        enemy = {"telegram_user_id": -5100003, "name": "GiveMenuGoblin", "dexterity": 10, "hp_current": 20, "hp_max": 20}
+        leader = db.get_character(leader_id)
+        leader["telegram_user_id"] = leader_id
+        session = sessions.start_session(-999, [leader, enemy], {leader_id: "party", -5100003: "enemy"})
+        session.turn_order = [leader_id, -5100003]
+
+        async def tap(data):
+            sink = []
+            update = FakeCallbackUpdate(leader_id, data, sink)
+            await bot.battle_menu_callback(update, DummyContext())
+            return "\n".join(sink)
+
+        await tap("bm|more")
+        await tap("bm|give")
+        await tap("bm|giveitem|healing_potion")
+        reply = await tap("bm|giveto|healing_potion|GiveMenuAlly")
+        self.assertIn("1x", reply)
+        self.assertEqual(db.get_character(ally_id)["inventory"].get("healing_potion", 0), 1)
+        self.assertEqual(session.current_participant_id(), leader_id)  # turn unchanged
+        sessions.end_session(-999)
 
     # -- AI companions rush to the fight regardless of location (2026-08-01,
     #    real live report: Coffee had Grask Emberscale (a real, active,

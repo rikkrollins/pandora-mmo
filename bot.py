@@ -100,7 +100,8 @@ from rules.leveling import (
     magic_penetration_pct, CLASS_SUBCLASSES, COMBAT_SUBCLASS_NAMES, COMBAT_SUBCLASS_DAMAGE_BONUS_PCT,
     THIEF_SUBCLASS_STEAL_BONUS, TOTEM_WARRIOR_SUBCLASS_NAME, LIFE_SUBCLASS_HEAL_BONUS,
     UTILITY_SUBCLASS_ABILITY_CHECK_BONUS, UTILITY_SUBCLASS_CHECK_BONUS_VALUE,
-    rebirth_hp_max, power_scale_ratio,
+    rebirth_hp_max, power_scale_ratio, full_hp_max_for, proficiency_bonus_for_level,
+    MEDIUM_ENCOUNTER_XP_PER_CHARACTER,
 )
 from rules.proficiency import practiced_bonus, MAX_PRACTICE_BONUS
 
@@ -1990,7 +1991,15 @@ def _battle_menu_keyboard(session: sessions.Session) -> InlineKeyboardMarkup | N
     ]
     if consumable_ids:
         row.append(InlineKeyboardButton("🎒 Items", callback_data="bm|items"))
-    row.append(InlineKeyboardButton("🏃 Run", callback_data="bm|run"))
+    # "More" submenu (2026-08-01, per Coffee: "instead of run make it
+    # an other command... Run, Give, Formation, Equip and other things
+    # useful for battle that doesnt require a turn"): Run shares this
+    # submenu with three genuinely free, no-turn-cost utility actions
+    # (_do_give_item/_do_equip_item/_do_set_formation_row -- confirmed
+    # by reading each: none of them ever check whose turn it is or
+    # call advance_turn) -- decluttering the primary row down to just
+    # the real turn-consuming choices.
+    row.append(InlineKeyboardButton("⚙️ More", callback_data="bm|more"))
     return InlineKeyboardMarkup([row])
 
 
@@ -2179,6 +2188,108 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         item_name = item["name"] if item else value
         await _safe_edit_markup(query)
         await _do_use_item(update, f"use {item_name} on {target_name}")
+        return
+
+    if action == "more":
+        buttons = [[InlineKeyboardButton("🔀 Formation", callback_data="bm|formation")]]
+        if _give_item_keyboard(character) is not None:
+            buttons.append([InlineKeyboardButton("🤝 Give", callback_data="bm|give")])
+        if _equip_keyboard(character) is not None:
+            buttons.append([InlineKeyboardButton("⚔️ Equip", callback_data="bm|equip")])
+        buttons.append([InlineKeyboardButton("🏃 Run", callback_data="bm|run")])
+        buttons.append([InlineKeyboardButton("« Back", callback_data="bm|menu")])
+        await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+        return
+
+    if action == "formation":
+        current_row = character.get("formation_row", "front") if character else "front"
+        if current_row == "back":
+            label, new_row = "🛡️ Move to Front Row", "front"
+        else:
+            label, new_row = "🔮 Move to Back Row", "back"
+        buttons = [
+            [InlineKeyboardButton(label, callback_data=f"bm|setrow|{new_row}")],
+            [InlineKeyboardButton("« Back", callback_data="bm|more")],
+        ]
+        await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+        return
+
+    if action == "setrow" and value in ("front", "back"):
+        await _do_set_formation_row(update, "", value)
+        await _safe_edit_markup(query, _battle_menu_keyboard(session))
+        return
+
+    if action == "give":
+        carried_ids = [
+            item_id for item_id, qty in (character.get("inventory", {}) if character else {}).items()
+            if qty > 0 and items_module.get_item(item_id)
+        ]
+        others = [
+            p for p in _get_combat_eligible_party_members(character["current_location"])
+            if p["telegram_user_id"] != user_id
+        ] if character else []
+        if not carried_ids or not others:
+            await _safe_edit_markup(query, _battle_menu_keyboard(session))
+            return
+        buttons = [
+            [InlineKeyboardButton(items_module.get_item(iid)["name"], callback_data=f"bm|giveitem|{iid}")]
+            for iid in carried_ids
+        ]
+        buttons.append([InlineKeyboardButton("« Back", callback_data="bm|more")])
+        await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+        return
+
+    if action == "giveitem":
+        item = items_module.get_item(value)
+        others = [
+            p for p in _get_combat_eligible_party_members(character["current_location"])
+            if p["telegram_user_id"] != user_id
+        ] if character else []
+        if item is None or not others:
+            await _safe_edit_markup(query, _battle_menu_keyboard(session))
+            return
+        buttons = [
+            [InlineKeyboardButton(p["name"], callback_data=f"bm|giveto|{value}|{p['name']}")]
+            for p in others
+        ]
+        buttons.append([InlineKeyboardButton("« Back", callback_data="bm|give")])
+        await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+        return
+
+    if action == "giveto":
+        item = items_module.get_item(value)
+        item_name = item["name"] if item else value
+        await _safe_edit_markup(query)
+        await _do_give_item(update, f"give {item_name} to {target_name}")
+        await _safe_send(update, _turn_announcement(session), reply_markup=_battle_menu_keyboard(session))
+        return
+
+    if action == "equip":
+        equipped_ids = {character.get("equipped_weapon"), character.get("equipped_armor"),
+                        character.get("equipped_shield"), *(character.get("equipped_accessories") or [])} \
+            if character else set()
+        equippable_ids = [
+            item_id for item_id, qty in (character.get("inventory", {}) if character else {}).items()
+            if qty > 0 and item_id not in equipped_ids
+            and (items_module.get_item(item_id) or {}).get("type") in ("weapon", "armor", "shield", "ring", "amulet", "wondrous")
+        ]
+        if not equippable_ids:
+            await _safe_edit_markup(query, _battle_menu_keyboard(session))
+            return
+        buttons = [
+            [InlineKeyboardButton(items_module.get_item(iid)["name"], callback_data=f"bm|equipitem|{iid}")]
+            for iid in equippable_ids
+        ]
+        buttons.append([InlineKeyboardButton("« Back", callback_data="bm|more")])
+        await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+        return
+
+    if action == "equipitem":
+        item = items_module.get_item(value)
+        item_name = item["name"] if item else value
+        await _safe_edit_markup(query)
+        await _do_equip_item(update, f"equip {item_name}")
+        await _safe_send(update, _turn_announcement(session), reply_markup=_battle_menu_keyboard(session))
         return
 
     if action == "run":
@@ -2900,10 +3011,27 @@ def _award_victory_xp(session: sessions.Session) -> tuple[str, list[str]]:
     adjust_faction_standing) — killing a faction's member sours that
     whole faction on you, not just that one NPC.
     """
+    # Real bug found live (2026-08-01, Coffee: "They didn't get
+    # experience for being in battle" -- Wren Hollowbrook, a real,
+    # present, actively-fighting AI companion, had 0 XP after a real
+    # combat win). This "not is_ai" filter excluded EVERY AI companion
+    # from combat XP entirely, present or not -- contradicting this
+    # game's own stated design philosophy ("an AI-driven party member
+    # plays under the same rules as a human one", see
+    # _share_quest_rewards_with_party's docstring, which already
+    # correctly includes present AI companions and was written
+    # ASSUMING this function already did the same). scaled_enemy_count
+    # already sizes the encounter for the FULL present party (human +
+    # AI, via _get_real_party_combatants) -- splitting the resulting
+    # XP only among the humans was rewarding humans for a fight scaled
+    # around companions who got nothing back. The SEPARATE "absent
+    # party member" bonus loop below still correctly excludes is_ai
+    # (test_ai_companions_never_get_the_absent_party_bonus) -- that
+    # rule is untouched; this only fixes AI companions who were
+    # actually IN this fight.
     real_party_ids_all = [
         pid for pid in session.turn_order
         if session.sides.get(pid) == "party"
-        and not next(p for p in session.participants if p["telegram_user_id"] == pid).get("is_ai")
     ]
 
     # Task #170, per Coffee: guild membership now requires proving
@@ -5252,6 +5380,59 @@ async def _do_pass_turn(update: Update) -> None:
         await _resolve_ai_turns(update, session)
 
 
+async def _balance_companion_level_to_party(update: Update, companion_telegram_user_id: int, party_id: int | None) -> None:
+    """
+    Per Coffee (2026-08-01): "when we get a new AI party member to the
+    party, make their level when joining the parties avg lvl, so
+    players stay balanced with the party." One-directional -- only
+    ever RAISES a companion up to the party's average level, never
+    lowers one back down, so a companion who already earned a higher
+    level somewhere else never loses real progress just by joining a
+    lower-level party. The party average is computed from every OTHER
+    real member (never counting the companion's own level against
+    itself, regardless of whether they've already been attached to
+    party_id by the time this runs). Recomputes hp_max/proficiency_
+    bonus/xp from scratch for the new level via the same real formulas
+    an actual level-up uses (full_hp_max_for/proficiency_bonus_for_
+    level/XP_THRESHOLDS) -- never just stamps a bigger level number
+    with stale level-1 stats still behind it.
+    """
+    if not party_id:
+        return
+    # Companion characters are their own active_characters owner
+    # (self-mapped, per create_ai_companion's docstring), so
+    # get_character(companion_telegram_user_id) reaches the same row
+    # get_character_by_id would.
+    companion = db.get_character(companion_telegram_user_id)
+    if companion is None:
+        return
+    current_level = companion.get("level", 1)
+    other_levels = [
+        m.get("level", 1) for m in db.get_party_members_by_id(party_id)
+        if m["telegram_user_id"] != companion_telegram_user_id
+    ]
+    if not other_levels:
+        return
+    target_level = max(1, round(sum(other_levels) / len(other_levels)))
+    if target_level <= current_level:
+        return
+    new_hp_max = full_hp_max_for(
+        companion["char_class"], companion["constitution"], target_level, companion.get("rebirth_count", 0),
+    )
+    db.update_character_by_id(
+        companion["character_id"],
+        level=target_level,
+        xp=XP_THRESHOLDS[target_level],
+        hp_max=new_hp_max,
+        hp_current=new_hp_max,
+        proficiency_bonus=proficiency_bonus_for_level(target_level),
+    )
+    await _safe_send(
+        update,
+        f"📈 **{companion['name']}** levels up to **{target_level}** to stay in step with the rest of the party.",
+    )
+
+
 async def _do_recruit_npc(update: Update, npc_name: str) -> None:
     npc_id = npc_name.lower().replace(" ", "_")
     npc = None
@@ -5338,14 +5519,27 @@ async def _do_recruit_npc(update: Update, npc_name: str) -> None:
     # since create_character's schema default location has nothing to
     # do with where they were actually just recruited.
     recruiter = db.get_character(update.effective_user.id)
+    party_summary = _party_summary_text()
     if recruiter is not None:
         party_id = recruiter.get("party_id")
         if not party_id:
             party_id = db.create_party(update.effective_user.id)
         db.add_ai_companion_to_party(companion["telegram_user_id"], party_id)
         db.move_character(companion["telegram_user_id"], recruiter["current_location"])
+        await _balance_companion_level_to_party(update, companion["telegram_user_id"], party_id)
+        # Real bug found live while testing the level-balance feature
+        # above (2026-08-01): _party_summary_text() is _get_party_
+        # members()'s GLOBAL roster -- every active character in the
+        # whole game, not just this specific party_id (correct and
+        # intentional for the welcome narration/"who's active" listing
+        # elsewhere in this file, but wrong here) -- so with more than
+        # one real party active in the game at once, "joins your party!"
+        # was listing every OTHER party's members too. Same fix shape
+        # _do_start_combat's header already applies (see its own "not
+        # the global _party_summary_text()" comment).
+        party_summary = _format_party_names(db.get_party_members_by_id(party_id))
 
-    await _safe_send(update, f"🤝 {npc['name']} joins your party! {_party_summary_text()}")
+    await _safe_send(update, f"🤝 {npc['name']} joins your party! {party_summary}")
 
     # Per Coffee (2026-07-14): each recruitable should mention "a task,
     # mission, journey or adventure" once they join, so the party can
@@ -8533,6 +8727,7 @@ async def _do_invite_to_party(update: Update, target_name: str) -> None:
         # AI companions have no real turn to accept with — they join immediately.
         db.add_ai_companion_to_party(target["telegram_user_id"], party_id)
         await _safe_send(update, f"🎗️ **{target['name']}** joins your party!")
+        await _balance_companion_level_to_party(update, target["telegram_user_id"], party_id)
         return
 
     db.set_pending_party_invite(target["telegram_user_id"], party_id)
@@ -8653,6 +8848,23 @@ async def _do_set_formation_row(update: Update, target_name: str, row: str) -> N
         await _safe_send(update, f"{target['name']} is already in the {row} row.")
         return
     db.update_character(target["telegram_user_id"], formation_row=row)
+    # Real-time mid-fight repositioning (2026-08-01, per Coffee: "let
+    # the party use formations to move forward and pull back in
+    # battle" -- meant to matter for THIS fight, not just the next
+    # one). A combat session's participants are a snapshot taken at
+    # _do_start_combat time; without this, the DB write above would be
+    # correct for future fights but silently invisible to the targeting/
+    # AC math (_pick_formation_weighted_target, resolve_attack's
+    # formation_ac_bonus) for the fight actually in progress. Same
+    # "find and mutate the live participant dict too" pattern
+    # _do_use_item's heal branch already uses for hp_current.
+    session = sessions.get_session(update.effective_chat.id)
+    if session is not None:
+        live_target = next(
+            (p for p in session.participants if p["telegram_user_id"] == target["telegram_user_id"]), None,
+        )
+        if live_target is not None:
+            live_target["formation_row"] = row
     if row == "back":
         await _safe_send(
             update,
@@ -10977,6 +11189,42 @@ async def _maybe_send_npc_portrait(update: Update, npc_id: str, npc_data: dict) 
         logger.warning(f"[images] NPC portrait failed for {npc_id!r}: {e!r}")
 
 
+def _monster_danger_line(monster_keys: list[str]) -> str:
+    """
+    Real difficulty signal for "look around" (2026-08-01, per Coffee:
+    "show the lv of the enemies... it will give us an idea if we are
+    over our heads or not"). A monster has no stored level of its own
+    -- inferred here the same way scaled_enemy_count already reasons
+    about fights, by finding the highest real 5E DMG "medium
+    encounter" XP threshold (MEDIUM_ENCOUNTER_XP_PER_CHARACTER) this
+    monster's own xp_reward clears, i.e. "a medium fight for a
+    level-N character" -- not an invented number. A boss shows "???"
+    instead, per Coffee's own instruction, same spoiler-avoidance
+    convention as the locked chapter list. Also fixes a real, separate
+    display bug caught while building this: this line used to join
+    raw monster_keys directly ("colosseum_champion") instead of each
+    monster's real display name.
+    """
+    parts = []
+    for key in monster_keys:
+        template = cl.get_monster_template(CAMPAIGN, key)
+        if template is None:
+            continue
+        name = template["name"]
+        if template.get("is_boss"):
+            parts.append(f"{name} (???)")
+            continue
+        xp = template.get("xp_reward", 0)
+        level = 1
+        for lvl, threshold in sorted(MEDIUM_ENCOUNTER_XP_PER_CHARACTER.items()):
+            if xp >= threshold:
+                level = lvl
+            else:
+                break
+        parts.append(f"{name} (Lv. {level})")
+    return ", ".join(parts)
+
+
 async def _do_look(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -11008,7 +11256,7 @@ async def _do_look(update: Update) -> None:
         lines.append(f"People here: {', '.join(npc_names)}")
     monsters_here = location.get("monsters", [])
     if monsters_here:
-        lines.append(f"You sense danger here: {', '.join(monsters_here)}")
+        lines.append(f"You sense danger here: {_monster_danger_line(monsters_here)}")
     connections = location.get("connections", [])
     if connections:
         # Sensory travel descriptions (task #220, per Coffee: "explain

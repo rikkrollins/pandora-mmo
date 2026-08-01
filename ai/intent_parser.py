@@ -128,11 +128,14 @@ without naming a specific item (e.g. "auto equip my character", "put on my gear 
 - "unbench_party_member" is for putting a benched party member back into the active fighting roster \
 (e.g. "unbench Zara", "bring Zara back", "Zara's back in"). Set "target" to their name.
 - "set_front_row" is for moving a character to the front row battle formation (takes point, gets targeted \
-first, but no evade bonus) (e.g. "move Zara to the front", "put me in front", "Zara takes point"). \
-Set "target" to their name, or omit/self if unnamed.
+first, but no evade bonus) (e.g. "move Zara to the front", "put me in front", "Zara takes point", "push up", \
+"advance", "hold the line", "move up"). Set "target" to their name, or omit/self if unnamed.
 - "set_back_row" is for moving a character to the back row battle formation (less likely to be targeted, \
 harder to hit, free to heal/cast/shoot from safety) (e.g. "put Zara in the back row", "I'll hang back", \
-"move me to the back", "Zara stays behind me"). Set "target" to their name, or omit/self if unnamed.
+"move me to the back", "Zara stays behind me", "pull back", "pull Zara back", "cover me", "fall back", \
+"get behind me", "retreat to the back"). This is a real-time tactical repositioning during a fight, distinct \
+from "flee" (which tries to escape the fight entirely) -- only classify as flee if they clearly mean leaving \
+combat, not just moving within it. Set "target" to their name, or omit/self if unnamed.
 - "find_merchant" is for asking where to get supplies or find the nearest shop/merchant.
 - "give_item" is for handing/giving/trading a carried item to another real player or AI companion, \
 not a shop transaction (e.g. "give my healing potion to Sarah", "hand Borin the torch"). Set "target" to the recipient's name.
@@ -606,6 +609,31 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
         return {**base, "action": "set_front_row", "target": None}
     if any(w in lowered for w in ["back row", "hang back", "stay behind", "stays behind"]):
         return {**base, "action": "set_back_row", "target": None}
+
+    # Real-time tactical phrasing (2026-08-01, per Coffee: "research
+    # phrases and words used to cover, defend, pull back, move forward
+    # and other things used for formations" -- meant to work instantly
+    # mid-fight in the heat of the moment, not just the more deliberate
+    # "move X to the row" phrasing above). Deliberately conservative:
+    # only phrases specific enough to a real battlefield context to be
+    # safe as an unconditional keyword-fallback match (this fallback
+    # WINS outright over the model whenever it returns non-"chat", so a
+    # false positive here would misclassify real narrative text, e.g.
+    # "we need to protect the village" -- that's why looser words like
+    # bare "defend"/"protect"/"advance" are deliberately left out).
+    # "pull " requires a trailing "back" (a real name can sit between,
+    # e.g. "pull Zara back"); everything else is a fixed phrase.
+    if "pull " in lowered and lowered.rstrip().rstrip(".!").endswith("back"):
+        name = text[lowered.index("pull ") + len("pull "):lowered.rindex("back")].strip()
+        # Guards against an unrelated sentence that happens to end in
+        # "back" after an earlier "pull " (e.g. "pull the lever, then
+        # head back") -- a real name is short and has no punctuation.
+        if len(name.split()) <= 3 and "," not in name and "." not in name:
+            return {**base, "action": "set_back_row", "target": name or None}
+    if any(w in lowered for w in ["fall back", "cover me"]):
+        return {**base, "action": "set_back_row", "target": None}
+    if any(w in lowered for w in ["push up", "move up", "hold the line", "hold the front"]):
+        return {**base, "action": "set_front_row", "target": None}
 
     # Checked BEFORE the attack-word match below: a hypothetical/defensive
     # statement like "Stand on guard in case the wolves attack" contains
