@@ -2,6 +2,16 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.65] — Equip from the battle menu now offers your whole party
+
+Real live report, caught testing the new battle menu the moment it
+shipped: "when i clicked equip it only showed my character and no one
+else." `_do_equip_item` has always supported equipping gear for
+another present party member — the new battle-menu button just never
+offered anyone but the caller. Tapping Equip now shows an "⚡ Auto
+Equip Party" option plus every present party member (self included);
+picking someone shows THEIR carried gear, not yours.
+
 ## [1.27.64] — Battle formations mid-fight, and AI companions actually earn combat XP now
 
 Per Coffee: "let the party use formations to move forward and pull

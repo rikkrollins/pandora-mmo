@@ -2016,6 +2016,50 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.current_participant_id(), leader_id)  # turn unchanged
         sessions.end_session(-999)
 
+    async def test_equip_via_battle_menu_offers_present_party_members_not_just_self(self):
+        """
+        Real live bug (2026-08-01, Coffee: "when i clicked equip it
+        only showed my character and no one else"). _do_equip_item has
+        always supported equipping gear for another present party
+        member ("equip Sarah with the longbow") -- the battle-menu
+        button just never offered anyone but the caller. Also covers
+        Coffee's explicit follow-up ask: "put an auto equip button".
+        """
+        import sessions
+        sessions.end_session(-999)
+        leader_id = 950701
+        ally_id = 950702
+        make_basic_character(leader_id, "EquipMenuLeader", current_location="crossroads_tavern")
+        make_basic_character(ally_id, "EquipMenuAlly", current_location="crossroads_tavern")
+        db.update_character(ally_id, inventory={"rusty_dagger": 1})
+        enemy = {"telegram_user_id": -5100004, "name": "EquipMenuGoblin", "dexterity": 10,
+                 "hp_current": 20, "hp_max": 20}
+        leader = db.get_character(leader_id)
+        leader["telegram_user_id"] = leader_id
+        ally = db.get_character(ally_id)
+        ally["telegram_user_id"] = ally_id
+        session = sessions.start_session(-999, [leader, ally, enemy],
+                                          {leader_id: "party", ally_id: "party", -5100004: "enemy"})
+        session.turn_order = [leader_id, ally_id, -5100004]
+
+        async def tap(data):
+            sink = []
+            update = FakeCallbackUpdate(leader_id, data, sink)
+            await bot.battle_menu_callback(update, DummyContext())
+            return "\n".join(sink)
+
+        await tap("bm|more")
+        equip_menu = await tap("bm|equip")
+        self.assertIn("Auto Equip", equip_menu)
+        self.assertIn("EquipMenuAlly", equip_menu)  # the actual bug: ally used to be missing
+
+        await tap(f"bm|equipfor|{ally_id}")
+        reply = await tap(f"bm|equipitem|{ally_id}|rusty_dagger")
+        self.assertEqual(db.get_character(ally_id).get("equipped_weapon"), "rusty_dagger")
+        self.assertNotEqual(db.get_character(leader_id).get("equipped_weapon"), "rusty_dagger")
+        self.assertEqual(session.current_participant_id(), leader_id)  # turn unchanged
+        sessions.end_session(-999)
+
     # -- AI companions rush to the fight regardless of location (2026-08-01,
     #    real live report: Coffee had Grask Emberscale (a real, active,
     #    non-benched party member) sit out a fight purely because he'd

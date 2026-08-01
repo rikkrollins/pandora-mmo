@@ -2265,11 +2265,43 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     if action == "equip":
-        equipped_ids = {character.get("equipped_weapon"), character.get("equipped_armor"),
-                        character.get("equipped_shield"), *(character.get("equipped_accessories") or [])} \
-            if character else set()
+        # Real live bug (2026-08-01, Coffee: "when i clicked equip it
+        # only showed my character and no one else"): this used to
+        # only ever build a picker from the CALLER's own inventory --
+        # never let you help another present party member equip, even
+        # though _do_equip_item itself has always supported that
+        # ("equip Sarah with the longbow"). Shows Auto Equip Party
+        # (per Coffee: "put an auto equip button") plus one entry per
+        # present combatant (self included) -- picking a person shows
+        # THEIR equippable gear next.
+        others = [
+            p for p in _get_combat_eligible_party_members(character["current_location"])
+            if p["telegram_user_id"] != user_id
+        ] if character else []
+        buttons = [[InlineKeyboardButton("⚡ Auto Equip Party", callback_data="bm|equipauto")]]
+        buttons.append([InlineKeyboardButton("🧍 Yourself", callback_data=f"bm|equipfor|{user_id}")])
+        for p in others:
+            buttons.append([InlineKeyboardButton(p["name"], callback_data=f"bm|equipfor|{p['telegram_user_id']}")])
+        buttons.append([InlineKeyboardButton("« Back", callback_data="bm|more")])
+        await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+        return
+
+    if action == "equipauto":
+        await _safe_edit_markup(query)
+        await _do_auto_equip_gear(update, "auto equip the party")
+        await _safe_send(update, _turn_announcement(session), reply_markup=_battle_menu_keyboard(session))
+        return
+
+    if action == "equipfor" and value:
+        target_tid = int(value)
+        target = db.get_character(target_tid)
+        if target is None:
+            await _safe_edit_markup(query, _battle_menu_keyboard(session))
+            return
+        equipped_ids = {target.get("equipped_weapon"), target.get("equipped_armor"),
+                        target.get("equipped_shield"), *(target.get("equipped_accessories") or [])}
         equippable_ids = [
-            item_id for item_id, qty in (character.get("inventory", {}) if character else {}).items()
+            item_id for item_id, qty in (target.get("inventory") or {}).items()
             if qty > 0 and item_id not in equipped_ids
             and (items_module.get_item(item_id) or {}).get("type") in ("weapon", "armor", "shield", "ring", "amulet", "wondrous")
         ]
@@ -2277,18 +2309,23 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             await _safe_edit_markup(query, _battle_menu_keyboard(session))
             return
         buttons = [
-            [InlineKeyboardButton(items_module.get_item(iid)["name"], callback_data=f"bm|equipitem|{iid}")]
+            [InlineKeyboardButton(items_module.get_item(iid)["name"], callback_data=f"bm|equipitem|{target_tid}|{iid}")]
             for iid in equippable_ids
         ]
-        buttons.append([InlineKeyboardButton("« Back", callback_data="bm|more")])
+        buttons.append([InlineKeyboardButton("« Back", callback_data="bm|equip")])
         await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
         return
 
-    if action == "equipitem":
-        item = items_module.get_item(value)
-        item_name = item["name"] if item else value
+    if action == "equipitem" and len(parts) > 3:
+        target_tid = int(parts[2])
+        item = items_module.get_item(parts[3])
+        item_name = item["name"] if item else parts[3]
+        target = db.get_character(target_tid)
         await _safe_edit_markup(query)
-        await _do_equip_item(update, f"equip {item_name}")
+        if target is not None and target_tid != user_id:
+            await _do_equip_item(update, f"equip {item_name} for {target['name']}")
+        else:
+            await _do_equip_item(update, f"equip {item_name}")
         await _safe_send(update, _turn_announcement(session), reply_markup=_battle_menu_keyboard(session))
         return
 
