@@ -22,3 +22,4 @@ dev_videos/
 campaign_sources/
 # Piper voice model (~60MB), downloaded on first use, see ai/tts_piper.py
 voice_models/
+.env.bak
