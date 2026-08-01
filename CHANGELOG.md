@@ -2,6 +2,18 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.66] — Fast-travel now brings your AI companions with you
+
+Real bug found investigating Coffee's report ("It's not letting me
+send to wren, who is in my party"): on-foot travel has always moved
+real AI companions along with the party, but fast-travel (waypoint
+warp) never got the same fix — warping anywhere silently stranded
+every AI companion at the old location. Confirmed live: Ravenloft
+fast-traveled to Market Row while Wren Hollowbrook stayed behind at
+the Sunken Root Caverns, so "give X to Wren" correctly (if
+confusingly) said she wasn't there — she genuinely wasn't. Fast-travel
+now brings every real AI companion along, same as walking does.
+
 ## [1.27.65] — Equip from the battle menu now offers your whole party
 
 Real live report, caught testing the new battle menu the moment it

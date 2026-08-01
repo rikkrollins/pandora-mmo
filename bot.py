@@ -12824,6 +12824,18 @@ async def _do_fast_travel(update: Update, text: str) -> None:
         return
 
     db.move_character(telegram_user_id, destination_id)
+    # Real live bug found investigating Coffee's report ("It's not
+    # letting me send to wren, who is in my party" -- 2026-08-01):
+    # _do_move (on-foot travel) has always moved real AI companions
+    # along with the party via this exact block; fast_travel (waypoint
+    # warp) never got the same fix, so warping anywhere silently left
+    # every AI companion behind at the old location -- indistinguishable
+    # from them just vanishing, and exactly why Wren wasn't "here"
+    # anymore for a give/equip/anything-location-scoped action.
+    if character.get("party_id"):
+        for member in db.get_party_members_by_id(character["party_id"]):
+            if member.get("is_ai") and not member.get("is_dead") and member["telegram_user_id"] != telegram_user_id:
+                db.move_character(member["telegram_user_id"], destination_id)
     await _safe_send(update, f"🌀 You fast-travel to **{destination['name']}**.\n{destination['description']}")
 
     updated_character = db.get_character(telegram_user_id)

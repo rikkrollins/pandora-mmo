@@ -3404,6 +3404,37 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_fast_travel(FakeUpdate(user_id, "", sink), "fast travel to glimmerdeep grotto")
         self.assertEqual(db.get_character(user_id)["current_location"], "glimmerdeep_grotto")
 
+    async def test_fast_travel_brings_real_ai_companions_along(self):
+        """
+        Real live bug found investigating Coffee's report ("It's not
+        letting me send to wren, who is in my party"): _do_move
+        (on-foot travel) has always moved real AI companions along
+        with the party; _do_fast_travel (waypoint warp) never got the
+        same fix, so warping anywhere silently stranded every AI
+        companion at the old location -- confirmed live, Ravenloft
+        fast-traveled to Market Row while Wren Hollowbrook stayed
+        behind at the Sunken Root Caverns, so "give X to Wren" correctly
+        (if confusingly) said she wasn't "here" -- she genuinely wasn't.
+        """
+        leader_id = 950801
+        make_basic_character(leader_id, "FastTravelLeader2", current_location="crossroads_tavern")
+        db.update_character(leader_id, visited_locations=["crossroads_tavern", "market_row"])
+        party_id = db.create_party(leader_id)
+        companion = db.create_ai_companion(
+            "FastTravelBuddy", "Elf", "Ranger",
+            ability_scores={"strength": 12, "dexterity": 17, "constitution": 13,
+                             "intelligence": 11, "wisdom": 15, "charisma": 10},
+            hp_max=30, armor_class=14, gold=0, inventory={},
+        )
+        db.add_ai_companion_to_party(companion["telegram_user_id"], party_id)
+
+        sink = []
+        await bot._do_fast_travel(FakeUpdate(leader_id, "", sink), "fast travel to market row")
+        self.assertEqual(db.get_character(leader_id)["current_location"], "market_row")
+        self.assertEqual(
+            db.get_character_by_id(companion["character_id"])["current_location"], "market_row",
+        )
+
     # -- Per Coffee, 2026-07-19: fishing loses bait by a real 50/50 d20
     #    roll on every attempt (catch or miss), not a fixed schedule.
     async def test_fishing_loses_bait_on_a_low_roll_not_a_high_one(self):
