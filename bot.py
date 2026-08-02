@@ -1250,6 +1250,32 @@ def _get_combat_eligible_party_members(location_id: str) -> list[dict]:
     ]
 
 
+def _equipped_profession_bonus(character: dict, profession: str) -> int:
+    """
+    Magic item system Phase 4 (2026-08-02): sum of every equipped item's
+    profession_bonus affix matching this specific skill_key/profession
+    (e.g. "mining", "alchemy") -- live-summed at read time, same
+    convention as _equipped_regen_bonus/_equipped_ring_ac_bonus, never
+    baked into a stored column. Called as a third additive term
+    alongside _practiced_bonus_for/class_profession_affinity_bonus in
+    _do_gather/_do_craft's existing shared bonus accumulator.
+    """
+    total = 0
+    equipped_ids = [
+        character.get("equipped_weapon"), character.get("equipped_armor"), character.get("equipped_shield"),
+    ] + character.get("equipped_accessories", [])
+    for item_id in equipped_ids:
+        if not item_id:
+            continue
+        item = items_module.get_item(item_id)
+        if not item:
+            continue
+        for entry in item.get("profession_bonuses", []):
+            if entry.get("profession") == profession:
+                total += entry.get("value", 0)
+    return total
+
+
 def _apply_equipped_elemental_profile(character: dict) -> None:
     """
     Phase 2 of the magic item system (2026-08-02): rules.combat's
@@ -9887,6 +9913,11 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
     # as _do_craft's -- a Ranger foraging herbs, a Barbarian in a mine,
     # etc. See rules/crafting.py's CLASS_PROFESSIONS.
     bonus += class_profession_affinity_bonus(character["char_class"], skill_key)
+    # Magic item system Phase 4 (2026-08-02): a third additive source,
+    # live-summed off equipped gear -- same "just one more term in the
+    # existing bonus accumulator" shape this function already uses for
+    # the two sources above.
+    bonus += _equipped_profession_bonus(character, skill_key)
     result["total"] += bonus
     result["practiced_bonus"] = bonus
     success = result["total"] >= SKILL_CHECK_DC
@@ -10060,6 +10091,9 @@ async def _do_craft(update: Update, text: str) -> None:
     # profession, so this never silently favors one build over another.
     bonus = _practiced_bonus_for(update.effective_user.id, profession)
     bonus += class_profession_affinity_bonus(character["char_class"], profession)
+    # Magic item system Phase 4 (2026-08-02): same third additive source
+    # as _do_gather's identical accumulator just above.
+    bonus += _equipped_profession_bonus(character, profession)
     result = resolve_craft(character, recipe_id, practiced_bonus=bonus)
 
     if result["outcome"] == "missing_materials":

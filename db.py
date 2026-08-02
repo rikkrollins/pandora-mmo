@@ -772,6 +772,17 @@ def _apply_affix(item: dict, affix: dict) -> None:
     elif kind == "grants_spell":
         item["grants_spell"] = affix["spell_id"]
         item["grants_spell_uses"] = affix["uses"]
+    # Phase 4 (2026-08-02): a numeric bonus to a real gathering/crafting
+    # roll -- appended to a list since an item could theoretically carry
+    # more than one (a future set bonus, say), read by
+    # bot._equipped_profession_bonus (mirrors _equipped_regen_bonus's
+    # live-summed-at-read-time pattern) at the exact same call sites
+    # _practiced_bonus_for/class_profession_affinity_bonus already feed
+    # into _do_gather/_do_craft's shared "bonus" accumulator.
+    elif kind == "profession_bonus":
+        item.setdefault("profession_bonuses", []).append(
+            {"profession": affix["profession"], "value": affix["value"]}
+        )
 
 
 def materialize_item_instance(item_id: str) -> dict | None:

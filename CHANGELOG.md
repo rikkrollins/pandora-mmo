@@ -2,6 +2,16 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.74] — Magic items: Phase 4, gear that boosts gathering & crafting
+
+Fourth phase of the magic item system. Equipped gear can now carry a
+real profession-bonus affix (e.g. "+3 to mining") that adds directly
+into the same roll gathering/crafting already use — a real DC boundary,
+not flavor text. Reuses the exact accumulator `_do_gather`/`_do_craft`
+already had for practiced-use and class-affinity bonuses; the item
+bonus is a third additive term in the same total, live-summed at read
+time same as every other equipped-gear bonus in this game.
+
 ## [1.27.73] — Magic items: Phase 3, items that grant spells
 
 Third phase of the magic item system. An equipped magic item (ring,

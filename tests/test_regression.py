@@ -1912,6 +1912,52 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(after["spell_slots_current"], slots_before)
         self.assertEqual(db.get_feature_uses(user_id, f"item_spell_{ring_id[2:]}"), 2)
 
+    async def test_equipped_profession_bonus_crosses_a_real_dc_boundary(self):
+        """
+        Real Phase 4 deliverable of the magic item system (2026-08-02):
+        _do_gather/_do_craft already summed multiple additive bonus
+        sources (_practiced_bonus_for + class_profession_affinity_bonus)
+        into one int before comparing to the flat SKILL_CHECK_DC -- a
+        third source, live-summed off equipped gear
+        (bot._equipped_profession_bonus), slots into that exact same
+        accumulator. Proven with a real forced_roll that fails the DC
+        without the item and passes with it, not a unit check of the
+        number alone.
+        """
+        user_id = 950905
+        make_basic_character(
+            user_id, "MiningTester2", char_class="Rogue", current_location="sunken_root_caverns",
+            ability_scores={"strength": 10, "dexterity": 14, "constitution": 12,
+                             "intelligence": 10, "wisdom": 10, "charisma": 10},
+        )
+        db.add_item(user_id, "pickaxe", 1)
+        character = db.get_character(user_id)
+        self.assertEqual(bot._equipped_profession_bonus(character, "mining"), 0)
+
+        ring_id = db.create_item_instance(
+            item_type="ring", name="Ring of the Deep Delver", rarity="rare", price=400,
+            base_stats={"type": "ring"},
+            affixes=[{"kind": "profession_bonus", "profession": "mining", "value": 3}],
+        )
+
+        async def gather():
+            sink = []
+            await bot._do_gather(FakeUpdate(user_id, "I mine for sulfur", sink), "I mine for sulfur", forced_roll=10)
+            return "\n".join(sink)
+
+        before = db.get_character(user_id)["inventory"].get("sulfur_dust", 0)
+        await gather()  # roll of 10, no bonus -> total 10 < DC 13, fails
+        self.assertEqual(db.get_character(user_id)["inventory"].get("sulfur_dust", 0), before)
+
+        db.add_item(user_id, ring_id, 1)
+        success, _msg, _updated = db.equip_item(user_id, ring_id)
+        self.assertTrue(success)
+        self.assertEqual(bot._equipped_profession_bonus(db.get_character(user_id), "mining"), 3)
+
+        before2 = db.get_character(user_id)["inventory"].get("sulfur_dust", 0)
+        await gather()  # same roll of 10, +3 from the ring -> total 13 == DC 13, succeeds
+        self.assertGreater(db.get_character(user_id)["inventory"].get("sulfur_dust", 0), before2)
+
     async def test_ai_companion_actually_fighting_gets_real_combat_xp(self):
         """
         Real live bug (2026-08-01, Coffee: "They didn't get experience
