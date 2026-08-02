@@ -557,7 +557,28 @@ ITEMS = {
 
 
 def get_item(item_id: str) -> dict | None:
-    return ITEMS.get(item_id)
+    """
+    Real per-instance magic items (2026-08-02 magic item system, per
+    Coffee: "make loot real"): a generated/crafted item's id (e.g.
+    "gi42") is never a key in the static ITEMS dict below -- it's a
+    pointer into db.py's item_instances table instead. Falling back here,
+    rather than teaching every call site about the new id scheme
+    separately, is what lets equip/combat/shop/market/scrolls all keep
+    working against a generated item completely unchanged -- they only
+    ever call get_item(). Deferred import: db.py imports this module
+    (`items as items_module`) at its own load time, so a top-level
+    `import db` here would be circular; by the time get_item() is ever
+    actually CALLED, both modules are already fully loaded, which is the
+    standard way to break this exact kind of cycle without restructuring
+    either file.
+    """
+    item = ITEMS.get(item_id)
+    if item is not None:
+        return item
+    if isinstance(item_id, str) and item_id.startswith("gi") and item_id[2:].isdigit():
+        import db
+        return db.materialize_item_instance(item_id)
+    return None
 
 
 def is_sellable(item_id: str) -> bool:
@@ -610,9 +631,15 @@ def find_item_mentioned_in_text(text: str, candidate_ids: list[str] | None = Non
     search_space = candidate_ids if candidate_ids is not None else list(ITEMS.keys())
     # Check longer names first so "greater healing potion" doesn't get
     # shadowed by a shorter partial match like "healing potion".
-    ordered = sorted(search_space, key=lambda i: -len(ITEMS[i]["name"]))
+    # get_item(), not a direct ITEMS[...] index (2026-08-02 magic item
+    # system): a generated item's id (e.g. "gi42") is never a key in the
+    # static ITEMS dict -- candidate_ids can genuinely include one the
+    # moment a player carries any kept generated loot, and this function
+    # is reached from ordinary inventory-scanning free text (equip/sell/
+    # give), so it must resolve those too, not just the static catalog.
+    ordered = sorted(search_space, key=lambda i: -len(get_item(i)["name"]))
     for item_id in ordered:
-        data = ITEMS[item_id]
+        data = get_item(item_id)
         if data["name"].lower() in lowered or item_id.replace("_", " ") in lowered:
             return item_id
 
@@ -660,7 +687,7 @@ def find_item_mentioned_in_text(text: str, candidate_ids: list[str] | None = Non
     strong_matches = set()
     weak_matches = set()
     for item_id in search_space:
-        name_words = [w for w in ITEMS[item_id]["name"].lower().split()]
+        name_words = [w for w in get_item(item_id)["name"].lower().split()]
         significant_words = [
             w[:-1] if w.endswith("s") else w for w in name_words
             if (w[:-1] if w.endswith("s") else w) not in stopwords
@@ -690,7 +717,7 @@ def find_item_mentioned_in_text(text: str, candidate_ids: list[str] | None = Non
 
     matches = set(weak_matches)
     for item_id in search_space:
-        required_for = ITEMS[item_id].get("required_for")
+        required_for = get_item(item_id).get("required_for")
         if required_for and (required_for in lowered_words or f"{required_for}s" in lowered_words):
             matches.add(item_id)
     if len(matches) == 1:

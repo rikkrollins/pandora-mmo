@@ -90,15 +90,29 @@ def _name_for(base_label: str, tier: str) -> str:
 def generate_weapon(base_id: str | None = None, tier: str | None = None) -> dict:
     """
     Returns a fully-formed item dict in the same shape as items.py's
-    ITEMS entries — safe to hand straight to db.add_item alongside a
-    synthetic item_id, or to merge into a shop/loot table.
+    ITEMS entries — safe to hand straight to db.create_item_instance
+    (base_stats=this dict minus "affixes", affixes=this dict's "affixes"),
+    or to merge into a shop/loot table.
+
+    2026-08-02 magic item system refactor: the tier bonus used to be
+    BAKED directly into damage_dice ("1d8+4") -- that's exactly the
+    "single flat monolithic stat baked in at generation time" shape the
+    real per-instance item architecture rules out (see the plan's
+    Context section: base item + a list of independently-attachable
+    affixes, so enchanting/forging/imbuing can all reuse this same
+    system later by appending one more affix, never bespoke merge logic).
+    damage_dice now stays the pure base value; the bonus comes back as a
+    separate "affixes" list instead -- which also matches how combat
+    actually consumes it better than the old code did:
+    _weapon_for_attacker/resolve_attack already read damage_bonus as a
+    field SEPARATE from damage_dice (rules/combat.py's roll_damage
+    modifier=weapon.get("damage_bonus", 0) + ...), never as dice-string
+    concatenation.
     """
     base_id = base_id or random.choice(list(WEAPON_BASES.keys()))
     base = WEAPON_BASES[base_id]
     tier = tier or roll_tier()
     bonus = TIER_BONUS[tier]
-
-    damage_dice = f"{base['damage_dice']}+{bonus}" if bonus else base["damage_dice"]
     name = _name_for(base_id.replace("_", " ").title(), tier)
 
     return {
@@ -107,21 +121,24 @@ def generate_weapon(base_id: str | None = None, tier: str | None = None) -> dict
         "rarity": tier,
         "price": base["base_price"] * TIER_PRICE_MULT[tier],
         "weight": 2,
-        "damage_dice": damage_dice,
+        "damage_dice": base["damage_dice"],
         "ability": base["ability"],
         "weapon_category": base["weapon_category"],
         "generated": True,
         "generated_base": base_id,
         "note": f"A {tier.replace('_', ' ')} find, worked with more care than most of its kind.",
+        "affixes": (
+            [{"kind": "stat_bonus", "field": "damage_bonus", "value": bonus}] if bonus else []
+        ),
     }
 
 
 def generate_armor(base_id: str | None = None, tier: str | None = None) -> dict:
+    """See generate_weapon's docstring for why the tier bonus is now an affix, not baked into ac_base."""
     base_id = base_id or random.choice(list(ARMOR_BASES.keys()))
     base = ARMOR_BASES[base_id]
     tier = tier or roll_tier()
     bonus = TIER_BONUS[tier]
-
     name = _name_for(base_id.replace("_", " ").title() + " Armor", tier)
 
     return {
@@ -130,20 +147,23 @@ def generate_armor(base_id: str | None = None, tier: str | None = None) -> dict:
         "rarity": tier,
         "price": base["base_price"] * TIER_PRICE_MULT[tier],
         "weight": 15,
-        "ac_base": base["ac_base"] + bonus,
+        "ac_base": base["ac_base"],
         "armor_category": base["armor_category"],
         "generated": True,
         "generated_base": base_id,
         "note": f"A {tier.replace('_', ' ')} find, worked with more care than most of its kind.",
+        "affixes": (
+            [{"kind": "stat_bonus", "field": "ac_base", "value": bonus}] if bonus else []
+        ),
     }
 
 
 def generate_shield(base_id: str | None = None, tier: str | None = None) -> dict:
+    """See generate_weapon's docstring for why the tier bonus is now an affix, not baked into ac_bonus."""
     base_id = base_id or random.choice(list(SHIELD_BASES.keys()))
     base = SHIELD_BASES[base_id]
     tier = tier or roll_tier()
     bonus = TIER_BONUS[tier]
-
     name = _name_for(base_id.replace("_", " ").title(), tier)
 
     return {
@@ -152,11 +172,14 @@ def generate_shield(base_id: str | None = None, tier: str | None = None) -> dict
         "rarity": tier,
         "price": base["base_price"] * TIER_PRICE_MULT[tier],
         "weight": 6,
-        "ac_bonus": base["ac_bonus"] + bonus,
+        "ac_bonus": base["ac_bonus"],
         "armor_category": base["armor_category"],
         "generated": True,
         "generated_base": base_id,
         "note": f"A {tier.replace('_', ' ')} find, worked with more care than most of its kind.",
+        "affixes": (
+            [{"kind": "stat_bonus", "field": "ac_bonus", "value": bonus}] if bonus else []
+        ),
     }
 
 

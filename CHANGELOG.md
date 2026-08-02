@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.71] — Magic items: Phase 1, real keepable loot
+
+First phase of a real Diablo-style magic item system (per Coffee: "make
+loot real"). Combat's "bonus gear loot" roll (`rules/item_generator.py`'s
+tier-weighted weapon/armor generator, common → legendary) used to convert
+straight to gold the instant it rolled, because nothing could persist a
+per-instance item with its own unique stats — every item reference
+anywhere was a bare string key into the static item catalog. A new
+`item_instances` table now lets a generated item be a real, synthetic
+`item_id` that every existing system (inventory, equip, combat, the
+market, item-name matching in free text) already resolves correctly with
+no changes of its own, via one small fallback in `get_item()`. Items are
+modeled as a base item plus a list of independently-attachable affixes
+(one so far: a flat stat bonus) rather than one flat dict baked in at
+roll time — the foundation for elemental damage/resistance, granted
+spells, profession bonuses, set bonuses, a new top tier, and player-
+driven crafting/forging/enchanting, all coming in later phases and all
+reusing this same system rather than needing their own.
+
 ## [1.27.70] — Scrolls now show up (and target correctly) in the battle Items menu
 
 Real live bug (Coffee: "i didnt see a button for the revive scroll

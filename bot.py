@@ -3215,6 +3215,32 @@ async def _share_quest_rewards_with_party(
             db.update_character(member_id, gold=fresh["gold"] + bonus_gold)
 
 
+def _grant_generated_loot(real_party_ids: list[int]) -> str:
+    """
+    Rolls a real, keepable, equippable magic item (2026-08-02 magic item
+    system, Phase 1) via rules/item_generator.py, persists it as a real
+    per-instance item (db.create_item_instance -- a synthetic "gi<n>"
+    item_id, resolved later by items.get_item()'s fallback into
+    db.materialize_item_instance), and awards it to one random real party
+    member. A single physical object isn't meaningfully split like
+    gold/XP -- same reasoning already used for the map-loot drop right
+    after this call site.
+    """
+    loot_item = generate_item(item_type=random.choice(["weapon", "armor"]))
+    affixes = loot_item.pop("affixes", [])
+    item_id = db.create_item_instance(
+        item_type=loot_item["type"], name=loot_item["name"], rarity=loot_item["rarity"],
+        price=loot_item["price"], base_stats=loot_item, affixes=affixes,
+    )
+    winner_id = random.choice(real_party_ids)
+    db.add_item(winner_id, item_id, 1)
+    winner_name = db.get_character(winner_id)["name"]
+    return (
+        f"\n💰 **{winner_name}** loots a **{loot_item['name']}** from the fallen — "
+        f"a real {loot_item['rarity'].replace('_', ' ')} find, added straight to their inventory!"
+    )
+
+
 def _award_victory_xp(session: sessions.Session) -> tuple[str, list[str]]:
     """
     Awards real XP (from the defeated monster's real 5E-sourced XP value)
@@ -3415,23 +3441,13 @@ def _award_victory_xp(session: sessions.Session) -> tuple[str, list[str]]:
                     f"({updated['progress_count']}/{updated['objective_count']})"
                 )
 
-    # Bonus gear loot: rules/item_generator.py procedurally rolls a
-    # fresh weapon/armor dict on demand (tier-weighted stats, no stable
-    # item_id) rather than picking from items.py's fixed catalog, so it
-    # can't be added to inventory or equipped via db.equip_item (2026-
-    # 07-15, which DOES now make items.py's real catalog weapons/armor
-    # affect combat) -- framed as sold in town instead. Its price
-    # (already tier-weighted via roll_tier, same as every other rules/
-    # module) becomes a real, varied gold reward instead of a flat number.
-    loot_item = generate_item(item_type=random.choice(["weapon", "armor"]))
-    gold_each = max(loot_item["price"] // len(real_party_ids), 1)
-    for pid in real_party_ids:
-        character = db.get_character(pid)
-        db.update_character(pid, gold=character["gold"] + gold_each)
-    loot_line = (
-        f"\n💰 The party loots a **{loot_item['name']}** from the fallen — not worth "
-        f"carrying, so it's sold in town for {gold_each} gold each."
-    )
+    # Bonus gear loot: real, keepable, equippable magic item (2026-08-02
+    # magic item system, per Coffee: "make loot real" -- previously
+    # rules/item_generator.py's roll had no stable item_id and could
+    # never be added to inventory or equipped, so it was converted
+    # straight to gold instead; that's now Phase 1 of the plan at
+    # /home/pandora/.claude/plans/sequential-tinkering-quokka.md).
+    loot_line = _grant_generated_loot(real_party_ids)
 
     # Task #141 (discoverable half): a rare chance for the fallen to
     # also be carrying a real map -- the same fixed items.py catalog

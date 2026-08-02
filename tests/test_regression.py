@@ -1733,6 +1733,105 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(companion_xp_after, companion_xp_before)
         sessions.end_session(-999)
 
+    def test_generated_item_can_be_kept_equipped_and_affects_combat(self):
+        """
+        Real Phase 1 deliverable of the magic item system (2026-08-02,
+        per Coffee: "make loot real" -- see the plan file's Context
+        section). Before this, rules/item_generator.py already rolled
+        real tier-weighted weapon/armor stats, but the roll had no
+        stable item_id and nothing could persist it -- the only caller
+        converted it straight to gold instead of letting anyone keep it.
+        Also covers the tier-bonus-as-affix refactor (no longer baked
+        into damage_dice/ac_base as a dice-string/int concatenation) and
+        the real find_item_mentioned_in_text landmine fix (direct
+        ITEMS[...] indexing would KeyError the moment a generated item
+        ever reached it).
+        """
+        from rules.item_generator import generate_weapon, generate_armor
+        user_id = 950901
+        make_basic_character(user_id, "LootTester2", current_location="crossroads_tavern")
+
+        legendary_weapon = generate_weapon(tier="legendary")
+        self.assertNotIn("+", legendary_weapon["damage_dice"])
+        self.assertTrue(any(
+            a.get("kind") == "stat_bonus" and a.get("field") == "damage_bonus" and a.get("value") == 4
+            for a in legendary_weapon["affixes"]
+        ))
+        common_weapon = generate_weapon(tier="common")
+        self.assertEqual(common_weapon["affixes"], [])
+
+        gold_before = db.get_character(user_id)["gold"]
+        item_id = db.create_item_instance(
+            item_type=legendary_weapon["type"], name=legendary_weapon["name"], rarity=legendary_weapon["rarity"],
+            price=legendary_weapon["price"], base_stats=legendary_weapon, affixes=legendary_weapon["affixes"],
+        )
+        self.assertTrue(item_id.startswith("gi") and item_id[2:].isdigit())
+        db.add_item(user_id, item_id, 1)
+        character = db.get_character(user_id)
+        self.assertEqual(character["inventory"].get(item_id), 1)
+        self.assertEqual(character["gold"], gold_before)  # kept, not sold
+
+        resolved = items_module.get_item(item_id)
+        self.assertIsNotNone(resolved)
+        self.assertEqual(resolved.get("damage_bonus"), 4)
+        self.assertEqual(resolved["rarity"], "legendary")
+
+        success, _msg, _updated = db.equip_item(user_id, item_id)
+        self.assertTrue(success)
+        weapon_for_attack = bot._weapon_for_attacker(db.get_character(user_id))
+        self.assertEqual(weapon_for_attack.get("damage_bonus"), 4)
+        self.assertEqual(weapon_for_attack.get("damage_dice"), legendary_weapon["damage_dice"])
+
+        legendary_armor = generate_armor(tier="legendary")
+        armor_id = db.create_item_instance(
+            item_type=legendary_armor["type"], name=legendary_armor["name"], rarity=legendary_armor["rarity"],
+            price=legendary_armor["price"], base_stats=legendary_armor, affixes=legendary_armor["affixes"],
+        )
+        db.add_item(user_id, armor_id, 1)
+        expected_bonus = next(a["value"] for a in legendary_armor["affixes"] if a["field"] == "ac_base")
+        self.assertEqual(expected_bonus, 4)
+        resolved_armor = items_module.get_item(armor_id)
+        self.assertEqual(resolved_armor["ac_base"], legendary_armor["ac_base"] + expected_bonus)
+        ac_success, _ac_msg, _ac_updated = db.equip_item(user_id, armor_id)
+        self.assertTrue(ac_success)
+
+        # Landmine: find_item_mentioned_in_text must not KeyError on a
+        # generated item id, and must actually resolve it by name.
+        candidates = list(db.get_character(user_id)["inventory"].keys())
+        result = items_module.find_item_mentioned_in_text(
+            f"equip the {legendary_weapon['name'].lower()}", candidate_ids=candidates,
+        )
+        self.assertEqual(result, item_id)
+
+    async def test_generated_loot_is_kept_not_auto_sold_on_combat_victory(self):
+        """
+        Full-stack version of the test above -- proves the REAL combat-
+        victory call site (_award_victory_xp's loot section, via the new
+        _grant_generated_loot helper) actually keeps the roll instead of
+        the old "convert to gold" behavior.
+        """
+        import sessions
+        sessions.end_session(-999)
+        leader_id = 950902
+        make_basic_character(leader_id, "LootVictoryLeader", current_location="crossroads_tavern")
+        gold_before = db.get_character(leader_id)["gold"]
+
+        enemy = {"telegram_user_id": -2_600_301, "name": "LootGoblin", "dexterity": 10, "xp_reward": 10}
+        leader = db.get_character(leader_id)
+        leader["telegram_user_id"] = leader_id
+        session = sessions.start_session(-999, [leader, enemy], {leader_id: "party", -2_600_301: "enemy"})
+        session.turn_order = [leader_id, -2_600_301]
+
+        summary, _level_up_notes = bot._award_victory_xp(session)
+        self.assertIn("loots a", summary)
+        self.assertIn("real", summary)
+
+        updated_character = db.get_character(leader_id)
+        generated_ids = [iid for iid in updated_character["inventory"] if iid.startswith("gi")]
+        self.assertEqual(len(generated_ids), 1)
+        self.assertEqual(updated_character["gold"], gold_before)  # no gold awarded for the roll itself
+        sessions.end_session(-999)
+
     async def test_ai_companion_actually_fighting_gets_real_combat_xp(self):
         """
         Real live bug (2026-08-01, Coffee: "They didn't get experience

@@ -123,6 +123,39 @@ CREATE TABLE IF NOT EXISTS market_listings (
 );
 """
 
+# Real per-instance magic items (2026-08-02, per Coffee: "make loot real"
+# -- a Diablo-style system). Every OTHER item reference in this game is a
+# bare item_id string into items.py's static, hand-authored ITEMS dict --
+# fine for a fixed catalog, but there was never a way to say "this
+# specific ring rolled ac_bonus 3, a different one of the same name
+# rolled ac_bonus 1." Sibling table to market_listings above, same
+# migration convention. `base_stats` is the item's un-bonused base shape
+# (damage_dice/ability/weapon_category/armor_category/ac_base/ac_bonus/
+# damage_type -- whatever rules/item_generator.py's generate_weapon/
+# generate_armor/generate_shield already produce, minus the tier bonus,
+# which is now an affix instead of baked into base_stats -- see that
+# module's own 2026-08-02 refactor). `affixes` is a JSON list of
+# independently-attachable effect dicts (stat_bonus now; elemental_damage/
+# resistance/vulnerability/immunity, grants_spell, profession_bonus in
+# later phases) -- this list is the whole point of the architecture: every
+# later feature (elemental affixes, granted spells, profession bonuses,
+# set bonuses, enchanting, forging) is just "add one more dict to this
+# list" using the same shared vocabulary, never a bespoke merge per
+# feature. `set_id` is unused until the set-bonus phase.
+CREATE_ITEM_INSTANCES_TABLE = """
+CREATE TABLE IF NOT EXISTS item_instances (
+    instance_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_type TEXT NOT NULL,
+    name TEXT NOT NULL,
+    rarity TEXT NOT NULL,
+    price INTEGER NOT NULL DEFAULT 0,
+    base_stats TEXT NOT NULL DEFAULT '{}',
+    affixes TEXT NOT NULL DEFAULT '[]',
+    set_id TEXT,
+    created_at TEXT NOT NULL
+);
+"""
+
 # Area quest board — distinct from a character's personal quest journal
 # (active_quests/completed_quests on the characters table, which only
 # ever covers the hand-authored story quests). A board quest is a
@@ -251,6 +284,7 @@ def init_db() -> None:
         conn.execute(CREATE_NPC_RELATIONSHIPS_TABLE)
         conn.execute(CREATE_FACTION_STANDING_TABLE)
         conn.execute(CREATE_MARKET_LISTINGS_TABLE)
+        conn.execute(CREATE_ITEM_INSTANCES_TABLE)
         conn.execute(CREATE_BOARD_QUESTS_TABLE)
         conn.execute(CREATE_PARTIES_TABLE)
         conn.execute(CREATE_GAME_SETTINGS_TABLE)
@@ -667,6 +701,84 @@ def remove_item(telegram_user_id: int, item_id: str, quantity: int = 1) -> tuple
         character["inventory"][item_id] = remaining
     updated = update_character(telegram_user_id, inventory=character["inventory"])
     return True, updated
+
+
+# Synthetic item_id prefix for a real per-instance item (2026-08-02 magic
+# item system) -- e.g. "gi42" for instance_id 42. Short and safely under
+# Telegram's real callback_data length limit (see bot.py's "equip|item|
+# {item_id}" pattern) -- deliberately never a UUID or anything embedding
+# the item's own data.
+GENERATED_ITEM_ID_PREFIX = "gi"
+
+
+def create_item_instance(
+    item_type: str, name: str, rarity: str, price: int,
+    base_stats: dict, affixes: list | None = None, set_id: str | None = None,
+) -> str:
+    """
+    Persists one real, unique rolled/crafted item and returns its
+    synthetic item_id (e.g. "gi42") -- the string every other system
+    (inventory, equip, market, scrolls-of-a-sort) treats exactly like any
+    static items.py catalog key, via items.get_item()'s fallback into
+    materialize_item_instance below.
+    """
+    with get_connection() as conn:
+        cur = conn.execute(
+            "INSERT INTO item_instances (item_type, name, rarity, price, base_stats, affixes, set_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                item_type, name, rarity, price, json.dumps(base_stats), json.dumps(affixes or []),
+                set_id, datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        instance_id = cur.lastrowid
+    return f"{GENERATED_ITEM_ID_PREFIX}{instance_id}"
+
+
+def _apply_affix(item: dict, affix: dict) -> None:
+    """
+    Folds one affix's effect onto an already-materialized item dict, in
+    place. One branch per affix `kind` -- the shared vocabulary every
+    later phase (elemental damage/resistance, granted spells, profession
+    bonuses, set bonuses) adds its own branch to, and enchanting/forging/
+    imbuing (2026-08-02 plan, Phase 7) all reuse unchanged, since they're
+    just "append one more affix dict and re-materialize."
+    """
+    kind = affix.get("kind")
+    if kind == "stat_bonus":
+        field = affix["field"]
+        item[field] = item.get(field, 0) + affix["value"]
+
+
+def materialize_item_instance(item_id: str) -> dict | None:
+    """
+    Resolves a synthetic "gi<n>" item_id into a full item dict, in the
+    exact same shape items.py's static ITEMS entries already use --
+    called from items.get_item()'s fallback, so every existing call site
+    (equip_item above, combat, shop, scrolls, market) works against a
+    generated item with zero changes of its own.
+    """
+    if not item_id.startswith(GENERATED_ITEM_ID_PREFIX):
+        return None
+    try:
+        instance_id = int(item_id[len(GENERATED_ITEM_ID_PREFIX):])
+    except ValueError:
+        return None
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM item_instances WHERE instance_id = ?", (instance_id,)
+        ).fetchone()
+    if row is None:
+        return None
+    item = json.loads(row["base_stats"])
+    item.update({
+        "name": row["name"], "type": row["item_type"], "rarity": row["rarity"],
+        "price": row["price"], "generated": True, "instance_id": instance_id,
+        "set_id": row["set_id"],
+    })
+    for affix in json.loads(row["affixes"]):
+        _apply_affix(item, affix)
+    return item
 
 
 def _equipped_ring_ac_bonus(character: dict) -> int:
