@@ -2,6 +2,22 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.68] — Using an item/scroll ON a named companion no longer gets swallowed as chat
+
+Real live bug (Coffee, mid-fight: "Use a scroll of revivify on Wren"
+produced an unrelated ambient "Wren says a line about her garden" reply
+instead of any real result). The scroll-of-anything → cast_spell
+classification rule already existed (fixed once before for a different
+companion's name), but it ran *after* the deterministic keyword
+fallback's generic "message names a known NPC/companion → talk to them"
+check — so naming who the item was FOR defeated the very rule meant to
+route it correctly. Moved the scroll check ahead of that generic check,
+matching how `give_item`/`recruit_npc` were already special-cased for
+the identical reason. Confirmed the underlying revive logic itself was
+already correct (a companion reduced to 0 HP has been marked genuinely
+dead in the database since the 2026-07-24 fix) — this was purely a
+misclassification bug, not a revival-logic one.
+
 ## [1.27.67] — Multiple simultaneous fights, same chat, no cross-contamination
 
 Phase 1 of the multi-tenant scaling plan: `sessions.py` no longer keeps

@@ -507,6 +507,23 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
         r"glanced?\s+at)\b"
     )
     has_examine_verb = bool(_NPC_HIJACK_EXAMINE_GUARD.search(lowered))
+
+    # Checked BEFORE the known-NPC-name loop below, same reasoning as
+    # give_item/recruit_npc/quest-board above (2026-08-02, real live bug,
+    # Coffee: "Use a scroll of revivify on Wren" -- mid-fight, trying to
+    # revive a downed companion -- got completely swallowed by the loop
+    # below into an unrelated ambient "Wren says a line about her garden"
+    # reply, since Wren's own name is a real known NPC/companion name and
+    # the loop ran first). This exact bug was "fixed" once already
+    # (2026-07-24, Laurrienna) by adding the scroll->cast_spell check
+    # further down in this function -- but that fix landed AFTER this
+    # loop, so it only ever actually helped when the scroll message
+    # DIDN'T also name a known NPC, which is precisely the case that
+    # matters most (using an item ON someone). Moved here so naming the
+    # target no longer defeats it.
+    if any(w in lowered for w in ["cast ", "i cast"]) or ("scroll" in lowered and re.search(r"\buse\b", lowered)):
+        return {**base, "action": "cast_spell"}
+
     for npc_name in known_npc_names:
         # Matches the NPC's full registered name as a substring ("old
         # maren" in "go talk to old maren") OR any single word of it, at
@@ -1144,17 +1161,11 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if any(w in lowered for w in ["steal", "pickpocket", "rob the", "rob this", "swipe the", "take without paying"]):
         return {**base, "action": "steal"}
 
-    # "scroll" + any "use" phrasing (2026-07-24, Coffee: "Use the scroll
-    # of revivify on Laurrienna" got misread as a plain look-around) --
-    # a scroll is a type="scroll" item, not a type="consumable" one, so
-    # _do_use_item's own inventory filter would never find it and would
-    # just reject the action; _do_cast_spell is the real handler that
-    # already knows how to find a matching scroll in inventory and
-    # consume it in place of a spell slot. Checked BEFORE the general
-    # "use the/my/a" -> use_item broadening below, so a scroll always
-    # wins that ambiguity.
-    if any(w in lowered for w in ["cast ", "i cast"]) or ("scroll" in lowered and re.search(r"\buse\b", lowered)):
-        return {**base, "action": "cast_spell"}
+    # The scroll->cast_spell check itself now lives further up in this
+    # function, before the known-NPC-name loop (see 2026-08-02 comment
+    # there) -- moved out of here since this position ran AFTER that
+    # loop, which let a message naming a known NPC/companion ("...on
+    # Wren") slip past it entirely.
 
     if any(w in lowered for w in ["equip ", "wield ", "wear ", "put on the", "put on my",
                                     "i equip", "i wield"]):
