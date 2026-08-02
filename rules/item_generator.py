@@ -48,9 +48,17 @@ SHIELD_BASES = {
     "wooden_shield": {"ac_bonus": 2, "base_price": 10, "armor_category": "shield"},
 }
 
-TIERS = ["common", "uncommon", "rare", "very_rare", "legendary"]
-TIER_BONUS = {"common": 0, "uncommon": 1, "rare": 2, "very_rare": 3, "legendary": 4}
-TIER_PRICE_MULT = {"common": 1, "uncommon": 4, "rare": 12, "very_rare": 30, "legendary": 80}
+TIERS = ["common", "uncommon", "rare", "very_rare", "legendary", "mythic"]
+# mythic (2026-08-02, magic item system Phase 6): ONE step above
+# legendary, deliberately a MODEST numeric bump (+5, not +10 or +20) --
+# per Coffee's own framing, the point of mythic is real new mechanical
+# effects (ignore_resistance/free_extra_attack/damage_immunity below),
+# never just a bigger flat number. Splits what used to be legendary's
+# whole 2% slice in half with legendary (roll_tier below), so getting a
+# legendary drop is now slightly MORE common than before, and mythic is
+# the new rarest tier.
+TIER_BONUS = {"common": 0, "uncommon": 1, "rare": 2, "very_rare": 3, "legendary": 4, "mythic": 5}
+TIER_PRICE_MULT = {"common": 1, "uncommon": 4, "rare": 12, "very_rare": 30, "legendary": 80, "mythic": 250}
 
 # Phase 2 of the magic item system (2026-08-02): real elemental damage
 # types already in live use across this game (rules/combat.py's
@@ -64,7 +72,7 @@ ELEMENTAL_DAMAGE_TYPES = [
 # Only a rare+ item gets a shot at an elemental affix -- keeps it a real
 # step up from a plain stat-bonus common/uncommon roll, not just noise on
 # every drop.
-ELEMENTAL_AFFIX_ELIGIBLE_TIERS = {"rare", "very_rare", "legendary"}
+ELEMENTAL_AFFIX_ELIGIBLE_TIERS = {"rare", "very_rare", "legendary", "mythic"}
 ELEMENTAL_AFFIX_CHANCE = 0.3
 
 PREFIXES = {
@@ -73,11 +81,13 @@ PREFIXES = {
     "rare": ["Ashforged", "Stormwrought", "Runed", "Deepcut"],
     "very_rare": ["Emberbound", "Frostwoven", "Starforged", "Hollowlight"],
     "legendary": ["World-Ending", "Godsbane", "Undying", "Last-Dawn"],
+    "mythic": ["Realitybreaking", "World-Splitting", "Godsforged", "Truthless"],
 }
 SUFFIXES = {
     "rare": ["of the Wolf", "of Embers", "of the Deep", "of Quiet Ruin"],
     "very_rare": ["of the Undying", "of the Tempest", "of the First Flame", "of the Hollow Choir"],
     "legendary": ["of the World's End", "of the Last Dawn", "of Forgotten Kings", "of the Unmoored Isle"],
+    "mythic": ["of the Unwritten Law", "of the Broken Pantheon", "that Should Not Be", "of the Last Rebirth"],
 }
 
 
@@ -92,7 +102,9 @@ def roll_tier() -> str:
         return "rare"
     if r <= 98:
         return "very_rare"
-    return "legendary"
+    if r <= 99:
+        return "legendary"
+    return "mythic"
 
 
 def _name_for(base_label: str, tier: str) -> str:
@@ -128,6 +140,40 @@ def _maybe_set_id(tier: str) -> str | None:
     if tier not in SET_TAG_ELIGIBLE_TIERS or random.random() > SET_TAG_CHANCE or not ITEM_SETS:
         return None
     return random.choice(list(ITEM_SETS.keys()))
+
+
+# Real progression gate for every generated mythic item (Phase 6,
+# 2026-08-02): met by ANY ONE of a rebirth, a maxed echo trial tier, or
+# beating the hidden superboss quest -- the reward loop that lets real
+# progression unlock the gear that then unlocks harder content, per
+# Coffee's own framing, rather than pure drop luck alone deciding who
+# gets to use it. Values mirror bot.py's real ECHO_TRIAL_MAX_TIER (10)
+# and the confirmed hidden-superboss quest id
+# ("the_unaskeds_reckoning") -- duplicated here rather than imported,
+# since rules/ modules stay free of any bot.py dependency by
+# convention; if either of those ever changes, this needs updating too.
+MYTHIC_EQUIP_REQUIREMENT = {
+    "any_of": [
+        {"kind": "rebirth_count", "value": 1},
+        {"kind": "echo_trial_tier", "value": 10},
+        {"kind": "completed_quest", "value": "the_unaskeds_reckoning"},
+    ]
+}
+
+
+def _mythic_affix(item_type: str) -> dict:
+    """
+    Every mythic roll GUARANTEES exactly one mythic-exclusive effect --
+    per Coffee's own framing, the point of the tier is real new
+    mechanical effects, not a coin-flip chance at one on top of an
+    already-rare drop. Weapons get ignore_resistance or
+    free_extra_attack (50/50); armor/shield get damage_immunity (reuses
+    Phase 2's existing "immunity" affix kind directly -- no new kind
+    needed, just guaranteed here instead of a rare+ chance).
+    """
+    if item_type == "weapon":
+        return random.choice([{"kind": "ignore_resistance"}, {"kind": "free_extra_attack"}])
+    return {"kind": "immunity", "damage_type": random.choice(ELEMENTAL_DAMAGE_TYPES)}
 
 
 def generate_weapon(base_id: str | None = None, tier: str | None = None) -> dict:
@@ -170,10 +216,12 @@ def generate_weapon(base_id: str | None = None, tier: str | None = None) -> dict
         "generated": True,
         "generated_base": base_id,
         "set_id": _maybe_set_id(tier),
+        "equip_requirement": MYTHIC_EQUIP_REQUIREMENT if tier == "mythic" else None,
         "note": f"A {tier.replace('_', ' ')} find, worked with more care than most of its kind.",
         "affixes": (
             ([{"kind": "stat_bonus", "field": "damage_bonus", "value": bonus}] if bonus else [])
             + _maybe_elemental_affix(tier, "elemental_damage")
+            + ([_mythic_affix("weapon")] if tier == "mythic" else [])
         ),
     }
 
@@ -197,10 +245,12 @@ def generate_armor(base_id: str | None = None, tier: str | None = None) -> dict:
         "generated": True,
         "generated_base": base_id,
         "set_id": _maybe_set_id(tier),
+        "equip_requirement": MYTHIC_EQUIP_REQUIREMENT if tier == "mythic" else None,
         "note": f"A {tier.replace('_', ' ')} find, worked with more care than most of its kind.",
         "affixes": (
             ([{"kind": "stat_bonus", "field": "ac_base", "value": bonus}] if bonus else [])
             + _maybe_elemental_affix(tier, "resistance")
+            + ([_mythic_affix("armor")] if tier == "mythic" else [])
         ),
     }
 
@@ -224,10 +274,12 @@ def generate_shield(base_id: str | None = None, tier: str | None = None) -> dict
         "generated": True,
         "generated_base": base_id,
         "set_id": _maybe_set_id(tier),
+        "equip_requirement": MYTHIC_EQUIP_REQUIREMENT if tier == "mythic" else None,
         "note": f"A {tier.replace('_', ' ')} find, worked with more care than most of its kind.",
         "affixes": (
             ([{"kind": "stat_bonus", "field": "ac_bonus", "value": bonus}] if bonus else [])
             + _maybe_elemental_affix(tier, "resistance")
+            + ([_mythic_affix("shield")] if tier == "mythic" else [])
         ),
     }
 

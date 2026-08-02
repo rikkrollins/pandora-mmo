@@ -203,14 +203,25 @@ def _attacks_per_turn(character: dict) -> int:
     """
     char_class = (character.get("char_class") or "").lower()
     if char_class not in EXTRA_ATTACK_CLASSES:
-        return 1
-    level = character.get("level", 1)
-    if char_class == "fighter":
-        if level >= 20:
-            return 4
-        if level >= 11:
-            return 3
-    return 2 if level >= 5 else 1
+        base_attacks = 1
+    else:
+        level = character.get("level", 1)
+        if char_class == "fighter":
+            if level >= 20:
+                base_attacks = 4
+            elif level >= 11:
+                base_attacks = 3
+            else:
+                base_attacks = 2 if level >= 5 else 1
+        else:
+            base_attacks = 2 if level >= 5 else 1
+    # Mythic weapon affix (magic item system Phase 6, 2026-08-02): a
+    # real, guaranteed +1 attack regardless of class/level -- checked
+    # unconditionally, since it's meant to matter even for a caster or
+    # low-level character wielding it, not just already-martial builds.
+    if character.get("free_extra_attack"):
+        base_attacks += 1
+    return base_attacks
 
 # Maps a resource node's gathering ability to the one class whose
 # training lets them naturally pick that kind of material out of a
@@ -1290,10 +1301,21 @@ def _apply_equipped_elemental_profile(character: dict) -> None:
     in place, matching how session participants already pick up other
     combat-only fields (conditions, raging, etc.) once they become part
     of session.participants.
+
+    Also picks up two mythic-exclusive OFFENSE flags (Phase 6, 2026-08-02)
+    -- ignores_resistance (checked by apply_damage_type_modifier) and
+    free_extra_attack (checked by _attacks_per_turn) -- real, guaranteed
+    mythic-tier effects, not bigger versions of an existing number.
+    Checked across EVERY equipped slot (not just the weapon): a
+    hand-authored unique wondrous item (e.g. Pandora's Answer) is just
+    as real a source of these as a generated mythic weapon.
     """
     resistances, vulnerabilities, immunities = set(), set(), set()
-    equipped_ids = [character.get("equipped_armor"), character.get("equipped_shield")]
-    equipped_ids += character.get("equipped_accessories", [])
+    equipped_ids = [
+        character.get("equipped_weapon"), character.get("equipped_armor"), character.get("equipped_shield"),
+    ] + character.get("equipped_accessories", [])
+    ignores_resistance = False
+    free_extra_attack = False
     for item_id in equipped_ids:
         if not item_id:
             continue
@@ -1303,12 +1325,20 @@ def _apply_equipped_elemental_profile(character: dict) -> None:
         resistances.update(item.get("resistances", []))
         vulnerabilities.update(item.get("vulnerabilities", []))
         immunities.update(item.get("immunities", []))
+        if item.get("ignores_resistance"):
+            ignores_resistance = True
+        if item.get("free_extra_attack"):
+            free_extra_attack = True
     if resistances:
         character["resistances"] = list(set(character.get("resistances", [])) | resistances)
     if vulnerabilities:
         character["vulnerabilities"] = list(set(character.get("vulnerabilities", [])) | vulnerabilities)
     if immunities:
         character["immunities"] = list(set(character.get("immunities", [])) | immunities)
+    if ignores_resistance:
+        character["ignores_resistance"] = True
+    if free_extra_attack:
+        character["free_extra_attack"] = True
 
 
 def _get_real_party_combatants(requester: dict) -> list[dict]:

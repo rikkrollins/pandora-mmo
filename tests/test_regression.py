@@ -2015,6 +2015,66 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(ring1_id, after_unequip["equipped_accessories"])
         self.assertIn(ring2_id, after_unequip["equipped_accessories"])
 
+    def test_mythic_ignore_resistance_deals_full_damage_through_a_resistance(self):
+        """
+        Real Phase 6 deliverable of the magic item system (2026-08-02):
+        a mythic-exclusive ignore_resistance affix is a genuinely new
+        mechanical effect, not a bigger number -- full damage against a
+        resistant defender, where a legendary (or any non-mythic)
+        attacker of the same base would be halved by the exact same
+        rules.combat.apply_damage_type_modifier every other damage-type
+        interaction in this game already uses, unchanged.
+        """
+        from rules.combat import apply_damage_type_modifier
+        defender = {"resistances": ["fire"]}
+        non_mythic_hit = apply_damage_type_modifier(20, "fire", defender, attacker={"rebirth_count": 0})
+        self.assertEqual(non_mythic_hit, 10)
+        mythic_hit = apply_damage_type_modifier(
+            20, "fire", defender, attacker={"rebirth_count": 0, "ignores_resistance": True},
+        )
+        self.assertEqual(mythic_hit, 20)
+
+    def test_mythic_equip_gated_behind_real_progression(self):
+        """
+        Real Phase 6 deliverable: db.equip_item refuses a mythic item on
+        a zero-progression character and succeeds once a real threshold
+        (any ONE of rebirth_count/echo_trial_tier/a specific completed
+        quest) is met -- the reward-loop mechanic real progression
+        unlocks, not pure drop luck alone.
+        """
+        from rules.item_generator import generate_weapon, MYTHIC_EQUIP_REQUIREMENT
+        user_id = 950907
+        make_basic_character(user_id, "MythicWielder2", current_location="crossroads_tavern")
+
+        mythic_weapon = generate_weapon(tier="mythic")
+        self.assertEqual(mythic_weapon["equip_requirement"], MYTHIC_EQUIP_REQUIREMENT)
+        self.assertTrue(any(
+            a["kind"] in ("ignore_resistance", "free_extra_attack") for a in mythic_weapon["affixes"]
+        ))
+
+        affixes = mythic_weapon.pop("affixes", [])
+        item_id = db.create_item_instance(
+            item_type=mythic_weapon["type"], name=mythic_weapon["name"], rarity=mythic_weapon["rarity"],
+            price=mythic_weapon["price"], base_stats=mythic_weapon, affixes=affixes,
+        )
+        db.add_item(user_id, item_id, 1)
+
+        success_before, _msg, _u1 = db.equip_item(user_id, item_id)
+        self.assertFalse(success_before)
+        self.assertNotEqual(db.get_character(user_id).get("equipped_weapon"), item_id)
+
+        db.update_character(user_id, rebirth_count=1)
+        success_after, _msg2, _u2 = db.equip_item(user_id, item_id)
+        self.assertTrue(success_after)
+        self.assertEqual(db.get_character(user_id).get("equipped_weapon"), item_id)
+
+    def test_free_extra_attack_adds_exactly_one_attack_regardless_of_class(self):
+        """Real Phase 6 deliverable: the free_extra_attack mythic affix is a flat +1, checked unconditionally."""
+        character = make_basic_character(950908, "ExtraAttackTester", char_class="Wizard", current_location="crossroads_tavern")
+        base_attacks = bot._attacks_per_turn(character)
+        character["free_extra_attack"] = True
+        self.assertEqual(bot._attacks_per_turn(character), base_attacks + 1)
+
     async def test_ai_companion_actually_fighting_gets_real_combat_xp(self):
         """
         Real live bug (2026-08-01, Coffee: "They didn't get experience

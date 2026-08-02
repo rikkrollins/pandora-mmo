@@ -784,6 +784,18 @@ def _apply_affix(item: dict, affix: dict) -> None:
         item.setdefault("profession_bonuses", []).append(
             {"profession": affix["profession"], "value": affix["value"]}
         )
+    # Phase 6 (2026-08-02): mythic-tier-exclusive combat affixes. Real
+    # mechanical effects, not bigger numbers -- ignore_resistance is
+    # checked by rules.combat.apply_damage_type_modifier, free_extra_attack
+    # by bot._attacks_per_turn, both read off the equipped weapon via
+    # bot._apply_equipped_elemental_profile the same live-summed way
+    # every other combat-affecting affix already works. damage_immunity
+    # is deliberately NOT its own kind -- it reuses the "immunity" kind
+    # Phase 2 already built, just rolled preferentially at mythic tier.
+    elif kind == "ignore_resistance":
+        item["ignores_resistance"] = True
+    elif kind == "free_extra_attack":
+        item["free_extra_attack"] = True
 
 
 def materialize_item_instance(item_id: str) -> dict | None:
@@ -891,6 +903,35 @@ def unequip_accessory(telegram_user_id: int, item_id: str) -> tuple[bool, str, d
     return True, f"You take off the {name}. AC is now {new_ac}.", updated
 
 
+def _meets_equip_requirement(character: dict, item: dict) -> bool:
+    """
+    Real progression gate for mythic-tier gear (magic item system
+    Phase 6, 2026-08-02) -- mirrors bot.py's own location-gate
+    convention (_meets_location_level/_meets_rebirth_requirement): an
+    item with no "equip_requirement" field is completely unaffected
+    (every non-mythic item today). Shape:
+    {"any_of": [{"kind": "rebirth_count"|"echo_trial_tier", "value": int}
+                | {"kind": "completed_quest", "value": quest_id}, ...]}
+    -- met if the character satisfies AT LEAST ONE listed condition,
+    since the real intent is "prove real progression ANY one of these
+    ways" (a rebirth, a maxed echo trial tier, or beating the hidden
+    superboss), not requiring every path at once.
+    """
+    requirement = item.get("equip_requirement")
+    if not requirement:
+        return True
+    for condition in requirement.get("any_of", []):
+        kind = condition.get("kind")
+        value = condition.get("value")
+        if kind == "rebirth_count" and character.get("rebirth_count", 0) >= value:
+            return True
+        if kind == "echo_trial_tier" and character.get("echo_trial_tier", 0) >= value:
+            return True
+        if kind == "completed_quest" and value in character.get("completed_quests", []):
+            return True
+    return False
+
+
 def equip_item(telegram_user_id: int, item_id: str) -> tuple[bool, str, dict | None]:
     """
     Equip a weapon, armor, shield, ring, amulet, or wondrous item the
@@ -928,6 +969,13 @@ def equip_item(telegram_user_id: int, item_id: str) -> tuple[bool, str, dict | N
     item = items_module.get_item(item_id)
     if item is None or item.get("type") not in ("weapon", "armor", "shield", "ring", "amulet", "wondrous"):
         return False, f"{item['name'] if item else item_id} isn't something you can equip.", character
+
+    if not _meets_equip_requirement(character, item):
+        return (
+            False,
+            f"The {item['name']} resists your grasp — you haven't proven yourself enough yet to wield it.",
+            character,
+        )
 
     if item["type"] == "weapon":
         # A weapon carries no AC of its own, but COULD complete a set

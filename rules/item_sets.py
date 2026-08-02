@@ -33,7 +33,7 @@ ITEM_SETS = {
 # eligibility bar item_generator.py's own elemental affixes already use,
 # keeping a set piece a real step up from an ordinary rare/very_rare/
 # legendary drop, not noise on every roll.
-SET_TAG_ELIGIBLE_TIERS = {"rare", "very_rare", "legendary"}
+SET_TAG_ELIGIBLE_TIERS = {"rare", "very_rare", "legendary", "mythic"}
 SET_TAG_CHANCE = 0.15
 
 

@@ -135,6 +135,13 @@ def apply_damage_type_modifier(damage: int, damage_type: str | None, defender: d
     vulnerable = damage_type in vulnerabilities
     if resistant and vulnerable:
         return damage
+    # Mythic-tier weapon affix (magic item system Phase 6, 2026-08-02):
+    # ignore_resistance is a real, guaranteed mechanical effect, not a
+    # bigger version of magic_penetration_pct -- checked before the
+    # normal halving math, same "genuine escape hatch" spirit as
+    # immunity above, but attacker-side instead of defender-side.
+    if resistant and attacker and attacker.get("ignores_resistance"):
+        return damage
     if resistant:
         halved = damage // 2
         cut_off = damage - halved

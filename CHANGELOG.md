@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.76] — Magic items: Phase 6, mythic tier & real progression-gated gear
+
+Sixth phase of the magic item system. A new "mythic" tier sits one step
+above legendary — a deliberately modest numeric bump, because the real
+point is genuinely new mechanical effects, not bigger flat numbers:
+`ignore_resistance` (a mythic weapon deals full damage through an
+enemy's resistance instead of being halved by it), `free_extra_attack`
+(a flat extra attack per turn on top of whatever your class already
+grants), and immunity affixes (reusing the existing resistance/
+vulnerability/immunity system from Phase 2 as-is). Mythic gear is real
+end-game gear: it's gated behind actual progression (a rebirth, a
+maxed-out Echo Trial tier, or beating a specific hidden quest) —
+`equip_item` now genuinely refuses to let you wear it otherwise,
+instead of silently letting a lucky drop skip the reward loop. Pandora's
+Answer, the hidden superboss's legendary reward, has been upgraded to
+mythic with real new effects to match.
+
 ## [1.27.75] — Magic items: Phase 5, set bonuses, and a real "take it off"
 
 Fifth phase of the magic item system. A handful of hand-authored named

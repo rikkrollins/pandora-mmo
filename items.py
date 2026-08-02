@@ -476,10 +476,22 @@ ITEMS = {
     # The true hidden final boss (2026-07-25, per Coffee: an FF6/FF7-
     # style ultimate secret superboss, gated on 10 rebirths AND having
     # already defeated every other secret final boss in the game). The
-    # single strongest item that exists.
+    # single strongest item that exists -- upgraded to real mythic tier
+    # (2026-08-02, magic item system Phase 6) with real mechanical
+    # effects to match its own "single strongest item" billing, rather
+    # than leaving it a plain legendary-tier stat stick the moment
+    # actual mythic gear started existing. Hand-authored, never rolled
+    # -- same shape a generated mythic item's own affixes produce
+    # (ignores_resistance/immunities), set by hand instead, so combat
+    # code treats both identically. equip_requirement is almost
+    # decorative here (you can only ever receive this by having already
+    # beaten the exact content it also gates on), but kept for
+    # consistency with every other mythic item.
     "pandoras_answer": {
-        "name": "Pandora's Answer", "type": "wondrous", "rarity": "legendary",
+        "name": "Pandora's Answer", "type": "wondrous", "rarity": "mythic",
         "price": 0, "weight": 0, "regen_bonus": 10, "ac_bonus": 5,
+        "ignores_resistance": True, "immunities": ["necrotic", "psychic"],
+        "equip_requirement": {"any_of": [{"kind": "completed_quest", "value": "the_unaskeds_reckoning"}]},
         "note": "Not a weapon. Not really armor, either. Just an answer, finally given to whoever was willing to ask the question one more time than everyone before them.",
         "description": "Not a weapon. Not really armor, either. Just an answer, finally given to whoever was willing to ask the question one more time than everyone before them.",
     },
