@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.73] — Magic items: Phase 3, items that grant spells
+
+Third phase of the magic item system. An equipped magic item (ring,
+amulet, wondrous item, or even a weapon/armor/shield) can now grant its
+wearer a spell they don't otherwise know — the same real precedent a
+carried scroll already had, but gated by the item's own limited-use
+charges (reset on rest) instead of spending a spell slot, since a
+permanently-worn item isn't a one-shot consumable like a scroll. Never
+touches `known_spells` or the wearer's real spell slots. The five
+near-identical resource-spend blocks inside spell casting were also
+consolidated into one shared helper along the way, so scroll/item/slot
+resolution now lives in exactly one place instead of five.
+
 ## [1.27.72] — Magic items: Phase 2, elemental damage & resistance
 
 Second phase of the magic item system. Rare+ generated weapons now have

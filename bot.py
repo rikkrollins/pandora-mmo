@@ -14935,6 +14935,45 @@ async def spell_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 REVIVE_HP_FRACTION = 0.05
 
 
+async def _spend_cast_resource(
+    update: Update, character: dict, spell: dict, via_scroll: bool,
+    via_gear: bool, gear_instance_id: int | None, gear_spell_uses: int,
+) -> bool:
+    """
+    Real resource-spend for a spell cast, once the cast is already known
+    to be valid -- cantrips (level 0) are always free/unlimited; a
+    scroll-cast spends the scroll itself (handled separately, see
+    _consume_scroll_if_any) rather than this; an item-granted cast
+    (2026-08-02 magic item system Phase 3) spends one of the item's own
+    feature_uses charges, keyed per item instance so two different
+    spell-granting items never share a budget; everything else spends a
+    real spell slot. Returns False (having already sent the player a
+    real, specific reason) if the resource isn't available -- callers
+    should return immediately when this is False.
+    """
+    if via_gear:
+        feature_key = f"item_spell_{gear_instance_id}"
+        if db.get_feature_uses(update.effective_user.id, feature_key) >= gear_spell_uses:
+            await update.effective_chat.send_message(
+                f"You've already used {spell['name']} from that item as many times as you can since your last rest.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return False
+        db.use_feature(update.effective_user.id, feature_key)
+        return True
+    if not via_scroll and spell["level"] > 0:
+        spent, _ = db.spend_spell_slot(update.effective_user.id)
+        if not spent:
+            await update.effective_chat.send_message(
+                f"You have no spell slots remaining to cast {spell['name']} "
+                f"({character['spell_slots_current']}/{character['spell_slots_max']} left). "
+                f"Rest to recover them.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return False
+    return True
+
+
 async def _do_cast_spell(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -14968,6 +15007,33 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             spell = spells_module.get_spell(candidate) if candidate else None
             if spell and (candidate.replace("_", " ") in lowered or spell["name"].lower() in lowered):
                 spell_id, via_scroll, scroll_item_id = candidate, True, item_id
+                break
+
+    # Phase 3 of the magic item system (2026-08-02): a third fallback --
+    # an equipped item (ring/amulet/wondrous/weapon/armor/shield) can
+    # grant a spell the wearer doesn't otherwise know, same shape as the
+    # scroll branch just above, but gated by feature_uses (a permanently-
+    # worn item isn't a one-shot consumable like a scroll, so it needs
+    # SOME limiter) rather than spending a spell slot or the item itself.
+    via_gear = False
+    gear_instance_id = None
+    gear_spell_uses = 0
+    if spell_id is None:
+        equipped_ids = [
+            character.get("equipped_weapon"), character.get("equipped_armor"), character.get("equipped_shield"),
+        ] + character.get("equipped_accessories", [])
+        for item_id in equipped_ids:
+            if not item_id:
+                continue
+            item_data = items_module.get_item(item_id)
+            candidate = item_data.get("grants_spell") if item_data else None
+            if not candidate:
+                continue
+            spell = spells_module.get_spell(candidate)
+            if spell and (candidate.replace("_", " ") in lowered or spell["name"].lower() in lowered):
+                spell_id, via_gear = candidate, True
+                gear_instance_id = item_data.get("instance_id")
+                gear_spell_uses = item_data.get("grants_spell_uses", 1)
                 break
 
     if spell_id is None:
@@ -15058,19 +15124,12 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                     )
                 return
 
-            # Only spend a slot once we KNOW the cast is actually valid —
-            # cantrips (level 0) are free/unlimited per real 5E rules.
-            # A scroll-cast spends the scroll instead of a slot.
-            if not via_scroll and spell["level"] > 0:
-                spent, _ = db.spend_spell_slot(update.effective_user.id)
-                if not spent:
-                    await update.effective_chat.send_message(
-                        f"You have no spell slots remaining to cast {spell['name']} "
-                        f"({character['spell_slots_current']}/{character['spell_slots_max']} left). "
-                        f"Rest to recover them.",
-                        message_thread_id=config.TOPIC_ADVENTURE_ID,
-                    )
-                    return
+            # Only spend a resource once we KNOW the cast is actually
+            # valid -- cantrips (level 0) are free/unlimited per real 5E
+            # rules; see _spend_cast_resource's own docstring for the
+            # scroll/item/slot resolution.
+            if not await _spend_cast_resource(update, character, spell, via_scroll, via_gear, gear_instance_id, gear_spell_uses):
+                return
             _consume_scroll_if_any()
 
             target = _pick_target(text, opposing)
@@ -15186,16 +15245,8 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                 message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
             return
-        if not via_scroll and spell["level"] > 0:
-            spent, _ = db.spend_spell_slot(update.effective_user.id)
-            if not spent:
-                await update.effective_chat.send_message(
-                    f"You have no spell slots remaining to cast {spell['name']} "
-                    f"({character['spell_slots_current']}/{character['spell_slots_max']} left). "
-                    f"Rest to recover them.",
-                    message_thread_id=config.TOPIC_ADVENTURE_ID,
-                )
-                return
+        if not await _spend_cast_resource(update, character, spell, via_scroll, via_gear, gear_instance_id, gear_spell_uses):
+            return
         _consume_scroll_if_any()
         result = spells_module.resolve_heal_spell(spell_id, character, target_character)
         db.update_character(target_character["telegram_user_id"], hp_current=target_character["hp_current"])
@@ -15234,16 +15285,8 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                 message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
             return
-        if not via_scroll and spell["level"] > 0:
-            spent, _ = db.spend_spell_slot(update.effective_user.id)
-            if not spent:
-                await update.effective_chat.send_message(
-                    f"You have no spell slots remaining to cast {spell['name']} "
-                    f"({character['spell_slots_current']}/{character['spell_slots_max']} left). "
-                    f"Rest to recover them.",
-                    message_thread_id=config.TOPIC_ADVENTURE_ID,
-                )
-                return
+        if not await _spend_cast_resource(update, character, spell, via_scroll, via_gear, gear_instance_id, gear_spell_uses):
+            return
         _consume_scroll_if_any()
         revive_hp = max(1, round(target_character["hp_max"] * REVIVE_HP_FRACTION))
         db.update_character(
@@ -15264,16 +15307,8 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                     message_thread_id=config.TOPIC_ADVENTURE_ID,
                 )
                 return
-            if not via_scroll and spell["level"] > 0:
-                spent, _ = db.spend_spell_slot(update.effective_user.id)
-                if not spent:
-                    await update.effective_chat.send_message(
-                        f"You have no spell slots remaining to cast {spell['name']} "
-                        f"({character['spell_slots_current']}/{character['spell_slots_max']} left). "
-                        f"Rest to recover them.",
-                        message_thread_id=config.TOPIC_ADVENTURE_ID,
-                    )
-                    return
+            if not await _spend_cast_resource(update, character, spell, via_scroll, via_gear, gear_instance_id, gear_spell_uses):
+                return
             _consume_scroll_if_any()
 
             stats = spell["summon_stats"]
@@ -15302,16 +15337,8 @@ async def _do_cast_spell(update: Update, text: str) -> None:
         )
 
     else:
-        if not via_scroll and spell["level"] > 0:
-            spent, _ = db.spend_spell_slot(update.effective_user.id)
-            if not spent:
-                await update.effective_chat.send_message(
-                    f"You have no spell slots remaining to cast {spell['name']} "
-                    f"({character['spell_slots_current']}/{character['spell_slots_max']} left). "
-                    f"Rest to recover them.",
-                    message_thread_id=config.TOPIC_ADVENTURE_ID,
-                )
-                return
+        if not await _spend_cast_resource(update, character, spell, via_scroll, via_gear, gear_instance_id, gear_spell_uses):
+            return
         _consume_scroll_if_any()
         buff_target = _find_party_target_by_name(text)
         target_note = f" on **{buff_target['name']}**" if buff_target else ""

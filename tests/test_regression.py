@@ -1869,6 +1869,49 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(apply_damage_type_modifier(20, "fire", combatant), 10)
         self.assertEqual(apply_damage_type_modifier(20, "cold", combatant), 20)
 
+    async def test_equipped_item_can_grant_a_spell_gated_by_feature_uses(self):
+        """
+        Real Phase 3 deliverable of the magic item system (2026-08-02):
+        _do_cast_spell already had a real precedent for "temporary access
+        to a spell you don't otherwise know" -- a carried scroll. This
+        adds a third fallback: an EQUIPPED item can grant a spell too,
+        but gated by feature_uses (a permanently-worn item isn't a
+        one-shot consumable like a scroll) instead of spending a real
+        spell slot or ever touching known_spells.
+        """
+        user_id = 950904
+        character = make_basic_character(user_id, "GearCaster2", char_class="Fighter", current_location="crossroads_tavern")
+        self.assertNotIn("cure_wounds", character["known_spells"])
+        known_spells_before = list(character["known_spells"])
+        slots_before = character["spell_slots_current"]
+
+        ring_id = db.create_item_instance(
+            item_type="ring", name="Ring of the Ember Spark", rarity="rare", price=500,
+            base_stats={"type": "ring"},
+            affixes=[{"kind": "grants_spell", "spell_id": "cure_wounds", "uses": 2}],
+        )
+        db.add_item(user_id, ring_id, 1)
+        success, _msg, _updated = db.equip_item(user_id, ring_id)
+        self.assertTrue(success)
+
+        async def cast():
+            sink = []
+            await bot._do_cast_spell(FakeUpdate(user_id, "cast cure wounds", sink), "cast cure wounds")
+            return "\n".join(sink)
+
+        reply1 = await cast()
+        self.assertNotIn("don't know a spell", reply1.lower())
+        reply2 = await cast()
+        self.assertNotIn("don't know a spell", reply2.lower())
+        self.assertNotIn("already used", reply2.lower())
+        reply3 = await cast()
+        self.assertIn("already used", reply3.lower())
+
+        after = db.get_character(user_id)
+        self.assertEqual(after["known_spells"], known_spells_before)
+        self.assertEqual(after["spell_slots_current"], slots_before)
+        self.assertEqual(db.get_feature_uses(user_id, f"item_spell_{ring_id[2:]}"), 2)
+
     async def test_ai_companion_actually_fighting_gets_real_combat_xp(self):
         """
         Real live bug (2026-08-01, Coffee: "They didn't get experience

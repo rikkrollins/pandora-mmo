@@ -762,6 +762,16 @@ def _apply_affix(item: dict, affix: dict) -> None:
     elif kind in ("resistance", "vulnerability", "immunity"):
         list_field = f"{kind}s"
         item.setdefault(list_field, []).append(affix["damage_type"])
+    # Phase 3 (2026-08-02): an item that grants a spell the wearer
+    # doesn't otherwise know -- bot._do_cast_spell's own third fallback
+    # branch (after known_spells, after a carried scroll) reads these two
+    # fields directly off the materialized item, gated by feature_uses
+    # (f"item_spell_{instance_id}"), never a real spell slot -- a
+    # permanently-worn item isn't a one-shot scroll, but still needs some
+    # limiter.
+    elif kind == "grants_spell":
+        item["grants_spell"] = affix["spell_id"]
+        item["grants_spell_uses"] = affix["uses"]
 
 
 def materialize_item_instance(item_id: str) -> dict | None:
