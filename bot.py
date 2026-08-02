@@ -3292,9 +3292,10 @@ def _grant_generated_loot(real_party_ids: list[int]) -> str:
     """
     loot_item = generate_item(item_type=random.choice(["weapon", "armor"]))
     affixes = loot_item.pop("affixes", [])
+    set_id = loot_item.pop("set_id", None)
     item_id = db.create_item_instance(
         item_type=loot_item["type"], name=loot_item["name"], rarity=loot_item["rarity"],
-        price=loot_item["price"], base_stats=loot_item, affixes=affixes,
+        price=loot_item["price"], base_stats=loot_item, affixes=affixes, set_id=set_id,
     )
     winner_id = random.choice(real_party_ids)
     db.add_item(winner_id, item_id, 1)
@@ -13966,6 +13967,41 @@ async def _do_equip_item(update: Update, text: str) -> None:
     await _check_and_award_achievements(update, db.get_character(target["telegram_user_id"]))
 
 
+async def _do_unequip_item(update: Update, text: str) -> None:
+    """
+    Real, previously-missing feature (2026-08-02, magic item system
+    Phase 5): a player could equip a ring/amulet/wondrous item but never
+    take it back off -- confirmed by grep before this, no such code path
+    existed anywhere. Needed for a set bonus to be meaningfully real (a
+    bonus that could only ever be gained, never lost, would have no
+    trustworthy "off" state), but genuinely useful on its own too.
+    Accessories only for now, same scope db.unequip_accessory's own
+    docstring explains -- weapon/armor/shield are single-slot columns
+    already correctly replaced by equipping something else.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    worn_ids = character.get("equipped_accessories", [])
+    items_wanted = _extract_item_list(text, worn_ids)
+    if not items_wanted:
+        await update.effective_chat.send_message(
+            "Take off what, exactly? Name a ring, amulet, or wondrous item you're actually wearing.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    lines = []
+    for item_id, _quantity in items_wanted:
+        success, message, _ = db.unequip_accessory(update.effective_user.id, item_id)
+        lines.append(f"🎽 {message}" if success else message)
+    await _safe_send(update, "\n".join(lines))
+
+
 _AUTO_EQUIP_PARTY_WORDS = ["party", "everyone", "everybody", "all of us", "the team", "my group"]
 
 
@@ -16424,6 +16460,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_check_professions(update)
     elif action == "equip_item":
         await _do_equip_item(update, intent.get("raw_text", text))
+    elif action == "unequip_item":
+        await _do_unequip_item(update, intent.get("raw_text", text))
     elif action == "auto_equip":
         await _do_auto_equip_gear(update, intent.get("raw_text", text))
     elif action == "show_map":

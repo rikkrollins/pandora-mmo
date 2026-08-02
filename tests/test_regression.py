@@ -1958,6 +1958,63 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await gather()  # same roll of 10, +3 from the ring -> total 13 == DC 13, succeeds
         self.assertGreater(db.get_character(user_id)["inventory"].get("sulfur_dust", 0), before2)
 
+    async def test_set_bonus_applies_at_threshold_and_drops_off_on_unequip(self):
+        """
+        Real Phase 5 deliverable of the magic item system (2026-08-02):
+        a real 3-state sequence through the actual handlers -- equip one
+        piece of a hand-authored named set (no bonus yet), equip the
+        second (the 2-piece bonus activates, armor_class reflects it via
+        the new db.recompute_armor_class), unequip one piece (the bonus
+        drops off). Also the first real exercise of db.unequip_accessory/
+        bot._do_unequip_item -- a genuinely new feature this game never
+        had before (confirmed by grep: no unequip path existed at all).
+
+        The test's OWN baseline is captured after the FIRST equip, not
+        at character creation -- the fixture's armor_class default is a
+        flat, dexterity-disconnected value, and the very first real
+        equip event now correctly recomputes AC from scratch, which is
+        a genuine correction, not something this test should treat as
+        a false baseline.
+        """
+        from rules.item_sets import ITEM_SETS
+        user_id = 950906
+        make_basic_character(
+            user_id, "SetTester2", current_location="crossroads_tavern",
+            ability_scores={"strength": 10, "dexterity": 12, "constitution": 10,
+                             "intelligence": 10, "wisdom": 10, "charisma": 10},
+        )
+        set_id = "emberwoven_vanguard"
+        set_def = ITEM_SETS[set_id]
+        expected_bonus = set_def["pieces"][2][0]["value"]
+
+        ring1_id = db.create_item_instance(
+            item_type="ring", name="Emberwoven Band", rarity="rare", price=300,
+            base_stats={"type": "ring"}, affixes=[], set_id=set_id,
+        )
+        ring2_id = db.create_item_instance(
+            item_type="amulet", name="Emberwoven Pendant", rarity="rare", price=300,
+            base_stats={"type": "amulet"}, affixes=[], set_id=set_id,
+        )
+
+        db.add_item(user_id, ring1_id, 1)
+        success1, _msg1, _u1 = db.equip_item(user_id, ring1_id)
+        self.assertTrue(success1)
+        ac_one_piece = db.get_character(user_id)["armor_class"]
+
+        db.add_item(user_id, ring2_id, 1)
+        success2, msg2, _u2 = db.equip_item(user_id, ring2_id)
+        self.assertTrue(success2)
+        after_two = db.get_character(user_id)
+        self.assertEqual(after_two["armor_class"], ac_one_piece + expected_bonus)
+        self.assertIn("AC is now", msg2)
+
+        sink = []
+        await bot._do_unequip_item(FakeUpdate(user_id, "take off my Emberwoven Band", sink), "take off my Emberwoven Band")
+        after_unequip = db.get_character(user_id)
+        self.assertEqual(after_unequip["armor_class"], ac_one_piece)
+        self.assertNotIn(ring1_id, after_unequip["equipped_accessories"])
+        self.assertIn(ring2_id, after_unequip["equipped_accessories"])
+
     async def test_ai_companion_actually_fighting_gets_real_combat_xp(self):
         """
         Real live bug (2026-08-01, Coffee: "They didn't get experience

@@ -114,6 +114,8 @@ party member — different from casting a revival spell. Set "target" to the dea
 - "equip_item" is for equipping/wielding/wearing/putting on a weapon or piece of armor they're carrying \
 (e.g. "equip my longsword", "wear the chain mail", "wield the dagger", "equip Sarah with the longbow"). \
 Set "item_name" to the item, and "target" to who it's for if a specific OTHER party member is named (defaults to self).
+- "unequip_item" is the inverse: taking off a currently-worn ring/amulet/wondrous item \
+(e.g. "take off my ring", "unequip the amulet", "remove my cloak"). Set "item_name" to the item.
 - "auto_equip" is for asking the game to automatically equip the best weapon/armor/shield being carried, \
 without naming a specific item (e.g. "auto equip my character", "put on my gear automatically", \
 "help me equip my player"). Set "target" to a specific party member's name if named, else self.
@@ -1167,6 +1169,15 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # loop, which let a message naming a known NPC/companion ("...on
     # Wren") slip past it entirely.
 
+    # Checked BEFORE equip_item just below -- "take off"/"unequip"/
+    # "remove my" are the real inverse of "put on"/"wear", and share
+    # enough surface words (both can mention a ring/amulet by name) that
+    # the more specific removal phrasing needs to win first (magic item
+    # system Phase 5, 2026-08-02: a real, previously entirely missing
+    # unequip feature).
+    if any(w in lowered for w in ["take off", "unequip", "remove my", "i remove"]):
+        return {**base, "action": "unequip_item"}
+
     if any(w in lowered for w in ["equip ", "wield ", "wear ", "put on the", "put on my",
                                     "i equip", "i wield"]):
         return {**base, "action": "equip_item"}
@@ -1557,7 +1568,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "invite_to_party", "accept_party_invite", "leave_party", "bench_party_member",
                 "unbench_party_member", "set_front_row", "set_back_row", "find_merchant",
                 "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "arcane_recovery",
-                "make_campfire", "give_item", "use_item", "equip_item", "auto_equip", "breath_weapon",
+                "make_campfire", "give_item", "use_item", "equip_item", "unequip_item", "auto_equip", "breath_weapon",
                 "channel_divinity", "action_surge", "reckless_attack", "divine_smite",
                 "flurry_of_blows", "wild_shape", "toggle_manual_dice", "level_up", "auto_level_up_party",
                 "set_description", "set_pronouns",

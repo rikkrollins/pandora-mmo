@@ -12,6 +12,7 @@ multiplier, and picks from that tier's own name-flavor word lists.
 import random
 
 from rules.dice import roll
+from rules.item_sets import ITEM_SETS, SET_TAG_ELIGIBLE_TIERS, SET_TAG_CHANCE
 
 # weapon_category/armor_category (task #223's proficiency system,
 # 2026-07-21, caught before it caused a real bug): every generated item
@@ -115,6 +116,20 @@ def _maybe_elemental_affix(tier: str, kind: str) -> list[dict]:
     return [{"kind": kind, "damage_type": random.choice(ELEMENTAL_DAMAGE_TYPES)}]
 
 
+def _maybe_set_id(tier: str) -> str | None:
+    """
+    Magic item system Phase 5 (2026-08-02): a rare+ roll has a real
+    (not guaranteed) chance to be tagged as a piece of one of the small,
+    hand-authored named sets in rules/item_sets.py -- per Coffee's
+    explicit decision, sets are curated content, never randomly
+    assembled, so this only ever picks an EXISTING set_id, never
+    invents one.
+    """
+    if tier not in SET_TAG_ELIGIBLE_TIERS or random.random() > SET_TAG_CHANCE or not ITEM_SETS:
+        return None
+    return random.choice(list(ITEM_SETS.keys()))
+
+
 def generate_weapon(base_id: str | None = None, tier: str | None = None) -> dict:
     """
     Returns a fully-formed item dict in the same shape as items.py's
@@ -154,6 +169,7 @@ def generate_weapon(base_id: str | None = None, tier: str | None = None) -> dict
         "weapon_category": base["weapon_category"],
         "generated": True,
         "generated_base": base_id,
+        "set_id": _maybe_set_id(tier),
         "note": f"A {tier.replace('_', ' ')} find, worked with more care than most of its kind.",
         "affixes": (
             ([{"kind": "stat_bonus", "field": "damage_bonus", "value": bonus}] if bonus else [])
@@ -180,6 +196,7 @@ def generate_armor(base_id: str | None = None, tier: str | None = None) -> dict:
         "armor_category": base["armor_category"],
         "generated": True,
         "generated_base": base_id,
+        "set_id": _maybe_set_id(tier),
         "note": f"A {tier.replace('_', ' ')} find, worked with more care than most of its kind.",
         "affixes": (
             ([{"kind": "stat_bonus", "field": "ac_base", "value": bonus}] if bonus else [])
@@ -206,6 +223,7 @@ def generate_shield(base_id: str | None = None, tier: str | None = None) -> dict
         "armor_category": base["armor_category"],
         "generated": True,
         "generated_base": base_id,
+        "set_id": _maybe_set_id(tier),
         "note": f"A {tier.replace('_', ' ')} find, worked with more care than most of its kind.",
         "affixes": (
             ([{"kind": "stat_bonus", "field": "ac_bonus", "value": bonus}] if bonus else [])

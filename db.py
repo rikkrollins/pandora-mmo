@@ -24,6 +24,7 @@ from rules.leveling import (
     level_for_xp, proficiency_bonus_for_level,
     hp_gain_for_level, ASI_LEVELS, xp_gain_multiplier, EVOLUTION_HP_MULTIPLIER,
 )
+from rules.item_sets import active_set_bonus_affixes
 import spells as spells_module
 
 CREATE_CHARACTERS_TABLE = """
@@ -826,6 +827,70 @@ def _equipped_ring_ac_bonus(character: dict) -> int:
     return total
 
 
+def _equipped_set_ids(character: dict) -> list[str]:
+    """set_id of every currently-equipped item (weapon/armor/shield/accessories), duplicates included -- one entry per piece worn."""
+    equipped_ids = [
+        character.get("equipped_weapon"), character.get("equipped_armor"), character.get("equipped_shield"),
+    ] + character.get("equipped_accessories", [])
+    set_ids = []
+    for item_id in equipped_ids:
+        if not item_id:
+            continue
+        item = items_module.get_item(item_id)
+        if item and item.get("set_id"):
+            set_ids.append(item["set_id"])
+    return set_ids
+
+
+def _equipped_set_ac_bonus(character: dict) -> int:
+    """Sum of any AC-affecting (ac_base/ac_bonus stat_bonus) affix from a currently-active set bonus (Phase 5, 2026-08-02)."""
+    total = 0
+    for affix in active_set_bonus_affixes(_equipped_set_ids(character)):
+        if affix.get("kind") == "stat_bonus" and affix.get("field") in ("ac_base", "ac_bonus"):
+            total += affix.get("value", 0)
+    return total
+
+
+def unequip_accessory(telegram_user_id: int, item_id: str) -> tuple[bool, str, dict | None]:
+    """
+    Real, previously-missing feature (2026-08-02, needed for set bonuses
+    to be meaningfully correct -- a bonus that could only ever be gained
+    and never lost had no real "off" state to trust). Only accessories
+    (rings/amulets/wondrous) for now -- weapon/armor/shield are single-
+    slot columns already correctly replaced by equipping something else;
+    "go bare-handed/bare-chested" isn't a real ask, so it's out of scope.
+
+    Real bug caught before shipping (2026-08-02): an earlier version of
+    this feature tried to recompute armor_class fully from scratch
+    (10 + DEX, or equipped armor's ac_base + DEX) -- wrong, because this
+    game's REAL starting AC is per-class (bot.py's BASE_ARMOR_CLASS
+    table, plus special Wizard/Monk/Sorcerer Unarmored Defense formulas
+    computed once at character creation), never a flat 10-based default.
+    A from-scratch recompute silently discarded that the instant anyone
+    equipped or unequipped anything. Fixed the only way that's safe
+    without duplicating BASE_ARMOR_CLASS into db.py: treat the item's
+    own direct ac_bonus, and any set-bonus CHANGE, as pure deltas
+    applied on top of whatever armor_class already legitimately is --
+    never a full recompute.
+    """
+    character = get_character(telegram_user_id)
+    if character is None:
+        return False, "No character found.", None
+    accessories = character.get("equipped_accessories", [])
+    if item_id not in accessories:
+        return False, "You're not wearing that.", character
+    item = items_module.get_item(item_id)
+    old_set_bonus = _equipped_set_ac_bonus(character)
+    character["equipped_accessories"] = [a for a in accessories if a != item_id]
+    new_set_bonus = _equipped_set_ac_bonus(character)
+    new_ac = character["armor_class"] - (item.get("ac_bonus", 0) if item else 0) + (new_set_bonus - old_set_bonus)
+    updated = update_character(
+        telegram_user_id, equipped_accessories=character["equipped_accessories"], armor_class=new_ac,
+    )
+    name = item["name"] if item else item_id
+    return True, f"You take off the {name}. AC is now {new_ac}.", updated
+
+
 def equip_item(telegram_user_id: int, item_id: str) -> tuple[bool, str, dict | None]:
     """
     Equip a weapon, armor, shield, ring, amulet, or wondrous item the
@@ -865,6 +930,18 @@ def equip_item(telegram_user_id: int, item_id: str) -> tuple[bool, str, dict | N
         return False, f"{item['name'] if item else item_id} isn't something you can equip.", character
 
     if item["type"] == "weapon":
+        # A weapon carries no AC of its own, but COULD complete a set
+        # whose bonus does (Phase 5, 2026-08-02) -- a pure delta, same
+        # "capture before, mutate, capture after" pattern every other
+        # branch below uses, so a weapon-based set piece isn't silently
+        # ignored just because weapons never affected AC before.
+        old_set_bonus = _equipped_set_ac_bonus(character)
+        character["equipped_weapon"] = item_id
+        set_delta = _equipped_set_ac_bonus(character) - old_set_bonus
+        if set_delta:
+            new_ac = character["armor_class"] + set_delta
+            updated = update_character(telegram_user_id, equipped_weapon=item_id, armor_class=new_ac)
+            return True, f"You equip the {item['name']}. AC is now {new_ac}.", updated
         updated = update_character(telegram_user_id, equipped_weapon=item_id)
         return True, f"You equip the {item['name']}.", updated
 
@@ -876,15 +953,31 @@ def equip_item(telegram_user_id: int, item_id: str) -> tuple[bool, str, dict | N
     ring_bonus = _equipped_ring_ac_bonus(character)
 
     if item["type"] == "armor":
+        # Real bug caught before shipping (2026-08-02): an earlier
+        # version of this branch recomputed AC fully from scratch
+        # (item's ac_base + DEX) -- wrong, because a character's real
+        # starting AC is per-class (bot.py's BASE_ARMOR_CLASS table,
+        # Wizard/Monk/Sorcerer Unarmored Defense formulas), never a flat
+        # 10-based default; a from-scratch recompute silently discarded
+        # that. Restored to the original delta math (ac_base + DEX +
+        # whatever shield/ring bonus already applies), now with a set-
+        # bonus delta layered on top the same way every other branch
+        # here handles it.
+        old_set_bonus = _equipped_set_ac_bonus(character)
+        character["equipped_armor"] = item_id
+        set_delta = _equipped_set_ac_bonus(character) - old_set_bonus
         dex_mod = ability_modifier(character["dexterity"])
-        new_ac = item["ac_base"] + dex_mod + current_shield_bonus + ring_bonus
+        new_ac = item["ac_base"] + dex_mod + current_shield_bonus + ring_bonus + set_delta
         updated = update_character(telegram_user_id, equipped_armor=item_id, armor_class=new_ac)
         return True, f"You put on the {item['name']} (AC {new_ac}).", updated
 
     if item["type"] == "shield":
         # Additive on top of current AC, swapping out any previously-
         # equipped shield's bonus first rather than stacking both.
-        new_ac = character["armor_class"] - current_shield_bonus + item["ac_bonus"]
+        old_set_bonus = _equipped_set_ac_bonus(character)
+        character["equipped_shield"] = item_id
+        set_delta = _equipped_set_ac_bonus(character) - old_set_bonus
+        new_ac = character["armor_class"] - current_shield_bonus + item["ac_bonus"] + set_delta
         updated = update_character(telegram_user_id, equipped_shield=item_id, armor_class=new_ac)
         return True, f"You raise the {item['name']} (AC {new_ac}).", updated
 
@@ -893,12 +986,21 @@ def equip_item(telegram_user_id: int, item_id: str) -> tuple[bool, str, dict | N
     accessories = character["equipped_accessories"]
     if item_id in accessories:
         return False, f"You're already wearing the {item['name']}.", character
+    old_set_bonus = _equipped_set_ac_bonus(character)
     accessories = accessories + [item_id]
+    character["equipped_accessories"] = accessories
     updates = {"equipped_accessories": accessories}
     note_parts = [f"You put on the {item['name']}."]
 
-    if item.get("ac_bonus"):
-        new_ac = character["armor_class"] + item["ac_bonus"]
+    # This item's own direct ac_bonus, PLUS whatever set-bonus delta
+    # equipping it just caused (2026-08-02, Phase 5) -- a ring with no
+    # ac_bonus of its own can still be the piece that crosses a set
+    # threshold, so both sources are checked, never just the item's own
+    # field the way this branch originally only did.
+    set_delta = _equipped_set_ac_bonus(character) - old_set_bonus
+    ac_delta = item.get("ac_bonus", 0) + set_delta
+    if ac_delta:
+        new_ac = character["armor_class"] + ac_delta
         updates["armor_class"] = new_ac
         note_parts.append(f"AC is now {new_ac}.")
     if item.get("constitution_set") and item["constitution_set"] > character["constitution"]:

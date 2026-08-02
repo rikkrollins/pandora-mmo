@@ -2,6 +2,24 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.75] — Magic items: Phase 5, set bonuses, and a real "take it off"
+
+Fifth phase of the magic item system. A handful of hand-authored named
+sets (e.g. "The Emberwoven Vanguard") can now drop on rare+ gear —
+wearing enough pieces of the same set grants a real bonus at 2/4-piece
+thresholds, on top of whatever each piece already does on its own. Also
+ships something this game never had at all before: a real way to take
+off a ring, amulet, or wondrous item once worn ("take off my ring",
+"unequip the amulet") — needed to prove a set bonus actually comes and
+goes correctly, but useful on its own regardless.
+
+Caught and fixed before shipping: an early version of this recomputed
+armor_class fully from scratch on every equip change, which would have
+silently thrown away this game's real per-class starting AC (Wizard/
+Monk/Sorcerer Unarmored Defense, etc.) — fixed to apply set-bonus
+changes as a pure delta on top of the existing, correct AC math instead
+of replacing it.
+
 ## [1.27.74] — Magic items: Phase 4, gear that boosts gathering & crafting
 
 Fourth phase of the magic item system. Equipped gear can now carry a
