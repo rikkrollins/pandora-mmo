@@ -119,6 +119,11 @@ Set "item_name" to the item, and "target" to who it's for if a specific OTHER pa
 - "auto_equip" is for asking the game to automatically equip the best weapon/armor/shield being carried, \
 without naming a specific item (e.g. "auto equip my character", "put on my gear automatically", \
 "help me equip my player"). Set "target" to a specific party member's name if named, else self.
+- "forge_item" is for upgrading a real, previously found/crafted magic item to a higher tier at the forge \
+(e.g. "forge my longsword", "forge the chain shirt"). Set "item_name" to the item.
+- "enchant_item" is for adding a new magic effect to a real, previously found/crafted item -- "enchant" and \
+"imbue" mean the same thing here (e.g. "enchant my longsword with flame", "imbue the shield with warding"). \
+Set "item_name" to the item.
 - "join_guild" is for joining/asking to join a specific guild or order.
 - "pass_turn" is for skipping, waiting, or passing.
 - "resolve_choice" is for declaring a decision on a moral choice/quest resolution (e.g. "I choose to...", "I'll go with...").
@@ -1182,6 +1187,18 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
                                     "i equip", "i wield"]):
         return {**base, "action": "equip_item"}
 
+    # Magic item system Phase 7 (2026-08-02): forge/enchant/imbue -- real
+    # generated-item mutation, checked before nothing else conflicts
+    # (neither word appears in any earlier trigger here). "enchant"/
+    # "imbue" also appear in the SEPARATE enchanters_guild dialogue
+    # check in bot.py's guild_topic_handler, but that only fires inside
+    # that guild's own dedicated Telegram topic, never through this
+    # general classifier -- no collision.
+    if any(w in lowered for w in ["forge my", "forge the", "i forge"]):
+        return {**base, "action": "forge_item"}
+    if any(w in lowered for w in ["enchant my", "enchant the", "imbue my", "imbue the", "i enchant", "i imbue"]):
+        return {**base, "action": "enchant_item"}
+
     # "eat" needs a real word-boundary check (not the bare substring style
     # used above) -- confirmed live 2026-07-18: a naive "eat " substring
     # check false-positives on any word ending in those letters followed
@@ -1569,6 +1586,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "unbench_party_member", "set_front_row", "set_back_row", "find_merchant",
                 "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "arcane_recovery",
                 "make_campfire", "give_item", "use_item", "equip_item", "unequip_item", "auto_equip", "breath_weapon",
+                "forge_item", "enchant_item",
                 "channel_divinity", "action_surge", "reckless_attack", "divine_smite",
                 "flurry_of_blows", "wild_shape", "toggle_manual_dice", "level_up", "auto_level_up_party",
                 "set_description", "set_pronouns",

@@ -2075,6 +2075,140 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character["free_extra_attack"] = True
         self.assertEqual(bot._attacks_per_turn(character), base_attacks + 1)
 
+    def test_forging_bumps_tier_and_stat_bonus_in_place_same_item_id(self):
+        """
+        Real Phase 7 deliverable of the magic item system (2026-08-02):
+        forging bumps an EXISTING generated item's rarity and stat_bonus
+        affix value up one real tier, same instance_id/item_id -- no
+        migration, every existing inventory/equip reference stays valid.
+        """
+        from rules.item_generator import generate_weapon
+        base_weapon = generate_weapon(tier="common")
+        affixes = base_weapon.pop("affixes", [])
+        item_id = db.create_item_instance(
+            item_type=base_weapon["type"], name=base_weapon["name"], rarity=base_weapon["rarity"],
+            price=base_weapon["price"], base_stats=base_weapon, affixes=affixes,
+        )
+        before = db.materialize_item_instance(item_id)
+        self.assertEqual(before.get("damage_bonus", 0), 0)
+
+        ok, _msg, forged = db.forge_item_instance(item_id)
+        self.assertTrue(ok)
+        self.assertEqual(forged["rarity"], "uncommon")
+        self.assertEqual(forged.get("damage_bonus"), 1)
+        self.assertEqual(forged["instance_id"], before["instance_id"])
+
+        ok2, _msg2, forged2 = db.forge_item_instance(item_id)
+        self.assertTrue(ok2)
+        self.assertEqual(forged2["rarity"], "rare")
+        self.assertEqual(forged2.get("damage_bonus"), 2)
+
+        mythic_weapon = generate_weapon(tier="mythic")
+        mythic_affixes = mythic_weapon.pop("affixes", [])
+        mythic_item_id = db.create_item_instance(
+            item_type=mythic_weapon["type"], name=mythic_weapon["name"], rarity=mythic_weapon["rarity"],
+            price=mythic_weapon["price"], base_stats=mythic_weapon, affixes=mythic_affixes,
+        )
+        ok3, _msg3, forged3 = db.forge_item_instance(mythic_item_id)
+        self.assertFalse(ok3)
+        self.assertIsNone(forged3)
+
+        ok4, _msg4, forged4 = db.forge_item_instance("longsword")
+        self.assertFalse(ok4)
+        self.assertIsNone(forged4)
+
+    def test_enchanting_appends_a_new_affix_to_an_existing_forged_item(self):
+        """
+        Real Phase 7 deliverable: enchanting/imbuing appends ONE new
+        affix (here, grants_spell) to an existing item's affix list --
+        the same shared vocabulary db._apply_affix already understands,
+        proving the item stays fully consistent (keeps its forge-bumped
+        damage_bonus AND gains the new effect) with zero new cast-side
+        code, since materialize_item_instance folds it on unchanged.
+        """
+        from rules.item_generator import generate_weapon
+        base_weapon = generate_weapon(tier="common")
+        affixes = base_weapon.pop("affixes", [])
+        item_id = db.create_item_instance(
+            item_type=base_weapon["type"], name=base_weapon["name"], rarity=base_weapon["rarity"],
+            price=base_weapon["price"], base_stats=base_weapon, affixes=affixes,
+        )
+        db.forge_item_instance(item_id)
+
+        ok, _msg, enchanted = db.enchant_item_instance(
+            item_id, {"kind": "grants_spell", "spell_id": "magic_missile", "uses": 2},
+        )
+        self.assertTrue(ok)
+        self.assertEqual(enchanted.get("damage_bonus"), 1)
+        self.assertEqual(enchanted.get("grants_spell"), "magic_missile")
+        self.assertEqual(enchanted.get("grants_spell_uses"), 2)
+
+    def test_advanced_craft_recipe_rolls_a_real_generated_item_at_fixed_tier(self):
+        """
+        Real Phase 7 deliverable: an advanced recipe reuses
+        rules/item_generator.py (the same roll combat loot already uses)
+        to produce a REAL generated item at the recipe's fixed tier on
+        success, instead of a flat catalog item -- and reports missing
+        materials honestly without ever rolling, same convention as the
+        static RECIPES above.
+        """
+        from rules.crafting import resolve_advanced_craft
+        character = make_basic_character(950909, "AdvancedCraftTester", char_class="Fighter", current_location="crossroads_tavern")
+        result = resolve_advanced_craft(character, "masterwork_longsword", practiced_bonus=0)
+        self.assertEqual(result["outcome"], "missing_materials")
+
+        db.add_item(950909, "iron_ore", 6)
+        db.add_item(950909, "moonpetal", 1)
+        character = db.get_character(950909)
+        succeeded = False
+        for _ in range(30):
+            result = resolve_advanced_craft(character, "masterwork_longsword", practiced_bonus=50)
+            if result["outcome"] == "success":
+                succeeded = True
+                break
+        self.assertTrue(succeeded)
+        self.assertEqual(result["generated_item"]["type"], "weapon")
+        self.assertEqual(result["generated_item"]["rarity"], "rare")
+
+    def test_forge_and_enchant_keyword_fallback_classification(self):
+        """Real Phase 7 deliverable: "forge my X" / "enchant my X" / "imbue the X" classify correctly without a model call."""
+        self.assertEqual(_keyword_fallback("forge my longsword", [])["action"], "forge_item")
+        self.assertEqual(_keyword_fallback("enchant my longsword with flame", [])["action"], "enchant_item")
+        self.assertEqual(_keyword_fallback("imbue the shield with warding", [])["action"], "enchant_item")
+
+    async def test_real_forge_handler_advances_a_carried_items_tier(self):
+        """
+        Real Phase 7 deliverable: bot._do_forge_item, run through the
+        real dispatch/narration pipeline via a real FakeUpdate (not just
+        the underlying db function), genuinely advances a carried
+        generated item's tier and spends the real gold/material cost.
+        """
+        from rules.item_generator import generate_weapon
+        user_id = 950910
+        make_basic_character(
+            user_id, "HandlerForgeTester2", char_class="Fighter", current_location="crossroads_tavern",
+            ability_scores={"strength": 20, "dexterity": 10, "constitution": 14,
+                             "intelligence": 10, "wisdom": 10, "charisma": 10},
+            gold=10000,
+        )
+        weapon = generate_weapon(tier="common")
+        affixes = weapon.pop("affixes", [])
+        item_id = db.create_item_instance(
+            item_type=weapon["type"], name=weapon["name"], rarity=weapon["rarity"],
+            price=weapon["price"], base_stats=weapon, affixes=affixes,
+        )
+        db.add_item(user_id, item_id, 1)
+        db.add_item(user_id, "iron_ore", 100)
+
+        advanced = False
+        for _ in range(15):
+            sink = []
+            await bot._do_forge_item(FakeUpdate(user_id, f"forge my {weapon['name']}", sink), f"forge my {weapon['name']}")
+            if db.materialize_item_instance(item_id)["rarity"] != "common":
+                advanced = True
+                break
+        self.assertTrue(advanced)
+
     async def test_ai_companion_actually_fighting_gets_real_combat_xp(self):
         """
         Real live bug (2026-08-01, Coffee: "They didn't get experience

@@ -6,6 +6,7 @@ rules/. The AI layer only narrates what happened here; it never invents
 whether a craft attempt worked or what it produced.
 """
 from rules.dice import roll_ability_check
+from rules.item_generator import generate_item
 
 # recipe_id -> {materials: {item_id: qty}, result_item: item_id,
 # result_qty: int, ability: str, dc: int}. Materials are only consumed
@@ -195,3 +196,127 @@ def resolve_craft(character: dict, recipe_id: str, practiced_bonus: int = 0) -> 
         "dc": recipe["dc"],
         "ability": recipe["ability"],
     }
+
+
+# Magic item system Phase 7 (2026-08-02): "will this work for crafting
+# advanced items too? forging? enchanting? imbuing?" -- per Coffee's own
+# question when scoping the whole system, the answer this phase proves
+# is yes, by reusing every piece already built rather than inventing a
+# parallel one. An advanced recipe produces a REAL generated item (via
+# rules/item_generator.py, the exact same roll combat loot already uses)
+# at a recipe-fixed tier, instead of a flat catalog item_id -- same
+# material-check/ability-roll shape as RECIPES above, just a different
+# result shape (generated_item, not result_item/result_qty).
+ADVANCED_RECIPES = {
+    "masterwork_longsword": {
+        "materials": {"iron_ore": 6, "moonpetal": 1},
+        "item_type": "weapon", "base_id": "longsword", "tier": "rare",
+        "ability": "strength", "dc": 16, "profession": "blacksmithing",
+        "name": "Masterwork Longsword",
+    },
+    "masterwork_greataxe": {
+        "materials": {"iron_ore": 8, "moonpetal": 1},
+        "item_type": "weapon", "base_id": "greataxe", "tier": "rare",
+        "ability": "strength", "dc": 17, "profession": "blacksmithing",
+        "name": "Masterwork Greataxe",
+    },
+    "runed_chain_shirt": {
+        "materials": {"iron_ore": 7, "silverleaf_herb": 2},
+        "item_type": "armor", "base_id": "chain_shirt", "tier": "rare",
+        "ability": "strength", "dc": 17, "profession": "blacksmithing",
+        "name": "Runed Chain Shirt",
+    },
+    "wardstone_shield": {
+        "materials": {"iron_ore": 5, "silverleaf_herb": 1},
+        "item_type": "shield", "base_id": "wooden_shield", "tier": "rare",
+        "ability": "strength", "dc": 16, "profession": "blacksmithing",
+        "name": "Wardstone Shield",
+    },
+}
+
+
+def get_advanced_recipe(recipe_id: str) -> dict | None:
+    return ADVANCED_RECIPES.get(recipe_id)
+
+
+def resolve_advanced_craft(character: dict, recipe_id: str, practiced_bonus: int = 0) -> dict:
+    """
+    Same shape/convention as resolve_craft above (materials only consumed
+    on success, practiced_bonus added to the roll here in the rules
+    layer) -- the one difference is `generated_item`, a full rolled item
+    dict from rules/item_generator.py at the recipe's fixed tier, instead
+    of a static result_item/result_qty. The caller (bot.py) persists it
+    via db.create_item_instance exactly like combat loot already does.
+    """
+    recipe = ADVANCED_RECIPES.get(recipe_id)
+    if recipe is None:
+        raise ValueError(f"Unknown advanced recipe: {recipe_id}")
+
+    if not has_materials(character["inventory"], recipe):
+        missing = [
+            item_id for item_id, qty in recipe["materials"].items()
+            if character["inventory"].get(item_id, 0) < qty
+        ]
+        return {"outcome": "missing_materials", "missing": missing, "recipe_id": recipe_id}
+
+    check = roll_ability_check(character, recipe["ability"], proficient=False)
+    check["total"] += practiced_bonus
+    check["practiced_bonus"] = practiced_bonus
+    success = check["total"] >= recipe["dc"]
+
+    generated_item = None
+    if success:
+        generated_item = generate_item(
+            item_type=recipe["item_type"], base_id=recipe.get("base_id"), tier=recipe["tier"],
+        )
+
+    return {
+        "outcome": "success" if success else "failure",
+        "recipe_id": recipe_id,
+        "materials_consumed": recipe["materials"] if success else {},
+        "generated_item": generated_item,
+        "check": check,
+        "dc": recipe["dc"],
+        "ability": recipe["ability"],
+    }
+
+
+# Enchanting & imbuing (Phase 7): deliberately the SAME operation --
+# append one new affix, from the exact same shared vocabulary
+# db._apply_affix already understands, to an existing generated item's
+# affix list. "Enchant" vs "imbue" is purely a player-facing/in-fiction
+# distinction (which station/profession gates it), never a different
+# data operation -- per the approved plan. Gated to the items each affix
+# actually makes sense on (`applies_to`), same real-world logic as
+# item_generator only ever offering weapons an elemental_damage affix
+# and armor/shields a resistance one.
+ENCHANT_RECIPES = {
+    "enchant_flame": {
+        "materials": {"sulfur_dust": 2, "moonpetal": 1},
+        "affix": {"kind": "elemental_damage", "damage_type": "fire"},
+        "applies_to": ("weapon",),
+        "ability": "intelligence", "dc": 15, "profession": "alchemy",
+    },
+    "enchant_frost": {
+        "materials": {"sulfur_dust": 1, "moonpetal": 2},
+        "affix": {"kind": "elemental_damage", "damage_type": "cold"},
+        "applies_to": ("weapon",),
+        "ability": "intelligence", "dc": 15, "profession": "alchemy",
+    },
+    "enchant_warding": {
+        "materials": {"iron_ore": 2, "silverleaf_herb": 2},
+        "affix": {"kind": "resistance", "damage_type": "cold"},
+        "applies_to": ("armor", "shield"),
+        "ability": "intelligence", "dc": 15, "profession": "alchemy",
+    },
+    "enchant_arcana": {
+        "materials": {"moonpetal": 3, "iron_ore": 1},
+        "affix": {"kind": "grants_spell", "spell_id": "magic_missile", "uses": 2},
+        "applies_to": ("weapon", "armor", "shield", "ring", "amulet", "wondrous"),
+        "ability": "intelligence", "dc": 17, "profession": "alchemy",
+    },
+}
+
+
+def get_enchant_recipe(recipe_id: str) -> dict | None:
+    return ENCHANT_RECIPES.get(recipe_id)

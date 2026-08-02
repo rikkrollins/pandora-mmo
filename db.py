@@ -25,6 +25,7 @@ from rules.leveling import (
     hp_gain_for_level, ASI_LEVELS, xp_gain_multiplier, EVOLUTION_HP_MULTIPLIER,
 )
 from rules.item_sets import active_set_bonus_affixes
+from rules.item_generator import TIERS, TIER_BONUS, TIER_PRICE_MULT
 import spells as spells_module
 
 CREATE_CHARACTERS_TABLE = """
@@ -827,6 +828,99 @@ def materialize_item_instance(item_id: str) -> dict | None:
     for affix in json.loads(row["affixes"]):
         _apply_affix(item, affix)
     return item
+
+
+# Magic item system Phase 7 (2026-08-02): which base stat field each
+# item type's tier bonus rides on -- matches rules/item_generator.py's
+# generate_weapon/generate_armor/generate_shield exactly (damage_bonus
+# for a weapon, ac_base for armor, ac_bonus for a shield).
+FORGE_STAT_BONUS_FIELD = {"weapon": "damage_bonus", "armor": "ac_base", "shield": "ac_bonus"}
+
+
+def forge_item_instance(item_id: str) -> tuple[bool, str, dict | None]:
+    """
+    Forging: bumps an EXISTING generated item's rarity to the next real
+    tier and its tier-bonus stat_bonus affix value to match -- one
+    UPDATE, same instance_id/item_id, so every existing inventory/equip
+    reference to it stays valid with no migration. Only ever called
+    after bot.py has already confirmed materials/gold and rolled a real
+    success -- this function itself just performs the mutation and
+    reports what happened.
+    """
+    if not item_id.startswith(GENERATED_ITEM_ID_PREFIX):
+        return False, "Only a real generated magic item can be forged.", None
+    try:
+        instance_id = int(item_id[len(GENERATED_ITEM_ID_PREFIX):])
+    except ValueError:
+        return False, "Only a real generated magic item can be forged.", None
+
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM item_instances WHERE instance_id = ?", (instance_id,)
+        ).fetchone()
+        if row is None:
+            return False, "That item no longer exists.", None
+        current_tier = row["rarity"]
+        if current_tier not in TIERS or TIERS.index(current_tier) >= len(TIERS) - 1:
+            return False, f"The {row['name']} is already at the highest tier — there's nowhere higher to forge it.", None
+
+        next_tier = TIERS[TIERS.index(current_tier) + 1]
+        new_bonus = TIER_BONUS[next_tier]
+        field = FORGE_STAT_BONUS_FIELD.get(row["item_type"])
+        affixes = json.loads(row["affixes"])
+        if field:
+            for affix in affixes:
+                if affix.get("kind") == "stat_bonus" and affix.get("field") == field:
+                    affix["value"] = new_bonus
+                    break
+            else:
+                if new_bonus:
+                    affixes.append({"kind": "stat_bonus", "field": field, "value": new_bonus})
+
+        old_mult = TIER_PRICE_MULT.get(current_tier, 1) or 1
+        new_price = int(row["price"] * TIER_PRICE_MULT.get(next_tier, old_mult) / old_mult)
+
+        conn.execute(
+            "UPDATE item_instances SET rarity = ?, price = ?, affixes = ? WHERE instance_id = ?",
+            (next_tier, new_price, json.dumps(affixes), instance_id),
+        )
+
+    forged_item = materialize_item_instance(item_id)
+    return True, f"The {forged_item['name']} is reforged into a real {next_tier.replace('_', ' ')}!", forged_item
+
+
+def enchant_item_instance(item_id: str, affix: dict) -> tuple[bool, str, dict | None]:
+    """
+    Enchanting/imbuing (Phase 7): appends ONE new affix, from the exact
+    same shared vocabulary _apply_affix already understands, to an
+    existing generated item's affix list. The clearest possible proof
+    the shared-affix architecture pays off -- an item enchanted with a
+    grants_spell affix here works through bot._do_cast_spell's existing
+    Phase 3 fallback with zero new cast-side code, since materialize_
+    item_instance folds this new affix on exactly like every other one.
+    """
+    if not item_id.startswith(GENERATED_ITEM_ID_PREFIX):
+        return False, "Only a real generated magic item can be enchanted.", None
+    try:
+        instance_id = int(item_id[len(GENERATED_ITEM_ID_PREFIX):])
+    except ValueError:
+        return False, "Only a real generated magic item can be enchanted.", None
+
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM item_instances WHERE instance_id = ?", (instance_id,)
+        ).fetchone()
+        if row is None:
+            return False, "That item no longer exists.", None
+        affixes = json.loads(row["affixes"])
+        affixes.append(affix)
+        conn.execute(
+            "UPDATE item_instances SET affixes = ? WHERE instance_id = ?",
+            (json.dumps(affixes), instance_id),
+        )
+
+    enchanted_item = materialize_item_instance(item_id)
+    return True, f"The {enchanted_item['name']} hums with newly-worked power.", enchanted_item
 
 
 def _equipped_ring_ac_bonus(character: dict) -> int:

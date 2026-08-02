@@ -89,6 +89,8 @@ from rules.combat import (
 from rules.crafting import (
     RECIPES, get_recipe, has_materials, resolve_craft,
     CLASS_PROFESSIONS, CLASS_PROFESSION_AFFINITY_BONUS, class_profession_affinity_bonus,
+    ADVANCED_RECIPES, get_advanced_recipe, resolve_advanced_craft,
+    ENCHANT_RECIPES, get_enchant_recipe,
 )
 from rules.dice import roll, roll_damage, ability_modifier, roll_ability_check, roll_d20
 from rules.item_generator import generate_item
@@ -3309,6 +3311,24 @@ async def _share_quest_rewards_with_party(
             db.update_character(member_id, gold=fresh["gold"] + bonus_gold)
 
 
+def _persist_generated_item(loot_item: dict) -> str:
+    """
+    Shared persistence step for any freshly-rolled item.py-shaped dict
+    from rules/item_generator.py -- pops the two fields that live in
+    their own DB columns (affixes, set_id) and hands the rest to
+    db.create_item_instance, returning the synthetic "gi<n>" item_id.
+    Factored out of _grant_generated_loot (Phase 1) so Phase 7's advanced
+    crafting recipes can reuse the exact same persistence step instead of
+    duplicating it.
+    """
+    affixes = loot_item.pop("affixes", [])
+    set_id = loot_item.pop("set_id", None)
+    return db.create_item_instance(
+        item_type=loot_item["type"], name=loot_item["name"], rarity=loot_item["rarity"],
+        price=loot_item["price"], base_stats=loot_item, affixes=affixes, set_id=set_id,
+    )
+
+
 def _grant_generated_loot(real_party_ids: list[int]) -> str:
     """
     Rolls a real, keepable, equippable magic item (2026-08-02 magic item
@@ -3321,12 +3341,7 @@ def _grant_generated_loot(real_party_ids: list[int]) -> str:
     after this call site.
     """
     loot_item = generate_item(item_type=random.choice(["weapon", "armor"]))
-    affixes = loot_item.pop("affixes", [])
-    set_id = loot_item.pop("set_id", None)
-    item_id = db.create_item_instance(
-        item_type=loot_item["type"], name=loot_item["name"], rarity=loot_item["rarity"],
-        price=loot_item["price"], base_stats=loot_item, affixes=affixes, set_id=set_id,
-    )
+    item_id = _persist_generated_item(loot_item)
     winner_id = random.choice(real_party_ids)
     db.add_item(winner_id, item_id, 1)
     winner_name = db.get_character(winner_id)["name"]
@@ -10095,14 +10110,45 @@ async def _do_craft(update: Update, text: str) -> None:
         )
         return
 
-    recipe_id = items_module.find_item_mentioned_in_text(text, candidate_ids=list(RECIPES.keys()))
+    # Magic item system Phase 7 (2026-08-02): advanced recipes are
+    # matched SEPARATELY from the static ones, not merged into the same
+    # candidate_ids list -- items_module.find_item_mentioned_in_text
+    # calls get_item() on every candidate to sort by name length, and an
+    # ADVANCED_RECIPES key (e.g. "masterwork_longsword") is neither a
+    # static catalog item nor a generated "gi<n>" id, so get_item() on
+    # one returns None and crashes that sort (real bug #1, caught live
+    # before shipping via the mandatory regression run: "craft healing
+    # potion" started crashing the instant advanced recipe ids were
+    # merged into that same candidate list).
+    #
+    # Checked in THIS order -- advanced first, static second (real bug
+    # #2, also caught live: checking static first made "craft a
+    # masterwork longsword" silently craft a plain Longsword instead,
+    # since items_module.find_item_mentioned_in_text does substring
+    # matching and the static item name "Longsword" is itself a
+    # substring of "masterwork longsword" -- the static recipe won
+    # before the advanced one was ever even tried). Every advanced
+    # recipe name is a real superset of its base item's name (adds a
+    # descriptive prefix like "Masterwork"/"Runed"/"Wardstone"), so
+    # trying the advanced match first and falling back to static can
+    # never misfire the other way -- a plain "craft a longsword" simply
+    # won't match any advanced recipe's fuller name.
+    recipe_id = _find_advanced_recipe_in_text(text)
+    is_advanced = recipe_id is not None
+    if recipe_id is None:
+        recipe_id = items_module.find_item_mentioned_in_text(text, candidate_ids=list(RECIPES.keys()))
+
     if recipe_id is None:
         recipe_names = ", ".join(items_module.get_item(r)["name"] for r in RECIPES)
+        adv_names = ", ".join(r["name"] for r in ADVANCED_RECIPES.values())
         await update.effective_chat.send_message(
-            f"Not sure what you're trying to craft. Known recipes: {recipe_names}",
+            f"Not sure what you're trying to craft. Known recipes: {recipe_names}. "
+            f"Advanced recipes: {adv_names}.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
         )
         return
+
+    recipe = get_advanced_recipe(recipe_id) if is_advanced else get_recipe(recipe_id)
 
     # 2026-07-14, per Coffee: crafting is its own named, levelable
     # skill -- tracked separately from whichever ability a given recipe
@@ -10113,7 +10159,7 @@ async def _do_craft(update: Update, text: str) -> None:
     # "crafting" bucket -- practicing potions no longer secretly makes
     # you better at forging weapons too. Recipes with no profession set
     # fall back to the old shared "crafting" key.
-    profession = get_recipe(recipe_id).get("profession", "crafting")
+    profession = recipe.get("profession", "crafting")
     # Class profession affinity (2026-07-25, per Coffee): a real +2 on
     # top of the usual earned practiced_bonus when this is the
     # character's own class's home profession (rules/crafting.py's
@@ -10125,10 +10171,12 @@ async def _do_craft(update: Update, text: str) -> None:
     # Magic item system Phase 4 (2026-08-02): same third additive source
     # as _do_gather's identical accumulator just above.
     bonus += _equipped_profession_bonus(character, profession)
-    result = resolve_craft(character, recipe_id, practiced_bonus=bonus)
+    result = (
+        resolve_advanced_craft(character, recipe_id, practiced_bonus=bonus) if is_advanced
+        else resolve_craft(character, recipe_id, practiced_bonus=bonus)
+    )
 
     if result["outcome"] == "missing_materials":
-        recipe = get_recipe(recipe_id)
         need = ", ".join(
             f"{qty}x {items_module.get_item(i)['name']}" for i, qty in recipe["materials"].items()
         )
@@ -10142,9 +10190,17 @@ async def _do_craft(update: Update, text: str) -> None:
         db.remove_item(update.effective_user.id, item_id, qty)
 
     success = result["outcome"] == "success"
+    result_item = None
     if success:
         db.record_skill_use(update.effective_user.id, profession)
-        db.add_item(update.effective_user.id, result["result_item"], result["result_qty"])
+        if is_advanced:
+            loot_item = result["generated_item"]
+            generated_item_id = _persist_generated_item(loot_item)
+            db.add_item(update.effective_user.id, generated_item_id, 1)
+            result_item = loot_item
+        else:
+            db.add_item(update.effective_user.id, result["result_item"], result["result_qty"])
+            result_item = items_module.get_item(result["result_item"])
 
     flavor = await asyncio.to_thread(
         narrate_skill_check, character, text, result["ability"],
@@ -10152,8 +10208,13 @@ async def _do_craft(update: Update, text: str) -> None:
     )
     message = _format_skill_check_result(flavor, result["check"], result["ability"], result["dc"], success)
     if success:
-        result_item = items_module.get_item(result["result_item"])
-        message += f"\n⚗️ You craft **{result['result_qty']}x {result_item['name']}**."
+        if is_advanced:
+            message += (
+                f"\n⚗️ You craft a **{result_item['name']}** "
+                f"({result_item['rarity'].replace('_', ' ')}) — a real magic item, ready to equip!"
+            )
+        else:
+            message += f"\n⚗️ You craft **{result['result_qty']}x {result_item['name']}**."
     else:
         message += "\n⚗️ The attempt fails, but your materials aren't wasted — you can try again."
     await _safe_send(update, message)
@@ -10161,7 +10222,175 @@ async def _do_craft(update: Update, text: str) -> None:
         # Real image of what was actually crafted (2026-07-25/26, per
         # Coffee: images for professions/actions too) -- same reuse of
         # the existing item-icon convention as the gather fix above.
-        await _maybe_send_item_image(update, result["result_item"], result_item)
+        image_item_id = generated_item_id if is_advanced else result["result_item"]
+        await _maybe_send_item_image(update, image_item_id, result_item)
+
+
+# Magic item system Phase 7 (2026-08-02): forging bumps a real generated
+# item ("gi<n>", db.create_item_instance) up ONE tier, in place, same
+# item_id -- gated on gold + tier-scaled materials and a real
+# blacksmithing ability check, exactly like every other rules/ outcome
+# in this game. Only weapons/armor/shields are forgeable (matches
+# db.FORGE_STAT_BONUS_FIELD, the fields that actually carry a tier
+# bonus); a plain static-catalog item (no "gi" id) has no item_instances
+# row to mutate, so it's refused with an honest reason rather than
+# silently no-opping.
+FORGE_ADVANCE_DC = {"common": 10, "uncommon": 13, "rare": 16, "very_rare": 19, "legendary": 22}
+FORGE_MATERIAL_COST = {
+    "common": {"iron_ore": 2}, "uncommon": {"iron_ore": 3}, "rare": {"iron_ore": 5},
+    "very_rare": {"iron_ore": 8}, "legendary": {"iron_ore": 12},
+}
+FORGE_GOLD_COST = {"common": 50, "uncommon": 150, "rare": 400, "very_rare": 1000, "legendary": 3000}
+
+
+async def _do_forge_item(update: Update, text: str) -> None:
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    item_id = items_module.find_item_mentioned_in_text(text, candidate_ids=list(character["inventory"].keys()))
+    item = items_module.get_item(item_id) if item_id else None
+    if item_id is None or not item_id.startswith(db.GENERATED_ITEM_ID_PREFIX) or item is None:
+        await _safe_send(
+            update,
+            "Only a real magic item you've found or crafted (not a plain shop item) can be forged to a higher tier.",
+        )
+        return
+    if item["type"] not in ("weapon", "armor", "shield"):
+        await _safe_send(update, "Only weapons, armor, and shields can be forged.")
+        return
+
+    current_tier = item["rarity"]
+    if current_tier not in FORGE_ADVANCE_DC:
+        await _safe_send(update, f"The {item['name']} is already at the highest tier — there's nowhere higher to forge it.")
+        return
+
+    cost = FORGE_MATERIAL_COST[current_tier]
+    gold_cost = FORGE_GOLD_COST[current_tier]
+    if character["gold"] < gold_cost or not all(character["inventory"].get(mid, 0) >= qty for mid, qty in cost.items()):
+        need = ", ".join(f"{qty}x {items_module.get_item(mid)['name']}" for mid, qty in cost.items())
+        await _safe_send(update, f"Forging the {item['name']} to the next tier needs {gold_cost} gold and {need}.")
+        return
+
+    profession = "blacksmithing"
+    bonus = _practiced_bonus_for(update.effective_user.id, profession)
+    bonus += class_profession_affinity_bonus(character["char_class"], profession)
+    bonus += _equipped_profession_bonus(character, profession)
+    check = roll_ability_check(character, "strength", proficient=False)
+    check["total"] += bonus
+    check["practiced_bonus"] = bonus
+    dc = FORGE_ADVANCE_DC[current_tier]
+    success = check["total"] >= dc
+
+    flavor = await asyncio.to_thread(
+        narrate_skill_check, character, text, "strength",
+        {**check, "ability": "strength", "dc": dc, "success": success},
+    )
+    message = _format_skill_check_result(flavor, check, "strength", dc, success)
+    if not success:
+        message += f"\n🔨 The forging attempt fails — the {item['name']} is unharmed, and your materials aren't wasted."
+        await _safe_send(update, message)
+        return
+
+    for mid, qty in cost.items():
+        db.remove_item(update.effective_user.id, mid, qty)
+    db.update_character(update.effective_user.id, gold=character["gold"] - gold_cost)
+    db.record_skill_use(update.effective_user.id, profession)
+    _forge_ok, forge_msg, forged_item = db.forge_item_instance(item_id)
+    message += f"\n🔨 {forge_msg}"
+    await _safe_send(update, message)
+    if forged_item:
+        await _maybe_send_item_image(update, item_id, forged_item)
+
+
+def _find_advanced_recipe_in_text(text: str) -> str | None:
+    """Matches an ADVANCED_RECIPES entry by its own "name" field -- see _do_craft's docstring comment for why this can't reuse items_module.find_item_mentioned_in_text."""
+    lowered = text.lower()
+    for recipe_id, recipe in sorted(ADVANCED_RECIPES.items(), key=lambda kv: -len(kv[1]["name"])):
+        if recipe["name"].lower() in lowered:
+            return recipe_id
+    return None
+
+
+def _find_enchant_recipe_in_text(text: str) -> str | None:
+    lowered = text.lower()
+    for recipe_id in ENCHANT_RECIPES:
+        label = recipe_id.replace("enchant_", "").replace("_", " ")
+        if label in lowered:
+            return recipe_id
+    return None
+
+
+async def _do_enchant_item(update: Update, text: str) -> None:
+    """
+    Enchanting/imbuing (Phase 7): "enchant"/"imbue" both classify to this
+    same handler (see ai/intent_parser.py) -- purely a player-facing/
+    in-fiction distinction per the approved plan, not a different data
+    operation. Appends one new affix from rules/crafting.py's
+    ENCHANT_RECIPES to an existing generated item, gated on materials and
+    a real alchemy ability check.
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    item_id = items_module.find_item_mentioned_in_text(text, candidate_ids=list(character["inventory"].keys()))
+    item = items_module.get_item(item_id) if item_id else None
+    if item_id is None or not item_id.startswith(db.GENERATED_ITEM_ID_PREFIX) or item is None:
+        await _safe_send(
+            update,
+            "Only a real magic item you've found or crafted (not a plain shop item) can be enchanted.",
+        )
+        return
+
+    recipe_id = _find_enchant_recipe_in_text(text)
+    if recipe_id is None:
+        recipe_names = ", ".join(r.replace("enchant_", "").replace("_", " ") for r in ENCHANT_RECIPES)
+        await _safe_send(update, f"Not sure what enchantment you mean. Known enchantments: {recipe_names}.")
+        return
+    recipe = get_enchant_recipe(recipe_id)
+    if item["type"] not in recipe["applies_to"]:
+        await _safe_send(update, f"That enchantment can't be applied to a {item['type']}.")
+        return
+    if not has_materials(character["inventory"], recipe):
+        need = ", ".join(f"{qty}x {items_module.get_item(mid)['name']}" for mid, qty in recipe["materials"].items())
+        await _safe_send(update, f"You don't have the materials for that enchantment. You need: {need}.")
+        return
+
+    profession = recipe.get("profession", "alchemy")
+    bonus = _practiced_bonus_for(update.effective_user.id, profession)
+    bonus += class_profession_affinity_bonus(character["char_class"], profession)
+    bonus += _equipped_profession_bonus(character, profession)
+    check = roll_ability_check(character, recipe["ability"], proficient=False)
+    check["total"] += bonus
+    check["practiced_bonus"] = bonus
+    dc = recipe["dc"]
+    success = check["total"] >= dc
+
+    flavor = await asyncio.to_thread(
+        narrate_skill_check, character, text, recipe["ability"],
+        {**check, "ability": recipe["ability"], "dc": dc, "success": success},
+    )
+    message = _format_skill_check_result(flavor, check, recipe["ability"], dc, success)
+    if not success:
+        message += f"\n✨ The enchantment fizzles — the {item['name']} is unharmed, and your materials aren't wasted."
+        await _safe_send(update, message)
+        return
+
+    for mid, qty in recipe["materials"].items():
+        db.remove_item(update.effective_user.id, mid, qty)
+    db.record_skill_use(update.effective_user.id, profession)
+    _ok, enchant_msg, enchanted_item = db.enchant_item_instance(item_id, dict(recipe["affix"]))
+    message += f"\n✨ {enchant_msg}"
+    await _safe_send(update, message)
+    if enchanted_item:
+        await _maybe_send_item_image(update, item_id, enchanted_item)
 
 
 async def _do_make_campfire(update: Update) -> None:
@@ -16500,6 +16729,10 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_gather(update, intent.get("raw_text", text))
     elif action == "craft":
         await _do_craft(update, text)
+    elif action == "forge_item":
+        await _do_forge_item(update, intent.get("raw_text", text))
+    elif action == "enchant_item":
+        await _do_enchant_item(update, intent.get("raw_text", text))
     elif action == "make_campfire":
         await _do_make_campfire(update)
     elif action == "second_wind":

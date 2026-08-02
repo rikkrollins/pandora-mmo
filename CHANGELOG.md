@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.77] — Magic items: Phase 7 (final), crafting advanced items, forging & enchanting/imbuing
+
+Final phase of the magic item system. "Craft a masterwork longsword" (or
+a runed chain shirt, a wardstone shield) now rolls a REAL generated
+magic item at a fixed rare tier via the exact same generator combat
+loot already uses, instead of a flat catalog item — real recipes, real
+materials, real ability check. Two brand-new actions reuse an existing
+item down to its exact database row rather than creating a parallel
+system: "forge my longsword" bumps a found/crafted item up one real
+tier in place (same item, same equip/inventory reference, just
+stronger); "enchant my longsword with flame" / "imbue the shield with
+warding" append one new affix from the same shared vocabulary every
+earlier phase already built — including a real granted-spell
+enchantment, provably working through Phase 3's existing cast fallback
+with zero new casting code.
+
+Caught and fixed live before shipping, twice: (1) an early version
+crashed plain "craft healing potion" the instant advanced recipe ids
+were merged into the same item-name search used for static recipes,
+since that search calls get_item() on every candidate and an advanced
+recipe id isn't a real item; (2) once separated, checking the static
+recipes first made "craft a masterwork longsword" silently craft a
+plain Longsword instead — the static item name "Longsword" is itself a
+substring of "masterwork longsword". Fixed by matching advanced recipes
+first (their names are always a superset of the base item's), falling
+back to the static search only when nothing advanced matches.
+
 ## [1.27.76] — Magic items: Phase 6, mythic tier & real progression-gated gear
 
 Sixth phase of the magic item system. A new "mythic" tier sits one step
