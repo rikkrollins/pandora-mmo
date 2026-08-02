@@ -49,8 +49,20 @@ def use_test_db(path: str) -> None:
     config.DB_PATH = path
     db.init_db()
     sessions.SNAPSHOT_PATH = path + ".sessions_snapshot.json"
+    # 2026-08-01 multi-fight rewrite: sessions.py replaced the old single
+    # _ACTIVE_SESSIONS (chat_id-keyed)/_CHAT_LOCKS pair with a real
+    # session_id-based index (_ACTIVE_SESSIONS is now session_id-keyed,
+    # plus _CHAT_SESSIONS/_USER_SESSION/_SESSION_LOCKS/_START_LOCKS) --
+    # every one of these needs resetting here, not just the old two, or a
+    # previous test's fake session_ids/locks leak into the next test (and,
+    # per this exact function's own docstring above, into the real
+    # snapshot) the same way the old _ACTIVE_SESSIONS leak once did.
     sessions._ACTIVE_SESSIONS.clear()
-    sessions._CHAT_LOCKS.clear()
+    sessions._CHAT_SESSIONS.clear()
+    sessions._USER_SESSION.clear()
+    sessions._SESSION_LOCKS.clear()
+    sessions._START_LOCKS.clear()
+    sessions._NEXT_SESSION_ID = 1
 
 
 class FakeMessage:

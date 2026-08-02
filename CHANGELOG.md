@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.67] — Multiple simultaneous fights, same chat, no cross-contamination
+
+Phase 1 of the multi-tenant scaling plan: `sessions.py` no longer keeps
+one combat session per chat — it's now keyed by a real `session_id`, with
+a per-user index (`get_session_for_user`) resolving which specific fight
+a player is actually in, and a per-session lock so two unrelated fights
+in the same chat never block or bleed into each other. Before this,
+starting a second fight while any other player's fight was still active
+anywhere in the same chat was flatly impossible — the old design
+unconditionally overwrote whatever fight was already running. Every
+combat-adjacent handler in `bot.py` (attack, flee, spells, class
+features, use-item, formations, fast-travel/rest/switch-character combat
+gates, the join-an-in-progress-fight flow, the owner-only stuck-combat
+override, `/redo`) now resolves the *acting player's own* fight rather
+than "whatever fight this chat happens to have." Also fixed a real
+latent bug caught during this rewrite: the startup snapshot-restore loop
+was iterating the session dict as if it were still keyed by chat_id,
+which would have misdirected restored-fight announcements and locks the
+moment two sessions were ever restored from the same snapshot at once.
+Verified with two independent parties fighting simultaneously in the
+same chat, through the real handlers, with real Ollama narration —
+zero shared state, and a player already fighting can't be double-drafted
+into a second fight.
+
 ## [1.27.66] — Fast-travel now brings your AI companions with you
 
 Real bug found investigating Coffee's report ("It's not letting me

@@ -2028,8 +2028,8 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
-    session = sessions.get_session(chat_id)
-    if session is None or user_id not in session.turn_order or session.current_participant_id() != user_id:
+    session = sessions.get_session_for_user(chat_id, user_id)
+    if session is None or session.current_participant_id() != user_id:
         await query.answer("It's not your turn right now.", show_alert=True)
         return
 
@@ -2051,8 +2051,8 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             if opposing:
                 await _do_attack(update, f"attack {opposing[0]['name']}")
             else:
-                async with sessions.get_lock(chat_id):
-                    live_session = sessions.get_session(chat_id)
+                async with sessions.get_session_lock(session.session_id):
+                    live_session = sessions.get_session_by_id(session.session_id)
                     resolved = live_session is not None and await _try_end_stale_combat(update, live_session)
                 if not resolved:
                     await update.effective_chat.send_message(
@@ -3970,7 +3970,7 @@ async def _try_end_stale_combat(update: Update, session: sessions.Session) -> bo
     await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
     for note in level_up_notes:
         await _notify_main_topic(update, note)
-    sessions.end_session(chat_id)
+    sessions.end_session(chat_id, session)
     return True
 
 
@@ -3978,8 +3978,9 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
     """
     Resolves consecutive AI-controlled turns AND auto-resolved death-save
     turns for downed real players. Assumes the caller already holds
-    sessions.get_lock(session.chat_id) — this function does NOT acquire
-    it itself, to avoid deadlocking against a non-reentrant lock.
+    sessions.get_session_lock(session.session_id) — this function does
+    NOT acquire it itself, to avoid deadlocking against a non-reentrant
+    lock.
 
     Includes stalemate detection: if the only remaining party members are
     stabilized (unconscious, can't act) and the enemy has no living
@@ -4012,7 +4013,7 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
                 "⚠️ Combat seems stuck in a loop — ending it automatically. "
                 "Please report this if it happens again.",
             )
-            sessions.end_session(session.chat_id)
+            sessions.end_session(session.chat_id, session)
             return
 
         stall_threshold = max(len(session.turn_order) * 2, 4)
@@ -4054,7 +4055,7 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
                 "🏳️ **Stalemate — the enemy breaks off, unable to finish the fight. "
                 "Your party survives.**",
             )
-            sessions.end_session(session.chat_id)
+            sessions.end_session(session.chat_id, session)
             return
 
         current = session.current_participant()
@@ -4371,7 +4372,7 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
         await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
         for note in level_up_notes:
             await _notify_main_topic(update, note)
-        sessions.end_session(session.chat_id)
+        sessions.end_session(session.chat_id, session)
 
 
 async def _self_heal_stuck_ai_turn(update: Update, session: sessions.Session) -> None:
@@ -4481,9 +4482,9 @@ async def _do_challenge_duel(update: Update, text: str) -> None:
         )
         return
 
-    if sessions.get_session(update.effective_chat.id) is not None:
+    if sessions.get_session_for_user(update.effective_chat.id, telegram_user_id) is not None:
         await update.effective_chat.send_message(
-            "A fight's already happening here.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You're already in a fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
         )
         return
 
@@ -4498,6 +4499,12 @@ async def _do_challenge_duel(update: Update, text: str) -> None:
         await update.effective_chat.send_message(
             "Not sure who you mean — name a real player here to challenge.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    if sessions.get_session_for_user(update.effective_chat.id, target["telegram_user_id"]) is not None:
+        await update.effective_chat.send_message(
+            f"{target['name']} is already in a fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
         )
         return
 
@@ -4537,9 +4544,10 @@ async def _do_accept_duel(update: Update) -> None:
             "This is a safe place — no duels here.", message_thread_id=config.TOPIC_ADVENTURE_ID
         )
         return
-    if sessions.get_session(update.effective_chat.id) is not None:
+    if (sessions.get_session_for_user(update.effective_chat.id, telegram_user_id) is not None
+            or sessions.get_session_for_user(update.effective_chat.id, challenger_id) is not None):
         await update.effective_chat.send_message(
-            "A fight's already happening here.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "One of you is already in a fight — the duel's off.", message_thread_id=config.TOPIC_ADVENTURE_ID
         )
         return
 
@@ -4547,6 +4555,11 @@ async def _do_accept_duel(update: Update) -> None:
         update.effective_chat.id, [challenger, target],
         {challenger_id: "party", telegram_user_id: "enemy"},
     )
+    if session is None:
+        await update.effective_chat.send_message(
+            "One of you is already in a fight — the duel's off.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
     await _safe_send(
         update, f"⚔️ **{challenger['name']}** vs **{target['name']}** — the duel begins!",
     )
@@ -4672,10 +4685,17 @@ def _absent_party_members_note(requester: dict, party: list[dict]) -> str:
 
 async def _do_start_combat(update: Update, monster_key: str | None = None, count: int | None = None) -> None:
     chat_id = update.effective_chat.id
-    async with sessions.get_lock(chat_id):
-        if sessions.get_session(chat_id) is not None:
+    async with sessions.get_start_lock(chat_id):
+        # Real rewrite (2026-08-01, multi-fight support): this used to
+        # refuse the moment ANY fight was active anywhere in this chat,
+        # even one this requester had nothing to do with -- a chat can
+        # now host more than one independent fight at once, so the only
+        # real question is whether THIS requester specifically is
+        # already in one (start_session below does the same check for
+        # every other party member too, and refuses if any of them are).
+        if sessions.get_session_for_user(chat_id, update.effective_user.id) is not None:
             await update.effective_chat.send_message(
-                "A combat session is already active! Say \"cancel\" if you think "
+                "You're already in a fight! Say \"cancel\" if you think "
                 "it's stuck and need to force-end it.",
                 message_thread_id=config.TOPIC_ADVENTURE_ID,
             )
@@ -4805,6 +4825,15 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             sides[enemy["telegram_user_id"]] = "enemy"
 
         session = sessions.start_session(chat_id, party + enemies, sides=sides)
+        if session is None:
+            # A real party member (per start_session's own check) is
+            # already a participant in some OTHER active fight -- can't
+            # start a second one for them at the same time.
+            await update.effective_chat.send_message(
+                "Someone in your party is already in another fight right now.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
         # Bestiary discovery (2026-07-16, per Coffee): every real human
         # party member fighting this monster type learns it -- same
         # fog-of-war convention as visited_locations, so "show me the
@@ -4953,10 +4982,10 @@ async def _do_start_echo_trial(update: Update, text: str) -> None:
     has already earned (echo_trial_tier).
     """
     chat_id = update.effective_chat.id
-    async with sessions.get_lock(chat_id):
-        if sessions.get_session(chat_id) is not None:
+    async with sessions.get_start_lock(chat_id):
+        if sessions.get_session_for_user(chat_id, update.effective_user.id) is not None:
             await update.effective_chat.send_message(
-                "A combat session is already active!", message_thread_id=config.TOPIC_ADVENTURE_ID
+                "You're already in a fight!", message_thread_id=config.TOPIC_ADVENTURE_ID
             )
             return
         requester = db.get_character(update.effective_user.id)
@@ -5008,6 +5037,12 @@ async def _do_start_echo_trial(update: Update, text: str) -> None:
         for enemy in enemies:
             sides[enemy["telegram_user_id"]] = "enemy"
         session = sessions.start_session(chat_id, party + enemies, sides=sides)
+        if session is None:
+            await update.effective_chat.send_message(
+                "Someone in your party is already in another fight right now.",
+                message_thread_id=config.TOPIC_ADVENTURE_ID,
+            )
+            return
         initiative_line = ", ".join(f"{p['name']} ({p['initiative']})" for p in session.participants)
         enemy_description = f"{count}x **{enemies[0]['name'].rsplit(' ', 1)[0]}**" if count > 1 else f"**{enemies[0]['name']}**"
         resistance_note = ""
@@ -5108,8 +5143,8 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
     provocation, never the fight's outcome.
     """
     chat_id = update.effective_chat.id
-    if sessions.get_session(chat_id) is not None:
-        return  # never interrupt combat already in progress
+    if sessions.get_session_for_user(chat_id, character["telegram_user_id"]) is not None:
+        return  # never interrupt combat this character is already in
 
     npc_ids = _npcs_at_location(location["id"])
     if not npc_ids or random.random() > AMBIENT_NPC_ENCOUNTER_CHANCE:
@@ -5127,8 +5162,8 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
     if disposition == "hostile":
         if npc_id in _DEFEATED_NPCS or "stats" not in npc_data:
             return
-        async with sessions.get_lock(chat_id):
-            if sessions.get_session(chat_id) is not None:
+        async with sessions.get_start_lock(chat_id):
+            if sessions.get_session_for_user(chat_id, character["telegram_user_id"]) is not None:
                 return
             # Same location-scoping fix as _do_start_combat (2026-07-14,
             # per Coffee): an ambush breaking out here shouldn't pull in
@@ -5148,6 +5183,8 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
             sides = {p["telegram_user_id"]: "party" for p in party}
             sides[enemy["telegram_user_id"]] = "enemy"
             session = sessions.start_session(chat_id, party + [enemy], sides=sides)
+            if session is None:
+                return  # a party member is already in another fight -- skip the ambush
 
             initiative_line = ", ".join(
                 f"{p['name']} ({p['initiative']})" for p in session.participants
@@ -5198,6 +5235,31 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
             await _safe_send(update, f"💬 **{npc_data['name']}:** {line}")
 
 
+@contextlib.asynccontextmanager
+async def _held_session(chat_id: int, telegram_user_id: int):
+    """
+    Resolves which active fight (if any) this specific user is
+    currently in, then holds THAT fight's own lock for the duration of
+    the 'async with' block -- the standard "find my fight, then lock
+    just that fight" shape nearly every combat-action handler needs
+    (2026-08-01 multi-fight rewrite: replaces the old "async with
+    sessions.get_lock(chat_id): session = sessions.get_session(chat_id)"
+    pattern, which locked and fetched by CHAT, not by which fight the
+    acting player was actually in -- harmless with only one fight per
+    chat, wrong the moment two independent fights exist in the same
+    chat at once). Yields None if this user isn't in any active fight
+    right now; re-resolves the session fresh once the lock is actually
+    held, in case something else ended it in the moment between the
+    initial lookup and acquiring the lock.
+    """
+    session = sessions.get_session_for_user(chat_id, telegram_user_id)
+    if session is None:
+        yield None
+        return
+    async with sessions.get_session_lock(session.session_id):
+        yield sessions.get_session_by_id(session.session_id)
+
+
 async def _do_attack(update: Update, action_text: str, forced_roll: int | None = None) -> None:
     chat_id = update.effective_chat.id
 
@@ -5210,7 +5272,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
     # function's own lock below, since _do_start_combat acquires the same
     # per-chat lock itself (asyncio.Lock isn't reentrant -- nesting them
     # would deadlock).
-    if sessions.get_session(chat_id) is None:
+    if sessions.get_session_for_user(chat_id, update.effective_user.id) is None:
         character = db.get_character(update.effective_user.id)
         location = cl.get_location(CAMPAIGN, character["current_location"]) if character else None
         local_monsters = location.get("monsters", []) if location else []
@@ -5235,8 +5297,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
         if matched_monster is not None:
             await _do_start_combat(update, monster_key=matched_monster)
 
-    async with sessions.get_lock(chat_id):
-        session = sessions.get_session(chat_id)
+    async with _held_session(chat_id, update.effective_user.id) as session:
         if session is None:
             await update.effective_chat.send_message(
                 "No combat is active right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
@@ -5246,7 +5307,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
         user_id = update.effective_user.id
         if session.current_participant_id() != user_id:
             await _self_heal_stuck_ai_turn(update, session)
-            session = sessions.get_session(chat_id)
+            session = sessions.get_session_for_user(chat_id, user_id)
             if session is None:
                 await update.effective_chat.send_message(
                     "Combat had stalled and just resolved itself — nothing active right now.",
@@ -5398,7 +5459,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                 await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
                 for note in level_up_notes:
                     await _notify_main_topic(update, note)
-                sessions.end_session(chat_id)
+                sessions.end_session(chat_id, session)
                 return
 
         session.advance_turn()
@@ -5407,8 +5468,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
 
 async def _do_pass_turn(update: Update) -> None:
     chat_id = update.effective_chat.id
-    async with sessions.get_lock(chat_id):
-        session = sessions.get_session(chat_id)
+    async with _held_session(chat_id, update.effective_user.id) as session:
         if session is None:
             await _safe_send(update, "There's no active turn to pass right now.")
             return
@@ -6109,8 +6169,7 @@ async def _do_shove(update: Update, action_text: str, forced_roll: int | None = 
     physically roll for themselves.
     """
     chat_id = update.effective_chat.id
-    async with sessions.get_lock(chat_id):
-        session = sessions.get_session(chat_id)
+    async with _held_session(chat_id, update.effective_user.id) as session:
         if session is None:
             await update.effective_chat.send_message(
                 "No combat is active right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
@@ -6120,7 +6179,7 @@ async def _do_shove(update: Update, action_text: str, forced_roll: int | None = 
         user_id = update.effective_user.id
         if session.current_participant_id() != user_id:
             await _self_heal_stuck_ai_turn(update, session)
-            session = sessions.get_session(chat_id)
+            session = sessions.get_session_for_user(chat_id, user_id)
             if session is None:
                 await update.effective_chat.send_message(
                     "Combat had stalled and just resolved itself — nothing active right now.",
@@ -6317,7 +6376,7 @@ async def _resolve_flee_attempt(update, session: sessions.Session, action_text: 
         + ("\n\n🏳️ With you gone, the fight has no one left to finish — it ends here." if combat_over else ""),
     )
     if combat_over:
-        sessions.end_session(chat_id)
+        sessions.end_session(chat_id, session)
     else:
         await _resolve_ai_turns(update, session)
 
@@ -6335,8 +6394,7 @@ async def _do_flee(update: Update, action_text: str, forced_roll: int | None = N
     _resolve_flee_attempt above.
     """
     chat_id = update.effective_chat.id
-    async with sessions.get_lock(chat_id):
-        session = sessions.get_session(chat_id)
+    async with _held_session(chat_id, update.effective_user.id) as session:
         if session is None:
             await update.effective_chat.send_message(
                 "No combat is active right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
@@ -6346,7 +6404,7 @@ async def _do_flee(update: Update, action_text: str, forced_roll: int | None = N
         user_id = update.effective_user.id
         if session.current_participant_id() != user_id:
             await _self_heal_stuck_ai_turn(update, session)
-            session = sessions.get_session(chat_id)
+            session = sessions.get_session_for_user(chat_id, user_id)
             if session is None:
                 await update.effective_chat.send_message(
                     "Combat had stalled and just resolved itself — nothing active right now.",
@@ -6399,7 +6457,7 @@ async def _do_message_ai(update: Update, text: str) -> None:
         )
         return
 
-    session = sessions.get_session(update.effective_chat.id)
+    session = sessions.get_session_for_user(update.effective_chat.id, character["telegram_user_id"])
     if session is not None:
         candidates = [
             p for p in session.participants
@@ -6603,7 +6661,7 @@ async def _do_rest(update: Update) -> None:
     # longer a real participant in it. Same fix shape as the earlier
     # fast-travel bug (v1.26.3) -- only blocks a character who's
     # actually still in that session's turn order.
-    active_session = sessions.get_session(chat_id)
+    active_session = sessions.get_session_for_user(chat_id, telegram_user_id)
     if active_session is not None and telegram_user_id in active_session.turn_order:
         await update.effective_chat.send_message(
             "You can't rest in the middle of combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
@@ -6652,7 +6710,7 @@ def _nearest_safe_waypoint(character: dict) -> str:
 
 
 def _in_active_combat(telegram_user_id: int, chat_id: int) -> bool:
-    session = sessions.get_session(chat_id)
+    session = sessions.get_session_for_user(chat_id, telegram_user_id)
     return session is not None and telegram_user_id in session.turn_order
 
 
@@ -6770,8 +6828,7 @@ async def _check_idle_characters(bot) -> None:
 
         _IDLE_WARNED.discard(telegram_user_id)
         if _in_active_combat(telegram_user_id, _LAST_KNOWN_CHAT_ID):
-            async with sessions.get_lock(_LAST_KNOWN_CHAT_ID):
-                session = sessions.get_session(_LAST_KNOWN_CHAT_ID)
+            async with _held_session(_LAST_KNOWN_CHAT_ID, telegram_user_id) as session:
                 if session is not None and session.current_participant_id() == telegram_user_id:
                     update_like = _ChatOnlyUpdate(bot, _LAST_KNOWN_CHAT_ID)
                     session.advance_turn()
@@ -8895,7 +8952,7 @@ async def _do_set_formation_row(update: Update, target_name: str, row: str) -> N
     # formation_ac_bonus) for the fight actually in progress. Same
     # "find and mutate the live participant dict too" pattern
     # _do_use_item's heal branch already uses for hp_current.
-    session = sessions.get_session(update.effective_chat.id)
+    session = sessions.get_session_for_user(update.effective_chat.id, target["telegram_user_id"])
     if session is not None:
         live_target = next(
             (p for p in session.participants if p["telegram_user_id"] == target["telegram_user_id"]), None,
@@ -9817,7 +9874,7 @@ async def _do_make_campfire(update: Update) -> None:
             "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
         )
         return
-    if sessions.get_session(update.effective_chat.id) is not None:
+    if sessions.get_session_for_user(update.effective_chat.id, telegram_user_id) is not None:
         await update.effective_chat.send_message(
             "Not in the middle of a fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
         )
@@ -9937,7 +9994,7 @@ async def _do_rage(update: Update) -> None:
         )
         return
 
-    session = sessions.get_session(update.effective_chat.id)
+    session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
     if session is None:
         await update.effective_chat.send_message(
             "You can only enter a rage in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
@@ -9991,11 +10048,48 @@ async def _do_join_battle(update: Update) -> None:
         return
 
     chat_id = update.effective_chat.id
-    async with sessions.get_lock(chat_id):
-        session = sessions.get_session(chat_id)
+    if sessions.get_session_for_user(chat_id, telegram_user_id) is not None:
+        await update.effective_chat.send_message(
+            "You're already part of a fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+    if character["hp_current"] <= 0:
+        await update.effective_chat.send_message(
+            "You can't join a fight at 0 HP.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    # Multiple independent fights can now be running in the same chat
+    # (2026-08-01 multi-fight rewrite), so "join the battle" has to pick
+    # WHICH one -- the fight actually happening at this character's own
+    # current location, same as before, just resolved across every
+    # active session in the chat instead of assuming there's only one.
+    candidate_sessions = sessions.get_sessions_in_chat(chat_id)
+    if not candidate_sessions:
+        await update.effective_chat.send_message(
+            "There's no fight happening right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        )
+        return
+
+    matching_session = None
+    for candidate in candidate_sessions:
+        party_members = [p for p in candidate.participants if candidate.sides.get(p["telegram_user_id"]) == "party"]
+        battle_location = next((p.get("current_location") for p in party_members if p.get("current_location")), None)
+        if battle_location is not None and character["current_location"] == battle_location:
+            matching_session = candidate
+            break
+    if matching_session is None:
+        await update.effective_chat.send_message(
+            "There's no fight happening at your current location — you'd need to go there first.",
+            message_thread_id=config.TOPIC_ADVENTURE_ID,
+        )
+        return
+
+    async with sessions.get_session_lock(matching_session.session_id):
+        session = sessions.get_session_by_id(matching_session.session_id)
         if session is None:
             await update.effective_chat.send_message(
-                "There's no fight happening right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                "That fight just ended.", message_thread_id=config.TOPIC_ADVENTURE_ID
             )
             return
         if any(p["telegram_user_id"] == telegram_user_id for p in session.participants):
@@ -10003,30 +10097,8 @@ async def _do_join_battle(update: Update) -> None:
                 "You're already part of this fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
             )
             return
-        if character["hp_current"] <= 0:
-            await update.effective_chat.send_message(
-                "You can't join a fight at 0 HP.", message_thread_id=config.TOPIC_ADVENTURE_ID
-            )
-            return
 
-        # The fight's real location is wherever its own party members
-        # actually are -- session participants carry current_location
-        # frozen from when combat started (nobody mid-fight is moving),
-        # so this is a real check, not a guess.
-        party_members = [p for p in session.participants if session.sides.get(p["telegram_user_id"]) == "party"]
-        battle_location = next((p.get("current_location") for p in party_members if p.get("current_location")), None)
-        if battle_location is not None and character["current_location"] != battle_location:
-            dest = cl.get_location(CAMPAIGN, battle_location)
-            location_name = dest["name"] if dest else battle_location
-            await update.effective_chat.send_message(
-                f"The fight is happening at {location_name} — you'd need to go there first.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
-            )
-            return
-
-        session.participants.append(character)
-        session.sides[telegram_user_id] = "party"
-        session.turn_order.append(telegram_user_id)
+        sessions.join_session(session, character, "party")
         await _safe_send(update, f"⚔️ **{character['name']}** joins the battle!")
         await _notify_main_topic(update, f"⚔️ **{character['name']}** joined an in-progress battle!")
 
@@ -10072,7 +10144,7 @@ async def _do_wild_shape(update: Update) -> None:
         )
         return
 
-    session = sessions.get_session(update.effective_chat.id)
+    session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
     if session is None:
         await update.effective_chat.send_message(
             "You can only Wild Shape in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
@@ -10144,7 +10216,7 @@ async def _do_action_surge(update: Update) -> None:
         )
         return
 
-    session = sessions.get_session(update.effective_chat.id)
+    session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
     if session is None:
         await update.effective_chat.send_message(
             "You can only use Action Surge in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
@@ -10200,7 +10272,7 @@ async def _do_reckless_attack(update: Update) -> None:
         )
         return
 
-    session = sessions.get_session(update.effective_chat.id)
+    session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
     if session is None:
         await update.effective_chat.send_message(
             "You can only attack recklessly in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
@@ -10266,7 +10338,7 @@ async def _do_divine_smite(update: Update) -> None:
         )
         return
 
-    session = sessions.get_session(update.effective_chat.id)
+    session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
     if session is None:
         await update.effective_chat.send_message(
             "You can only smite in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
@@ -10332,7 +10404,7 @@ async def _do_flurry_of_blows(update: Update) -> None:
         )
         return
 
-    session = sessions.get_session(update.effective_chat.id)
+    session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
     if session is None:
         await update.effective_chat.send_message(
             "You can only use Flurry of Blows in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
@@ -10452,8 +10524,7 @@ async def _do_breath_weapon(update: Update) -> None:
         return
 
     chat_id = update.effective_chat.id
-    async with sessions.get_lock(chat_id):
-        session = sessions.get_session(chat_id)
+    async with _held_session(chat_id, update.effective_user.id) as session:
         if session is None:
             await update.effective_chat.send_message(
                 "You can only use your Breath Weapon in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
@@ -10523,7 +10594,7 @@ async def _do_breath_weapon(update: Update) -> None:
             await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
             for note in level_up_notes:
                 await _notify_main_topic(update, note)
-            sessions.end_session(chat_id)
+            sessions.end_session(chat_id, session)
             return
 
         session.advance_turn()
@@ -10546,8 +10617,7 @@ async def _do_use_environment(update: Update) -> None:
     new physical feature a room hasn't already been given.
     """
     chat_id = update.effective_chat.id
-    async with sessions.get_lock(chat_id):
-        session = sessions.get_session(chat_id)
+    async with _held_session(chat_id, update.effective_user.id) as session:
         if session is None:
             await update.effective_chat.send_message(
                 "No combat is active right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
@@ -10635,7 +10705,7 @@ async def _do_use_environment(update: Update) -> None:
             await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
             for note in level_up_notes:
                 await _notify_main_topic(update, note)
-            sessions.end_session(chat_id)
+            sessions.end_session(chat_id, session)
             return
 
         session.advance_turn()
@@ -10681,7 +10751,7 @@ async def _do_channel_divinity(update: Update) -> None:
         )
         return
 
-    session = sessions.get_session(update.effective_chat.id)
+    session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
     if session is None:
         await update.effective_chat.send_message(
             "You can only Turn Undead in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
@@ -12756,7 +12826,7 @@ async def _do_fast_travel(update: Update, text: str) -> None:
     # every other player in the game from fast-traveling too. Now only
     # blocks a character who's actually a real participant in that
     # session -- someone else's fight elsewhere no longer stops you.
-    active_session = sessions.get_session(update.effective_chat.id)
+    active_session = sessions.get_session_for_user(update.effective_chat.id, telegram_user_id)
     if active_session is not None and telegram_user_id in active_session.turn_order:
         await update.effective_chat.send_message(
             "You can't fast-travel in the middle of combat.",
@@ -12989,7 +13059,7 @@ async def _do_use_item(update: Update, text: str) -> None:
 
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
-    session = sessions.get_session(chat_id)
+    session = sessions.get_session_for_user(chat_id, user_id)
     in_combat = session is not None and user_id in session.turn_order
     if in_combat and session.current_participant_id() != user_id:
         current_name = session.current_participant()["name"]
@@ -13179,8 +13249,7 @@ async def _do_use_item(update: Update, text: str) -> None:
     await _safe_send(update, message)
 
     if in_combat:
-        async with sessions.get_lock(chat_id):
-            session = sessions.get_session(chat_id)
+        async with _held_session(chat_id, user_id) as session:
             if session is not None:
                 session.advance_turn()
                 await _resolve_ai_turns(update, session)
@@ -14677,8 +14746,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
     # the same blanket-condition simplification prone/poisoned already
     # use for their effects. Only meaningful mid-combat, since conditions
     # only ever exist on an active session participant.
-    async with sessions.get_lock(chat_id):
-        session = sessions.get_session(chat_id)
+    async with _held_session(chat_id, update.effective_user.id) as session:
         caster = (
             next((p for p in session.participants if p["telegram_user_id"] == update.effective_user.id), None)
             if session else None
@@ -14712,8 +14780,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             db.remove_item(update.effective_user.id, scroll_item_id, 1)
 
     if spell["effect"] == "damage":
-        async with sessions.get_lock(chat_id):
-            session = sessions.get_session(chat_id)
+        async with _held_session(chat_id, update.effective_user.id) as session:
             if session is None:
                 await update.effective_chat.send_message(
                     "There's nothing to cast that at right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
@@ -14721,7 +14788,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                 return
             if session.current_participant_id() != update.effective_user.id:
                 await _self_heal_stuck_ai_turn(update, session)
-                session = sessions.get_session(chat_id)
+                session = sessions.get_session_by_id(session.session_id)
                 if session is None:
                     await update.effective_chat.send_message(
                         "Combat had stalled and just resolved itself — nothing active right now.",
@@ -14859,7 +14926,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                 )
                 for note in level_up_notes:
                     await _notify_main_topic(update, note)
-                sessions.end_session(chat_id)
+                sessions.end_session(chat_id, session)
                 return
             session.advance_turn()
             await _resolve_ai_turns(update, session)
@@ -14948,8 +15015,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
         )
 
     elif spell["effect"] == "summon":
-        async with sessions.get_lock(chat_id):
-            session = sessions.get_session(chat_id)
+        async with _held_session(chat_id, update.effective_user.id) as session:
             if session is None:
                 await update.effective_chat.send_message(
                     "There's nothing to summon into right now — this only works in combat.",
@@ -15227,7 +15293,7 @@ async def roster_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     # Same real bug shape as _do_rest (2026-07-23, Coffee): only blocks
     # a character who's actually still a participant in this chat's
     # shared combat session, not merely "some fight is happening here."
-    active_session = sessions.get_session(update.effective_chat.id)
+    active_session = sessions.get_session_for_user(update.effective_chat.id, telegram_user_id)
     if active_session is not None and telegram_user_id in active_session.turn_order:
         await update.effective_chat.send_message(
             "You can't switch characters in the middle of combat.",
@@ -15338,7 +15404,7 @@ async def _do_switch_character(update: Update, text: str) -> None:
         )
         return
 
-    active_session = sessions.get_session(update.effective_chat.id)
+    active_session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
     if active_session is not None and update.effective_user.id in active_session.turn_order:
         await update.effective_chat.send_message(
             "You can't switch characters in the middle of combat.",
@@ -15368,7 +15434,7 @@ async def _do_delete_character(update: Update, text: str) -> None:
         )
         return
 
-    active_session = sessions.get_session(update.effective_chat.id)
+    active_session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
     if active_session is not None and update.effective_user.id in active_session.turn_order:
         await update.effective_chat.send_message(
             "You can't delete a character in the middle of combat.",
@@ -15545,7 +15611,12 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         had_active_state = _clear_all_stateful_flows(context, update.effective_user.id)
 
         chat_id = update.effective_chat.id
-        session_active = sessions.get_session(chat_id) is not None
+        # Multiple independent fights can now be running in this chat at
+        # once (2026-08-01 multi-fight rewrite) -- "cancel" has no way to
+        # name which one it means, so the owner override clears every
+        # stuck fight in the chat rather than guessing at just one.
+        sessions_in_chat = sessions.get_sessions_in_chat(chat_id)
+        session_active = bool(sessions_in_chat)
 
         # "cancel" no longer walks a player out of a real fight — that's
         # what fleeing (a real dice roll, and impossible against a boss)
@@ -15555,11 +15626,13 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         if session_active:
             is_owner = await _is_group_owner(update, context)
             if is_owner:
-                async with sessions.get_lock(chat_id):
-                    if sessions.get_session(chat_id) is not None:
-                        sessions.end_session(chat_id)
+                for stuck_session in sessions_in_chat:
+                    async with sessions.get_session_lock(stuck_session.session_id):
+                        live = sessions.get_session_by_id(stuck_session.session_id)
+                        if live is not None:
+                            sessions.end_session(chat_id, live)
                 await update.effective_chat.send_message(
-                    "Force-ended the stuck combat session (owner override). You're free to act again.",
+                    "Force-ended the stuck combat session(s) (owner override). You're free to act again.",
                     message_thread_id=config.TOPIC_ADVENTURE_ID,
                 )
                 return
@@ -15688,7 +15761,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # cliff" without the player ever needing to say the meta-phrase
     # "use the environment".
     environment_name = None
-    if sessions.get_session(update.effective_chat.id) is not None:
+    if sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id) is not None:
         requester = db.get_character(update.effective_user.id)
         location = cl.get_location(CAMPAIGN, requester["current_location"]) if requester else None
         env = location.get("combat_environment") if location else None
@@ -17032,7 +17105,7 @@ async def redo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         # shape a genuinely compound message already gets.
         known_npcs = [data["name"] for data in CAMPAIGN["npcs"].values()]
         environment_name = None
-        if sessions.get_session(stored_update.effective_chat.id) is not None:
+        if sessions.get_session_for_user(stored_update.effective_chat.id, entry["user_id"]) is not None:
             redo_requester = db.get_character(entry["user_id"])
             redo_location = cl.get_location(CAMPAIGN, redo_requester["current_location"]) if redo_requester else None
             redo_env = redo_location.get("combat_environment") if redo_location else None
@@ -18563,7 +18636,13 @@ async def _on_startup(application: Application) -> None:
     restored = sessions.load_snapshot()
     if restored:
         logger.info(f"[sessions] restored {restored} active combat session(s) from snapshot")
-        for chat_id, session in list(sessions._ACTIVE_SESSIONS.items()):
+        # 2026-08-01 multi-fight rewrite: _ACTIVE_SESSIONS is now keyed by
+        # session_id, not chat_id -- the real chat to announce into is
+        # session.chat_id, and locking/re-fetching this specific restored
+        # fight uses its own session_id, never the chat-wide shims (a chat
+        # can now hold more than one restored session at once).
+        for session_id, session in list(sessions._ACTIVE_SESSIONS.items()):
+            chat_id = session.chat_id
             try:
                 current_name = session.current_participant()["name"] if session.turn_order else "?"
                 await application.bot.send_message(
@@ -18590,8 +18669,8 @@ async def _on_startup(application: Application) -> None:
                 # unconditionally even when it's already a real player's
                 # turn: _resolve_ai_turns just re-sends that turn's
                 # announcement + battle menu and returns immediately.
-                async with sessions.get_lock(chat_id):
-                    live_session = sessions.get_session(chat_id)
+                async with sessions.get_session_lock(session_id):
+                    live_session = sessions.get_session_by_id(session_id)
                     if live_session is not None:
                         # Real live incident (2026-07-19, Coffee: "no
                         # enemys left standing... it stopped"): the exact

@@ -2,17 +2,29 @@
 sessions.py
 In-memory turn/session management for combat encounters, scoped to the
 Adventure topic. A "session" tracks participants, turn order, whose
-turn it is, and a rolling event log. Sessions are keyed by chat_id
-(each Telegram group has exactly one active Adventure session at a time
-in this simple design).
+turn it is, and a rolling event log.
 
-Every chat also gets its own asyncio.Lock (see get_lock()). This is
-critical: without it, two players sending actions within moments of
-each other can both read and mutate the same session concurrently,
-producing exactly the kind of corrupted, out-of-order combat state
-seen in real playtesting (wrong turn attribution, garbled HP, a
-session that never resolves). Every handler that touches a session
-MUST acquire this lock first.
+Sessions are keyed by a real session_id (2026-08-01 rewrite, per
+Coffee: wanting real support for multiple simultaneous fights instead
+of "only one fight active at a time, anywhere"). The OLD design keyed
+_ACTIVE_SESSIONS by chat_id alone, which meant a single Telegram group
+could only ever host one fight at once -- confirmed live and directly
+felt during this project's own testing (starting a second fight while
+any other player's fight was still resolving refused outright). A
+single PLAYER still can never be in two fights at once (see
+_USER_SESSION below), but two different parties in the same chat can
+now fight completely independent encounters at the same time, with
+independent locks so neither blocks the other.
+
+Every SESSION gets its own asyncio.Lock (see get_session_lock()) so
+concurrent actions from players in the SAME fight never mutate it at
+the same time -- this is the same safety property the old per-chat
+lock provided, just scoped correctly now that a chat can host more
+than one fight. Starting a brand-new fight is guarded by a separate
+per-chat lock (get_start_lock()), since there's no session yet to lock
+at that point. Every handler that touches an existing session MUST
+acquire that session's own lock first; every handler that might START
+a new one MUST acquire the chat's start-lock first.
 """
 import asyncio
 import json
@@ -44,6 +56,7 @@ class Session:
     participants: list  # list of character dicts (mutated in place for HP etc.)
     turn_order: list  # list of telegram_user_id in initiative order
     sides: dict  # telegram_user_id -> "party" | "enemy"
+    session_id: int = 0  # assigned by start_session; 0 is never a real id
     current_turn_index: int = 0
     round_number: int = 1
     event_log: list = field(default_factory=list)
@@ -167,6 +180,7 @@ class Session:
         """
         return {
             "chat_id": self.chat_id,
+            "session_id": self.session_id,
             "participants": self.participants,
             "turn_order": self.turn_order,
             "sides": {str(k): v for k, v in self.sides.items()},
@@ -182,6 +196,10 @@ class Session:
     def from_json_dict(cls, data: dict) -> "Session":
         return cls(
             chat_id=data["chat_id"],
+            # .get(...) with a default (2026-08-01): a snapshot written by
+            # the old chat_id-only design has no session_id at all -- the
+            # caller (load_snapshot) assigns a fresh real one in that case.
+            session_id=data.get("session_id", 0),
             participants=data["participants"],
             turn_order=data["turn_order"],
             sides={int(k): v for k, v in data["sides"].items()},
@@ -197,36 +215,151 @@ class Session:
         )
 
 
-# chat_id -> Session
+# session_id -> Session. The real source of truth; everything else below
+# is just an index over this dict for fast lookups.
 _ACTIVE_SESSIONS: dict[int, Session] = {}
 
-# chat_id -> asyncio.Lock, so concurrent actions from different players in
-# the same chat never mutate a session at the same time.
-_CHAT_LOCKS: dict[int, asyncio.Lock] = {}
+# chat_id -> set of session_ids currently active in that chat. Lets
+# "what's happening in this chat right now" stay cheap without scanning
+# every session in the game.
+_CHAT_SESSIONS: dict[int, set[int]] = {}
+
+# telegram_user_id -> session_id. The real "is this specific player
+# already in a fight" index -- replaces the old "is ANY fight active in
+# this chat" check, which incorrectly blocked an uninvolved player's
+# actions just because someone else in the same chat was fighting
+# (confirmed live, 2026-07-22, Sugar: "I'm not in battle why can't I
+# travel?" -- fixed once already for fast_travel specifically; this
+# rewrite makes the underlying data model actually support the fix
+# everywhere instead of needing a one-off patch per call site).
+_USER_SESSION: dict[int, int] = {}
+
+# session_id -> asyncio.Lock, one per ACTIVE FIGHT. Two unrelated fights
+# in the same chat never contend on the same lock, which is the entire
+# point of this rewrite -- under the old per-chat lock, one fight's
+# combat resolution could make an unrelated fight in the same chat wait
+# on it for no real reason.
+_SESSION_LOCKS: dict[int, asyncio.Lock] = {}
+
+# chat_id -> asyncio.Lock, guarding "is anyone here about to start a new
+# fight" -- distinct from a session lock, since there's no session yet
+# to lock at that point. Two players in the same chat both trying to
+# start a fight at the same instant must not race each other into two
+# sessions over the same participants.
+_START_LOCKS: dict[int, asyncio.Lock] = {}
+
+_NEXT_SESSION_ID = 1
 
 
-def get_lock(chat_id: int) -> asyncio.Lock:
-    """Get (or create) the lock for a given chat. Always the same Lock
-    object for a given chat_id, so 'async with sessions.get_lock(chat_id):'
-    correctly serializes every action that touches that chat's state."""
-    if chat_id not in _CHAT_LOCKS:
-        _CHAT_LOCKS[chat_id] = asyncio.Lock()
-    return _CHAT_LOCKS[chat_id]
+def _new_session_id() -> int:
+    global _NEXT_SESSION_ID
+    sid = _NEXT_SESSION_ID
+    _NEXT_SESSION_ID += 1
+    return sid
+
+
+def get_start_lock(chat_id: int) -> asyncio.Lock:
+    """
+    Lock guarding "start a brand-new fight in this chat" specifically.
+    Acquire this before calling start_session() (or before the
+    'is anyone already in a fight' check that decides whether to call
+    it), same discipline the old get_lock(chat_id) provided for every
+    combat action -- now split out because an ONGOING fight's actions
+    use get_session_lock(session_id) instead, so two unrelated fights
+    never block each other.
+    """
+    if chat_id not in _START_LOCKS:
+        _START_LOCKS[chat_id] = asyncio.Lock()
+    return _START_LOCKS[chat_id]
+
+
+def get_session_lock(session_id: int) -> asyncio.Lock:
+    """Get (or create) the lock for one specific active fight. Always the
+    same Lock object for a given session_id, so 'async with
+    sessions.get_session_lock(session_id):' correctly serializes every
+    action that touches THAT fight's state, without blocking any other
+    fight."""
+    if session_id not in _SESSION_LOCKS:
+        _SESSION_LOCKS[session_id] = asyncio.Lock()
+    return _SESSION_LOCKS[session_id]
+
+
+def get_session_by_id(session_id: int) -> Session | None:
+    return _ACTIVE_SESSIONS.get(session_id)
+
+
+def get_session_for_user(chat_id: int, telegram_user_id: int) -> Session | None:
+    """
+    The real "is this player currently in a fight" lookup -- the
+    per-user replacement for the old get_session(chat_id). Returns None
+    if this player isn't a participant in any currently active session,
+    regardless of how many OTHER fights might be happening in this same
+    chat right now.
+    """
+    session_id = _USER_SESSION.get(telegram_user_id)
+    if session_id is None:
+        return None
+    session = _ACTIVE_SESSIONS.get(session_id)
+    # Defensive: a stale index entry should never crash a caller -- just
+    # report "not in a fight" and let the index get cleaned up on the
+    # next end_session/start_session pass.
+    if session is None or telegram_user_id not in session.turn_order:
+        return None
+    return session
+
+
+def get_sessions_in_chat(chat_id: int) -> list[Session]:
+    """Every currently active fight in this chat (zero, one, or many)."""
+    return [_ACTIVE_SESSIONS[sid] for sid in _CHAT_SESSIONS.get(chat_id, set()) if sid in _ACTIVE_SESSIONS]
 
 
 def get_session(chat_id: int) -> Session | None:
-    return _ACTIVE_SESSIONS.get(chat_id)
-
-
-def start_session(chat_id: int, participants: list, sides: dict) -> Session:
     """
-    Roll initiative for all participants and start a new combat session
-    for this chat. Overwrites any existing session for this chat.
+    Back-compat shim for the old chat-wide lookup: returns a fight
+    happening in this chat if there's EXACTLY one (the common case,
+    including every real fight today), None if there are zero, and the
+    FIRST one found if there happen to be several (callers that need to
+    tell fights apart should use get_session_for_user or
+    get_sessions_in_chat instead -- this exists so call sites that
+    genuinely only care about the old chat-wide question don't all need
+    to change on day one of the rewrite).
+    """
+    sessions_here = get_sessions_in_chat(chat_id)
+    return sessions_here[0] if sessions_here else None
+
+
+def get_lock(chat_id: int) -> asyncio.Lock:
+    """
+    Back-compat shim: the old per-chat lock. New code should use
+    get_start_lock(chat_id) when deciding whether to start a fight, or
+    get_session_lock(session_id) when acting within one already found
+    via get_session_for_user -- kept as an alias of get_start_lock so
+    any call site not yet migrated still serializes fight-START
+    attempts correctly rather than breaking outright.
+    """
+    return get_start_lock(chat_id)
+
+
+def start_session(chat_id: int, participants: list, sides: dict) -> Session | None:
+    """
+    Roll initiative for all participants and start a NEW combat session
+    for this chat. Unlike the old design, this does NOT overwrite an
+    existing fight -- a chat can now host more than one at once. Returns
+    None (starting nothing) if any incoming participant is already a
+    participant in some other active fight, anywhere, rather than
+    silently drafting them into a second one or clobbering the fight
+    they were already in.
     `sides` maps telegram_user_id -> "party" or "enemy".
     """
+    for p in participants:
+        if p["telegram_user_id"] in _USER_SESSION:
+            return None
+
     ordered = start_combat(list(participants))  # sorts by initiative, descending
+    session_id = _new_session_id()
     session = Session(
         chat_id=chat_id,
+        session_id=session_id,
         participants=ordered,
         turn_order=[p["telegram_user_id"] for p in ordered],
         sides=dict(sides),
@@ -235,13 +368,49 @@ def start_session(chat_id: int, participants: list, sides: dict) -> Session:
         "Combat begins! Initiative order: "
         + ", ".join(f"{p['name']} ({p['initiative']})" for p in ordered)
     )
-    _ACTIVE_SESSIONS[chat_id] = session
+    _ACTIVE_SESSIONS[session_id] = session
+    _CHAT_SESSIONS.setdefault(chat_id, set()).add(session_id)
+    for pid in session.turn_order:
+        _USER_SESSION[pid] = session_id
     save_snapshot()
     return session
 
 
-def end_session(chat_id: int) -> None:
-    _ACTIVE_SESSIONS.pop(chat_id, None)
+def join_session(session: Session, character: dict, side: str) -> None:
+    """
+    Adds a new participant to an ALREADY-RUNNING fight (2026-08-01, e.g.
+    _do_join_battle: a player traveling to where combat is already in
+    progress after missing the initial roll-call). Caller must already
+    hold this session's own lock (get_session_lock(session.session_id))
+    before calling this. Keeps _USER_SESSION in sync the same way
+    start_session does -- this is the only other place a participant
+    gets added to turn_order after a fight has already begun.
+    """
+    telegram_user_id = character["telegram_user_id"]
+    session.participants.append(character)
+    session.sides[telegram_user_id] = side
+    session.turn_order.append(telegram_user_id)
+    _USER_SESSION[telegram_user_id] = session.session_id
+    save_snapshot()
+
+
+def end_session(chat_id: int, session: Session | None = None) -> None:
+    """
+    Ends one fight. `session` should be passed whenever the caller
+    already has it (the common case now that a chat can host more than
+    one) -- if omitted, falls back to ending whichever single fight
+    get_session(chat_id) would find, for callers not yet migrated. A
+    no-op if there's nothing to end.
+    """
+    if session is None:
+        session = get_session(chat_id)
+    if session is None:
+        return
+    _ACTIVE_SESSIONS.pop(session.session_id, None)
+    _CHAT_SESSIONS.get(chat_id, set()).discard(session.session_id)
+    for pid in list(session.turn_order):
+        if _USER_SESSION.get(pid) == session.session_id:
+            _USER_SESSION.pop(pid, None)
     save_snapshot()
 
 
@@ -288,7 +457,12 @@ def load_snapshot() -> int:
         restored = 0
         for data in payload.get("sessions", []):
             session = Session.from_json_dict(data)
-            _ACTIVE_SESSIONS[session.chat_id] = session
+            if not session.session_id:
+                session.session_id = _new_session_id()
+            _ACTIVE_SESSIONS[session.session_id] = session
+            _CHAT_SESSIONS.setdefault(session.chat_id, set()).add(session.session_id)
+            for pid in session.turn_order:
+                _USER_SESSION[pid] = session.session_id
             restored += 1
         return restored
     except Exception as e:  # noqa: BLE001 -- corrupt/partial file must not block startup

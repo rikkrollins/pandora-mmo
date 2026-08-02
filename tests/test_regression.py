@@ -1298,7 +1298,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "telegram_user_id": enemy_id, "name": "Goblin", "dexterity": 10,
             "hp_current": 7, "monster_key": "goblin",
         }
-        session = sessions.start_session(-999, [enemy], {enemy_id: "enemy", user_id: "party"})
+        player = db.get_character(user_id)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {enemy_id: "enemy", user_id: "party"})
 
         sink = []
         await bot._do_channel_divinity(FakeUpdate(user_id, "channel divinity", sink))
@@ -1317,7 +1319,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "telegram_user_id": undead_id, "name": "Shadow Wisp", "dexterity": 18,
             "hp_current": 22, "monster_key": "shadow_wisp", "conditions": [],
         }
-        session = sessions.start_session(-999, [undead], {undead_id: "enemy", user_id: "party"})
+        player = db.get_character(user_id)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, undead], {undead_id: "enemy", user_id: "party"})
 
         sink = []
         await bot._do_channel_divinity(FakeUpdate(user_id, "channel divinity", sink))
@@ -1778,6 +1782,61 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(companion_xp_after, companion_xp_before)
         self.assertEqual(leader_xp_after - leader_xp_before, companion_xp_after - companion_xp_before)
         sessions.end_session(-999)
+
+    async def test_multi_fight_sessions_do_not_cross_contaminate(self):
+        """
+        The real Phase 1 deliverable (2026-08-01 multi-fight rewrite, per
+        Coffee: "I want this built so it works for 1000s of users" --
+        supporting more than one simultaneous fight was the first
+        concrete piece). Before this rewrite, sessions.py kept exactly
+        ONE Session per chat_id, unconditionally overwritten by
+        start_session -- so two different parties fighting at the same
+        time in the same chat was flatly impossible; starting a second
+        fight silently clobbered the first one's turn order and combat
+        log outright. Confirms two independent session_ids can now
+        coexist in the same chat with zero shared state, and that a
+        player already in one fight can't be double-drafted into a
+        second one.
+        """
+        import sessions
+        for s in list(sessions.get_sessions_in_chat(-999)):
+            sessions.end_session(-999, s)
+
+        player_a, player_b = 900500, 900501
+        char_a = make_basic_character(player_a, "MultiFightA", current_location="crossroads_tavern")
+        char_b = make_basic_character(player_b, "MultiFightB", current_location="crossroads_tavern")
+        enemy_a = {"telegram_user_id": -2_500_070, "name": "GoblinA", "dexterity": 10}
+        enemy_b = {"telegram_user_id": -2_500_071, "name": "GoblinB", "dexterity": 10}
+
+        session_a = sessions.start_session(
+            -999, [char_a, enemy_a], {player_a: "party", enemy_a["telegram_user_id"]: "enemy"},
+        )
+        session_b = sessions.start_session(
+            -999, [char_b, enemy_b], {player_b: "party", enemy_b["telegram_user_id"]: "enemy"},
+        )
+
+        self.assertIsNotNone(session_a)
+        self.assertIsNotNone(session_b)
+        self.assertNotEqual(session_a.session_id, session_b.session_id)
+        self.assertEqual(len(sessions.get_sessions_in_chat(-999)), 2)
+        self.assertIs(sessions.get_session_for_user(-999, player_a), session_a)
+        self.assertIs(sessions.get_session_for_user(-999, player_b), session_b)
+
+        # A player already fighting can't be drafted into a second fight --
+        # start_session must reject (return None), not silently clobber
+        # the fight they're already in.
+        dup_enemy_id = -2_500_072
+        dup = sessions.start_session(
+            -999, [char_a, {"telegram_user_id": dup_enemy_id, "name": "GoblinC", "dexterity": 10}],
+            {player_a: "party", dup_enemy_id: "enemy"},
+        )
+        self.assertIsNone(dup)
+        self.assertIs(sessions.get_session_for_user(-999, player_a), session_a)
+        self.assertEqual(len(sessions.get_sessions_in_chat(-999)), 2)  # still just the original two
+
+        sessions.end_session(-999, session_a)
+        sessions.end_session(-999, session_b)
+        self.assertEqual(len(sessions.get_sessions_in_chat(-999)), 0)
 
     # -- Party bench + active-combat cap (2026-07-31, per Coffee: "cap it
     #    at 6 per fight, all members in party get experience and gold
@@ -3818,6 +3877,58 @@ class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
         combined = " ".join(sink)
         self.assertIn("Combat Begins!", combined)
         self.assertNotIn("no combat is active right now", combined.lower())
+
+    async def test_two_simultaneous_fights_resolve_independently_through_real_handlers(self):
+        """
+        Full-stack version of FastRegressionTests'
+        test_multi_fight_sessions_do_not_cross_contaminate -- proves a
+        REAL attack dispatched through bot.py's actual handler (real
+        Ollama narration, not a mock) only ever touches the acting
+        player's own fight, never an unrelated second fight sharing the
+        same chat. This is the actual end-to-end proof Phase 1 exists
+        to deliver: two parties fighting at once in one Telegram chat,
+        confusing no one.
+        """
+        import sessions
+        for s in list(sessions.get_sessions_in_chat(-999)):
+            sessions.end_session(-999, s)
+
+        player_a, player_b = 900510, 900511
+        char_a = make_basic_character(player_a, "RealFightA", current_location="crossroads_tavern")
+        char_b = make_basic_character(player_b, "RealFightB", current_location="crossroads_tavern")
+        enemy_a = {
+            "telegram_user_id": -2_500_080, "name": "Real Goblin A", "dexterity": 10, "strength": 10,
+            "armor_class": 12, "hp_current": 200, "hp_max": 200, "proficiency_bonus": 2,
+            "is_ai": 1, "xp_reward": 10, "monster_key": "goblin",
+            "resistances": [], "vulnerabilities": [], "immunities": [],
+        }
+        enemy_b = {**enemy_a, "telegram_user_id": -2_500_081, "name": "Real Goblin B"}
+
+        session_a = sessions.start_session(
+            -999, [char_a, enemy_a], {player_a: "party", enemy_a["telegram_user_id"]: "enemy"},
+        )
+        session_b = sessions.start_session(
+            -999, [char_b, enemy_b], {player_b: "party", enemy_b["telegram_user_id"]: "enemy"},
+        )
+
+        b_round_before = session_b.round_number
+        b_enemy_hp_before = next(
+            p for p in session_b.participants if p["telegram_user_id"] == enemy_b["telegram_user_id"]
+        )["hp_current"]
+
+        sink = []
+        await bot.adventure_master_handler(FakeUpdate(player_a, "I attack the goblin", sink), DummyContext())
+
+        session_b_after = sessions.get_session_for_user(-999, player_b)
+        self.assertIs(session_b_after, session_b)
+        self.assertEqual(session_b_after.round_number, b_round_before)
+        b_enemy_hp_after = next(
+            p for p in session_b_after.participants if p["telegram_user_id"] == enemy_b["telegram_user_id"]
+        )["hp_current"]
+        self.assertEqual(b_enemy_hp_after, b_enemy_hp_before)
+
+        sessions.end_session(-999, session_a)
+        sessions.end_session(-999, session_b)
 
     async def test_accept_quest_honors_a_specifically_named_quest_over_companion_quest(self):
         """
