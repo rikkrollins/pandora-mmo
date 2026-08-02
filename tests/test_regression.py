@@ -364,7 +364,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     def test_sera_is_a_static_npc_at_her_campaign_location(self):
         bot._NPC_LOCATIONS.clear()
         bot._seed_npc_locations()
-        self.assertNotIn("sera_wanderer", bot._NPC_LOCATIONS)
+        self.assertNotIn("sera_wanderer", bot._NPC_LOCATIONS.get(bot._LAST_KNOWN_CHAT_ID, {}))
         found_at = [
             loc_id for region in bot.CAMPAIGN["locations"].values()
             for loc_id, loc in region.items()
@@ -2075,6 +2075,64 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.current_participant_id(), leader_id)  # turn unchanged
         sessions.end_session(-999)
 
+    async def test_scroll_shows_up_and_targets_correctly_in_battle_menu_items(self):
+        """
+        Real live bug (2026-08-02, Coffee: "i didnt see a button for the
+        revive scroll either in battle in the item menu as a push
+        button... mae sure all scrolls are usable in battle with
+        targetting enabled"). Both the battle menu's top-level Items
+        button visibility check and its own item listing only ever
+        filtered to type=="consumable" -- a scroll (type=="scroll")
+        never showed up, and a character carrying nothing BUT scrolls
+        never even got an Items button at all. Also covers the
+        previously-missing resurrect-effect target picker (a dead party
+        member, not a living one) for both the scroll flow and its
+        known-spell-caster "cast" counterpart.
+        """
+        import sessions
+        sessions.end_session(-999)
+        leader_id = 950801
+        make_basic_character(leader_id, "ScrollMenuLeader", char_class="Cleric", current_location="crossroads_tavern")
+        db.add_item(leader_id, "scroll_revivify", 1)
+        char = db.get_character(leader_id)
+        self.assertIn("scroll_revivify", bot._battle_usable_item_ids(char))
+
+        dead_companion = db.create_ai_companion(
+            "ScrollMenuFallen", "Elf", "Ranger",
+            ability_scores={"strength": 12, "dexterity": 17, "constitution": 13,
+                             "intelligence": 11, "wisdom": 15, "charisma": 10},
+            hp_max=30, armor_class=14, gold=0, inventory={},
+        )
+        party_id = db.create_party(leader_id)
+        db.add_ai_companion_to_party(dead_companion["telegram_user_id"], party_id)
+        db.update_character_by_id(dead_companion["character_id"], is_dead=1, hp_current=0)
+        char = db.get_character(leader_id)
+
+        enemy = {
+            "telegram_user_id": -2_600_101, "name": "ScrollMenuGoblin", "dexterity": 10, "strength": 10,
+            "armor_class": 12, "hp_current": 20, "hp_max": 20, "proficiency_bonus": 2, "is_ai": 1,
+        }
+        session = sessions.start_session(-999, [char, enemy], {leader_id: "party", -2_600_101: "enemy"})
+        if session.current_participant_id() != leader_id:
+            session.current_turn_index = session.turn_order.index(leader_id)
+
+        keyboard = bot._battle_menu_keyboard(session)
+        button_labels = [btn.text for row in keyboard.inline_keyboard for btn in row]
+        self.assertTrue(any("Items" in label for label in button_labels))
+
+        sink = []
+        await bot.battle_menu_callback(FakeCallbackUpdate(leader_id, "bm|scroll|scroll_revivify", sink), DummyContext())
+        self.assertTrue(any("ScrollMenuFallen" in m for m in sink))
+
+        sink2 = []
+        await bot.battle_menu_callback(
+            FakeCallbackUpdate(leader_id, "bm|scrolltarget|scroll_revivify|ScrollMenuFallen", sink2), DummyContext(),
+        )
+        revived = db.get_character_by_id(dead_companion["character_id"])
+        self.assertFalse(revived.get("is_dead"))
+        self.assertEqual(db.get_character(leader_id)["inventory"].get("scroll_revivify", 0), 0)
+        sessions.end_session(-999, session)
+
     async def test_equip_via_battle_menu_offers_present_party_members_not_just_self(self):
         """
         Real live bug (2026-08-01, Coffee: "when i clicked equip it
@@ -2126,6 +2184,70 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     #    "I want the AI players that are in the party to be in the
     #    battles... that's the point of picking the active party members
     #    for combats"). ---------------------------------------------------
+    async def test_challenge_and_accept_duel_starts_a_real_fight(self):
+        """
+        Real coverage for the duel flow, never previously tested --
+        also exercises _PENDING_DUELS' chat-scoping (2026-08-01 Phase 2):
+        the pending challenge is now stored per-chat, not one bare
+        module-level dict shared across every Telegram group the bot is
+        ever added to.
+        """
+        import sessions
+        sessions.end_session(-999)
+        challenger_id, target_id = 950601, 950602
+        make_basic_character(challenger_id, "DuelChallenger", current_location="whispering_wood")
+        make_basic_character(target_id, "DuelTarget", current_location="whispering_wood")
+
+        sink = []
+        await bot._do_challenge_duel(FakeUpdate(challenger_id, "I challenge DuelTarget", sink), "I challenge DuelTarget")
+        self.assertTrue(any("challenges" in m for m in sink))
+        self.assertEqual(
+            bot._chat_scoped_dict(bot._PENDING_DUELS, -999).get(target_id), challenger_id,
+        )
+
+        sink2 = []
+        await bot._do_accept_duel(FakeUpdate(target_id, "accept duel", sink2))
+        self.assertTrue(any("duel begins" in m for m in sink2))
+        session = sessions.get_session_for_user(-999, target_id)
+        self.assertIsNotNone(session)
+        self.assertIs(sessions.get_session_for_user(-999, challenger_id), session)
+        self.assertNotIn(target_id, bot._chat_scoped_dict(bot._PENDING_DUELS, -999))
+        sessions.end_session(-999, session)
+
+    def test_chat_scoped_globals_do_not_leak_across_tenant_chats(self):
+        """
+        Real Phase 2 deliverable (2026-08-01, chat-scoping bot.py's other
+        bare globals): a door picked, an NPC defeated, or a challenge
+        issued in one tenant's world must never show up as already
+        unlocked/defeated/pending in a completely different tenant's
+        chat. Before this pass, _UNLOCKED/_DEFEATED_NPCS/_PENDING_DUELS
+        were bare sets/dicts shared across every Telegram chat the bot
+        is ever added to -- harmless with exactly one real chat, wrong
+        the moment a second tenant exists.
+        """
+        chat_a, chat_b = -999, -888
+
+        bot._chat_scoped_set(bot._UNLOCKED, chat_a).add("sealed_stone_door")
+        self.assertNotIn("sealed_stone_door", bot._chat_scoped_set(bot._UNLOCKED, chat_b))
+
+        bot._chat_scoped_set(bot._DEFEATED_NPCS, chat_a).add("some_npc_id")
+        self.assertNotIn("some_npc_id", bot._chat_scoped_set(bot._DEFEATED_NPCS, chat_b))
+
+        bot._chat_scoped_dict(bot._PENDING_DUELS, chat_a)[123] = 456
+        self.assertNotIn(123, bot._chat_scoped_dict(bot._PENDING_DUELS, chat_b))
+
+        bot._chat_scoped_dict(bot._NPC_LOCATIONS, chat_a)["sera_wanderer"] = "market_row"
+        self.assertNotIn("sera_wanderer", bot._chat_scoped_dict(bot._NPC_LOCATIONS, chat_b))
+
+        bot._log_world_event("crossroads_tavern", "a leaked test event", chat_id=chat_a)
+        self.assertFalse(any(
+            "a leaked test event" in text for (_when, _loc, text) in bot._RECENT_WORLD_EVENTS.get(chat_b, [])
+        ))
+
+        context_a = bot._chat_scoped_dict(bot._AI_PLAYER_CONTEXTS, chat_a).setdefault(789, bot._AiPlayerContext())
+        context_a.user_data["human_guidance"] = "retreat"
+        self.assertNotIn(789, bot._chat_scoped_dict(bot._AI_PLAYER_CONTEXTS, chat_b))
+
     async def test_active_ai_companion_joins_combat_despite_being_elsewhere(self):
         leader_id = 950501
         make_basic_character(leader_id, "RushLeader", current_location="crossroads_tavern")
@@ -3240,6 +3362,27 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(names.index("TopDog"), names.index("LastPlace"))
         self.assertNotIn("CombatOnly", names)
 
+    def test_scroll_use_on_a_named_npc_still_classifies_as_cast_spell(self):
+        """
+        Real live bug (2026-08-02, Coffee, mid-fight: "Use a scroll of
+        revivify on Wren" produced an unrelated ambient "Wren says a
+        line about her garden" reply instead of any real item/spell
+        result). The scroll->cast_spell check already existed (fixed
+        once before, 2026-07-24, for "...on Laurrienna"), but it was
+        positioned AFTER _keyword_fallback's generic known-NPC-name loop
+        -- so it only ever actually won when the scroll message did NOT
+        also name a real known NPC/companion, which is precisely the
+        common case (using an item ON someone). Moved earlier so naming
+        the target no longer defeats it.
+        """
+        known = ["Wren Hollowbrook", "Laurrienna"]
+        for text in (
+            "Use a scroll of revivify on Wren",
+            "use the scroll of revivify on Laurrienna",
+            "I cast revivify on Wren",
+        ):
+            self.assertEqual(_keyword_fallback(text, known)["action"], "cast_spell", text)
+
     def test_leaderboard_trigger_recognized(self):
         from ai.intent_parser import _keyword_fallback
         for text in ("show me the leaderboard", "who's the best"):
@@ -3458,7 +3601,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("blocked by", sink[-1])
         self.assertEqual(db.get_character(user_id)["current_location"], "the_weeping_well")
 
-        bot._UNLOCKED.add("sealed_stone_door")
+        bot._chat_scoped_set(bot._UNLOCKED, -999).add("sealed_stone_door")
         sink.clear()
         await bot._do_fast_travel(FakeUpdate(user_id, "", sink), "fast travel to glimmerdeep grotto")
         self.assertEqual(db.get_character(user_id)["current_location"], "glimmerdeep_grotto")

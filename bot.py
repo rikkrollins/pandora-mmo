@@ -290,12 +290,28 @@ def _adjust_faction_standing(telegram_user_id: int, faction_id: str, delta: int,
 # "id" from campaign.json. In-memory, not persisted — same deliberate
 # simplification as combat conditions: shared world state that resets on
 # a bot restart rather than needing a new schema/table for it.
-_UNLOCKED: set[str] = set()
+# 2026-08-01 Phase 2 (chat-scoping): each of these was a bare set/dict
+# shared across every Telegram chat the bot is ever added to -- fine
+# while there was exactly one real chat, wrong the moment a second
+# tenant chat exists (a door picked in one group's world would show as
+# already unlocked in a completely different group's world). Keyed by
+# chat_id now, via the _chat_scoped_set/_chat_scoped_dict helpers below.
+_UNLOCKED: dict[int, set[str]] = {}
 
 # Named hostile NPCs (campaign.json npc ids) already defeated in combat —
 # in-memory, same reasoning as _UNLOCKED. A defeated antagonist doesn't
 # respawn to ambush the same world again.
-_DEFEATED_NPCS: set[str] = set()
+_DEFEATED_NPCS: dict[int, set[str]] = {}
+
+
+def _chat_scoped_set(store: dict[int, set], chat_id: int) -> set:
+    """Lazily creates and returns this chat's own set within a chat_id-keyed store."""
+    return store.setdefault(chat_id, set())
+
+
+def _chat_scoped_dict(store: dict[int, dict], chat_id: int) -> dict:
+    """Lazily creates and returns this chat's own dict within a chat_id-keyed store."""
+    return store.setdefault(chat_id, {})
 
 # Ambient world-NPC encounters (friendly small-talk, or a hostile NPC
 # provoking a real fight) roll this chance on arrival at a location that
@@ -409,8 +425,12 @@ _PENDING_ASI_CHOICE: set[int] = set()
 # stored here (target_id -> challenger_id) the moment it's issued,
 # consumed the moment it's accepted or the target does anything else
 # (same in-memory, session-scoped, "one specific next reply" pattern as
-# _PENDING_ASI_CHOICE/_PENDING_DICE_ROLLS above).
-_PENDING_DUELS: dict[int, int] = {}
+# _PENDING_ASI_CHOICE/_PENDING_DICE_ROLLS above). Chat-scoped (2026-08-01
+# Phase 2) since a duel challenge is a real fact about ONE tenant's world
+# -- the same telegram_user_id being challenged in two different tenant
+# chats at once must not let accepting in one resolve a challenge issued
+# in the other.
+_PENDING_DUELS: dict[int, dict[int, int]] = {}
 
 # Character description (2026-07-16, per Coffee): "add a description to my
 # character" asks what the description should be rather than trying to
@@ -437,11 +457,25 @@ MAX_STATUS_NOTE_LENGTH = 60
 _ABILITY_NAMES = ("strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma")
 _ASI_AUTO_WORDS = ("auto", "automatically", "assign", "distribute", "do it for me")
 
-_NPC_LOCATIONS: dict[str, str] = {}
+# 2026-08-01 Phase 2: chat-scoped (dict[chat_id, dict[npc_id, loc_id]]) --
+# each tenant's world will eventually have its own independent Sarah/
+# Theron wandering around, not one shared wanderer bleeding across every
+# group the bot is in. Real per-request call sites (an actual Update in
+# hand) pass their own chat_id explicitly; the still-single-chat
+# background loops (hourly narration, the "meanwhile" heartbeat,
+# autonomous AI-player narration) fall back to _LAST_KNOWN_CHAT_ID via
+# each function's own default parameter, same as everything else that
+# depends on it until Phase 3's real chats table exists.
+_NPC_LOCATIONS: dict[int, dict[str, str]] = {}
 NPC_WANDER_CHANCE_PER_CYCLE = 0.15
 WORLD_HEARTBEAT_IDLE_THRESHOLD_SECONDS = 1200  # 20 real minutes with no player activity at all
 WORLD_HEARTBEAT_MIN_GAP_SECONDS = 900  # never more than once per ~15 real minutes
-_LAST_WORLD_HEARTBEAT_AT: datetime | None = None
+# Chat-scoped (2026-08-01 Phase 2), same as _NPC_LOCATIONS/_RECENT_WORLD_EVENTS
+# above -- each tenant's "meanwhile" heartbeat should gate on its OWN last-
+# fired time, not one shared clock across every chat. Only ever has a
+# real entry for _LAST_KNOWN_CHAT_ID today (this loop has no other chat
+# to post into yet), but the shape is ready for Phase 3.
+_LAST_WORLD_HEARTBEAT_AT: dict[int, datetime] = {}
 
 # Task #75, per Coffee: "World events: rare world-boss spawns broadcast
 # server-wide." Deliberately restricted to is_boss monsters that are
@@ -493,22 +527,33 @@ _LAST_MOLTBOOK_NOTIFIED_SIGNATURE: tuple | None = None
 # anything else depends on.
 # ---------------------------------------------------------------------
 HOURLY_UPDATE_INTERVAL_SECONDS = getattr(config, "HOURLY_UPDATE_INTERVAL_SECONDS", 3600)
-_LAST_HOURLY_UPDATE_AT: datetime | None = None
+# Chat-scoped (2026-08-01 Phase 2), same reasoning as _LAST_WORLD_HEARTBEAT_AT
+# above -- each tenant chat needs its own independent "have I already
+# fired this hour" gate. Only ever has a real entry for _LAST_KNOWN_CHAT_ID
+# today.
+_LAST_HOURLY_UPDATE_AT: dict[int, datetime] = {}
 # Which clock hour (US Eastern, "%Y-%m-%d %H") the update last fired for —
 # e.g. "2026-07-10 05" — so it lands on the top of the hour rather than
 # drifting to whatever offset the bot process happened to start at.
 EASTERN_TZ = ZoneInfo("America/New_York")
-_LAST_HOURLY_UPDATE_BUCKET: str | None = None
-_RECENT_WORLD_EVENTS: list[tuple[datetime, str, str]] = []  # (when, location_id, text)
+_LAST_HOURLY_UPDATE_BUCKET: dict[int, str] = {}
+# 2026-08-01 Phase 2: chat-scoped, same reasoning as _UNLOCKED/_NPC_LOCATIONS
+# above -- each tenant's own recent-events recap shouldn't include another
+# tenant's combat victories/level-ups. Real per-request callers (a session
+# or update in hand) pass their own chat_id; background-loop-only callers
+# fall back to _LAST_KNOWN_CHAT_ID, same convention as _npcs_at_location.
+_RECENT_WORLD_EVENTS: dict[int, list[tuple[datetime, str, str]]] = {}
 
 
-def _log_world_event(location_id: str | None, text: str) -> None:
+def _log_world_event(location_id: str | None, text: str, chat_id: int | None = None) -> None:
     if not location_id:
         return
+    chat_id = chat_id if chat_id is not None else _LAST_KNOWN_CHAT_ID
     now = datetime.now(timezone.utc)
-    _RECENT_WORLD_EVENTS.append((now, location_id, text))
+    events = _RECENT_WORLD_EVENTS.setdefault(chat_id, [])
+    events.append((now, location_id, text))
     cutoff = now.timestamp() - (HOURLY_UPDATE_INTERVAL_SECONDS * 2)
-    _RECENT_WORLD_EVENTS[:] = [e for e in _RECENT_WORLD_EVENTS if e[0].timestamp() >= cutoff]
+    events[:] = [e for e in events if e[0].timestamp() >= cutoff]
 
 
 def _npc_currently_wanders(npc_id: str) -> bool:
@@ -532,43 +577,49 @@ def _wanderable_npc_ids() -> list[str]:
     return [npc_id for npc_id in CAMPAIGN["npcs"] if _npc_currently_wanders(npc_id)]
 
 
-def _seed_npc_locations() -> None:
+def _seed_npc_locations(chat_id: int | None = None) -> None:
     """Gives each wanderable NPC a real starting location, from wherever campaign.json first placed them."""
+    chat_id = chat_id if chat_id is not None else _LAST_KNOWN_CHAT_ID
+    locations = _chat_scoped_dict(_NPC_LOCATIONS, chat_id)
     for npc_id in _wanderable_npc_ids():
-        if npc_id in _NPC_LOCATIONS:
+        if npc_id in locations:
             continue
         for layer_locations in CAMPAIGN["locations"].values():
             for loc_id, loc in layer_locations.items():
                 if npc_id in loc.get("npcs", []):
-                    _NPC_LOCATIONS[npc_id] = loc_id
+                    locations[npc_id] = loc_id
                     break
-            if npc_id in _NPC_LOCATIONS:
+            if npc_id in locations:
                 break
 
 
-def _npcs_at_location(location_id: str) -> list[str]:
+def _npcs_at_location(location_id: str, chat_id: int | None = None) -> list[str]:
     """Fixed NPCs still listed in campaign.json for this location, plus any wanderers currently here."""
+    chat_id = chat_id if chat_id is not None else _LAST_KNOWN_CHAT_ID
     location = cl.get_location(CAMPAIGN, location_id)
     static_npcs = [
         n for n in (location.get("npcs", []) if location else [])
         if not _npc_currently_wanders(n)
     ]
-    wandering_here = [npc_id for npc_id, loc_id in _NPC_LOCATIONS.items() if loc_id == location_id]
+    locations = _chat_scoped_dict(_NPC_LOCATIONS, chat_id)
+    wandering_here = [npc_id for npc_id, loc_id in locations.items() if loc_id == location_id]
     return static_npcs + wandering_here
 
 
-def _wander_npcs() -> None:
+def _wander_npcs(chat_id: int | None = None) -> None:
+    chat_id = chat_id if chat_id is not None else _LAST_KNOWN_CHAT_ID
+    locations = _chat_scoped_dict(_NPC_LOCATIONS, chat_id)
     for npc_id in _wanderable_npc_ids():
         if random.random() > NPC_WANDER_CHANCE_PER_CYCLE:
             continue
-        current_loc_id = _NPC_LOCATIONS.get(npc_id)
+        current_loc_id = locations.get(npc_id)
         if not current_loc_id:
             continue
         location = cl.get_location(CAMPAIGN, current_loc_id)
         connections = list(location.get("connections", [])) if location else []
         if not connections:
             continue
-        _NPC_LOCATIONS[npc_id] = random.choice(connections)
+        locations[npc_id] = random.choice(connections)
 
 
 OLLAMA_CONGESTION_LOAD_THRESHOLD = 12.0
@@ -612,7 +663,6 @@ async def _maybe_post_world_heartbeat(bot) -> None:
     going, not a paused game. Never invents anything beyond a real
     NPC's real current location and their own listed activity_goals.
     """
-    global _LAST_WORLD_HEARTBEAT_AT
     if _LAST_KNOWN_CHAT_ID is None:
         return
     if _ollama_congested():
@@ -628,7 +678,8 @@ async def _maybe_post_world_heartbeat(bot) -> None:
     idle_for = (now - datetime.fromisoformat(row["m"])).total_seconds()
     if idle_for < WORLD_HEARTBEAT_IDLE_THRESHOLD_SECONDS:
         return
-    if _LAST_WORLD_HEARTBEAT_AT and (now - _LAST_WORLD_HEARTBEAT_AT).total_seconds() < WORLD_HEARTBEAT_MIN_GAP_SECONDS:
+    last_heartbeat = _LAST_WORLD_HEARTBEAT_AT.get(_LAST_KNOWN_CHAT_ID)
+    if last_heartbeat and (now - last_heartbeat).total_seconds() < WORLD_HEARTBEAT_MIN_GAP_SECONDS:
         return
 
     with db.get_connection() as conn:
@@ -665,7 +716,7 @@ async def _maybe_post_world_heartbeat(bot) -> None:
 
     if not line:
         return
-    _LAST_WORLD_HEARTBEAT_AT = now
+    _LAST_WORLD_HEARTBEAT_AT[_LAST_KNOWN_CHAT_ID] = now
     await _safe_send(update_like, f"🕯️ *(meanwhile, at {location_name})*\n💬 **{speaker_name}:** {line}")
 
 
@@ -749,13 +800,12 @@ async def _maybe_post_hourly_status_update(bot) -> None:
     lands on the clock hour instead of drifting to whatever offset the
     bot happened to start at.
     """
-    global _LAST_HOURLY_UPDATE_AT, _LAST_HOURLY_UPDATE_BUCKET
     if _LAST_KNOWN_CHAT_ID is None:
         return
 
     now = datetime.now(timezone.utc)
     current_hour_bucket = datetime.now(EASTERN_TZ).strftime("%Y-%m-%d %H")
-    if _LAST_HOURLY_UPDATE_BUCKET == current_hour_bucket:
+    if _LAST_HOURLY_UPDATE_BUCKET.get(_LAST_KNOWN_CHAT_ID) == current_hour_bucket:
         return
 
     # Real live bug (2026-07-18, Coffee: "What is happening here we were
@@ -819,8 +869,8 @@ async def _maybe_post_hourly_status_update(bot) -> None:
     # Commit to firing this cycle regardless of what's found below —
     # an hour with nothing to report still gets a (quiet) update, and
     # either way we don't want to re-check every 60s until the next hour.
-    _LAST_HOURLY_UPDATE_AT = now
-    _LAST_HOURLY_UPDATE_BUCKET = current_hour_bucket
+    _LAST_HOURLY_UPDATE_AT[_LAST_KNOWN_CHAT_ID] = now
+    _LAST_HOURLY_UPDATE_BUCKET[_LAST_KNOWN_CHAT_ID] = current_hour_bucket
 
     if not last_active_row:
         return  # nobody has ever played — nothing to report on
@@ -835,7 +885,7 @@ async def _maybe_post_hourly_status_update(bot) -> None:
 
     cutoff = now.timestamp() - HOURLY_UPDATE_INTERVAL_SECONDS
     recent_events = [
-        text for (when, loc, text) in _RECENT_WORLD_EVENTS
+        text for (when, loc, text) in _RECENT_WORLD_EVENTS.get(_LAST_KNOWN_CHAT_ID, [])
         if loc == location_id and when.timestamp() >= cutoff
     ]
 
@@ -1018,7 +1068,10 @@ async def _maybe_run_moltbook_social_tick(bot) -> None:
         return
 
     cutoff = now.timestamp() - MOLTBOOK_SOCIAL_TICK_INTERVAL_SECONDS
-    recent_activity = [text for (when, _loc, text) in _RECENT_WORLD_EVENTS if when.timestamp() >= cutoff]
+    recent_activity = [
+        text for (when, _loc, text) in _RECENT_WORLD_EVENTS.get(_LAST_KNOWN_CHAT_ID, [])
+        if when.timestamp() >= cutoff
+    ]
 
     decision = await asyncio.to_thread(decide_social_action, feed_posts, recent_activity)
     action = decision.get("action")
@@ -1145,7 +1198,12 @@ class _AiPlayerContext:
         self.user_data = {}
 
 
-_AI_PLAYER_CONTEXTS: dict[int, _AiPlayerContext] = {}
+# 2026-08-01 Phase 2: chat-scoped. Per the approved multi-tenant plan,
+# each tenant chat gets its OWN independent autonomous AI party/wandering-
+# companion state, not one shared "living world" bleeding across every
+# group the bot is in -- that sharing would itself be the exact dilution
+# the multi-tenant scaling work exists to avoid.
+_AI_PLAYER_CONTEXTS: dict[int, dict[int, _AiPlayerContext]] = {}
 
 
 # ---------------------------------------------------------------------
@@ -1958,6 +2016,44 @@ def _turn_announcement(session: sessions.Session) -> str:
     )
 
 
+def _battle_usable_item_ids(character: dict) -> list[str]:
+    """
+    Every carried item this character could tap a battle-menu button to
+    use right now -- real ordinary consumables (potions, rations) AND
+    scrolls (2026-08-02, real live report, Coffee: "i didnt see a button
+    for the revive scroll... in the item menu" -- the battle menu's
+    Items list, and the top-level Items button's own visibility check,
+    both only ever filtered to type=="consumable", so a character
+    carrying nothing BUT scrolls never even saw an Items button at all,
+    and a scroll never showed up in the list for anyone). A scroll isn't
+    used through _do_use_item (see intent_parser's own scroll-routing
+    comment) -- it's a real, if unprepared, spell (_do_cast_spell's
+    inventory scroll-lookup) -- but from the player's own perspective
+    it's still just "something in my bag," so both share this one
+    button-visibility list; battle_menu_callback's "items" action
+    dispatches each kind through its own real handler.
+    """
+    return [
+        item_id for item_id, qty in character.get("inventory", {}).items()
+        if qty > 0 and (items_module.get_item(item_id) or {}).get("type") in ("consumable", "scroll")
+    ]
+
+
+def _dead_party_members(character: dict) -> list[dict]:
+    """
+    Real dead party members eligible for Revivify, including a party
+    seat currently occupied by someone playing an active character
+    while their other, dead one waits (2026-07-24 fix, see
+    get_party_members_by_id_including_inactive_slots's own call sites)
+    -- the same lookup _do_use_item's heal_and_revive branch already
+    uses, shared here for the battle-menu button flow.
+    """
+    party_id = character.get("party_id")
+    if not party_id:
+        return []
+    return [m for m in db.get_party_members_by_id_including_inactive_slots(party_id) if m.get("is_dead")]
+
+
 def _battle_menu_keyboard(session: sessions.Session) -> InlineKeyboardMarkup | None:
     """
     Top-level RPG-style battle menu (Fight/Skills/Items/Run) for whoever
@@ -1985,11 +2081,8 @@ def _battle_menu_keyboard(session: sessions.Session) -> InlineKeyboardMarkup | N
     row = [InlineKeyboardButton("⚔️ Fight", callback_data="bm|fight")]
     if character.get("known_spells"):
         row.append(InlineKeyboardButton("✨ Skills", callback_data="bm|skills"))
-    consumable_ids = [
-        item_id for item_id, qty in character.get("inventory", {}).items()
-        if qty > 0 and (items_module.get_item(item_id) or {}).get("type") == "consumable"
-    ]
-    if consumable_ids:
+    usable_ids = _battle_usable_item_ids(character)
+    if usable_ids:
         row.append(InlineKeyboardButton("🎒 Items", callback_data="bm|items"))
     # "More" submenu (2026-08-01, per Coffee: "instead of run make it
     # an other command... Run, Give, Formation, Equip and other things
@@ -2096,11 +2189,14 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         # "Fight" already prompts for a target (see the "fight"/"target"
         # actions above); damage and heal spells now get the same picker,
         # reusing that exact pattern, whenever there's more than one
-        # sensible option. Utility effects (buff/negate/ac_bonus/summon/
-        # resurrect) are unchanged -- summon has no target, resurrect needs
-        # a specific DEAD party member (not a live-combat concept, since
-        # Revivify only works outside combat per its own design), and the
-        # rest are still flavor-only with no mechanical target yet.
+        # sensible option. Utility effects (buff/negate/ac_bonus/summon)
+        # are unchanged -- summon has no target, and the rest are still
+        # flavor-only with no mechanical target yet. Resurrect (2026-08-02,
+        # same fix as the "scroll" action's identical branch below --
+        # this is the known-spell-caster path to the exact same gap, a
+        # real Cleric/Paladin who's learned Revivify outright rather than
+        # carrying a scroll for it) needs a specific DEAD party member,
+        # not a live-combat concept since Revivify works outside combat.
         if spell and spell["effect"] == "damage":
             opposing = session.living_on_side(session.opposing_side(user_id))
             if len(opposing) > 1:
@@ -2129,6 +2225,21 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 buttons.append([InlineKeyboardButton("« Back", callback_data="bm|skills")])
                 await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
                 return
+        elif spell and spell["effect"] == "resurrect":
+            dead = _dead_party_members(character) if character else []
+            if not dead:
+                await _safe_edit_markup(query)
+                await update.effective_chat.send_message(
+                    "No one in your party is dead right now.", message_thread_id=config.TOPIC_ADVENTURE_ID,
+                )
+                return
+            buttons = [
+                [InlineKeyboardButton(p["name"], callback_data=f"bm|casttarget|{value}|{p['name']}")]
+                for p in dead
+            ]
+            buttons.append([InlineKeyboardButton("« Back", callback_data="bm|skills")])
+            await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+            return
         await _safe_edit_markup(query)
         await _do_cast_spell(update, f"cast {spell_name}")
         return
@@ -2141,14 +2252,18 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     if action == "items":
-        consumable_ids = [
-            item_id for item_id, qty in (character.get("inventory", {}) if character else {}).items()
-            if qty > 0 and (items_module.get_item(item_id) or {}).get("type") == "consumable"
-        ]
-        item_buttons = [
-            [InlineKeyboardButton(items_module.get_item(iid)["name"], callback_data=f"bm|use|{iid}")]
-            for iid in consumable_ids if items_module.get_item(iid)
-        ]
+        usable_ids = _battle_usable_item_ids(character) if character else []
+        item_buttons = []
+        for iid in usable_ids:
+            item = items_module.get_item(iid)
+            if not item:
+                continue
+            # Scrolls dispatch through _do_cast_spell (a real, if
+            # unprepared, spell), never _do_use_item -- see
+            # _battle_usable_item_ids' own docstring for why they're
+            # still listed side by side here.
+            button_action = "scroll" if item.get("type") == "scroll" else "use"
+            item_buttons.append([InlineKeyboardButton(item["name"], callback_data=f"bm|{button_action}|{iid}")])
         item_buttons.append([InlineKeyboardButton("« Back", callback_data="bm|menu")])
         await _safe_edit_markup(query, InlineKeyboardMarkup(item_buttons))
         return
@@ -2188,6 +2303,76 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         item_name = item["name"] if item else value
         await _safe_edit_markup(query)
         await _do_use_item(update, f"use {item_name} on {target_name}")
+        return
+
+    if action == "scroll":
+        # Real live bug (2026-08-02, Coffee: "i didnt see a button for
+        # the revive scroll... make sure all scrolls are usable in
+        # battle with targetting enabled") -- a scroll's target picker
+        # depends on the SPELL it carries, not the item itself, so this
+        # mirrors "cast"'s own per-effect branching (damage/heal/
+        # resurrect) rather than duplicating _do_use_item's simpler
+        # heal/cure_poison-only picker.
+        item = items_module.get_item(value)
+        spell = spells_module.get_spell(item.get("spell")) if item else None
+        spell_name = spell["name"] if spell else (item["name"] if item else value)
+        if spell and spell["effect"] == "damage":
+            opposing = session.living_on_side(session.opposing_side(user_id))
+            if len(opposing) > 1:
+                buttons = [
+                    [InlineKeyboardButton(
+                        f"{p['name']} ({p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP)",
+                        callback_data=f"bm|scrolltarget|{value}|{p['name']}",
+                    )]
+                    for p in opposing
+                ]
+                buttons.append([InlineKeyboardButton("« Back", callback_data="bm|items")])
+                await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+                return
+        elif spell and spell["effect"] in ("heal", "cure_poison"):
+            own_side = session.sides.get(user_id)
+            allies = session.living_on_side(own_side) if own_side else []
+            if len(allies) > 1:
+                buttons = [
+                    [InlineKeyboardButton(
+                        f"{p['name']} ({p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP)"
+                        + (" — you" if p["telegram_user_id"] == user_id else ""),
+                        callback_data=f"bm|scrolltarget|{value}|{p['name']}",
+                    )]
+                    for p in allies
+                ]
+                buttons.append([InlineKeyboardButton("« Back", callback_data="bm|items")])
+                await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+                return
+        elif spell and spell["effect"] == "resurrect":
+            dead = _dead_party_members(character) if character else []
+            if not dead:
+                # query was already answered unconditionally at the top
+                # of this handler -- a second query.answer() would raise,
+                # so this falls back to a plain chat message instead, same
+                # convention "fight"'s own no-valid-targets case uses.
+                await _safe_edit_markup(query)
+                await update.effective_chat.send_message(
+                    "No one in your party is dead right now.", message_thread_id=config.TOPIC_ADVENTURE_ID,
+                )
+                return
+            buttons = [
+                [InlineKeyboardButton(p["name"], callback_data=f"bm|scrolltarget|{value}|{p['name']}")]
+                for p in dead
+            ]
+            buttons.append([InlineKeyboardButton("« Back", callback_data="bm|items")])
+            await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+            return
+        await _safe_edit_markup(query)
+        await _do_cast_spell(update, f"cast {spell_name}")
+        return
+
+    if action == "scrolltarget":
+        item = items_module.get_item(value)
+        spell = spells_module.get_spell(item.get("spell")) if item else None
+        spell_name = spell["name"] if spell else (item["name"] if item else value)
+        await _safe_edit_markup(query)
+        await _do_cast_spell(update, f"cast {spell_name} on {target_name}")
         return
 
     if action == "more":
@@ -3086,7 +3271,7 @@ def _award_victory_xp(session: sessions.Session) -> tuple[str, list[str]]:
     for p in session.participants:
         if session.sides.get(p["telegram_user_id"]) == "enemy" and p.get("source_npc_id"):
             npc_id = p["source_npc_id"]
-            _DEFEATED_NPCS.add(npc_id)
+            _chat_scoped_set(_DEFEATED_NPCS, session.chat_id).add(npc_id)
             faction_id = _faction_for_npc(npc_id)
             if faction_id:
                 for pid in real_party_ids_all:
@@ -3112,7 +3297,7 @@ def _award_victory_xp(session: sessions.Session) -> tuple[str, list[str]]:
         event_location = event_location or after.get("current_location")
         if after["level"] > before["level"]:
             level_up_notes.append(_level_up_note(before, after))
-            _log_world_event(event_location, f"{after['name']} reached level {after['level']}.")
+            _log_world_event(event_location, f"{after['name']} reached level {after['level']}.", session.chat_id)
 
     # Inactive party members' cut (2026-07-16, per Coffee): "inactive
     # party members shud get a small % of exp for their parties tasks
@@ -3140,14 +3325,14 @@ def _award_victory_xp(session: sessions.Session) -> tuple[str, list[str]]:
             after = db.add_xp(member_pid, bonus_xp)
             if after["level"] > before["level"]:
                 level_up_notes.append(_level_up_note(before, after))
-                _log_world_event(event_location, f"{after['name']} reached level {after['level']}.")
+                _log_world_event(event_location, f"{after['name']} reached level {after['level']}.", session.chat_id)
 
     enemy_names = [
         p["name"] for p in session.participants
         if session.sides.get(p["telegram_user_id"]) == "enemy"
     ]
     if enemy_names:
-        _log_world_event(event_location, f"The party defeated {', '.join(enemy_names)}.")
+        _log_world_event(event_location, f"The party defeated {', '.join(enemy_names)}.", session.chat_id)
 
     # Task #75: if this victory just defeated the currently-active world
     # boss (_maybe_spawn_world_boss, background world tick), clear its
@@ -3216,7 +3401,7 @@ def _award_victory_xp(session: sessions.Session) -> tuple[str, list[str]]:
                         after = db.add_xp(pid, updated["reward_xp"])
                         if after["level"] > before["level"]:
                             level_up_notes.append(_level_up_note(before, after))
-                            _log_world_event(event_location, f"{after['name']} reached level {after['level']}.")
+                            _log_world_event(event_location, f"{after['name']} reached level {after['level']}.", session.chat_id)
                         character = db.get_character(pid)
                         db.update_character(pid, gold=character["gold"] + updated["reward_gold"])
                         db.increment_board_quests_completed(pid)
@@ -4212,7 +4397,7 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
         # fled from at all (same rule _do_flee already enforces for a
         # human), so guidance to run from one is silently ignored here
         # rather than attempted and failing oddly.
-        ai_context = _AI_PLAYER_CONTEXTS.get(current["telegram_user_id"])
+        ai_context = _chat_scoped_dict(_AI_PLAYER_CONTEXTS, session.chat_id).get(current["telegram_user_id"])
         guidance = ai_context.user_data.pop("human_guidance", None) if ai_context else None
         if guidance and not any(e.get("is_boss") for e in opposing) and any(
             w in guidance.lower() for w in ("run", "retreat", "flee", "fall back", "escape")
@@ -4508,7 +4693,7 @@ async def _do_challenge_duel(update: Update, text: str) -> None:
         )
         return
 
-    _PENDING_DUELS[target["telegram_user_id"]] = telegram_user_id
+    _chat_scoped_dict(_PENDING_DUELS, update.effective_chat.id)[target["telegram_user_id"]] = telegram_user_id
     await _safe_send(
         update,
         f"⚔️ **{character['name']}** challenges **{target['name']}** to a duel! "
@@ -4518,7 +4703,7 @@ async def _do_challenge_duel(update: Update, text: str) -> None:
 
 async def _do_accept_duel(update: Update) -> None:
     telegram_user_id = update.effective_user.id
-    challenger_id = _PENDING_DUELS.pop(telegram_user_id, None)
+    challenger_id = _chat_scoped_dict(_PENDING_DUELS, update.effective_chat.id).pop(telegram_user_id, None)
     if challenger_id is None:
         await update.effective_chat.send_message(
             "No duel challenge is waiting for you.", message_thread_id=config.TOPIC_ADVENTURE_ID
@@ -5146,7 +5331,7 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
     if sessions.get_session_for_user(chat_id, character["telegram_user_id"]) is not None:
         return  # never interrupt combat this character is already in
 
-    npc_ids = _npcs_at_location(location["id"])
+    npc_ids = _npcs_at_location(location["id"], chat_id)
     if not npc_ids or random.random() > AMBIENT_NPC_ENCOUNTER_CHANCE:
         return
 
@@ -5160,7 +5345,7 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
     memory_facts = db.get_relationship(telegram_user_id, npc_id)["memory_events"]
 
     if disposition == "hostile":
-        if npc_id in _DEFEATED_NPCS or "stats" not in npc_data:
+        if npc_id in _chat_scoped_set(_DEFEATED_NPCS, chat_id) or "stats" not in npc_data:
             return
         async with sessions.get_start_lock(chat_id):
             if sessions.get_session_for_user(chat_id, character["telegram_user_id"]) is not None:
@@ -5745,7 +5930,7 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
     _do_skill_check, before this is ever dispatched to -- forced_roll
     just threads that already-collected value through to the actual roll.
     """
-    if lockable["id"] in _UNLOCKED:
+    if lockable["id"] in _chat_scoped_set(_UNLOCKED, update.effective_chat.id):
         await update.effective_chat.send_message(
             f"{lockable['name'].capitalize()} is already unlocked.",
             message_thread_id=config.TOPIC_ADVENTURE_ID,
@@ -5765,7 +5950,7 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
 
     reward_line = ""
     if success:
-        _UNLOCKED.add(lockable["id"])
+        _chat_scoped_set(_UNLOCKED, update.effective_chat.id).add(lockable["id"])
         if lockable["kind"] == "chest":
             for item_id, qty in lockable.get("loot", {}).items():
                 db.add_item(update.effective_user.id, item_id, qty)
@@ -6479,7 +6664,9 @@ async def _do_message_ai(update: Update, text: str) -> None:
         await _safe_send(update, f"🗣️ **{character['name']}** tells **{target['name']}**: \"{text}\"")
         return
 
-    context_like = _AI_PLAYER_CONTEXTS.setdefault(target["telegram_user_id"], _AiPlayerContext())
+    context_like = _chat_scoped_dict(_AI_PLAYER_CONTEXTS, update.effective_chat.id).setdefault(
+        target["telegram_user_id"], _AiPlayerContext(),
+    )
     context_like.user_data["human_guidance"] = text
     await _safe_send(update, f"🗣️ **{character['name']}** tells **{target['name']}**: \"{text}\"")
 
@@ -7309,6 +7496,7 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
     _log_world_event(
         character.get("current_location") if character else None,
         f"{character['name']} completed the quest \"{quest['title']}\"." if character else None,
+        update_like.effective_chat.id,
     )
 
     db.complete_quest(telegram_user_id, quest_id)
@@ -11357,7 +11545,7 @@ async def _do_look(update: Update) -> None:
     # (non-AI) reply path.
     lines = [f"👁️ **{character['name']}** looks around.", f"📍 **{location['name']}** ({location['layer']})", location["description"]]
     lines.append(f"🌤️ {world_clock.conditions_line(location['layer'])}")
-    npcs_here = _npcs_at_location(character["current_location"])
+    npcs_here = _npcs_at_location(character["current_location"], update.effective_chat.id)
     if npcs_here:
         npc_names = [cl.get_npc(CAMPAIGN, n)["name"] for n in npcs_here if cl.get_npc(CAMPAIGN, n)]
         lines.append(f"People here: {', '.join(npc_names)}")
@@ -12602,7 +12790,7 @@ async def _do_move(update: Update, text: str) -> None:
 
     locked_connections = current.get("locked_connections", {})
     lockable_id = locked_connections.get(destination_id)
-    if lockable_id and lockable_id not in _UNLOCKED:
+    if lockable_id and lockable_id not in _chat_scoped_set(_UNLOCKED, update.effective_chat.id):
         lockable = next(
             (lk for lk in current.get("lockables", []) if lk["id"] == lockable_id), None
         )
@@ -12877,7 +13065,7 @@ async def _do_fast_travel(update: Update, text: str) -> None:
 
     locked_connections = current.get("locked_connections", {})
     lockable_id = locked_connections.get(destination_id)
-    if lockable_id and lockable_id not in _UNLOCKED:
+    if lockable_id and lockable_id not in _chat_scoped_set(_UNLOCKED, update.effective_chat.id):
         lockable = next(
             (lk for lk in current.get("lockables", []) if lk["id"] == lockable_id), None
         )
@@ -16629,7 +16817,7 @@ async def hint_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     lines = ["💡 **Things you might try here:**"]
 
-    npcs_here = _npcs_at_location(character["current_location"])
+    npcs_here = _npcs_at_location(character["current_location"], update.effective_chat.id)
     for npc_id in npcs_here:
         npc = cl.get_npc(CAMPAIGN, npc_id)
         if npc:
@@ -18498,7 +18686,7 @@ async def _ai_party_autonomous_tick(bot) -> None:
             )
             return
 
-    context_like = _AI_PLAYER_CONTEXTS.setdefault(user_id, _AiPlayerContext())
+    context_like = _chat_scoped_dict(_AI_PLAYER_CONTEXTS, _LAST_KNOWN_CHAT_ID).setdefault(user_id, _AiPlayerContext())
     last_action = context_like.user_data.get("last_autonomous_action")
 
     # Recruited companions (e.g. Sarah) aren't in the hardcoded

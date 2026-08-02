@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.70] — Scrolls now show up (and target correctly) in the battle Items menu
+
+Real live bug (Coffee: "i didnt see a button for the revive scroll
+either in battle in the item menu as a push button"). Both the battle
+menu's top-level Items button (visibility check) and its own item
+listing only ever filtered to `type=="consumable"` — a scroll
+(`type=="scroll"`) never showed up, and a character carrying nothing
+BUT scrolls never even got an Items button at all. Scrolls now share
+that same list and get their own real target picker based on the
+spell they carry: enemies for a damage scroll, living allies for
+heal/cure poison, a genuinely DEAD party member for Revivify (a real,
+previously-missing gap — also fixed for a known spellcaster casting
+Revivify directly from the Skills menu, not just via scroll).
+
+## [1.27.69] — Phase 1 follow-up: chat-scope the rest of bot.py's shared world state
+
+Continuing the multi-tenant scaling plan: `_UNLOCKED`, `_DEFEATED_NPCS`,
+`_NPC_LOCATIONS`, `_RECENT_WORLD_EVENTS`, `_PENDING_DUELS`,
+`_AI_PLAYER_CONTEXTS`, and the hourly/"meanwhile" heartbeat gate
+timers were all bare module-level globals shared across every Telegram
+chat the bot is ever added to — a door picked, an NPC defeated, or a
+duel challenge issued in one tenant's world would have silently shown
+up as already-unlocked/defeated/pending in a completely different
+tenant's chat. All now keyed by chat_id. No behavior change for the one
+real chat running today — verified with a dedicated test proving zero
+cross-chat leakage, plus real coverage for dueling (previously
+completely untested) added along the way.
+
 ## [1.27.68] — Using an item/scroll ON a named companion no longer gets swallowed as chat
 
 Real live bug (Coffee, mid-fight: "Use a scroll of revivify on Wren"
