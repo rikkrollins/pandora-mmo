@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.78] — Multi-tenant scaling Phase 3 (first slice): per-tenant topic routing + /set_topic
+
+First slice of letting another real Telegram group add this bot with
+its own working topic layout (task #250, part of the long-standing
+multi-tenant scaling plan). Two new tables (`chats`, `chat_topic_config`)
+back a real per-chat topic mapping; `topics.py`'s core routing/gating
+helpers (`is_main`/`is_support`/`is_adventure`/`is_development`/
+`get_topic_name`, plus a new `thread_id_for`) now take a real chat_id
+and look up that chat's own configured thread_id first, falling back to
+this bot's own home-group constants when a chat has no mapping — so
+this bot's own live group (which has never needed to configure
+anything) behaves byte-for-byte identically to before this shipped. A
+new `/set_topic <main|support|adventure|development>` admin command,
+run from inside the real topic itself, lets a group's own Telegram
+admin/owner map it in one step — gated on real Telegram admin/owner
+status, not the Dev-topic allowlist. The Development topic remains
+permanently exclusive to this bot's one home group: `/set_topic
+development` is refused outright for any other chat, matching Coffee's
+explicit standing instruction that the Dev command-bridge must never be
+replicated elsewhere.
+
+This is the routing/gating half of Phase 3 only — the ~340 remaining
+`config.TOPIC_ADVENTURE_ID`-style references used as outbound reply
+destinations inside Adventure-topic handlers, and the full Phase 4
+database multi-tenancy retrofit (giving every game table a real
+chat_id), are both explicitly deferred to their own follow-up work, per
+the plan's own guidance to batch a change this size across several
+sessions rather than one large sweep.
+
 ## [1.27.77] — Magic items: Phase 7 (final), crafting advanced items, forging & enchanting/imbuing
 
 Final phase of the magic item system. "Craft a masterwork longsword" (or

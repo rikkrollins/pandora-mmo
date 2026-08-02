@@ -84,8 +84,9 @@ class FakeSentMessage:
 
 
 class FakeChat:
-    def __init__(self, sink):
-        self.id = -999
+    def __init__(self, sink, chat_id=-999, title=None):
+        self.id = chat_id
+        self.title = title
         self._sink = sink
         self.last_sent_message = None
         self.sent_photos = []
@@ -118,9 +119,9 @@ class FakeUpdate:
     needs to simulate replying to someone else's message (e.g.
     /add_admin, /ban).
     """
-    def __init__(self, user_id, text, sink, thread_id=None, reply_to_message=None):
+    def __init__(self, user_id, text, sink, thread_id=None, reply_to_message=None, chat_id=None, chat_title=None):
         self.effective_user = FakeUser(user_id)
-        self.effective_chat = FakeChat(sink)
+        self.effective_chat = FakeChat(sink, chat_id=chat_id if chat_id is not None else -999, title=chat_title)
         self.message = FakeMessage(text, thread_id, reply_to_message=reply_to_message)
         self.effective_message = self.message
 

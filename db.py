@@ -209,6 +209,32 @@ CREATE TABLE IF NOT EXISTS game_settings (
 );
 """
 
+# Multi-tenant scaling Phase 3 (2026-08-02): a real registry of every
+# Telegram group that has ever run /set_topic, so another group can add
+# this bot and get its own working topic routing without touching
+# config.py's own hardcoded home-group constants at all. chat_topic_config
+# is the actual per-tenant routing table topics.py reads from; chats is
+# just onboarding metadata (who set it up, when) -- not yet a foreign key
+# target for anything, since Phase 4 (adding chat_id to every other table)
+# hasn't happened yet.
+CREATE_CHATS_TABLE = """
+CREATE TABLE IF NOT EXISTS chats (
+    chat_id INTEGER PRIMARY KEY,
+    title TEXT,
+    added_by_user_id INTEGER,
+    created_at TEXT NOT NULL
+);
+"""
+
+CREATE_CHAT_TOPIC_CONFIG_TABLE = """
+CREATE TABLE IF NOT EXISTS chat_topic_config (
+    chat_id INTEGER NOT NULL,
+    topic_name TEXT NOT NULL,
+    message_thread_id INTEGER,
+    PRIMARY KEY (chat_id, topic_name)
+);
+"""
+
 PARTY_MAX_MEMBERS = config.PARTY_MAX_MEMBERS  # moved to config.py 2026-07-14, now .env-configurable
 
 
@@ -290,6 +316,8 @@ def init_db() -> None:
         conn.execute(CREATE_BOARD_QUESTS_TABLE)
         conn.execute(CREATE_PARTIES_TABLE)
         conn.execute(CREATE_GAME_SETTINGS_TABLE)
+        conn.execute(CREATE_CHATS_TABLE)
+        conn.execute(CREATE_CHAT_TOPIC_CONFIG_TABLE)
 
         # Older DBs created before fog-of-war/character-slots/proficiency
         # may already have the new characters table but be missing later
@@ -1946,6 +1974,47 @@ def set_setting(key: str, value: str) -> None:
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (key, value),
         )
+
+
+# --- Multi-tenant topic routing (Phase 3, 2026-08-02) ---
+
+def register_chat(chat_id: int, title: str | None, added_by_user_id: int) -> None:
+    """Records that a group has run /set_topic at least once. Safe to call repeatedly -- just refreshes the title."""
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO chats (chat_id, title, added_by_user_id, created_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(chat_id) DO UPDATE SET title = excluded.title",
+            (chat_id, title, added_by_user_id, datetime.now(timezone.utc).isoformat()),
+        )
+
+
+def set_chat_topic_id(chat_id: int, topic_name: str, message_thread_id: int | None) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO chat_topic_config (chat_id, topic_name, message_thread_id) VALUES (?, ?, ?) "
+            "ON CONFLICT(chat_id, topic_name) DO UPDATE SET message_thread_id = excluded.message_thread_id",
+            (chat_id, topic_name.lower(), message_thread_id),
+        )
+
+
+def get_chat_topic_id(chat_id: int, topic_name: str) -> int | None:
+    """None means "no per-tenant row" -- callers (topics.py) fall back to the home-group constants in that case."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT message_thread_id FROM chat_topic_config WHERE chat_id = ? AND topic_name = ?",
+            (chat_id, topic_name.lower()),
+        ).fetchone()
+    return row["message_thread_id"] if row else None
+
+
+def get_chat_topic_name_for_thread(chat_id: int, message_thread_id: int) -> str | None:
+    """Reverse lookup for this one chat's own configured topics -- used by topics.get_topic_name."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT topic_name FROM chat_topic_config WHERE chat_id = ? AND message_thread_id = ?",
+            (chat_id, message_thread_id),
+        ).fetchone()
+    return row["topic_name"] if row else None
 
 
 # --- Trusted-dev allowlist (2026-07-17, per Coffee: a genuine second

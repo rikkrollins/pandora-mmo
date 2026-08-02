@@ -17,17 +17,19 @@ import unittest
 
 import bot
 import campaign_loader as cl
+import config
 import db
 import guilds
 import items as items_module
 import spells
+import topics
 from ai.intent_parser import _keyword_fallback, parse_intents
 from ai.support_agent import _deterministic_inventory_answer
 from ai.text_cleanup import strip_think_tags
 from rules.combat import resolve_attack
 from rules.crafting import RECIPES
 from tests.helpers import (
-    DummyContext, DummyMessage, FakeCallbackUpdate, FakeUpdate, make_basic_character, use_test_db,
+    DummyContext, DummyMessage, FakeBot, FakeCallbackUpdate, FakeUpdate, make_basic_character, use_test_db,
 )
 
 
@@ -2208,6 +2210,90 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 advanced = True
                 break
         self.assertTrue(advanced)
+
+    def test_topic_routing_falls_back_to_home_group_constants_with_no_per_tenant_row(self):
+        """
+        Real multi-tenant scaling Phase 3 deliverable (2026-08-02, task
+        #250): topics.py's is_adventure/is_support/is_development/
+        is_main/thread_id_for all gained a required chat_id parameter,
+        looking up db.chat_topic_config first -- but ANY chat with no
+        row there (including every real message this bot's own live
+        group has ever sent, which has never run /set_topic) falls back
+        to the exact same config.py constants as before. This is the
+        core backward-compat guarantee: the live group's behavior is
+        byte-for-byte unchanged by this phase.
+        """
+        unregistered_chat_id = 424242
+        self.assertTrue(topics.is_adventure(unregistered_chat_id, config.TOPIC_ADVENTURE_ID))
+        self.assertTrue(topics.is_support(unregistered_chat_id, config.TOPIC_SUPPORT_ID))
+        self.assertTrue(topics.is_development(unregistered_chat_id, config.TOPIC_DEVELOPMENT_ID))
+        self.assertTrue(topics.is_main(unregistered_chat_id, None))
+        self.assertTrue(topics.is_adventure(None, config.TOPIC_ADVENTURE_ID))
+        self.assertEqual(topics.thread_id_for(unregistered_chat_id, "adventure"), config.TOPIC_ADVENTURE_ID)
+
+    async def test_a_second_tenant_chat_routes_through_its_own_configured_topic_id(self):
+        """
+        Real multi-tenant scaling Phase 3 deliverable: a chat that has
+        configured its OWN "adventure" thread_id (via db.set_chat_topic_id,
+        what /set_topic does under the hood) via a thread_id completely
+        different from this bot's real config.TOPIC_ADVENTURE_ID
+        genuinely routes through bot._route_text_message to
+        adventure_master_handler -- the actual proof multi-tenant
+        routing works end-to-end, not just that the function signatures
+        compile. The home group's own real Adventure thread_id stays
+        correctly gated for its own (unregistered) chat_id throughout.
+        """
+        tenant_chat_id = -5551234
+        tenant_adventure_thread_id = 999001
+        db.set_chat_topic_id(tenant_chat_id, "adventure", tenant_adventure_thread_id)
+        self.assertTrue(topics.is_adventure(tenant_chat_id, tenant_adventure_thread_id))
+        self.assertEqual(topics.get_topic_name(tenant_chat_id, tenant_adventure_thread_id), "adventure")
+
+        home_chat_id = 111111
+        self.assertTrue(topics.is_adventure(home_chat_id, config.TOPIC_ADVENTURE_ID))
+
+        user_id = 700001
+        make_basic_character(user_id, "TenantPlayer", current_location="crossroads_tavern")
+        sink = []
+        update = FakeUpdate(user_id, "check my sheet", sink, thread_id=tenant_adventure_thread_id, chat_id=tenant_chat_id)
+        await bot._route_text_message(update, DummyContext())
+        transcript = "\n".join(sink)
+        self.assertIn("TenantPlayer", transcript)
+
+    async def test_set_topic_command_gates_and_persists_correctly(self):
+        """
+        Real multi-tenant scaling Phase 3 deliverable: /set_topic is
+        gated on real Telegram admin/owner status (not the Dev-topic
+        allowlist), refuses to ever configure a "development" topic for
+        any chat other than this bot's own home group (per Coffee's hard
+        instruction that the Dev bridge never extends to another group),
+        and actually persists a real mapping on success.
+        """
+        # Non-admin refusal
+        sink = []
+        update = FakeUpdate(700002, "/set_topic adventure", sink, thread_id=555, chat_id=-5559999)
+        context = DummyContext(bot=FakeBot(status="member"), args=["adventure"])
+        await bot.set_topic_command(update, context)
+        self.assertIn("Only a group admin", "\n".join(sink))
+        self.assertIsNone(db.get_chat_topic_id(-5559999, "adventure"))
+
+        # "development" refused for a non-home chat, even for a real owner
+        sink2 = []
+        non_home_chat = (config.TELEGRAM_CHAT_ID + 999999) if config.TELEGRAM_CHAT_ID else -777777
+        update2 = FakeUpdate(700003, "/set_topic development", sink2, thread_id=777, chat_id=non_home_chat)
+        context2 = DummyContext(bot=FakeBot(status="creator"), args=["development"])
+        await bot.set_topic_command(update2, context2)
+        self.assertIn("exclusive to this bot's own home group", "\n".join(sink2))
+        self.assertIsNone(db.get_chat_topic_id(non_home_chat, "development"))
+
+        # Real success for an actual Telegram admin
+        sink3 = []
+        new_tenant_chat = -5558888
+        update3 = FakeUpdate(700004, "/set_topic support", sink3, thread_id=444, chat_id=new_tenant_chat, chat_title="Some Other Group")
+        context3 = DummyContext(bot=FakeBot(status="administrator"), args=["support"])
+        await bot.set_topic_command(update3, context3)
+        self.assertIn("now set as", "\n".join(sink3))
+        self.assertEqual(db.get_chat_topic_id(new_tenant_chat, "support"), 444)
 
     async def test_ai_companion_actually_fighting_gets_real_combat_xp(self):
         """
