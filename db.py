@@ -748,6 +748,20 @@ def _apply_affix(item: dict, affix: dict) -> None:
     if kind == "stat_bonus":
         field = affix["field"]
         item[field] = item.get(field, 0) + affix["value"]
+    # Phase 2 (2026-08-02): elemental affixes. A weapon carries at most
+    # one damage_type (matches every static weapon in items.py -- e.g.
+    # flametongue_shortsword's single "fire"), so this just sets the
+    # field rather than accumulating a list. Armor/shield/accessories
+    # append to real list fields -- the SAME fields
+    # rules.combat.apply_damage_type_modifier already reads off any
+    # defender dict (resistances/vulnerabilities/immunities), reused here
+    # completely unchanged; only equip-time now needs to actually
+    # populate them (see bot._equipped_elemental_profile).
+    elif kind == "elemental_damage":
+        item["damage_type"] = affix["damage_type"]
+    elif kind in ("resistance", "vulnerability", "immunity"):
+        list_field = f"{kind}s"
+        item.setdefault(list_field, []).append(affix["damage_type"])
 
 
 def materialize_item_instance(item_id: str) -> dict | None:

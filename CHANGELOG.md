@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.72] — Magic items: Phase 2, elemental damage & resistance
+
+Second phase of the magic item system. Rare+ generated weapons now have
+a real chance to roll an elemental damage type (fire/cold/lightning/
+force/radiant/psychic/poison/necrotic/silver — the same vocabulary
+already used by spells and a few static weapons); rare+ generated
+armor/shields now have a real chance to roll a matching resistance.
+`rules/combat.py`'s existing resistance/vulnerability/immunity math
+(already used for monsters) is completely unchanged — the real gap was
+that no PLAYER ever had those fields populated at all. Equipped gear's
+elemental resistance is now live-summed at combat-start, the same
+pattern already used for ring AC bonuses and regen bonuses.
+
 ## [1.27.71] — Magic items: Phase 1, real keepable loot
 
 First phase of a real Diablo-style magic item system (per Coffee: "make

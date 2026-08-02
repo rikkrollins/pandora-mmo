@@ -1832,6 +1832,43 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updated_character["gold"], gold_before)  # no gold awarded for the roll itself
         sessions.end_session(-999)
 
+    def test_equipped_elemental_resistance_actually_halves_matching_damage(self):
+        """
+        Real Phase 2 deliverable of the magic item system (2026-08-02):
+        rules.combat.apply_damage_type_modifier already read
+        resistances/vulnerabilities/immunities off ANY defender dict
+        (monster templates have set these for a while), but no real
+        PLAYER ever had them populated -- equipped gear's resistance
+        affix now reaches combat via
+        bot._apply_equipped_elemental_profile, live-summed at
+        combat-start time in bot._get_real_party_combatants, same
+        pattern as _equipped_regen_bonus/_equipped_ring_ac_bonus.
+        """
+        from rules.combat import apply_damage_type_modifier
+        from rules.item_generator import generate_armor
+        user_id = 950903
+        character = make_basic_character(user_id, "ElementalTester2", current_location="crossroads_tavern")
+
+        self.assertEqual(apply_damage_type_modifier(20, "fire", character), 20)
+
+        armor = generate_armor(tier="legendary")
+        armor["affixes"] = [a for a in armor["affixes"] if a.get("kind") != "resistance"]
+        armor["affixes"].append({"kind": "resistance", "damage_type": "fire"})
+        armor_id = db.create_item_instance(
+            item_type=armor["type"], name=armor["name"], rarity=armor["rarity"],
+            price=armor["price"], base_stats=armor, affixes=armor["affixes"],
+        )
+        db.add_item(user_id, armor_id, 1)
+        success, _msg, _updated = db.equip_item(user_id, armor_id)
+        self.assertTrue(success)
+        self.assertIn("fire", items_module.get_item(armor_id).get("resistances", []))
+
+        party = bot._get_real_party_combatants(db.get_character(user_id))
+        combatant = next(p for p in party if p["telegram_user_id"] == user_id)
+        self.assertIn("fire", combatant.get("resistances", []))
+        self.assertEqual(apply_damage_type_modifier(20, "fire", combatant), 10)
+        self.assertEqual(apply_damage_type_modifier(20, "cold", combatant), 20)
+
     async def test_ai_companion_actually_fighting_gets_real_combat_xp(self):
         """
         Real live bug (2026-08-01, Coffee: "They didn't get experience

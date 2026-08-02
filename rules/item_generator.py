@@ -51,6 +51,21 @@ TIERS = ["common", "uncommon", "rare", "very_rare", "legendary"]
 TIER_BONUS = {"common": 0, "uncommon": 1, "rare": 2, "very_rare": 3, "legendary": 4}
 TIER_PRICE_MULT = {"common": 1, "uncommon": 4, "rare": 12, "very_rare": 30, "legendary": 80}
 
+# Phase 2 of the magic item system (2026-08-02): real elemental damage
+# types already in live use across this game (rules/combat.py's
+# apply_damage_type_modifier, spells.py, items.py's static weapons like
+# flametongue_shortsword) -- reused verbatim, never invented here.
+# "physical" is deliberately excluded: it's the unmarked default every
+# weapon already has, not something worth rolling as a bonus affix.
+ELEMENTAL_DAMAGE_TYPES = [
+    "fire", "cold", "lightning", "force", "radiant", "psychic", "poison", "necrotic", "silver",
+]
+# Only a rare+ item gets a shot at an elemental affix -- keeps it a real
+# step up from a plain stat-bonus common/uncommon roll, not just noise on
+# every drop.
+ELEMENTAL_AFFIX_ELIGIBLE_TIERS = {"rare", "very_rare", "legendary"}
+ELEMENTAL_AFFIX_CHANCE = 0.3
+
 PREFIXES = {
     "common": ["Sturdy", "Plain", "Worn", "Serviceable"],
     "uncommon": ["Gleaming", "Keen", "Tempered", "Well-Balanced"],
@@ -85,6 +100,19 @@ def _name_for(base_label: str, tier: str) -> str:
     if tier in SUFFIXES:
         name += f" {random.choice(SUFFIXES[tier])}"
     return name
+
+
+def _maybe_elemental_affix(tier: str, kind: str) -> list[dict]:
+    """
+    A rare+ roll has a real (not guaranteed) chance at one elemental
+    affix -- `kind="elemental_damage"` for a weapon (offense),
+    `kind="resistance"` for armor/shield (defense). Empty list otherwise,
+    same "omit rather than roll a zero-effect affix" convention the
+    stat_bonus affix already uses at common tier.
+    """
+    if tier not in ELEMENTAL_AFFIX_ELIGIBLE_TIERS or random.random() > ELEMENTAL_AFFIX_CHANCE:
+        return []
+    return [{"kind": kind, "damage_type": random.choice(ELEMENTAL_DAMAGE_TYPES)}]
 
 
 def generate_weapon(base_id: str | None = None, tier: str | None = None) -> dict:
@@ -128,7 +156,8 @@ def generate_weapon(base_id: str | None = None, tier: str | None = None) -> dict
         "generated_base": base_id,
         "note": f"A {tier.replace('_', ' ')} find, worked with more care than most of its kind.",
         "affixes": (
-            [{"kind": "stat_bonus", "field": "damage_bonus", "value": bonus}] if bonus else []
+            ([{"kind": "stat_bonus", "field": "damage_bonus", "value": bonus}] if bonus else [])
+            + _maybe_elemental_affix(tier, "elemental_damage")
         ),
     }
 
@@ -153,7 +182,8 @@ def generate_armor(base_id: str | None = None, tier: str | None = None) -> dict:
         "generated_base": base_id,
         "note": f"A {tier.replace('_', ' ')} find, worked with more care than most of its kind.",
         "affixes": (
-            [{"kind": "stat_bonus", "field": "ac_base", "value": bonus}] if bonus else []
+            ([{"kind": "stat_bonus", "field": "ac_base", "value": bonus}] if bonus else [])
+            + _maybe_elemental_affix(tier, "resistance")
         ),
     }
 
@@ -178,7 +208,8 @@ def generate_shield(base_id: str | None = None, tier: str | None = None) -> dict
         "generated_base": base_id,
         "note": f"A {tier.replace('_', ' ')} find, worked with more care than most of its kind.",
         "affixes": (
-            [{"kind": "stat_bonus", "field": "ac_bonus", "value": bonus}] if bonus else []
+            ([{"kind": "stat_bonus", "field": "ac_bonus", "value": bonus}] if bonus else [])
+            + _maybe_elemental_affix(tier, "resistance")
         ),
     }
 

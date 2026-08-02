@@ -1250,6 +1250,41 @@ def _get_combat_eligible_party_members(location_id: str) -> list[dict]:
     ]
 
 
+def _apply_equipped_elemental_profile(character: dict) -> None:
+    """
+    Phase 2 of the magic item system (2026-08-02): rules.combat's
+    apply_damage_type_modifier already reads resistances/vulnerabilities/
+    immunities off ANY defender dict (monster templates have set these
+    for a while) -- what was missing is a real PLAYER ever having them
+    populated at all. Live-summed at combat-start time, same pattern as
+    _equipped_regen_bonus/_equipped_ring_ac_bonus (never baked into a
+    stored column), over armor/shield/accessories (a weapon's own
+    damage_type is offense, handled separately by _weapon_for_attacker --
+    this is purely the wearer's own defense). Mutates the character dict
+    in place, matching how session participants already pick up other
+    combat-only fields (conditions, raging, etc.) once they become part
+    of session.participants.
+    """
+    resistances, vulnerabilities, immunities = set(), set(), set()
+    equipped_ids = [character.get("equipped_armor"), character.get("equipped_shield")]
+    equipped_ids += character.get("equipped_accessories", [])
+    for item_id in equipped_ids:
+        if not item_id:
+            continue
+        item = items_module.get_item(item_id)
+        if not item:
+            continue
+        resistances.update(item.get("resistances", []))
+        vulnerabilities.update(item.get("vulnerabilities", []))
+        immunities.update(item.get("immunities", []))
+    if resistances:
+        character["resistances"] = list(set(character.get("resistances", [])) | resistances)
+    if vulnerabilities:
+        character["vulnerabilities"] = list(set(character.get("vulnerabilities", [])) | vulnerabilities)
+    if immunities:
+        character["immunities"] = list(set(character.get("immunities", [])) | immunities)
+
+
 def _get_real_party_combatants(requester: dict) -> list[dict]:
     """
     Who actually fights ALONGSIDE requester when combat starts (2026-07-23,
@@ -1294,23 +1329,26 @@ def _get_real_party_combatants(requester: dict) -> list[dict]:
     location_id = requester["current_location"]
     party_id = requester.get("party_id")
     if not party_id:
-        return [requester]
-    combatants = []
-    for m in db.get_party_members_by_id(party_id):
-        if m.get("is_benched") or m.get("is_inactive"):
-            continue
-        if m.get("is_ai"):
-            if m["current_location"] != location_id:
-                db.update_character_by_id(m["character_id"], current_location=location_id)
-                m["current_location"] = location_id
-                m["_rushed_in"] = True
-            combatants.append(m)
-        elif m["current_location"] == location_id:
-            combatants.append(m)
-    if len(combatants) > config.PARTY_ACTIVE_COMBAT_CAP:
-        requester_id = requester["telegram_user_id"]
-        others = [p for p in combatants if p["telegram_user_id"] != requester_id]
-        combatants = [requester] + others[:config.PARTY_ACTIVE_COMBAT_CAP - 1]
+        combatants = [requester]
+    else:
+        combatants = []
+        for m in db.get_party_members_by_id(party_id):
+            if m.get("is_benched") or m.get("is_inactive"):
+                continue
+            if m.get("is_ai"):
+                if m["current_location"] != location_id:
+                    db.update_character_by_id(m["character_id"], current_location=location_id)
+                    m["current_location"] = location_id
+                    m["_rushed_in"] = True
+                combatants.append(m)
+            elif m["current_location"] == location_id:
+                combatants.append(m)
+        if len(combatants) > config.PARTY_ACTIVE_COMBAT_CAP:
+            requester_id = requester["telegram_user_id"]
+            others = [p for p in combatants if p["telegram_user_id"] != requester_id]
+            combatants = [requester] + others[:config.PARTY_ACTIVE_COMBAT_CAP - 1]
+    for combatant in combatants:
+        _apply_equipped_elemental_profile(combatant)
     return combatants
 
 
