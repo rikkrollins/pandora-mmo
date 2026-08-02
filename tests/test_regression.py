@@ -2295,6 +2295,49 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("now set as", "\n".join(sink3))
         self.assertEqual(db.get_chat_topic_id(new_tenant_chat, "support"), 444)
 
+    async def test_outbound_replies_route_to_each_chats_own_configured_topic(self):
+        """
+        Real multi-tenant scaling Phase 3 deliverable (2026-08-02): the
+        outbound-reply sweep. ~340 bot.py call sites that used to send
+        replies straight to config.py's hardcoded home-group thread ids
+        now resolve per-chat via topics.thread_id_for -- this is the
+        actual proof that sweep accomplished something real: a second
+        tenant's own OUTBOUND reply lands in ITS configured thread_id,
+        not the home group's, while the home group (no chat_topic_config
+        row) keeps landing exactly where it always did. Also covers the
+        Dev-topic admin gate, now topics.is_development(...) instead of
+        a raw == comparison against config.TOPIC_DEVELOPMENT_ID -- still
+        correctly refuses/accepts for the home group.
+        """
+        home_chat_id = 222222
+        make_basic_character(800001, "HomePlayer", current_location="crossroads_tavern")
+        sink = []
+        update = FakeUpdate(800001, "check my sheet", sink, thread_id=config.TOPIC_ADVENTURE_ID, chat_id=home_chat_id)
+        await bot._route_text_message(update, DummyContext())
+        self.assertTrue(update.effective_chat.sent_thread_ids)
+        self.assertTrue(all(tid == config.TOPIC_ADVENTURE_ID for tid in update.effective_chat.sent_thread_ids))
+
+        tenant_chat_id = -8887777
+        tenant_adventure_thread_id = 424999
+        db.set_chat_topic_id(tenant_chat_id, "adventure", tenant_adventure_thread_id)
+        make_basic_character(800002, "TenantPlayer2", current_location="crossroads_tavern")
+        sink2 = []
+        update2 = FakeUpdate(800002, "check my sheet", sink2, thread_id=tenant_adventure_thread_id, chat_id=tenant_chat_id)
+        await bot._route_text_message(update2, DummyContext())
+        self.assertTrue(update2.effective_chat.sent_thread_ids)
+        self.assertTrue(all(tid == tenant_adventure_thread_id for tid in update2.effective_chat.sent_thread_ids))
+        self.assertNotEqual(tenant_adventure_thread_id, config.TOPIC_ADVENTURE_ID)
+
+        sink3 = []
+        wrong_thread_update = FakeUpdate(700010, "/ban", sink3, thread_id=config.TOPIC_ADVENTURE_ID, chat_id=config.TELEGRAM_CHAT_ID or 111)
+        await bot.ban_command(wrong_thread_update, DummyContext(bot=FakeBot(status="creator")))
+        self.assertEqual(sink3, [])
+
+        sink4 = []
+        right_thread_update = FakeUpdate(700011, "/ban", sink4, thread_id=config.TOPIC_DEVELOPMENT_ID, chat_id=config.TELEGRAM_CHAT_ID or 111)
+        await bot.ban_command(right_thread_update, DummyContext(bot=FakeBot(status="creator"), args=[]))
+        self.assertTrue(len(sink4) > 0)
+
     async def test_ai_companion_actually_fighting_gets_real_combat_xp(self):
         """
         Real live bug (2026-08-01, Coffee: "They didn't get experience

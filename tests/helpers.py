@@ -90,9 +90,11 @@ class FakeChat:
         self._sink = sink
         self.last_sent_message = None
         self.sent_photos = []
+        self.sent_thread_ids = []
 
     async def send_message(self, text, **kwargs):
         self._sink.append(text)
+        self.sent_thread_ids.append(kwargs.get("message_thread_id"))
         self.last_sent_message = FakeSentMessage(self._sink)
         return self.last_sent_message
 

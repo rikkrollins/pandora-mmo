@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.79] — Multi-tenant scaling Phase 3 (complete): outbound reply routing sweep
+
+Completes task #250. The ~340 remaining `config.TOPIC_ADVENTURE_ID`/
+`TOPIC_SUPPORT_ID`/`TOPIC_DEVELOPMENT_ID` references across roughly 120
+functions in bot.py — every outbound reply destination that used to
+hardcode this bot's own home-group thread ids — now resolve per-chat
+via `topics.thread_id_for`, the same helper v1.27.78 introduced for
+incoming-message routing. The single highest-leverage fix was
+`_safe_send`'s own default fallback, which alone covers roughly half of
+every affected call site. The Development-topic admin commands
+(`/ban`, `/add_admin`, `/warning`, etc.) also switched their gate check
+from a raw `==` comparison to `topics.is_development(...)`, so they
+correctly follow a future `/set_topic development` remap within
+Coffee's own group instead of silently ignoring it. Three genuine
+non-`update` call sites (the AI-companion autonomous-turn shim, the
+restart combat-recovery announcement, and the Moltbook heartbeat
+notifier) were fixed individually.
+
+Verified live: a second tenant chat's own outbound reply now lands in
+its own `/set_topic`-configured thread, not the home group's, while the
+home group's behavior (no `chat_topic_config` row) is provably
+unchanged. A full 320-test regression run turned up zero real
+regressions — the one failure was a known, pre-existing test-ordering
+artifact (confirmed passing in isolation), not caused by this sweep.
+
+This closes out Phase 3 of the multi-tenant scaling plan. The only
+remaining piece is Phase 4 (task #251): giving every currently-global
+game table (characters, parties, market listings, etc.) a real chat_id,
+so two tenant groups' game data doesn't share one namespace.
+
 ## [1.27.78] — Multi-tenant scaling Phase 3 (first slice): per-tenant topic routing + /set_topic
 
 First slice of letting another real Telegram group add this bot with

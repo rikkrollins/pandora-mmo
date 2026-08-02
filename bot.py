@@ -1027,7 +1027,7 @@ async def _maybe_check_moltbook_activity(bot) -> None:
     try:
         await bot.send_message(
             chat_id=_LAST_KNOWN_CHAT_ID,
-            message_thread_id=config.TOPIC_DEVELOPMENT_ID,
+            message_thread_id=topics.thread_id_for(_LAST_KNOWN_CHAT_ID, "development"),
             text="\n".join(lines),
         )
         # Only recorded as "notified" once the send actually succeeds —
@@ -1191,7 +1191,7 @@ class _AiPlayerUpdate:
     def __init__(self, bot, chat_id: int, user_id: int, text: str):
         self.effective_chat = _ChatOnlyUpdate._Chat(bot, chat_id)
         self.effective_user = _AiPlayerUpdate._User(user_id)
-        self.message = _AiPlayerUpdate._Message(text, config.TOPIC_ADVENTURE_ID)
+        self.message = _AiPlayerUpdate._Message(text, topics.thread_id_for(chat_id, "adventure"))
         # Real live regression (2026-07-25, caught within minutes of the
         # update.message -> update.effective_message edit-safety fix):
         # this shim never set effective_message at all, only .message --
@@ -1623,7 +1623,7 @@ async def _begin_character_creation(update: Update, context: ContextTypes.DEFAUL
     context.user_data["creation"] = {"step": "name"}
     await update.effective_chat.send_message(
         f"{prefix}Let's create your character! What's their name?",
-        message_thread_id=config.TOPIC_ADVENTURE_ID,
+        message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
     )
 
 
@@ -1685,14 +1685,14 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
         if not clean_name:
             await update.effective_chat.send_message(
                 "That doesn't look like a name — try again?",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
         creation["name"] = clean_name
         creation["step"] = "race"
         await update.effective_chat.send_message(
             f"Nice! What race? Choose one: {', '.join(VALID_RACES)}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             reply_markup=_race_keyboard(),
         )
         return
@@ -1702,14 +1702,14 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
         if race not in VALID_RACES:
             await update.effective_chat.send_message(
                 f"Please choose one of: {', '.join(VALID_RACES)}",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
         creation["race"] = race
         creation["step"] = "class"
         await update.effective_chat.send_message(
             f"Great, a {race}! What class? Choose one: {', '.join(VALID_CLASSES)}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             reply_markup=_class_keyboard(),
         )
         return
@@ -1719,7 +1719,7 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
         if char_class not in VALID_CLASSES:
             await update.effective_chat.send_message(
                 f"Please choose one of: {', '.join(VALID_CLASSES)}",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
         creation["char_class"] = char_class
@@ -1738,7 +1738,7 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
             f"numbers in that order, using each rolled value exactly once "
             f"(e.g. '15 14 13 12 10 8'), or say \"assign them automatically\" / "
             f"\"do it for me\" to let the game pick a sensible spread for your class.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             reply_markup=_score_assignment_keyboard(),
         )
         return
@@ -1759,7 +1759,7 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
                     f"That doesn't match your rolled scores ({', '.join(map(str, rolled))}). "
                     f"Please reply with all 6 values, each used exactly once, in "
                     f"STR DEX CON INT WIS CHA order, or say \"do it for me\" to auto-assign.",
-                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                    message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
                 )
                 return
 
@@ -1770,7 +1770,7 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
             "(attack rolls, skill checks, saving throws) instead of the game rolling for you? "
             "You can change this any time later by saying \"use my own dice\" or \"let the game "
             "roll for me\". (yes/no)",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             reply_markup=_dice_preference_keyboard(),
         )
         return
@@ -1782,7 +1782,7 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
             "What pronouns should the narration use for your character — he/him, she/her, "
             "they/them, or something else? Say \"skip\" to leave it unset (narration defaults "
             "to they/them) — you can always set this later by asking.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             reply_markup=_pronouns_keyboard(),
         )
         return
@@ -1799,7 +1799,7 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
             "appearance, personality — whatever helps other players and NPCs get a sense of "
             "who they are. Reply with a description, or say \"skip\" to leave it blank — you "
             "can always add one later by asking.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -1925,7 +1925,7 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
             f"🎲 Physical dice mode: {'ON' if wants_manual_dice else 'OFF'} (say \"use my own dice\" or "
             f"\"let the game roll for me\" any time to change it)"
         )
-        await update.effective_chat.send_message(sheet, message_thread_id=config.TOPIC_ADVENTURE_ID)
+        await update.effective_chat.send_message(sheet, message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"))
         del context.user_data["creation"]
 
         # Task #81, per Coffee: a real generated portrait, one per
@@ -1943,7 +1943,7 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
             await update.effective_chat.send_photo(
                 photo=images_module.generate_image_url(portrait_prompt),
                 caption=f"🎨 {character['name']}",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
         except Exception as e:
             logger.warning(f"[images] portrait generation failed, skipping: {e!r}")
@@ -2245,7 +2245,7 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                     resolved = live_session is not None and await _try_end_stale_combat(update, live_session)
                 if not resolved:
                     await update.effective_chat.send_message(
-                        "No valid targets remain.", message_thread_id=config.TOPIC_ADVENTURE_ID,
+                        "No valid targets remain.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
                     )
             return
         buttons = [
@@ -2326,7 +2326,7 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             if not dead:
                 await _safe_edit_markup(query)
                 await update.effective_chat.send_message(
-                    "No one in your party is dead right now.", message_thread_id=config.TOPIC_ADVENTURE_ID,
+                    "No one in your party is dead right now.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
                 )
                 return
             buttons = [
@@ -2449,7 +2449,7 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 # convention "fight"'s own no-valid-targets case uses.
                 await _safe_edit_markup(query)
                 await update.effective_chat.send_message(
-                    "No one in your party is dead right now.", message_thread_id=config.TOPIC_ADVENTURE_ID,
+                    "No one in your party is dead right now.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
                 )
                 return
             buttons = [
@@ -2843,7 +2843,7 @@ async def _safe_send(
     if thread_id is _MAIN_TOPIC_SEND:
         resolved_thread_id = None
     elif thread_id is None:
-        resolved_thread_id = config.TOPIC_ADVENTURE_ID
+        resolved_thread_id = topics.thread_id_for(update.effective_chat.id, "adventure")
     else:
         resolved_thread_id = thread_id
 
@@ -3656,7 +3656,7 @@ async def _do_rebirth(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if character["level"] < MAX_LEVEL:
@@ -3800,7 +3800,7 @@ async def _do_choose_hybrid(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     tier = hybrid_tier(character.get("rebirth_count", 0))
@@ -3848,7 +3848,7 @@ async def _do_choose_subclass(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     lowered = text.lower()
@@ -3927,7 +3927,7 @@ async def _do_level_up(update: Update, text: str) -> None:
     character = db.get_character(user_id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -3973,7 +3973,7 @@ async def _do_auto_level_up_party(update: Update) -> None:
     requester = db.get_character(update.effective_user.id)
     if requester is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -4782,20 +4782,20 @@ async def _do_challenge_duel(update: Update, text: str) -> None:
     character = db.get_character(telegram_user_id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
     location = cl.get_location(CAMPAIGN, character["current_location"])
     if location and location.get("safe"):
         await update.effective_chat.send_message(
-            "This is a safe place — no duels here.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "This is a safe place — no duels here.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
     if sessions.get_session_for_user(update.effective_chat.id, telegram_user_id) is not None:
         await update.effective_chat.send_message(
-            "You're already in a fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You're already in a fight.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -4809,13 +4809,13 @@ async def _do_challenge_duel(update: Update, text: str) -> None:
     if target is None:
         await update.effective_chat.send_message(
             "Not sure who you mean — name a real player here to challenge.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
     if sessions.get_session_for_user(update.effective_chat.id, target["telegram_user_id"]) is not None:
         await update.effective_chat.send_message(
-            f"{target['name']} is already in a fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            f"{target['name']} is already in a fight.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -4832,7 +4832,7 @@ async def _do_accept_duel(update: Update) -> None:
     challenger_id = _chat_scoped_dict(_PENDING_DUELS, update.effective_chat.id).pop(telegram_user_id, None)
     if challenger_id is None:
         await update.effective_chat.send_message(
-            "No duel challenge is waiting for you.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "No duel challenge is waiting for you.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -4846,19 +4846,19 @@ async def _do_accept_duel(update: Update) -> None:
     if target["current_location"] != challenger["current_location"]:
         await update.effective_chat.send_message(
             f"{challenger['name']} isn't here anymore — the duel's off.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     location = cl.get_location(CAMPAIGN, target["current_location"])
     if location and location.get("safe"):
         await update.effective_chat.send_message(
-            "This is a safe place — no duels here.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "This is a safe place — no duels here.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if (sessions.get_session_for_user(update.effective_chat.id, telegram_user_id) is not None
             or sessions.get_session_for_user(update.effective_chat.id, challenger_id) is not None):
         await update.effective_chat.send_message(
-            "One of you is already in a fight — the duel's off.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "One of you is already in a fight — the duel's off.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -4868,7 +4868,7 @@ async def _do_accept_duel(update: Update) -> None:
     )
     if session is None:
         await update.effective_chat.send_message(
-            "One of you is already in a fight — the duel's off.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "One of you is already in a fight — the duel's off.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     await _safe_send(
@@ -5008,14 +5008,14 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             await update.effective_chat.send_message(
                 "You're already in a fight! Say \"cancel\" if you think "
                 "it's stuck and need to force-end it.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
 
         requester = db.get_character(update.effective_user.id)
         if requester is None:
             await update.effective_chat.send_message(
-                "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+                "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
             )
             return
 
@@ -5039,12 +5039,12 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             if downed:
                 await update.effective_chat.send_message(
                     "Everyone here has fallen — say \"I rest\" to recover before continuing.",
-                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                    message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
                 )
             else:
                 await update.effective_chat.send_message(
                     "No one here is in a fit state to fight right now.",
-                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                    message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
                 )
             return
 
@@ -5059,7 +5059,7 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
         if template is None:
             await update.effective_chat.send_message(
                 f"No monster template found for '{monster_key}'.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
 
@@ -5074,7 +5074,7 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
         if requester.get("is_ai") and template.get("is_boss") and not any(not p.get("is_ai") for p in party):
             await update.effective_chat.send_message(
                 f"{requester['name']} sizes up {template['name']} and holds back — not a fight worth starting without the rest of the party here.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
 
@@ -5142,7 +5142,7 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             # start a second one for them at the same time.
             await update.effective_chat.send_message(
                 "Someone in your party is already in another fight right now.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
         # Bestiary discovery (2026-07-16, per Coffee): every real human
@@ -5296,31 +5296,31 @@ async def _do_start_echo_trial(update: Update, text: str) -> None:
     async with sessions.get_start_lock(chat_id):
         if sessions.get_session_for_user(chat_id, update.effective_user.id) is not None:
             await update.effective_chat.send_message(
-                "You're already in a fight!", message_thread_id=config.TOPIC_ADVENTURE_ID
+                "You're already in a fight!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
             )
             return
         requester = db.get_character(update.effective_user.id)
         if requester is None:
             await update.effective_chat.send_message(
-                "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+                "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
             )
             return
         if requester["current_location"] != "the_colosseum":
             await update.effective_chat.send_message(
-                "Echo trials only happen at The Colosseum.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                "Echo trials only happen at The Colosseum.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
             )
             return
         if requester.get("guild") != "silver_wardens":
             await update.effective_chat.send_message(
                 "Only Silver Wardens members can challenge an echo trial — join first.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
         known = requester.get("known_monsters") or []
         if not known:
             await update.effective_chat.send_message(
                 "You haven't fought anything real yet — an echo needs a real memory to mirror.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
         lowered = text.lower()
@@ -5330,7 +5330,7 @@ async def _do_start_echo_trial(update: Update, text: str) -> None:
         party = [p for p in all_characters if p["hp_current"] > 0]
         if not party:
             await update.effective_chat.send_message(
-                "No one here is in a fit state to fight right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                "No one here is in a fit state to fight right now.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
             )
             return
 
@@ -5340,7 +5340,7 @@ async def _do_start_echo_trial(update: Update, text: str) -> None:
         enemies = [e for i in range(count) if (e := _build_echo_enemy(monster_key, tier, i, count)) is not None]
         if not enemies:
             await update.effective_chat.send_message(
-                "That echo can't be conjured.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                "That echo can't be conjured.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
             )
             return
 
@@ -5351,7 +5351,7 @@ async def _do_start_echo_trial(update: Update, text: str) -> None:
         if session is None:
             await update.effective_chat.send_message(
                 "Someone in your party is already in another fight right now.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
         initiative_line = ", ".join(f"{p['name']} ({p['initiative']})" for p in session.participants)
@@ -5611,7 +5611,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
     async with _held_session(chat_id, update.effective_user.id) as session:
         if session is None:
             await update.effective_chat.send_message(
-                "No combat is active right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                "No combat is active right now.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
             )
             return
 
@@ -5622,14 +5622,14 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
             if session is None:
                 await update.effective_chat.send_message(
                     "Combat had stalled and just resolved itself — nothing active right now.",
-                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                    message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
                 )
                 return
         if session.current_participant_id() != user_id:
             current_name = session.current_participant()["name"]
             await update.effective_chat.send_message(
                 f"It's not your turn — it's **{current_name}**'s turn.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
 
@@ -5637,7 +5637,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
         if attacker["hp_current"] <= 0:
             await update.effective_chat.send_message(
                 "You're unconscious (0 HP) and can't act until healed.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
 
@@ -5645,7 +5645,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
         if not opposing:
             if not await _try_end_stale_combat(update, session):
                 await update.effective_chat.send_message(
-                    "No valid targets remain.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                    "No valid targets remain.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
                 )
             return
 
@@ -5852,14 +5852,14 @@ async def _do_recruit_npc(update: Update, npc_name: str) -> None:
     if npc is None:
         await update.effective_chat.send_message(
             "There's no one by that name here to recruit.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
     if not npc.get("recruitable"):
         await update.effective_chat.send_message(
             f"{npc['name']} isn't interested in joining your party.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -5887,7 +5887,7 @@ async def _do_recruit_npc(update: Update, npc_name: str) -> None:
                 and already_recruited.get("party_id") == requester["party_id"]):
             await update.effective_chat.send_message(
                 f"{npc['name']} is already traveling with you.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
         await _do_invite_to_party(update, npc["name"])
@@ -6059,7 +6059,7 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
     if lockable["id"] in _chat_scoped_set(_UNLOCKED, update.effective_chat.id):
         await update.effective_chat.send_message(
             f"{lockable['name'].capitalize()} is already unlocked.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -6237,7 +6237,7 @@ async def _do_skill_check(update: Update, ability: str, action_text: str, forced
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -6483,7 +6483,7 @@ async def _do_shove(update: Update, action_text: str, forced_roll: int | None = 
     async with _held_session(chat_id, update.effective_user.id) as session:
         if session is None:
             await update.effective_chat.send_message(
-                "No combat is active right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                "No combat is active right now.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
             )
             return
 
@@ -6494,14 +6494,14 @@ async def _do_shove(update: Update, action_text: str, forced_roll: int | None = 
             if session is None:
                 await update.effective_chat.send_message(
                     "Combat had stalled and just resolved itself — nothing active right now.",
-                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                    message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
                 )
                 return
         if session.current_participant_id() != user_id:
             current_name = session.current_participant()["name"]
             await update.effective_chat.send_message(
                 f"It's not your turn — it's **{current_name}**'s turn.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
 
@@ -6509,7 +6509,7 @@ async def _do_shove(update: Update, action_text: str, forced_roll: int | None = 
         if attacker["hp_current"] <= 0:
             await update.effective_chat.send_message(
                 "You're unconscious (0 HP) and can't act until healed.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
 
@@ -6517,7 +6517,7 @@ async def _do_shove(update: Update, action_text: str, forced_roll: int | None = 
         if not opposing:
             if not await _try_end_stale_combat(update, session):
                 await update.effective_chat.send_message(
-                    "No valid targets remain.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                    "No valid targets remain.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
                 )
             return
         target = _pick_target(action_text, opposing)
@@ -6577,7 +6577,7 @@ async def _resolve_flee_attempt(update, session: sessions.Session, action_text: 
     if fleeing["hp_current"] <= 0:
         await update.effective_chat.send_message(
             "You're unconscious (0 HP) and can't act until healed.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -6585,7 +6585,7 @@ async def _resolve_flee_attempt(update, session: sessions.Session, action_text: 
     if any(e.get("is_boss") for e in opposing):
         await update.effective_chat.send_message(
             "🚫 There's no fleeing this fight — whatever you're facing won't let you leave.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -6708,7 +6708,7 @@ async def _do_flee(update: Update, action_text: str, forced_roll: int | None = N
     async with _held_session(chat_id, update.effective_user.id) as session:
         if session is None:
             await update.effective_chat.send_message(
-                "No combat is active right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                "No combat is active right now.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
             )
             return
 
@@ -6719,14 +6719,14 @@ async def _do_flee(update: Update, action_text: str, forced_roll: int | None = N
             if session is None:
                 await update.effective_chat.send_message(
                     "Combat had stalled and just resolved itself — nothing active right now.",
-                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                    message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
                 )
                 return
         if session.current_participant_id() != user_id:
             current_name = session.current_participant()["name"]
             await update.effective_chat.send_message(
                 f"It's not your turn — it's **{current_name}**'s turn.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
 
@@ -6764,7 +6764,7 @@ async def _do_message_ai(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -6782,7 +6782,7 @@ async def _do_message_ai(update: Update, text: str) -> None:
     if target is None:
         await update.effective_chat.send_message(
             "Not sure who you're talking to — name a party member, or tag them with @username.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -6977,19 +6977,19 @@ async def _do_rest(update: Update) -> None:
     active_session = sessions.get_session_for_user(chat_id, telegram_user_id)
     if active_session is not None and telegram_user_id in active_session.turn_order:
         await update.effective_chat.send_message(
-            "You can't rest in the middle of combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You can't rest in the middle of combat.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
     character = db.get_character(telegram_user_id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if character.get("is_inactive"):
         await update.effective_chat.send_message(
-            "You're already resting.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You're already resting.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -6997,7 +6997,7 @@ async def _do_rest(update: Update) -> None:
     slots_full = character["spell_slots_current"] == character["spell_slots_max"]
     if hp_full and slots_full:
         await update.effective_chat.send_message(
-            "You're already at full health and spell slots.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You're already at full health and spell slots.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -7077,18 +7077,18 @@ async def _do_go_inactive(update: Update, duration_text: str) -> None:
     character = db.get_character(telegram_user_id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if character.get("is_inactive"):
         await update.effective_chat.send_message(
-            "You're already resting.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You're already resting.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if _in_active_combat(telegram_user_id, update.effective_chat.id):
         await update.effective_chat.send_message(
             "You can't rest in the middle of a fight — escape or finish the battle first.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -7376,7 +7376,7 @@ async def _do_talk_party(update: Update, action_text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -7388,7 +7388,7 @@ async def _do_talk_party(update: Update, action_text: str) -> None:
     if not present:
         await update.effective_chat.send_message(
             f"**{character['name']}** speaks up, but there's no one from the party here to answer.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -7397,7 +7397,7 @@ async def _do_talk_party(update: Update, action_text: str) -> None:
     if not npc_id or npc_id not in _NPCS:
         await update.effective_chat.send_message(
             f"**{companion['name']}** doesn't seem to have anything to say right now.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -7519,7 +7519,7 @@ async def _do_replay_chapter_intro(update: Update, arc_id: str | None = None) ->
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if arc_id is None:
@@ -7527,7 +7527,7 @@ async def _do_replay_chapter_intro(update: Update, arc_id: str | None = None) ->
         if current is None:
             await update.effective_chat.send_message(
                 "You've already completed every chapter — there's no current one to replay.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
         arc_id, arc = current
@@ -7535,7 +7535,7 @@ async def _do_replay_chapter_intro(update: Update, arc_id: str | None = None) ->
         arc = CAMPAIGN.get("story_arcs", {}).get(arc_id)
         if arc is None or not _arc_is_reached(character, arc_id, arc):
             await update.effective_chat.send_message(
-                "That chapter hasn't been reached yet.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                "That chapter hasn't been reached yet.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
             )
             return
     arc_quests = arc.get("quests", [])
@@ -7847,7 +7847,7 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
     character = db.get_character(telegram_user_id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -7909,11 +7909,11 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
         if all_quests:
             await update.effective_chat.send_message(
                 "Everything on the board here has already been taken on for today.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
         else:
             await update.effective_chat.send_message(
-                "There's nothing to take on here right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                "There's nothing to take on here right now.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
             )
         return
 
@@ -7940,12 +7940,12 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
             if named_taken_quest.get("completed_at"):
                 await update.effective_chat.send_message(
                     f"\"{named_taken_quest['title']}\" has already been completed.",
-                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                    message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
                 )
             else:
                 await update.effective_chat.send_message(
                     f"\"{named_taken_quest['title']}\" is already taken by someone else.",
-                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                    message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
                 )
             return
         if len(available) == 1:
@@ -7954,7 +7954,7 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
             titles = ", ".join(f'"{q["title"]}"' for q in available)
             await update.effective_chat.send_message(
                 f"There's more than one thing posted here — which one? {titles}",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
 
@@ -8006,7 +8006,7 @@ async def _do_resolve_quest_choice(update: Update, text: str) -> None:
     character = db.get_character(telegram_user_id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -8016,7 +8016,7 @@ async def _do_resolve_quest_choice(update: Update, text: str) -> None:
     ]
     if not ready:
         await update.effective_chat.send_message(
-            "You don't have a decision to make right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a decision to make right now.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -8028,7 +8028,7 @@ async def _do_resolve_quest_choice(update: Update, text: str) -> None:
         labels = "\n".join(f'  • "{c["label"]}"' for c in branch["choices"].values())
         await update.effective_chat.send_message(
             f"Which way do you want to go on **{quest['title']}**?\n{labels}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -8167,7 +8167,7 @@ async def _do_check_quests(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -8253,13 +8253,13 @@ async def _do_ask_clue(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
     if not character["active_quests"]:
         await update.effective_chat.send_message(
-            "You don't have any active quests to find clues for.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have any active quests to find clues for.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -8279,7 +8279,7 @@ async def _do_answer_puzzle(update: Update, text: str) -> None:
     character = db.get_character(telegram_user_id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -8297,7 +8297,7 @@ async def _do_answer_puzzle(update: Update, text: str) -> None:
             return
 
     await update.effective_chat.send_message(
-        "That's not it — think it over some more.", message_thread_id=config.TOPIC_ADVENTURE_ID
+        "That's not it — think it over some more.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
     )
 
 
@@ -8310,12 +8310,12 @@ async def _do_sell_market(update: Update, args: list[str]) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if len(args) < 3:
         await update.effective_chat.send_message(
-            "Usage: /sell_market <quantity> <price> <item name>", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "Usage: /sell_market <quantity> <price> <item name>", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     try:
@@ -8323,25 +8323,25 @@ async def _do_sell_market(update: Update, args: list[str]) -> None:
         price = int(args[1])
     except ValueError:
         await update.effective_chat.send_message(
-            "Quantity and price both need to be real numbers.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "Quantity and price both need to be real numbers.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if quantity <= 0 or price <= 0:
         await update.effective_chat.send_message(
-            "Quantity and price both need to be more than zero.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "Quantity and price both need to be more than zero.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     item_text = " ".join(args[2:])
     item_id = items_module.find_item_mentioned_in_text(item_text, candidate_ids=list(character["inventory"].keys()))
     if item_id is None:
         await update.effective_chat.send_message(
-            "You don't have that item to sell.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have that item to sell.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     held = character["inventory"].get(item_id, 0)
     if held < quantity:
         await update.effective_chat.send_message(
-            f"You only have {held}.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            f"You only have {held}.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     removed, _ = db.remove_item(update.effective_user.id, item_id, quantity)
@@ -8410,37 +8410,37 @@ async def _do_buy_market(update: Update, args: list[str]) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if not args:
         await update.effective_chat.send_message(
-            "Usage: /buy_market <listing #>", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "Usage: /buy_market <listing #>", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     try:
         listing_id = int(args[0].lstrip("#"))
     except ValueError:
         await update.effective_chat.send_message(
-            "That's not a real listing number.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "That's not a real listing number.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     listing = db.get_market_listing(listing_id)
     if listing is None:
         await update.effective_chat.send_message(
             "That listing doesn't exist — it may have already been bought.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     if listing["seller_id"] == update.effective_user.id:
         await update.effective_chat.send_message(
-            "You can't buy your own listing.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You can't buy your own listing.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if character["gold"] < listing["price"]:
         await update.effective_chat.send_message(
             f"You only have {character['gold']} gold — this costs {listing['price']}.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -8466,7 +8466,7 @@ async def _do_gamble(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -8474,7 +8474,7 @@ async def _do_gamble(update: Update, text: str) -> None:
     if not location or not location.get("safe"):
         await update.effective_chat.send_message(
             "There's nowhere to gamble here — try somewhere like a tavern.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -8487,12 +8487,12 @@ async def _do_gamble(update: Update, text: str) -> None:
     if not amount or amount <= 0:
         await update.effective_chat.send_message(
             "How much gold do you want to wager? Say an amount, e.g. 'I bet 20 gold'.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     if amount > character["gold"]:
         await update.effective_chat.send_message(
-            f"You only have {character['gold']} gold.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            f"You only have {character['gold']} gold.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -8541,7 +8541,7 @@ async def _do_dice_game(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     sides, game_name = CLASS_DICE_GAMES.get(character["char_class"], (20, "High Roll"))
@@ -8565,7 +8565,7 @@ async def _do_fortunes_wheel(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     result = roll(1, 100)[0]
@@ -8607,7 +8607,7 @@ async def _do_set_alignment(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     lowered = text.lower()
@@ -8622,7 +8622,7 @@ async def _do_set_alignment(update: Update, text: str) -> None:
     await update.effective_chat.send_message(
         "Which alignment? e.g. \"set my alignment to chaotic good\" — "
         "Lawful/Neutral/Chaotic x Good/Neutral/Evil, or \"true neutral\".",
-        message_thread_id=config.TOPIC_ADVENTURE_ID,
+        message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
     )
 
 
@@ -8681,7 +8681,7 @@ async def _do_show_skill_tree(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     points = character.get("skill_points", 0)
@@ -8738,7 +8738,7 @@ async def skilltree_menu_callback(update: Update, context: ContextTypes.DEFAULT_
         return
     if character.get("skill_points", 0) < upgrade["cost"]:
         await update.effective_chat.send_message(
-            "Not enough skill points yet.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "Not enough skill points yet.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     updates = {
@@ -8796,7 +8796,7 @@ async def _do_check_party(update: Update, text: str = "") -> None:
         members = db.get_party_members_by_id_including_inactive_slots(party_id)
         await update.effective_chat.send_message(
             f"🎗️ **Your party's sheets ({len(members)}/{db.PARTY_MAX_MEMBERS}):**",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         for member in members:
             await _safe_send(
@@ -9092,25 +9092,25 @@ async def _do_invite_to_party(update: Update, target_name: str) -> None:
     character = db.get_character(telegram_user_id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if not target_name:
         await update.effective_chat.send_message(
             "Invite who, exactly? Try \"invite [name] to my party\".",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
     target = _find_party_target_by_name(target_name)
     if target is None:
         await update.effective_chat.send_message(
-            f"No one named \"{target_name}\" is around to invite.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            f"No one named \"{target_name}\" is around to invite.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if target["telegram_user_id"] == telegram_user_id:
         await update.effective_chat.send_message(
-            "You can't invite yourself.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You can't invite yourself.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -9121,13 +9121,13 @@ async def _do_invite_to_party(update: Update, target_name: str) -> None:
     if db.get_party_size(party_id) >= db.PARTY_MAX_MEMBERS:
         await update.effective_chat.send_message(
             f"Your party is already full ({db.PARTY_MAX_MEMBERS} members).",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
     if target.get("party_id") == party_id:
         await update.effective_chat.send_message(
-            f"{target['name']} is already in your party.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            f"{target['name']} is already in your party.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -9568,7 +9568,7 @@ async def _do_check_sheet(update: Update, target_name: str | None = None) -> Non
         # target_name is echoed as given rather than reformatted.
         await update.effective_chat.send_message(
             f"Nobody named {target_name} is playing right now — can't show a sheet for them.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -9577,7 +9577,7 @@ async def _do_check_sheet(update: Update, target_name: str | None = None) -> Non
         await update.effective_chat.send_message(
             "You don't have a character yet — say something like "
             "'I want to create a character' to get started!",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     # Task #176: spell-cast buttons only make sense on the ASKER's own
@@ -9593,12 +9593,12 @@ async def _do_check_inventory(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if not character["inventory"]:
         await update.effective_chat.send_message(
-            "Your backpack is empty.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "Your backpack is empty.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     lines = []
@@ -9908,7 +9908,7 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -9919,7 +9919,7 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
         hint = f" Things worth gathering here: {', '.join(n['name'] for n in resource_nodes)}" if resource_nodes else ""
         await update.effective_chat.send_message(
             f"🌿 **{character['name']}** doesn't spot anything worth gathering here.{hint}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -9940,7 +9940,7 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
         await update.effective_chat.send_message(
             f"🌿 **{character['name']}** needs {' and '.join(missing_tools)} to do that — doesn't have "
             f"{'them' if len(missing_tools) > 1 else 'one'} yet. Check a shop.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -10082,7 +10082,7 @@ async def _do_check_professions(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     skill_uses = character.get("skill_uses") or {}
@@ -10106,7 +10106,7 @@ async def _do_craft(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -10144,7 +10144,7 @@ async def _do_craft(update: Update, text: str) -> None:
         await update.effective_chat.send_message(
             f"Not sure what you're trying to craft. Known recipes: {recipe_names}. "
             f"Advanced recipes: {adv_names}.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -10182,7 +10182,7 @@ async def _do_craft(update: Update, text: str) -> None:
         )
         await update.effective_chat.send_message(
             f"You don't have the materials for that. You need: {need}.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -10247,7 +10247,7 @@ async def _do_forge_item(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -10336,7 +10336,7 @@ async def _do_enchant_item(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -10407,23 +10407,23 @@ async def _do_make_campfire(update: Update) -> None:
     character = db.get_character(telegram_user_id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if sessions.get_session_for_user(update.effective_chat.id, telegram_user_id) is not None:
         await update.effective_chat.send_message(
-            "Not in the middle of a fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "Not in the middle of a fight.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if character["inventory"].get("wood", 0) < 1:
         await update.effective_chat.send_message(
-            "You don't have any wood to burn.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have any wood to burn.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if character["hp_current"] >= character["hp_max"]:
         await update.effective_chat.send_message(
             "Already at full health — no need for a fire right now.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -10455,19 +10455,19 @@ async def _do_second_wind(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if character["char_class"] != "Fighter":
         await update.effective_chat.send_message(
             "Second Wind is a real Fighter class feature — your class doesn't have it.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     if db.get_feature_uses(update.effective_user.id, "second_wind") >= 1:
         await update.effective_chat.send_message(
             "You've already used Second Wind since your last rest.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -10513,27 +10513,27 @@ async def _do_rage(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if character["char_class"] != "Barbarian":
         await update.effective_chat.send_message(
             "Rage is a real Barbarian class feature — your class doesn't have it.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     max_rages = RAGE_MAX_USES + (1 if _has_skill_upgrade(character, "endless_fury") else 0)
     if db.get_feature_uses(update.effective_user.id, "rage") >= max_rages:
         await update.effective_chat.send_message(
             f"You've already raged {max_rages} times since your last rest.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
     session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
     if session is None:
         await update.effective_chat.send_message(
-            "You can only enter a rage in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You can only enter a rage in combat.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     participant = next(
@@ -10541,12 +10541,12 @@ async def _do_rage(update: Update) -> None:
     )
     if participant is None:
         await update.effective_chat.send_message(
-            "You're not part of the current fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You're not part of the current fight.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if participant.get("raging"):
         await update.effective_chat.send_message(
-            "You're already raging.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You're already raging.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -10579,19 +10579,19 @@ async def _do_join_battle(update: Update) -> None:
     character = db.get_character(telegram_user_id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
     chat_id = update.effective_chat.id
     if sessions.get_session_for_user(chat_id, telegram_user_id) is not None:
         await update.effective_chat.send_message(
-            "You're already part of a fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You're already part of a fight.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if character["hp_current"] <= 0:
         await update.effective_chat.send_message(
-            "You can't join a fight at 0 HP.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You can't join a fight at 0 HP.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -10603,7 +10603,7 @@ async def _do_join_battle(update: Update) -> None:
     candidate_sessions = sessions.get_sessions_in_chat(chat_id)
     if not candidate_sessions:
         await update.effective_chat.send_message(
-            "There's no fight happening right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "There's no fight happening right now.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -10617,7 +10617,7 @@ async def _do_join_battle(update: Update) -> None:
     if matching_session is None:
         await update.effective_chat.send_message(
             "There's no fight happening at your current location — you'd need to go there first.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -10625,12 +10625,12 @@ async def _do_join_battle(update: Update) -> None:
         session = sessions.get_session_by_id(matching_session.session_id)
         if session is None:
             await update.effective_chat.send_message(
-                "That fight just ended.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                "That fight just ended.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
             )
             return
         if any(p["telegram_user_id"] == telegram_user_id for p in session.participants):
             await update.effective_chat.send_message(
-                "You're already part of this fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                "You're already part of this fight.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
             )
             return
 
@@ -10658,32 +10658,32 @@ async def _do_wild_shape(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if character["char_class"] != "Druid":
         await update.effective_chat.send_message(
             "Wild Shape is a real Druid class feature — your class doesn't have it.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     if character["level"] < 2:
         await update.effective_chat.send_message(
             "Wild Shape is a Druid feature starting at level 2 — you're not there yet.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     if db.get_feature_uses(update.effective_user.id, "wild_shape") >= WILD_SHAPE_MAX_USES:
         await update.effective_chat.send_message(
             f"You've already used Wild Shape {WILD_SHAPE_MAX_USES} times since your last rest.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
     session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
     if session is None:
         await update.effective_chat.send_message(
-            "You can only Wild Shape in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You can only Wild Shape in combat.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     participant = next(
@@ -10691,12 +10691,12 @@ async def _do_wild_shape(update: Update) -> None:
     )
     if participant is None:
         await update.effective_chat.send_message(
-            "You're not part of the current fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You're not part of the current fight.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if participant.get("wild_shaped"):
         await update.effective_chat.send_message(
-            "You're already Wild Shaped.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You're already Wild Shaped.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -10730,32 +10730,32 @@ async def _do_action_surge(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if character["char_class"] != "Fighter":
         await update.effective_chat.send_message(
             "Action Surge is a real Fighter class feature — your class doesn't have it.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     if character["level"] < 2:
         await update.effective_chat.send_message(
             "Action Surge is a Fighter feature starting at level 2 — you're not there yet.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     if db.get_feature_uses(update.effective_user.id, "action_surge") >= 1:
         await update.effective_chat.send_message(
             "You've already used Action Surge since your last rest.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
     session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
     if session is None:
         await update.effective_chat.send_message(
-            "You can only use Action Surge in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You can only use Action Surge in combat.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     participant = next(
@@ -10763,12 +10763,12 @@ async def _do_action_surge(update: Update) -> None:
     )
     if participant is None:
         await update.effective_chat.send_message(
-            "You're not part of the current fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You're not part of the current fight.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if participant.get("action_surge_active"):
         await update.effective_chat.send_message(
-            "Action Surge is already active for your next attack.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "Action Surge is already active for your next attack.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -10798,20 +10798,20 @@ async def _do_reckless_attack(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if character["char_class"] != "Barbarian":
         await update.effective_chat.send_message(
             "Reckless Attack is a real Barbarian class feature — your class doesn't have it.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
     session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
     if session is None:
         await update.effective_chat.send_message(
-            "You can only attack recklessly in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You can only attack recklessly in combat.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     participant = next(
@@ -10819,7 +10819,7 @@ async def _do_reckless_attack(update: Update) -> None:
     )
     if participant is None:
         await update.effective_chat.send_message(
-            "You're not part of the current fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You're not part of the current fight.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -10853,31 +10853,31 @@ async def _do_divine_smite(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if character["char_class"] != "Paladin":
         await update.effective_chat.send_message(
             "Divine Smite is a real Paladin class feature — your class doesn't have it.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     if character["level"] < 2:
         await update.effective_chat.send_message(
             "Divine Smite is a Paladin feature starting at level 2 — you're not there yet.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     if character["spell_slots_current"] < 1:
         await update.effective_chat.send_message(
-            "You don't have a spell slot left to smite with.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a spell slot left to smite with.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
     session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
     if session is None:
         await update.effective_chat.send_message(
-            "You can only smite in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You can only smite in combat.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     participant = next(
@@ -10885,12 +10885,12 @@ async def _do_divine_smite(update: Update) -> None:
     )
     if participant is None:
         await update.effective_chat.send_message(
-            "You're not part of the current fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You're not part of the current fight.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if participant.get("smite_active"):
         await update.effective_chat.send_message(
-            "Divine Smite is already primed for your next hit.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "Divine Smite is already primed for your next hit.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -10918,32 +10918,32 @@ async def _do_flurry_of_blows(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if character["char_class"] != "Monk":
         await update.effective_chat.send_message(
             "Flurry of Blows is a real Monk class feature — your class doesn't have it.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     if character["level"] < 2:
         await update.effective_chat.send_message(
             "Flurry of Blows is a Monk feature starting at level 2 — you're not there yet.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     max_ki = character["level"] + (2 if _has_skill_upgrade(character, "iron_will") else 0)
     if db.get_feature_uses(update.effective_user.id, "ki") >= max_ki:
         await update.effective_chat.send_message(
-            "You're out of ki points until your next rest.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You're out of ki points until your next rest.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
     session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
     if session is None:
         await update.effective_chat.send_message(
-            "You can only use Flurry of Blows in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You can only use Flurry of Blows in combat.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     participant = next(
@@ -10951,12 +10951,12 @@ async def _do_flurry_of_blows(update: Update) -> None:
     )
     if participant is None:
         await update.effective_chat.send_message(
-            "You're not part of the current fight.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You're not part of the current fight.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if participant.get("flurry_bonus_attacks"):
         await update.effective_chat.send_message(
-            "Flurry of Blows is already primed for your next attack.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "Flurry of Blows is already primed for your next attack.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -10985,7 +10985,8 @@ async def _do_toggle_manual_dice(update: Update, action_text: str, thread_id: in
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=thread_id or config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!",
+            message_thread_id=thread_id or topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -11043,19 +11044,19 @@ async def _do_breath_weapon(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if character.get("race") != "Dragonborn":
         await update.effective_chat.send_message(
             "Breath Weapon is a real Dragonborn racial trait — your race doesn't have it.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     if db.get_feature_uses(update.effective_user.id, "breath_weapon") >= 1:
         await update.effective_chat.send_message(
             "You've already used your Breath Weapon since your last rest.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -11063,7 +11064,7 @@ async def _do_breath_weapon(update: Update) -> None:
     async with _held_session(chat_id, update.effective_user.id) as session:
         if session is None:
             await update.effective_chat.send_message(
-                "You can only use your Breath Weapon in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                "You can only use your Breath Weapon in combat.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
             )
             return
         user_id = update.effective_user.id
@@ -11071,7 +11072,7 @@ async def _do_breath_weapon(update: Update) -> None:
             current_name = session.current_participant()["name"]
             await update.effective_chat.send_message(
                 f"It's not your turn — it's **{current_name}**'s turn.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
 
@@ -11079,7 +11080,7 @@ async def _do_breath_weapon(update: Update) -> None:
         if attacker["hp_current"] <= 0:
             await update.effective_chat.send_message(
                 "You're unconscious (0 HP) and can't act until healed.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
 
@@ -11087,7 +11088,7 @@ async def _do_breath_weapon(update: Update) -> None:
         if not opposing:
             if not await _try_end_stale_combat(update, session):
                 await update.effective_chat.send_message(
-                    "No valid targets remain.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                    "No valid targets remain.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
                 )
             return
         target = opposing[0]
@@ -11156,7 +11157,7 @@ async def _do_use_environment(update: Update) -> None:
     async with _held_session(chat_id, update.effective_user.id) as session:
         if session is None:
             await update.effective_chat.send_message(
-                "No combat is active right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                "No combat is active right now.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
             )
             return
 
@@ -11165,14 +11166,14 @@ async def _do_use_environment(update: Update) -> None:
             current_name = session.current_participant()["name"]
             await update.effective_chat.send_message(
                 f"It's not your turn — it's **{current_name}**'s turn.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
 
         character = db.get_character(user_id)
         if character is None:
             await update.effective_chat.send_message(
-                "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+                "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
             )
             return
 
@@ -11181,13 +11182,13 @@ async def _do_use_environment(update: Update) -> None:
         if environment is None:
             await update.effective_chat.send_message(
                 f"**{character['name']}** looks around, but there's nothing usable against an enemy here.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
         if session.environment_used:
             await update.effective_chat.send_message(
                 f"**{character['name']}** already used {environment['name']} — it's spent for this fight.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
 
@@ -11195,7 +11196,7 @@ async def _do_use_environment(update: Update) -> None:
         if not opposing:
             if not await _try_end_stale_combat(update, session):
                 await update.effective_chat.send_message(
-                    "No valid targets remain.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                    "No valid targets remain.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
                 )
             return
 
@@ -11265,39 +11266,39 @@ async def _do_channel_divinity(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if character["char_class"] != "Cleric":
         await update.effective_chat.send_message(
             "Channel Divinity is a real Cleric class feature — your class doesn't have it.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     if character["level"] < 2:
         await update.effective_chat.send_message(
             "Channel Divinity is a Cleric feature starting at level 2 — you're not there yet.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     if db.get_feature_uses(update.effective_user.id, "channel_divinity") >= 1:
         await update.effective_chat.send_message(
             "You've already used Channel Divinity since your last rest.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
     session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
     if session is None:
         await update.effective_chat.send_message(
-            "You can only Turn Undead in combat.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You can only Turn Undead in combat.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     opposing = session.living_on_side(session.opposing_side(update.effective_user.id))
     undead_targets = [p for p in opposing if p.get("monster_key") in UNDEAD_MONSTER_KEYS]
     if not undead_targets:
         await update.effective_chat.send_message(
-            "There's no undead here to turn.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "There's no undead here to turn.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -11332,13 +11333,13 @@ async def _do_bardic_inspiration(update: Update, target_text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if character["char_class"] != "Bard":
         await update.effective_chat.send_message(
             "Bardic Inspiration is a real Bard class feature — your class doesn't have it.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -11346,7 +11347,7 @@ async def _do_bardic_inspiration(update: Update, target_text: str) -> None:
     if db.get_feature_uses(update.effective_user.id, "bardic_inspiration") >= max_uses:
         await update.effective_chat.send_message(
             f"You're out of Bardic Inspiration until your next rest ({max_uses} use(s) per rest).",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -11383,19 +11384,19 @@ async def _do_lay_on_hands(update: Update, target_text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if character["char_class"] != "Paladin":
         await update.effective_chat.send_message(
             "Lay on Hands is a real Paladin class feature — your class doesn't have it.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     if db.get_feature_uses(update.effective_user.id, "lay_on_hands") >= 1:
         await update.effective_chat.send_message(
             "You've already used your Lay on Hands pool since your last rest.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -11438,19 +11439,19 @@ async def _do_arcane_recovery(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if character["char_class"] != "Wizard":
         await update.effective_chat.send_message(
             "Arcane Recovery is a real Wizard class feature — your class doesn't have it.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     if db.get_feature_uses(update.effective_user.id, "arcane_recovery") >= 1:
         await update.effective_chat.send_message(
             "You've already used Arcane Recovery since your last rest.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -11458,7 +11459,7 @@ async def _do_arcane_recovery(update: Update) -> None:
     if missing_slots <= 0:
         await update.effective_chat.send_message(
             "Your spell slots are already full — nothing to recover.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -11597,7 +11598,7 @@ async def _maybe_send_location_image(update: Update, location: dict, location_id
                 prompt, width=768, height=512, seed=_location_image_seed(location_id),
             ),
             caption=f"📍 {location['name']}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
     except Exception as e:
         logger.warning(f"[images] location image failed for {location_id!r}: {e!r}")
@@ -11661,7 +11662,7 @@ async def _maybe_send_item_image(update: Update, item_id: str, item_data: dict) 
                 prompt, width=512, height=512, seed=_deterministic_image_seed(f"item:{item_id}"),
             ),
             caption=f"🎒 {item_data['name']}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
     except Exception as e:
         logger.warning(f"[images] item image failed for {item_id!r}: {e!r}")
@@ -11688,7 +11689,7 @@ async def _maybe_send_monster_image(update: Update, monster_key: str, template: 
                 prompt, width=512, height=512, seed=_deterministic_image_seed(f"monster:{monster_key}"),
             ),
             caption=f"⚔️ {template['name']}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
     except Exception as e:
         logger.warning(f"[images] monster image failed for {monster_key!r}: {e!r}")
@@ -11721,7 +11722,7 @@ async def _maybe_send_spell_image(update: Update, spell: dict) -> None:
                 prompt, width=512, height=512, seed=_deterministic_image_seed(f"spell:{spell['name']}"),
             ),
             caption=f"✨ {spell['name']}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
     except Exception as e:
         logger.warning(f"[images] spell image failed for {spell['name']!r}: {e!r}")
@@ -11753,7 +11754,7 @@ async def _maybe_send_defeat_image(update: Update, entry: dict) -> None:
                 prompt, width=512, height=512, seed=_deterministic_image_seed(seed_key),
             ),
             caption=f"💀 {entry['name']} has fallen",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
     except Exception as e:
         logger.warning(f"[images] defeat image failed for {entry['name']!r}: {e!r}")
@@ -11779,7 +11780,7 @@ async def _maybe_send_ability_image(update: Update, ability_name: str, flavor: s
                 prompt, width=512, height=512, seed=_deterministic_image_seed(f"ability:{ability_name}"),
             ),
             caption=f"{emoji} {ability_name}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
     except Exception as e:
         logger.warning(f"[images] ability image failed for {ability_name!r}: {e!r}")
@@ -11804,7 +11805,7 @@ async def _maybe_send_interactable_image(update: Update, obj_data: dict) -> None
                 prompt, width=640, height=480, seed=_deterministic_image_seed(f"interactable:{obj_data['name']}"),
             ),
             caption=f"🔍 {obj_data['name']}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
     except Exception as e:
         logger.warning(f"[images] interactable image failed for {obj_data['name']!r}: {e!r}")
@@ -11826,7 +11827,7 @@ async def _maybe_send_npc_portrait(update: Update, npc_id: str, npc_data: dict) 
                 prompt, width=512, height=512, seed=_deterministic_image_seed(f"npc:{npc_id}"),
             ),
             caption=f"🎨 {npc_data.get('name', npc_id)}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
     except Exception as e:
         logger.warning(f"[images] NPC portrait failed for {npc_id!r}: {e!r}")
@@ -11872,14 +11873,14 @@ async def _do_look(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     location = cl.get_location(CAMPAIGN, character["current_location"])
     if location is None:
         await update.effective_chat.send_message(
             f"**{character['name']}** seems to be nowhere in particular. That's... concerning.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -12212,14 +12213,14 @@ async def _do_examine(update: Update, target_text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     location = cl.get_location(CAMPAIGN, character["current_location"])
     if location is None:
         await update.effective_chat.send_message(
             f"**{character['name']}** seems to be nowhere in particular. That's... concerning.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -12252,12 +12253,12 @@ async def _do_examine(update: Update, target_text: str) -> None:
             names = [i["name"] for i in interactables.values()]
             await update.effective_chat.send_message(
                 f"🔍 **{character['name']}**, examine what, exactly? Things worth a closer look here: {', '.join(names)}",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
         else:
             await update.effective_chat.send_message(
                 f"🔍 **{character['name']}** finds nothing here that catches the eye for a closer look.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
         return
 
@@ -12317,7 +12318,7 @@ async def _do_examine(update: Update, target_text: str) -> None:
         hint = f" Things worth a closer look here: {', '.join(names)}" if names else ""
         await update.effective_chat.send_message(
             f"🔍 **{character['name']}** doesn't spot anything like that here.{hint}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -12347,7 +12348,7 @@ async def _do_show_map(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -12355,7 +12356,7 @@ async def _do_show_map(update: Update) -> None:
     revealed = set(character["map_revealed_locations"]) - visited
     if not visited and not revealed:
         await update.effective_chat.send_message(
-            "You haven't explored anywhere yet.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You haven't explored anywhere yet.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -12409,13 +12410,13 @@ async def _do_show_visual_map(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     visited = character.get("visited_locations") or []
     if not visited:
         await update.effective_chat.send_message(
-            "You haven't explored anywhere yet.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You haven't explored anywhere yet.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     names = [cl.get_location(CAMPAIGN, loc_id)["name"] for loc_id in visited if cl.get_location(CAMPAIGN, loc_id)]
@@ -12428,13 +12429,13 @@ async def _do_show_visual_map(update: Update) -> None:
         await update.effective_chat.send_photo(
             photo=images_module.generate_image_url(prompt, width=768, height=768),
             caption="🗺️ Your explored world, so far.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
     except Exception as e:
         logger.warning(f"[images] visual map generation failed: {e!r}")
         await update.effective_chat.send_message(
             "Couldn't generate a map image right now — try again in a bit.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
 
 
@@ -12486,7 +12487,7 @@ async def _do_bestiary(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -12494,7 +12495,7 @@ async def _do_bestiary(update: Update) -> None:
     if not known:
         await update.effective_chat.send_message(
             "Your bestiary is empty — fight something to start learning about it.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -12980,7 +12981,7 @@ async def _do_leaderboard(update: Update) -> None:
     ranked = db.get_leaderboard(limit=10)
     if not ranked:
         await update.effective_chat.send_message(
-            "Nobody's made it onto the board yet.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "Nobody's made it onto the board yet.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -13010,7 +13011,7 @@ async def _do_move(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -13109,14 +13110,14 @@ async def _do_move(update: Update, text: str) -> None:
         # location). Worth its own clearer reply for human players too.
         if character["current_location"].replace("_", " ") in lowered or current["name"].lower() in lowered:
             await update.effective_chat.send_message(
-                f"You're already at {current['name']}.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                f"You're already at {current['name']}.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
             )
             return
         reachable_names = ", ".join(cl.get_location(CAMPAIGN, r)["name"] for r in reachable)
         await update.effective_chat.send_message(
             f"**{character['name']}** can't get there directly from {current['name']}. "
             f"From here you can reach: {reachable_names}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -13124,7 +13125,7 @@ async def _do_move(update: Update, text: str) -> None:
     if destination.get("requires_item") and destination["requires_item"] not in character["inventory"]:
         await update.effective_chat.send_message(
             f"Something stops **{character['name']}** from going any further — missing something needed first.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -13145,13 +13146,13 @@ async def _do_move(update: Update, text: str) -> None:
         name = lockable["name"] if lockable else "something locked"
         await update.effective_chat.send_message(
             f"The way to {destination['name']} is blocked by {name}. Try picking the lock first.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
     story_gate_message = _check_story_gate(character, current, destination_id)
     if story_gate_message:
-        await update.effective_chat.send_message(story_gate_message, message_thread_id=config.TOPIC_ADVENTURE_ID)
+        await update.effective_chat.send_message(story_gate_message, message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"))
         return
 
     destination_already_visited = destination_id in (character.get("visited_locations") or [])
@@ -13308,7 +13309,7 @@ async def _send_level_gate_message(update: Update, destination: dict) -> None:
         f"A deep, wordless dread stops you at the threshold of **{destination['name']}** — "
         f"whatever waits there, you can feel you're not ready for it yet "
         f"(recommended level {destination['min_level']}+).",
-        message_thread_id=config.TOPIC_ADVENTURE_ID,
+        message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
     )
 
 
@@ -13331,7 +13332,7 @@ async def _send_rebirth_gate_message(update: Update, destination: dict) -> None:
         f"Something about **{destination['name']}** refuses to fully resolve in front of you — "
         f"as if the world itself doesn't think you've lived enough of it yet "
         f"(requires {required} rebirth{'s' if required != 1 else ''}).",
-        message_thread_id=config.TOPIC_ADVENTURE_ID,
+        message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
     )
 
 
@@ -13348,7 +13349,7 @@ async def _do_fast_travel(update: Update, text: str) -> None:
     character = db.get_character(telegram_user_id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -13366,7 +13367,7 @@ async def _do_fast_travel(update: Update, text: str) -> None:
     if active_session is not None and telegram_user_id in active_session.turn_order:
         await update.effective_chat.send_message(
             "You can't fast-travel in the middle of combat.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -13383,13 +13384,13 @@ async def _do_fast_travel(update: Update, text: str) -> None:
         known_names = ", ".join(cl.get_location(CAMPAIGN, loc_id)["name"] for loc_id in visited)
         await update.effective_chat.send_message(
             f"You can only fast-travel somewhere you've actually been. Waypoints you've discovered: {known_names}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
     if destination_id == character["current_location"]:
         await update.effective_chat.send_message(
-            "You're already there.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You're already there.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -13397,7 +13398,7 @@ async def _do_fast_travel(update: Update, text: str) -> None:
     if destination.get("requires_item") and destination["requires_item"] not in character["inventory"]:
         await update.effective_chat.send_message(
             f"Something stops **{character['name']}** from going any further — missing something needed first.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -13420,13 +13421,13 @@ async def _do_fast_travel(update: Update, text: str) -> None:
         name = lockable["name"] if lockable else "something locked"
         await update.effective_chat.send_message(
             f"The way to {destination['name']} is blocked by {name}. Try picking the lock first.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
     story_gate_message = _check_story_gate(character, current, destination_id)
     if story_gate_message:
-        await update.effective_chat.send_message(story_gate_message, message_thread_id=config.TOPIC_ADVENTURE_ID)
+        await update.effective_chat.send_message(story_gate_message, message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"))
         return
 
     db.move_character(telegram_user_id, destination_id)
@@ -13487,14 +13488,14 @@ async def _do_find_merchant(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
     result = _nearest_shop_location(character["current_location"])
     if result is None:
         await update.effective_chat.send_message(
-            "There's no known merchant reachable from here.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "There's no known merchant reachable from here.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -13526,7 +13527,7 @@ async def _do_give_item(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -13538,7 +13539,7 @@ async def _do_give_item(update: Update, text: str) -> None:
     if recipient is None:
         await update.effective_chat.send_message(
             f"**{character['name']}**: give it to whom? Name someone real who's actually here with you.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -13546,7 +13547,7 @@ async def _do_give_item(update: Update, text: str) -> None:
     if not items_wanted:
         await update.effective_chat.send_message(
             f"Give {recipient['name']} what, exactly? Name something you're actually carrying.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -13589,7 +13590,7 @@ async def _do_use_item(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -13601,7 +13602,7 @@ async def _do_use_item(update: Update, text: str) -> None:
         current_name = session.current_participant()["name"]
         await update.effective_chat.send_message(
             f"It's not your turn — it's **{current_name}**'s turn.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -13616,7 +13617,7 @@ async def _do_use_item(update: Update, text: str) -> None:
     if item_id is None:
         await update.effective_chat.send_message(
             "Use what, exactly? Name a consumable you're actually carrying.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -13639,7 +13640,7 @@ async def _do_use_item(update: Update, text: str) -> None:
     removed, _ = db.remove_item(update.effective_user.id, item_id, 1)
     if not removed:
         await update.effective_chat.send_message(
-            f"You don't have a {item['name']} to use.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            f"You don't have a {item['name']} to use.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -13820,13 +13821,13 @@ async def _do_drink_water(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     location = cl.get_location(CAMPAIGN, character["current_location"])
     if location is None or not location.get("healing_water"):
         await update.effective_chat.send_message(
-            "There's no water to drink here.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "There's no water to drink here.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if db.get_feature_uses(update.effective_user.id, "healing_water") < 1:
@@ -13856,14 +13857,14 @@ async def _do_give_offering(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if character["current_location"] != "hollow_stump_shrine":
         await update.effective_chat.send_message(
             "There's no shrine to give an offering at here — the Hollow Stump Shrine, "
             "back in the Whispering Wood, is the place for that.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     # Real bug caught live (2026-07-24, Coffee: "she's currently dead"
@@ -13913,7 +13914,7 @@ async def _do_give_offering(update: Update, text: str) -> None:
         else:
             await update.effective_chat.send_message(
                 "Name a dead party member to pray for — there's no one to bring back right now.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
     await _apply_shrine_offering(update, character, target)
@@ -13930,14 +13931,14 @@ async def _do_shrine_offering_menu(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     if character["current_location"] != "hollow_stump_shrine":
         await update.effective_chat.send_message(
             "There's no shrine to give an offering at here — the Hollow Stump Shrine, "
             "back in the Whispering Wood, is the place for that.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     # Same real bug/fix as _do_give_offering above -- _get_party_members
@@ -13958,7 +13959,7 @@ async def _do_shrine_offering_menu(update: Update) -> None:
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(
                 f"💧 Bless the Party ({HOLLOW_STUMP_SHRINE_BLESSING_COST}g)", callback_data="shrine|bless",
             )]]),
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     rows = [
@@ -13986,7 +13987,7 @@ async def _do_shrine_offering_menu(update: Update) -> None:
     await update.effective_chat.send_message(
         f"Who do you want to pray for? The offering calls for {HOLLOW_STUMP_SHRINE_OFFERING_COST} gold.",
         reply_markup=InlineKeyboardMarkup(rows),
-        message_thread_id=config.TOPIC_ADVENTURE_ID,
+        message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
     )
 
 
@@ -14011,7 +14012,7 @@ async def shrine_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         if not dead_members:
             await update.effective_chat.send_message(
                 "No one left to bring back — everyone in your party is alive and well.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
         await _apply_shrine_offering_all(update, character, dead_members)
@@ -14022,7 +14023,7 @@ async def shrine_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if target is None or not target.get("is_dead"):
         await update.effective_chat.send_message(
             "That party member isn't waiting to be revived anymore.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     await _apply_shrine_offering(update, character, target)
@@ -14070,7 +14071,7 @@ async def _apply_shrine_offering(update: Update, character: dict, target: dict) 
         await update.effective_chat.send_message(
             f"The offering calls for {HOLLOW_STUMP_SHRINE_OFFERING_COST} gold — "
             f"you only have {character['gold']}.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     db.update_character(character["telegram_user_id"], gold=character["gold"] - HOLLOW_STUMP_SHRINE_OFFERING_COST)
@@ -14113,7 +14114,7 @@ async def _apply_shrine_offering_all(update: Update, character: dict, dead_membe
         await update.effective_chat.send_message(
             f"Reviving the whole party calls for {total_cost} gold — "
             f"you only have {character['gold']}.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     db.update_character(character["telegram_user_id"], gold=character["gold"] - total_cost)
@@ -14149,7 +14150,7 @@ async def _apply_shrine_blessing(update: Update, character: dict) -> None:
         await update.effective_chat.send_message(
             f"The blessing calls for {HOLLOW_STUMP_SHRINE_BLESSING_COST} gold — "
             f"you only have {character['gold']}.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     db.update_character(character["telegram_user_id"], gold=character["gold"] - HOLLOW_STUMP_SHRINE_BLESSING_COST)
@@ -14183,7 +14184,7 @@ async def _do_equip_item(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -14206,7 +14207,7 @@ async def _do_equip_item(update: Update, text: str) -> None:
         await update.effective_chat.send_message(
             f"Equip what, exactly? Name a weapon, armor, shield, ring, amulet, or wondrous item "
             f"{who} actually {'are' if who == 'you' else 'is'} carrying.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -14241,7 +14242,7 @@ async def _do_unequip_item(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -14250,7 +14251,7 @@ async def _do_unequip_item(update: Update, text: str) -> None:
     if not items_wanted:
         await update.effective_chat.send_message(
             "Take off what, exactly? Name a ring, amulet, or wondrous item you're actually wearing.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -14285,7 +14286,7 @@ async def _do_auto_equip_gear(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -14471,14 +14472,14 @@ async def _do_list_shop(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     location = cl.get_location(CAMPAIGN, character["current_location"])
     shop_id = location.get("shop") if location else None
     if not shop_id:
         await update.effective_chat.send_message(
-            "There's no shop here.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "There's no shop here.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     shop_data = cl.get_shop(CAMPAIGN, shop_id)
@@ -14537,14 +14538,14 @@ async def _do_buy(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     location = cl.get_location(CAMPAIGN, character["current_location"])
     shop_id = location.get("shop") if location else None
     if not shop_id:
         await update.effective_chat.send_message(
-            "There's no shop here.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "There's no shop here.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     shop_data = cl.get_shop(CAMPAIGN, shop_id)
@@ -14553,7 +14554,7 @@ async def _do_buy(update: Update, text: str) -> None:
     if not items_wanted:
         await update.effective_chat.send_message(
             "Not sure what item you mean — try naming it more directly.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -14579,7 +14580,7 @@ async def _do_sell(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -14587,7 +14588,7 @@ async def _do_sell(update: Update, text: str) -> None:
     items_wanted = [(item_id, qty) for item_id, qty in items_wanted if item_id in character["inventory"]]
     if not items_wanted:
         await update.effective_chat.send_message(
-            "You're not carrying anything by that name.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You're not carrying anything by that name.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -14618,7 +14619,7 @@ async def _do_steal(update: Update, text: str, forced_roll: int | None = None) -
     character = db.get_character(telegram_user_id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -14626,7 +14627,7 @@ async def _do_steal(update: Update, text: str, forced_roll: int | None = None) -
     shop_id = location.get("shop") if location else None
     if not shop_id:
         await update.effective_chat.send_message(
-            "There's nothing here worth stealing.", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "There's nothing here worth stealing.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -14637,7 +14638,7 @@ async def _do_steal(update: Update, text: str, forced_roll: int | None = None) -
     if owner_npc and db.is_banned_by_npc(telegram_user_id, owner_npc):
         await update.effective_chat.send_message(
             f"{owner_name} is already watching you like a hawk after last time — not worth the risk.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -14809,7 +14810,7 @@ async def _do_show_hybrid_menu(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     tier = hybrid_tier(character.get("rebirth_count", 0))
@@ -14856,7 +14857,7 @@ async def _do_show_menu(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     await _safe_send(
@@ -14949,7 +14950,7 @@ async def _do_show_story_so_far(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -15025,7 +15026,7 @@ async def _do_show_story_so_far(update: Update) -> None:
                     prompt, width=768, height=512, seed=_deterministic_image_seed(f"arc:{current[0]}"),
                 ),
                 caption=f"📖 {current_arc_pair[0]}",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
         except Exception as e:
             logger.warning(f"[images] story-so-far chapter image failed: {e!r}")
@@ -15060,7 +15061,7 @@ async def _do_show_equip_menu(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     keyboard = _equip_keyboard(character)
@@ -15112,7 +15113,7 @@ async def _do_show_level_menu(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     lines = [f"📈 **Level {character['level']}** — {character['xp']} XP"]
@@ -15285,7 +15286,7 @@ async def _spend_cast_resource(
         if db.get_feature_uses(update.effective_user.id, feature_key) >= gear_spell_uses:
             await update.effective_chat.send_message(
                 f"You've already used {spell['name']} from that item as many times as you can since your last rest.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return False
         db.use_feature(update.effective_user.id, feature_key)
@@ -15297,7 +15298,7 @@ async def _spend_cast_resource(
                 f"You have no spell slots remaining to cast {spell['name']} "
                 f"({character['spell_slots_current']}/{character['spell_slots_max']} left). "
                 f"Rest to recover them.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return False
     return True
@@ -15307,7 +15308,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -15370,7 +15371,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
         await update.effective_chat.send_message(
             f"You don't know a spell by that name, and don't have a scroll for it either. "
             f"Spells you know: {known}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -15391,7 +15392,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
         if caster and "silenced" in caster.get("conditions", []):
             await update.effective_chat.send_message(
                 f"🔇 **{character['name']}** can't get the words out — silenced!",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
         # Real 5E: a Druid can't cast spells while Wild Shaped (task #91
@@ -15402,7 +15403,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             await update.effective_chat.send_message(
                 f"🐾 **{character['name']}** is Wild Shaped — no hands, no spellcasting until "
                 f"they shift back.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
 
@@ -15420,7 +15421,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
         async with _held_session(chat_id, update.effective_user.id) as session:
             if session is None:
                 await update.effective_chat.send_message(
-                    "There's nothing to cast that at right now.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                    "There's nothing to cast that at right now.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
                 )
                 return
             if session.current_participant_id() != update.effective_user.id:
@@ -15429,27 +15430,27 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                 if session is None:
                     await update.effective_chat.send_message(
                         "Combat had stalled and just resolved itself — nothing active right now.",
-                        message_thread_id=config.TOPIC_ADVENTURE_ID,
+                        message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
                     )
                     return
             if session.current_participant_id() != update.effective_user.id:
                 current_name = session.current_participant()["name"]
                 await update.effective_chat.send_message(
                     f"It's not your turn — it's **{current_name}**'s turn.",
-                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                    message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
                 )
                 return
             if character["hp_current"] <= 0:
                 await update.effective_chat.send_message(
                     "You're unconscious (0 HP) and can't act until healed.",
-                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                    message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
                 )
                 return
             opposing = session.living_on_side(session.opposing_side(update.effective_user.id))
             if not opposing:
                 if not await _try_end_stale_combat(update, session):
                     await update.effective_chat.send_message(
-                        "No valid targets remain.", message_thread_id=config.TOPIC_ADVENTURE_ID
+                        "No valid targets remain.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
                     )
                 return
 
@@ -15552,7 +15553,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                     await _check_echo_trial_progress(update, session)
                 await update.effective_chat.send_message(
                     f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}",
-                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                    message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
                 )
                 for note in level_up_notes:
                     await _notify_main_topic(update, note)
@@ -15571,7 +15572,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             await update.effective_chat.send_message(
                 f"**{target_character['name']}** is dead, not just hurt — {spell['name']} won't bring them back. "
                 f"Revivify (or a Scroll of Revivify) is what's needed.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
         if not await _spend_cast_resource(update, character, spell, via_scroll, via_gear, gear_instance_id, gear_spell_uses):
@@ -15611,7 +15612,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
         if target_character is None or not target_character.get("is_dead"):
             await update.effective_chat.send_message(
                 "Name a dead party member to revive — there's no one to bring back right now.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
         if not await _spend_cast_resource(update, character, spell, via_scroll, via_gear, gear_instance_id, gear_spell_uses):
@@ -15633,7 +15634,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             if session is None:
                 await update.effective_chat.send_message(
                     "There's nothing to summon into right now — this only works in combat.",
-                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                    message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
                 )
                 return
             if not await _spend_cast_resource(update, character, spell, via_scroll, via_gear, gear_instance_id, gear_spell_uses):
@@ -15683,7 +15684,7 @@ async def _do_join_guild(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
 
@@ -15730,7 +15731,7 @@ async def _do_join_guild(update: Update, text: str) -> None:
         names = ", ".join(g["name"] for g in GUILDS.values())
         await update.effective_chat.send_message(
             f"Not sure which guild you mean. Guilds: {names}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -15738,7 +15739,7 @@ async def _do_join_guild(update: Update, text: str) -> None:
     if not eligible:
         await update.effective_chat.send_message(
             f"You can't join {GUILDS[guild_id]['name']} yet: {reason}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -15780,7 +15781,7 @@ async def _do_show_waypoints(update: Update) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
         await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=config.TOPIC_ADVENTURE_ID
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
     visited = character["visited_locations"]
@@ -15788,7 +15789,7 @@ async def _do_show_waypoints(update: Update) -> None:
     if not others:
         await update.effective_chat.send_message(
             "You haven't discovered anywhere else to fast-travel to yet.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     await _safe_send(
@@ -15843,7 +15844,7 @@ async def _do_list_characters(update: Update) -> None:
     if not roster:
         await update.effective_chat.send_message(
             "You don't have any characters yet — say 'I want to create a character' to get started!",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -15895,7 +15896,7 @@ async def roster_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if active_session is not None and telegram_user_id in active_session.turn_order:
         await update.effective_chat.send_message(
             "You can't switch characters in the middle of combat.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
     previously_active = db.get_character(telegram_user_id)
@@ -15998,7 +15999,7 @@ async def _do_switch_character(update: Update, text: str) -> None:
         names = ", ".join(c["name"] for c in roster) if roster else "none yet"
         await update.effective_chat.send_message(
             f"Couldn't find one of your characters by that name. Your characters: {names}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -16006,7 +16007,7 @@ async def _do_switch_character(update: Update, text: str) -> None:
     if active_session is not None and update.effective_user.id in active_session.turn_order:
         await update.effective_chat.send_message(
             "You can't switch characters in the middle of combat.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -16028,7 +16029,7 @@ async def _do_delete_character(update: Update, text: str) -> None:
         names = ", ".join(c["name"] for c in roster) if roster else "none yet"
         await update.effective_chat.send_message(
             f"Couldn't find one of your characters by that name. Your characters: {names}",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -16036,7 +16037,7 @@ async def _do_delete_character(update: Update, text: str) -> None:
     if active_session is not None and update.effective_user.id in active_session.turn_order:
         await update.effective_chat.send_message(
             "You can't delete a character in the middle of combat.",
-            message_thread_id=config.TOPIC_ADVENTURE_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -16048,7 +16049,7 @@ async def _do_delete_character(update: Update, text: str) -> None:
     )
     await update.effective_chat.send_message(
         f"🗑️ Deleted **{match['name']}**.{note}",
-        message_thread_id=config.TOPIC_ADVENTURE_ID,
+        message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
     )
 
 
@@ -16231,13 +16232,13 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
                             sessions.end_session(chat_id, live)
                 await update.effective_chat.send_message(
                     "Force-ended the stuck combat session(s) (owner override). You're free to act again.",
-                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                    message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
                 )
                 return
             await update.effective_chat.send_message(
                 "You can't just walk away from a fight — try to flee (a real risk, and impossible "
                 "against some enemies), or see it through.",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
 
@@ -16246,7 +16247,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         else:
             msg = "There's nothing in progress to cancel right now."
 
-        await update.effective_chat.send_message(msg, message_thread_id=config.TOPIC_ADVENTURE_ID)
+        await update.effective_chat.send_message(msg, message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"))
         return
 
     # If this user is mid-character-creation, that flow owns their next message.
@@ -16289,7 +16290,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         if manual_value is None:
             await update.effective_chat.send_message(
                 "I didn't catch a number 1-20 in that — what did you roll?",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
         del _PENDING_DICE_ROLLS[update.effective_user.id]
@@ -16339,7 +16340,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         return
 
     text = update.message.text.strip()
-    _LAST_TOPIC_MESSAGE[(update.effective_chat.id, config.TOPIC_ADVENTURE_ID)] = {
+    _LAST_TOPIC_MESSAGE[(update.effective_chat.id, update.effective_message.message_thread_id)] = {
         "kind": "adventure",
         "update": update,
         "context": context,
@@ -16465,7 +16466,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
 
             await update.effective_chat.send_message(
                 f"☀️ **{character['name']}** wakes and rejoins — welcome back!{heal_note}",
-                message_thread_id=config.TOPIC_ADVENTURE_ID,
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
 
     if len(intents) > 1:
@@ -16484,14 +16485,14 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         # update.effective_chat in place.
         chat_proxy = _BufferingChatProxy(update.effective_chat)
         proxied_update = _EffectiveChatOverride(update, chat_proxy)
-        async with _keep_typing(update.effective_chat, config.TOPIC_ADVENTURE_ID):
+        async with _keep_typing(update.effective_chat, update.effective_message.message_thread_id):
             for i in intents:
                 await _dispatch_intent(proxied_update, context, i, text)
         if chat_proxy.buffered:
             await _safe_send(update, "\n\n".join(chat_proxy.buffered))
         return
 
-    async with _keep_typing(update.effective_chat, config.TOPIC_ADVENTURE_ID):
+    async with _keep_typing(update.effective_chat, update.effective_message.message_thread_id):
         for i in intents:
             await _dispatch_intent(update, context, i, text)
 
@@ -17470,52 +17471,52 @@ async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     a DEV or admin can use those commands" -- deliberately not
     owner-only, so an existing trusted dev can onboard another one.
     """
-    if update.effective_message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
+    if not topics.is_development(update.effective_chat.id, update.effective_message.message_thread_id):
         return
     is_authorized = await _is_dev_topic_authorized(update, context)
     if is_authorized is None:
         await _safe_send(
             update,
             "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
-            thread_id=config.TOPIC_DEVELOPMENT_ID,
+            thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
         )
         return
     if not is_authorized:
-        await _safe_send(update, "Only a Dev-topic admin can grant this.", thread_id=config.TOPIC_DEVELOPMENT_ID)
+        await _safe_send(update, "Only a Dev-topic admin can grant this.", thread_id=topics.thread_id_for(update.effective_chat.id, "development"))
         return
 
     target_id, target_label = _resolve_telegram_target(update, context)
     if target_id is None:
-        await _safe_send(update, _NO_TARGET_MESSAGE, thread_id=config.TOPIC_DEVELOPMENT_ID)
+        await _safe_send(update, _NO_TARGET_MESSAGE, thread_id=topics.thread_id_for(update.effective_chat.id, "development"))
         return
     db.add_trusted_dev_id(target_id)
     await _safe_send(
-        update, f"✅ {target_label} now has Development-topic access.", thread_id=config.TOPIC_DEVELOPMENT_ID
+        update, f"✅ {target_label} now has Development-topic access.", thread_id=topics.thread_id_for(update.effective_chat.id, "development")
     )
 
 
 async def remove_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.effective_message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
+    if not topics.is_development(update.effective_chat.id, update.effective_message.message_thread_id):
         return
     is_authorized = await _is_dev_topic_authorized(update, context)
     if is_authorized is None:
         await _safe_send(
             update,
             "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
-            thread_id=config.TOPIC_DEVELOPMENT_ID,
+            thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
         )
         return
     if not is_authorized:
-        await _safe_send(update, "Only a Dev-topic admin can revoke this.", thread_id=config.TOPIC_DEVELOPMENT_ID)
+        await _safe_send(update, "Only a Dev-topic admin can revoke this.", thread_id=topics.thread_id_for(update.effective_chat.id, "development"))
         return
 
     target_id, target_label = _resolve_telegram_target(update, context)
     if target_id is None:
-        await _safe_send(update, _NO_TARGET_MESSAGE, thread_id=config.TOPIC_DEVELOPMENT_ID)
+        await _safe_send(update, _NO_TARGET_MESSAGE, thread_id=topics.thread_id_for(update.effective_chat.id, "development"))
         return
     db.remove_trusted_dev_id(target_id)
     await _safe_send(
-        update, f"✅ {target_label} no longer has Development-topic access.", thread_id=config.TOPIC_DEVELOPMENT_ID
+        update, f"✅ {target_label} no longer has Development-topic access.", thread_id=topics.thread_id_for(update.effective_chat.id, "development")
     )
 
 
@@ -17530,48 +17531,48 @@ async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     the Development topic so this can never be triggered from
     Adventure/Support by an ordinary player.
     """
-    if update.effective_message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
+    if not topics.is_development(update.effective_chat.id, update.effective_message.message_thread_id):
         return
     is_authorized = await _is_dev_topic_authorized(update, context)
     if is_authorized is None:
         await _safe_send(
             update,
             "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
-            thread_id=config.TOPIC_DEVELOPMENT_ID,
+            thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
         )
         return
     if not is_authorized:
-        await _safe_send(update, "Only a Dev-topic admin can ban a player.", thread_id=config.TOPIC_DEVELOPMENT_ID)
+        await _safe_send(update, "Only a Dev-topic admin can ban a player.", thread_id=topics.thread_id_for(update.effective_chat.id, "development"))
         return
 
     target_id, target_label = _resolve_telegram_target(update, context)
     if target_id is None:
-        await _safe_send(update, _NO_TARGET_MESSAGE, thread_id=config.TOPIC_DEVELOPMENT_ID)
+        await _safe_send(update, _NO_TARGET_MESSAGE, thread_id=topics.thread_id_for(update.effective_chat.id, "development"))
         return
     db.ban_user(target_id)
     await _safe_send(
-        update, f"🚫 {target_label} is now banned — they can no longer play.", thread_id=config.TOPIC_DEVELOPMENT_ID
+        update, f"🚫 {target_label} is now banned — they can no longer play.", thread_id=topics.thread_id_for(update.effective_chat.id, "development")
     )
 
 
 async def unban_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.effective_message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
+    if not topics.is_development(update.effective_chat.id, update.effective_message.message_thread_id):
         return
     is_authorized = await _is_dev_topic_authorized(update, context)
     if is_authorized is None:
         await _safe_send(
             update,
             "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
-            thread_id=config.TOPIC_DEVELOPMENT_ID,
+            thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
         )
         return
     if not is_authorized:
-        await _safe_send(update, "Only a Dev-topic admin can unban a player.", thread_id=config.TOPIC_DEVELOPMENT_ID)
+        await _safe_send(update, "Only a Dev-topic admin can unban a player.", thread_id=topics.thread_id_for(update.effective_chat.id, "development"))
         return
 
     target_id, target_label = _resolve_telegram_target(update, context)
     if target_id is None:
-        await _safe_send(update, _NO_TARGET_MESSAGE, thread_id=config.TOPIC_DEVELOPMENT_ID)
+        await _safe_send(update, _NO_TARGET_MESSAGE, thread_id=topics.thread_id_for(update.effective_chat.id, "development"))
         return
     db.unban_user(target_id)
     # Clean slate on reversal (2026-07-17) -- an auto-ban from 3
@@ -17581,7 +17582,7 @@ async def unban_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     db.clear_infractions(target_id)
     await _safe_send(
         update, f"✅ {target_label} is unbanned and their infraction record is cleared.",
-        thread_id=config.TOPIC_DEVELOPMENT_ID,
+        thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
     )
 
 
@@ -17614,7 +17615,7 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     report_text = (
         f"🚩 **Player report** from {reporter_label} (id {reporter.id}) in {topic_name}:\n{reason.strip()}"
     )
-    await _safe_send(update, report_text, thread_id=config.TOPIC_DEVELOPMENT_ID)
+    await _safe_send(update, report_text, thread_id=topics.thread_id_for(update.effective_chat.id, "development"))
     await update.effective_chat.send_message(
         "Thanks — this has been sent to the admins for review.",
         message_thread_id=update.effective_message.message_thread_id,
@@ -17670,7 +17671,7 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             update,
             f"🚫 **Auto-ban**: {target_label} reached 3 infractions and has been banned. "
             f"Reply with /unban (replying to one of their messages, or /unban {target_id}) to reverse this if it was a mistake.",
-            thread_id=config.TOPIC_DEVELOPMENT_ID,
+            thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
         )
 
 
@@ -17776,7 +17777,7 @@ async def redo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             party_members = _get_party_members() if character else None
             reply = await asyncio.to_thread(answer_support_question, stored_text, character, party_members)
             logger.info(f"[redo] support user={entry['user_id']} text={stored_text!r} reply={reply!r}")
-            await _safe_send(stored_update, reply, thread_id=config.TOPIC_SUPPORT_ID)
+            await _safe_send(stored_update, reply, thread_id=topics.thread_id_for(update.effective_chat.id, "support"))
             return
 
         # kind == "adventure": re-parse fresh (picks up any fix shipped
@@ -17819,13 +17820,13 @@ async def development_topic_handler(update: Update, context: ContextTypes.DEFAUL
     if is_owner is None:
         await update.effective_chat.send_message(
             "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
-            message_thread_id=config.TOPIC_DEVELOPMENT_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
         )
         return
     if not is_owner:
         await update.effective_chat.send_message(
             "The Development topic is restricted to the group owner.",
-            message_thread_id=config.TOPIC_DEVELOPMENT_ID,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
         )
         return
 
@@ -17842,12 +17843,12 @@ async def development_topic_handler(update: Update, context: ContextTypes.DEFAUL
         await _safe_send(
             update,
             "🔊 TTS narration is now **ON** — real narration will also be read aloud via @TextTSBot.",
-            thread_id=config.TOPIC_DEVELOPMENT_ID,
+            thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
         )
         return
     if any(w in lowered_question for w in ("turn off tts", "disable tts", "turn tts off")):
         db.set_setting("tts_enabled", "0")
-        await _safe_send(update, "🔇 TTS narration is now **OFF**.", thread_id=config.TOPIC_DEVELOPMENT_ID)
+        await _safe_send(update, "🔇 TTS narration is now **OFF**.", thread_id=topics.thread_id_for(update.effective_chat.id, "development"))
         return
 
     # TTS backend switch (2026-07-18) -- see ai/tts_piper.py. Independent
@@ -17860,12 +17861,12 @@ async def development_topic_handler(update: Update, context: ContextTypes.DEFAUL
         await _safe_send(
             update,
             "🔊 TTS backend switched to **Piper** (local, no @TextTSBot dependency).",
-            thread_id=config.TOPIC_DEVELOPMENT_ID,
+            thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
         )
         return
     if any(w in lowered_question for w in ("use textbot for tts", "switch tts to textbot", "textbot tts")):
         db.set_setting("tts_backend", "textbot")
-        await _safe_send(update, "🔊 TTS backend switched back to **@TextTSBot**.", thread_id=config.TOPIC_DEVELOPMENT_ID)
+        await _safe_send(update, "🔊 TTS backend switched back to **@TextTSBot**.", thread_id=topics.thread_id_for(update.effective_chat.id, "development"))
         return
 
     # Live narration-length override (2026-07-14) -- "set story mode to N"
@@ -17887,7 +17888,7 @@ async def development_topic_handler(update: Update, context: ContextTypes.DEFAUL
         db.set_setting("story_mode", str(level))
         await _safe_send(
             update, f"📖 Story mode set to **{level}** (0=shortest, 10=full novel-chapter prose).",
-            thread_id=config.TOPIC_DEVELOPMENT_ID,
+            thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
         )
         return
 
@@ -17896,19 +17897,19 @@ async def development_topic_handler(update: Update, context: ContextTypes.DEFAUL
     # wasn't pausable at all (Moltbook social).
     if any(w in lowered_question for w in ("turn on ai party", "enable ai party", "resume ai party")):
         db.set_setting("ai_party_enabled", "1")
-        await _safe_send(update, "🎲 Autonomous AI party is now **ON**.", thread_id=config.TOPIC_DEVELOPMENT_ID)
+        await _safe_send(update, "🎲 Autonomous AI party is now **ON**.", thread_id=topics.thread_id_for(update.effective_chat.id, "development"))
         return
     if any(w in lowered_question for w in ("turn off ai party", "disable ai party", "pause ai party")):
         db.set_setting("ai_party_enabled", "0")
-        await _safe_send(update, "⏸️ Autonomous AI party is now **OFF**.", thread_id=config.TOPIC_DEVELOPMENT_ID)
+        await _safe_send(update, "⏸️ Autonomous AI party is now **OFF**.", thread_id=topics.thread_id_for(update.effective_chat.id, "development"))
         return
     if any(w in lowered_question for w in ("turn on moltbook", "enable moltbook", "resume moltbook")):
         db.set_setting("moltbook_social_enabled", "1")
-        await _safe_send(update, "🦞 Moltbook autonomous social is now **ON**.", thread_id=config.TOPIC_DEVELOPMENT_ID)
+        await _safe_send(update, "🦞 Moltbook autonomous social is now **ON**.", thread_id=topics.thread_id_for(update.effective_chat.id, "development"))
         return
     if any(w in lowered_question for w in ("turn off moltbook", "disable moltbook", "pause moltbook")):
         db.set_setting("moltbook_social_enabled", "0")
-        await _safe_send(update, "⏸️ Moltbook autonomous social is now **OFF**.", thread_id=config.TOPIC_DEVELOPMENT_ID)
+        await _safe_send(update, "⏸️ Moltbook autonomous social is now **OFF**.", thread_id=topics.thread_id_for(update.effective_chat.id, "development"))
         return
 
     # Campaign-source link (2026-07-14): Coffee wants to send links to
@@ -17925,7 +17926,7 @@ async def development_topic_handler(update: Update, context: ContextTypes.DEFAUL
         await _safe_send(
             update,
             "🔗 Got it — logged in campaign_sources/INDEX.md for a future Claude Code session to pull from.",
-            thread_id=config.TOPIC_DEVELOPMENT_ID,
+            thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
         )
         return
 
@@ -17969,7 +17970,7 @@ async def development_topic_handler(update: Update, context: ContextTypes.DEFAUL
     history.append(f"Assistant: {reply}")
     del history[:-MAX_ASSISTANT_HISTORY]
 
-    await _safe_send(update, reply, thread_id=config.TOPIC_DEVELOPMENT_ID)
+    await _safe_send(update, reply, thread_id=topics.thread_id_for(update.effective_chat.id, "development"))
 
 
 DEV_SCREENSHOTS_DIR = "dev_screenshots"
@@ -17989,7 +17990,7 @@ async def dev_topic_photo_handler(update: Update, context: ContextTypes.DEFAULT_
     the image itself here — this bot has no image-understanding
     capability of its own; it just makes the file available.
     """
-    if update.effective_message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
+    if not topics.is_development(update.effective_chat.id, update.effective_message.message_thread_id):
         return
 
     is_owner = await _is_dev_topic_authorized(update, context)
@@ -17997,7 +17998,7 @@ async def dev_topic_photo_handler(update: Update, context: ContextTypes.DEFAULT_
         await _safe_send(
             update,
             "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
-            thread_id=config.TOPIC_DEVELOPMENT_ID,
+            thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
         )
         return
     if not is_owner:
@@ -18031,7 +18032,7 @@ async def dev_topic_photo_handler(update: Update, context: ContextTypes.DEFAULT_
                     update,
                     "Couldn't download that screenshot just now (a Telegram API call kept timing "
                     "out) — mind resending it?",
-                    thread_id=config.TOPIC_DEVELOPMENT_ID,
+                    thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
                 )
                 return
             logger.warning(f"[dev_topic_image] download failed, retrying: {e!r}")
@@ -18051,7 +18052,7 @@ async def dev_topic_photo_handler(update: Update, context: ContextTypes.DEFAULT_
         f"📸 Got it — saved for troubleshooting at `{filepath}`. I can't see it from here myself "
         f"(no image capability in this running process), but it's ready for a live Claude Code "
         f"session to look at directly.",
-        thread_id=config.TOPIC_DEVELOPMENT_ID,
+        thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
     )
 
 
@@ -18088,7 +18089,7 @@ async def dev_topic_document_handler(update: Update, context: ContextTypes.DEFAU
     synthetic name, a real document's name is meaningful) and every
     upload is recorded in campaign_sources/INDEX.md.
     """
-    if update.effective_message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
+    if not topics.is_development(update.effective_chat.id, update.effective_message.message_thread_id):
         return
 
     is_owner = await _is_dev_topic_authorized(update, context)
@@ -18096,7 +18097,7 @@ async def dev_topic_document_handler(update: Update, context: ContextTypes.DEFAU
         await _safe_send(
             update,
             "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
-            thread_id=config.TOPIC_DEVELOPMENT_ID,
+            thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
         )
         return
     if not is_owner:
@@ -18120,7 +18121,7 @@ async def dev_topic_document_handler(update: Update, context: ContextTypes.DEFAU
         update,
         f"📄 Got it — saved at `{filepath}` and logged in campaign_sources/INDEX.md for a future "
         f"Claude Code session to pull from when building the campaign-loading feature.",
-        thread_id=config.TOPIC_DEVELOPMENT_ID,
+        thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
     )
 
 
@@ -18148,7 +18149,7 @@ async def dev_topic_video_handler(update: Update, context: ContextTypes.DEFAULT_
     process still never "sees" the video itself, same disclosed
     limitation as the photo handler.
     """
-    if update.effective_message.message_thread_id != config.TOPIC_DEVELOPMENT_ID:
+    if not topics.is_development(update.effective_chat.id, update.effective_message.message_thread_id):
         return
 
     is_owner = await _is_dev_topic_authorized(update, context)
@@ -18156,7 +18157,7 @@ async def dev_topic_video_handler(update: Update, context: ContextTypes.DEFAULT_
         await _safe_send(
             update,
             "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
-            thread_id=config.TOPIC_DEVELOPMENT_ID,
+            thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
         )
         return
     if not is_owner:
@@ -18180,7 +18181,7 @@ async def dev_topic_video_handler(update: Update, context: ContextTypes.DEFAULT_
             update,
             f"🎥 Got the video — saved at `{video_path}`, but frame extraction failed ({extraction_error}). "
             f"The raw video file is still there for a live session to look at directly.",
-            thread_id=config.TOPIC_DEVELOPMENT_ID,
+            thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
         )
         return
 
@@ -18201,7 +18202,7 @@ async def dev_topic_video_handler(update: Update, context: ContextTypes.DEFAULT_
         f"was deleted afterward to save disk space). I can't see it from here myself (no video "
         f"capability in this running process) — same as screenshots, the frames are ready for a live "
         f"session to look at directly.",
-        thread_id=config.TOPIC_DEVELOPMENT_ID,
+        thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
     )
 
 
@@ -18276,7 +18277,7 @@ async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TY
     if await asyncio.to_thread(db.is_banned, update.effective_user.id):
         return
     question = update.message.text.strip()
-    _LAST_TOPIC_MESSAGE[(update.effective_chat.id, config.TOPIC_SUPPORT_ID)] = {
+    _LAST_TOPIC_MESSAGE[(update.effective_chat.id, update.effective_message.message_thread_id)] = {
         "kind": "support",
         "update": update,
         "context": context,
@@ -18292,7 +18293,7 @@ async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TY
     if any(w in lowered_question for w in ("own dice", "own physical dice", "dice on", "dice off",
                                              "let the game roll", "turn on manual dice", "turn off manual dice",
                                              "turn on physical dice", "turn off physical dice")):
-        await _do_toggle_manual_dice(update, question, thread_id=config.TOPIC_SUPPORT_ID)
+        await _do_toggle_manual_dice(update, question, thread_id=topics.thread_id_for(update.effective_chat.id, "support"))
         return
 
     character = db.get_character(update.effective_user.id)
@@ -18346,7 +18347,7 @@ async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TY
         if replies:
             reply = "\n\n".join(replies)
             logger.info(f"[support] user={update.effective_user.id} text={question!r} reply={reply!r}")
-            await _safe_send(update, reply, thread_id=config.TOPIC_SUPPORT_ID)
+            await _safe_send(update, reply, thread_id=topics.thread_id_for(update.effective_chat.id, "support"))
             return
 
     # Real "tell them, then do it" fix (2026-07-18, per Coffee, after a
@@ -18360,12 +18361,12 @@ async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TY
     await _safe_send(
         update,
         "⏳ Looking that up now — this can take a minute or two under load. I'll reply here as soon as I have it.",
-        thread_id=config.TOPIC_SUPPORT_ID,
+        thread_id=topics.thread_id_for(update.effective_chat.id, "support"),
     )
-    async with _keep_typing(update.effective_chat, config.TOPIC_SUPPORT_ID):
+    async with _keep_typing(update.effective_chat, update.effective_message.message_thread_id):
         reply = await asyncio.to_thread(answer_support_question, question, character, party_members)
     logger.info(f"[support] user={update.effective_user.id} text={question!r} reply={reply!r}")
-    await _safe_send(update, reply, thread_id=config.TOPIC_SUPPORT_ID)
+    await _safe_send(update, reply, thread_id=topics.thread_id_for(update.effective_chat.id, "support"))
 
 
 # Per-user message queues — see _run_in_user_order for why these exist.
@@ -19329,7 +19330,7 @@ async def _on_startup(application: Application) -> None:
                     chat_id,
                     f"🔄 The bot just restarted, but this fight wasn't lost — "
                     f"combat resumes right where it left off. It's **{current_name}**'s turn.",
-                    message_thread_id=config.TOPIC_ADVENTURE_ID,
+                    message_thread_id=topics.thread_id_for(chat_id, "adventure"),
                     parse_mode="Markdown",
                 )
                 # Real live incident (2026-07-19, Coffee: "the battle seemed
