@@ -73,10 +73,11 @@ class FakeMessage:
 
 
 class FakeSentMessage:
-    """Real enough to stand in for python-telegram-bot's Message where a test needs .delete()."""
-    def __init__(self, sink):
+    """Real enough to stand in for python-telegram-bot's Message where a test needs .delete() or .message_id."""
+    def __init__(self, sink, message_id=None):
         self.deleted = False
         self._sink = sink
+        self.message_id = message_id
 
     async def delete(self):
         self.deleted = True
@@ -91,17 +92,22 @@ class FakeChat:
         self.last_sent_message = None
         self.sent_photos = []
         self.sent_thread_ids = []
+        self._next_message_id = 1
 
     async def send_message(self, text, **kwargs):
         self._sink.append(text)
         self.sent_thread_ids.append(kwargs.get("message_thread_id"))
-        self.last_sent_message = FakeSentMessage(self._sink)
+        self.last_sent_message = FakeSentMessage(self._sink, message_id=self._next_message_id)
+        self._next_message_id += 1
         return self.last_sent_message
 
     async def send_photo(self, photo, caption=None, **kwargs):
-        self.sent_photos.append({"photo": photo, "caption": caption})
+        self.sent_photos.append({"photo": photo, "caption": caption, "reply_markup": kwargs.get("reply_markup")})
         self._sink.append(f"<photo:{caption}>")
-        return FakeSentMessage(self._sink)
+        sent = FakeSentMessage(self._sink, message_id=self._next_message_id)
+        self._next_message_id += 1
+        self.last_sent_message = sent
+        return sent
 
 
 class FakeUser:

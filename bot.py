@@ -316,6 +316,21 @@ _UNLOCKED: dict[int, set[str]] = {}
 # respawn to ambush the same world again.
 _DEFEATED_NPCS: dict[int, set[str]] = {}
 
+# Every real image this bot has sent recently, keyed by chat_id then by
+# the real Telegram message_id of the sent photo (2026-08-03, per
+# Coffee: "/reimage" -- if a player doesn't like a generated image,
+# replying to it should make a new one). Populated by the one shared
+# _send_generated_image choke point every _maybe_send_*_image helper
+# routes through; reimage_command looks a reply's message_id up here.
+# In-memory only, same "resets on restart" convention as _UNLOCKED/
+# _DEFEATED_NPCS above -- an image from before a restart just can't be
+# remade, which is an acceptable, honest limit (the player gets a clear
+# "I don't have a record of that" rather than a wrong regeneration).
+# Capped per chat (_REIMAGE_TRACKED_MESSAGES_PER_CHAT) so a
+# long-running process's memory doesn't grow unbounded.
+_SENT_IMAGE_PROMPTS: dict[int, dict[int, dict]] = {}
+_REIMAGE_TRACKED_MESSAGES_PER_CHAT = 200
+
 
 def _chat_scoped_set(store: dict[int, set], chat_id: int) -> set:
     """Lazily creates and returns this chat's own set within a chat_id-keyed store."""
@@ -1951,18 +1966,11 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
         # failing (Pollinations down, network hiccup) must never block
         # character creation itself, so this is caught and silently
         # skipped rather than surfaced as an error.
-        try:
-            portrait_prompt = (
-                f"fantasy RPG character portrait, {character['race']} {character['char_class']}, "
-                f"{character.get('description') or 'determined adventurer'}, digital painting"
-            )
-            await update.effective_chat.send_photo(
-                photo=images_module.generate_image_url(portrait_prompt),
-                caption=f"🎨 {character['name']}",
-                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-            )
-        except Exception as e:
-            logger.warning(f"[images] portrait generation failed, skipping: {e!r}")
+        portrait_prompt = (
+            f"fantasy RPG character portrait, {character['race']} {character['char_class']}, "
+            f"{character.get('description') or 'determined adventurer'}, digital painting"
+        )
+        await _send_generated_image(update, portrait_prompt, f"🎨 {character['name']}", log_key=character["name"])
 
         await _send_welcome_narration(update, character)
 
@@ -3345,7 +3353,30 @@ def _persist_generated_item(loot_item: dict) -> str:
     )
 
 
-def _grant_generated_loot(real_party_ids: list[int]) -> str:
+def _item_view_keyboard(item_id: str) -> InlineKeyboardMarkup:
+    """Single-button prompt attached to a loot announcement (2026-08-03, per Coffee: "put a button so we can click and view the item")."""
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🔍 View Item", callback_data=f"itemview|show|{item_id}")]])
+
+
+def _item_actions_keyboard(item_id: str) -> InlineKeyboardMarkup:
+    """
+    Real action buttons on the item-view screen itself (2026-08-03, per
+    Coffee: "when viewing the item put a button to sell, put market
+    equip, or give"). Each dispatches through itemview_callback to the
+    exact same underlying logic the equivalent free-text command
+    already uses (db.equip_item, shop.sell_item, db.create_market_
+    listing, db.add_item/remove_item) -- no separate action logic of
+    its own.
+    """
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚔️ Equip", callback_data=f"itemview|equip|{item_id}")],
+        [InlineKeyboardButton("💰 Sell", callback_data=f"itemview|sell|{item_id}")],
+        [InlineKeyboardButton("🏛️ List on Market", callback_data=f"itemview|market|{item_id}")],
+        [InlineKeyboardButton("🤝 Give", callback_data=f"itemview|give|{item_id}")],
+    ])
+
+
+async def _grant_generated_loot(update: Update, real_party_ids: list[int]) -> str:
     """
     Rolls a real, keepable, equippable magic item (2026-08-02 magic item
     system, Phase 1) via rules/item_generator.py, persists it as a real
@@ -3355,19 +3386,29 @@ def _grant_generated_loot(real_party_ids: list[int]) -> str:
     member. A single physical object isn't meaningfully split like
     gold/XP -- same reasoning already used for the map-loot drop right
     after this call site.
+
+    Also sends a real, separate follow-up message with a "View Item"
+    button (2026-08-03, per Coffee) -- can't be a button on the victory
+    summary text itself, since that's one shared message covering XP/
+    quest/loot/level-up all at once and Telegram buttons apply to a
+    whole message, not one line of it.
     """
     loot_item = generate_item(item_type=random.choice(["weapon", "armor"]))
     item_id = _persist_generated_item(loot_item)
     winner_id = random.choice(real_party_ids)
     db.add_item(winner_id, item_id, 1)
     winner_name = db.get_character(winner_id)["name"]
+    await _safe_send(
+        update, f"🔍 Tap below to inspect the {loot_item['name']} {winner_name} just found.",
+        reply_markup=_item_view_keyboard(item_id), speak=False,
+    )
     return (
         f"\n💰 **{winner_name}** loots a **{loot_item['name']}** from the fallen — "
         f"a real {loot_item['rarity'].replace('_', ' ')} find, added straight to their inventory!"
     )
 
 
-def _award_victory_xp(session: sessions.Session) -> tuple[str, list[str]]:
+async def _award_victory_xp(update: Update, session: sessions.Session) -> tuple[str, list[str]]:
     """
     Awards real XP (from the defeated monster's real 5E-sourced XP value)
     to every real (non-AI) party member still in the fight, split evenly
@@ -3573,7 +3614,7 @@ def _award_victory_xp(session: sessions.Session) -> tuple[str, list[str]]:
     # never be added to inventory or equipped, so it was converted
     # straight to gold instead; that's now Phase 1 of the plan at
     # /home/pandora/.claude/plans/sequential-tinkering-quokka.md).
-    loot_line = _grant_generated_loot(real_party_ids)
+    loot_line = await _grant_generated_loot(update, real_party_ids)
 
     # Task #141 (discoverable half): a rare chance for the fallen to
     # also be carrying a real map -- the same fixed items.py catalog
@@ -4287,7 +4328,7 @@ async def _try_end_stale_combat(update: Update, session: sessions.Session) -> bo
     if not session.is_combat_over():
         return False
     winner = _determine_winner(session)
-    xp_summary, level_up_notes = _award_victory_xp(session) if winner == "party" else ("", [])
+    xp_summary, level_up_notes = await _award_victory_xp(update, session) if winner == "party" else ("", [])
     if winner == "party":
         await _check_quest_completions_defeat_monster(update, session)
         await _mark_location_cleared_for_party(update, session)
@@ -4689,7 +4730,7 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
 
     if session.is_combat_over():
         winner = _determine_winner(session)
-        xp_summary, level_up_notes = _award_victory_xp(session) if winner == "party" else ("", [])
+        xp_summary, level_up_notes = await _award_victory_xp(update, session) if winner == "party" else ("", [])
         if winner == "party":
             await _check_quest_completions_defeat_monster(update, session)
             await _mark_location_cleared_for_party(update, session)
@@ -5776,7 +5817,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
 
             if session.is_combat_over():
                 winner = _determine_winner(session)
-                xp_summary, level_up_notes = _award_victory_xp(session) if winner == "party" else ("", [])
+                xp_summary, level_up_notes = await _award_victory_xp(update, session) if winner == "party" else ("", [])
                 if winner == "party":
                     await _check_quest_completions_defeat_monster(update, session)
                     await _mark_location_cleared_for_party(update, session)
@@ -11275,7 +11316,7 @@ async def _do_breath_weapon(update: Update) -> None:
 
         if session.is_combat_over():
             winner = _determine_winner(session)
-            xp_summary, level_up_notes = _award_victory_xp(session) if winner == "party" else ("", [])
+            xp_summary, level_up_notes = await _award_victory_xp(update, session) if winner == "party" else ("", [])
             if winner == "party":
                 await _check_quest_completions_defeat_monster(update, session)
                 await _mark_location_cleared_for_party(update, session)
@@ -11386,7 +11427,7 @@ async def _do_use_environment(update: Update) -> None:
 
         if session.is_combat_over():
             winner = _determine_winner(session)
-            xp_summary, level_up_notes = _award_victory_xp(session) if winner == "party" else ("", [])
+            xp_summary, level_up_notes = await _award_victory_xp(update, session) if winner == "party" else ("", [])
             if winner == "party":
                 await _check_quest_completions_defeat_monster(update, session)
                 await _mark_location_cleared_for_party(update, session)
@@ -11709,6 +11750,79 @@ async def look_action_menu_callback(update: Update, context: ContextTypes.DEFAUL
         await _do_shrine_offering_menu(update)
 
 
+async def _send_generated_image(
+    update: Update, prompt: str, caption: str, width: int = 512, height: int = 512,
+    seed: int | None = None, log_key: str = "", reply_markup: InlineKeyboardMarkup | None = None,
+) -> None:
+    """
+    Shared low-level image sender (2026-08-03, per Coffee: "/reimage" --
+    if a player doesn't like a generated image, replying to it should
+    make a new one). Every _maybe_send_*_image helper below routes
+    through this one function instead of calling send_photo directly,
+    so there's exactly one place that needs to remember which prompt
+    produced which sent message -- reimage_command looks a reply's real
+    message_id up in _SENT_IMAGE_PROMPTS (populated here) to know what
+    to regenerate, without any caller needing to know that tracking
+    exists. Capped per chat so a long-running process's memory doesn't
+    grow unbounded; oldest tracked entry is dropped once the cap is hit.
+    `reply_markup` (2026-08-03, per Coffee: item-view/equip/sell/market/
+    give buttons on a looted item) is optional so every existing caller
+    that doesn't need buttons is unaffected.
+    """
+    try:
+        sent = await update.effective_chat.send_photo(
+            photo=images_module.generate_image_url(prompt, width=width, height=height, seed=seed),
+            caption=caption,
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+            reply_markup=reply_markup,
+        )
+        message_id = getattr(sent, "message_id", None)
+        if message_id is not None:
+            tracked = _chat_scoped_dict(_SENT_IMAGE_PROMPTS, update.effective_chat.id)
+            tracked[message_id] = {"prompt": prompt, "width": width, "height": height, "caption": caption}
+            if len(tracked) > _REIMAGE_TRACKED_MESSAGES_PER_CHAT:
+                tracked.pop(min(tracked), None)
+    except Exception as e:
+        logger.warning(f"[images] image send failed for {log_key!r}: {e!r}")
+
+
+async def reimage_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /reimage (2026-08-03, per Coffee: "if i dont like an image generated
+    or used i can reply with /reimage and it will make a new image
+    based on its description"). Must be used as a real Telegram reply
+    to an image this bot generated -- looks the original prompt up in
+    _SENT_IMAGE_PROMPTS via the reply's own real message_id (populated
+    by _send_generated_image, the one shared choke point every image
+    this game sends -- locations, portraits, monsters, spells, items,
+    abilities, defeats, interactables, the visual map, story-arc art --
+    now routes through). Regenerates with the exact same prompt but a
+    genuinely random new seed instead of the usual deterministic one,
+    since the whole point is a different take on the same real subject,
+    not a different subject. The new image is tracked too, so /reimage
+    can be chained again on the result if it's still not liked.
+    """
+    reply = update.message.reply_to_message if update.message else None
+    if reply is None:
+        await update.effective_chat.send_message(
+            "Reply to a real image I sent with /reimage to get a new take on it.",
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        )
+        return
+    tracked = _chat_scoped_dict(_SENT_IMAGE_PROMPTS, update.effective_chat.id)
+    entry = tracked.get(reply.message_id)
+    if entry is None:
+        await update.effective_chat.send_message(
+            "I don't have a record of that image to remake — it may be too old, or wasn't one I generated.",
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        )
+        return
+    await _send_generated_image(
+        update, entry["prompt"], entry["caption"], width=entry["width"], height=entry["height"],
+        seed=random.randint(0, 2 ** 31 - 1), log_key="reimage",
+    )
+
+
 def _deterministic_image_seed(key: str) -> int:
     """
     Shared deterministic seed (2026-07-22, task "images for the whole
@@ -11746,16 +11860,10 @@ async def _maybe_send_location_image(update: Update, location: dict, location_id
         f"{location['description']}, fantasy tabletop RPG environment concept art, "
         "atmospheric lighting, detailed digital painting, no text or labels"
     )
-    try:
-        await update.effective_chat.send_photo(
-            photo=images_module.generate_image_url(
-                prompt, width=768, height=512, seed=_location_image_seed(location_id),
-            ),
-            caption=f"📍 {location['name']}",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
-    except Exception as e:
-        logger.warning(f"[images] location image failed for {location_id!r}: {e!r}")
+    await _send_generated_image(
+        update, prompt, f"📍 {location['name']}", width=768, height=512,
+        seed=_location_image_seed(location_id), log_key=location_id,
+    )
 
 
 def _npc_portrait_prompt(npc_data: dict) -> str:
@@ -11810,16 +11918,10 @@ async def _maybe_send_item_image(update: Update, item_id: str, item_data: dict) 
     convention as locations/NPCs/monsters.
     """
     prompt = _item_image_prompt(item_data)
-    try:
-        await update.effective_chat.send_photo(
-            photo=images_module.generate_image_url(
-                prompt, width=512, height=512, seed=_deterministic_image_seed(f"item:{item_id}"),
-            ),
-            caption=f"🎒 {item_data['name']}",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
-    except Exception as e:
-        logger.warning(f"[images] item image failed for {item_id!r}: {e!r}")
+    await _send_generated_image(
+        update, prompt, f"🎒 {item_data['name']}",
+        seed=_deterministic_image_seed(f"item:{item_id}"), log_key=item_id,
+    )
 
 
 def _monster_image_prompt(template: dict) -> str:
@@ -11837,16 +11939,10 @@ async def _maybe_send_monster_image(update: Update, monster_key: str, template: 
     monster always gets the same generated depiction.
     """
     prompt = _monster_image_prompt(template)
-    try:
-        await update.effective_chat.send_photo(
-            photo=images_module.generate_image_url(
-                prompt, width=512, height=512, seed=_deterministic_image_seed(f"monster:{monster_key}"),
-            ),
-            caption=f"⚔️ {template['name']}",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
-    except Exception as e:
-        logger.warning(f"[images] monster image failed for {monster_key!r}: {e!r}")
+    await _send_generated_image(
+        update, prompt, f"⚔️ {template['name']}",
+        seed=_deterministic_image_seed(f"monster:{monster_key}"), log_key=monster_key,
+    )
 
 
 def _spell_image_prompt(spell: dict) -> str:
@@ -11870,16 +11966,10 @@ async def _maybe_send_spell_image(update: Update, spell: dict) -> None:
     same spell always shows the same generated depiction.
     """
     prompt = _spell_image_prompt(spell)
-    try:
-        await update.effective_chat.send_photo(
-            photo=images_module.generate_image_url(
-                prompt, width=512, height=512, seed=_deterministic_image_seed(f"spell:{spell['name']}"),
-            ),
-            caption=f"✨ {spell['name']}",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
-    except Exception as e:
-        logger.warning(f"[images] spell image failed for {spell['name']!r}: {e!r}")
+    await _send_generated_image(
+        update, prompt, f"✨ {spell['name']}",
+        seed=_deterministic_image_seed(f"spell:{spell['name']}"), log_key=spell["name"],
+    )
 
 
 def _defeat_image_prompt(entry: dict) -> str:
@@ -11902,16 +11992,10 @@ async def _maybe_send_defeat_image(update: Update, entry: dict) -> None:
     """
     seed_key = f"defeat:{entry.get('monster_key') or entry['name']}"
     prompt = _defeat_image_prompt(entry)
-    try:
-        await update.effective_chat.send_photo(
-            photo=images_module.generate_image_url(
-                prompt, width=512, height=512, seed=_deterministic_image_seed(seed_key),
-            ),
-            caption=f"💀 {entry['name']} has fallen",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
-    except Exception as e:
-        logger.warning(f"[images] defeat image failed for {entry['name']!r}: {e!r}")
+    await _send_generated_image(
+        update, prompt, f"💀 {entry['name']} has fallen",
+        seed=_deterministic_image_seed(seed_key), log_key=entry["name"],
+    )
 
 
 def _ability_image_prompt(ability_name: str, flavor: str) -> str:
@@ -11928,16 +12012,10 @@ async def _maybe_send_ability_image(update: Update, ability_name: str, flavor: s
     same ability always shows the same generated depiction.
     """
     prompt = _ability_image_prompt(ability_name, flavor)
-    try:
-        await update.effective_chat.send_photo(
-            photo=images_module.generate_image_url(
-                prompt, width=512, height=512, seed=_deterministic_image_seed(f"ability:{ability_name}"),
-            ),
-            caption=f"{emoji} {ability_name}",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
-    except Exception as e:
-        logger.warning(f"[images] ability image failed for {ability_name!r}: {e!r}")
+    await _send_generated_image(
+        update, prompt, f"{emoji} {ability_name}",
+        seed=_deterministic_image_seed(f"ability:{ability_name}"), log_key=ability_name,
+    )
 
 
 def _interactable_image_prompt(obj_data: dict) -> str:
@@ -11953,16 +12031,10 @@ async def _maybe_send_interactable_image(update: Update, obj_data: dict) -> None
     deterministic-per-name convention as everything else here.
     """
     prompt = _interactable_image_prompt(obj_data)
-    try:
-        await update.effective_chat.send_photo(
-            photo=images_module.generate_image_url(
-                prompt, width=640, height=480, seed=_deterministic_image_seed(f"interactable:{obj_data['name']}"),
-            ),
-            caption=f"🔍 {obj_data['name']}",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
-    except Exception as e:
-        logger.warning(f"[images] interactable image failed for {obj_data['name']!r}: {e!r}")
+    await _send_generated_image(
+        update, prompt, f"🔍 {obj_data['name']}", width=640, height=480,
+        seed=_deterministic_image_seed(f"interactable:{obj_data['name']}"), log_key=obj_data["name"],
+    )
 
 
 async def _maybe_send_npc_portrait(update: Update, npc_id: str, npc_data: dict) -> None:
@@ -11975,16 +12047,10 @@ async def _maybe_send_npc_portrait(update: Update, npc_id: str, npc_data: dict) 
     (_deterministic_image_seed), never a different random depiction.
     """
     prompt = _npc_portrait_prompt(npc_data)
-    try:
-        await update.effective_chat.send_photo(
-            photo=images_module.generate_image_url(
-                prompt, width=512, height=512, seed=_deterministic_image_seed(f"npc:{npc_id}"),
-            ),
-            caption=f"🎨 {npc_data.get('name', npc_id)}",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
-    except Exception as e:
-        logger.warning(f"[images] NPC portrait failed for {npc_id!r}: {e!r}")
+    await _send_generated_image(
+        update, prompt, f"🎨 {npc_data.get('name', npc_id)}",
+        seed=_deterministic_image_seed(f"npc:{npc_id}"), log_key=npc_id,
+    )
 
 
 def _monster_danger_line(monster_keys: list[str]) -> str:
@@ -12410,9 +12476,114 @@ def _format_item_stats_line(item: dict) -> str | None:
         parts.append(f"+{item['regen_bonus']} HP regen")
     if item.get("equip_requirement"):
         parts.append("requires real progression to equip")
+    # Real worth, shown for equipables specifically (2026-08-03, per
+    # Coffee: "in the description of the items can u show what it is
+    # worth? do this for equipables") -- consumables/scrolls/materials
+    # already show their price at the point of buying/selling them, so
+    # this is scoped to the gear types where "what's this actually
+    # worth" is the real open question (an equipped item's price is
+    # otherwise invisible until you try to sell it).
+    if item_type in ("weapon", "armor", "shield", "ring", "amulet", "wondrous") and item.get("price"):
+        parts.append(f"worth {item['price']}g")
     if not parts:
         return None
     return "; ".join(parts)
+
+
+async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Handles every tap on the item-view system (2026-08-03, per Coffee:
+    "put a button so we can click and view the item" / "put a button to
+    sell, put market equip, or give"). "show" (the loot announcement's
+    own button) is read-only -- anyone in the party can view an item's
+    real stats+image regardless of who actually looted it. Every other
+    action (equip/sell/market/give) operates on the TAPPING player's own
+    inventory, same as the equivalent free-text command already does --
+    a party member tapping "Equip" on gear they don't personally own
+    just gets the same honest "you don't have that" refusal typing
+    "equip X" would already give them, no special-casing needed.
+    """
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    item_id = parts[2] if len(parts) > 2 else ""
+    await _safe_answer(query)
+
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        return
+    item = items_module.get_item(item_id)
+    if item is None:
+        await _safe_send(update, "That item no longer exists.")
+        return
+
+    if action == "show":
+        stats_line = _format_item_stats_line(item)
+        caption = f"🎒 {item['name']}" + (f"\n📊 {stats_line}" if stats_line else "")
+        prompt = _item_image_prompt(item)
+        await _send_generated_image(
+            update, prompt, caption, seed=_deterministic_image_seed(f"item:{item_id}"), log_key=item_id,
+            reply_markup=_item_actions_keyboard(item_id),
+        )
+        return
+
+    owns_it = character.get("inventory", {}).get(item_id, 0) > 0
+    if action == "equip":
+        if not owns_it:
+            await _safe_send(update, f"You don't have the {item['name']} to equip.")
+            return
+        _ok, msg, _updated = db.equip_item(update.effective_user.id, item_id)
+        await _safe_send(update, msg)
+    elif action == "sell":
+        if not owns_it:
+            await _safe_send(update, f"You don't have the {item['name']} to sell.")
+            return
+        _ok, msg = shop_module.sell_item(update.effective_user.id, item_id, 1)
+        await _safe_send(update, msg)
+    elif action == "market":
+        if not owns_it:
+            await _safe_send(update, f"You don't have the {item['name']} to list.")
+            return
+        price = max(int(item.get("price", 0) * 1.5), 1)
+        removed, _updated = db.remove_item(update.effective_user.id, item_id, 1)
+        if not removed:
+            await _safe_send(update, "Something went wrong listing that item.")
+            return
+        listing_id = db.create_market_listing(update.effective_user.id, character["name"], item_id, 1, price)
+        message = f"🏷️ **{character['name']}** lists **{item['name']}** for **{price} gold** (listing #{listing_id})."
+        stats_line = _format_item_stats_line(item)
+        if stats_line:
+            message += f"\n\n📊 **Stats:** {stats_line}"
+        await _safe_send(update, message)
+    elif action == "give":
+        if not owns_it:
+            await _safe_send(update, f"You don't have the {item['name']} to give.")
+            return
+        candidates = [
+            p for p in _get_combat_eligible_party_members(character["current_location"])
+            if p["telegram_user_id"] != character["telegram_user_id"]
+        ]
+        if not candidates:
+            await _safe_send(update, "There's nobody else here to give it to.")
+            return
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(p["name"], callback_data=f"itemview|giveto|{item_id}|{p['telegram_user_id']}")]
+            for p in candidates
+        ])
+        await _safe_send(update, f"Give the {item['name']} to whom?", reply_markup=keyboard)
+    elif action == "giveto":
+        if not owns_it:
+            await _safe_send(update, f"You don't have the {item['name']} to give anymore.")
+            return
+        recipient_id = int(parts[3])
+        removed, _updated = db.remove_item(update.effective_user.id, item_id, 1)
+        if not removed:
+            await _safe_send(update, "Something went wrong giving that item.")
+            return
+        db.add_item(recipient_id, item_id, 1)
+        recipient = db.get_character(recipient_id)
+        recipient_name = recipient["name"] if recipient else "them"
+        await _safe_send(update, f"🤝 **{character['name']}** gives the {item['name']} to **{recipient_name}**.")
 
 
 async def _do_examine(update: Update, target_text: str) -> None:
@@ -12646,18 +12817,7 @@ async def _do_show_visual_map(update: Update) -> None:
         f"illustration style, depicting these named regions: {', '.join(names)}, "
         "no readable text or labels, cartography art"
     )
-    try:
-        await update.effective_chat.send_photo(
-            photo=images_module.generate_image_url(prompt, width=768, height=768),
-            caption="🗺️ Your explored world, so far.",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
-    except Exception as e:
-        logger.warning(f"[images] visual map generation failed: {e!r}")
-        await update.effective_chat.send_message(
-            "Couldn't generate a map image right now — try again in a bit.",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
+    await _send_generated_image(update, prompt, "🗺️ Your explored world, so far.", width=768, height=768, log_key="visual_map")
 
 
 def _format_bestiary_entry(monster_key: str, template: dict) -> str:
@@ -15241,16 +15401,10 @@ async def _do_show_story_so_far(update: Update) -> None:
             f"{current_arc_pair[1]}, fantasy tabletop RPG book illustration, "
             "epic, atmospheric, painterly, no text or labels"
         )
-        try:
-            await update.effective_chat.send_photo(
-                photo=images_module.generate_image_url(
-                    prompt, width=768, height=512, seed=_deterministic_image_seed(f"arc:{current[0]}"),
-                ),
-                caption=f"📖 {current_arc_pair[0]}",
-                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-            )
-        except Exception as e:
-            logger.warning(f"[images] story-so-far chapter image failed: {e!r}")
+        await _send_generated_image(
+            update, prompt, f"📖 {current_arc_pair[0]}", width=768, height=512,
+            seed=_deterministic_image_seed(f"arc:{current[0]}"), log_key=current[0],
+        )
 
     await _safe_send(
         update, f"📖 **Story So Far**\n\n{recap}{next_step_block}\n\n" + "\n".join(chapter_lines),
@@ -15765,7 +15919,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
 
             if session.is_combat_over():
                 winner = _determine_winner(session)
-                xp_summary, level_up_notes = _award_victory_xp(session) if winner == "party" else ("", [])
+                xp_summary, level_up_notes = await _award_victory_xp(update, session) if winner == "party" else ("", [])
                 if winner == "party":
                     await _check_quest_completions_defeat_monster(update, session)
                     await _mark_location_cleared_for_party(update, session)
@@ -19663,6 +19817,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("remove_admin", remove_admin_command))
     application.add_handler(CommandHandler("report", report_command))
     application.add_handler(CommandHandler("set_topic", set_topic_command))
+    application.add_handler(CommandHandler("reimage", reimage_command))
     application.add_handler(CommandHandler("rest", rest_command))
     application.add_handler(CommandHandler("sell", sell_command))
     application.add_handler(CommandHandler("sheet", sheet_command))
@@ -19694,6 +19849,7 @@ def build_application() -> Application:
     application.add_handler(MessageHandler(filters.Document.ALL, dev_topic_document_handler))
     application.add_handler(MessageHandler(filters.VIDEO, dev_topic_video_handler))
     application.add_handler(CallbackQueryHandler(battle_menu_callback, pattern=r"^bm\|"))
+    application.add_handler(CallbackQueryHandler(itemview_callback, pattern=r"^itemview\|"))
     # Task #176: out-of-combat browsing buttons (shop/spells/quest board),
     # own callback-data namespaces so none of these can ever collide with
     # the combat battle menu above or each other.

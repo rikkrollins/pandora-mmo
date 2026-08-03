@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.82] — /reimage, a real item-view system, and richer generated-item art
+
+**New: `/reimage`.** Reply to any image this bot has ever generated
+(locations, portraits, monsters, spells, items, abilities, defeats,
+interactables, the visual map, story chapter art — literally every
+generated image in the game, all now routed through one shared sender)
+with `/reimage` to get a fresh new take on the exact same subject,
+using a genuinely random seed instead of the usual one that keeps a
+given place/item/NPC looking the same every time. If the reply isn't a
+real recent image, you get an honest "I don't have a record of that"
+rather than a silent failure or the wrong picture.
+
+**New: a real item-view system.** Looting a real generated item in
+combat now comes with a "🔍 View Item" button. Tapping it shows the
+item's real image, its full computed stats, and four action buttons —
+Equip, Sell, List on Market, and Give — each doing the exact same real
+thing its equivalent free-text command already does (no separate logic
+of its own). Give shows a picker of who's actually present to hand it
+to; Market lists it at a sensible markup over its own value.
+
+**Improved: what an item's description actually tells you.** Every
+equipable now shows its real worth in gold alongside its other stats
+(rarity, bonuses, elemental effects, everything). Generated items also
+get a real, affix-grounded description now instead of the same generic
+sentence for every item of a given tier — a fire dagger's own
+description actually mentions fire, which also means its generated art
+now visually reflects what the item actually does instead of every
+same-tier item rendering identically.
+
 ## [1.27.81] — In-battle inactivity timeout, and real fixes for magic items in the market/shop
 
 **New: in-battle inactivity timeout**, per Coffee's own spec given live

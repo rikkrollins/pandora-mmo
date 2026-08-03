@@ -1699,7 +1699,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         before_absent = db.get_character(absent_id)["xp"]
         before_fighter = db.get_character(fighter_id)["xp"]
-        bot._award_victory_xp(session)
+        await bot._award_victory_xp(FakeUpdate(fighter_id, "", []), session)
         after_absent = db.get_character(absent_id)["xp"]
         after_fighter = db.get_character(fighter_id)["xp"]
 
@@ -1732,7 +1732,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # Should not raise even if an AI companion shares the party, and
         # the companion (is_ai) must never receive the absent-member bonus.
         companion_xp_before = companion["xp"]
-        bot._award_victory_xp(session)
+        await bot._award_victory_xp(FakeUpdate(fighter_id, "", []), session)
         companion_xp_after = db.get_character(companion["telegram_user_id"])["xp"]
         self.assertEqual(companion_xp_after, companion_xp_before)
         sessions.end_session(-999)
@@ -1826,7 +1826,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session = sessions.start_session(-999, [leader, enemy], {leader_id: "party", -2_600_301: "enemy"})
         session.turn_order = [leader_id, -2_600_301]
 
-        summary, _level_up_notes = bot._award_victory_xp(session)
+        summary, _level_up_notes = await bot._award_victory_xp(FakeUpdate(leader_id, "", []), session)
         self.assertIn("loots a", summary)
         self.assertIn("real", summary)
 
@@ -2602,6 +2602,122 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Stats:", "\n".join(sink3))
         self.assertTrue(len(update3.effective_chat.sent_photos) > 0)
 
+    async def test_reimage_command_regenerates_a_real_tracked_image(self):
+        """
+        Real live request (2026-08-03, Coffee, Development topic): "if i
+        dont like an image generated or used i can reply with /reimage
+        and it will make a new image based on its description." Every
+        image-sending helper now routes through the one shared
+        _send_generated_image choke point, which tracks (chat_id,
+        message_id) -> prompt in _SENT_IMAGE_PROMPTS; reimage_command
+        looks a reply's real message_id up there and regenerates with
+        the same prompt but a fresh random seed.
+        """
+        from rules.item_generator import generate_weapon
+        user_id = 995001
+        make_basic_character(user_id, "ReimageTester", current_location="crossroads_tavern")
+        weapon = generate_weapon(tier="rare")
+        affixes = weapon.pop("affixes", [])
+        item_id = db.create_item_instance(
+            item_type=weapon["type"], name=weapon["name"], rarity=weapon["rarity"],
+            price=weapon["price"], base_stats=weapon, affixes=affixes,
+        )
+        materialized = db.materialize_item_instance(item_id)
+        sink = []
+        update = FakeUpdate(user_id, "check my sheet", sink)
+        await bot._maybe_send_item_image(update, item_id, materialized)
+        first_photo_msg = update.effective_chat.last_sent_message
+        self.assertIsNotNone(first_photo_msg.message_id)
+
+        sink_no_reply = []
+        no_reply_update = FakeUpdate(user_id, "/reimage", sink_no_reply)
+        await bot.reimage_command(no_reply_update, DummyContext())
+        self.assertIn("Reply to a real image", "\n".join(sink_no_reply))
+
+        sink_untracked = []
+        fake_untracked = type("FakeUntrackedMessage", (), {"message_id": 999999})()
+        untracked_update = FakeUpdate(user_id, "/reimage", sink_untracked, reply_to_message=fake_untracked)
+        await bot.reimage_command(untracked_update, DummyContext())
+        self.assertIn("don't have a record", "\n".join(sink_untracked))
+
+        sink_real = []
+        real_reply_update = FakeUpdate(user_id, "/reimage", sink_real, reply_to_message=first_photo_msg)
+        real_reply_update.effective_chat = update.effective_chat
+        await bot.reimage_command(real_reply_update, DummyContext())
+        self.assertEqual(len(update.effective_chat.sent_photos), 2)
+
+    async def test_looted_item_gets_a_view_button_with_working_actions(self):
+        """
+        Real live requests (2026-08-03, Coffee, Development topic):
+        "when we loot the item put a button so we can click and view the
+        item" and "when viewing the item put a button to sell, put
+        market equip, or give." Proves the whole chain end-to-end: a
+        real combat loot grant sends a real View Item button, tapping it
+        shows the item's real stats+image with action buttons attached,
+        and tapping Equip actually equips the real item.
+        """
+        make_basic_character(996001, "LootWinner", current_location="whispering_wood")
+        sink = []
+        loot_update = FakeUpdate(996001, "combat victory", sink)
+        loot_line = await bot._grant_generated_loot(loot_update, [996001])
+        self.assertIn("loots a", loot_line)
+        self.assertTrue(len(loot_update.effective_chat.sent_photos) == 0)  # the loot line has no photo of its own
+        self.assertTrue(len(loot_update.effective_chat._sink) > 0)
+
+        winner_char = db.get_character(996001)
+        generated_ids = [k for k in winner_char["inventory"] if k.startswith("gi")]
+        self.assertTrue(len(generated_ids) > 0)
+        item_id = generated_ids[0]
+
+        sink_show = []
+        show_update = FakeCallbackUpdate(996001, f"itemview|show|{item_id}", sink_show)
+        await bot.itemview_callback(show_update, DummyContext())
+        self.assertTrue(len(show_update.effective_chat.sent_photos) > 0)
+        self.assertIsNotNone(show_update.effective_chat.sent_photos[-1]["reply_markup"])
+
+        sink_equip = []
+        equip_update = FakeCallbackUpdate(996001, f"itemview|equip|{item_id}", sink_equip)
+        await bot.itemview_callback(equip_update, DummyContext())
+        after_equip = db.get_character(996001)
+        self.assertTrue(after_equip.get("equipped_weapon") == item_id or after_equip.get("equipped_armor") == item_id)
+
+    def test_equipable_worth_shown_in_stats_line(self):
+        """Real live request (2026-08-03): "in the description of the items can u show what it is worth? do this for equipables"."""
+        from rules.item_generator import generate_weapon
+        weapon = generate_weapon(tier="rare")
+        affixes = weapon.pop("affixes", [])
+        item_id = db.create_item_instance(
+            item_type=weapon["type"], name=weapon["name"], rarity=weapon["rarity"],
+            price=weapon["price"], base_stats=weapon, affixes=affixes,
+        )
+        item = db.materialize_item_instance(item_id)
+        stats_line = bot._format_item_stats_line(item)
+        self.assertIsNotNone(stats_line)
+        self.assertIn("worth", stats_line)
+        self.assertIn("g", stats_line)
+
+    def test_generated_item_notes_reflect_real_affixes(self):
+        """
+        Real live request (2026-08-03): "make sure the generated items
+        have proper indetail descriptions so the image generation works
+        properly" -- the note field (which the image prompt reads) used
+        to be the exact same tier-only sentence for every item
+        regardless of what actually got rolled.
+        """
+        from rules.item_generator import generate_weapon
+        fire_weapon = None
+        for _ in range(60):
+            w = generate_weapon(tier="rare")
+            if any(a.get("kind") == "elemental_damage" for a in w["affixes"]):
+                fire_weapon = w
+                break
+        self.assertIsNotNone(fire_weapon)
+        dmg_type = next(a["damage_type"] for a in fire_weapon["affixes"] if a["kind"] == "elemental_damage")
+        self.assertIn(dmg_type, fire_weapon["note"])
+
+        plain_weapon = generate_weapon(tier="common")
+        self.assertTrue(plain_weapon["note"].startswith("A common find"))
+
     async def test_ai_companion_actually_fighting_gets_real_combat_xp(self):
         """
         Real live bug (2026-08-01, Coffee: "They didn't get experience
@@ -2643,7 +2759,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         leader_xp_before = db.get_character(leader_id)["xp"]
         companion_xp_before = db.get_character(companion_id)["xp"]
-        bot._award_victory_xp(session)
+        await bot._award_victory_xp(FakeUpdate(leader_id, "", []), session)
         leader_xp_after = db.get_character(leader_id)["xp"]
         companion_xp_after = db.get_character(companion_id)["xp"]
 
@@ -2777,7 +2893,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [leader_id, enemy_id]
 
         before = db.get_character(benched_id)["xp"]
-        bot._award_victory_xp(session)
+        await bot._award_victory_xp(FakeUpdate(leader_id, "", []), session)
         after = db.get_character(benched_id)["xp"]
         self.assertEqual(after - before, int(100 * bot.INACTIVE_PARTY_XP_SHARE))
         sessions.end_session(-999)

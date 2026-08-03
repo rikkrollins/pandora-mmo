@@ -161,6 +161,43 @@ MYTHIC_EQUIP_REQUIREMENT = {
 }
 
 
+def _note_for_item(tier: str, affixes: list[dict]) -> str:
+    """
+    Real, affix-grounded flavor text (2026-08-03, per Coffee: "make sure
+    the generated items have proper detailed descriptions so the image
+    generation works properly"). Before this, every item's "note" was
+    the exact same tier-only sentence regardless of what actually got
+    rolled -- _item_image_prompt (bot.py) reads this same field to build
+    the generated art's prompt, so a rare dagger wreathed in fire and a
+    plain rare dagger with no elemental affix at all rendered as
+    visually identical art. Built entirely from this item's own real
+    rolled affixes, never invented detail -- an item with no notable
+    affix still gets the honest plain-tier sentence, nothing fabricated.
+    """
+    details = []
+    for affix in affixes:
+        kind = affix.get("kind")
+        if kind == "elemental_damage":
+            details.append(f"wreathed in {affix['damage_type']} energy")
+        elif kind == "immunity":
+            details.append(f"utterly unmarked by {affix['damage_type']}")
+        elif kind == "resistance":
+            details.append(f"radiates a faint ward against {affix['damage_type']}")
+        elif kind == "vulnerability":
+            details.append(f"strangely drawn to {affix['damage_type']}")
+        elif kind == "grants_spell":
+            spell_name = affix["spell_id"].replace("_", " ")
+            details.append(f"hums with {spell_name} magic")
+        elif kind == "ignore_resistance":
+            details.append("seems to cut through any ward laid against it")
+        elif kind == "free_extra_attack":
+            details.append("moves faster than the eye can follow")
+        elif kind == "profession_bonus":
+            details.append(f"marked with a craftsman's {affix['profession']} sigil")
+    base = f"A {tier.replace('_', ' ')} find, worked with more care than most of its kind"
+    return f"{base}, {'; '.join(details)}." if details else f"{base}."
+
+
 def _mythic_affix(item_type: str) -> dict:
     """
     Every mythic roll GUARANTEES exactly one mythic-exclusive effect --
@@ -203,6 +240,11 @@ def generate_weapon(base_id: str | None = None, tier: str | None = None) -> dict
     tier = tier or roll_tier()
     bonus = TIER_BONUS[tier]
     name = _name_for(base_id.replace("_", " ").title(), tier)
+    affixes = (
+        ([{"kind": "stat_bonus", "field": "damage_bonus", "value": bonus}] if bonus else [])
+        + _maybe_elemental_affix(tier, "elemental_damage")
+        + ([_mythic_affix("weapon")] if tier == "mythic" else [])
+    )
 
     return {
         "name": name,
@@ -217,12 +259,8 @@ def generate_weapon(base_id: str | None = None, tier: str | None = None) -> dict
         "generated_base": base_id,
         "set_id": _maybe_set_id(tier),
         "equip_requirement": MYTHIC_EQUIP_REQUIREMENT if tier == "mythic" else None,
-        "note": f"A {tier.replace('_', ' ')} find, worked with more care than most of its kind.",
-        "affixes": (
-            ([{"kind": "stat_bonus", "field": "damage_bonus", "value": bonus}] if bonus else [])
-            + _maybe_elemental_affix(tier, "elemental_damage")
-            + ([_mythic_affix("weapon")] if tier == "mythic" else [])
-        ),
+        "note": _note_for_item(tier, affixes),
+        "affixes": affixes,
     }
 
 
@@ -233,6 +271,11 @@ def generate_armor(base_id: str | None = None, tier: str | None = None) -> dict:
     tier = tier or roll_tier()
     bonus = TIER_BONUS[tier]
     name = _name_for(base_id.replace("_", " ").title() + " Armor", tier)
+    affixes = (
+        ([{"kind": "stat_bonus", "field": "ac_base", "value": bonus}] if bonus else [])
+        + _maybe_elemental_affix(tier, "resistance")
+        + ([_mythic_affix("armor")] if tier == "mythic" else [])
+    )
 
     return {
         "name": name,
@@ -246,12 +289,8 @@ def generate_armor(base_id: str | None = None, tier: str | None = None) -> dict:
         "generated_base": base_id,
         "set_id": _maybe_set_id(tier),
         "equip_requirement": MYTHIC_EQUIP_REQUIREMENT if tier == "mythic" else None,
-        "note": f"A {tier.replace('_', ' ')} find, worked with more care than most of its kind.",
-        "affixes": (
-            ([{"kind": "stat_bonus", "field": "ac_base", "value": bonus}] if bonus else [])
-            + _maybe_elemental_affix(tier, "resistance")
-            + ([_mythic_affix("armor")] if tier == "mythic" else [])
-        ),
+        "note": _note_for_item(tier, affixes),
+        "affixes": affixes,
     }
 
 
@@ -262,6 +301,11 @@ def generate_shield(base_id: str | None = None, tier: str | None = None) -> dict
     tier = tier or roll_tier()
     bonus = TIER_BONUS[tier]
     name = _name_for(base_id.replace("_", " ").title(), tier)
+    affixes = (
+        ([{"kind": "stat_bonus", "field": "ac_bonus", "value": bonus}] if bonus else [])
+        + _maybe_elemental_affix(tier, "resistance")
+        + ([_mythic_affix("shield")] if tier == "mythic" else [])
+    )
 
     return {
         "name": name,
@@ -275,12 +319,8 @@ def generate_shield(base_id: str | None = None, tier: str | None = None) -> dict
         "generated_base": base_id,
         "set_id": _maybe_set_id(tier),
         "equip_requirement": MYTHIC_EQUIP_REQUIREMENT if tier == "mythic" else None,
-        "note": f"A {tier.replace('_', ' ')} find, worked with more care than most of its kind.",
-        "affixes": (
-            ([{"kind": "stat_bonus", "field": "ac_bonus", "value": bonus}] if bonus else [])
-            + _maybe_elemental_affix(tier, "resistance")
-            + ([_mythic_affix("shield")] if tier == "mythic" else [])
-        ),
+        "note": _note_for_item(tier, affixes),
+        "affixes": affixes,
     }
 
 
