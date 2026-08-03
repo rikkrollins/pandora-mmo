@@ -11779,7 +11779,15 @@ async def _send_generated_image(
         message_id = getattr(sent, "message_id", None)
         if message_id is not None:
             tracked = _chat_scoped_dict(_SENT_IMAGE_PROMPTS, update.effective_chat.id)
-            tracked[message_id] = {"prompt": prompt, "width": width, "height": height, "caption": caption}
+            # reply_markup is tracked too (real gap caught on self-review,
+            # 2026-08-03) -- otherwise /reimage-ing an item-view screen
+            # (image + Equip/Sell/Market/Give buttons) would regenerate a
+            # plain photo with no buttons at all, silently losing the
+            # whole action-button feature on the new image.
+            tracked[message_id] = {
+                "prompt": prompt, "width": width, "height": height,
+                "caption": caption, "reply_markup": reply_markup,
+            }
             if len(tracked) > _REIMAGE_TRACKED_MESSAGES_PER_CHAT:
                 tracked.pop(min(tracked), None)
     except Exception as e:
@@ -11819,7 +11827,7 @@ async def reimage_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     await _send_generated_image(
         update, entry["prompt"], entry["caption"], width=entry["width"], height=entry["height"],
-        seed=random.randint(0, 2 ** 31 - 1), log_key="reimage",
+        seed=random.randint(0, 2 ** 31 - 1), log_key="reimage", reply_markup=entry.get("reply_markup"),
     )
 
 

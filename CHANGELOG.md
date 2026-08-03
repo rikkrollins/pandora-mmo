@@ -2,6 +2,15 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.83] — Hotfix: /reimage dropped item-view action buttons
+
+Caught on self-review right after v1.27.82 shipped: /reimage-ing an
+item-view screen (image + Equip/Sell/List on Market/Give buttons)
+regenerated a plain photo with no buttons at all, since the tracking
+that remembers what to regenerate never stored the original buttons
+alongside the prompt. Fixed — a reimaged item view now keeps its real
+action buttons.
+
 ## [1.27.82] — /reimage, a real item-view system, and richer generated-item art
 
 **New: `/reimage`.** Reply to any image this bot has ever generated

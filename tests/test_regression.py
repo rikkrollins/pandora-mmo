@@ -2718,6 +2718,40 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         plain_weapon = generate_weapon(tier="common")
         self.assertTrue(plain_weapon["note"].startswith("A common find"))
 
+    async def test_reimage_preserves_item_view_action_buttons(self):
+        """
+        Real gap caught on self-review right after shipping v1.27.82
+        (2026-08-03): /reimage-ing an item-view screen (image +
+        Equip/Sell/Market/Give buttons) regenerated a plain photo with
+        NO buttons at all, since _send_generated_image's tracking dict
+        never stored the original reply_markup alongside the prompt.
+        Fixed by tracking reply_markup too.
+        """
+        from rules.item_generator import generate_weapon
+        user_id = 998001
+        make_basic_character(user_id, "ReimageButtonTester", current_location="crossroads_tavern")
+        weapon = generate_weapon(tier="rare")
+        affixes = weapon.pop("affixes", [])
+        item_id = db.create_item_instance(
+            item_type=weapon["type"], name=weapon["name"], rarity=weapon["rarity"],
+            price=weapon["price"], base_stats=weapon, affixes=affixes,
+        )
+        db.add_item(user_id, item_id, 1)
+
+        sink_show = []
+        show_update = FakeCallbackUpdate(user_id, f"itemview|show|{item_id}", sink_show)
+        await bot.itemview_callback(show_update, DummyContext())
+        first_photo = show_update.effective_chat.sent_photos[-1]
+        first_msg = show_update.effective_chat.last_sent_message
+        self.assertIsNotNone(first_photo["reply_markup"])
+
+        sink_reimage = []
+        reimage_update = FakeUpdate(user_id, "/reimage", sink_reimage, reply_to_message=first_msg)
+        reimage_update.effective_chat = show_update.effective_chat
+        await bot.reimage_command(reimage_update, DummyContext())
+        second_photo = show_update.effective_chat.sent_photos[-1]
+        self.assertIsNotNone(second_photo["reply_markup"])
+
     async def test_ai_companion_actually_fighting_gets_real_combat_xp(self):
         """
         Real live bug (2026-08-01, Coffee: "They didn't get experience
