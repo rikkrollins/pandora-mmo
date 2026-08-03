@@ -69,6 +69,24 @@ class Session:
     # fight, tracked here rather than on any single participant, since
     # it's a real fact about the BATTLEFIELD, not any one combatant.
     environment_used: bool = False
+    # In-battle inactivity timeout (2026-08-02, per Coffee: a real
+    # player who goes quiet mid-combat now gets warned, then has their
+    # turn auto-resolved as an attack rather than just passed, so the
+    # fight actually keeps moving -- see bot._check_combat_timeouts.
+    # turn_started_at is keyed per participant (not just "the current
+    # one") so a snapshot restart doesn't lose whose clock was running;
+    # timeout_escalated tracks who's already been auto-timed-out once
+    # THIS fight (shortens their next warning/action window from
+    # 3/5 minutes to 30s/60s, per Coffee's explicit spec) -- cleared the
+    # moment that participant is seen acting on their own again
+    # (real activity resets them back to the normal window), and reset
+    # for free on any brand-new fight since it lives on the Session
+    # itself, never persisted beyond it. timeout_warned tracks who's
+    # already gotten this turn's one warning, cleared whenever
+    # advance_turn() hands the turn to someone new.
+    turn_started_at: dict = field(default_factory=dict)
+    timeout_escalated: set = field(default_factory=set)
+    timeout_warned: set = field(default_factory=set)
 
     def current_participant_id(self) -> int:
         return self.turn_order[self.current_turn_index]
@@ -91,6 +109,10 @@ class Session:
         self.current_turn_index = (self.current_turn_index + 1) % len(self.turn_order)
         if self.current_turn_index == 0:
             self.round_number += 1
+        if self.turn_order:
+            new_pid = self.turn_order[self.current_turn_index]
+            self.turn_started_at[new_pid] = time.time()
+            self.timeout_warned.discard(new_pid)
 
     def log_event(self, text: str) -> None:
         self.event_log.append(text)
@@ -233,6 +255,9 @@ class Session:
             "active": self.active,
             "stabilized_ids": list(self.stabilized_ids),
             "environment_used": self.environment_used,
+            "turn_started_at": {str(k): v for k, v in self.turn_started_at.items()},
+            "timeout_escalated": list(self.timeout_escalated),
+            "timeout_warned": list(self.timeout_warned),
         }
 
     @classmethod
@@ -255,6 +280,12 @@ class Session:
             # by an older running process, mid-restart, won't have this
             # key yet -- must not crash restoring a real in-progress fight.
             environment_used=data.get("environment_used", False),
+            # .get(...) with a default (2026-08-02, in-battle timeout
+            # feature): same forward-compat reasoning -- a snapshot
+            # written before this shipped won't have these keys.
+            turn_started_at={int(k): v for k, v in data.get("turn_started_at", {}).items()},
+            timeout_escalated=set(data.get("timeout_escalated", [])),
+            timeout_warned=set(data.get("timeout_warned", [])),
         )
 
 
@@ -411,6 +442,8 @@ def start_session(chat_id: int, participants: list, sides: dict) -> Session | No
         "Combat begins! Initiative order: "
         + ", ".join(f"{p['name']} ({p['initiative']})" for p in ordered)
     )
+    if session.turn_order:
+        session.turn_started_at[session.turn_order[0]] = time.time()
     _ACTIVE_SESSIONS[session_id] = session
     _CHAT_SESSIONS.setdefault(chat_id, set()).add(session_id)
     for pid in session.turn_order:
@@ -506,6 +539,13 @@ def load_snapshot() -> int:
             _CHAT_SESSIONS.setdefault(session.chat_id, set()).add(session.session_id)
             for pid in session.turn_order:
                 _USER_SESSION[pid] = session.session_id
+            # A restart mid-fight shouldn't hand the resumed current
+            # participant an instant false timeout just because the old
+            # snapshot predates this field, or a save landed between two
+            # turns -- give them a fresh clock from right now instead.
+            if session.turn_order:
+                current_pid = session.turn_order[session.current_turn_index]
+                session.turn_started_at.setdefault(current_pid, time.time())
             restored += 1
         return restored
     except Exception as e:  # noqa: BLE001 -- corrupt/partial file must not block startup

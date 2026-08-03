@@ -594,10 +594,22 @@ def get_item(item_id: str) -> dict | None:
 
 
 def is_sellable(item_id: str) -> bool:
-    item = ITEMS.get(item_id)
+    """
+    Real live bug (2026-08-02, caught investigating a Development-topic
+    request: "make sure players can sell the items to applicable shops
+    also if they don't want them"): this used a direct ITEMS.get(...)
+    lookup, not get_item()'s fallback -- every generated magic item
+    (rules/item_generator.py, a "gi<n>" id) always came back None here,
+    so shop.sell_item's is_sellable check silently rejected selling ANY
+    generated item at all, unconditionally, with no way to know why. An
+    earlier investigation (magic item system Phase 1) concluded this
+    function was dead code never called anywhere in bot.py -- wrong;
+    shop.sell_item calls it directly via _do_sell.
+    """
+    item = get_item(item_id)
     if item is None:
         return False
-    return item["type"] != "quest_item" and item.get("price", 0) > 0
+    return item.get("type") != "quest_item" and item.get("price", 0) > 0
 
 
 def find_item_id_by_name(name_fragment: str) -> str | None:

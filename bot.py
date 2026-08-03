@@ -347,6 +347,22 @@ IDLE_TIMEOUT_SECONDS = 3600
 IDLE_CHECK_INTERVAL_SECONDS = 60
 SAFE_LOCATION_FALLBACK = "crossroads_tavern"
 
+# In-battle inactivity timeout (2026-08-02, per Coffee's own spec: warn
+# a quiet player mid-combat at 3 minutes, auto-attack on their behalf
+# at 5 -- deliberately much shorter than the general IDLE_* thresholds
+# above, since a whole party is actively blocked on one person's turn
+# during combat, unlike ordinary idleness. Once a player has been
+# auto-timed-out once in the CURRENT fight, their window shortens to a
+# flat 1 minute (30s warn / 60s act) for any LATER turn -- they've
+# already shown they're away; don't make everyone wait the full window
+# twice. Real activity (a message sent since their turn began) resets
+# them back to the full window on their next turn, in case they were
+# just deciding what to do.
+COMBAT_TIMEOUT_WARNING_SECONDS = 180
+COMBAT_TIMEOUT_ACTION_SECONDS = 300
+COMBAT_TIMEOUT_ESCALATED_WARNING_SECONDS = 30
+COMBAT_TIMEOUT_ESCALATED_ACTION_SECONDS = 60
+
 # Real telegram_user_ids already warned about their current idle
 # stretch, so the warning fires once, not every check cycle. In-memory
 # only, same reasoning as _UNLOCKED/_DEFEATED_NPCS — cleared the moment
@@ -7153,6 +7169,124 @@ async def _check_idle_characters(bot) -> None:
         await _go_inactive(telegram_user_id, update_like, "drifts off to rest")
 
 
+async def _check_combat_timeouts(bot) -> None:
+    """
+    Real in-battle inactivity timeout (2026-08-02, per Coffee's own
+    spec, given live in the Development topic). Unlike
+    _check_idle_characters above (which only ever auto-passes an idle
+    player's combat turn, no warning, on the same slow 30/60-minute
+    IDLE_* clock as ordinary out-of-combat idleness), this runs its own
+    much shorter clock, since a whole party is actively blocked on one
+    quiet player's turn: a warning at COMBAT_TIMEOUT_WARNING_SECONDS,
+    then the turn auto-resolves as a real ATTACK (not just a pass) at
+    COMBAT_TIMEOUT_ACTION_SECONDS -- "Default action is Fight," per
+    Coffee's own words. A player already auto-timed-out once THIS fight
+    gets a shortened 30s/60s window on any later turn instead
+    (session.timeout_escalated); genuine activity since their turn
+    began (character.last_active_at newer than the turn started)
+    clears that escalation back to the normal window, since they've
+    shown they're not actually away.
+
+    Deliberately written to loop over every currently active session
+    directly (sessions._ACTIVE_SESSIONS), not through the single
+    _LAST_KNOWN_CHAT_ID global the rest of this background loop still
+    relies on -- sessions.py has been correctly multi-chat/multi-fight
+    since the 2026-08-01 rewrite, so there's no reason to route this
+    THROUGH that known single-chat limitation just because sibling
+    checks in this same loop still do.
+
+    Locking care: _do_attack (used for the forced-attack action) looks
+    up and re-acquires this exact session's own lock itself via
+    _held_session -- calling it while THIS function is still holding
+    that lock would deadlock (asyncio.Lock is not reentrant). Every
+    branch below that needs to force a real attack releases the lock
+    first (exits the `async with` block) before calling _do_attack.
+    _resolve_ai_turns is the one exception -- its own docstring already
+    documents that it assumes the caller holds the lock and does not
+    re-acquire it, so it's safe to call from inside.
+    """
+    now = time.time()
+    for session_id in list(sessions._ACTIVE_SESSIONS.keys()):
+        need_forced_attack = False
+        update_like = None
+        async with sessions.get_session_lock(session_id):
+            session = sessions.get_session_by_id(session_id)
+            if session is None or not session.turn_order:
+                continue
+            pid = session.current_participant_id()
+            participant = session.current_participant()
+            if participant.get("is_ai"):
+                continue  # AI companions/monsters act instantly -- no timeout needed
+
+            turn_started = session.turn_started_at.get(pid)
+            if turn_started is None:
+                # Defensive only -- advance_turn()/start_session() always seed
+                # this now. Give them a fresh clock rather than a false timeout.
+                session.turn_started_at[pid] = now
+                continue
+
+            character = db.get_character(pid)
+            if character and character.get("last_active_at"):
+                try:
+                    if datetime.fromisoformat(character["last_active_at"]).timestamp() > turn_started:
+                        session.timeout_escalated.discard(pid)
+                except (TypeError, ValueError):
+                    pass
+
+            escalated = pid in session.timeout_escalated
+            warning_threshold = COMBAT_TIMEOUT_ESCALATED_WARNING_SECONDS if escalated else COMBAT_TIMEOUT_WARNING_SECONDS
+            action_threshold = COMBAT_TIMEOUT_ESCALATED_ACTION_SECONDS if escalated else COMBAT_TIMEOUT_ACTION_SECONDS
+            elapsed = now - turn_started
+            if elapsed < warning_threshold:
+                continue
+
+            update_like = _AiPlayerUpdate(bot, session.chat_id, pid, "I attack")
+
+            if elapsed < action_threshold:
+                if pid not in session.timeout_warned:
+                    session.timeout_warned.add(pid)
+                    await _safe_send(
+                        update_like,
+                        f"⏳ **{participant['name']}** is about to Time-Out due to inactivity!",
+                    )
+                continue
+
+            if participant["hp_current"] <= 0:
+                # Down, not just quiet -- forcing an "attack" makes no sense
+                # for an unconscious character. Pull them out of the fight
+                # entirely and let them recover somewhere safe instead.
+                _sync_player_to_db(participant)
+                chat_id = session.chat_id
+                destination_id = _nearest_safe_waypoint(character) if character else SAFE_LOCATION_FALLBACK
+                if character:
+                    db.update_character(pid, current_location=destination_id)
+                session.remove_dead_player(pid)
+                combat_over = session.is_combat_over()
+                await _safe_send(
+                    update_like,
+                    f"⌛ **{participant['name']}** timed out while down — carried off to safety to recover."
+                    + ("\n\n🏳️ With them gone, the fight has no one left to finish — it ends here." if combat_over else ""),
+                )
+                if combat_over:
+                    sessions.end_session(chat_id, session)
+                else:
+                    await _resolve_ai_turns(update_like, session)
+                if character:
+                    await _go_inactive(pid, update_like, "is carried off to rest and recover")
+            else:
+                session.timeout_escalated.add(pid)
+                await _safe_send(
+                    update_like,
+                    f"⌛ **{participant['name']}** timed out — they attack on instinct to keep the fight moving!",
+                )
+                need_forced_attack = True
+
+        # Outside the lock now -- safe to call _do_attack, which re-acquires
+        # this same session's lock itself.
+        if need_forced_attack and update_like is not None:
+            await _do_attack(update_like, "I attack")
+
+
 # ---------------------------------------------------------------------
 # Quests — journal, clues, acceptance, and deterministic completion
 # detection. Whether a quest is complete is always a real, computed
@@ -8350,12 +8484,15 @@ async def _do_sell_market(update: Update, args: list[str]) -> None:
     listing_id = db.create_market_listing(
         update.effective_user.id, character["name"], item_id, quantity, price
     )
-    item_name = items_module.get_item(item_id)["name"]
-    await _safe_send(
-        update,
-        f"🏷️ **{character['name']}** lists **{quantity}x {item_name}** for **{price} gold** "
-        f"(listing #{listing_id}). Say \"/buy_market {listing_id}\" to buy it.",
+    listed_item = items_module.get_item(item_id)
+    message = (
+        f"🏷️ **{character['name']}** lists **{quantity}x {listed_item['name']}** for **{price} gold** "
+        f"(listing #{listing_id}). Say \"/buy_market {listing_id}\" to buy it."
     )
+    stats_line = _format_item_stats_line(listed_item)
+    if stats_line:
+        message += f"\n\n📊 **Stats:** {stats_line}"
+    await _safe_send(update, message)
 
 
 def _market_keyboard(listings: list[dict]) -> InlineKeyboardMarkup | None:
@@ -8394,10 +8531,19 @@ async def _do_check_market(update: Update) -> None:
     for listing in listings:
         item = items_module.get_item(listing["item_id"])
         item_name = item["name"] if item else listing["item_id"]
-        lines.append(
+        line = (
             f"#{listing['listing_id']}: {listing['quantity']}x {item_name} — {listing['price']} gold "
             f"(seller: {listing['seller_name']})"
         )
+        # Real magic item stats on every listing (2026-08-02, per
+        # Coffee: "so players kno when to use the items and what they
+        # can sell for") -- a Diablo-style rarity/affix summary,
+        # reusing the exact same formatter examine's own fix just
+        # added, rather than a separate market-only implementation.
+        stats_line = _format_item_stats_line(item) if item else None
+        if stats_line:
+            line += f"\n     📊 {stats_line}"
+        lines.append(line)
     lines.append(
         "\nTap a listing below to buy it, or say \"/buy_market <#>\".\n"
         "Selling something yourself? Say \"/sell_market <quantity> <price> <item name>\" "
@@ -8451,12 +8597,20 @@ async def _do_buy_market(update: Update, args: list[str]) -> None:
         db.update_character(listing["seller_id"], gold=seller["gold"] + listing["price"])
     db.remove_market_listing(listing_id)
 
-    item_name = items_module.get_item(listing["item_id"])["name"]
-    await _safe_send(
-        update,
+    bought_item = items_module.get_item(listing["item_id"])
+    item_name = bought_item["name"]
+    message = (
         f"🏛️ **{character['name']}** buys **{listing['quantity']}x {item_name}** from "
-        f"**{listing['seller_name']}** for **{listing['price']} gold**.",
+        f"**{listing['seller_name']}** for **{listing['price']} gold**."
     )
+    stats_line = _format_item_stats_line(bought_item)
+    if stats_line:
+        message += f"\n\n📊 **Stats:** {stats_line}"
+    await _safe_send(update, message)
+    # Real image on purchase (2026-08-02, per Coffee: "the generated
+    # item shud show an image" -- a single, deliberate market action,
+    # same convention _maybe_send_item_image already uses for equip.
+    await _maybe_send_item_image(update, listing["item_id"], bought_item)
 
 
 GAMBLE_WIN_THRESHOLD = 8  # 2d6 total needed to double your wager
@@ -12209,6 +12363,58 @@ def _find_monster_mentioned_in_text(location: dict, text: str) -> tuple[str, dic
     return None
 
 
+def _format_item_stats_line(item: dict) -> str | None:
+    """
+    Real computed stats for a magic/generated item, not just flavor
+    text (2026-08-02, per Coffee, live in the Development topic: "How
+    can I see the stats in the details of this? I have no idea how
+    strong it is or what it does" -- there was genuinely no way to see
+    a generated magic item's real affixes anywhere in the game before
+    this). Built from whatever real fields are already present on the
+    materialized item dict (rules/item_generator.py's rolled items and
+    items.py's hand-authored ones like pandoras_answer share the exact
+    same shape), so this works for either without special-casing.
+    Returns None for a plain item with nothing stat-worthy to show
+    (e.g. a scroll or a common potion) -- callers should just fall back
+    to flavor text alone in that case.
+    """
+    parts = []
+    rarity = item.get("rarity")
+    item_type = item.get("type")
+    if rarity and item_type:
+        parts.append(f"{rarity.replace('_', ' ').title()} {item_type}")
+    if item.get("damage_bonus"):
+        parts.append(f"+{item['damage_bonus']} damage")
+    if item.get("ac_base"):
+        parts.append(f"AC {item['ac_base']}")
+    if item.get("ac_bonus"):
+        parts.append(f"+{item['ac_bonus']} AC")
+    if item.get("damage_type") and item["damage_type"] != "physical":
+        parts.append(f"deals {item['damage_type']} damage")
+    if item.get("resistances"):
+        parts.append(f"resistance to {', '.join(item['resistances'])}")
+    if item.get("vulnerabilities"):
+        parts.append(f"vulnerable to {', '.join(item['vulnerabilities'])}")
+    if item.get("immunities"):
+        parts.append(f"immune to {', '.join(item['immunities'])}")
+    if item.get("grants_spell"):
+        spell_name = item["grants_spell"].replace("_", " ").title()
+        parts.append(f"grants {spell_name} ({item.get('grants_spell_uses', 1)}/rest)")
+    for pb in item.get("profession_bonuses") or []:
+        parts.append(f"+{pb['value']} {pb['profession']}")
+    if item.get("ignores_resistance"):
+        parts.append("ignores enemy resistance")
+    if item.get("free_extra_attack"):
+        parts.append("grants an extra attack")
+    if item.get("regen_bonus"):
+        parts.append(f"+{item['regen_bonus']} HP regen")
+    if item.get("equip_requirement"):
+        parts.append("requires real progression to equip")
+    if not parts:
+        return None
+    return "; ".join(parts)
+
+
 async def _do_examine(update: Update, target_text: str) -> None:
     character = db.get_character(update.effective_user.id)
     if character is None:
@@ -12308,10 +12514,25 @@ async def _do_examine(update: Update, target_text: str) -> None:
         item_match = items_module.find_item_mentioned_in_text(target_text, candidate_ids=owned_item_ids)
         if item_match:
             item_data = items_module.get_item(item_match)
+            # Real live crash (2026-08-02, caught via a Development-topic
+            # report): a generated magic item (rules/item_generator.py,
+            # e.g. "Runed Dagger of Embers") has no "description" field
+            # at all -- only hand-authored items.py entries ever set
+            # one. Direct indexing here KeyError'd on every attempt to
+            # examine any generated item, the exact case this whole
+            # system exists to make keepable. Falls back to the
+            # generator's own "note" field, then a bare generic line,
+            # rather than assuming either key exists.
+            description = item_data.get("description") or item_data.get("note") \
+                or f"a {(item_data.get('type') or 'item')}, worked with real craftsmanship."
             narration = await asyncio.to_thread(
-                narrate_examine, character, location["name"], item_data["name"], item_data["description"]
+                narrate_examine, character, location["name"], item_data["name"], description
             )
-            await _safe_send(update, f"🔍 **{character['name']}** examines their {item_data['name']}: {narration}")
+            message = f"🔍 **{character['name']}** examines their {item_data['name']}: {narration}"
+            stats_line = _format_item_stats_line(item_data)
+            if stats_line:
+                message += f"\n\n📊 **Stats:** {stats_line}"
+            await _safe_send(update, message)
             return
 
         names = [i["name"] for i in interactables.values()]
@@ -19223,6 +19444,10 @@ async def _idle_inactivity_loop(application: Application) -> None:
             await _check_idle_characters(application.bot)
         except Exception as e:
             logger.error(f"[idle_check] background loop failed this cycle: {e!r}")
+        try:
+            await _check_combat_timeouts(application.bot)
+        except Exception as e:
+            logger.error(f"[combat_timeout] background loop failed this cycle: {e!r}")
         try:
             _wander_npcs()
         except Exception as e:

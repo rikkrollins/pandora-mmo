@@ -2,6 +2,46 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.81] — In-battle inactivity timeout, and real fixes for magic items in the market/shop
+
+**New: in-battle inactivity timeout**, per Coffee's own spec given live
+in the Development topic. A player who goes quiet on their own combat
+turn now gets a real warning ("about to Time-Out due to inactivity!")
+at 3 minutes, then has their turn auto-resolved as a real attack —
+default action is Fight — at 5 minutes, so the fight actually keeps
+moving instead of leaving the whole party blocked. Once a player has
+been auto-timed-out once in the current fight, their window shortens
+to a flat 30s/60s on any later turn; sending any real message since
+their turn began resets that back to the normal 3/5-minute window,
+in case they were just deciding what to do. A player who's down (0 HP)
+when their timeout fires isn't forced into a nonsensical attack —
+they're pulled from the fight and sent to rest somewhere safe instead.
+
+**Fixed: examining a generated magic item crashed outright.** Generated
+items (the loot/crafting/forging/enchanting system shipped earlier
+this week) never set a "description" field the way hand-authored items
+always do — "look at" one crashed the whole handler. Also, per Coffee's
+own follow-up ("I have no idea how strong it is or what it does"),
+examining one now shows its real computed stats (rarity, bonuses,
+elemental effects, granted spells, everything the item actually does),
+not just flavor text.
+
+**Fixed: generated magic items could never actually be sold.**
+`items.is_sellable` used a direct catalog lookup instead of the real
+per-instance item resolver, so every generated item was silently
+rejected as unsellable by any NPC shop — a real, previously-uncaught
+landmine (an earlier investigation had wrongly concluded this function
+was unreachable dead code). Selling a generated item to a shop now
+works and pays out real gold.
+
+**Improved: the player market** now shows the same real stats summary
+on every listing, and on both listing something for sale and buying
+something, so a buyer can actually tell what an item does and what
+it's worth before spending gold on it — matches Coffee's own
+"players kno when to use the items and what they can sell for."
+Buying a generated item from the market now also sends its real item
+image, same as equipping one already did.
+
 ## [1.27.80] — Hotfix: combat participants leaking permanently in the session index
 
 Real live bug (2026-08-02, found within minutes via a Development-topic

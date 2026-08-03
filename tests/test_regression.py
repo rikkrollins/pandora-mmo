@@ -13,7 +13,9 @@ or when touching code they cover directly.
 """
 import os
 import shutil
+import time
 import unittest
+from datetime import datetime, timezone
 
 import bot
 import campaign_loader as cl
@@ -2409,6 +2411,196 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             sides={960005: "party", -960007: "enemy"},
         )
         self.assertIsNotNone(session4)
+
+    async def test_in_battle_timeout_warns_then_forces_a_default_attack(self):
+        """
+        Real in-battle inactivity timeout (2026-08-02, per Coffee's own
+        spec given live in the Development topic): a quiet player mid-
+        combat gets warned at COMBAT_TIMEOUT_WARNING_SECONDS, then has
+        their turn auto-resolved as a real ATTACK (default action =
+        "Fight") at COMBAT_TIMEOUT_ACTION_SECONDS -- not just a passed
+        turn. Escalates to a short 30s/60s window on any LATER turn once
+        they've been auto-timed-out once this fight; real activity
+        since their turn began resets that back to the normal window.
+        Uses backdated session.turn_started_at timestamps instead of
+        real sleeps to exercise this deterministically and fast.
+        """
+        import sessions
+
+        class _FakeSendBot:
+            async def send_message(self, chat_id=None, message_thread_id=None, text=None, **kwargs):
+                return None
+
+            async def send_photo(self, chat_id=None, message_thread_id=None, photo=None, caption=None, **kwargs):
+                return None
+
+            async def send_audio(self, chat_id=None, message_thread_id=None, audio=None, **kwargs):
+                return None
+
+        fake_bot = _FakeSendBot()
+        player_id = 991001
+        make_basic_character(player_id, "TimeoutTester", current_location="crossroads_tavern")
+
+        def new_fight(player_hp=None):
+            character = db.get_character(player_id)
+            if player_hp is not None:
+                character["hp_current"] = player_hp
+            companion = {"telegram_user_id": -700001, "name": "TestCompanion", "hp_current": 50, "hp_max": 50,
+                         "is_ai": True, "strength": 12, "dexterity": 12, "armor_class": 12,
+                         "damage_dice": "1d6", "damage_bonus": 0, "damage_type": "physical", "proficiency_bonus": 2}
+            foe = {"telegram_user_id": -700002, "name": "TestDummy", "hp_current": 200, "hp_max": 200,
+                   "is_ai": True, "strength": 10, "dexterity": 10, "armor_class": 8,
+                   "damage_dice": "1d4", "damage_bonus": 0, "damage_type": "physical",
+                   "proficiency_bonus": 2, "xp_reward": 10, "monster_key": "test_dummy"}
+            sides = {player_id: "party", -700001: "party", -700002: "enemy"}
+            session = sessions.start_session(-999500, [character, companion, foe], sides=sides)
+            idx = session.turn_order.index(player_id)
+            session.current_turn_index = idx
+            session.turn_started_at[player_id] = time.time()
+            return session
+
+        # Warning threshold: warned, no forced action yet.
+        session1 = new_fight()
+        session1.turn_started_at[player_id] = time.time() - (bot.COMBAT_TIMEOUT_WARNING_SECONDS + 5)
+        await bot._check_combat_timeouts(fake_bot)
+        self.assertIn(player_id, session1.timeout_warned)
+        self.assertEqual(session1.current_participant_id(), player_id)
+        self.assertNotIn(player_id, session1.timeout_escalated)
+        sessions.end_session(-999500, session1)
+
+        # Action threshold: a real attack happens, player is escalated for next time.
+        session2 = new_fight()
+        session2.turn_started_at[player_id] = time.time() - (bot.COMBAT_TIMEOUT_ACTION_SECONDS + 5)
+        foe_hp_before = next(p for p in session2.participants if p["telegram_user_id"] == -700002)["hp_current"]
+        await bot._check_combat_timeouts(fake_bot)
+        foe_after = next(p for p in session2.participants if p["telegram_user_id"] == -700002)
+        self.assertIn(player_id, session2.timeout_escalated)
+        self.assertTrue(foe_after["hp_current"] < foe_hp_before or session2.current_participant_id() != player_id)
+        sessions.end_session(-999500, session2)
+
+        # Escalated: forced action fires after only the short 60s window.
+        session3 = new_fight()
+        session3.timeout_escalated.add(player_id)
+        session3.turn_started_at[player_id] = time.time() - (bot.COMBAT_TIMEOUT_ESCALATED_ACTION_SECONDS + 5)
+        foe_hp_before3 = next(p for p in session3.participants if p["telegram_user_id"] == -700002)["hp_current"]
+        await bot._check_combat_timeouts(fake_bot)
+        foe_after3 = next(p for p in session3.participants if p["telegram_user_id"] == -700002)
+        self.assertTrue(foe_after3["hp_current"] < foe_hp_before3 or session3.current_participant_id() != player_id)
+        sessions.end_session(-999500, session3)
+
+        # Real activity since the turn began resets escalation back to normal.
+        session4 = new_fight()
+        session4.timeout_escalated.add(player_id)
+        session4.turn_started_at[player_id] = time.time() - (bot.COMBAT_TIMEOUT_ESCALATED_WARNING_SECONDS + 5)
+        db.update_character(player_id, last_active_at=datetime.now(timezone.utc).isoformat())
+        await bot._check_combat_timeouts(fake_bot)
+        self.assertNotIn(player_id, session4.timeout_escalated)
+        sessions.end_session(-999500, session4)
+
+        # A downed player at the action threshold is pulled to safety, not force-attacked.
+        session5 = new_fight(player_hp=0)
+        session5.turn_started_at[player_id] = time.time() - (bot.COMBAT_TIMEOUT_ACTION_SECONDS + 5)
+        await bot._check_combat_timeouts(fake_bot)
+        after_char = db.get_character(player_id)
+        self.assertEqual(after_char.get("is_inactive"), 1)
+        self.assertEqual(after_char.get("current_location"), "crossroads_tavern")
+        self.assertNotIn(player_id, session5.turn_order)
+        self.assertNotIn(player_id, sessions._USER_SESSION)
+
+    async def test_examine_a_generated_item_no_longer_crashes(self):
+        """
+        Real live crash (2026-08-02, caught via a Development-topic
+        report): "Look at the runed dagger of embers" (a real generated
+        magic item, equipped) crashed the whole handler with KeyError:
+        'description' -- generated items (rules/item_generator.py) never
+        set that field, only hand-authored items.py entries do. The
+        player's own follow-up ("How can I see the stats... I have no
+        idea how strong it is") also exposed a real gap: even once
+        fixed, there was no way to see a magic item's actual affixes
+        anywhere in the game -- _format_item_stats_line fixes that too.
+        """
+        from rules.item_generator import generate_weapon
+        user_id = 993001
+        make_basic_character(user_id, "ExamineTester", current_location="crossroads_tavern")
+        weapon = generate_weapon(tier="rare")
+        affixes = weapon.pop("affixes", [])
+        item_id = db.create_item_instance(
+            item_type=weapon["type"], name=weapon["name"], rarity=weapon["rarity"],
+            price=weapon["price"], base_stats=weapon, affixes=affixes,
+        )
+        db.add_item(user_id, item_id, 1)
+        materialized = db.materialize_item_instance(item_id)
+        self.assertNotIn("description", materialized)
+
+        sink = []
+        await bot._do_examine(FakeUpdate(user_id, f"look at the {materialized['name']}", sink), f"look at the {materialized['name']}")
+        transcript = "\n".join(sink)
+        self.assertTrue(len(transcript) > 0)
+        self.assertIn("Stats:", transcript)
+
+    async def test_generated_items_can_be_sold_and_market_shows_real_stats(self):
+        """
+        Real live bugs (2026-08-02, Development topic): (1)
+        items.is_sellable used a direct ITEMS.get(...) lookup instead of
+        get_item()'s fallback, so shop.sell_item unconditionally
+        rejected EVERY generated magic item as unsellable -- an earlier
+        investigation wrongly concluded this function was dead code; it
+        was actually reachable via bot._do_sell the whole time. (2) "the
+        generated item shud show ... full list of stats ... this for the
+        market ... so players kno when to use the items and what they
+        can sell for" -- the player market listing view showed a bare
+        item name with no stats at all.
+        """
+        from rules.item_generator import generate_weapon
+        import shop as shop_module
+
+        weapon = generate_weapon(tier="rare")
+        affixes = weapon.pop("affixes", [])
+        item_id = db.create_item_instance(
+            item_type=weapon["type"], name=weapon["name"], rarity=weapon["rarity"],
+            price=weapon["price"], base_stats=weapon, affixes=affixes,
+        )
+        self.assertTrue(items_module.is_sellable(item_id))
+
+        seller_id = 994001
+        make_basic_character(seller_id, "SellTester", current_location="crossroads_tavern", gold=0)
+        db.add_item(seller_id, item_id, 1)
+        ok, _msg = shop_module.sell_item(seller_id, item_id, 1)
+        self.assertTrue(ok)
+        after_sell = db.get_character(seller_id)
+        self.assertGreater(after_sell["gold"], 0)
+        self.assertEqual(after_sell["inventory"].get(item_id, 0), 0)
+
+        lister_id = 994002
+        make_basic_character(lister_id, "MarketLister", current_location="crossroads_tavern")
+        weapon2 = generate_weapon(tier="very_rare")
+        affixes2 = weapon2.pop("affixes", [])
+        item_id2 = db.create_item_instance(
+            item_type=weapon2["type"], name=weapon2["name"], rarity=weapon2["rarity"],
+            price=weapon2["price"], base_stats=weapon2, affixes=affixes2,
+        )
+        db.add_item(lister_id, item_id2, 1)
+
+        sink1 = []
+        await bot._do_sell_market(
+            FakeUpdate(lister_id, f"/sell_market 1 500 {weapon2['name']}", sink1),
+            ["1", "500", weapon2["name"]],
+        )
+        self.assertIn("Stats:", "\n".join(sink1))
+
+        sink2 = []
+        await bot._do_check_market(FakeUpdate(994003, "check market", sink2))
+        self.assertIn("📊", "\n".join(sink2))
+
+        buyer_id = 994004
+        make_basic_character(buyer_id, "MarketBuyer", current_location="crossroads_tavern", gold=10000)
+        listings = db.get_market_listings()
+        listing_id = next(l["listing_id"] for l in listings if l["item_id"] == item_id2)
+        sink3 = []
+        update3 = FakeUpdate(buyer_id, f"/buy_market {listing_id}", sink3)
+        await bot._do_buy_market(update3, [str(listing_id)])
+        self.assertIn("Stats:", "\n".join(sink3))
+        self.assertTrue(len(update3.effective_chat.sent_photos) > 0)
 
     async def test_ai_companion_actually_fighting_gets_real_combat_xp(self):
         """
