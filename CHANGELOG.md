@@ -2,6 +2,32 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.80] — Hotfix: combat participants leaking permanently in the session index
+
+Real live bug (2026-08-02, found within minutes via a Development-topic
+report: "Battle is not initiating and there's some kind of issue going
+on in the background"). Two real players sharing a party (Ravenloft,
+Laurienna) were permanently refused every new fight with "Someone in
+your party is already in another fight right now" immediately followed
+by "No combat is active right now" — even though the live combat
+snapshot showed zero active sessions.
+
+Root cause: `Session.remove_defeated()` (drops a defeated AI
+participant from the turn order — covers real AI party companions like
+Grask Emberscale/Wren Hollowbrook, not just monsters) and
+`Session.remove_dead_player()` (permanent player death, also reused by
+the flee-to-safety path) both mutated the turn order directly but never
+cleared the removed participant's entry in the in-memory index that
+refuses double-booking someone into two fights at once.
+`end_session()`'s own cleanup only clears entries for participants
+still in the turn order at the time it runs — so a companion knocked
+out mid-fight, or a player who died or fled, stayed permanently
+"stuck," blocking every future fight naming them for as long as the
+process stayed up. Fixed both removal paths to clear the index entry
+the moment a participant leaves the fight, whatever the reason. A
+one-off restart already gave the two affected players immediate relief
+while this fix was being written and verified.
+
 ## [1.27.79] — Multi-tenant scaling Phase 3 (complete): outbound reply routing sweep
 
 Completes task #250. The ~340 remaining `config.TOPIC_ADVENTURE_ID`/

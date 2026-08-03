@@ -105,6 +105,31 @@ class Session:
         here — they stay in turn_order, unconscious, and roll death
         saves on their turns instead (see remove_dead_player for actual
         permanent player death after 3 failed saves).
+
+        Real live bug (2026-08-02, caught investigating a Dev-topic
+        report: "Battle is not initiating" -- two separate real players
+        sharing a party, Ravenloft and Laurienna, both permanently
+        refused with "Someone in your party is already in another fight
+        right now" followed by "No combat is active right now," even
+        though sessions_snapshot.json showed zero active sessions).
+        `is_ai` covers BOTH monsters AND real AI party companions (e.g.
+        Grask Emberscale, Wren Hollowbrook) -- this function only ever
+        dropped a defeated one from turn_order, never from the module-
+        level _USER_SESSION index start_session()/end_session() both
+        maintain. A companion knocked to 0 HP mid-fight got silently
+        orphaned in _USER_SESSION pointing at a session_id that would
+        later end normally for everyone else -- end_session() only
+        clears entries for participants STILL in turn_order, so the
+        orphaned companion's id stayed registered forever (confirmed:
+        both Grask -1004 and Wren -1005, this exact party's own AI
+        companions, were present in the live goblin fight seen earlier
+        this session and are exactly the shape of participant this
+        function silently drops). Any FUTURE fight naming that same
+        companion in its party then failed start_session's "already in
+        another fight" check against a session that had long since
+        ended, for the rest of that companion's existence or until a
+        bot restart -- which is why a plain restart cleared the symptom
+        immediately (_USER_SESSION is pure in-memory, never persisted).
         """
         removed = []
         still_alive_ids = []
@@ -126,6 +151,9 @@ class Session:
                 self.current_turn_index = self.turn_order.index(current_id)
             else:
                 self.current_turn_index = 0 if self.turn_order else 0
+            for r in removed:
+                if _USER_SESSION.get(r["telegram_user_id"]) == self.session_id:
+                    _USER_SESSION.pop(r["telegram_user_id"], None)
 
         return removed
 
@@ -133,12 +161,27 @@ class Session:
         """
         Permanently removes a real player from turn_order after they've
         failed 3 death saves — genuine death, unlike a monster's normal
-        removal in remove_defeated().
+        removal in remove_defeated(). Also used by the flee-to-safety
+        path (_resolve_flee_attempt) to drop a fleeing participant from
+        this fight while it continues for everyone else.
+
+        Real live bug (2026-08-02, same root cause and same Dev-topic
+        report as remove_defeated()'s fix above): this used to only
+        touch turn_order, never the module-level _USER_SESSION index --
+        a player removed here (death or flee) stayed permanently
+        registered against this session_id in _USER_SESSION, since
+        end_session()'s own cleanup only clears entries for participants
+        STILL in turn_order at the time it runs. That orphaned entry
+        then refused every future fight attempt involving that same
+        player with "Someone in your party is already in another fight
+        right now," for as long as the process stayed up.
         """
         if telegram_user_id not in self.turn_order:
             return
         current_id = self.turn_order[self.current_turn_index]
         self.turn_order.remove(telegram_user_id)
+        if _USER_SESSION.get(telegram_user_id) == self.session_id:
+            _USER_SESSION.pop(telegram_user_id, None)
         if not self.turn_order:
             self.current_turn_index = 0
         elif current_id in self.turn_order:

@@ -2338,6 +2338,78 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot.ban_command(right_thread_update, DummyContext(bot=FakeBot(status="creator"), args=[]))
         self.assertTrue(len(sink4) > 0)
 
+    def test_removed_combat_participants_dont_leak_in_user_session_forever(self):
+        """
+        Real live bug (2026-08-02, found via a Development-topic report:
+        "Battle is not initiating" -- two real players sharing a party,
+        Ravenloft and Laurienna, were permanently refused new combat
+        with "Someone in your party is already in another fight right
+        now" followed by "No combat is active right now," even though
+        sessions_snapshot.json showed zero active sessions).
+
+        Root cause: Session.remove_defeated() (drops a defeated AI
+        participant from turn_order -- covers real AI party companions
+        like Grask Emberscale/Wren Hollowbrook, not just monsters) and
+        Session.remove_dead_player() (permanent player death, also
+        reused by the flee-to-safety path) both mutated turn_order
+        directly but never cleared the removed participant's entry in
+        the module-level _USER_SESSION index that start_session() uses
+        to refuse double-booking a participant into two fights at once.
+        end_session()'s own cleanup only clears entries for participants
+        STILL in turn_order, so anyone removed by either method stayed
+        permanently "stuck," refusing every future fight naming them
+        until the whole bot process restarted (confirmed live: a plain
+        restart was the only thing that cleared the two real players'
+        stuck state, since _USER_SESSION is pure in-memory and never
+        persisted to sessions_snapshot.json).
+        """
+        import sessions
+
+        def member(uid, name, hp=50, is_ai=True):
+            return {"telegram_user_id": uid, "name": name, "hp_current": hp, "hp_max": hp,
+                    "is_ai": is_ai, "strength": 12, "dexterity": 12, "armor_class": 12, "initiative": 10}
+
+        chat_id = -999001
+        companion = member(-960001, "TestCompanion", hp=0, is_ai=True)
+        real_player = member(960002, "TestPlayer", hp=200, is_ai=False)
+        enemy = member(-960003, "TestGoblin", hp=25, is_ai=True)
+        sides = {companion["telegram_user_id"]: "party", real_player["telegram_user_id"]: "party",
+                 enemy["telegram_user_id"]: "enemy"}
+        session1 = sessions.start_session(chat_id, [companion, real_player, enemy], sides=sides)
+        self.assertIsNotNone(session1)
+        self.assertEqual(sessions._USER_SESSION.get(-960001), session1.session_id)
+
+        removed = session1.remove_defeated()
+        self.assertTrue(any(r["telegram_user_id"] == -960001 for r in removed))
+        self.assertNotIn(-960001, sessions._USER_SESSION)
+        sessions.end_session(chat_id, session1)
+
+        # The real proof: a brand new fight naming that same companion must now succeed.
+        party2 = [member(-960001, "TestCompanion", hp=106, is_ai=True), member(960002, "TestPlayer", hp=200, is_ai=False)]
+        enemy2 = member(-960004, "TestGoblin2", hp=25, is_ai=True)
+        sides2 = {p["telegram_user_id"]: "party" for p in party2}
+        sides2[enemy2["telegram_user_id"]] = "enemy"
+        session2 = sessions.start_session(chat_id, party2 + [enemy2], sides=sides2)
+        self.assertIsNotNone(session2)
+        sessions.end_session(chat_id, session2)
+
+        # Same proof for remove_dead_player (permanent death / flee).
+        dying_player = member(960005, "TestDyingPlayer", hp=0, is_ai=False)
+        enemy3 = member(-960006, "TestGoblin3", hp=25, is_ai=True)
+        sides3 = {dying_player["telegram_user_id"]: "party", enemy3["telegram_user_id"]: "enemy"}
+        session3 = sessions.start_session(chat_id, [dying_player, enemy3], sides=sides3)
+        self.assertIsNotNone(session3)
+        self.assertEqual(sessions._USER_SESSION.get(960005), session3.session_id)
+        session3.remove_dead_player(960005)
+        self.assertNotIn(960005, sessions._USER_SESSION)
+        sessions.end_session(chat_id, session3)
+
+        session4 = sessions.start_session(
+            chat_id, [member(960005, "TestDyingPlayer", hp=327, is_ai=False), member(-960007, "TestGoblin4", hp=25, is_ai=True)],
+            sides={960005: "party", -960007: "enemy"},
+        )
+        self.assertIsNotNone(session4)
+
     async def test_ai_companion_actually_fighting_gets_real_combat_xp(self):
         """
         Real live bug (2026-08-01, Coffee: "They didn't get experience
