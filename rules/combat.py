@@ -274,8 +274,15 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     # computed live here rather than stored on the character -- see
     # hybrid_features.hybrid_ac_bonus's own docstring for why (freely
     # switching hybrid flavors can never leave a stale bonus behind).
+    # Shield (real 5E spell, 2026-08-04): +5 AC, computed live here (same
+    # "checked at attack time, never mutated on the character" style as
+    # hybrid_ac_bonus/formation_ac_bonus just above) rather than
+    # permanently bumping armor_class -- the "shield_active" condition
+    # expires on its own via Session._expire_timed_conditions, so there's
+    # no separate AC-reversal code needed either.
+    shield_bonus = 5 if "shield_active" in defender.get("conditions", []) else 0
     effective_defender_ac = (
-        defender["armor_class"] + hybrid_features.hybrid_ac_bonus(defender) + formation_ac_bonus(defender)
+        defender["armor_class"] + hybrid_features.hybrid_ac_bonus(defender) + formation_ac_bonus(defender) + shield_bonus
     )
     attack_result = roll_attack(
         attacker,
@@ -286,6 +293,18 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         disadvantage=disadvantage,
         forced_roll=forced_roll,
     )
+
+    # Bless (real 5E spell, 2026-08-04): a real, flat +2 to attack rolls
+    # for the caster's whole blessed party -- roll_attack has no numeric
+    # to-hit-bonus parameter of its own, so this is applied as a
+    # post-roll adjustment, same "recheck hit off the adjusted total"
+    # shape a forced physical-dice roll already uses elsewhere. Doesn't
+    # touch a natural 1/20 (crit/fumble are about the raw die, not the
+    # total), matching real 5E where Bless can't turn a fumble into a
+    # hit or a crit into a miss.
+    if "blessed" in attacker.get("conditions", []) and not attack_result["critical_fail"] and not attack_result["critical_hit"]:
+        attack_result["total"] += 2
+        attack_result["hit"] = attack_result["total"] >= effective_defender_ac
 
     shield_reaction_triggered = False
     reaction_available = defender.get("reaction_used_round") != round_number
@@ -301,6 +320,7 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
 
     damage_dealt = 0
     relentless_endurance_triggered = False
+    death_ward_triggered = False
     dark_ones_blessing_gained = 0
     uncanny_dodge_triggered = False
     hybrid_bonus_gained = 0
@@ -340,6 +360,12 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
             forced_roll=forced_damage_roll,
         )
         damage_dealt = max(dmg["total"], 0)
+        # Command's "Drop" word (real 5E spell, 2026-08-04): the target's
+        # weapon clatters away for a round -- reduced here to a heavily
+        # weakened, effectively-unarmed swing rather than tracking a
+        # separate "no weapon equipped" combat path just for this.
+        if "disarmed" in attacker.get("conditions", []):
+            damage_dealt = damage_dealt // 4
         if sneak_attack_die:
             # Real 5E scales Sneak Attack's die count with Rogue level
             # (1d6 at 1-2, up to 10d6 at 19-20) -- found frozen at a flat
@@ -351,6 +377,18 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
                 extra_sneak_dice += 1
             sneak_dmg = roll_damage("1d6", critical=attack_result["critical_hit"], extra_dice=extra_sneak_dice)
             damage_dealt += sneak_dmg["total"]
+        # Hex / Hunter's Mark (real 5E spells, 2026-08-04): both grant
+        # extra damage specifically "when you hit the marked creature
+        # with a weapon attack" -- real 5E text for both, so this is
+        # scoped to weapon attacks only (not spell damage), matching the
+        # actual spells rather than a made-up broader bonus. Hunter's
+        # Mark's die scales with slot level in real 5E; simplified here
+        # to a flat 1d6, same "one die, no slot-level scaling" style
+        # this engine already uses for Sneak Attack's base case.
+        marked_target_id = attacker.get("marked_target_id")
+        if marked_target_id is not None and marked_target_id == defender.get("telegram_user_id"):
+            mark_dmg = roll_damage("1d6", critical=attack_result["critical_hit"])
+            damage_dealt += mark_dmg["total"]
         damage_dealt = apply_damage_type_modifier(
             damage_dealt, weapon.get("damage_type", "physical"), defender, attacker
         )
@@ -436,6 +474,17 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
                 and defender_relentless_endurance_available):
             hp_after = 1
             relentless_endurance_triggered = True
+        # Death Ward (real 5E spell, 2026-08-04): "the first time this
+        # creature would drop to 0 hit points as a result of taking
+        # damage, it instead drops to 1 hit point, and the spell ends" --
+        # same shape as Relentless Endurance just above (which this
+        # engine already modeled this exact way), gated on the
+        # "death_warded" condition instead of race, and consumed
+        # (removed) on trigger since real Death Ward only saves you once.
+        elif hp_after == 0 and hp_before > 0 and "death_warded" in defender.get("conditions", []):
+            hp_after = 1
+            death_ward_triggered = True
+            defender["conditions"].remove("death_warded")
         defender["hp_current"] = hp_after
 
         # Boss Enrage (2026-07-27, per Coffee: "I want the battles to be
@@ -498,6 +547,7 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         "target_ac": effective_defender_ac,
         "damage_dealt": damage_dealt,
         "relentless_endurance_triggered": relentless_endurance_triggered,
+        "death_ward_triggered": death_ward_triggered,
         "dark_ones_blessing_gained": dark_ones_blessing_gained,
         "shield_reaction_triggered": shield_reaction_triggered,
         "uncanny_dodge_triggered": uncanny_dodge_triggered,

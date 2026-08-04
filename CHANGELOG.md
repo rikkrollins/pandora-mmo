@@ -2,6 +2,80 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.85] — Multi-tenant DB Phase 4b, 27 real spell mechanics, darkness/light system
+
+**Real live bug fixed (Coffee, Development topic): "i wasted a turn
+because of this."** Casting Counterspell mid-fight spent the turn and
+the spell slot, then narrated "this spell's flavor is real, but it
+doesn't yet apply a mechanical effect in this build." Auditing
+`_do_cast_spell`'s dispatch found this wasn't unique to Counterspell —
+**every spell whose effect type is `buff`/`negate`/`ac_bonus` (27 spells
+total)** fell into one shared flavor-only branch that still spent the
+slot/turn no matter what was cast. Per Coffee's explicit direction
+("do research so all 27 have functioning mechanics ... do not MISS
+ANYTHING"), all 27 now have a real, tested mechanical effect instead of
+a stopgap warning:
+
+- **Counterspell** is correctly reaction-only in real 5E, and no
+  monster or NPC in this game casts spells yet — so proactive casting
+  is now honestly refused ("can only be used as a REACTION... nothing
+  was spent") instead of quietly burning a turn. This directly fixes
+  the reported bug.
+- **Death Ward, Shield, Bless, Protection from Evil and Good,
+  Invisibility, Longstrider** and other buffs now apply real, timed
+  combat conditions (new `condition_expires_round` tracking, expired
+  automatically each round) that genuinely change AC, hit chance,
+  advantage/disadvantage, or survive-a-killing-blow outcomes in
+  `rules/combat.py`.
+- **Hex, Hunter's Mark, Faerie Fire, Hold Person, Hold Monster, Charm
+  Person, Animal Friendship, Command** now impose real advantage/
+  disadvantage or bonus-damage effects on the actual target, reusing
+  the existing conditions/advantage system rather than a parallel one.
+- **Banishment** (per Coffee's design: usable on both enemies and
+  allies, no reward/XP if the fight ends while an enemy is banished)
+  and **Polymorph** (full stat-block swap onto a real existing monster
+  template, reverts on expiry, current HP carries over per real 5E
+  rules) are both fully real now.
+- **Misty Step, Dimension Door** guarantee a real escape from combat
+  (reusing the existing forced-success flee resolution).
+- **Detect Magic** gives a real readout of which carried items are
+  actually magical. **Guidance, Thaumaturgy, Mage Hand, Prestidigitation**
+  grant a real, one-time consumable +2 bonus on your next skill check
+  rather than staying pure flavor.
+- **Dispel Magic** genuinely strips real magical conditions off a
+  target instead of doing nothing.
+- Found and fixed a real bug while building this: Hunter's Mark/Hex's
+  bonus-damage check compared `marked_target_id == telegram_user_id`
+  without a null guard, so two unrelated participants that both
+  happened to lack the field (`None == None`) spuriously matched and
+  silently added bonus damage on unmarked attacks.
+
+**New: darkness and light sources are now real.** Underground locations
+not explicitly lit are dark unless the character has Darkvision, a
+carried torch/light item, or an active Dancing Lights effect (a real
+10-minute timed light source). In the dark, "look around" and arriving
+via travel no longer reveal the room's description, its image, or who's
+in it — only "It is too dark. You cannot see..." plus the exits you can
+feel your way to, hinting that you need a light source. `look` also now
+always states the in-game time, which matters for exactly this system
+(night/day affects some locations' lighting).
+
+**Multi-tenant scaling Phase 4b: the `characters`/`active_characters`
+CRUD layer and ~300+ call sites are chat-scoped for real.** Every one of
+the ~55 `telegram_user_id`-keyed `db.py` functions now takes a required
+`chat_id`, and every real call site across `bot.py`, `shop.py`, and the
+test suite was updated to pass it — closing the gap where a second
+Telegram group would previously have read and written directly into
+this bot's own live game data instead of getting an independent game.
+Every background-loop function that touches per-chat state (idle/rest
+healing, AI-party autonomous turns, quest/timeout checks, XP/level-up
+announcements, and more) now sources its chat_id from the actual
+session/character/pending-action it's already handling, rather than the
+old single global "whichever chat spoke most recently" fallback — a
+real stopgap improvement, though the full "loop over every known chat"
+version of the background scheduler (task tracked separately) is still
+future work.
+
 ## [1.27.84] — Multi-tenant DB Phase 4a, dev-topic edit crash fix, /cancel_market
 
 **Multi-tenant scaling Phase 4a: database schema retrofit (sub-phase 1

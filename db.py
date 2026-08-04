@@ -646,11 +646,11 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     return d
 
 
-def _active_character_id(telegram_user_id: int, conn=None) -> int | None:
+def _active_character_id(telegram_user_id: int, chat_id: int, conn=None) -> int | None:
     def _lookup(c):
         row = c.execute(
-            "SELECT character_id FROM active_characters WHERE telegram_user_id = ?",
-            (telegram_user_id,),
+            "SELECT character_id FROM active_characters WHERE telegram_user_id = ? AND chat_id = ?",
+            (telegram_user_id, chat_id),
         ).fetchone()
         return row["character_id"] if row else None
 
@@ -660,22 +660,20 @@ def _active_character_id(telegram_user_id: int, conn=None) -> int | None:
         return _lookup(c)
 
 
-def _set_active_character(telegram_user_id: int, character_id: int, conn) -> None:
+def _set_active_character(telegram_user_id: int, chat_id: int, character_id: int, conn) -> None:
     # active_characters' real PK became (telegram_user_id, chat_id) in the
-    # Phase 4a schema migration (2026-08-03). chat_id isn't threaded through
-    # this function's own signature yet -- that's Phase 4b -- so until then
-    # every write here targets the one real home chat_id, matching every
-    # existing row (there is currently exactly one tenant).
+    # Phase 4a schema migration (2026-08-03); Phase 4b (2026-08-04) threads
+    # the real chat_id through as a genuine parameter.
     conn.execute(
         """
         INSERT INTO active_characters (telegram_user_id, chat_id, character_id) VALUES (?, ?, ?)
         ON CONFLICT(telegram_user_id, chat_id) DO UPDATE SET character_id = excluded.character_id
         """,
-        (telegram_user_id, config.TELEGRAM_CHAT_ID, character_id),
+        (telegram_user_id, chat_id, character_id),
     )
 
 
-def create_character(telegram_user_id: int, name: str, race: str, char_class: str,
+def create_character(telegram_user_id: int, chat_id: int, name: str, race: str, char_class: str,
                       ability_scores: dict, hp_max: int, armor_class: int,
                       gold: int, inventory: dict, is_ai: bool = False,
                       known_spells: list | None = None,
@@ -691,15 +689,15 @@ def create_character(telegram_user_id: int, name: str, race: str, char_class: st
         cur = conn.execute(
             """
             INSERT INTO characters (
-                telegram_user_id, name, race, char_class, level, xp,
+                telegram_user_id, chat_id, name, race, char_class, level, xp,
                 hp_current, hp_max, strength, dexterity, constitution,
                 intelligence, wisdom, charisma, proficiency_bonus,
                 armor_class, inventory, gold, is_ai, current_location, known_spells,
                 spell_slots_max, spell_slots_current, visited_locations
-            ) VALUES (?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?, ?, 2, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?, ?, 2, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                telegram_user_id, name, race, char_class,
+                telegram_user_id, chat_id, name, race, char_class,
                 hp_max, hp_max,
                 ability_scores["strength"], ability_scores["dexterity"],
                 ability_scores["constitution"], ability_scores["intelligence"],
@@ -710,14 +708,14 @@ def create_character(telegram_user_id: int, name: str, race: str, char_class: st
             ),
         )
         character_id = cur.lastrowid
-        _set_active_character(telegram_user_id, character_id, conn)
-    return get_character(telegram_user_id)
+        _set_active_character(telegram_user_id, chat_id, character_id, conn)
+    return get_character(telegram_user_id, chat_id)
 
 
 _NEXT_AI_ID: int | None = None  # lazily seeded from the DB — see create_ai_companion
 
 
-def create_ai_companion(name: str, race: str, char_class: str, ability_scores: dict,
+def create_ai_companion(chat_id: int, name: str, race: str, char_class: str, ability_scores: dict,
                          hp_max: int, armor_class: int, gold: int, inventory: dict) -> dict:
     """
     Create an AI-controlled companion character. Uses a synthetic negative
@@ -746,15 +744,15 @@ def create_ai_companion(name: str, race: str, char_class: str, ability_scores: d
     ai_id = _NEXT_AI_ID
     _NEXT_AI_ID -= 1
     return create_character(
-        telegram_user_id=ai_id, name=name, race=race, char_class=char_class,
+        telegram_user_id=ai_id, chat_id=chat_id, name=name, race=race, char_class=char_class,
         ability_scores=ability_scores, hp_max=hp_max, armor_class=armor_class,
         gold=gold, inventory=inventory, is_ai=True,
     )
 
 
-def update_character(telegram_user_id: int, **fields) -> dict | None:
+def update_character(telegram_user_id: int, chat_id: int, **fields) -> dict | None:
     if not fields:
-        return get_character(telegram_user_id)
+        return get_character(telegram_user_id, chat_id)
 
     json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades")
     for key in json_fields:
@@ -765,14 +763,14 @@ def update_character(telegram_user_id: int, **fields) -> dict | None:
     values = list(fields.values())
 
     with get_connection() as conn:
-        character_id = _active_character_id(telegram_user_id, conn)
+        character_id = _active_character_id(telegram_user_id, chat_id, conn)
         if character_id is None:
             return None
         conn.execute(
             f"UPDATE characters SET {columns} WHERE character_id = ?",
             values + [character_id],
         )
-    return get_character(telegram_user_id)
+    return get_character(telegram_user_id, chat_id)
 
 
 def update_character_by_id(character_id: int, **fields) -> dict | None:
@@ -817,22 +815,22 @@ def update_character_by_id(character_id: int, **fields) -> dict | None:
     return _row_to_dict(row) if row else None
 
 
-def add_item(telegram_user_id: int, item_id: str, quantity: int = 1) -> dict | None:
+def add_item(telegram_user_id: int, chat_id: int, item_id: str, quantity: int = 1) -> dict | None:
     """Add `quantity` of an item to a character's backpack (dict of item_id -> count)."""
-    character = get_character(telegram_user_id)
+    character = get_character(telegram_user_id, chat_id)
     if character is None:
         return None
     character["inventory"][item_id] = character["inventory"].get(item_id, 0) + quantity
-    return update_character(telegram_user_id, inventory=character["inventory"])
+    return update_character(telegram_user_id, chat_id, inventory=character["inventory"])
 
 
-def remove_item(telegram_user_id: int, item_id: str, quantity: int = 1) -> tuple[bool, dict | None]:
+def remove_item(telegram_user_id: int, chat_id: int, item_id: str, quantity: int = 1) -> tuple[bool, dict | None]:
     """
     Remove `quantity` of an item from a character's backpack. Returns
     (success, updated_character). Fails cleanly (no partial removal) if
     the character doesn't have enough of the item.
     """
-    character = get_character(telegram_user_id)
+    character = get_character(telegram_user_id, chat_id)
     if character is None:
         return False, None
     have = character["inventory"].get(item_id, 0)
@@ -843,7 +841,7 @@ def remove_item(telegram_user_id: int, item_id: str, quantity: int = 1) -> tuple
         character["inventory"].pop(item_id, None)
     else:
         character["inventory"][item_id] = remaining
-    updated = update_character(telegram_user_id, inventory=character["inventory"])
+    updated = update_character(telegram_user_id, chat_id, inventory=character["inventory"])
     return True, updated
 
 
@@ -1099,7 +1097,7 @@ def _equipped_set_ac_bonus(character: dict) -> int:
     return total
 
 
-def unequip_accessory(telegram_user_id: int, item_id: str) -> tuple[bool, str, dict | None]:
+def unequip_accessory(telegram_user_id: int, chat_id: int, item_id: str) -> tuple[bool, str, dict | None]:
     """
     Real, previously-missing feature (2026-08-02, needed for set bonuses
     to be meaningfully correct -- a bonus that could only ever be gained
@@ -1121,7 +1119,7 @@ def unequip_accessory(telegram_user_id: int, item_id: str) -> tuple[bool, str, d
     applied on top of whatever armor_class already legitimately is --
     never a full recompute.
     """
-    character = get_character(telegram_user_id)
+    character = get_character(telegram_user_id, chat_id)
     if character is None:
         return False, "No character found.", None
     accessories = character.get("equipped_accessories", [])
@@ -1133,7 +1131,7 @@ def unequip_accessory(telegram_user_id: int, item_id: str) -> tuple[bool, str, d
     new_set_bonus = _equipped_set_ac_bonus(character)
     new_ac = character["armor_class"] - (item.get("ac_bonus", 0) if item else 0) + (new_set_bonus - old_set_bonus)
     updated = update_character(
-        telegram_user_id, equipped_accessories=character["equipped_accessories"], armor_class=new_ac,
+        telegram_user_id, chat_id, equipped_accessories=character["equipped_accessories"], armor_class=new_ac,
     )
     name = item["name"] if item else item_id
     return True, f"You take off the {name}. AC is now {new_ac}.", updated
@@ -1168,7 +1166,7 @@ def _meets_equip_requirement(character: dict, item: dict) -> bool:
     return False
 
 
-def equip_item(telegram_user_id: int, item_id: str) -> tuple[bool, str, dict | None]:
+def equip_item(telegram_user_id: int, chat_id: int, item_id: str) -> tuple[bool, str, dict | None]:
     """
     Equip a weapon, armor, shield, ring, amulet, or wondrous item the
     character is actually carrying. Returns (success, message,
@@ -1196,7 +1194,7 @@ def equip_item(telegram_user_id: int, item_id: str) -> tuple[bool, str, dict | N
     several of these at once (e.g. two rings). Armor/shield equips
     re-sum every currently-worn ring's ac_bonus so order never matters.
     """
-    character = get_character(telegram_user_id)
+    character = get_character(telegram_user_id, chat_id)
     if character is None:
         return False, "No character found.", None
     if character["inventory"].get(item_id, 0) < 1:
@@ -1224,9 +1222,9 @@ def equip_item(telegram_user_id: int, item_id: str) -> tuple[bool, str, dict | N
         set_delta = _equipped_set_ac_bonus(character) - old_set_bonus
         if set_delta:
             new_ac = character["armor_class"] + set_delta
-            updated = update_character(telegram_user_id, equipped_weapon=item_id, armor_class=new_ac)
+            updated = update_character(telegram_user_id, chat_id, equipped_weapon=item_id, armor_class=new_ac)
             return True, f"You equip the {item['name']}. AC is now {new_ac}.", updated
-        updated = update_character(telegram_user_id, equipped_weapon=item_id)
+        updated = update_character(telegram_user_id, chat_id, equipped_weapon=item_id)
         return True, f"You equip the {item['name']}.", updated
 
     current_shield_bonus = 0
@@ -1252,7 +1250,7 @@ def equip_item(telegram_user_id: int, item_id: str) -> tuple[bool, str, dict | N
         set_delta = _equipped_set_ac_bonus(character) - old_set_bonus
         dex_mod = ability_modifier(character["dexterity"])
         new_ac = item["ac_base"] + dex_mod + current_shield_bonus + ring_bonus + set_delta
-        updated = update_character(telegram_user_id, equipped_armor=item_id, armor_class=new_ac)
+        updated = update_character(telegram_user_id, chat_id, equipped_armor=item_id, armor_class=new_ac)
         return True, f"You put on the {item['name']} (AC {new_ac}).", updated
 
     if item["type"] == "shield":
@@ -1262,7 +1260,7 @@ def equip_item(telegram_user_id: int, item_id: str) -> tuple[bool, str, dict | N
         character["equipped_shield"] = item_id
         set_delta = _equipped_set_ac_bonus(character) - old_set_bonus
         new_ac = character["armor_class"] - current_shield_bonus + item["ac_bonus"] + set_delta
-        updated = update_character(telegram_user_id, equipped_shield=item_id, armor_class=new_ac)
+        updated = update_character(telegram_user_id, chat_id, equipped_shield=item_id, armor_class=new_ac)
         return True, f"You raise the {item['name']} (AC {new_ac}).", updated
 
     # Ring / amulet / wondrous: added to the accessories list (worn
@@ -1291,11 +1289,11 @@ def equip_item(telegram_user_id: int, item_id: str) -> tuple[bool, str, dict | N
         updates["constitution"] = item["constitution_set"]
         note_parts.append(f"Constitution is now {item['constitution_set']}.")
 
-    updated = update_character(telegram_user_id, **updates)
+    updated = update_character(telegram_user_id, chat_id, **updates)
     return True, " ".join(note_parts), updated
 
 
-def auto_equip_best_gear(telegram_user_id: int) -> tuple[str, dict | None]:
+def auto_equip_best_gear(telegram_user_id: int, chat_id: int) -> tuple[str, dict | None]:
     """
     Picks the real best weapon (highest average damage -- see
     rules.dice.average_damage) and real best armor (highest ac_base)
@@ -1306,7 +1304,7 @@ def auto_equip_best_gear(telegram_user_id: int) -> tuple[str, dict | None]:
     Always returns a real, honest summary, even if there was nothing
     to equip in one or both slots (never silently no-ops).
     """
-    character = get_character(telegram_user_id)
+    character = get_character(telegram_user_id, chat_id)
     if character is None:
         return "No character found.", None
 
@@ -1326,14 +1324,14 @@ def auto_equip_best_gear(telegram_user_id: int) -> tuple[str, dict | None]:
             key=lambda i: average_damage(items_module.get_item(i)["damage_dice"],
                                           items_module.get_item(i).get("damage_bonus", 0)),
         )
-        _, msg, character = equip_item(telegram_user_id, best_weapon)
+        _, msg, character = equip_item(telegram_user_id, chat_id, best_weapon)
         messages.append(msg)
     else:
         messages.append("No weapon carried to equip.")
 
     if armor_ids:
         best_armor = max(armor_ids, key=lambda i: items_module.get_item(i)["ac_base"])
-        _, msg, character = equip_item(telegram_user_id, best_armor)
+        _, msg, character = equip_item(telegram_user_id, chat_id, best_armor)
         messages.append(msg)
     else:
         messages.append("No armor carried to equip.")
@@ -1344,7 +1342,7 @@ def auto_equip_best_gear(telegram_user_id: int) -> tuple[str, dict | None]:
     ]
     if shield_ids:
         best_shield = max(shield_ids, key=lambda i: items_module.get_item(i)["ac_bonus"])
-        _, msg, character = equip_item(telegram_user_id, best_shield)
+        _, msg, character = equip_item(telegram_user_id, chat_id, best_shield)
         messages.append(msg)
 
     # Rings/amulets/wondrous items (2026-07-15): unlike weapon/armor/
@@ -1357,18 +1355,18 @@ def auto_equip_best_gear(telegram_user_id: int) -> tuple[str, dict | None]:
         and item_id not in character["equipped_accessories"]
     ]
     for accessory_id in accessory_ids:
-        success, msg, character = equip_item(telegram_user_id, accessory_id)
+        success, msg, character = equip_item(telegram_user_id, chat_id, accessory_id)
         if success:
             messages.append(msg)
 
     return " ".join(messages), character
 
 
-def move_character(telegram_user_id: int, new_location: str) -> dict | None:
-    return update_character(telegram_user_id, current_location=new_location)
+def move_character(telegram_user_id: int, chat_id: int, new_location: str) -> dict | None:
+    return update_character(telegram_user_id, chat_id, current_location=new_location)
 
 
-def mark_visited(telegram_user_id: int, location_id: str) -> dict | None:
+def mark_visited(telegram_user_id: int, chat_id: int, location_id: str) -> dict | None:
     """
     Adds location_id to this character's visited_locations, moving it to
     the end if already present. Real bug, reported live 2026-07-18: a
@@ -1387,32 +1385,32 @@ def mark_visited(telegram_user_id: int, location_id: str) -> dict | None:
     revisit makes the list a genuine recency order, matching what
     _nearest_safe_waypoint's docstring already claimed it did.
     """
-    character = get_character(telegram_user_id)
+    character = get_character(telegram_user_id, chat_id)
     if character is None:
         return None
     visited = character["visited_locations"]
     if location_id in visited:
         visited.remove(location_id)
     visited.append(location_id)
-    return update_character(telegram_user_id, visited_locations=visited)
+    return update_character(telegram_user_id, chat_id, visited_locations=visited)
 
 
-def mark_known_monster(telegram_user_id: int, monster_key: str) -> dict | None:
+def mark_known_monster(telegram_user_id: int, chat_id: int, monster_key: str) -> dict | None:
     """
     Adds monster_key to this character's known_monsters (bestiary
     discovery), if new -- same fog-of-war pattern as mark_visited above,
     called once a character has actually fought a given monster type.
     """
-    character = get_character(telegram_user_id)
+    character = get_character(telegram_user_id, chat_id)
     if character is None:
         return None
     if monster_key in character["known_monsters"]:
         return character
     character["known_monsters"].append(monster_key)
-    return update_character(telegram_user_id, known_monsters=character["known_monsters"])
+    return update_character(telegram_user_id, chat_id, known_monsters=character["known_monsters"])
 
 
-def mark_location_cleared(telegram_user_id: int, location_id: str) -> dict | None:
+def mark_location_cleared(telegram_user_id: int, chat_id: int, location_id: str) -> dict | None:
     """
     Marks a location as "cleared" -- this character has won a real fight
     there at least once. Same fog-of-war-style pattern as mark_visited/
@@ -1422,43 +1420,43 @@ def mark_location_cleared(telegram_user_id: int, location_id: str) -> dict | Non
     check to block deeper connections until the room before them has
     actually been fought through.
     """
-    character = get_character(telegram_user_id)
+    character = get_character(telegram_user_id, chat_id)
     if character is None:
         return None
     if location_id in character["cleared_locations"]:
         return character
     character["cleared_locations"].append(location_id)
-    return update_character(telegram_user_id, cleared_locations=character["cleared_locations"])
+    return update_character(telegram_user_id, chat_id, cleared_locations=character["cleared_locations"])
 
 
-def learn_spell(telegram_user_id: int, spell_id: str) -> dict | None:
-    character = get_character(telegram_user_id)
+def learn_spell(telegram_user_id: int, chat_id: int, spell_id: str) -> dict | None:
+    character = get_character(telegram_user_id, chat_id)
     if character is None:
         return None
     if spell_id not in character["known_spells"]:
         character["known_spells"].append(spell_id)
-    return update_character(telegram_user_id, known_spells=character["known_spells"])
+    return update_character(telegram_user_id, chat_id, known_spells=character["known_spells"])
 
 
-def spend_spell_slot(telegram_user_id: int) -> tuple[bool, dict | None]:
+def spend_spell_slot(telegram_user_id: int, chat_id: int) -> tuple[bool, dict | None]:
     """
     Attempts to spend one spell slot. Returns (success, updated_character).
     Fails cleanly (no partial change) if none remain.
     """
-    character = get_character(telegram_user_id)
+    character = get_character(telegram_user_id, chat_id)
     if character is None:
         return False, None
     if character["spell_slots_current"] <= 0:
         return False, character
     updated = update_character(
-        telegram_user_id, spell_slots_current=character["spell_slots_current"] - 1
+        telegram_user_id, chat_id, spell_slots_current=character["spell_slots_current"] - 1
     )
     return True, updated
 
 
-def complete_quest(telegram_user_id: int, quest_id: str) -> dict | None:
+def complete_quest(telegram_user_id: int, chat_id: int, quest_id: str) -> dict | None:
     """Marks a quest completed and clears it from active_quests, if present."""
-    character = get_character(telegram_user_id)
+    character = get_character(telegram_user_id, chat_id)
     if character is None:
         return None
     if quest_id not in character["completed_quests"]:
@@ -1466,28 +1464,28 @@ def complete_quest(telegram_user_id: int, quest_id: str) -> dict | None:
     active = character["active_quests"]
     active.pop(quest_id, None)
     return update_character(
-        telegram_user_id, completed_quests=character["completed_quests"], active_quests=active
+        telegram_user_id, chat_id, completed_quests=character["completed_quests"], active_quests=active
     )
 
 
-def accept_quest(telegram_user_id: int, quest_id: str) -> dict | None:
-    character = get_character(telegram_user_id)
+def accept_quest(telegram_user_id: int, chat_id: int, quest_id: str) -> dict | None:
+    character = get_character(telegram_user_id, chat_id)
     if character is None:
         return None
     active = character["active_quests"]
     if quest_id not in active:
         active[quest_id] = {"accepted_at": datetime.now(timezone.utc).isoformat()}
-    return update_character(telegram_user_id, active_quests=active)
+    return update_character(telegram_user_id, chat_id, active_quests=active)
 
 
-def join_guild(telegram_user_id: int, guild_id: str) -> dict | None:
-    return update_character(telegram_user_id, guild=guild_id)
+def join_guild(telegram_user_id: int, chat_id: int, guild_id: str) -> dict | None:
+    return update_character(telegram_user_id, chat_id, guild=guild_id)
 
 
-def get_character(telegram_user_id: int) -> dict | None:
+def get_character(telegram_user_id: int, chat_id: int) -> dict | None:
     """Returns this telegram_user_id's currently ACTIVE character, if any."""
     with get_connection() as conn:
-        character_id = _active_character_id(telegram_user_id, conn)
+        character_id = _active_character_id(telegram_user_id, chat_id, conn)
         if character_id is None:
             return None
         row = conn.execute(
@@ -1515,12 +1513,12 @@ def get_character_by_id(character_id: int) -> dict | None:
     return _row_to_dict(row) if row else None
 
 
-def list_characters(telegram_user_id: int) -> list[dict]:
-    """All non-deleted characters this telegram_user_id owns, oldest first."""
+def list_characters(telegram_user_id: int, chat_id: int) -> list[dict]:
+    """All non-deleted characters this telegram_user_id owns IN THIS CHAT, oldest first."""
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT * FROM characters WHERE telegram_user_id = ? AND is_deleted = 0 ORDER BY character_id",
-            (telegram_user_id,),
+            "SELECT * FROM characters WHERE telegram_user_id = ? AND chat_id = ? AND is_deleted = 0 ORDER BY character_id",
+            (telegram_user_id, chat_id),
         ).fetchall()
     return [_row_to_dict(r) for r in rows]
 
@@ -1590,7 +1588,7 @@ def find_character_by_telegram_username(username: str) -> dict | None:
     return _row_to_dict(row) if row else None
 
 
-def update_telegram_username(telegram_user_id: int, username: str | None) -> None:
+def update_telegram_username(telegram_user_id: int, chat_id: int, username: str | None) -> None:
     """
     Keeps a character's telegram_username fresh from the real incoming
     Update on every message (Telegram usernames can change, and are
@@ -1600,7 +1598,7 @@ def update_telegram_username(telegram_user_id: int, username: str | None) -> Non
     if not username:
         return
     with get_connection() as conn:
-        character_id = _active_character_id(telegram_user_id, conn)
+        character_id = _active_character_id(telegram_user_id, chat_id, conn)
         if character_id is None:
             return
         conn.execute(
@@ -1609,7 +1607,7 @@ def update_telegram_username(telegram_user_id: int, username: str | None) -> Non
         )
 
 
-def switch_character(telegram_user_id: int, character_id: int) -> dict | None:
+def switch_character(telegram_user_id: int, chat_id: int, character_id: int) -> dict | None:
     """
     Makes character_id the active character for telegram_user_id, if it
     exists, is owned by them, and isn't deleted. Returns the newly-active
@@ -1617,16 +1615,16 @@ def switch_character(telegram_user_id: int, character_id: int) -> dict | None:
     """
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT * FROM characters WHERE character_id = ? AND telegram_user_id = ? AND is_deleted = 0",
-            (character_id, telegram_user_id),
+            "SELECT * FROM characters WHERE character_id = ? AND telegram_user_id = ? AND chat_id = ? AND is_deleted = 0",
+            (character_id, telegram_user_id, chat_id),
         ).fetchone()
         if row is None:
             return None
-        _set_active_character(telegram_user_id, character_id, conn)
+        _set_active_character(telegram_user_id, chat_id, character_id, conn)
     return _row_to_dict(row)
 
 
-def delete_character(telegram_user_id: int, character_id: int) -> bool:
+def delete_character(telegram_user_id: int, chat_id: int, character_id: int) -> bool:
     """
     Soft-deletes a character this telegram_user_id owns. If it was the
     active character, another remaining (non-deleted) character owned by
@@ -1635,29 +1633,29 @@ def delete_character(telegram_user_id: int, character_id: int) -> bool:
     """
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT character_id FROM characters WHERE character_id = ? AND telegram_user_id = ? AND is_deleted = 0",
-            (character_id, telegram_user_id),
+            "SELECT character_id FROM characters WHERE character_id = ? AND telegram_user_id = ? AND chat_id = ? AND is_deleted = 0",
+            (character_id, telegram_user_id, chat_id),
         ).fetchone()
         if row is None:
             return False
 
         conn.execute("UPDATE characters SET is_deleted = 1 WHERE character_id = ?", (character_id,))
 
-        current_active = _active_character_id(telegram_user_id, conn)
+        current_active = _active_character_id(telegram_user_id, chat_id, conn)
         if current_active == character_id:
             replacement = conn.execute(
-                "SELECT character_id FROM characters WHERE telegram_user_id = ? AND is_deleted = 0 "
+                "SELECT character_id FROM characters WHERE telegram_user_id = ? AND chat_id = ? AND is_deleted = 0 "
                 "ORDER BY character_id LIMIT 1",
-                (telegram_user_id,),
+                (telegram_user_id, chat_id),
             ).fetchone()
             if replacement:
-                _set_active_character(telegram_user_id, replacement["character_id"], conn)
+                _set_active_character(telegram_user_id, chat_id, replacement["character_id"], conn)
             else:
-                conn.execute("DELETE FROM active_characters WHERE telegram_user_id = ?", (telegram_user_id,))
+                conn.execute("DELETE FROM active_characters WHERE telegram_user_id = ? AND chat_id = ?", (telegram_user_id, chat_id))
     return True
 
 
-def add_xp(telegram_user_id: int, amount: int) -> dict | None:
+def add_xp(telegram_user_id: int, chat_id: int, amount: int) -> dict | None:
     """
     Add XP and auto-update level + proficiency bonus if it crossed a
     threshold. If the character actually leveled up, this also applies
@@ -1669,7 +1667,7 @@ def add_xp(telegram_user_id: int, amount: int) -> dict | None:
     equally to AI-controlled companions, since they level through this
     same function.
     """
-    character = get_character(telegram_user_id)
+    character = get_character(telegram_user_id, chat_id)
     if character is None:
         return None
 
@@ -1729,7 +1727,7 @@ def add_xp(telegram_user_id: int, amount: int) -> dict | None:
         if newly_learned:
             updates["known_spells"] = character["known_spells"] + newly_learned
 
-    return update_character(telegram_user_id, **updates)
+    return update_character(telegram_user_id, chat_id, **updates)
 
 
 # ---------------------------------------------------------------------
@@ -1905,19 +1903,19 @@ def remove_market_listing(listing_id: int) -> None:
 # just tracks the raw per-ability use counts the formula is applied to.
 # ---------------------------------------------------------------------
 
-def get_skill_uses(telegram_user_id: int) -> dict:
-    character = get_character(telegram_user_id)
+def get_skill_uses(telegram_user_id: int, chat_id: int) -> dict:
+    character = get_character(telegram_user_id, chat_id)
     return character["skill_uses"] if character else {}
 
 
-def record_skill_use(telegram_user_id: int, ability: str) -> int:
+def record_skill_use(telegram_user_id: int, chat_id: int, ability: str) -> int:
     """Increments and returns the new use count for this ability."""
-    character = get_character(telegram_user_id)
+    character = get_character(telegram_user_id, chat_id)
     if character is None:
         return 0
     uses = character["skill_uses"]
     uses[ability] = uses.get(ability, 0) + 1
-    update_character(telegram_user_id, skill_uses=uses)
+    update_character(telegram_user_id, chat_id, skill_uses=uses)
     return uses[ability]
 
 
@@ -1930,25 +1928,25 @@ def record_skill_use(telegram_user_id: int, ability: str) -> int:
 # HP/spell slots, so they either reset all at once or not at all.
 # ---------------------------------------------------------------------
 
-def get_feature_uses(telegram_user_id: int, feature_id: str) -> int:
-    character = get_character(telegram_user_id)
+def get_feature_uses(telegram_user_id: int, chat_id: int, feature_id: str) -> int:
+    character = get_character(telegram_user_id, chat_id)
     return character["feature_uses"].get(feature_id, 0) if character else 0
 
 
-def use_feature(telegram_user_id: int, feature_id: str) -> int:
+def use_feature(telegram_user_id: int, chat_id: int, feature_id: str) -> int:
     """Increments and returns the new use count for this feature this rest cycle."""
-    character = get_character(telegram_user_id)
+    character = get_character(telegram_user_id, chat_id)
     if character is None:
         return 0
     uses = character["feature_uses"]
     uses[feature_id] = uses.get(feature_id, 0) + 1
-    update_character(telegram_user_id, feature_uses=uses)
+    update_character(telegram_user_id, chat_id, feature_uses=uses)
     return uses[feature_id]
 
 
-def reset_feature_uses(telegram_user_id: int) -> None:
+def reset_feature_uses(telegram_user_id: int, chat_id: int) -> None:
     """Clears all limited-use feature counters -- called on a full rest."""
-    update_character(telegram_user_id, feature_uses={})
+    update_character(telegram_user_id, chat_id, feature_uses={})
 
 
 # ---------------------------------------------------------------------
@@ -1960,10 +1958,10 @@ def reset_feature_uses(telegram_user_id: int) -> None:
 # message — see bot.py's adventure_master_handler).
 # ---------------------------------------------------------------------
 
-def touch_last_active(telegram_user_id: int) -> None:
+def touch_last_active(telegram_user_id: int, chat_id: int) -> None:
     """Records 'this player did something just now' — real players only in practice."""
     with get_connection() as conn:
-        character_id = _active_character_id(telegram_user_id, conn)
+        character_id = _active_character_id(telegram_user_id, chat_id, conn)
         if character_id is None:
             return
         conn.execute(
@@ -1972,7 +1970,7 @@ def touch_last_active(telegram_user_id: int) -> None:
         )
 
 
-def update_login_streak(telegram_user_id: int) -> tuple[int, bool] | None:
+def update_login_streak(telegram_user_id: int, chat_id: int) -> tuple[int, bool] | None:
     """
     Login streak (task #78): a real consecutive-real-calendar-day
     counter, checked from the SAME real-activity checkpoint as
@@ -1982,7 +1980,7 @@ def update_login_streak(telegram_user_id: int) -> tuple[int, bool] | None:
     None entirely for AI characters (companions/autonomous party),
     which don't have a real login of their own.
     """
-    character = get_character(telegram_user_id)
+    character = get_character(telegram_user_id, chat_id)
     if character is None or character.get("is_ai"):
         return None
 
@@ -2001,11 +1999,11 @@ def update_login_streak(telegram_user_id: int) -> tuple[int, bool] | None:
             last_date = None
 
     streak = streak + 1 if last_date is not None and (today - last_date).days == 1 else 1
-    update_character(telegram_user_id, login_streak_days=streak, last_login_date=today.isoformat())
+    update_character(telegram_user_id, chat_id, login_streak_days=streak, last_login_date=today.isoformat())
     return streak, True
 
 
-def claim_guild_quest_if_unclaimed_today(telegram_user_id: int, reward_gold: int, reward_xp: int) -> bool:
+def claim_guild_quest_if_unclaimed_today(telegram_user_id: int, chat_id: int, reward_gold: int, reward_xp: int) -> bool:
     """
     Guild quests (task #77): same real-day-gating idea as
     update_login_streak, but a flat "claimed or not today" flag rather
@@ -2015,50 +2013,50 @@ def claim_guild_quest_if_unclaimed_today(telegram_user_id: int, reward_gold: int
     character on a given real day; every later call that same day is a
     silent no-op, so combat victories after the first won't double-pay.
     """
-    character = get_character(telegram_user_id)
+    character = get_character(telegram_user_id, chat_id)
     if character is None:
         return False
     today = datetime.now(timezone.utc).date().isoformat()
     if character.get("last_guild_quest_date") == today:
         return False
     update_character(
-        telegram_user_id,
+        telegram_user_id, chat_id,
         last_guild_quest_date=today,
         gold=character["gold"] + reward_gold,
     )
-    add_xp(telegram_user_id, reward_xp)
+    add_xp(telegram_user_id, chat_id, reward_xp)
     return True
 
 
-def mark_inactive(telegram_user_id: int) -> dict | None:
-    return update_character(telegram_user_id, is_inactive=1)
+def mark_inactive(telegram_user_id: int, chat_id: int) -> dict | None:
+    return update_character(telegram_user_id, chat_id, is_inactive=1)
 
 
-def mark_active(telegram_user_id: int) -> dict | None:
-    return update_character(telegram_user_id, is_inactive=0)
+def mark_active(telegram_user_id: int, chat_id: int) -> dict | None:
+    return update_character(telegram_user_id, chat_id, is_inactive=0)
 
 
-def set_do_not_disturb(telegram_user_id: int, enabled: bool) -> dict | None:
-    return update_character(telegram_user_id, do_not_disturb=1 if enabled else 0)
+def set_do_not_disturb(telegram_user_id: int, chat_id: int, enabled: bool) -> dict | None:
+    return update_character(telegram_user_id, chat_id, do_not_disturb=1 if enabled else 0)
 
 
-def set_status_note(telegram_user_id: int, note: str | None) -> dict | None:
-    return update_character(telegram_user_id, status_note=note)
+def set_status_note(telegram_user_id: int, chat_id: int, note: str | None) -> dict | None:
+    return update_character(telegram_user_id, chat_id, status_note=note)
 
 
-def unlock_achievement(telegram_user_id: int, achievement_id: str) -> dict | None:
+def unlock_achievement(telegram_user_id: int, chat_id: int, achievement_id: str) -> dict | None:
     """Idempotent -- adding an already-unlocked achievement again is a no-op."""
-    character = get_character(telegram_user_id)
+    character = get_character(telegram_user_id, chat_id)
     if character is None:
         return None
     if achievement_id in character["achievements"]:
         return character
     character["achievements"].append(achievement_id)
-    return update_character(telegram_user_id, achievements=character["achievements"])
+    return update_character(telegram_user_id, chat_id, achievements=character["achievements"])
 
 
-def set_active_title(telegram_user_id: int, title: str | None) -> dict | None:
-    return update_character(telegram_user_id, active_title=title)
+def set_active_title(telegram_user_id: int, chat_id: int, title: str | None) -> dict | None:
+    return update_character(telegram_user_id, chat_id, active_title=title)
 
 
 def get_idle_real_characters() -> list[dict]:
@@ -2379,7 +2377,7 @@ def resolve_board_quest_branch(board_quest_id: int, choice_key: str) -> dict | N
     return branch_data
 
 
-def increment_board_quests_completed(telegram_user_id: int) -> None:
+def increment_board_quests_completed(telegram_user_id: int, chat_id: int) -> None:
     """
     Board quests track their own completion (board_quests.completed_at)
     entirely separately from a character's story-quest completed_quests
@@ -2392,8 +2390,9 @@ def increment_board_quests_completed(telegram_user_id: int) -> None:
     """
     with get_connection() as conn:
         conn.execute(
-            "UPDATE characters SET board_quests_completed = board_quests_completed + 1 WHERE telegram_user_id = ?",
-            (telegram_user_id,),
+            "UPDATE characters SET board_quests_completed = board_quests_completed + 1 "
+            "WHERE telegram_user_id = ? AND chat_id = ?",
+            (telegram_user_id, chat_id),
         )
 
 
@@ -2521,7 +2520,7 @@ def list_all_active_real_players() -> list[dict]:
     return [_row_to_dict(r) for r in rows]
 
 
-def create_party(telegram_user_id: int) -> int:
+def create_party(telegram_user_id: int, chat_id: int) -> int:
     """Creates a new party and immediately puts the creator's active character in it."""
     with get_connection() as conn:
         cur = conn.execute(
@@ -2529,22 +2528,22 @@ def create_party(telegram_user_id: int) -> int:
             (telegram_user_id, datetime.now(timezone.utc).isoformat()),
         )
         party_id = cur.lastrowid
-        character_id = _active_character_id(telegram_user_id, conn)
+        character_id = _active_character_id(telegram_user_id, chat_id, conn)
         conn.execute("UPDATE characters SET party_id = ? WHERE character_id = ?", (party_id, character_id))
     return party_id
 
 
-def set_pending_party_invite(telegram_user_id: int, party_id: int) -> None:
+def set_pending_party_invite(telegram_user_id: int, chat_id: int, party_id: int) -> None:
     with get_connection() as conn:
-        character_id = _active_character_id(telegram_user_id, conn)
+        character_id = _active_character_id(telegram_user_id, chat_id, conn)
         conn.execute(
             "UPDATE characters SET pending_party_invite = ? WHERE character_id = ?", (party_id, character_id)
         )
 
 
-def accept_party_invite(telegram_user_id: int) -> tuple[bool, str]:
+def accept_party_invite(telegram_user_id: int, chat_id: int) -> tuple[bool, str]:
     """Joins the party the character was invited to, if there's room. Returns (success, message)."""
-    character = get_character(telegram_user_id)
+    character = get_character(telegram_user_id, chat_id)
     if character is None:
         return False, "You don't have a character yet!"
     party_id = character.get("pending_party_invite")
@@ -2553,7 +2552,7 @@ def accept_party_invite(telegram_user_id: int) -> tuple[bool, str]:
     if get_party_size(party_id) >= PARTY_MAX_MEMBERS:
         return False, "That party is already full (6 members)."
     with get_connection() as conn:
-        character_id = _active_character_id(telegram_user_id, conn)
+        character_id = _active_character_id(telegram_user_id, chat_id, conn)
         conn.execute(
             "UPDATE characters SET party_id = ?, pending_party_invite = NULL WHERE character_id = ?",
             (party_id, character_id),
@@ -2561,21 +2560,24 @@ def accept_party_invite(telegram_user_id: int) -> tuple[bool, str]:
     return True, "Joined the party!"
 
 
-def leave_party(telegram_user_id: int) -> bool:
+def leave_party(telegram_user_id: int, chat_id: int) -> bool:
     """Returns False if the character wasn't in a party to begin with."""
-    character = get_character(telegram_user_id)
+    character = get_character(telegram_user_id, chat_id)
     if character is None or not character.get("party_id"):
         return False
     with get_connection() as conn:
-        character_id = _active_character_id(telegram_user_id, conn)
+        character_id = _active_character_id(telegram_user_id, chat_id, conn)
         conn.execute("UPDATE characters SET party_id = NULL WHERE character_id = ?", (character_id,))
     return True
 
 
-def add_ai_companion_to_party(telegram_user_id: int, party_id: int) -> None:
+def add_ai_companion_to_party(telegram_user_id: int, chat_id: int, party_id: int) -> None:
     """AI companions have no real turn to 'accept' with -- they join immediately when invited."""
     with get_connection() as conn:
-        conn.execute("UPDATE characters SET party_id = ? WHERE telegram_user_id = ?", (party_id, telegram_user_id))
+        conn.execute(
+            "UPDATE characters SET party_id = ? WHERE telegram_user_id = ? AND chat_id = ?",
+            (party_id, telegram_user_id, chat_id),
+        )
 
 
 # --- Autonomous AI-played party (2026-07-10, per Coffee: a separate,
@@ -2583,9 +2585,12 @@ def add_ai_companion_to_party(telegram_user_id: int, party_id: int) -> None:
 # players use -- distinct from is_ai=1 combat companions, which only
 # ever auto-resolve combat turns and never act outside them) ---
 
-def mark_autonomous(telegram_user_id: int) -> None:
+def mark_autonomous(telegram_user_id: int, chat_id: int) -> None:
     with get_connection() as conn:
-        conn.execute("UPDATE characters SET is_autonomous = 1 WHERE telegram_user_id = ?", (telegram_user_id,))
+        conn.execute(
+            "UPDATE characters SET is_autonomous = 1 WHERE telegram_user_id = ? AND chat_id = ?",
+            (telegram_user_id, chat_id),
+        )
 
 
 def get_autonomous_players() -> list[dict]:

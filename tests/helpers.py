@@ -200,7 +200,7 @@ class DummyContext:
 def make_basic_character(user_id: int, name: str = "Elduinn", **overrides) -> dict:
     """A real, minimal Fighter character row for tests that don't care about build specifics."""
     fields = dict(
-        telegram_user_id=user_id, name=name, race="Human", char_class="Fighter",
+        telegram_user_id=user_id, chat_id=-999, name=name, race="Human", char_class="Fighter",
         ability_scores={
             "strength": 15, "dexterity": 14, "constitution": 13,
             "intelligence": 10, "wisdom": 10, "charisma": 10,

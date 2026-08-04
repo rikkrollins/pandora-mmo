@@ -142,7 +142,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         make_basic_character(user_id, current_location="tavern_upstairs")
         sink = []
         await bot.adventure_master_handler(FakeUpdate(user_id, "Go downstairs", sink), DummyContext())
-        character = db.get_character(user_id)
+        character = db.get_character(user_id, -999)
         self.assertNotEqual(character["current_location"], "tavern_upstairs")
 
     # -- Examine target-matching (v1.7.5) ------------------------------
@@ -196,7 +196,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         wood_id, resting_id = 666666, 777777
         make_basic_character(wood_id, "Roric2", current_location="whispering_wood")
         make_basic_character(resting_id, "Snorri", current_location="whispering_wood")
-        db.update_character(resting_id, is_inactive=1)
+        db.update_character(resting_id, -999, is_inactive=1)
         eligible_ids = {p["telegram_user_id"] for p in bot._get_combat_eligible_party_members("whispering_wood")}
         self.assertNotIn(resting_id, eligible_ids)
 
@@ -228,7 +228,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         coffee_id, sera_id = 111111, -1002
         make_basic_character(coffee_id, "Elduinn")
         db.create_character(
-            sera_id, "Sarah", "Elf", "Ranger",
+            sera_id, -999, "Sarah", "Elf", "Ranger",
             {"strength": 12, "dexterity": 17, "constitution": 13,
              "intelligence": 11, "wisdom": 15, "charisma": 10},
             hp_max=11, armor_class=14, gold=50, inventory={}, known_spells=[], is_ai=True,
@@ -295,19 +295,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         """
         user_id = 888888
         make_basic_character(user_id, "Roamer", current_location="the_first_city")
-        db.update_character(user_id, level=10)
+        db.update_character(user_id, -999, level=10)
 
         sink = []
         await bot.adventure_master_handler(
             FakeUpdate(user_id, "Ascend to the Unmoored Isle", sink), DummyContext())
-        character = db.get_character(user_id)
+        character = db.get_character(user_id, -999)
         self.assertEqual(character["current_location"], "the_first_city")  # blocked, no shard
 
-        db.add_item(user_id, "shard_of_dim_light", 1)
+        db.add_item(user_id, -999, "shard_of_dim_light", 1)
         sink.clear()
         await bot.adventure_master_handler(
             FakeUpdate(user_id, "Ascend to the Unmoored Isle", sink), DummyContext())
-        character = db.get_character(user_id)
+        character = db.get_character(user_id, -999)
         self.assertEqual(character["current_location"], "the_unmoored_isle")
 
     # -- The Unmoored Isle has a real final boss (post-1.10.0) --------
@@ -525,10 +525,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # Guild vetting was further extended (2026-07-25) to also require
         # a chosen subclass (eligible_for_guild) -- this fixture predates
         # that too, stale the same way the 3 tests fixed in 822e728 were.
-        db.update_character(user_id, level=3, proven_in_combat=1, subclass="evocation")
+        db.update_character(user_id, -999, level=3, proven_in_combat=1, subclass="evocation")
         sink = []
         await bot._do_join_guild(FakeUpdate(user_id, "join the arcane circle", sink), "join the arcane circle")
-        character = db.get_character(user_id)
+        character = db.get_character(user_id, -999)
         self.assertGreaterEqual(character["inventory"].get("scroll_magic_missile", 0), 1)
 
     # -- story_arcs (campaign.json) mapped the whole campaign's main
@@ -552,10 +552,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         make_basic_character(user_id, "Arclight", current_location="crossroads_tavern")
         arc1_quests = bot.CAMPAIGN["story_arcs"]["arc_1_discovery"]["quests"]
         for q in arc1_quests:  # _complete_quest_and_announce calls db.complete_quest
-            db.complete_quest(user_id, q)  # BEFORE _chapter_complete_note, so this
+            db.complete_quest(user_id, -999, q)  # BEFORE _chapter_complete_note, so this
             # test mirrors that real ordering rather than checking a
             # state that would never actually occur mid-flow.
-        note = bot._chapter_complete_note(user_id, arc1_quests[-1])
+        note = bot._chapter_complete_note(user_id, -999, arc1_quests[-1])
         self.assertIn("Chapter complete", note)
         self.assertIn("Discovery", note)
 
@@ -564,8 +564,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         user_id = 888900
         make_basic_character(user_id, "Arclight", current_location="crossroads_tavern")
         arc1_quests = bot.CAMPAIGN["story_arcs"]["arc_1_discovery"]["quests"]
-        db.complete_quest(user_id, arc1_quests[0])  # only the first of several
-        note = bot._chapter_complete_note(user_id, arc1_quests[0])
+        db.complete_quest(user_id, -999, arc1_quests[0])  # only the first of several
+        note = bot._chapter_complete_note(user_id, -999, arc1_quests[0])
         self.assertEqual(note, "")
 
     async def test_arc_opening_cutscene_fires_on_a_chapters_first_quest(self):
@@ -594,8 +594,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/arc_opening_test2.db")
         user_id = 888902
         make_basic_character(user_id, "Cutscenetester2", current_location="crossroads_tavern")
-        db.complete_quest(user_id, "welcome_to_the_crossroads")
-        db.update_character(user_id, current_location="hollow_stump_shrine")
+        db.complete_quest(user_id, -999, "welcome_to_the_crossroads")
+        db.update_character(user_id, -999, current_location="hollow_stump_shrine")
         sink = []
         with patch("bot.narrate_arc_opening", return_value="SHOULD NOT APPEAR") as mock_narrate:
             await bot._do_accept_quest(FakeUpdate(user_id, "I accept the quest", sink), "I accept the quest")
@@ -625,7 +625,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         giver_id, recipient_id = 900001, 900002
         make_basic_character(giver_id, "Giver", current_location="crossroads_tavern")
         make_basic_character(recipient_id, "Receiver", current_location="crossroads_tavern")
-        db.add_item(giver_id, "healing_potion", 2)
+        db.add_item(giver_id, -999, "healing_potion", 2)
 
         sink = []
         await bot._do_give_item(
@@ -635,8 +635,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         combined = " ".join(sink)
         self.assertIn("Receiver", combined)
 
-        giver = db.get_character(giver_id)
-        recipient = db.get_character(recipient_id)
+        giver = db.get_character(giver_id, -999)
+        recipient = db.get_character(recipient_id, -999)
         self.assertEqual(giver["inventory"].get("healing_potion", 0), 1)
         self.assertEqual(recipient["inventory"].get("healing_potion", 0), 1)
 
@@ -645,14 +645,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         giver_id, elsewhere_id = 900003, 900004
         make_basic_character(giver_id, "Giver2", current_location="crossroads_tavern")
         make_basic_character(elsewhere_id, "Farflung", current_location="whispering_wood")
-        db.add_item(giver_id, "healing_potion", 1)
+        db.add_item(giver_id, -999, "healing_potion", 1)
 
         sink = []
         await bot._do_give_item(
             FakeUpdate(giver_id, "give my healing potion to Farflung", sink),
             "give my healing potion to Farflung",
         )
-        giver = db.get_character(giver_id)
+        giver = db.get_character(giver_id, -999)
         self.assertEqual(giver["inventory"].get("healing_potion", 0), 1)  # nothing transferred
 
     async def test_give_item_rejects_item_the_giver_doesnt_have(self):
@@ -666,7 +666,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             FakeUpdate(giver_id, "give my healing potion to Receiver3", sink),
             "give my healing potion to Receiver3",
         )
-        recipient = db.get_character(recipient_id)
+        recipient = db.get_character(recipient_id, -999)
         self.assertEqual(recipient["inventory"].get("healing_potion", 0), 0)
 
     # -- Potions were completely non-functional: no action anywhere ever
@@ -682,15 +682,15 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/use_item_test.db")
         user_id = 900101
         make_basic_character(user_id, "Drinker", current_location="crossroads_tavern", hp_max=20)
-        db.update_character(user_id, hp_current=5)
-        db.add_item(user_id, "healing_potion", 2)
+        db.update_character(user_id, -999, hp_current=5)
+        db.add_item(user_id, -999, "healing_potion", 2)
 
         sink = []
         await bot._do_use_item(FakeUpdate(user_id, "drink the healing potion", sink), "drink the healing potion")
         combined = " ".join(sink)
         self.assertIn("healing", combined.lower())
 
-        character = db.get_character(user_id)
+        character = db.get_character(user_id, -999)
         self.assertGreater(character["hp_current"], 5)
         self.assertEqual(character["inventory"].get("healing_potion", 0), 1)  # consumed exactly 1
 
@@ -699,8 +699,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sessions.end_session(-999)
         user_id = 900102
         make_basic_character(user_id, "Poisoned", current_location="crossroads_tavern")
-        db.add_item(user_id, "antitoxin", 1)
-        character = db.get_character(user_id)
+        db.add_item(user_id, -999, "antitoxin", 1)
+        character = db.get_character(user_id, -999)
         character["conditions"] = ["poisoned"]
         session = sessions.start_session(-999, [character], {user_id: "party"})
 
@@ -743,12 +743,12 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/equip_test.db")
         user_id = 900201
         make_basic_character(user_id, "Wielder", current_location="crossroads_tavern")
-        db.add_item(user_id, "greataxe", 1)
+        db.add_item(user_id, -999, "greataxe", 1)
 
-        default_weapon = bot._weapon_for_attacker(db.get_character(user_id))
+        default_weapon = bot._weapon_for_attacker(db.get_character(user_id, -999))
         self.assertNotEqual(default_weapon["damage_dice"], "1d12")
 
-        success, message, updated = db.equip_item(user_id, "greataxe")
+        success, message, updated = db.equip_item(user_id, -999, "greataxe")
         self.assertTrue(success)
         self.assertEqual(updated["equipped_weapon"], "greataxe")
         equipped_weapon = bot._weapon_for_attacker(updated)
@@ -759,9 +759,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/equip_test2.db")
         user_id = 900202
         character = make_basic_character(user_id, "Armored", current_location="crossroads_tavern")
-        db.add_item(user_id, "chain_mail", 1)
+        db.add_item(user_id, -999, "chain_mail", 1)
 
-        success, message, updated = db.equip_item(user_id, "chain_mail")
+        success, message, updated = db.equip_item(user_id, -999, "chain_mail")
         self.assertTrue(success)
         from rules.dice import ability_modifier
         expected_ac = 16 + ability_modifier(character["dexterity"])  # chain_mail's ac_base is 16
@@ -772,28 +772,28 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/equip_test3.db")
         user_id = 900203
         make_basic_character(user_id, "Empty2", current_location="crossroads_tavern")
-        success, message, _ = db.equip_item(user_id, "longsword")
+        success, message, _ = db.equip_item(user_id, -999, "longsword")
         self.assertFalse(success)
 
     def test_equip_rejects_non_equippable_item(self):
         use_test_db("tests/tmp/equip_test4.db")
         user_id = 900204
         make_basic_character(user_id, "Drinker2", current_location="crossroads_tavern")
-        db.add_item(user_id, "healing_potion", 1)
-        success, message, _ = db.equip_item(user_id, "healing_potion")
+        db.add_item(user_id, -999, "healing_potion", 1)
+        success, message, _ = db.equip_item(user_id, -999, "healing_potion")
         self.assertFalse(success)
 
     async def test_do_equip_item_handler_end_to_end(self):
         use_test_db("tests/tmp/equip_test5.db")
         user_id = 900205
         make_basic_character(user_id, "Handler", current_location="crossroads_tavern")
-        db.add_item(user_id, "longsword", 1)
+        db.add_item(user_id, -999, "longsword", 1)
 
         sink = []
         await bot._do_equip_item(FakeUpdate(user_id, "equip my longsword", sink), "equip my longsword")
         combined = " ".join(sink)
         self.assertIn("Longsword", combined)
-        character = db.get_character(user_id)
+        character = db.get_character(user_id, -999)
         self.assertEqual(character["equipped_weapon"], "longsword")
 
     # -- Reactions (Shield, Uncanny Dodge): CLAUDE.md flagged this as
@@ -902,8 +902,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/shield_test.db")
         user_id = 900301
         make_basic_character(user_id, "Shieldbearer", current_location="crossroads_tavern", armor_class=16)
-        db.add_item(user_id, "wooden_shield", 1)
-        success, message, updated = db.equip_item(user_id, "wooden_shield")
+        db.add_item(user_id, -999, "wooden_shield", 1)
+        success, message, updated = db.equip_item(user_id, -999, "wooden_shield")
         self.assertTrue(success)
         self.assertEqual(updated["equipped_shield"], "wooden_shield")
         self.assertEqual(updated["armor_class"], 18)  # 16 + wooden_shield's ac_bonus of 2
@@ -912,10 +912,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/shield_test2.db")
         user_id = 900302
         character = make_basic_character(user_id, "Upgrader", current_location="crossroads_tavern")
-        db.add_item(user_id, "wooden_shield", 1)
-        db.add_item(user_id, "chain_mail", 1)
-        db.equip_item(user_id, "wooden_shield")
-        success, message, updated = db.equip_item(user_id, "chain_mail")
+        db.add_item(user_id, -999, "wooden_shield", 1)
+        db.add_item(user_id, -999, "chain_mail", 1)
+        db.equip_item(user_id, -999, "wooden_shield")
+        success, message, updated = db.equip_item(user_id, -999, "chain_mail")
         self.assertTrue(success)
         from rules.dice import ability_modifier
         expected = 16 + ability_modifier(character["dexterity"]) + 2  # chain_mail + dex + shield
@@ -925,11 +925,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/auto_equip_test.db")
         user_id = 900303
         make_basic_character(user_id, "Auto", current_location="crossroads_tavern")
-        db.add_item(user_id, "rusty_dagger", 1)   # 1d4, worse
-        db.add_item(user_id, "greataxe", 1)       # 1d12, better
-        db.add_item(user_id, "leather_armor", 1)  # ac_base 11, worse
-        db.add_item(user_id, "chain_mail", 1)     # ac_base 16, better
-        summary, character = db.auto_equip_best_gear(user_id)
+        db.add_item(user_id, -999, "rusty_dagger", 1)   # 1d4, worse
+        db.add_item(user_id, -999, "greataxe", 1)       # 1d12, better
+        db.add_item(user_id, -999, "leather_armor", 1)  # ac_base 11, worse
+        db.add_item(user_id, -999, "chain_mail", 1)     # ac_base 16, better
+        summary, character = db.auto_equip_best_gear(user_id, -999)
         self.assertEqual(character["equipped_weapon"], "greataxe")
         self.assertEqual(character["equipped_armor"], "chain_mail")
 
@@ -937,10 +937,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/auto_equip_test2.db")
         user_id = 900304
         make_basic_character(user_id, "AutoHandler", current_location="crossroads_tavern")
-        db.add_item(user_id, "longsword", 1)
+        db.add_item(user_id, -999, "longsword", 1)
         sink = []
         await bot._do_auto_equip_gear(FakeUpdate(user_id, "auto equip my character", sink), "auto equip my character")
-        character = db.get_character(user_id)
+        character = db.get_character(user_id, -999)
         self.assertEqual(character["equipped_weapon"], "longsword")
         self.assertTrue(any("Longsword" in msg for msg in sink))
 
@@ -1100,7 +1100,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         equipper_id, helped_id = 900305, 900306
         make_basic_character(equipper_id, "Helper", current_location="crossroads_tavern")
         helped = make_basic_character(helped_id, "Helped", current_location="crossroads_tavern")
-        db.add_item(helped_id, "longsword", 1)  # in HELPED's own inventory, not the helper's
+        db.add_item(helped_id, -999, "longsword", 1)  # in HELPED's own inventory, not the helper's
 
         sink = []
         await bot._do_equip_item(
@@ -1109,19 +1109,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         combined = " ".join(sink)
         self.assertIn("Helped", combined)
-        helped_after = db.get_character(helped_id)
+        helped_after = db.get_character(helped_id, -999)
         self.assertEqual(helped_after["equipped_weapon"], "longsword")
-        equipper_after = db.get_character(equipper_id)
+        equipper_after = db.get_character(equipper_id, -999)
         self.assertIsNone(equipper_after["equipped_weapon"])  # the HELPER didn't equip anything
 
     def test_sheet_shows_equipped_and_carried_not_equipped_gear(self):
         use_test_db("tests/tmp/sheet_gear_test.db")
         user_id = 900307
         make_basic_character(user_id, "SheetTest", current_location="crossroads_tavern")
-        db.add_item(user_id, "longsword", 1)
-        db.add_item(user_id, "shortsword", 1)
-        db.equip_item(user_id, "longsword")
-        character = db.get_character(user_id)
+        db.add_item(user_id, -999, "longsword", 1)
+        db.add_item(user_id, -999, "shortsword", 1)
+        db.equip_item(user_id, -999, "longsword")
+        character = db.get_character(user_id, -999)
         sheet = bot._format_character_sheet(character)
         self.assertIn("Equipped: Longsword", sheet)
         self.assertIn("Carried but not equipped: Shortsword", sheet)
@@ -1134,8 +1134,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/ring_test.db")
         user_id = 900401
         make_basic_character(user_id, "RingBearer", current_location="crossroads_tavern", armor_class=15)
-        db.add_item(user_id, "ring_of_protection", 1)
-        success, message, updated = db.equip_item(user_id, "ring_of_protection")
+        db.add_item(user_id, -999, "ring_of_protection", 1)
+        success, message, updated = db.equip_item(user_id, -999, "ring_of_protection")
         self.assertTrue(success)
         self.assertEqual(updated["armor_class"], 16)
         self.assertIn("ring_of_protection", updated["equipped_accessories"])
@@ -1144,10 +1144,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/ring_test2.db")
         user_id = 900402
         make_basic_character(user_id, "TwoRings", current_location="crossroads_tavern", armor_class=15)
-        db.add_item(user_id, "ring_of_protection", 1)
-        db.add_item(user_id, "ring_of_the_undertow", 1)
-        db.equip_item(user_id, "ring_of_protection")
-        success, message, updated = db.equip_item(user_id, "ring_of_the_undertow")
+        db.add_item(user_id, -999, "ring_of_protection", 1)
+        db.add_item(user_id, -999, "ring_of_the_undertow", 1)
+        db.equip_item(user_id, -999, "ring_of_protection")
+        success, message, updated = db.equip_item(user_id, -999, "ring_of_the_undertow")
         self.assertTrue(success)
         self.assertEqual(updated["armor_class"], 17)
 
@@ -1155,10 +1155,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/ring_test3.db")
         user_id = 900403
         character = make_basic_character(user_id, "RingThenArmor", current_location="crossroads_tavern")
-        db.add_item(user_id, "ring_of_protection", 1)
-        db.add_item(user_id, "chain_mail", 1)
-        db.equip_item(user_id, "ring_of_protection")
-        success, message, updated = db.equip_item(user_id, "chain_mail")
+        db.add_item(user_id, -999, "ring_of_protection", 1)
+        db.add_item(user_id, -999, "chain_mail", 1)
+        db.equip_item(user_id, -999, "ring_of_protection")
+        success, message, updated = db.equip_item(user_id, -999, "chain_mail")
         self.assertTrue(success)
         from rules.dice import ability_modifier
         expected = 16 + ability_modifier(character["dexterity"]) + 1  # chain_mail + dex + ring
@@ -1168,8 +1168,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/amulet_test.db")
         user_id = 900404
         make_basic_character(user_id, "Amuleted", current_location="crossroads_tavern")
-        db.add_item(user_id, "amulet_of_health", 1)
-        success, message, updated = db.equip_item(user_id, "amulet_of_health")
+        db.add_item(user_id, -999, "amulet_of_health", 1)
+        success, message, updated = db.equip_item(user_id, -999, "amulet_of_health")
         self.assertTrue(success)
         self.assertEqual(updated["constitution"], 19)
 
@@ -1181,8 +1181,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             ability_scores={"strength": 10, "dexterity": 10, "constitution": 20,
                              "intelligence": 10, "wisdom": 10, "charisma": 10},
         )
-        db.add_item(user_id, "amulet_of_health", 1)
-        success, message, updated = db.equip_item(user_id, "amulet_of_health")
+        db.add_item(user_id, -999, "amulet_of_health", 1)
+        success, message, updated = db.equip_item(user_id, -999, "amulet_of_health")
         self.assertTrue(success)
         self.assertEqual(updated["constitution"], 20)
 
@@ -1190,19 +1190,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/ring_test4.db")
         user_id = 900406
         make_basic_character(user_id, "Careful", current_location="crossroads_tavern")
-        db.add_item(user_id, "ring_of_protection", 1)
-        db.equip_item(user_id, "ring_of_protection")
-        success, message, _ = db.equip_item(user_id, "ring_of_protection")
+        db.add_item(user_id, -999, "ring_of_protection", 1)
+        db.equip_item(user_id, -999, "ring_of_protection")
+        success, message, _ = db.equip_item(user_id, -999, "ring_of_protection")
         self.assertFalse(success)
 
     def test_auto_equip_wears_every_carried_ring_and_amulet(self):
         use_test_db("tests/tmp/auto_equip_accessories_test.db")
         user_id = 900407
         make_basic_character(user_id, "AutoAccessory", current_location="crossroads_tavern")
-        db.add_item(user_id, "ring_of_protection", 1)
-        db.add_item(user_id, "ring_of_the_undertow", 1)
-        db.add_item(user_id, "amulet_of_health", 1)
-        summary, character = db.auto_equip_best_gear(user_id)
+        db.add_item(user_id, -999, "ring_of_protection", 1)
+        db.add_item(user_id, -999, "ring_of_the_undertow", 1)
+        db.add_item(user_id, -999, "amulet_of_health", 1)
+        summary, character = db.auto_equip_best_gear(user_id, -999)
         self.assertIn("ring_of_protection", character["equipped_accessories"])
         self.assertIn("ring_of_the_undertow", character["equipped_accessories"])
         self.assertIn("amulet_of_health", character["equipped_accessories"])
@@ -1211,17 +1211,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/ring_test5.db")
         user_id = 900408
         make_basic_character(user_id, "StillChecked", current_location="crossroads_tavern")
-        db.add_item(user_id, "waterlogged_journal", 1)
-        success, message, _ = db.equip_item(user_id, "waterlogged_journal")
+        db.add_item(user_id, -999, "waterlogged_journal", 1)
+        success, message, _ = db.equip_item(user_id, -999, "waterlogged_journal")
         self.assertFalse(success)
 
     def test_cloak_of_elvenkind_grants_advantage_on_sneak_checks(self):
         use_test_db("tests/tmp/cloak_test.db")
         user_id = 900409
         make_basic_character(user_id, "Sneaky", current_location="crossroads_tavern")
-        db.add_item(user_id, "cloak_of_elvenkind", 1)
-        db.equip_item(user_id, "cloak_of_elvenkind")
-        character = db.get_character(user_id)
+        db.add_item(user_id, -999, "cloak_of_elvenkind", 1)
+        db.equip_item(user_id, -999, "cloak_of_elvenkind")
+        character = db.get_character(user_id, -999)
         self.assertTrue(
             bot._cloak_of_elvenkind_grants_advantage(character, "dexterity", "I try to sneak past the guard")
         )
@@ -1230,9 +1230,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/cloak_test2.db")
         user_id = 900410
         make_basic_character(user_id, "Climber", current_location="crossroads_tavern")
-        db.add_item(user_id, "cloak_of_elvenkind", 1)
-        db.equip_item(user_id, "cloak_of_elvenkind")
-        character = db.get_character(user_id)
+        db.add_item(user_id, -999, "cloak_of_elvenkind", 1)
+        db.equip_item(user_id, -999, "cloak_of_elvenkind")
+        character = db.get_character(user_id, -999)
         self.assertFalse(
             bot._cloak_of_elvenkind_grants_advantage(character, "dexterity", "I try to climb the wall")
         )
@@ -1241,7 +1241,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/cloak_test3.db")
         user_id = 900411
         make_basic_character(user_id, "NoCloak", current_location="crossroads_tavern")
-        character = db.get_character(user_id)
+        character = db.get_character(user_id, -999)
         self.assertFalse(
             bot._cloak_of_elvenkind_grants_advantage(character, "dexterity", "I try to sneak past the guard")
         )
@@ -1296,14 +1296,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sessions.end_session(-999)
         user_id = 900452
         make_basic_character(user_id, "Chaplain", char_class="Cleric", current_location="crossroads_tavern")
-        db.update_character(user_id, level=2)
+        db.update_character(user_id, -999, level=2)
 
         enemy_id = -2_500_040
         enemy = {
             "telegram_user_id": enemy_id, "name": "Goblin", "dexterity": 10,
             "hp_current": 7, "monster_key": "goblin",
         }
-        player = db.get_character(user_id)
+        player = db.get_character(user_id, -999)
         player["telegram_user_id"] = user_id
         session = sessions.start_session(-999, [player, enemy], {enemy_id: "enemy", user_id: "party"})
 
@@ -1317,21 +1317,21 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sessions.end_session(-999)
         user_id = 900453
         make_basic_character(user_id, "Chaplain", char_class="Cleric", current_location="crossroads_tavern")
-        db.update_character(user_id, level=2)
+        db.update_character(user_id, -999, level=2)
 
         undead_id = -2_500_041
         undead = {
             "telegram_user_id": undead_id, "name": "Shadow Wisp", "dexterity": 18,
             "hp_current": 22, "monster_key": "shadow_wisp", "conditions": [],
         }
-        player = db.get_character(user_id)
+        player = db.get_character(user_id, -999)
         player["telegram_user_id"] = user_id
         session = sessions.start_session(-999, [player, undead], {undead_id: "enemy", user_id: "party"})
 
         sink = []
         await bot._do_channel_divinity(FakeUpdate(user_id, "channel divinity", sink))
         self.assertIn("frightened", undead["conditions"])
-        self.assertEqual(db.get_feature_uses(user_id, "channel_divinity"), 1)
+        self.assertEqual(db.get_feature_uses(user_id, -999, "channel_divinity"), 1)
 
         sink2 = []
         await bot._do_channel_divinity(FakeUpdate(user_id, "channel divinity", sink2))
@@ -1352,14 +1352,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink = []
         await bot._do_gather(FakeUpdate(user_id, "I go fishing", sink), "I go fishing")
         self.assertTrue(any("Fishing Pole" in m for m in sink))
-        character = db.get_character(user_id)
+        character = db.get_character(user_id, -999)
         self.assertEqual(character["inventory"].get("raw_fish", 0), 0)
 
     async def test_fishing_works_with_pole_and_bait(self):
         user_id = 900461
         make_basic_character(user_id, "Angler", current_location="stonearch_bridge")
-        db.add_item(user_id, "fishing_pole", 1)
-        db.add_item(user_id, "bait", 1)
+        db.add_item(user_id, -999, "fishing_pole", 1)
+        db.add_item(user_id, -999, "bait", 1)
         sink = []
         await bot._do_gather(FakeUpdate(user_id, "I go fishing", sink), "I go fishing")
         self.assertFalse(any("Fishing Pole" in m for m in sink))
@@ -1431,11 +1431,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sessions.end_session(-999)
         user_id = 900472
         make_basic_character(user_id, "Twinstrike", char_class="Fighter", current_location="crossroads_tavern")
-        db.update_character(user_id, level=2)
+        db.update_character(user_id, -999, level=2)
 
         enemy_id = -2_500_050
         enemy = {"telegram_user_id": enemy_id, "name": "Dummy", "dexterity": 10, "hp_current": 100}
-        player = db.get_character(user_id)
+        player = db.get_character(user_id, -999)
         player["telegram_user_id"] = user_id
         session = sessions.start_session(-999, [player, enemy], {enemy_id: "enemy", user_id: "party"})
 
@@ -1443,7 +1443,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_action_surge(FakeUpdate(user_id, "action surge", sink))
         participant = next(p for p in session.participants if p["telegram_user_id"] == user_id)
         self.assertTrue(participant.get("action_surge_active"))
-        self.assertEqual(db.get_feature_uses(user_id, "action_surge"), 1)
+        self.assertEqual(db.get_feature_uses(user_id, -999, "action_surge"), 1)
 
         sink2 = []
         await bot._do_action_surge(FakeUpdate(user_id, "action surge", sink2))
@@ -1483,7 +1483,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sessions.end_session(-999)
         user_id = 900475
         make_basic_character(user_id, "Squire", char_class="Paladin")
-        db.update_character(user_id, spell_slots_max=2, spell_slots_current=2)
+        db.update_character(user_id, -999, spell_slots_max=2, spell_slots_current=2)
         sink = []
         await bot._do_divine_smite(FakeUpdate(user_id, "divine smite", sink))
         self.assertTrue(any("level 2" in m for m in sink))
@@ -1493,7 +1493,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sessions.end_session(-999)
         user_id = 900476
         make_basic_character(user_id, "Squire", char_class="Paladin")
-        db.update_character(user_id, level=2, spell_slots_max=2, spell_slots_current=0)
+        db.update_character(user_id, -999, level=2, spell_slots_max=2, spell_slots_current=0)
         sink = []
         await bot._do_divine_smite(FakeUpdate(user_id, "divine smite", sink))
         self.assertTrue(any("spell slot" in m for m in sink))
@@ -1506,7 +1506,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             user_id, "Smiter", char_class="Paladin", current_location="crossroads_tavern",
             armor_class=18,
         )
-        db.update_character(user_id, level=2, spell_slots_max=2, spell_slots_current=2)
+        db.update_character(user_id, -999, level=2, spell_slots_max=2, spell_slots_current=2)
 
         enemy_id = -2_500_051
         enemy = {
@@ -1514,7 +1514,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "armor_class": 1, "proficiency_bonus": 2,  # guaranteed hits
             "hp_current": 200, "hp_max": 200, "is_ai": 1, "monster_key": "goblin",
         }
-        player = db.get_character(user_id)
+        player = db.get_character(user_id, -999)
         player["telegram_user_id"] = user_id
         session = sessions.start_session(-999, [player, enemy], {user_id: "party", enemy_id: "enemy"})
         session.turn_order = [user_id, enemy_id]
@@ -1532,7 +1532,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertLess(enemy["hp_current"], 200)
-        self.assertEqual(db.get_character(user_id)["spell_slots_current"], 1)
+        self.assertEqual(db.get_character(user_id, -999)["spell_slots_current"], 1)
         sessions.end_session(-999)
 
     async def test_flurry_of_blows_rejects_non_monk(self):
@@ -1549,11 +1549,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sessions.end_session(-999)
         user_id = 900479
         make_basic_character(user_id, "Fistfighter", char_class="Monk", current_location="crossroads_tavern")
-        db.update_character(user_id, level=2)
+        db.update_character(user_id, -999, level=2)
 
         enemy_id = -2_500_052
         enemy = {"telegram_user_id": enemy_id, "name": "Dummy", "dexterity": 10, "hp_current": 100}
-        player = db.get_character(user_id)
+        player = db.get_character(user_id, -999)
         player["telegram_user_id"] = user_id
         session = sessions.start_session(-999, [player, enemy], {enemy_id: "enemy", user_id: "party"})
 
@@ -1561,13 +1561,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_flurry_of_blows(FakeUpdate(user_id, "flurry of blows", sink))
         participant = next(p for p in session.participants if p["telegram_user_id"] == user_id)
         self.assertEqual(participant.get("flurry_bonus_attacks"), 2)
-        self.assertEqual(db.get_feature_uses(user_id, "ki"), 1)
+        self.assertEqual(db.get_feature_uses(user_id, -999, "ki"), 1)
 
         # A level 2 Monk only has 2 ki points -- second use ok, third rejected.
         participant.pop("flurry_bonus_attacks", None)
         sink2 = []
         await bot._do_flurry_of_blows(FakeUpdate(user_id, "flurry of blows", sink2))
-        self.assertEqual(db.get_feature_uses(user_id, "ki"), 2)
+        self.assertEqual(db.get_feature_uses(user_id, -999, "ki"), 2)
         participant.pop("flurry_bonus_attacks", None)
         sink3 = []
         await bot._do_flurry_of_blows(FakeUpdate(user_id, "flurry of blows", sink3))
@@ -1594,20 +1594,20 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         make_basic_character(user_id, "Roller")
         sink = []
         await bot._do_toggle_manual_dice(FakeUpdate(user_id, "use my own dice", sink), "use my own dice")
-        self.assertEqual(db.get_character(user_id)["manual_dice_enabled"], 1)
+        self.assertEqual(db.get_character(user_id, -999)["manual_dice_enabled"], 1)
         # Task #158 (2026-07-18): _safe_send now strips ** markers into real
         # Telegram bold entities instead of sending them as literal text.
         self.assertTrue(any("now ON" in m for m in sink))
 
         sink2 = []
         await bot._do_toggle_manual_dice(FakeUpdate(user_id, "let the game roll for me", sink2), "let the game roll for me")
-        self.assertEqual(db.get_character(user_id)["manual_dice_enabled"], 0)
+        self.assertEqual(db.get_character(user_id, -999)["manual_dice_enabled"], 0)
         self.assertTrue(any("now OFF" in m for m in sink2))
 
     async def test_skill_check_prompts_for_manual_roll_and_resumes_with_it(self):
         user_id = 900481
         make_basic_character(user_id, "Sharpeyes", current_location="crossroads_tavern")
-        db.update_character(user_id, manual_dice_enabled=1)
+        db.update_character(user_id, -999, manual_dice_enabled=1)
         bot._PENDING_DICE_ROLLS.pop(user_id, None)
 
         sink = []
@@ -1662,7 +1662,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "telegram_user_id": enemy_id, "name": "Dummy", "strength": 10, "dexterity": 10,
             "armor_class": 15, "hp_current": 100, "hp_max": 100, "is_ai": 1, "monster_key": "goblin",
         }
-        player = db.get_character(user_id)
+        player = db.get_character(user_id, -999)
         player["telegram_user_id"] = user_id
         session = sessions.start_session(-999, [player, enemy], {user_id: "party", enemy_id: "enemy"})
         session.turn_order = [user_id, enemy_id]
@@ -1686,23 +1686,23 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         absent_id = 900484
         make_basic_character(fighter_id, "Fighter", current_location="crossroads_tavern")
         make_basic_character(absent_id, "Homebody", current_location="crossroads_tavern")
-        party_id = db.create_party(fighter_id)
-        db.update_character(absent_id, party_id=party_id)
+        party_id = db.create_party(fighter_id, -999)
+        db.update_character(absent_id, -999, party_id=party_id)
 
         enemy_id = -2_500_054
         enemy = {
             "telegram_user_id": enemy_id, "name": "Goblin", "dexterity": 10, "xp_reward": 100,
         }
-        fighter = db.get_character(fighter_id)
+        fighter = db.get_character(fighter_id, -999)
         fighter["telegram_user_id"] = fighter_id
         session = sessions.start_session(-999, [fighter, enemy], {enemy_id: "enemy", fighter_id: "party"})
         session.turn_order = [fighter_id, enemy_id]
 
-        before_absent = db.get_character(absent_id)["xp"]
-        before_fighter = db.get_character(fighter_id)["xp"]
+        before_absent = db.get_character(absent_id, -999)["xp"]
+        before_fighter = db.get_character(fighter_id, -999)["xp"]
         await bot._award_victory_xp(FakeUpdate(fighter_id, "", []), session)
-        after_absent = db.get_character(absent_id)["xp"]
-        after_fighter = db.get_character(fighter_id)["xp"]
+        after_absent = db.get_character(absent_id, -999)["xp"]
+        after_fighter = db.get_character(fighter_id, -999)["xp"]
 
         self.assertEqual(after_fighter - before_fighter, 100)
         self.assertEqual(after_absent - before_absent, 50)  # INACTIVE_PARTY_XP_SHARE raised to 50% (2026-07-24)
@@ -1714,18 +1714,18 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         fighter_id = 900485
         make_basic_character(fighter_id, "Fighter", current_location="crossroads_tavern")
-        party_id = db.create_party(fighter_id)
+        party_id = db.create_party(fighter_id, -999)
         companion = db.create_ai_companion(
-            "Buddy", "Human", "Fighter",
+            -999, "Buddy", "Human", "Fighter",
             ability_scores={"strength": 15, "dexterity": 14, "constitution": 13,
                              "intelligence": 10, "wisdom": 10, "charisma": 10},
             hp_max=12, armor_class=15, gold=10, inventory={},
         )
-        db.add_ai_companion_to_party(companion["telegram_user_id"], party_id)
+        db.add_ai_companion_to_party(companion["telegram_user_id"], -999, party_id)
 
         enemy_id = -2_500_055
         enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "dexterity": 10, "xp_reward": 50}
-        fighter = db.get_character(fighter_id)
+        fighter = db.get_character(fighter_id, -999)
         fighter["telegram_user_id"] = fighter_id
         session = sessions.start_session(-999, [fighter, enemy], {enemy_id: "enemy", fighter_id: "party"})
         session.turn_order = [fighter_id, enemy_id]
@@ -1734,7 +1734,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # the companion (is_ai) must never receive the absent-member bonus.
         companion_xp_before = companion["xp"]
         await bot._award_victory_xp(FakeUpdate(fighter_id, "", []), session)
-        companion_xp_after = db.get_character(companion["telegram_user_id"])["xp"]
+        companion_xp_after = db.get_character(companion["telegram_user_id"], -999)["xp"]
         self.assertEqual(companion_xp_after, companion_xp_before)
         sessions.end_session(-999)
 
@@ -1765,14 +1765,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         common_weapon = generate_weapon(tier="common")
         self.assertEqual(common_weapon["affixes"], [])
 
-        gold_before = db.get_character(user_id)["gold"]
+        gold_before = db.get_character(user_id, -999)["gold"]
         item_id = db.create_item_instance(
             item_type=legendary_weapon["type"], name=legendary_weapon["name"], rarity=legendary_weapon["rarity"],
             price=legendary_weapon["price"], base_stats=legendary_weapon, affixes=legendary_weapon["affixes"],
         )
         self.assertTrue(item_id.startswith("gi") and item_id[2:].isdigit())
-        db.add_item(user_id, item_id, 1)
-        character = db.get_character(user_id)
+        db.add_item(user_id, -999, item_id, 1)
+        character = db.get_character(user_id, -999)
         self.assertEqual(character["inventory"].get(item_id), 1)
         self.assertEqual(character["gold"], gold_before)  # kept, not sold
 
@@ -1781,9 +1781,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resolved.get("damage_bonus"), 4)
         self.assertEqual(resolved["rarity"], "legendary")
 
-        success, _msg, _updated = db.equip_item(user_id, item_id)
+        success, _msg, _updated = db.equip_item(user_id, -999, item_id)
         self.assertTrue(success)
-        weapon_for_attack = bot._weapon_for_attacker(db.get_character(user_id))
+        weapon_for_attack = bot._weapon_for_attacker(db.get_character(user_id, -999))
         self.assertEqual(weapon_for_attack.get("damage_bonus"), 4)
         self.assertEqual(weapon_for_attack.get("damage_dice"), legendary_weapon["damage_dice"])
 
@@ -1792,17 +1792,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             item_type=legendary_armor["type"], name=legendary_armor["name"], rarity=legendary_armor["rarity"],
             price=legendary_armor["price"], base_stats=legendary_armor, affixes=legendary_armor["affixes"],
         )
-        db.add_item(user_id, armor_id, 1)
+        db.add_item(user_id, -999, armor_id, 1)
         expected_bonus = next(a["value"] for a in legendary_armor["affixes"] if a["field"] == "ac_base")
         self.assertEqual(expected_bonus, 4)
         resolved_armor = items_module.get_item(armor_id)
         self.assertEqual(resolved_armor["ac_base"], legendary_armor["ac_base"] + expected_bonus)
-        ac_success, _ac_msg, _ac_updated = db.equip_item(user_id, armor_id)
+        ac_success, _ac_msg, _ac_updated = db.equip_item(user_id, -999, armor_id)
         self.assertTrue(ac_success)
 
         # Landmine: find_item_mentioned_in_text must not KeyError on a
         # generated item id, and must actually resolve it by name.
-        candidates = list(db.get_character(user_id)["inventory"].keys())
+        candidates = list(db.get_character(user_id, -999)["inventory"].keys())
         result = items_module.find_item_mentioned_in_text(
             f"equip the {legendary_weapon['name'].lower()}", candidate_ids=candidates,
         )
@@ -1819,10 +1819,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sessions.end_session(-999)
         leader_id = 950902
         make_basic_character(leader_id, "LootVictoryLeader", current_location="crossroads_tavern")
-        gold_before = db.get_character(leader_id)["gold"]
+        gold_before = db.get_character(leader_id, -999)["gold"]
 
         enemy = {"telegram_user_id": -2_600_301, "name": "LootGoblin", "dexterity": 10, "xp_reward": 10}
-        leader = db.get_character(leader_id)
+        leader = db.get_character(leader_id, -999)
         leader["telegram_user_id"] = leader_id
         session = sessions.start_session(-999, [leader, enemy], {leader_id: "party", -2_600_301: "enemy"})
         session.turn_order = [leader_id, -2_600_301]
@@ -1831,7 +1831,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("loots a", summary)
         self.assertIn("real", summary)
 
-        updated_character = db.get_character(leader_id)
+        updated_character = db.get_character(leader_id, -999)
         generated_ids = [iid for iid in updated_character["inventory"] if iid.startswith("gi")]
         self.assertEqual(len(generated_ids), 1)
         self.assertEqual(updated_character["gold"], gold_before)  # no gold awarded for the roll itself
@@ -1863,12 +1863,12 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             item_type=armor["type"], name=armor["name"], rarity=armor["rarity"],
             price=armor["price"], base_stats=armor, affixes=armor["affixes"],
         )
-        db.add_item(user_id, armor_id, 1)
-        success, _msg, _updated = db.equip_item(user_id, armor_id)
+        db.add_item(user_id, -999, armor_id, 1)
+        success, _msg, _updated = db.equip_item(user_id, -999, armor_id)
         self.assertTrue(success)
         self.assertIn("fire", items_module.get_item(armor_id).get("resistances", []))
 
-        party = bot._get_real_party_combatants(db.get_character(user_id))
+        party = bot._get_real_party_combatants(db.get_character(user_id, -999))
         combatant = next(p for p in party if p["telegram_user_id"] == user_id)
         self.assertIn("fire", combatant.get("resistances", []))
         self.assertEqual(apply_damage_type_modifier(20, "fire", combatant), 10)
@@ -1895,8 +1895,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             base_stats={"type": "ring"},
             affixes=[{"kind": "grants_spell", "spell_id": "cure_wounds", "uses": 2}],
         )
-        db.add_item(user_id, ring_id, 1)
-        success, _msg, _updated = db.equip_item(user_id, ring_id)
+        db.add_item(user_id, -999, ring_id, 1)
+        success, _msg, _updated = db.equip_item(user_id, -999, ring_id)
         self.assertTrue(success)
 
         async def cast():
@@ -1912,10 +1912,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         reply3 = await cast()
         self.assertIn("already used", reply3.lower())
 
-        after = db.get_character(user_id)
+        after = db.get_character(user_id, -999)
         self.assertEqual(after["known_spells"], known_spells_before)
         self.assertEqual(after["spell_slots_current"], slots_before)
-        self.assertEqual(db.get_feature_uses(user_id, f"item_spell_{ring_id[2:]}"), 2)
+        self.assertEqual(db.get_feature_uses(user_id, -999, f"item_spell_{ring_id[2:]}"), 2)
 
     async def test_equipped_profession_bonus_crosses_a_real_dc_boundary(self):
         """
@@ -1935,8 +1935,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             ability_scores={"strength": 10, "dexterity": 14, "constitution": 12,
                              "intelligence": 10, "wisdom": 10, "charisma": 10},
         )
-        db.add_item(user_id, "pickaxe", 1)
-        character = db.get_character(user_id)
+        db.add_item(user_id, -999, "pickaxe", 1)
+        character = db.get_character(user_id, -999)
         self.assertEqual(bot._equipped_profession_bonus(character, "mining"), 0)
 
         ring_id = db.create_item_instance(
@@ -1950,18 +1950,18 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot._do_gather(FakeUpdate(user_id, "I mine for sulfur", sink), "I mine for sulfur", forced_roll=10)
             return "\n".join(sink)
 
-        before = db.get_character(user_id)["inventory"].get("sulfur_dust", 0)
+        before = db.get_character(user_id, -999)["inventory"].get("sulfur_dust", 0)
         await gather()  # roll of 10, no bonus -> total 10 < DC 13, fails
-        self.assertEqual(db.get_character(user_id)["inventory"].get("sulfur_dust", 0), before)
+        self.assertEqual(db.get_character(user_id, -999)["inventory"].get("sulfur_dust", 0), before)
 
-        db.add_item(user_id, ring_id, 1)
-        success, _msg, _updated = db.equip_item(user_id, ring_id)
+        db.add_item(user_id, -999, ring_id, 1)
+        success, _msg, _updated = db.equip_item(user_id, -999, ring_id)
         self.assertTrue(success)
-        self.assertEqual(bot._equipped_profession_bonus(db.get_character(user_id), "mining"), 3)
+        self.assertEqual(bot._equipped_profession_bonus(db.get_character(user_id, -999), "mining"), 3)
 
-        before2 = db.get_character(user_id)["inventory"].get("sulfur_dust", 0)
+        before2 = db.get_character(user_id, -999)["inventory"].get("sulfur_dust", 0)
         await gather()  # same roll of 10, +3 from the ring -> total 13 == DC 13, succeeds
-        self.assertGreater(db.get_character(user_id)["inventory"].get("sulfur_dust", 0), before2)
+        self.assertGreater(db.get_character(user_id, -999)["inventory"].get("sulfur_dust", 0), before2)
 
     async def test_set_bonus_applies_at_threshold_and_drops_off_on_unequip(self):
         """
@@ -2001,21 +2001,21 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             base_stats={"type": "amulet"}, affixes=[], set_id=set_id,
         )
 
-        db.add_item(user_id, ring1_id, 1)
-        success1, _msg1, _u1 = db.equip_item(user_id, ring1_id)
+        db.add_item(user_id, -999, ring1_id, 1)
+        success1, _msg1, _u1 = db.equip_item(user_id, -999, ring1_id)
         self.assertTrue(success1)
-        ac_one_piece = db.get_character(user_id)["armor_class"]
+        ac_one_piece = db.get_character(user_id, -999)["armor_class"]
 
-        db.add_item(user_id, ring2_id, 1)
-        success2, msg2, _u2 = db.equip_item(user_id, ring2_id)
+        db.add_item(user_id, -999, ring2_id, 1)
+        success2, msg2, _u2 = db.equip_item(user_id, -999, ring2_id)
         self.assertTrue(success2)
-        after_two = db.get_character(user_id)
+        after_two = db.get_character(user_id, -999)
         self.assertEqual(after_two["armor_class"], ac_one_piece + expected_bonus)
         self.assertIn("AC is now", msg2)
 
         sink = []
         await bot._do_unequip_item(FakeUpdate(user_id, "take off my Emberwoven Band", sink), "take off my Emberwoven Band")
-        after_unequip = db.get_character(user_id)
+        after_unequip = db.get_character(user_id, -999)
         self.assertEqual(after_unequip["armor_class"], ac_one_piece)
         self.assertNotIn(ring1_id, after_unequip["equipped_accessories"])
         self.assertIn(ring2_id, after_unequip["equipped_accessories"])
@@ -2062,16 +2062,16 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             item_type=mythic_weapon["type"], name=mythic_weapon["name"], rarity=mythic_weapon["rarity"],
             price=mythic_weapon["price"], base_stats=mythic_weapon, affixes=affixes,
         )
-        db.add_item(user_id, item_id, 1)
+        db.add_item(user_id, -999, item_id, 1)
 
-        success_before, _msg, _u1 = db.equip_item(user_id, item_id)
+        success_before, _msg, _u1 = db.equip_item(user_id, -999, item_id)
         self.assertFalse(success_before)
-        self.assertNotEqual(db.get_character(user_id).get("equipped_weapon"), item_id)
+        self.assertNotEqual(db.get_character(user_id, -999).get("equipped_weapon"), item_id)
 
-        db.update_character(user_id, rebirth_count=1)
-        success_after, _msg2, _u2 = db.equip_item(user_id, item_id)
+        db.update_character(user_id, -999, rebirth_count=1)
+        success_after, _msg2, _u2 = db.equip_item(user_id, -999, item_id)
         self.assertTrue(success_after)
-        self.assertEqual(db.get_character(user_id).get("equipped_weapon"), item_id)
+        self.assertEqual(db.get_character(user_id, -999).get("equipped_weapon"), item_id)
 
     def test_free_extra_attack_adds_exactly_one_attack_regardless_of_class(self):
         """Real Phase 6 deliverable: the free_extra_attack mythic affix is a flat +1, checked unconditionally."""
@@ -2162,9 +2162,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         result = resolve_advanced_craft(character, "masterwork_longsword", practiced_bonus=0)
         self.assertEqual(result["outcome"], "missing_materials")
 
-        db.add_item(950909, "iron_ore", 6)
-        db.add_item(950909, "moonpetal", 1)
-        character = db.get_character(950909)
+        db.add_item(950909, -999, "iron_ore", 6)
+        db.add_item(950909, -999, "moonpetal", 1)
+        character = db.get_character(950909, -999)
         succeeded = False
         for _ in range(30):
             result = resolve_advanced_craft(character, "masterwork_longsword", practiced_bonus=50)
@@ -2202,8 +2202,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             item_type=weapon["type"], name=weapon["name"], rarity=weapon["rarity"],
             price=weapon["price"], base_stats=weapon, affixes=affixes,
         )
-        db.add_item(user_id, item_id, 1)
-        db.add_item(user_id, "iron_ore", 100)
+        db.add_item(user_id, -999, item_id, 1)
+        db.add_item(user_id, -999, "iron_ore", 100)
 
         advanced = False
         for _ in range(15):
@@ -2256,7 +2256,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(topics.is_adventure(home_chat_id, config.TOPIC_ADVENTURE_ID))
 
         user_id = 700001
-        make_basic_character(user_id, "TenantPlayer", current_location="crossroads_tavern")
+        make_basic_character(user_id, "TenantPlayer", chat_id=tenant_chat_id, current_location="crossroads_tavern")
         sink = []
         update = FakeUpdate(user_id, "check my sheet", sink, thread_id=tenant_adventure_thread_id, chat_id=tenant_chat_id)
         await bot._route_text_message(update, DummyContext())
@@ -2313,7 +2313,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         correctly refuses/accepts for the home group.
         """
         home_chat_id = 222222
-        make_basic_character(800001, "HomePlayer", current_location="crossroads_tavern")
+        make_basic_character(800001, "HomePlayer", chat_id=home_chat_id, current_location="crossroads_tavern")
         sink = []
         update = FakeUpdate(800001, "check my sheet", sink, thread_id=config.TOPIC_ADVENTURE_ID, chat_id=home_chat_id)
         await bot._route_text_message(update, DummyContext())
@@ -2323,7 +2323,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         tenant_chat_id = -8887777
         tenant_adventure_thread_id = 424999
         db.set_chat_topic_id(tenant_chat_id, "adventure", tenant_adventure_thread_id)
-        make_basic_character(800002, "TenantPlayer2", current_location="crossroads_tavern")
+        make_basic_character(800002, "TenantPlayer2", chat_id=tenant_chat_id, current_location="crossroads_tavern")
         sink2 = []
         update2 = FakeUpdate(800002, "check my sheet", sink2, thread_id=tenant_adventure_thread_id, chat_id=tenant_chat_id)
         await bot._route_text_message(update2, DummyContext())
@@ -2440,10 +2440,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         fake_bot = _FakeSendBot()
         player_id = 991001
-        make_basic_character(player_id, "TimeoutTester", current_location="crossroads_tavern")
+        make_basic_character(player_id, "TimeoutTester", chat_id=-999500, current_location="crossroads_tavern")
 
         def new_fight(player_hp=None):
-            character = db.get_character(player_id)
+            character = db.get_character(player_id, -999500)
             if player_hp is not None:
                 character["hp_current"] = player_hp
             companion = {"telegram_user_id": -700001, "name": "TestCompanion", "hp_current": 50, "hp_max": 50,
@@ -2493,7 +2493,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session4 = new_fight()
         session4.timeout_escalated.add(player_id)
         session4.turn_started_at[player_id] = time.time() - (bot.COMBAT_TIMEOUT_ESCALATED_WARNING_SECONDS + 5)
-        db.update_character(player_id, last_active_at=datetime.now(timezone.utc).isoformat())
+        db.update_character(player_id, -999500, last_active_at=datetime.now(timezone.utc).isoformat())
         await bot._check_combat_timeouts(fake_bot)
         self.assertNotIn(player_id, session4.timeout_escalated)
         sessions.end_session(-999500, session4)
@@ -2502,7 +2502,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session5 = new_fight(player_hp=0)
         session5.turn_started_at[player_id] = time.time() - (bot.COMBAT_TIMEOUT_ACTION_SECONDS + 5)
         await bot._check_combat_timeouts(fake_bot)
-        after_char = db.get_character(player_id)
+        after_char = db.get_character(player_id, -999500)
         self.assertEqual(after_char.get("is_inactive"), 1)
         self.assertEqual(after_char.get("current_location"), "crossroads_tavern")
         self.assertNotIn(player_id, session5.turn_order)
@@ -2529,7 +2529,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             item_type=weapon["type"], name=weapon["name"], rarity=weapon["rarity"],
             price=weapon["price"], base_stats=weapon, affixes=affixes,
         )
-        db.add_item(user_id, item_id, 1)
+        db.add_item(user_id, -999, item_id, 1)
         materialized = db.materialize_item_instance(item_id)
         self.assertNotIn("description", materialized)
 
@@ -2565,10 +2565,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         seller_id = 994001
         make_basic_character(seller_id, "SellTester", current_location="crossroads_tavern", gold=0)
-        db.add_item(seller_id, item_id, 1)
-        ok, _msg = shop_module.sell_item(seller_id, item_id, 1)
+        db.add_item(seller_id, -999, item_id, 1)
+        ok, _msg = shop_module.sell_item(seller_id, -999, item_id, 1)
         self.assertTrue(ok)
-        after_sell = db.get_character(seller_id)
+        after_sell = db.get_character(seller_id, -999)
         self.assertGreater(after_sell["gold"], 0)
         self.assertEqual(after_sell["inventory"].get(item_id, 0), 0)
 
@@ -2580,7 +2580,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             item_type=weapon2["type"], name=weapon2["name"], rarity=weapon2["rarity"],
             price=weapon2["price"], base_stats=weapon2, affixes=affixes2,
         )
-        db.add_item(lister_id, item_id2, 1)
+        db.add_item(lister_id, -999, item_id2, 1)
 
         sink1 = []
         await bot._do_sell_market(
@@ -2665,7 +2665,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(len(loot_update.effective_chat.sent_photos) == 0)  # the loot line has no photo of its own
         self.assertTrue(len(loot_update.effective_chat._sink) > 0)
 
-        winner_char = db.get_character(996001)
+        winner_char = db.get_character(996001, -999)
         generated_ids = [k for k in winner_char["inventory"] if k.startswith("gi")]
         self.assertTrue(len(generated_ids) > 0)
         item_id = generated_ids[0]
@@ -2679,7 +2679,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink_equip = []
         equip_update = FakeCallbackUpdate(996001, f"itemview|equip|{item_id}", sink_equip)
         await bot.itemview_callback(equip_update, DummyContext())
-        after_equip = db.get_character(996001)
+        after_equip = db.get_character(996001, -999)
         self.assertTrue(after_equip.get("equipped_weapon") == item_id or after_equip.get("equipped_armor") == item_id)
 
     def test_equipable_worth_shown_in_stats_line(self):
@@ -2737,7 +2737,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             item_type=weapon["type"], name=weapon["name"], rarity=weapon["rarity"],
             price=weapon["price"], base_stats=weapon, affixes=affixes,
         )
-        db.add_item(user_id, item_id, 1)
+        db.add_item(user_id, -999, item_id, 1)
 
         sink_show = []
         show_update = FakeCallbackUpdate(user_id, f"itemview|show|{item_id}", sink_show)
@@ -2770,21 +2770,21 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sessions.end_session(-999)
         leader_id = 900490
         make_basic_character(leader_id, "XpLeader", current_location="crossroads_tavern")
-        party_id = db.create_party(leader_id)
+        party_id = db.create_party(leader_id, -999)
         companion = db.create_ai_companion(
-            "XpBuddy", "Elf", "Ranger",
+            -999, "XpBuddy", "Elf", "Ranger",
             ability_scores={"strength": 12, "dexterity": 17, "constitution": 13,
                              "intelligence": 11, "wisdom": 15, "charisma": 10},
             hp_max=30, armor_class=14, gold=0, inventory={},
         )
-        db.add_ai_companion_to_party(companion["telegram_user_id"], party_id)
+        db.add_ai_companion_to_party(companion["telegram_user_id"], -999, party_id)
         companion_id = companion["telegram_user_id"]
 
         enemy_id = -2_500_060
         enemy = {"telegram_user_id": enemy_id, "name": "XpGoblin", "dexterity": 10, "xp_reward": 90}
-        leader = db.get_character(leader_id)
+        leader = db.get_character(leader_id, -999)
         leader["telegram_user_id"] = leader_id
-        companion_p = db.get_character(companion_id)
+        companion_p = db.get_character(companion_id, -999)
         companion_p["telegram_user_id"] = companion_id
         session = sessions.start_session(
             -999, [leader, companion_p, enemy],
@@ -2792,11 +2792,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         session.turn_order = [leader_id, companion_id, enemy_id]
 
-        leader_xp_before = db.get_character(leader_id)["xp"]
-        companion_xp_before = db.get_character(companion_id)["xp"]
+        leader_xp_before = db.get_character(leader_id, -999)["xp"]
+        companion_xp_before = db.get_character(companion_id, -999)["xp"]
         await bot._award_victory_xp(FakeUpdate(leader_id, "", []), session)
-        leader_xp_after = db.get_character(leader_id)["xp"]
-        companion_xp_after = db.get_character(companion_id)["xp"]
+        leader_xp_after = db.get_character(leader_id, -999)["xp"]
+        companion_xp_after = db.get_character(companion_id, -999)["xp"]
 
         self.assertGreater(leader_xp_after, leader_xp_before)
         self.assertGreater(companion_xp_after, companion_xp_before)
@@ -2864,13 +2864,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_active_combat_roster_caps_at_six_leader_always_included(self):
         leader_id = 950001
         make_basic_character(leader_id, "BenchLeader", current_location="crossroads_tavern")
-        party_id = db.create_party(leader_id)
+        party_id = db.create_party(leader_id, -999)
         for i, name in enumerate(["A1", "A2", "A3", "A4", "A5", "A6"]):
             uid = 950002 + i
             make_basic_character(uid, name, current_location="crossroads_tavern")
-            db.update_character(uid, party_id=party_id)
+            db.update_character(uid, -999, party_id=party_id)
 
-        leader = db.get_character(leader_id)
+        leader = db.get_character(leader_id, -999)
         combatants = bot._get_real_party_combatants(leader)
         self.assertEqual(len(combatants), bot.config.PARTY_ACTIVE_COMBAT_CAP)
         self.assertTrue(any(c["telegram_user_id"] == leader_id for c in combatants))
@@ -2880,35 +2880,35 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         member_id = 950102
         make_basic_character(leader_id, "BenchLeader2", current_location="crossroads_tavern")
         make_basic_character(member_id, "Benchee", current_location="crossroads_tavern")
-        party_id = db.create_party(leader_id)
-        db.update_character(member_id, party_id=party_id)
+        party_id = db.create_party(leader_id, -999)
+        db.update_character(member_id, -999, party_id=party_id)
 
         await bot._do_bench_member(FakeUpdate(leader_id, "bench Benchee", []), "Benchee")
-        benched = db.get_character(member_id)
+        benched = db.get_character(member_id, -999)
         self.assertTrue(benched.get("is_benched"))
         self.assertEqual(benched.get("party_id"), party_id)  # still a real party member
 
-        combatants = bot._get_real_party_combatants(db.get_character(leader_id))
+        combatants = bot._get_real_party_combatants(db.get_character(leader_id, -999))
         self.assertNotIn(member_id, {c["telegram_user_id"] for c in combatants})
 
     async def test_unbench_refused_when_active_roster_already_full(self):
         leader_id = 950201
         make_basic_character(leader_id, "BenchLeader3", current_location="crossroads_tavern")
-        party_id = db.create_party(leader_id)
+        party_id = db.create_party(leader_id, -999)
         names = ["B1", "B2", "B3", "B4", "B5", "Extra"]
         ids = {}
         for i, name in enumerate(names):
             uid = 950202 + i
             ids[name] = uid
             make_basic_character(uid, name, current_location="crossroads_tavern")
-            db.update_character(uid, party_id=party_id)
-        db.update_character(ids["Extra"], is_benched=1)  # 6 already active (leader + B1-B5)
+            db.update_character(uid, -999, party_id=party_id)
+        db.update_character(ids["Extra"], -999, is_benched=1)  # 6 already active (leader + B1-B5)
 
         sink = []
         await bot._do_unbench_member(FakeUpdate(leader_id, "unbench Extra", sink), "Extra")
         reply = "\n".join(sink)
         self.assertIn("already full", reply.lower())
-        self.assertTrue(db.get_character(ids["Extra"]).get("is_benched"))
+        self.assertTrue(db.get_character(ids["Extra"], -999).get("is_benched"))
 
     async def test_benched_member_still_gets_xp_and_gold_share(self):
         import sessions
@@ -2917,19 +2917,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         benched_id = 950302
         make_basic_character(leader_id, "BenchLeader4", current_location="crossroads_tavern")
         make_basic_character(benched_id, "BenchedEarner", current_location="crossroads_tavern")
-        party_id = db.create_party(leader_id)
-        db.update_character(benched_id, party_id=party_id, is_benched=1)
+        party_id = db.create_party(leader_id, -999)
+        db.update_character(benched_id, -999, party_id=party_id, is_benched=1)
 
         enemy_id = -2_600_101
         enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "dexterity": 10, "xp_reward": 100}
-        leader = db.get_character(leader_id)
+        leader = db.get_character(leader_id, -999)
         leader["telegram_user_id"] = leader_id
         session = sessions.start_session(-999, [leader, enemy], {enemy_id: "enemy", leader_id: "party"})
         session.turn_order = [leader_id, enemy_id]
 
-        before = db.get_character(benched_id)["xp"]
+        before = db.get_character(benched_id, -999)["xp"]
         await bot._award_victory_xp(FakeUpdate(leader_id, "", []), session)
-        after = db.get_character(benched_id)["xp"]
+        after = db.get_character(benched_id, -999)["xp"]
         self.assertEqual(after - before, int(100 * bot.INACTIVE_PARTY_XP_SHARE))
         sessions.end_session(-999)
 
@@ -2973,7 +2973,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         make_basic_character(uid, "FormationSolo", current_location="crossroads_tavern")
         sink = []
         await bot._do_set_formation_row(FakeUpdate(uid, "move me to the back", sink), "", "back")
-        self.assertEqual(db.get_character(uid).get("formation_row"), "back")
+        self.assertEqual(db.get_character(uid, -999).get("formation_row"), "back")
         self.assertIn("back row", "\n".join(sink).lower())
 
     async def test_set_formation_row_targets_named_party_member_not_requester(self):
@@ -2981,28 +2981,28 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         member_id = 950403
         make_basic_character(leader_id, "FormationLeader", current_location="crossroads_tavern")
         make_basic_character(member_id, "FormationMember", current_location="crossroads_tavern")
-        party_id = db.create_party(leader_id)
-        db.update_character(member_id, party_id=party_id)
+        party_id = db.create_party(leader_id, -999)
+        db.update_character(member_id, -999, party_id=party_id)
 
         await bot._do_set_formation_row(
             FakeUpdate(leader_id, "move FormationMember to the back row", []), "FormationMember", "back",
         )
-        self.assertEqual(db.get_character(member_id).get("formation_row"), "back")
-        self.assertEqual(db.get_character(leader_id).get("formation_row", "front"), "front")
+        self.assertEqual(db.get_character(member_id, -999).get("formation_row"), "back")
+        self.assertEqual(db.get_character(leader_id, -999).get("formation_row", "front"), "front")
 
     async def test_set_formation_row_refuses_a_non_party_member(self):
         leader_id = 950404
         stranger_id = 950405
         make_basic_character(leader_id, "FormationLeader2", current_location="crossroads_tavern")
         make_basic_character(stranger_id, "Stranger", current_location="crossroads_tavern")
-        db.create_party(leader_id)  # stranger is deliberately NOT added
+        db.create_party(leader_id, -999)  # stranger is deliberately NOT added
 
         sink = []
         await bot._do_set_formation_row(
             FakeUpdate(leader_id, "move Stranger to the back row", sink), "Stranger", "back",
         )
         self.assertIn("no one named", "\n".join(sink).lower())
-        self.assertEqual(db.get_character(stranger_id).get("formation_row", "front"), "front")
+        self.assertEqual(db.get_character(stranger_id, -999).get("formation_row", "front"), "front")
 
     # -- Real-time mid-fight formation switching (2026-08-01, per Coffee:
     #    "let the party use formations to move forward and pull back in
@@ -3034,10 +3034,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         leader_id = 950601
         make_basic_character(leader_id, "MidFightLeader", current_location="crossroads_tavern",
                               hp_max=100, armor_class=15)
-        db.update_character(leader_id, hp_current=100)
+        db.update_character(leader_id, -999, hp_current=100)
         enemy = {"telegram_user_id": -5100001, "name": "MidFightGoblin", "dexterity": 10,
                  "hp_current": 200, "hp_max": 200, "armor_class": 12}
-        leader = db.get_character(leader_id)
+        leader = db.get_character(leader_id, -999)
         leader["telegram_user_id"] = leader_id
         session = sessions.start_session(-999, [leader, enemy], {leader_id: "party", -5100001: "enemy"})
         session.turn_order = [leader_id, -5100001]
@@ -3046,7 +3046,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         live = next(p for p in session.participants if p["telegram_user_id"] == leader_id)
         self.assertEqual(live.get("formation_row"), "back")
-        self.assertEqual(db.get_character(leader_id).get("formation_row"), "back")
+        self.assertEqual(db.get_character(leader_id, -999).get("formation_row"), "back")
         self.assertEqual(session.current_participant_id(), leader_id)  # turn unchanged
         sessions.end_session(-999)
 
@@ -3056,7 +3056,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         leader_id = 950602
         make_basic_character(leader_id, "MenuLeader", current_location="crossroads_tavern")
         enemy = {"telegram_user_id": -5100002, "name": "MenuGoblin", "dexterity": 10, "hp_current": 20, "hp_max": 20}
-        leader = db.get_character(leader_id)
+        leader = db.get_character(leader_id, -999)
         leader["telegram_user_id"] = leader_id
         session = sessions.start_session(-999, [leader, enemy], {leader_id: "party", -5100002: "enemy"})
         session.turn_order = [leader_id, -5100002]
@@ -3073,9 +3073,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         ally_id = 950604
         make_basic_character(leader_id, "GiveMenuLeader", current_location="crossroads_tavern")
         make_basic_character(ally_id, "GiveMenuAlly", current_location="crossroads_tavern")
-        db.update_character(leader_id, inventory={"healing_potion": 1})
+        db.update_character(leader_id, -999, inventory={"healing_potion": 1})
         enemy = {"telegram_user_id": -5100003, "name": "GiveMenuGoblin", "dexterity": 10, "hp_current": 20, "hp_max": 20}
-        leader = db.get_character(leader_id)
+        leader = db.get_character(leader_id, -999)
         leader["telegram_user_id"] = leader_id
         session = sessions.start_session(-999, [leader, enemy], {leader_id: "party", -5100003: "enemy"})
         session.turn_order = [leader_id, -5100003]
@@ -3091,7 +3091,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await tap("bm|giveitem|healing_potion")
         reply = await tap("bm|giveto|healing_potion|GiveMenuAlly")
         self.assertIn("1x", reply)
-        self.assertEqual(db.get_character(ally_id)["inventory"].get("healing_potion", 0), 1)
+        self.assertEqual(db.get_character(ally_id, -999)["inventory"].get("healing_potion", 0), 1)
         self.assertEqual(session.current_participant_id(), leader_id)  # turn unchanged
         sessions.end_session(-999)
 
@@ -3113,20 +3113,20 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sessions.end_session(-999)
         leader_id = 950801
         make_basic_character(leader_id, "ScrollMenuLeader", char_class="Cleric", current_location="crossroads_tavern")
-        db.add_item(leader_id, "scroll_revivify", 1)
-        char = db.get_character(leader_id)
+        db.add_item(leader_id, -999, "scroll_revivify", 1)
+        char = db.get_character(leader_id, -999)
         self.assertIn("scroll_revivify", bot._battle_usable_item_ids(char))
 
         dead_companion = db.create_ai_companion(
-            "ScrollMenuFallen", "Elf", "Ranger",
+            -999, "ScrollMenuFallen", "Elf", "Ranger",
             ability_scores={"strength": 12, "dexterity": 17, "constitution": 13,
                              "intelligence": 11, "wisdom": 15, "charisma": 10},
             hp_max=30, armor_class=14, gold=0, inventory={},
         )
-        party_id = db.create_party(leader_id)
-        db.add_ai_companion_to_party(dead_companion["telegram_user_id"], party_id)
+        party_id = db.create_party(leader_id, -999)
+        db.add_ai_companion_to_party(dead_companion["telegram_user_id"], -999, party_id)
         db.update_character_by_id(dead_companion["character_id"], is_dead=1, hp_current=0)
-        char = db.get_character(leader_id)
+        char = db.get_character(leader_id, -999)
 
         enemy = {
             "telegram_user_id": -2_600_101, "name": "ScrollMenuGoblin", "dexterity": 10, "strength": 10,
@@ -3150,7 +3150,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         revived = db.get_character_by_id(dead_companion["character_id"])
         self.assertFalse(revived.get("is_dead"))
-        self.assertEqual(db.get_character(leader_id)["inventory"].get("scroll_revivify", 0), 0)
+        self.assertEqual(db.get_character(leader_id, -999)["inventory"].get("scroll_revivify", 0), 0)
         sessions.end_session(-999, session)
 
     async def test_equip_via_battle_menu_offers_present_party_members_not_just_self(self):
@@ -3168,12 +3168,12 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         ally_id = 950702
         make_basic_character(leader_id, "EquipMenuLeader", current_location="crossroads_tavern")
         make_basic_character(ally_id, "EquipMenuAlly", current_location="crossroads_tavern")
-        db.update_character(ally_id, inventory={"rusty_dagger": 1})
+        db.update_character(ally_id, -999, inventory={"rusty_dagger": 1})
         enemy = {"telegram_user_id": -5100004, "name": "EquipMenuGoblin", "dexterity": 10,
                  "hp_current": 20, "hp_max": 20}
-        leader = db.get_character(leader_id)
+        leader = db.get_character(leader_id, -999)
         leader["telegram_user_id"] = leader_id
-        ally = db.get_character(ally_id)
+        ally = db.get_character(ally_id, -999)
         ally["telegram_user_id"] = ally_id
         session = sessions.start_session(-999, [leader, ally, enemy],
                                           {leader_id: "party", ally_id: "party", -5100004: "enemy"})
@@ -3192,8 +3192,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         await tap(f"bm|equipfor|{ally_id}")
         reply = await tap(f"bm|equipitem|{ally_id}|rusty_dagger")
-        self.assertEqual(db.get_character(ally_id).get("equipped_weapon"), "rusty_dagger")
-        self.assertNotEqual(db.get_character(leader_id).get("equipped_weapon"), "rusty_dagger")
+        self.assertEqual(db.get_character(ally_id, -999).get("equipped_weapon"), "rusty_dagger")
+        self.assertNotEqual(db.get_character(leader_id, -999).get("equipped_weapon"), "rusty_dagger")
         self.assertEqual(session.current_participant_id(), leader_id)  # turn unchanged
         sessions.end_session(-999)
 
@@ -3271,17 +3271,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_active_ai_companion_joins_combat_despite_being_elsewhere(self):
         leader_id = 950501
         make_basic_character(leader_id, "RushLeader", current_location="crossroads_tavern")
-        party_id = db.create_party(leader_id)
+        party_id = db.create_party(leader_id, -999)
         companion = db.create_ai_companion(
-            "RushCompanion", "Dragonborn", "Fighter",
+            -999, "RushCompanion", "Dragonborn", "Fighter",
             ability_scores={"strength": 16, "dexterity": 12, "constitution": 14,
                              "intelligence": 8, "wisdom": 10, "charisma": 10},
             hp_max=61, armor_class=16, gold=0, inventory={},
         )
-        db.add_ai_companion_to_party(companion["telegram_user_id"], party_id)
+        db.add_ai_companion_to_party(companion["telegram_user_id"], -999, party_id)
         db.update_character_by_id(companion["character_id"], current_location="whispering_woods")
 
-        combatants = bot._get_real_party_combatants(db.get_character(leader_id))
+        combatants = bot._get_real_party_combatants(db.get_character(leader_id, -999))
         self.assertIn(companion["telegram_user_id"], {c["telegram_user_id"] for c in combatants})
         self.assertEqual(
             db.get_character_by_id(companion["character_id"])["current_location"], "crossroads_tavern",
@@ -3293,17 +3293,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_benched_ai_companion_still_sits_out_regardless_of_location(self):
         leader_id = 950502
         make_basic_character(leader_id, "RushLeader2", current_location="crossroads_tavern")
-        party_id = db.create_party(leader_id)
+        party_id = db.create_party(leader_id, -999)
         companion = db.create_ai_companion(
-            "BenchedRushCompanion", "Dragonborn", "Fighter",
+            -999, "BenchedRushCompanion", "Dragonborn", "Fighter",
             ability_scores={"strength": 16, "dexterity": 12, "constitution": 14,
                              "intelligence": 8, "wisdom": 10, "charisma": 10},
             hp_max=61, armor_class=16, gold=0, inventory={},
         )
-        db.add_ai_companion_to_party(companion["telegram_user_id"], party_id)
+        db.add_ai_companion_to_party(companion["telegram_user_id"], -999, party_id)
         db.update_character_by_id(companion["character_id"], current_location="whispering_woods", is_benched=1)
 
-        combatants = bot._get_real_party_combatants(db.get_character(leader_id))
+        combatants = bot._get_real_party_combatants(db.get_character(leader_id, -999))
         self.assertNotIn(companion["telegram_user_id"], {c["telegram_user_id"] for c in combatants})
 
     async def test_real_human_party_member_elsewhere_is_not_teleported(self):
@@ -3311,12 +3311,12 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         human_id = 950504
         make_basic_character(leader_id, "RushLeader3", current_location="crossroads_tavern")
         make_basic_character(human_id, "RushHuman", current_location="whispering_woods")
-        party_id = db.create_party(leader_id)
-        db.update_character(human_id, party_id=party_id)
+        party_id = db.create_party(leader_id, -999)
+        db.update_character(human_id, -999, party_id=party_id)
 
-        combatants = bot._get_real_party_combatants(db.get_character(leader_id))
+        combatants = bot._get_real_party_combatants(db.get_character(leader_id, -999))
         self.assertNotIn(human_id, {c["telegram_user_id"] for c in combatants})
-        self.assertEqual(db.get_character(human_id)["current_location"], "whispering_woods")
+        self.assertEqual(db.get_character(human_id, -999)["current_location"], "whispering_woods")
 
     # -- Dev-topic video handling (2026-07-15, per Coffee): videos had NO
     #    handler at all before this (only TEXT/PHOTO/Document.ALL were
@@ -3409,7 +3409,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         player_id = 999910
         make_basic_character(player_id, "Listener", current_location="the_hush_below")
-        db.accept_quest(player_id, "the_hush_stage3_the_unspoken")
+        db.accept_quest(player_id, -999, "the_hush_stage3_the_unspoken")
 
         boss_id = -2_500_010
         boss = {
@@ -3422,7 +3422,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink = []
         await bot._check_quest_completions_defeat_monster(FakeUpdate(player_id, "irrelevant", sink), session)
 
-        character = db.get_character(player_id)
+        character = db.get_character(player_id, -999)
         self.assertIn("the_hush_stage3_the_unspoken", character["completed_quests"])
         self.assertNotIn("the_hush_stage3_the_unspoken", character["active_quests"])
         sessions.end_session(-999)
@@ -3433,7 +3433,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         player_id = 999911
         make_basic_character(player_id, "Delver", current_location="the_first_city")
-        db.accept_quest(player_id, "the_first_city_quest")
+        db.accept_quest(player_id, -999, "the_first_city_quest")
 
         boss_id = -2_500_011
         boss = {
@@ -3446,7 +3446,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink = []
         await bot._check_quest_completions_defeat_monster(FakeUpdate(player_id, "irrelevant", sink), session)
 
-        character = db.get_character(player_id)
+        character = db.get_character(player_id, -999)
         self.assertIn("the_first_city_quest", character["completed_quests"])
         self.assertNotIn("the_first_city_quest", character["active_quests"])
         sessions.end_session(-999)
@@ -3471,8 +3471,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sessions.end_session(-997)
 
         player_id = 999912
-        make_basic_character(player_id, "DepthSeeker", current_location="the_first_city_forgotten_depth")
-        db.accept_quest(player_id, "the_unrepeating_depth")
+        make_basic_character(player_id, "DepthSeeker", chat_id=-997, current_location="the_first_city_forgotten_depth")
+        db.accept_quest(player_id, -997, "the_unrepeating_depth")
 
         boss_id = -2_500_012
         boss = {
@@ -3483,9 +3483,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [boss_id, player_id]
 
         sink = []
-        await bot._check_quest_completions_defeat_monster(FakeUpdate(player_id, "irrelevant", sink), session)
+        await bot._check_quest_completions_defeat_monster(FakeUpdate(player_id, "irrelevant", sink, chat_id=-997), session)
 
-        character = db.get_character(player_id)
+        character = db.get_character(player_id, -997)
         self.assertIn("the_unrepeating_depth", character["completed_quests"])
         self.assertNotIn("the_unrepeating_depth", character["active_quests"])
         self.assertEqual(character["inventory"].get("the_last_word", 0), 1)
@@ -3569,8 +3569,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         user_id = 999921
         player = make_basic_character(user_id, "Scaleborn", race="Dragonborn", current_location="crossroads_tavern")
-        db.update_character(user_id, level=6)  # 3d6 tier
-        player = db.get_character(user_id)
+        db.update_character(user_id, -999, level=6)  # 3d6 tier
+        player = db.get_character(user_id, -999)
         player["telegram_user_id"] = user_id
 
         enemy_id = -2_500_020
@@ -3586,7 +3586,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink = []
         await bot._do_breath_weapon(FakeUpdate(user_id, "breath weapon", sink))
         self.assertLess(enemy["hp_current"], 100, "breath weapon should have dealt real damage")
-        self.assertEqual(db.get_feature_uses(user_id, "breath_weapon"), 1)
+        self.assertEqual(db.get_feature_uses(user_id, -999, "breath_weapon"), 1)
 
         # Second use this same rest should be rejected.
         sink2 = []
@@ -3677,10 +3677,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         bard_id = 900503
         make_basic_character(user_id, "Fighty", char_class="Fighter")
         make_basic_character(bard_id, "Songful", char_class="Bard")
-        db.update_character(bard_id, level=2)
-        party_id = db.create_party(user_id)
-        db.update_character(bard_id, party_id=party_id)
-        fighter = db.get_character(user_id)
+        db.update_character(bard_id, -999, level=2)
+        party_id = db.create_party(user_id, -999)
+        db.update_character(bard_id, -999, party_id=party_id)
+        fighter = db.get_character(user_id, -999)
         from unittest.mock import patch
         with patch("bot.roll", return_value=[6]):
             self.assertEqual(bot._song_of_rest_bonus(fighter), 6)
@@ -3713,8 +3713,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         from unittest.mock import patch
         user_id = 900504
         make_basic_character(user_id, "Sparky", char_class="Sorcerer")
-        db.update_character(user_id, level=3)
-        character = db.get_character(user_id)
+        db.update_character(user_id, -999, level=3)
+        character = db.get_character(user_id, -999)
         spell = {"damage_dice": "3d6"}
         result = {"rolls": [1, 2, 6], "damage_dealt": 9}
         with patch("bot.roll", return_value=[5]):
@@ -3725,8 +3725,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     def test_empowered_spell_only_once_per_rest(self):
         user_id = 900505
         make_basic_character(user_id, "Sparky2", char_class="Sorcerer")
-        db.update_character(user_id, level=3)
-        character = db.get_character(user_id)
+        db.update_character(user_id, -999, level=3)
+        character = db.get_character(user_id, -999)
         spell = {"damage_dice": "3d6"}
         result = {"rolls": [1, 1, 1], "damage_dealt": 3}
         first = bot._apply_empowered_spell(user_id, character, spell, result)
@@ -3737,7 +3737,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     def test_empowered_spell_requires_sorcerer_level_3(self):
         user_id = 900506
         make_basic_character(user_id, "Lowbie", char_class="Sorcerer")
-        character = db.get_character(user_id)
+        character = db.get_character(user_id, -999)
         spell = {"damage_dice": "3d6"}
         result = {"rolls": [1, 1, 1], "damage_dealt": 3}
         unchanged = bot._apply_empowered_spell(user_id, character, spell, result)
@@ -3745,8 +3745,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         user_id2 = 900507
         make_basic_character(user_id2, "WrongClass", char_class="Fighter")
-        db.update_character(user_id2, level=5)
-        character2 = db.get_character(user_id2)
+        db.update_character(user_id2, -999, level=5)
+        character2 = db.get_character(user_id2, -999)
         unchanged2 = bot._apply_empowered_spell(user_id2, character2, spell, dict(result))
         self.assertEqual(unchanged2["rolls"], [1, 1, 1])
 
@@ -3843,15 +3843,15 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     def test_board_quests_completed_counter_increments(self):
         user_id = 900490
         make_basic_character(user_id, "Bountyhunter")
-        self.assertEqual(db.get_character(user_id)["board_quests_completed"], 0)
-        db.increment_board_quests_completed(user_id)
-        db.increment_board_quests_completed(user_id)
-        self.assertEqual(db.get_character(user_id)["board_quests_completed"], 2)
+        self.assertEqual(db.get_character(user_id, -999)["board_quests_completed"], 0)
+        db.increment_board_quests_completed(user_id, -999)
+        db.increment_board_quests_completed(user_id, -999)
+        self.assertEqual(db.get_character(user_id, -999)["board_quests_completed"], 2)
 
     async def test_check_quests_shows_board_quest_completion_count(self):
         user_id = 900491
         make_basic_character(user_id, "Bountyhunter2")
-        db.increment_board_quests_completed(user_id)
+        db.increment_board_quests_completed(user_id, -999)
         sink = []
         await bot._do_check_quests(FakeUpdate(user_id, "check quests", sink))
         self.assertIn("Board quests completed", " ".join(sink))
@@ -3864,8 +3864,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_add_xp_banks_asi_points_instead_of_auto_applying(self):
         user_id = 900492
         make_basic_character(user_id, "Leveler")
-        before_strength = db.get_character(user_id)["strength"]
-        after = db.add_xp(user_id, 2700)  # crosses level 4, a real ASI level
+        before_strength = db.get_character(user_id, -999)["strength"]
+        after = db.add_xp(user_id, -999, 2700)  # crosses level 4, a real ASI level
         self.assertEqual(after["level"], 4)
         self.assertEqual(after["strength"], before_strength, "ASI should no longer auto-apply")
         self.assertEqual(after["pending_asi_points"], 2)
@@ -3880,16 +3880,16 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_level_up_prompts_then_resolves_with_named_ability(self):
         user_id = 900494
         make_basic_character(user_id, "Leveler3")
-        db.update_character(user_id, pending_asi_points=2)
+        db.update_character(user_id, -999, pending_asi_points=2)
         sink = []
         await bot._do_level_up(FakeUpdate(user_id, "level up", sink), "level up")
         self.assertIn(user_id, bot._PENDING_ASI_CHOICE)
         self.assertTrue(any("Which ability" in m for m in sink))
 
-        before_con = db.get_character(user_id)["constitution"]
+        before_con = db.get_character(user_id, -999)["constitution"]
         sink2 = []
         await bot._do_level_up(FakeUpdate(user_id, "constitution", sink2), "constitution")
-        after = db.get_character(user_id)
+        after = db.get_character(user_id, -999)
         self.assertEqual(after["constitution"], before_con + 2)
         self.assertEqual(after["pending_asi_points"], 0)
         self.assertNotIn(user_id, bot._PENDING_ASI_CHOICE)
@@ -3897,11 +3897,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_level_up_auto_assigns_to_class_primary_ability(self):
         user_id = 900495
         make_basic_character(user_id, "Leveler4")  # Fighter -> primary ability strength
-        db.update_character(user_id, pending_asi_points=4)
-        before_strength = db.get_character(user_id)["strength"]
+        db.update_character(user_id, -999, pending_asi_points=4)
+        before_strength = db.get_character(user_id, -999)["strength"]
         sink = []
         await bot._do_level_up(FakeUpdate(user_id, "level up, auto", sink), "level up, auto")
-        after = db.get_character(user_id)
+        after = db.get_character(user_id, -999)
         self.assertEqual(after["strength"], before_strength + 4)
         self.assertEqual(after["pending_asi_points"], 0)
         self.assertNotIn(user_id, bot._PENDING_ASI_CHOICE)
@@ -3909,11 +3909,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_level_up_single_ability_choice_caps_at_two_and_keeps_remainder(self):
         user_id = 900496
         make_basic_character(user_id, "Leveler5")
-        db.update_character(user_id, pending_asi_points=4)
-        before_wis = db.get_character(user_id)["wisdom"]
+        db.update_character(user_id, -999, pending_asi_points=4)
+        before_wis = db.get_character(user_id, -999)["wisdom"]
         sink = []
         await bot._do_level_up(FakeUpdate(user_id, "wisdom", sink), "wisdom")
-        after = db.get_character(user_id)
+        after = db.get_character(user_id, -999)
         self.assertEqual(after["wisdom"], before_wis + 2)
         self.assertEqual(after["pending_asi_points"], 2)
         self.assertTrue(any("still have 2" in m for m in sink))
@@ -3921,7 +3921,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_check_sheet_shows_pending_asi_points(self):
         user_id = 900497
         make_basic_character(user_id, "Leveler6")
-        db.update_character(user_id, pending_asi_points=2)
+        db.update_character(user_id, -999, pending_asi_points=2)
         sink = []
         await bot._do_check_sheet(FakeUpdate(user_id, "check my sheet", sink))
         self.assertTrue(any("ability point(s) waiting" in m for m in sink))
@@ -3989,7 +3989,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             FakeUpdate(user_id, "set my description to: A grizzled dwarf who never smiles", sink),
             "set my description to: A grizzled dwarf who never smiles",
         )
-        character = db.get_character(user_id)
+        character = db.get_character(user_id, -999)
         self.assertEqual(character["description"], "A grizzled dwarf who never smiles")
 
     async def test_set_description_with_no_content_prompts_then_saves_on_next_message(self):
@@ -4000,7 +4000,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             FakeUpdate(user_id, "I'd like to add a character description to my player", sink),
             "I'd like to add a character description to my player",
         )
-        self.assertIsNone(db.get_character(user_id)["description"])
+        self.assertIsNone(db.get_character(user_id, -999)["description"])
         self.assertIn(user_id, bot._PENDING_DESCRIPTION)
         self.assertIn("what would you like your character's description", sink[-1])
 
@@ -4011,7 +4011,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             from_prompt=True,
         )
         self.assertEqual(
-            db.get_character(user_id)["description"],
+            db.get_character(user_id, -999)["description"],
             "A quiet elven ranger who speaks rarely but shoots true.",
         )
 
@@ -4020,7 +4020,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         make_basic_character(user_id, "Skippy")
         sink = []
         await bot._do_set_description(FakeUpdate(user_id, "skip", sink), "skip", from_prompt=True)
-        self.assertIsNone(db.get_character(user_id)["description"])
+        self.assertIsNone(db.get_character(user_id, -999)["description"])
 
     async def test_set_description_trigger_recognized_over_check_sheet(self):
         # "add a description to my character" contains "my character" as a
@@ -4034,7 +4034,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     def test_character_sheet_shows_description_when_present(self):
         user_id = 900511
         make_basic_character(user_id, "Described")
-        character = db.update_character(user_id, description="A former sellsword.")
+        character = db.update_character(user_id, -999, description="A former sellsword.")
         sheet = bot._format_character_sheet(character)
         self.assertIn("A former sellsword.", sheet)
 
@@ -4054,26 +4054,26 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         make_basic_character(user_id, "Nyx")
         sink = []
         await bot._do_set_pronouns(FakeUpdate(user_id, "", sink), "set my pronouns to: she/her")
-        self.assertEqual(db.get_character(user_id)["pronouns"], "she/her")
+        self.assertEqual(db.get_character(user_id, -999)["pronouns"], "she/her")
 
     async def test_set_pronouns_with_no_content_prompts_then_saves_on_resume(self):
         user_id = 900531
         make_basic_character(user_id, "Vex")
         sink = []
         await bot._do_set_pronouns(FakeUpdate(user_id, "I'd like to set my pronouns", sink), "I'd like to set my pronouns")
-        self.assertIsNone(db.get_character(user_id)["pronouns"])
+        self.assertIsNone(db.get_character(user_id, -999)["pronouns"])
         self.assertIn(user_id, bot._PENDING_PRONOUNS)
 
         sink2 = []
         await bot._do_set_pronouns(FakeUpdate(user_id, "he/him", sink2), "he/him", from_prompt=True)
-        self.assertEqual(db.get_character(user_id)["pronouns"], "he/him")
+        self.assertEqual(db.get_character(user_id, -999)["pronouns"], "he/him")
 
     async def test_set_pronouns_skip_leaves_it_unset(self):
         user_id = 900532
         make_basic_character(user_id, "Ambiguous")
         sink = []
         await bot._do_set_pronouns(FakeUpdate(user_id, "skip", sink), "skip", from_prompt=True)
-        self.assertIsNone(db.get_character(user_id)["pronouns"])
+        self.assertIsNone(db.get_character(user_id, -999)["pronouns"])
 
     def test_set_pronouns_trigger_recognized(self):
         from ai.intent_parser import _keyword_fallback
@@ -4083,7 +4083,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     def test_character_sheet_shows_pronouns_when_present(self):
         user_id = 900533
         make_basic_character(user_id, "Told")
-        character = db.update_character(user_id, pronouns="they/them")
+        character = db.update_character(user_id, -999, pronouns="they/them")
         sheet = bot._format_character_sheet(character)
         self.assertIn("they/them", sheet)
 
@@ -4091,7 +4091,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         from ai.dm_agent import _build_skill_check_prompt
         user_id = 900534
         make_basic_character(user_id, "Set")
-        character = db.update_character(user_id, pronouns="he/him")
+        character = db.update_character(user_id, -999, pronouns="he/him")
         prompt = _build_skill_check_prompt(character, "climb the wall", "strength", {"raw_roll": 15, "total": 18})
         self.assertIn("he/him", prompt)
 
@@ -4122,7 +4122,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     def test_character_sheet_shows_pending_asi_points_at_the_bottom(self):
         user_id = 900516
         make_basic_character(user_id, "Leveled")
-        character = db.update_character(user_id, pending_asi_points=2)
+        character = db.update_character(user_id, -999, pending_asi_points=2)
         sheet = bot._format_character_sheet(character)
         lines = [line for line in sheet.split("\n") if line.strip()]
         self.assertIn("ability point(s) waiting to be spent", lines[-1])
@@ -4154,7 +4154,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # happen to have left standing at the same default location.
         with patch("bot._get_combat_eligible_party_members", return_value=[character]):
             await bot._do_start_combat(FakeUpdate(user_id, "fight a goblin", sink), monster_key="goblin", count=1)
-        updated = db.get_character(user_id)
+        updated = db.get_character(user_id, -999)
         self.assertIn("goblin", updated["known_monsters"])
         sessions.end_session(-999)
 
@@ -4172,11 +4172,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # no bestiary of its own to check, but this guards the loop's
         # is_ai filter against a future regression).
         ai_companion = db.create_ai_companion(
-            "Buddy", "Human", "Fighter",
+            -999, "Buddy", "Human", "Fighter",
             {"strength": 15, "dexterity": 14, "constitution": 13, "intelligence": 10, "wisdom": 10, "charisma": 10},
             hp_max=12, armor_class=15, gold=0, inventory={},
         )
-        result = db.mark_known_monster(ai_companion["telegram_user_id"], "goblin")
+        result = db.mark_known_monster(ai_companion["telegram_user_id"], -999, "goblin")
         # Just confirms the helper itself is generic/safe to call on any
         # character row -- the actual exclusion lives in _do_start_combat's
         # `if not p.get("is_ai")` filter, exercised by the test above.
@@ -4281,7 +4281,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             FakeUpdate(user_id, "", sink),
             "Buy 10 torches, 1 shears, 1 pickaxe, 1 fishing pole, 5 bait.",
         )
-        char = db.get_character(user_id)
+        char = db.get_character(user_id, -999)
         self.assertEqual(char["inventory"].get("torch"), 10)
         self.assertEqual(char["inventory"].get("shears"), 1)
         self.assertEqual(char["inventory"].get("pickaxe"), 1)
@@ -4293,19 +4293,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         make_basic_character(user_id, "Solo", current_location="market_row", gold=100)
         sink = []
         await bot._do_buy(FakeUpdate(user_id, "", sink), "buy a healing potion")
-        char = db.get_character(user_id)
+        char = db.get_character(user_id, -999)
         self.assertEqual(char["inventory"].get("healing_potion"), 1)
 
     async def test_multi_item_give_hands_over_every_named_item(self):
         giver_id, recipient_id = 900523, 900524
         make_basic_character(giver_id, "Giver", current_location="market_row")
         make_basic_character(recipient_id, "Receiver", current_location="market_row")
-        db.add_item(giver_id, "torch", 5)
-        db.add_item(giver_id, "shears", 2)
+        db.add_item(giver_id, -999, "torch", 5)
+        db.add_item(giver_id, -999, "shears", 2)
         sink = []
         await bot._do_give_item(FakeUpdate(giver_id, "", sink), "give 3 torches and 2 shears to Receiver")
-        giver = db.get_character(giver_id)
-        recipient = db.get_character(recipient_id)
+        giver = db.get_character(giver_id, -999)
+        recipient = db.get_character(recipient_id, -999)
         self.assertEqual(giver["inventory"].get("torch"), 2)
         self.assertEqual(recipient["inventory"].get("torch"), 3)
         self.assertEqual(recipient["inventory"].get("shears"), 2)
@@ -4321,7 +4321,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         user_id = 900525
         make_basic_character(user_id, "Standfast", current_location="whispering_wood", gold=50)
-        db.add_item(user_id, "woodcutters_axe", 1)
+        db.add_item(user_id, -999, "woodcutters_axe", 1)
         bq = db.create_board_quest(
             "whispering_wood", "2026-07-17", "A supply run for Wood",
             "Bring wood back to the board.", None, "gather_material", "wood", 1, 50, 20,
@@ -4336,7 +4336,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         updated = db.get_active_board_quest("whispering_wood", "2026-07-17")
         self.assertIsNotNone(updated["completed_at"])
-        self.assertEqual(db.get_character(user_id)["gold"], 70)
+        self.assertEqual(db.get_character(user_id, -999)["gold"], 70)
         self.assertTrue(any("Board quest complete" in msg for msg in sink))
 
     # -- /help + /hint (2026-07-17, per Coffee) -------------------------
@@ -4368,11 +4368,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     # -- Leaderboard / Hall of Fame (2026-07-17, per Coffee, task #74) --
     async def test_leaderboard_ranks_by_xp_and_excludes_combat_companions(self):
         make_basic_character(900940, "TopDog", gold=10)
-        db.add_xp(900940, 500)
+        db.add_xp(900940, -999, 500)
         make_basic_character(900941, "LastPlace", gold=10)
-        db.add_xp(900941, 50)
+        db.add_xp(900941, -999, 50)
         db.create_ai_companion(
-            name="CombatOnly", race="Human", char_class="Fighter",
+            chat_id=-999, name="CombatOnly", race="Human", char_class="Fighter",
             ability_scores={"strength": 15, "dexterity": 14, "constitution": 13,
                              "intelligence": 10, "wisdom": 10, "charisma": 10},
             hp_max=12, armor_class=15, gold=0, inventory={},
@@ -4410,7 +4410,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_do_leaderboard_produces_a_real_reply(self):
         make_basic_character(900942, "Ranked", gold=10)
-        db.add_xp(900942, 300)
+        db.add_xp(900942, -999, 300)
         sink = []
         await bot._do_leaderboard(FakeUpdate(900942, "", sink))
         self.assertIn("Hall of Fame", sink[-1])
@@ -4513,7 +4513,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_examine_known_monster_shows_real_bestiary_stats(self):
         user_id = 900944
         make_basic_character(user_id, "Veteran", current_location="whispering_wood")
-        db.update_character(user_id, known_monsters=["wolf"])
+        db.update_character(user_id, -999, known_monsters=["wolf"])
         sink = []
         await bot._do_examine(FakeUpdate(user_id, "", sink), "the wolves")
         reply = sink[-1]
@@ -4536,8 +4536,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             player_id, "Quickstep", char_class="Rogue", current_location="crossroads_tavern",
             hp_max=20, armor_class=13,
         )
-        db.update_character(player_id, level=2)
-        player = db.get_character(player_id)
+        db.update_character(player_id, -999, level=2)
+        player = db.get_character(player_id, -999)
         player["telegram_user_id"] = player_id
         player["hp_current"] = 20
 
@@ -4570,7 +4570,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             player_id, "Greenhorn", char_class="Rogue", current_location="crossroads_tavern",
             hp_max=20, armor_class=13,
         )
-        player = db.get_character(player_id)
+        player = db.get_character(player_id, -999)
         player["telegram_user_id"] = player_id
         player["hp_current"] = 20
 
@@ -4599,32 +4599,32 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_fast_travel_blocks_on_missing_requires_item(self):
         user_id = 900530
         make_basic_character(user_id, "Gatetest", current_location="the_first_city")
-        db.mark_visited(user_id, "the_unmoored_isle")
-        db.mark_visited(user_id, "the_first_city")
+        db.mark_visited(user_id, -999, "the_unmoored_isle")
+        db.mark_visited(user_id, -999, "the_first_city")
         sink = []
         await bot._do_fast_travel(FakeUpdate(user_id, "", sink), "fast travel to the unmoored isle")
         self.assertIn("missing something needed", sink[-1])
-        self.assertEqual(db.get_character(user_id)["current_location"], "the_first_city")
+        self.assertEqual(db.get_character(user_id, -999)["current_location"], "the_first_city")
 
-        db.add_item(user_id, "shard_of_dim_light", 1)
+        db.add_item(user_id, -999, "shard_of_dim_light", 1)
         sink.clear()
         await bot._do_fast_travel(FakeUpdate(user_id, "", sink), "fast travel to the unmoored isle")
-        self.assertEqual(db.get_character(user_id)["current_location"], "the_unmoored_isle")
+        self.assertEqual(db.get_character(user_id, -999)["current_location"], "the_unmoored_isle")
 
     async def test_fast_travel_blocks_on_locked_connection(self):
         user_id = 900531
         make_basic_character(user_id, "Locktest", current_location="the_weeping_well")
-        db.mark_visited(user_id, "the_weeping_well")
-        db.mark_visited(user_id, "glimmerdeep_grotto")
+        db.mark_visited(user_id, -999, "the_weeping_well")
+        db.mark_visited(user_id, -999, "glimmerdeep_grotto")
         sink = []
         await bot._do_fast_travel(FakeUpdate(user_id, "", sink), "fast travel to glimmerdeep grotto")
         self.assertIn("blocked by", sink[-1])
-        self.assertEqual(db.get_character(user_id)["current_location"], "the_weeping_well")
+        self.assertEqual(db.get_character(user_id, -999)["current_location"], "the_weeping_well")
 
         bot._chat_scoped_set(bot._UNLOCKED, -999).add("sealed_stone_door")
         sink.clear()
         await bot._do_fast_travel(FakeUpdate(user_id, "", sink), "fast travel to glimmerdeep grotto")
-        self.assertEqual(db.get_character(user_id)["current_location"], "glimmerdeep_grotto")
+        self.assertEqual(db.get_character(user_id, -999)["current_location"], "glimmerdeep_grotto")
 
     async def test_fast_travel_brings_real_ai_companions_along(self):
         """
@@ -4640,19 +4640,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         """
         leader_id = 950801
         make_basic_character(leader_id, "FastTravelLeader2", current_location="crossroads_tavern")
-        db.update_character(leader_id, visited_locations=["crossroads_tavern", "market_row"])
-        party_id = db.create_party(leader_id)
+        db.update_character(leader_id, -999, visited_locations=["crossroads_tavern", "market_row"])
+        party_id = db.create_party(leader_id, -999)
         companion = db.create_ai_companion(
-            "FastTravelBuddy", "Elf", "Ranger",
+            -999, "FastTravelBuddy", "Elf", "Ranger",
             ability_scores={"strength": 12, "dexterity": 17, "constitution": 13,
                              "intelligence": 11, "wisdom": 15, "charisma": 10},
             hp_max=30, armor_class=14, gold=0, inventory={},
         )
-        db.add_ai_companion_to_party(companion["telegram_user_id"], party_id)
+        db.add_ai_companion_to_party(companion["telegram_user_id"], -999, party_id)
 
         sink = []
         await bot._do_fast_travel(FakeUpdate(leader_id, "", sink), "fast travel to market row")
-        self.assertEqual(db.get_character(leader_id)["current_location"], "market_row")
+        self.assertEqual(db.get_character(leader_id, -999)["current_location"], "market_row")
         self.assertEqual(
             db.get_character_by_id(companion["character_id"])["current_location"], "market_row",
         )
@@ -4664,8 +4664,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         user_id = 900532
         make_basic_character(user_id, "Fishtest", current_location="stonearch_bridge")
-        db.add_item(user_id, "fishing_pole", 1)
-        db.add_item(user_id, "bait", 1)
+        db.add_item(user_id, -999, "fishing_pole", 1)
+        db.add_item(user_id, -999, "bait", 1)
 
         with patch("bot.roll_ability_check", return_value={
             "raw_roll": 15, "modifier": 0, "proficiency": 0, "total": 15,
@@ -4674,9 +4674,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             sink = []
             await bot._do_gather(FakeUpdate(user_id, "", sink), "fish in the stream")
             self.assertIn("bait comes free", "\n".join(sink))
-            self.assertEqual(db.get_character(user_id)["inventory"].get("bait", 0), 0)
+            self.assertEqual(db.get_character(user_id, -999)["inventory"].get("bait", 0), 0)
 
-        db.add_item(user_id, "bait", 1)
+        db.add_item(user_id, -999, "bait", 1)
         with patch("bot.roll_ability_check", return_value={
             "raw_roll": 15, "modifier": 0, "proficiency": 0, "total": 15,
         }), patch("bot.narrate_skill_check", return_value="You cast your line."), \
@@ -4684,7 +4684,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             sink = []
             await bot._do_gather(FakeUpdate(user_id, "", sink), "fish in the stream")
             self.assertNotIn("bait comes free", "\n".join(sink))
-            self.assertEqual(db.get_character(user_id)["inventory"].get("bait", 0), 1)
+            self.assertEqual(db.get_character(user_id, -999)["inventory"].get("bait", 0), 1)
 
     # -- Real live bug (2026-07-19, Sugar): "Create character" (no
     #    article) and "Create a second character" both missed the old
@@ -4715,7 +4715,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             }), patch("bot.narrate_skill_check", return_value="You search around."):
                 await bot._do_gather(FakeUpdate(user_id, "", sink), phrase)
             self.assertIn("Bait", sink[-1], f"{loc_id} didn't grant Bait: {sink[-1]}")
-            self.assertGreaterEqual(db.get_character(user_id)["inventory"].get("bait", 0), 1)
+            self.assertGreaterEqual(db.get_character(user_id, -999)["inventory"].get("bait", 0), 1)
 
     # -- World expansion (2026-07-19/20, per Coffee): compass navigation
     #    ("directions", a display/nav layer over "connections") added
@@ -4729,10 +4729,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # -- irrelevant to what THIS test actually checks (compass-word
         # resolution), so satisfy the gate directly rather than fighting
         # a real battle just to test unrelated direction-parsing logic.
-        db.mark_location_cleared(user_id, "whispering_wood")
+        db.mark_location_cleared(user_id, -999, "whispering_wood")
         sink = []
         await bot._do_move(FakeUpdate(user_id, "", sink), "go south")
-        self.assertEqual(db.get_character(user_id)["current_location"], "whispering_wood_deep_glade")
+        self.assertEqual(db.get_character(user_id, -999)["current_location"], "whispering_wood_deep_glade")
 
     async def test_compass_word_with_no_directions_field_falls_through_harmlessly(self):
         user_id = 900551
@@ -4741,7 +4741,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_move(FakeUpdate(user_id, "", sink), "go north")
         # market_row has no "directions" field -- must not crash, and must
         # not move the character anywhere (no location name matched either).
-        self.assertEqual(db.get_character(user_id)["current_location"], "market_row")
+        self.assertEqual(db.get_character(user_id, -999)["current_location"], "market_row")
 
     async def test_look_shows_compass_labels_for_directed_connections(self):
         user_id = 900552
@@ -4768,7 +4768,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_switch_character_matches_despite_my_character_filler(self):
         user_id = 900553
         make_basic_character(user_id, "Elduinn")
-        match = bot._find_own_character_by_name_fragment(user_id, "my character elduinn")
+        match = bot._find_own_character_by_name_fragment(user_id, -999, "my character elduinn")
         self.assertIsNotNone(match)
         self.assertEqual(match["name"], "Elduinn")
 
@@ -4799,7 +4799,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         make_basic_character(user_id, "MaxLevelTest")
         # MAX_LEVEL is 99, not 20, since the rebirth system shipped
         # (2026-07-22) -- this test predates that and was never updated.
-        db.update_character(user_id, level=99)
+        db.update_character(user_id, -999, level=99)
         sink = []
         await bot._do_show_level_menu(FakeUpdate(user_id, "", sink))
         self.assertIn("Max level reached", sink[-1])
@@ -4811,8 +4811,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         user_id = 900556
         make_basic_character(user_id, "First")
         make_basic_character(user_id, "Second")
-        roster = bot.db.list_characters(user_id)
-        active = bot.db.get_character(user_id)
+        roster = bot.db.list_characters(user_id, -999)
+        active = bot.db.get_character(user_id, -999)
         kb = bot._roster_keyboard(roster, active["character_id"])
         labels = [btn.text for row in kb.inline_keyboard for btn in row]
         self.assertTrue(any("First" in l for l in labels))
@@ -4825,7 +4825,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink = []
         update = FakeCallbackUpdate(user_id, f"roster|switch|{second['character_id']}", sink)
         await bot.roster_menu_callback(update, DummyContext())
-        active = bot.db.get_character(user_id)
+        active = bot.db.get_character(user_id, -999)
         self.assertEqual(active["name"], "Beta")
 
     async def test_roster_button_tap_blocked_during_combat(self):
@@ -4837,12 +4837,12 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # make_basic_character makes the newest row active (Delta) -- switch
         # back to Gamma so there's a real "currently active" character to
         # stay locked onto while combat blocks the tap-to-switch attempt.
-        bot.db.switch_character(user_id, first["character_id"])
+        bot.db.switch_character(user_id, -999, first["character_id"])
         sessions.start_session(-999, [{"telegram_user_id": user_id, "name": "Gamma", "dexterity": 10}], {user_id: "party"})
         sink = []
         update = FakeCallbackUpdate(user_id, f"roster|switch|{second['character_id']}", sink)
         await bot.roster_menu_callback(update, DummyContext())
-        active = bot.db.get_character(user_id)
+        active = bot.db.get_character(user_id, -999)
         self.assertEqual(active["name"], "Gamma")
         sessions.end_session(-999)
 
@@ -4960,7 +4960,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot.narrate_welcome", return_value="Welcome to the Crossroads."):
             await bot._continue_character_creation(FakeUpdate(user_id, "", sink), context, text="skip")
 
-        character = bot.db.get_character(user_id)
+        character = bot.db.get_character(user_id, -999)
         self.assertEqual(character["race"], "Elf")
         self.assertEqual(character["char_class"], "Fighter")
         self.assertEqual(character["pronouns"], "they/them")
@@ -5108,14 +5108,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("not your listing", sink2[-1])
         self.assertIsNotNone(db.get_market_listing(listing_id))
 
-        seller_before = db.get_character(seller_id)
+        seller_before = db.get_character(seller_id, -999)
         self.assertEqual(seller_before["inventory"].get("rusty_dagger", 0), 0)
 
         sink3 = []
         await bot._do_cancel_market(FakeUpdate(seller_id, "", sink3), [str(listing_id)])
         self.assertIn("Cancelled listing", sink3[-1])
         self.assertIsNone(db.get_market_listing(listing_id))
-        seller_after = db.get_character(seller_id)
+        seller_after = db.get_character(seller_id, -999)
         self.assertEqual(seller_after["inventory"].get("rusty_dagger", 0), 1)
         self.assertEqual(seller_after["gold"], seller_before["gold"])
 
@@ -5141,7 +5141,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink2 = []
         await bot._do_cancel_market_intent(FakeUpdate(seller_id, "", sink2), "Cancel my listing in the market")
         self.assertIn("Cancelled listing", sink2[-1])
-        self.assertEqual(db.get_character(seller_id)["inventory"].get("rusty_dagger", 0), 1)
+        self.assertEqual(db.get_character(seller_id, -999)["inventory"].get("rusty_dagger", 0), 1)
 
     async def test_cancel_market_intent_asks_which_one_when_ambiguous(self):
         seller_id = 900574
@@ -5156,6 +5156,150 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("more than one listing", sink2[-1])
         remaining = [l for l in db.get_market_listings() if l["seller_id"] == seller_id]
         self.assertEqual(len(remaining), 2)
+
+    # -- Task #265, per Coffee ("i wasted a turn ... u said it was
+    #    complete"): 27 spells whose effect type (buff/negate/ac_bonus)
+    #    fell into one shared flavor-only branch that still spent the
+    #    slot/turn. Promoted from the standalone verification script
+    #    used to build the real mechanics below. --
+    async def test_death_ward_saves_defender_at_1hp_and_is_consumed(self):
+        uid = 800101
+        make_basic_character(uid, "Warded", char_class="Cleric", hp_max=20)
+        char = db.get_character(uid, -999)
+        enemy_id = -800101
+        enemy = {"telegram_user_id": enemy_id, "name": "Test Dummy", "hp_current": 20, "hp_max": 20,
+                 "armor_class": 5, "strength": 10, "dexterity": 10, "is_ai": 1, "xp_reward": 0, "conditions": []}
+        player = dict(char)
+        player["conditions"] = ["death_warded"]
+        player["hp_current"] = 5
+        import sessions
+        session = sessions.start_session(-999, [player, enemy], {uid: "party", enemy_id: "enemy"})
+        weapon = {"damage_dice": "1d1", "damage_bonus": 100, "ability": "strength", "damage_type": "physical"}
+        result = resolve_attack(enemy, player, weapon, advantage=False, disadvantage=False,
+                                 defender_relentless_endurance_available=False, round_number=1,
+                                 forced_roll=20)
+        self.assertEqual(player["hp_current"], 1)
+        self.assertTrue(result["death_ward_triggered"])
+        self.assertNotIn("death_warded", player["conditions"])
+        sessions.end_session(-999, session)
+
+    async def test_bless_hex_and_shield_have_real_combat_effects(self):
+        caster_id, ally_id, enemy_id = 800102, 800103, -800102
+        make_basic_character(caster_id, "Blesser", char_class="Cleric")
+        make_basic_character(ally_id, "Ally", char_class="Fighter")
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "hp_current": 30, "hp_max": 30,
+                 "armor_class": 10, "strength": 10, "dexterity": 10, "is_ai": 1, "xp_reward": 10, "conditions": []}
+        import sessions
+        session = sessions.start_session(
+            -999, [db.get_character(caster_id, -999), db.get_character(ally_id, -999), enemy],
+            {caster_id: "party", ally_id: "party", enemy_id: "enemy"},
+        )
+        caster_p = next(p for p in session.participants if p["telegram_user_id"] == caster_id)
+        ally_p = next(p for p in session.participants if p["telegram_user_id"] == ally_id)
+
+        bot._apply_timed_condition(caster_p, "blessed", 10, session)
+        bot._apply_timed_condition(ally_p, "blessed", 10, session)
+        self.assertIn("blessed", ally_p["conditions"])
+
+        caster_p["marked_target_id"] = enemy_id
+        bot._apply_timed_condition(caster_p, "hunters_mark", 10, session)
+        weapon = {"damage_dice": "1d1", "damage_bonus": 0, "ability": "strength", "damage_type": "physical"}
+        result = resolve_attack(caster_p, enemy, weapon, advantage=False, disadvantage=False,
+                                 defender_relentless_endurance_available=False, round_number=1, forced_roll=15,
+                                 forced_damage_roll=1)
+        self.assertGreaterEqual(result["damage_dealt"], 2)
+
+        bot._apply_timed_condition(ally_p, "shield_active", 1, session)
+        ac_before = ally_p["armor_class"]
+        weak_attack = resolve_attack(enemy, ally_p, weapon, advantage=False, disadvantage=False,
+                                      defender_relentless_endurance_available=False, round_number=1,
+                                      forced_roll=ac_before + 3)
+        self.assertFalse(weak_attack["hit"])
+        sessions.end_session(-999, session)
+
+    async def test_hunters_mark_bonus_requires_a_real_matching_target(self):
+        # Regression for the None == None bug: an unmarked attacker with
+        # no marked_target_id must NOT get bonus damage against a
+        # defender that also lacks a telegram_user_id key.
+        attacker = {
+            "name": "Unmarked", "conditions": [], "marked_target_id": None,
+            "dexterity": 14, "strength": 16, "armor_class": 15, "hp_current": 20, "hp_max": 20,
+        }
+        defender = {"name": "Goblin", "dexterity": 10, "armor_class": 5, "hp_current": 20, "hp_max": 20}
+        weapon = {"damage_dice": "1d1", "damage_bonus": 0, "ability": "strength", "damage_type": "physical"}
+        result = resolve_attack(attacker, defender, weapon, advantage=False, disadvantage=False,
+                                 defender_relentless_endurance_available=False, round_number=1, forced_roll=15,
+                                 forced_damage_roll=1)
+        self.assertEqual(result["damage_dealt"], 1)
+
+    async def test_hold_person_and_invisibility_affect_advantage(self):
+        attacker = {"conditions": [], "char_class": "Fighter"}
+        held_defender = {"conditions": ["paralyzed"]}
+        adv, disadv = bot._attack_advantage_disadvantage(attacker, held_defender)
+        self.assertTrue(adv)
+
+        invis_defender = {"conditions": ["invisible"]}
+        adv2, disadv2 = bot._attack_advantage_disadvantage(attacker, invis_defender)
+        self.assertTrue(disadv2)
+
+        invis_attacker = {"conditions": ["invisible"], "char_class": "Rogue"}
+        plain_defender = {"conditions": []}
+        adv3, disadv3 = bot._attack_advantage_disadvantage(invis_attacker, plain_defender)
+        self.assertTrue(adv3)
+
+    async def test_counterspell_is_reaction_only_and_spends_nothing(self):
+        # Real live bug (2026-08, Coffee: "i wasted a turn because of
+        # this"): casting Counterspell used to spend a turn/slot and
+        # narrate a flavor-only non-effect. It's reaction-only in real
+        # 5E and there's no monster spellcasting to react to yet, so
+        # proactive casting must be honestly refused, spending nothing.
+        uid = 800104
+        make_basic_character(uid, "Countersplr", char_class="Wizard",
+                              known_spells=["counterspell"], spell_slots_max=5)
+        sink = []
+        await bot._do_cast_spell(FakeUpdate(uid, "cast counterspell", sink), "cast counterspell")
+        reply = "\n".join(sink)
+        self.assertIn("REACTION", reply)
+        fresh = db.get_character(uid, -999)
+        self.assertEqual(fresh["spell_slots_current"], 5)
+
+    async def test_dancing_lights_grants_a_real_light_source(self):
+        uid = 800105
+        make_basic_character(uid, "Torchless", char_class="Wizard", known_spells=["dancing_lights"],
+                              spell_slots_max=3, current_location="crossroads_tavern")
+        char = db.get_character(uid, -999)
+        self.assertFalse(bot._has_light_source(char, -999))
+        sink = []
+        await bot._do_cast_spell(FakeUpdate(uid, "cast dancing lights", sink), "cast dancing lights")
+        reply = "\n".join(sink)
+        self.assertIn("light", reply.lower())
+        fresh = db.get_character(uid, -999)
+        self.assertTrue(bot._has_light_source(fresh, -999))
+
+    async def test_guidance_grants_a_real_consumable_check_bonus(self):
+        uid = 800106
+        make_basic_character(uid, "Guided", char_class="Cleric", known_spells=["guidance"], spell_slots_max=0)
+        sink = []
+        await bot._do_cast_spell(FakeUpdate(uid, "cast guidance", sink), "cast guidance")
+        reply = "\n".join(sink)
+        self.assertIn("+2", reply)
+        pending = bot._chat_scoped_dict(bot._PENDING_CHECK_BONUS, -999).get(uid)
+        self.assertIsNotNone(pending)
+        self.assertEqual(pending["amount"], 2)
+
+    async def test_detect_magic_reports_real_carried_magic_items(self):
+        uid = 800107
+        make_basic_character(uid, "Detector", char_class="Wizard", known_spells=["detect_magic"],
+                              spell_slots_max=2)
+        ring_id = db.create_item_instance(
+            item_type="ring", name="Ring of Testing", rarity="rare", price=100,
+            base_stats={"type": "ring"}, affixes=[],
+        )
+        db.add_item(uid, -999, ring_id, 1)
+        sink = []
+        await bot._do_cast_spell(FakeUpdate(uid, "cast detect magic", sink), "cast detect magic")
+        reply = "\n".join(sink)
+        self.assertIn("Ring of Testing", reply)
 
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
@@ -5194,7 +5338,7 @@ class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
         wood_id, resting_id = 666667, 777778
         make_basic_character(wood_id, "Roric4", current_location="whispering_wood")
         make_basic_character(resting_id, "Snorri2", current_location="whispering_wood")
-        db.update_character(resting_id, is_inactive=1)
+        db.update_character(resting_id, -999, is_inactive=1)
 
         sink = []
         await bot.adventure_master_handler(
@@ -5287,7 +5431,7 @@ class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
         await bot.adventure_master_handler(
             FakeUpdate(user_id, "Recruit Sarah to my party", sink), DummyContext())
 
-        db.update_character(user_id, current_location="whispering_wood")
+        db.update_character(user_id, -999, current_location="whispering_wood")
         board_quests = board_quests_module.get_or_generate_board_quests(bot.CAMPAIGN, "whispering_wood")
         self.assertTrue(board_quests, "expected a real board quest to generate here")
         named_quest = board_quests[0]
@@ -5299,7 +5443,7 @@ class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(named_quest["title"], combined)
         self.assertNotIn("Sarah's Safer Crossing", combined)
 
-        character = db.get_character(user_id)
+        character = db.get_character(user_id, -999)
         self.assertNotIn("seras_safer_crossing", character["active_quests"])
 
     # -- Boss Multiattack + The Waiting Shape's Life Drain (v1.10.6) ---
@@ -5367,8 +5511,8 @@ class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
             player_id, "Twinstrike", char_class="Fighter", current_location="crossroads_tavern",
             hp_max=50, armor_class=18,
         )
-        db.update_character(player_id, level=5)
-        player = db.get_character(player_id)
+        db.update_character(player_id, -999, level=5)
+        player = db.get_character(player_id, -999)
         player["telegram_user_id"] = player_id
         player["hp_current"] = 50
 
@@ -5412,8 +5556,8 @@ class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
             player_id, "Thornback", char_class="Druid", current_location="crossroads_tavern",
             hp_max=20, armor_class=13, known_spells=["produce_flame"],
         )
-        db.update_character(player_id, level=2)
-        player = db.get_character(player_id)
+        db.update_character(player_id, -999, level=2)
+        player = db.get_character(player_id, -999)
         player["telegram_user_id"] = player_id
         player["hp_current"] = 20
 
@@ -5431,7 +5575,7 @@ class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
         participant = next(p for p in session.participants if p["telegram_user_id"] == player_id)
         self.assertTrue(participant.get("wild_shaped"))
         self.assertGreater(participant.get("temp_hp", 0), 0)
-        self.assertEqual(db.get_feature_uses(player_id, "wild_shape"), 1)
+        self.assertEqual(db.get_feature_uses(player_id, -999, "wild_shape"), 1)
 
         # A second Wild Shape attempt mid-fight should be refused, not stack.
         sink2 = []

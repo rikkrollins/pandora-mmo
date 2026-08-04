@@ -100,19 +100,69 @@ class Session:
         return "enemy" if side == "party" else "party"
 
     def living_on_side(self, side: str) -> list:
+        # Banishment (real 5E spell, 2026-08-04): a banished participant
+        # is alive but extraplanar -- can't act, can't be targeted, and
+        # (per Coffee's explicit direction) never counts toward a
+        # defeat/victory reward if the fight ends while it's away.
+        # Excluding it here, at the one shared "who's actually present
+        # to fight" choke point, covers every damage/heal/target-picker
+        # call site for free.
         return [
             p for p in self.participants
             if self.sides.get(p["telegram_user_id"]) == side and p["hp_current"] > 0
+            and "banished" not in p.get("conditions", [])
         ]
 
     def advance_turn(self) -> None:
         self.current_turn_index = (self.current_turn_index + 1) % len(self.turn_order)
         if self.current_turn_index == 0:
             self.round_number += 1
+            self._expire_timed_conditions()
         if self.turn_order:
             new_pid = self.turn_order[self.current_turn_index]
             self.turn_started_at[new_pid] = time.time()
             self.timeout_warned.discard(new_pid)
+
+    def _expire_timed_conditions(self) -> None:
+        """
+        Shared duration mechanism for every timed spell effect (Bless,
+        Hex/Hunter's Mark, Faerie Fire, Invisibility, Protection from
+        Evil and Good, Charm Person/Animal Friendship, Hold Person/Hold
+        Monster, Death Ward, Shield) added 2026-08-04 -- one real check
+        per participant per new round rather than bespoke cleanup code
+        per spell. A caster stores {condition_name: expiry_round} on
+        `condition_expires_round`; once round_number passes that value,
+        the condition (and any companion field like marked_target_id)
+        is removed here. Banishment uses its own separate mechanism
+        (banished_participants, restored by round number) since it
+        removes a participant from turn_order entirely rather than
+        applying a condition.
+        """
+        for p in self.participants:
+            expiries = p.get("condition_expires_round")
+            if not expiries:
+                continue
+            expired = [name for name, until in expiries.items() if self.round_number > until]
+            for name in expired:
+                del expiries[name]
+                if name in p.get("conditions", []):
+                    p["conditions"].remove(name)
+                if name in ("hex_mark", "hunters_mark"):
+                    p.pop("marked_target_id", None)
+                if name == "polymorphed":
+                    # Real 5E: polymorph ends, real stats return. Backup
+                    # was captured at cast time (bot.py's polymorph
+                    # branch); hp_current is restored capped at whatever
+                    # damage was actually taken in beast form, same
+                    # "current HP carries over, max HP reverts" rule
+                    # real 5E uses.
+                    backup = p.pop("_polymorph_backup", None)
+                    if backup:
+                        taken = max(backup["hp_current"] - p["hp_current"], 0)
+                        for key in ("armor_class", "strength", "dexterity", "hp_max"):
+                            if key in backup:
+                                p[key] = backup[key]
+                        p["hp_current"] = max(p["hp_max"] - taken, 1)
 
     def log_event(self, text: str) -> None:
         self.event_log.append(text)
