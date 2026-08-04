@@ -518,6 +518,115 @@ def init_db() -> None:
         if "formation_row" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN formation_row TEXT NOT NULL DEFAULT 'front'")
 
+        # Multi-tenant scaling Phase 4a (2026-08-03, see the full plan at
+        # /home/pandora/.claude/plans/sequential-tinkering-quokka.md):
+        # chat_id added to every currently-global game table, so a
+        # second Telegram group (once one actually exists) doesn't share
+        # one namespace with this bot's home group. Deliberately zero
+        # behavior change in this sub-phase -- nothing reads or filters
+        # by chat_id yet (that's Phases 4b-4e); this only adds the
+        # column and backfills every EXISTING row to the one real home
+        # chat_id (config.TELEGRAM_CHAT_ID), since that's genuinely
+        # which chat they already belong to -- inventing anything else
+        # would be fabricating data. Uses this same NOT-IN-columns-yet
+        # guard style as every other migration above, so re-running
+        # init_db() on an already-migrated DB is a no-op.
+        home_chat_id = config.TELEGRAM_CHAT_ID
+        if "chat_id" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN chat_id INTEGER")
+            if home_chat_id is not None:
+                conn.execute("UPDATE characters SET chat_id = ? WHERE chat_id IS NULL", (home_chat_id,))
+
+        market_listing_columns = _existing_columns(conn, "market_listings")
+        if "chat_id" not in market_listing_columns:
+            conn.execute("ALTER TABLE market_listings ADD COLUMN chat_id INTEGER")
+            if home_chat_id is not None:
+                conn.execute("UPDATE market_listings SET chat_id = ? WHERE chat_id IS NULL", (home_chat_id,))
+
+        if "chat_id" not in board_quest_columns:
+            conn.execute("ALTER TABLE board_quests ADD COLUMN chat_id INTEGER")
+            if home_chat_id is not None:
+                conn.execute("UPDATE board_quests SET chat_id = ? WHERE chat_id IS NULL", (home_chat_id,))
+
+        parties_columns = _existing_columns(conn, "parties")
+        if "chat_id" not in parties_columns:
+            conn.execute("ALTER TABLE parties ADD COLUMN chat_id INTEGER")
+            if home_chat_id is not None:
+                conn.execute("UPDATE parties SET chat_id = ? WHERE chat_id IS NULL", (home_chat_id,))
+
+        # active_characters/npc_relationships/faction_standing all need
+        # their real PRIMARY KEY to grow a chat_id column -- SQLite
+        # cannot ALTER TABLE to change a PK, so these three need a real
+        # table rebuild (create the new shape, copy every row across
+        # with the backfilled chat_id, drop the old table, rename the
+        # new one into place) instead of a plain ADD COLUMN. Safe: this
+        # schema uses zero SQL-level FOREIGN KEYs anywhere (confirmed),
+        # so no other table can reference the old one mid-rebuild, and
+        # this whole function already runs inside one connection/
+        # transaction (get_connection commits once at the very end), so
+        # a failure partway through rolls back cleanly instead of
+        # leaving a half-migrated table behind.
+        active_char_columns = _existing_columns(conn, "active_characters")
+        if "chat_id" not in active_char_columns:
+            conn.execute("""
+                CREATE TABLE active_characters_new (
+                    telegram_user_id INTEGER NOT NULL,
+                    chat_id INTEGER NOT NULL,
+                    character_id INTEGER NOT NULL,
+                    PRIMARY KEY (telegram_user_id, chat_id)
+                )
+            """)
+            conn.execute(
+                "INSERT INTO active_characters_new (telegram_user_id, chat_id, character_id) "
+                "SELECT telegram_user_id, ?, character_id FROM active_characters",
+                (home_chat_id,),
+            )
+            conn.execute("DROP TABLE active_characters")
+            conn.execute("ALTER TABLE active_characters_new RENAME TO active_characters")
+
+        npc_relationship_rebuild_columns = _existing_columns(conn, "npc_relationships")
+        if "chat_id" not in npc_relationship_rebuild_columns:
+            conn.execute("""
+                CREATE TABLE npc_relationships_new (
+                    telegram_user_id INTEGER NOT NULL,
+                    chat_id INTEGER NOT NULL,
+                    npc_id TEXT NOT NULL,
+                    affinity INTEGER NOT NULL DEFAULT 0,
+                    memory_events TEXT NOT NULL DEFAULT '[]',
+                    banned INTEGER NOT NULL DEFAULT 0,
+                    resolution TEXT NOT NULL DEFAULT 'unresolved',
+                    PRIMARY KEY (telegram_user_id, chat_id, npc_id)
+                )
+            """)
+            conn.execute(
+                "INSERT INTO npc_relationships_new "
+                "(telegram_user_id, chat_id, npc_id, affinity, memory_events, banned, resolution) "
+                "SELECT telegram_user_id, ?, npc_id, affinity, memory_events, banned, resolution "
+                "FROM npc_relationships",
+                (home_chat_id,),
+            )
+            conn.execute("DROP TABLE npc_relationships")
+            conn.execute("ALTER TABLE npc_relationships_new RENAME TO npc_relationships")
+
+        faction_standing_columns = _existing_columns(conn, "faction_standing")
+        if "chat_id" not in faction_standing_columns:
+            conn.execute("""
+                CREATE TABLE faction_standing_new (
+                    telegram_user_id INTEGER NOT NULL,
+                    chat_id INTEGER NOT NULL,
+                    faction_id TEXT NOT NULL,
+                    standing INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (telegram_user_id, chat_id, faction_id)
+                )
+            """)
+            conn.execute(
+                "INSERT INTO faction_standing_new (telegram_user_id, chat_id, faction_id, standing) "
+                "SELECT telegram_user_id, ?, faction_id, standing FROM faction_standing",
+                (home_chat_id,),
+            )
+            conn.execute("DROP TABLE faction_standing")
+            conn.execute("ALTER TABLE faction_standing_new RENAME TO faction_standing")
+
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)
@@ -552,12 +661,17 @@ def _active_character_id(telegram_user_id: int, conn=None) -> int | None:
 
 
 def _set_active_character(telegram_user_id: int, character_id: int, conn) -> None:
+    # active_characters' real PK became (telegram_user_id, chat_id) in the
+    # Phase 4a schema migration (2026-08-03). chat_id isn't threaded through
+    # this function's own signature yet -- that's Phase 4b -- so until then
+    # every write here targets the one real home chat_id, matching every
+    # existing row (there is currently exactly one tenant).
     conn.execute(
         """
-        INSERT INTO active_characters (telegram_user_id, character_id) VALUES (?, ?)
-        ON CONFLICT(telegram_user_id) DO UPDATE SET character_id = excluded.character_id
+        INSERT INTO active_characters (telegram_user_id, chat_id, character_id) VALUES (?, ?, ?)
+        ON CONFLICT(telegram_user_id, chat_id) DO UPDATE SET character_id = excluded.character_id
         """,
-        (telegram_user_id, character_id),
+        (telegram_user_id, config.TELEGRAM_CHAT_ID, character_id),
     )
 
 
@@ -1635,9 +1749,16 @@ def get_relationship(telegram_user_id: int, npc_id: str) -> dict:
             (telegram_user_id, npc_id),
         ).fetchone()
         if row is None:
+            # npc_relationships' chat_id became NOT NULL as part of the
+            # Phase 4a composite-PK rebuild (2026-08-03) -- chat_id isn't
+            # threaded through this function's own signature yet (that's
+            # Phase 4b), so until then every new row here belongs to the
+            # one real home chat_id, matching every existing row (there
+            # is currently exactly one tenant). Same fix shape as
+            # _set_active_character's ON CONFLICT fix above.
             conn.execute(
-                "INSERT INTO npc_relationships (telegram_user_id, npc_id) VALUES (?, ?)",
-                (telegram_user_id, npc_id),
+                "INSERT INTO npc_relationships (telegram_user_id, chat_id, npc_id) VALUES (?, ?, ?)",
+                (telegram_user_id, config.TELEGRAM_CHAT_ID, npc_id),
             )
             return {"telegram_user_id": telegram_user_id, "npc_id": npc_id, **_RELATIONSHIP_DEFAULTS}
     d = dict(row)
@@ -1721,9 +1842,11 @@ def get_faction_standing(telegram_user_id: int, faction_id: str, starting_standi
             (telegram_user_id, faction_id),
         ).fetchone()
         if row is None:
+            # Same Phase 4a NOT NULL chat_id fix as get_relationship above --
+            # chat_id isn't threaded through this function's signature yet.
             conn.execute(
-                "INSERT INTO faction_standing (telegram_user_id, faction_id, standing) VALUES (?, ?, ?)",
-                (telegram_user_id, faction_id, starting_standing),
+                "INSERT INTO faction_standing (telegram_user_id, chat_id, faction_id, standing) VALUES (?, ?, ?, ?)",
+                (telegram_user_id, config.TELEGRAM_CHAT_ID, faction_id, starting_standing),
             )
             return starting_standing
     return row["standing"]

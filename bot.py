@@ -8528,7 +8528,8 @@ async def _do_sell_market(update: Update, args: list[str]) -> None:
     listed_item = items_module.get_item(item_id)
     message = (
         f"🏷️ **{character['name']}** lists **{quantity}x {listed_item['name']}** for **{price} gold** "
-        f"(listing #{listing_id}). Say \"/buy_market {listing_id}\" to buy it."
+        f"(listing #{listing_id}). Say \"/buy_market {listing_id}\" to buy it, or "
+        f"\"/cancel_market {listing_id}\" to pull it back if you listed it by mistake."
     )
     stats_line = _format_item_stats_line(listed_item)
     if stats_line:
@@ -8588,7 +8589,8 @@ async def _do_check_market(update: Update) -> None:
     lines.append(
         "\nTap a listing below to buy it, or say \"/buy_market <#>\".\n"
         "Selling something yourself? Say \"/sell_market <quantity> <price> <item name>\" "
-        "(e.g. \"/sell_market 3 50 Silverleaf Herb\")."
+        "(e.g. \"/sell_market 3 50 Silverleaf Herb\").\n"
+        "Listed something by mistake? \"/cancel_market <#>\" pulls your own listing back."
     )
     await _safe_send(update, "\n".join(lines), reply_markup=_market_keyboard(listings), speak=False)
 
@@ -8652,6 +8654,97 @@ async def _do_buy_market(update: Update, args: list[str]) -> None:
     # item shud show an image" -- a single, deliberate market action,
     # same convention _maybe_send_item_image already uses for equip.
     await _maybe_send_item_image(update, listing["item_id"], bought_item)
+
+
+async def _do_cancel_market(update: Update, args: list[str]) -> None:
+    """
+    Real live request (2026-08-03, Coffee, Development topic): "How do I
+    cancel an item that I accidentally put on the market?" -- there was
+    no player-facing way to do this at all; db.remove_market_listing
+    previously only ever ran as part of completing a sale
+    (_do_buy_market above). Only the original seller can cancel their
+    own listing; the item goes straight back into their inventory (no
+    gold changes hands, matching a genuine "I didn't mean to list this"
+    take-back rather than a refund/repurchase).
+    """
+    character = db.get_character(update.effective_user.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    if not args:
+        await update.effective_chat.send_message(
+            "Usage: /cancel_market <listing #>", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    try:
+        listing_id = int(args[0].lstrip("#"))
+    except ValueError:
+        await update.effective_chat.send_message(
+            "That's not a real listing number.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    listing = db.get_market_listing(listing_id)
+    if listing is None:
+        await update.effective_chat.send_message(
+            "That listing doesn't exist — it may have already been bought or cancelled.",
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        )
+        return
+    if listing["seller_id"] != update.effective_user.id:
+        await update.effective_chat.send_message(
+            "That's not your listing to cancel.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+
+    db.add_item(update.effective_user.id, listing["item_id"], listing["quantity"])
+    db.remove_market_listing(listing_id)
+
+    cancelled_item = items_module.get_item(listing["item_id"])
+    item_name = cancelled_item["name"] if cancelled_item else listing["item_id"]
+    await _safe_send(
+        update,
+        f"🗑️ Cancelled listing #{listing_id} — **{listing['quantity']}x {item_name}** is back in your inventory.",
+    )
+
+
+async def _do_cancel_market_intent(update: Update, text: str) -> None:
+    """
+    Real live gap (2026-08-03, Coffee): typed "Cancel my listing in the
+    market" in plain English (this game's whole design is "no slash
+    commands required") -- but /cancel_market only existed as a slash
+    command, so the deterministic keyword fallback's existing "the
+    market"/"marketplace" check (which only ever pointed at
+    check_market) swallowed it and showed him the market listing
+    instead of cancelling anything. This is the natural-language entry
+    point: pulls a listing number out of the text if one was said
+    ("cancel listing 3", "cancel #3"); if none was given, auto-resolves
+    to the player's own single active listing (the common case --
+    someone who just said "cancel MY listing" almost always means the
+    one thing they have up), only falling back to asking them to name a
+    number when they genuinely have more than one live listing.
+    """
+    seller_id = update.effective_user.id
+    match = re.search(r"#?(\d+)", text)
+    if match:
+        await _do_cancel_market(update, [match.group(1)])
+        return
+
+    own_listings = [l for l in db.get_market_listings() if l["seller_id"] == seller_id]
+    if not own_listings:
+        await _safe_send(update, "You don't have anything listed on the marketplace right now.")
+        return
+    if len(own_listings) == 1:
+        await _do_cancel_market(update, [str(own_listings[0]["listing_id"])])
+        return
+
+    lines = ["You've got more than one listing up — which one? Say \"/cancel_market <#>\":"]
+    for listing in own_listings:
+        item = items_module.get_item(listing["item_id"])
+        item_name = item["name"] if item else listing["item_id"]
+        lines.append(f"#{listing['listing_id']}: {listing['quantity']}x {item_name} — {listing['price']} gold")
+    await _safe_send(update, "\n".join(lines), speak=False)
 
 
 GAMBLE_WIN_THRESHOLD = 8  # 2d6 total needed to double your wager
@@ -12558,7 +12651,10 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await _safe_send(update, "Something went wrong listing that item.")
             return
         listing_id = db.create_market_listing(update.effective_user.id, character["name"], item_id, 1, price)
-        message = f"🏷️ **{character['name']}** lists **{item['name']}** for **{price} gold** (listing #{listing_id})."
+        message = (
+            f"🏷️ **{character['name']}** lists **{item['name']}** for **{price} gold** (listing #{listing_id}). "
+            f"Listed by mistake? \"/cancel_market {listing_id}\" pulls it back."
+        )
         stats_line = _format_item_stats_line(item)
         if stats_line:
             message += f"\n\n📊 **Stats:** {stats_line}"
@@ -17053,6 +17149,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_accept_duel(update)
     elif action == "check_market":
         await _do_check_market(update)
+    elif action == "cancel_market":
+        await _do_cancel_market_intent(update, text)
     elif action == "join_battle":
         await _do_join_battle(update)
     elif action == "replay_intro":
@@ -17322,6 +17420,13 @@ async def buy_market_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not topics.is_adventure(update.effective_chat.id, update.effective_message.message_thread_id or 0):
         return
     await _do_buy_market(update, context.args)
+
+
+async def cancel_market_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/cancel_market <listing #> -- pull your own listing back off the marketplace. See _do_cancel_market."""
+    if not topics.is_adventure(update.effective_chat.id, update.effective_message.message_thread_id or 0):
+        return
+    await _do_cancel_market(update, context.args)
 
 
 async def join_battle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -18388,7 +18493,7 @@ async def dev_topic_photo_handler(update: Update, context: ContextTypes.DEFAULT_
         return
 
     os.makedirs(DEV_SCREENSHOTS_DIR, exist_ok=True)
-    largest_photo = update.message.photo[-1]
+    largest_photo = update.effective_message.photo[-1]
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     filename = f"{timestamp}_{largest_photo.file_unique_id}.jpg"
     filepath = os.path.join(DEV_SCREENSHOTS_DIR, filename)
@@ -18421,7 +18526,7 @@ async def dev_topic_photo_handler(update: Update, context: ContextTypes.DEFAULT_
             logger.warning(f"[dev_topic_image] download failed, retrying: {e!r}")
             await asyncio.sleep(2)
 
-    caption = (update.message.caption or "").strip()
+    caption = (update.effective_message.caption or "").strip()
     logger.info(f"[dev_topic_image] user={update.effective_user.id} path={filepath!r} caption={caption!r}")
 
     # Routed through _safe_send (not a raw send_message) since this was
@@ -18487,7 +18592,7 @@ async def dev_topic_document_handler(update: Update, context: ContextTypes.DEFAU
         return
 
     os.makedirs(CAMPAIGN_SOURCES_DIR, exist_ok=True)
-    doc = update.message.document
+    doc = update.effective_message.document
     file = await context.bot.get_file(doc.file_id)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", doc.file_name or "document")
@@ -18495,7 +18600,7 @@ async def dev_topic_document_handler(update: Update, context: ContextTypes.DEFAU
     filepath = os.path.join(CAMPAIGN_SOURCES_DIR, filename)
     await file.download_to_drive(filepath)
 
-    caption = (update.message.caption or "").strip()
+    caption = (update.effective_message.caption or "").strip()
     caption_note = f" — {caption}" if caption else ""
     _append_campaign_source(f"File: `{filepath}` (original name: {doc.file_name!r}){caption_note}")
     logger.info(f"[dev_topic_document] user={update.effective_user.id} path={filepath!r} caption={caption!r}")
@@ -18547,14 +18652,14 @@ async def dev_topic_video_handler(update: Update, context: ContextTypes.DEFAULT_
         return
 
     os.makedirs(DEV_VIDEOS_DIR, exist_ok=True)
-    video = update.message.video
+    video = update.effective_message.video
     file = await context.bot.get_file(video.file_id)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     video_filename = f"{timestamp}_{video.file_unique_id}.mp4"
     video_path = os.path.join(DEV_VIDEOS_DIR, video_filename)
     await file.download_to_drive(video_path)
 
-    caption = (update.message.caption or "").strip()
+    caption = (update.effective_message.caption or "").strip()
     logger.info(f"[dev_topic_video] user={update.effective_user.id} path={video_path!r} caption={caption!r}")
 
     frame_count, frames_dir, extraction_error = await asyncio.to_thread(_extract_video_frames, video_path)
@@ -19840,6 +19945,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("sell_market", sell_market_command))
     application.add_handler(CommandHandler("market", market_command))
     application.add_handler(CommandHandler("buy_market", buy_market_command))
+    application.add_handler(CommandHandler("cancel_market", cancel_market_command))
     application.add_handler(CommandHandler("join_battle", join_battle_command))
     application.add_handler(CommandHandler("shop", shop_command))
     application.add_handler(CommandHandler("startcombat", startcombat_command))

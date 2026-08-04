@@ -876,6 +876,13 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
         return {**base, "action": "challenge_duel"}
 
     if any(w in lowered for w in ["the market", "marketplace", "market listings"]):
+        # Real live gap (2026-08-03, Coffee): "Cancel my listing in the
+        # market" got swallowed by the plain "the market" check below
+        # and showed him the market instead of cancelling anything --
+        # this needs to be checked FIRST, same "specific case before the
+        # general one" shape as the "duel"/"accept" check above.
+        if any(w in lowered for w in ["cancel", "remove", "take back", "pull back", "unlist", "un-list", "delist"]):
+            return {**base, "action": "cancel_market"}
         return {**base, "action": "check_market"}
 
     if any(w in lowered for w in ["join the battle", "join the fight", "help them fight",
@@ -1592,7 +1599,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "set_description", "set_pronouns",
                 "bestiary", "list_shop", "leaderboard", "check_achievements", "set_title", "check_weather",
                 "check_guild_quest", "dice_game", "fortunes_wheel", "set_alignment", "message_ai",
-                "skill_tree", "challenge_duel", "accept_duel", "check_market", "join_battle",
+                "skill_tree", "challenge_duel", "accept_duel", "check_market", "cancel_market", "join_battle",
                 "replay_intro", "visual_map", "rebirth", "choose_hybrid", "give_offering",
                 "drink_water", "choose_subclass", "start_echo_trial", "check_professions",
                 "talk_party", "use_environment",

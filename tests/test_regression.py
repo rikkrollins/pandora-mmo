@@ -31,7 +31,8 @@ from ai.text_cleanup import strip_think_tags
 from rules.combat import resolve_attack
 from rules.crafting import RECIPES
 from tests.helpers import (
-    DummyContext, DummyMessage, FakeBot, FakeCallbackUpdate, FakeUpdate, make_basic_character, use_test_db,
+    DummyContext, DummyMessage, FakeBot, FakeCallbackUpdate, FakeChat, FakeUpdate, FakeUser,
+    make_basic_character, use_test_db,
 )
 
 
@@ -4980,6 +4981,181 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         update = FakeCallbackUpdate(user_id, "create|race|Elf", sink)
         await bot.creation_menu_callback(update, context)  # must not raise
         self.assertNotIn("creation", context.user_data)
+
+    # -- Multi-tenant scaling Phase 4a: schema + migration (2026-08-03) --
+    def test_phase_4a_chat_id_columns_and_composite_pks_exist(self):
+        """
+        Real db.py migration, first sub-phase of the DB multi-tenancy
+        retrofit (see plans/sequential-tinkering-quokka.md): every
+        currently-global table gets a real chat_id, with
+        active_characters/npc_relationships/faction_standing rebuilt to
+        a genuinely composite PK (SQLite can't ALTER a PK in place).
+        Deliberately zero behavior change in this sub-phase -- nothing
+        reads/filters by chat_id yet -- so this just proves the schema
+        landed correctly on the class's real shared test DB.
+        """
+        with db.get_connection() as conn:
+            for table in ("characters", "market_listings", "board_quests", "parties"):
+                cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({table})")]
+                self.assertIn("chat_id", cols, table)
+            for table, expected_pk in (
+                ("active_characters", {"telegram_user_id", "chat_id"}),
+                ("npc_relationships", {"telegram_user_id", "chat_id", "npc_id"}),
+                ("faction_standing", {"telegram_user_id", "chat_id", "faction_id"}),
+            ):
+                info = conn.execute(f"PRAGMA table_info({table})").fetchall()
+                pk_cols = {r["name"] for r in info if r["pk"] > 0}
+                self.assertEqual(pk_cols, expected_pk, table)
+
+    def test_get_relationship_and_faction_standing_auto_vivify_after_phase_4a(self):
+        """
+        Real regression caught by the mandatory full-suite run right
+        after the Phase 4a rebuild (2026-08-03): get_relationship() and
+        get_faction_standing()'s auto-vivify INSERTs didn't supply the
+        newly NOT NULL chat_id column, so ANY brand-new NPC relationship
+        or faction standing lookup (is_banned_by_npc, shop purchases,
+        etc.) crashed with sqlite3.IntegrityError. Fixed by writing
+        config.TELEGRAM_CHAT_ID internally, same shape as the
+        _set_active_character ON CONFLICT fix.
+        """
+        user_id = 900564
+        rel = db.get_relationship(user_id, "some_new_npc")
+        self.assertEqual(rel["banned"], 0)
+        self.assertFalse(db.is_banned_by_npc(user_id, "some_new_npc"))
+        standing = db.get_faction_standing(user_id, "some_new_faction")
+        self.assertEqual(standing, 0)
+        self.assertEqual(db.adjust_faction_standing(user_id, "some_new_faction", 5), 5)
+
+    # -- Dev-topic edited-message crash (2026-08-03, Coffee) -----------
+    async def test_dev_topic_photo_handler_survives_an_edited_message(self):
+        """
+        Real live crash (2026-08-03, Development topic): Coffee edited a
+        screenshot's caption to ask "How can I see the stats and the
+        details of this?" -- Telegram delivers an edit as
+        update.edited_message, not update.message, so update.message is
+        None. dev_topic_photo_handler (and the matching document/video
+        handlers) read update.message.photo/.caption directly, crashing
+        with AttributeError on every edited screenshot. Fixed by
+        switching to update.effective_message throughout.
+        """
+        class FakePhotoSize:
+            def __init__(self, file_id, file_unique_id):
+                self.file_id = file_id
+                self.file_unique_id = file_unique_id
+
+        class FakeEditedMessage:
+            def __init__(self, photo, caption, thread_id):
+                self.photo = photo
+                self.caption = caption
+                self.message_thread_id = thread_id
+                self.reply_to_message = None
+
+        class FakeEditedUpdate:
+            def __init__(self, user_id, sink, photo, caption, thread_id):
+                self.effective_user = FakeUser(user_id)
+                self.effective_chat = FakeChat(sink, chat_id=config.TELEGRAM_CHAT_ID)
+                self.message = None
+                self.effective_message = FakeEditedMessage(photo, caption, thread_id)
+
+        class FakeFile:
+            async def download_to_drive(self, path):
+                with open(path, "wb") as f:
+                    f.write(b"fake-jpeg-bytes")
+
+        class FakeBotWithGetFile(FakeBot):
+            async def get_file(self, file_id):
+                return FakeFile()
+
+        sink = []
+        update = FakeEditedUpdate(
+            user_id=7052163553,
+            sink=sink,
+            photo=[FakePhotoSize("small_id", "small_uniq"), FakePhotoSize("big_id", "big_uniq")],
+            caption="How can I see the stats and the details of this?",
+            thread_id=config.TOPIC_DEVELOPMENT_ID,
+        )
+        context = DummyContext(bot=FakeBotWithGetFile(status="creator"))
+        await bot.dev_topic_photo_handler(update, context)
+        self.assertTrue(sink, "handler produced no reply -- still crashing on edited messages")
+        self.assertIn("Got it", sink[-1])
+        saved_path = sink[-1].split("`")[1]
+        if os.path.exists(saved_path):
+            os.remove(saved_path)
+
+    # -- /cancel_market command + natural-language routing (2026-08-03) --
+    async def test_cancel_market_lets_the_seller_pull_back_their_own_listing(self):
+        """
+        Real live request (2026-08-03, Coffee, Development topic): "How
+        do I cancel an item that I accidentally put on the market?" --
+        db.remove_market_listing existed but had zero player-facing
+        caller before this (only ever ran as part of completing a
+        sale). /cancel_market <#> lets only the original seller pull
+        their own listing back; the item returns to inventory, no gold
+        changes hands.
+        """
+        seller_id, buyer_id = 900571, 900572
+        make_basic_character(seller_id, "MarketSeller", inventory={"rusty_dagger": 1})
+        make_basic_character(buyer_id, "MarketBuyer", gold=1000)
+
+        sink = []
+        update = FakeUpdate(seller_id, "", sink)
+        await bot._do_sell_market(update, ["1", "50", "rusty dagger"])
+        self.assertIn("/cancel_market", sink[-1])
+        listing_id = db.get_market_listings()[-1]["listing_id"]
+
+        sink2 = []
+        await bot._do_cancel_market(FakeUpdate(buyer_id, "", sink2), [str(listing_id)])
+        self.assertIn("not your listing", sink2[-1])
+        self.assertIsNotNone(db.get_market_listing(listing_id))
+
+        seller_before = db.get_character(seller_id)
+        self.assertEqual(seller_before["inventory"].get("rusty_dagger", 0), 0)
+
+        sink3 = []
+        await bot._do_cancel_market(FakeUpdate(seller_id, "", sink3), [str(listing_id)])
+        self.assertIn("Cancelled listing", sink3[-1])
+        self.assertIsNone(db.get_market_listing(listing_id))
+        seller_after = db.get_character(seller_id)
+        self.assertEqual(seller_after["inventory"].get("rusty_dagger", 0), 1)
+        self.assertEqual(seller_after["gold"], seller_before["gold"])
+
+    def test_cancel_market_natural_language_routes_correctly(self):
+        """
+        Real live gap (2026-08-03, Coffee): typed "Cancel my listing in
+        the market" in plain English -- this game's whole design is "no
+        slash commands required" -- but the deterministic keyword
+        fallback's existing "the market"/"marketplace" check only ever
+        pointed at check_market, so it showed him the market instead of
+        cancelling anything. Fixed with a "cancel" sub-check ahead of
+        the generic one, mirroring the existing "duel"/"accept" pattern.
+        """
+        self.assertEqual(_keyword_fallback("Cancel my listing in the market", [])["action"], "cancel_market")
+        self.assertEqual(_keyword_fallback("Check the market", [])["action"], "check_market")
+
+    async def test_cancel_market_intent_auto_resolves_a_single_listing(self):
+        seller_id = 900573
+        make_basic_character(seller_id, "SoloSeller", inventory={"rusty_dagger": 1})
+        sink = []
+        await bot._do_sell_market(FakeUpdate(seller_id, "", sink), ["1", "50", "rusty dagger"])
+
+        sink2 = []
+        await bot._do_cancel_market_intent(FakeUpdate(seller_id, "", sink2), "Cancel my listing in the market")
+        self.assertIn("Cancelled listing", sink2[-1])
+        self.assertEqual(db.get_character(seller_id)["inventory"].get("rusty_dagger", 0), 1)
+
+    async def test_cancel_market_intent_asks_which_one_when_ambiguous(self):
+        seller_id = 900574
+        make_basic_character(seller_id, "MultiSeller", inventory={"rusty_dagger": 2, "silvered_dagger": 1})
+        sink = []
+        update = FakeUpdate(seller_id, "", sink)
+        await bot._do_sell_market(update, ["1", "50", "rusty dagger"])
+        await bot._do_sell_market(update, ["1", "80", "silvered dagger"])
+
+        sink2 = []
+        await bot._do_cancel_market_intent(FakeUpdate(seller_id, "", sink2), "Cancel my listing")
+        self.assertIn("more than one listing", sink2[-1])
+        remaining = [l for l in db.get_market_listings() if l["seller_id"] == seller_id]
+        self.assertEqual(len(remaining), 2)
 
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):

@@ -2,6 +2,42 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.84] — Multi-tenant DB Phase 4a, dev-topic edit crash fix, /cancel_market
+
+**Multi-tenant scaling Phase 4a: database schema retrofit (sub-phase 1
+of the DB multi-tenancy plan).** Every currently-global game table
+(`characters`, `market_listings`, `board_quests`, `parties`) gains a
+real `chat_id` column, and `active_characters`, `npc_relationships`,
+`faction_standing` were rebuilt with a genuinely composite primary key
+(`telegram_user_id` + `chat_id`, since SQLite can't alter a table's PK
+in place). Every existing row is backfilled to this bot's one real home
+chat. Deliberately zero behavior change for this bot's own group —
+nothing reads or filters by chat_id yet (that's the next sub-phase);
+this only lays the schema groundwork so a second Telegram group could
+one day get its own independent game world instead of sharing this
+one's data. Caught and fixed two real regressions this introduced
+before shipping: `_set_active_character`'s `ON CONFLICT` target no
+longer matched the new composite PK, and `get_relationship`/
+`get_faction_standing`'s auto-vivify inserts (any brand-new NPC
+relationship or faction standing lookup) didn't supply the now-required
+`chat_id`, both crashing until fixed to write this bot's real home
+chat_id internally.
+
+**Fixed: editing a message in the Development topic crashed the bot.**
+Coffee edited a screenshot's caption to ask a follow-up question —
+Telegram delivers an edit as a different update shape than a new
+message, and the screenshot/document/video handlers were reading the
+wrong field, crashing with an unhandled exception on every edited
+message sent there instead of just replying normally.
+
+**New: `/cancel_market`, plus natural-language support.** There was
+previously no way to pull back your own accidental market listing —
+only a completed sale ever removed one. Say "cancel my listing" (or
+`/cancel_market <#>`) and the seller gets their item back, no gold
+changes hands. If you've only got one listing up, it just cancels
+that one; with more than one, it asks which. Only the original seller
+can cancel a listing.
+
 ## [1.27.83] — Hotfix: /reimage dropped item-view action buttons
 
 Caught on self-review right after v1.27.82 shipped: /reimage-ing an
