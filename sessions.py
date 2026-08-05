@@ -114,6 +114,24 @@ class Session:
         ]
 
     def advance_turn(self) -> None:
+        # Real live bug (2026-08-05, Coffee: "This was a double prompt
+        # also" -- the same "Grask Emberscale has 2 attacks this turn!"
+        # line posted twice back to back): a transient failure partway
+        # through resolving an AI's multiattack turn (e.g. a DB write
+        # under this box's known disk-I/O contention) can leave
+        # _resolve_ai_turns having already announced the multiattack
+        # count for a turn that never actually advanced -- the next
+        # retry of that same still-current turn re-announces it. This
+        # only ever needs clearing for the participant whose turn is
+        # ACTUALLY ending here (a genuine advance), never on a mere
+        # retry of the same un-advanced turn.
+        # Same reasoning, same fix shape, for the "Round N -- it's now
+        # X's turn!" human-turn prompt (_turn_prompt_announced) -- see
+        # bot.py's _resolve_ai_turns for the matching set-and-check.
+        if self.turn_order:
+            ending = self.current_participant()
+            ending.pop("_multiattack_announced", None)
+            ending.pop("_turn_prompt_announced", None)
         self.current_turn_index = (self.current_turn_index + 1) % len(self.turn_order)
         if self.current_turn_index == 0:
             self.round_number += 1

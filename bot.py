@@ -4617,7 +4617,22 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
                 continue
 
         if not current.get("is_ai"):
-            await _safe_send(update, _turn_announcement(session), reply_markup=_battle_menu_keyboard(session))
+            # Real live bug (2026-08-05, Coffee, Development topic
+            # screenshot: "What os happening?! I have two attacks now?!"
+            # -- the "Round N -- it's now X's turn!" prompt posted twice
+            # back to back, nothing in between): whatever handler
+            # originally triggered this AI-turn-resolution chain can get
+            # retried after a downstream failure elsewhere in that same
+            # request (same shape as the multiattack-announcement bug
+            # above) -- every already-COMPLETED AI turn stays completed
+            # (session.advance_turn() already ran for real), so the
+            # retry just fast-forwards straight back to this same
+            # still-current human turn and re-announces it. Same fix
+            # shape as _multiattack_announced: only ever send this once
+            # per real un-advanced turn.
+            if not current.get("_turn_prompt_announced"):
+                current["_turn_prompt_announced"] = True
+                await _safe_send(update, _turn_announcement(session), reply_markup=_battle_menu_keyboard(session))
             return
 
         opposing = session.living_on_side(session.opposing_side(current["telegram_user_id"]))
@@ -4667,7 +4682,8 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
         # path above -- skipped for bosses specifically, since those
         # already get their own "sizing up its target" flavor line each
         # turn (task #167) and a second generic line would just be noise.
-        if attack_count > 1 and not current.get("is_boss"):
+        if attack_count > 1 and not current.get("is_boss") and not current.get("_multiattack_announced"):
+            current["_multiattack_announced"] = True
             await _safe_send(update, f"⚔️ **{current['name']}** has **{attack_count} attacks** this turn!")
         combat_ended_mid_turn = False
         for attack_num in range(attack_count):
@@ -12040,7 +12056,7 @@ async def look_action_menu_callback(update: Update, context: ContextTypes.DEFAUL
 async def _send_generated_image(
     update: Update, prompt: str, caption: str, width: int = 512, height: int = 512,
     seed: int | None = None, log_key: str = "", reply_markup: InlineKeyboardMarkup | None = None,
-) -> None:
+) -> bool:
     """
     Shared low-level image sender (2026-08-03, per Coffee: "/reimage" --
     if a player doesn't like a generated image, replying to it should
@@ -12055,6 +12071,19 @@ async def _send_generated_image(
     `reply_markup` (2026-08-03, per Coffee: item-view/equip/sell/market/
     give buttons on a looted item) is optional so every existing caller
     that doesn't need buttons is unaffected.
+
+    Returns whether the photo genuinely sent (2026-08-05, real live bug,
+    Coffee: "i clicked to view the item and its not processing" --
+    confirmed live via two real image-generation failures for the exact
+    item he tapped). This used to swallow a failed generate/send with
+    only a log line and nothing else, which is fine for purely ambient
+    flavor images no one's actually waiting on -- but itemview_callback's
+    "show" action is a real, direct request the player just tapped a
+    button for, and losing BOTH the image AND the stats/action-buttons
+    caption that would have gone with it left them with literally
+    nothing. Callers that only ever sent flavor (no reply_markup, no
+    caption anyone's blocked on) can safely ignore this return value,
+    same as before.
     """
     try:
         sent = await update.effective_chat.send_photo(
@@ -12077,8 +12106,10 @@ async def _send_generated_image(
             }
             if len(tracked) > _REIMAGE_TRACKED_MESSAGES_PER_CHAT:
                 tracked.pop(min(tracked), None)
+        return True
     except Exception as e:
         logger.warning(f"[images] image send failed for {log_key!r}: {e!r}")
+        return False
 
 
 async def reimage_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -12832,10 +12863,19 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         stats_line = _format_item_stats_line(item)
         caption = f"🎒 {item['name']}" + (f"\n📊 {stats_line}" if stats_line else "")
         prompt = _item_image_prompt(item)
-        await _send_generated_image(
+        sent = await _send_generated_image(
             update, prompt, caption, seed=_deterministic_image_seed(f"item:{item_id}"), log_key=item_id,
             reply_markup=_item_actions_keyboard(item_id),
         )
+        if not sent:
+            # Real live bug (2026-08-05, Coffee: "i clicked to view the
+            # item and its not processing") -- a failed image generation
+            # used to silently drop BOTH the picture and the stats/
+            # action-buttons caption that would have gone with it,
+            # leaving the player with no response at all. This is a real
+            # request they just tapped a button for, so it always gets a
+            # real reply now, image or not.
+            await _safe_send(update, caption, reply_markup=_item_actions_keyboard(item_id))
         return
 
     owns_it = character.get("inventory", {}).get(item_id, 0) > 0

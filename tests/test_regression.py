@@ -4193,6 +4193,155 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(photo_count, 1, f"expected exactly 1 Goblin image, got {photo_count}: {sink}")
         sessions.end_session(-999)
 
+    async def test_multiattack_announcement_not_repeated_on_a_crash_and_retry(self):
+        # Real live bug (2026-08-05, Coffee, Development topic screenshot:
+        # "This was a double prompt also" -- "Grask Emberscale has 2
+        # attacks this turn!" posted twice back to back, with only ONE
+        # real attack result following): a transient failure partway
+        # through resolving an AI's multiattack turn (e.g. a DB write
+        # under this box's known disk-I/O contention) can leave
+        # _resolve_ai_turns having already announced the multiattack
+        # count for a turn that never actually advanced -- the very next
+        # retry of that same still-current turn re-announced it.
+        # Verified via a forced RuntimeError on the first _sync_player_
+        # to_db call (simulating exactly that transient failure);
+        # confirms the retry still completes the turn correctly.
+        from unittest.mock import patch
+        import sessions
+        sessions.end_session(-999)
+        grask = {
+            "telegram_user_id": -700501, "name": "Grask Emberscale", "is_ai": True,
+            "char_class": "Fighter", "level": 5, "race": "Half-Orc",
+            "strength": 16, "dexterity": 12, "constitution": 14,
+            "hp_current": 40, "hp_max": 40, "armor_class": 15,
+            "proficiency_bonus": 3, "damage_dice": "1d12", "damage_bonus": 3,
+            "damage_type": "physical", "chat_id": -999, "conditions": [],
+        }
+        human_id = 900902
+        make_basic_character(human_id, "RealPlayer2", current_location="crossroads_tavern")
+        human = db.get_character(human_id, -999)
+        goblin = {
+            "telegram_user_id": -700503, "name": "Goblin X", "is_ai": True,
+            "hp_current": 200, "hp_max": 200, "armor_class": 1,
+            "strength": 8, "dexterity": 14, "proficiency_bonus": 2,
+            "monster_key": "goblin", "xp_reward": 10, "conditions": [],
+        }
+        session = sessions.start_session(
+            -999, [grask, human, goblin], {-700501: "party", human_id: "party", -700503: "enemy"}
+        )
+        # is_combat_over() checks turn_order membership by side, so the
+        # goblin must stay in turn_order for combat to count as ongoing --
+        # placed after the human so the loop naturally stops at the
+        # human's turn (not is_ai), isolating exactly Grask's one turn.
+        session.turn_order = [-700501, human_id, -700503]
+        session.current_turn_index = 0
+
+        sink = []
+        update = FakeUpdate(-700501, "irrelevant", sink)
+
+        async def fast_post_narrated(update, character, action_text, result, session, **kwargs):
+            sink.append(f"<narrated attack result, hit={result.get('hit')}>")
+
+        call_count = {"n": 0}
+        real_sync = bot._sync_player_to_db
+
+        def flaky_sync(character):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise RuntimeError("simulated transient DB failure")
+            return real_sync(character)
+
+        with patch("bot._sync_player_to_db", side_effect=flaky_sync), \
+             patch("bot._post_narrated", side_effect=fast_post_narrated):
+            with self.assertRaises(RuntimeError):
+                await bot._resolve_ai_turns(update, session)
+
+        self.assertEqual(session.current_participant_id(), -700501, "turn should still be stuck on Grask after the crash")
+        self.assertEqual(sum(1 for line in sink if "has 2 attacks" in line), 1)
+
+        with patch("bot._post_narrated", side_effect=fast_post_narrated):
+            await bot._resolve_ai_turns(update, session)
+
+        self.assertEqual(
+            sum(1 for line in sink if "has 2 attacks" in line), 1,
+            f"multiattack announcement should appear exactly once total across the crash+retry, got: {sink}",
+        )
+        self.assertEqual(session.current_participant_id(), human_id, "Grask's turn should have genuinely advanced after the successful retry")
+        sessions.end_session(-999)
+
+    async def test_itemview_falls_back_to_text_when_image_generation_fails(self):
+        # Real live bug (2026-08-05, Coffee, Development topic screenshot:
+        # "i clicked to view the item and its not processing" -- log
+        # confirmed two real image-generation failures for the exact
+        # item, "gi21", he tapped): _send_generated_image used to swallow
+        # a failed generate/send with only a log line, silently dropping
+        # BOTH the picture and the stats/action-buttons caption that
+        # would have gone with it -- a real request the player just
+        # tapped a button for, left with no response at all.
+        from unittest.mock import patch
+        uid = 900530
+        make_basic_character(uid, "ImageFailTester")
+        item_id = db.create_item_instance(
+            item_type="weapon", name="Sturdy Greataxe", rarity="common", price=50,
+            base_stats={"type": "weapon", "damage_dice": "1d12"}, affixes=[],
+        )
+        db.add_item(uid, -999, item_id, 1)
+        sink = []
+        update = FakeCallbackUpdate(uid, f"itemview|show|{item_id}", sink)
+
+        async def failing_send(*args, **kwargs):
+            return False
+
+        with patch("bot._send_generated_image", side_effect=failing_send):
+            await bot.itemview_callback(update, context=None)
+
+        self.assertTrue(
+            any("Sturdy Greataxe" in line for line in sink),
+            f"expected a text fallback naming the item when the image fails, got: {sink}",
+        )
+
+    async def test_turn_prompt_not_repeated_on_a_resolve_ai_turns_reentry(self):
+        # Real live bug (2026-08-05, Coffee, Development topic screenshot:
+        # "What os happening?! I have two attacks now?!"): the "Round N
+        # -- it's now X's turn!" prompt posted twice back to back with
+        # nothing in between. Same root cause as the multiattack-
+        # announcement bug above: whatever handler originally triggered
+        # an AI-turn-resolution chain can get retried after a downstream
+        # failure, and since the human's turn never actually advanced,
+        # the retry re-enters _resolve_ai_turns and, with no AI turns
+        # left to resolve, goes straight back to "not is_ai" and used to
+        # re-announce the same prompt.
+        import sessions
+        sessions.end_session(-999)
+        human_id = 900921
+        make_basic_character(human_id, "Ravenloft2", current_location="crossroads_tavern")
+        human = db.get_character(human_id, -999)
+        goblin = {
+            "telegram_user_id": -700602, "name": "Goblin 2", "is_ai": True,
+            "hp_current": 25, "hp_max": 25, "armor_class": 10,
+            "strength": 8, "dexterity": 14, "proficiency_bonus": 2,
+            "monster_key": "goblin", "xp_reward": 10, "conditions": [],
+        }
+        session = sessions.start_session(-999, [human, goblin], {human_id: "party", -700602: "enemy"})
+        session.turn_order = [human_id, -700602]
+        session.current_turn_index = 0
+
+        sink = []
+        update = FakeUpdate(human_id, "irrelevant", sink)
+
+        await bot._resolve_ai_turns(update, session)
+        self.assertEqual(sum(1 for line in sink if "What do you do" in line), 1)
+
+        # Simulated re-entry: the same still-current, un-advanced human
+        # turn gets resolved again.
+        await bot._resolve_ai_turns(update, session)
+        self.assertEqual(
+            sum(1 for line in sink if "What do you do" in line), 1,
+            f"turn prompt should appear exactly once total across the re-entry, got: {sink}",
+        )
+        self.assertEqual(session.current_participant_id(), human_id)
+        sessions.end_session(-999)
+
     async def test_ai_companions_never_learn_monsters_for_the_human(self):
         # mark_known_monster is only ever called for non-AI party members
         # in _do_start_combat -- an AI companion in the same fight must

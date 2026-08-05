@@ -2,6 +2,45 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.87] — Two more real duplicate-message bugs fixed, item-view image fallback
+
+Same underlying bug pattern as v1.27.86's monster-image fix, found via
+continued live Development-topic reports the same day: a handler that
+gets re-entered on an already-partially-resolved, un-advanced turn
+(after a transient failure elsewhere in that request — this box's
+known disk-I/O contention is the prime suspect) re-announces something
+it already said, since nothing about the turn itself moved on.
+
+**Fixed: "This was a double prompt also" — the multiattack announcement
+posted twice.** Coffee's screenshot showed "Grask Emberscale has 2
+attacks this turn!" posted twice back to back, with only ONE real
+attack result following — the tell that the whole per-turn block ran
+twice, not that combat itself glitched. `sessions.py`'s `advance_turn()`
+now clears a `_multiattack_announced` flag on the participant whose
+turn is genuinely ending; `_resolve_ai_turns` checks-and-sets it before
+announcing, so a retry of the same un-advanced turn skips the repeat
+while a real new turn still announces normally.
+
+**Fixed: "What os happening?! I have two attacks now?!" — the "Round N
+— it's now X's turn!" prompt posted twice.** Same root cause, same fix
+shape: a new `_turn_prompt_announced` flag, set before sending the
+prompt and cleared in `advance_turn()`, stops `_resolve_ai_turns` from
+re-announcing a human's still-current turn on a re-entry.
+
+**Fixed: "i clicked to view the item and its not processing."** Real
+log confirmation: two genuine image-generation failures for the exact
+item Coffee tapped ("gi21"). `_send_generated_image` used to swallow a
+failed generate/send with only a log line, silently dropping BOTH the
+picture and the stats/action-buttons caption that would have gone with
+it — a real request the player just tapped a button for, left with no
+response at all. It now reports success/failure, and `itemview_callback`
+falls back to a real text reply (stats + Equip/Sell/Market/Give buttons)
+whenever the image itself fails to send.
+
+All three reproduced with real, forced-failure tests before fixing,
+confirmed genuinely fixed after, and promoted into the permanent
+regression suite.
+
 ## [1.27.86] — Background-loop multi-tenancy fix, duplicate monster-image fix
 
 **Fixed real live bug (Coffee, Development topic screenshot): "I noticed
