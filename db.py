@@ -2109,6 +2109,26 @@ def register_chat(chat_id: int, title: str | None, added_by_user_id: int) -> Non
         )
 
 
+def get_all_chat_ids() -> list[int]:
+    """
+    Every chat_id the background loop (bot.py's _idle_inactivity_loop
+    and sub-functions) should run its per-cycle checks against --
+    Phase 4b's fix for the "which chats exist" gap (see
+    sequential-tinkering-quokka.md). Union of every chat that has ever
+    run /set_topic (the `chats` table) plus this bot's own home chat
+    (config.TELEGRAM_CHAT_ID), which must always be included even if
+    it never ran /set_topic itself -- it's the one chat guaranteed to
+    always exist.
+    """
+    with get_connection() as conn:
+        rows = conn.execute("SELECT chat_id FROM chats").fetchall()
+    chat_ids = {row["chat_id"] for row in rows}
+    home_chat_id = getattr(config, "TELEGRAM_CHAT_ID", None)
+    if home_chat_id is not None:
+        chat_ids.add(home_chat_id)
+    return sorted(chat_ids)
+
+
 def set_chat_topic_id(chat_id: int, topic_name: str, message_thread_id: int | None) -> None:
     with get_connection() as conn:
         conn.execute(
@@ -2593,10 +2613,11 @@ def mark_autonomous(telegram_user_id: int, chat_id: int) -> None:
         )
 
 
-def get_autonomous_players() -> list[dict]:
+def get_autonomous_players(chat_id: int) -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT * FROM characters WHERE is_autonomous = 1 AND is_deleted = 0 ORDER BY character_id"
+            "SELECT * FROM characters WHERE is_autonomous = 1 AND is_deleted = 0 AND chat_id = ? ORDER BY character_id",
+            (chat_id,),
         ).fetchall()
     return [_row_to_dict(r) for r in rows]
 

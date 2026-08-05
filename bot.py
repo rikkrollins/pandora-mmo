@@ -501,24 +501,25 @@ MAX_STATUS_NOTE_LENGTH = 60
 _ABILITY_NAMES = ("strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma")
 _ASI_AUTO_WORDS = ("auto", "automatically", "assign", "distribute", "do it for me")
 
-# 2026-08-01 Phase 2: chat-scoped (dict[chat_id, dict[npc_id, loc_id]]) --
-# each tenant's world will eventually have its own independent Sarah/
-# Theron wandering around, not one shared wanderer bleeding across every
-# group the bot is in. Real per-request call sites (an actual Update in
-# hand) pass their own chat_id explicitly; the still-single-chat
-# background loops (hourly narration, the "meanwhile" heartbeat,
-# autonomous AI-player narration) fall back to _LAST_KNOWN_CHAT_ID via
-# each function's own default parameter, same as everything else that
-# depends on it until Phase 3's real chats table exists.
+# 2026-08-01 Phase 2, made real Phase 4b (2026-08-04): chat-scoped
+# (dict[chat_id, dict[npc_id, loc_id]]) -- each tenant's world has its
+# own independent Sarah/Theron wandering around, not one shared
+# wanderer bleeding across every group the bot is in. Real per-request
+# call sites (an actual Update in hand) pass their own chat_id
+# explicitly; the background loops (hourly narration, the "meanwhile"
+# heartbeat, NPC wander) now loop over every real known chat
+# (db.get_all_chat_ids(), see _idle_inactivity_loop) and pass each
+# chat_id in explicitly too -- the _LAST_KNOWN_CHAT_ID fallback below
+# only remains as a defensive default for any caller that doesn't pass
+# one, not something any real caller still relies on.
 _NPC_LOCATIONS: dict[int, dict[str, str]] = {}
 NPC_WANDER_CHANCE_PER_CYCLE = 0.15
 WORLD_HEARTBEAT_IDLE_THRESHOLD_SECONDS = 1200  # 20 real minutes with no player activity at all
 WORLD_HEARTBEAT_MIN_GAP_SECONDS = 900  # never more than once per ~15 real minutes
-# Chat-scoped (2026-08-01 Phase 2), same as _NPC_LOCATIONS/_RECENT_WORLD_EVENTS
-# above -- each tenant's "meanwhile" heartbeat should gate on its OWN last-
-# fired time, not one shared clock across every chat. Only ever has a
-# real entry for _LAST_KNOWN_CHAT_ID today (this loop has no other chat
-# to post into yet), but the shape is ready for Phase 3.
+# Chat-scoped (2026-08-01 Phase 2, made real Phase 4b), same as
+# _NPC_LOCATIONS/_RECENT_WORLD_EVENTS above -- each tenant's
+# "meanwhile" heartbeat gates on its OWN last-fired time, not one
+# shared clock across every chat.
 _LAST_WORLD_HEARTBEAT_AT: dict[int, datetime] = {}
 
 # Task #75, per Coffee: "World events: rare world-boss spawns broadcast
@@ -571,21 +572,21 @@ _LAST_MOLTBOOK_NOTIFIED_SIGNATURE: tuple | None = None
 # anything else depends on.
 # ---------------------------------------------------------------------
 HOURLY_UPDATE_INTERVAL_SECONDS = getattr(config, "HOURLY_UPDATE_INTERVAL_SECONDS", 3600)
-# Chat-scoped (2026-08-01 Phase 2), same reasoning as _LAST_WORLD_HEARTBEAT_AT
-# above -- each tenant chat needs its own independent "have I already
-# fired this hour" gate. Only ever has a real entry for _LAST_KNOWN_CHAT_ID
-# today.
+# Chat-scoped (2026-08-01 Phase 2, made real Phase 4b) -- each tenant
+# chat has its own independent "have I already fired this hour" gate,
+# set from the real chat_id _maybe_post_hourly_status_update is called
+# with per chat (see _idle_inactivity_loop).
 _LAST_HOURLY_UPDATE_AT: dict[int, datetime] = {}
 # Which clock hour (US Eastern, "%Y-%m-%d %H") the update last fired for —
 # e.g. "2026-07-10 05" — so it lands on the top of the hour rather than
 # drifting to whatever offset the bot process happened to start at.
 EASTERN_TZ = ZoneInfo("America/New_York")
 _LAST_HOURLY_UPDATE_BUCKET: dict[int, str] = {}
-# 2026-08-01 Phase 2: chat-scoped, same reasoning as _UNLOCKED/_NPC_LOCATIONS
-# above -- each tenant's own recent-events recap shouldn't include another
-# tenant's combat victories/level-ups. Real per-request callers (a session
-# or update in hand) pass their own chat_id; background-loop-only callers
-# fall back to _LAST_KNOWN_CHAT_ID, same convention as _npcs_at_location.
+# 2026-08-01 Phase 2, made real Phase 4b: chat-scoped -- each tenant's
+# own recent-events recap shouldn't include another tenant's combat
+# victories/level-ups. Every real caller (a session/character/update in
+# hand, or the background loop's own per-chat iteration) passes its own
+# chat_id explicitly now.
 _RECENT_WORLD_EVENTS: dict[int, list[tuple[datetime, str, str]]] = {}
 
 
@@ -652,6 +653,12 @@ def _npcs_at_location(location_id: str, chat_id: int | None = None) -> list[str]
 
 def _wander_npcs(chat_id: int | None = None) -> None:
     chat_id = chat_id if chat_id is not None else _LAST_KNOWN_CHAT_ID
+    # Self-healing seed (Phase 4b): setup_default_npcs() only seeds
+    # chats known at startup -- a tenant chat that registers later (via
+    # /set_topic) would otherwise never get its wanderers placed at all.
+    # _seed_npc_locations is idempotent per NPC, so this is a cheap no-op
+    # for any chat that's already seeded.
+    _seed_npc_locations(chat_id)
     locations = _chat_scoped_dict(_NPC_LOCATIONS, chat_id)
     for npc_id in _wanderable_npc_ids():
         if random.random() > NPC_WANDER_CHANCE_PER_CYCLE:
@@ -698,7 +705,7 @@ def _ollama_congested() -> bool:
         return False
 
 
-async def _maybe_post_world_heartbeat(bot) -> None:
+async def _maybe_post_world_heartbeat(bot, chat_id: int) -> None:
     """
     "The world keeps living while everyone's away" — if real players
     have been quiet for a long stretch, narrate one small, grounded
@@ -706,39 +713,44 @@ async def _maybe_post_world_heartbeat(bot) -> None:
     actually is, so checking back in feels like a place that kept
     going, not a paused game. Never invents anything beyond a real
     NPC's real current location and their own listed activity_goals.
+
+    Phase 4b: takes an explicit chat_id (the background loop calls this
+    once per chat in db.get_all_chat_ids(), see _idle_inactivity_loop)
+    rather than relying on the single-chat _LAST_KNOWN_CHAT_ID global --
+    every query below is scoped to this one chat's own characters.
     """
-    if _LAST_KNOWN_CHAT_ID is None:
-        return
     if _ollama_congested():
         return  # purely discretionary flavor -- not worth adding to an already-strained shared queue
 
     now = datetime.now(timezone.utc)
     with db.get_connection() as conn:
         row = conn.execute(
-            "SELECT MAX(last_active_at) AS m FROM characters WHERE is_ai = 0 AND is_deleted = 0"
+            "SELECT MAX(last_active_at) AS m FROM characters WHERE is_ai = 0 AND is_deleted = 0 AND chat_id = ?",
+            (chat_id,),
         ).fetchone()
     if not row or not row["m"]:
-        return  # nobody has ever actually played — nothing to be "meanwhile" about
+        return  # nobody has ever actually played in this chat — nothing to be "meanwhile" about
     idle_for = (now - datetime.fromisoformat(row["m"])).total_seconds()
     if idle_for < WORLD_HEARTBEAT_IDLE_THRESHOLD_SECONDS:
         return
-    last_heartbeat = _LAST_WORLD_HEARTBEAT_AT.get(_LAST_KNOWN_CHAT_ID)
+    last_heartbeat = _LAST_WORLD_HEARTBEAT_AT.get(chat_id)
     if last_heartbeat and (now - last_heartbeat).total_seconds() < WORLD_HEARTBEAT_MIN_GAP_SECONDS:
         return
 
     with db.get_connection() as conn:
         row = conn.execute(
-            "SELECT current_location FROM characters WHERE is_ai = 0 AND is_deleted = 0 "
-            "ORDER BY last_active_at DESC LIMIT 1"
+            "SELECT current_location FROM characters WHERE is_ai = 0 AND is_deleted = 0 AND chat_id = ? "
+            "ORDER BY last_active_at DESC LIMIT 1",
+            (chat_id,),
         ).fetchone()
     location_id = row["current_location"] if row else SAFE_LOCATION_FALLBACK
 
-    npcs_here = _npcs_at_location(location_id)
+    npcs_here = _npcs_at_location(location_id, chat_id)
     if not npcs_here:
         return
 
     location_name = cl.get_location(CAMPAIGN, location_id)["name"]
-    update_like = _ChatOnlyUpdate(bot, _LAST_KNOWN_CHAT_ID)
+    update_like = _ChatOnlyUpdate(bot, chat_id)
 
     if len(npcs_here) >= 2:
         npc_a, npc_b = random.sample(npcs_here, 2)
@@ -760,7 +772,7 @@ async def _maybe_post_world_heartbeat(bot) -> None:
 
     if not line:
         return
-    _LAST_WORLD_HEARTBEAT_AT[_LAST_KNOWN_CHAT_ID] = now
+    _LAST_WORLD_HEARTBEAT_AT[chat_id] = now
     await _safe_send(update_like, f"🕯️ *(meanwhile, at {location_name})*\n💬 **{speaker_name}:** {line}")
 
 
@@ -789,8 +801,21 @@ async def _maybe_spawn_world_boss(bot) -> None:
     roll on top of that, so it stays rare and unpredictable rather than
     firing like clockwork the instant the gap elapses. Never spawns a
     second boss while one is still out there unresolved.
+
+    Phase 4b note: game_settings (where this is persisted) was a
+    deliberate exclusion from the chat_id retrofit -- a single shared
+    process-wide toggle store, not per-tenant gameplay state (see
+    sequential-tinkering-quokka.md). This event is genuinely
+    bot-process-wide, not per-chat, so it stays a single global boss
+    rather than looping per chat; it announces to this bot's own real
+    home chat (config.TELEGRAM_CHAT_ID) rather than the old
+    _LAST_KNOWN_CHAT_ID global, which could silently redirect a
+    server-wide announcement to whichever tenant chat happened to speak
+    last. True per-tenant world bosses are a real future design
+    question, not something this fix invents an answer for.
     """
-    if _LAST_KNOWN_CHAT_ID is None:
+    home_chat_id = getattr(config, "TELEGRAM_CHAT_ID", None)
+    if home_chat_id is None:
         return
     if db.get_setting("active_world_boss"):
         return  # one's already out there -- resolve it before another can spawn
@@ -818,7 +843,7 @@ async def _maybe_spawn_world_boss(bot) -> None:
     }))
     db.set_setting("world_boss_last_spawn_at", now.isoformat())
 
-    update_like = _ChatOnlyUpdate(bot, _LAST_KNOWN_CHAT_ID)
+    update_like = _ChatOnlyUpdate(bot, home_chat_id)
     await _safe_send(
         update_like,
         f"🌍 **World Event!** A monstrous **{template['name']}** ({template['hp_max']} HP) has been "
@@ -828,28 +853,29 @@ async def _maybe_spawn_world_boss(bot) -> None:
     )
 
 
-async def _maybe_post_hourly_status_update(bot) -> None:
+async def _maybe_post_hourly_status_update(bot, chat_id: int) -> None:
     """
     Posts an hourly status update to Adventure: a short AI-narrated
     flavor beat (recent events + who's doing what) at whichever
-    location the most recently active real player currently occupies,
-    followed by a plain factual readout (player counts, quest board)
-    that never passes through the model — see narrate_hourly_update's
-    docstring for why that split matters. Fires at the top of every
-    real hour in US Eastern time (e.g. 5:00, 6:00 — within the ~60s
-    granularity of the background loop this runs in), regardless of
-    activity level, unlike _maybe_post_world_heartbeat above, which
+    location the most recently active real player actually occupies IN
+    THIS CHAT, followed by a plain factual readout (player counts, quest
+    board) that never passes through the model — see narrate_hourly_
+    update's docstring for why that split matters. Fires at the top of
+    every real hour in US Eastern time (e.g. 5:00, 6:00 — within the
+    ~60s granularity of the background loop this runs in), regardless
+    of activity level, unlike _maybe_post_world_heartbeat above, which
     only fires during long idle stretches. Gated on an hour-bucket
     string rather than "N seconds since last fire" specifically so it
     lands on the clock hour instead of drifting to whatever offset the
     bot happened to start at.
-    """
-    if _LAST_KNOWN_CHAT_ID is None:
-        return
 
+    Phase 4b: takes an explicit chat_id (the background loop calls this
+    once per chat in db.get_all_chat_ids()) -- every query below is
+    scoped to this one chat's own characters/sessions/events.
+    """
     now = datetime.now(timezone.utc)
     current_hour_bucket = datetime.now(EASTERN_TZ).strftime("%Y-%m-%d %H")
-    if _LAST_HOURLY_UPDATE_BUCKET.get(_LAST_KNOWN_CHAT_ID) == current_hour_bucket:
+    if _LAST_HOURLY_UPDATE_BUCKET.get(chat_id) == current_hour_bucket:
         return
 
     # Real live bug (2026-07-18, Coffee: "What is happening here we were
@@ -864,7 +890,7 @@ async def _maybe_post_hourly_status_update(bot) -> None:
     # regardless) -- this retries every ~60s on the next background-loop
     # tick until combat actually ends, rather than silently losing that
     # hour's update entirely.
-    if sessions.get_session(_LAST_KNOWN_CHAT_ID) is not None:
+    if sessions.get_session(chat_id) is not None:
         return
 
     # Joined through active_characters so a player's old, no-longer-played
@@ -879,15 +905,17 @@ async def _maybe_post_hourly_status_update(bot) -> None:
             """
             SELECT COUNT(*) AS n FROM characters c
             JOIN active_characters a ON a.character_id = c.character_id
-            WHERE c.is_ai = 0 AND c.is_deleted = 0 AND c.is_inactive = 0
-            """
+            WHERE c.is_ai = 0 AND c.is_deleted = 0 AND c.is_inactive = 0 AND c.chat_id = ?
+            """,
+            (chat_id,),
         ).fetchone()
         inactive_row = conn.execute(
             """
             SELECT COUNT(*) AS n FROM characters c
             JOIN active_characters a ON a.character_id = c.character_id
-            WHERE c.is_ai = 0 AND c.is_deleted = 0 AND c.is_inactive = 1
-            """
+            WHERE c.is_ai = 0 AND c.is_deleted = 0 AND c.is_inactive = 1 AND c.chat_id = ?
+            """,
+            (chat_id,),
         ).fetchone()
         # Per Coffee's request (2026-07-14): AI players should count too,
         # not just real humans -- the design philosophy (CLAUDE.md) is
@@ -898,23 +926,25 @@ async def _maybe_post_hourly_status_update(bot) -> None:
             """
             SELECT COUNT(*) AS n FROM characters c
             JOIN active_characters a ON a.character_id = c.character_id
-            WHERE c.is_ai = 1 AND c.is_deleted = 0
-            """
+            WHERE c.is_ai = 1 AND c.is_deleted = 0 AND c.chat_id = ?
+            """,
+            (chat_id,),
         ).fetchone()
         last_active_row = conn.execute(
             """
             SELECT c.current_location FROM characters c
             JOIN active_characters a ON a.character_id = c.character_id
-            WHERE c.is_ai = 0 AND c.is_deleted = 0
+            WHERE c.is_ai = 0 AND c.is_deleted = 0 AND c.chat_id = ?
             ORDER BY c.last_active_at DESC LIMIT 1
-            """
+            """,
+            (chat_id,),
         ).fetchone()
 
     # Commit to firing this cycle regardless of what's found below —
     # an hour with nothing to report still gets a (quiet) update, and
     # either way we don't want to re-check every 60s until the next hour.
-    _LAST_HOURLY_UPDATE_AT[_LAST_KNOWN_CHAT_ID] = now
-    _LAST_HOURLY_UPDATE_BUCKET[_LAST_KNOWN_CHAT_ID] = current_hour_bucket
+    _LAST_HOURLY_UPDATE_AT[chat_id] = now
+    _LAST_HOURLY_UPDATE_BUCKET[chat_id] = current_hour_bucket
 
     if not last_active_row:
         return  # nobody has ever played — nothing to report on
@@ -929,12 +959,12 @@ async def _maybe_post_hourly_status_update(bot) -> None:
 
     cutoff = now.timestamp() - HOURLY_UPDATE_INTERVAL_SECONDS
     recent_events = [
-        text for (when, loc, text) in _RECENT_WORLD_EVENTS.get(_LAST_KNOWN_CHAT_ID, [])
+        text for (when, loc, text) in _RECENT_WORLD_EVENTS.get(chat_id, [])
         if loc == location_id and when.timestamp() >= cutoff
     ]
 
     activity_lines = []
-    for npc_id in _npcs_at_location(location_id):
+    for npc_id in _npcs_at_location(location_id, chat_id):
         npc_data = CAMPAIGN["npcs"].get(npc_id)
         if not npc_data:
             continue
@@ -948,8 +978,8 @@ async def _maybe_post_hourly_status_update(bot) -> None:
     with db.get_connection() as conn:
         ai_companions = conn.execute(
             "SELECT name, race, char_class FROM characters "
-            "WHERE is_ai = 1 AND is_deleted = 0 AND current_location = ?",
-            (location_id,),
+            "WHERE is_ai = 1 AND is_deleted = 0 AND current_location = ? AND chat_id = ?",
+            (location_id, chat_id),
         ).fetchall()
     for comp in ai_companions:
         activity_lines.append(f"{comp['name']} the {comp['race']} {comp['char_class']} is here")
@@ -982,7 +1012,7 @@ async def _maybe_post_hourly_status_update(bot) -> None:
     if area_board_quests:
         lines.append(board_quests_module.format_board_listings(area_board_quests))
 
-    update_like = _ChatOnlyUpdate(bot, _LAST_KNOWN_CHAT_ID)
+    update_like = _ChatOnlyUpdate(bot, chat_id)
     await _safe_send(update_like, "\n".join(lines))
 
 
@@ -996,10 +1026,17 @@ async def _maybe_check_moltbook_activity(bot) -> None:
     Deliberately does NOT reply on Moltbook itself. That's a public
     reply under the project's name to a stranger's comment — a human
     call, not something a background loop should decide unsupervised.
+
+    Phase 4b note: this is one shared bot-wide Moltbook profile, not a
+    per-tenant concept, so it deliberately always notifies this bot's
+    own real home chat (config.TELEGRAM_CHAT_ID) rather than looping
+    per chat or trusting the old _LAST_KNOWN_CHAT_ID global, which
+    could silently redirect this to whichever tenant chat spoke last.
     """
     global _LAST_MOLTBOOK_CHECK_AT, _LAST_MOLTBOOK_NOTIFIED_SIGNATURE
     api_key = getattr(config, "MOLTBOOK_API_KEY", None)
-    if not api_key or _LAST_KNOWN_CHAT_ID is None:
+    home_chat_id = getattr(config, "TELEGRAM_CHAT_ID", None)
+    if not api_key or home_chat_id is None:
         return
 
     now = datetime.now(timezone.utc)
@@ -1057,8 +1094,8 @@ async def _maybe_check_moltbook_activity(bot) -> None:
 
     try:
         await bot.send_message(
-            chat_id=_LAST_KNOWN_CHAT_ID,
-            message_thread_id=topics.thread_id_for(_LAST_KNOWN_CHAT_ID, "development"),
+            chat_id=home_chat_id,
+            message_thread_id=topics.thread_id_for(home_chat_id, "development"),
             text="\n".join(lines),
         )
         # Only recorded as "notified" once the send actually succeeds —
@@ -1111,9 +1148,16 @@ async def _maybe_run_moltbook_social_tick(bot) -> None:
         logger.error(f"[moltbook_social] feed fetch failed: {e!r}")
         return
 
+    # Phase 4b: grounds on real recent activity across every known chat
+    # (not just whichever one last spoke, per the old _LAST_KNOWN_CHAT_ID
+    # global) -- Moltbook is one shared bot-wide presence, so "this
+    # game's own real recent activity" should reflect the whole game,
+    # not just one tenant.
     cutoff = now.timestamp() - MOLTBOOK_SOCIAL_TICK_INTERVAL_SECONDS
     recent_activity = [
-        text for (when, _loc, text) in _RECENT_WORLD_EVENTS.get(_LAST_KNOWN_CHAT_ID, [])
+        text
+        for chat_id in db.get_all_chat_ids()
+        for (when, _loc, text) in _RECENT_WORLD_EVENTS.get(chat_id, [])
         if when.timestamp() >= cutoff
     ]
 
@@ -4668,9 +4712,12 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
             # Once per turn (attack_num == 0), not per Multiattack swing,
             # same spam-avoidance shape as the boss decision flavor above.
             if attack_num == 0 and current.get("monster_key"):
-                monster_template = cl.get_monster_template(CAMPAIGN, current["monster_key"])
-                if monster_template:
-                    await _maybe_send_monster_image(update, current["monster_key"], monster_template)
+                if current.pop("_opening_image_shown", False):
+                    pass  # combat-start already posted this monster's art moments ago -- skip the immediate duplicate
+                else:
+                    monster_template = cl.get_monster_template(CAMPAIGN, current["monster_key"])
+                    if monster_template:
+                        await _maybe_send_monster_image(update, current["monster_key"], monster_template)
             adv, disadv = _attack_advantage_disadvantage(current, target)
             _refresh_real_player_spell_slots(target)
             result = resolve_attack(
@@ -5294,6 +5341,17 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             header += f"\n\n📢 {names} — a fight just broke out at **{location_name}**, come join if you can!"
         await _safe_send(update, header, reply_markup=_battle_menu_keyboard(session))
         await _maybe_send_monster_image(update, monster_key, template)
+        # Real live bug (2026-08-05, Coffee: "it posts two images... is
+        # this a glitch?"): when an enemy that wins initiative takes the
+        # very first action of the fight, _resolve_ai_turns' own "show
+        # the monster's art again the moment it attacks" flavor (below)
+        # fired immediately after this same image, posting an identical
+        # duplicate seconds apart. Flagging every enemy here so
+        # _resolve_ai_turns can skip exactly that one immediate repeat
+        # -- their FIRST attack only -- while every later attack still
+        # gets the real "show art again" beat as originally designed.
+        for enemy in enemies:
+            enemy["_opening_image_shown"] = True
         await _notify_main_topic(update, f"⚔️ {_format_party_names(party)} entered battle against {enemy_description}!")
         await _resolve_ai_turns(update, session)
 
@@ -7305,9 +7363,6 @@ async def _check_idle_characters(bot) -> None:
     pass to safety by going quiet. No separate warning is given for the
     in-combat case; the normal turn/timeout pressure already applies.
     """
-    if _LAST_KNOWN_CHAT_ID is None:
-        return  # nobody has said anything yet this run — nothing to check against
-
     now = datetime.now(timezone.utc)
 
     for character in db.get_idle_real_characters():
@@ -7317,16 +7372,17 @@ async def _check_idle_characters(bot) -> None:
             continue
         idle_seconds = (now - last_active).total_seconds()
         telegram_user_id = character["telegram_user_id"]
+        chat_id = character["chat_id"]
 
         if idle_seconds < IDLE_WARNING_SECONDS:
             continue
 
         if idle_seconds < IDLE_TIMEOUT_SECONDS:
-            if telegram_user_id in _IDLE_WARNED or _in_active_combat(telegram_user_id, _LAST_KNOWN_CHAT_ID):
+            if telegram_user_id in _IDLE_WARNED or _in_active_combat(telegram_user_id, chat_id):
                 continue
             _IDLE_WARNED.add(telegram_user_id)
             destination_name = cl.get_location(CAMPAIGN, _nearest_safe_waypoint(character))["name"]
-            update_like = _ChatOnlyUpdate(bot, _LAST_KNOWN_CHAT_ID)
+            update_like = _ChatOnlyUpdate(bot, chat_id)
             await _safe_send(
                 update_like,
                 f"⚠️ **{character['name']}** has been quiet a while — reply soon, or they'll "
@@ -7335,16 +7391,16 @@ async def _check_idle_characters(bot) -> None:
             continue
 
         _IDLE_WARNED.discard(telegram_user_id)
-        if _in_active_combat(telegram_user_id, _LAST_KNOWN_CHAT_ID):
-            async with _held_session(_LAST_KNOWN_CHAT_ID, telegram_user_id) as session:
+        if _in_active_combat(telegram_user_id, chat_id):
+            async with _held_session(chat_id, telegram_user_id) as session:
                 if session is not None and session.current_participant_id() == telegram_user_id:
-                    update_like = _ChatOnlyUpdate(bot, _LAST_KNOWN_CHAT_ID)
+                    update_like = _ChatOnlyUpdate(bot, chat_id)
                     session.advance_turn()
                     await _safe_send(update_like, f"⏳ **{character['name']}** is idle — turn passed.")
                     await _resolve_ai_turns(update_like, session)
             continue
 
-        update_like = _ChatOnlyUpdate(bot, _LAST_KNOWN_CHAT_ID)
+        update_like = _ChatOnlyUpdate(bot, chat_id)
         await _go_inactive(telegram_user_id, update_like, "drifts off to rest")
 
 
@@ -8373,7 +8429,7 @@ async def _do_resolve_quest_choice(update: Update, text: str) -> None:
     )
 
 
-def _format_story_quest_poster(quest: dict, location_id: str) -> str:
+def _format_story_quest_poster(quest: dict, location_id: str, chat_id: int | None = None) -> str:
     """
     A real "wanted poster" style display for an offerable story quest --
     title, description, reward, and who's actually offering it. Real
@@ -8395,7 +8451,7 @@ def _format_story_quest_poster(quest: dict, location_id: str) -> str:
         reward_bits.append(items_module.get_item(quest["reward_item"])["name"])
     reward_line = f"\n💰 **Reward:** {', '.join(reward_bits)}" if reward_bits else ""
 
-    giver_ids = _npcs_at_location(location_id)
+    giver_ids = _npcs_at_location(location_id, chat_id)
     giver_names = [cl.get_npc(CAMPAIGN, n)["name"] for n in giver_ids if cl.get_npc(CAMPAIGN, n)]
     location = cl.get_location(CAMPAIGN, location_id)
     location_name = location["name"] if location else location_id
@@ -8549,7 +8605,7 @@ async def _do_check_quests(update: Update) -> None:
         lines.append("Nothing posted here today.")
     if story_offer:
         _, quest = story_offer
-        lines.append(_format_story_quest_poster(quest, location_id))
+        lines.append(_format_story_quest_poster(quest, location_id, character["chat_id"]))
     if area_board_quests:
         lines.append(board_quests_module.format_board_listings(area_board_quests))
     if story_offer or any(not q.get("accepted_by") and not q.get("completed_at") for q in area_board_quests):
@@ -17093,7 +17149,8 @@ def setup_default_npcs() -> None:
             shop_items=_shop_items_for_npc(npc_id),
             pronouns=npc_data.get("pronouns", ""),
         )
-    _seed_npc_locations()
+    for chat_id in db.get_all_chat_ids():
+        _seed_npc_locations(chat_id)
 
 
 UNIVERSAL_ESCAPE_PHRASES = {"cancel", "start over", "nevermind", "never mind", "stop", "reset"}
@@ -19584,8 +19641,8 @@ AI_PARTY_ENABLED = False
 
 
 def _ensure_ai_party_exists(chat_id: int) -> None:
-    """Creates the autonomous AI party once, if it doesn't already exist, and forms them into their own party."""
-    existing = db.get_autonomous_players()
+    """Creates the autonomous AI party once per chat, if it doesn't already exist for this chat, and forms them into their own party."""
+    existing = db.get_autonomous_players(chat_id)
     if existing:
         return
     party_id = None
@@ -19696,7 +19753,7 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
             "that need rebirths to reach) -- say \"I rebirth\" to do it."
         )
 
-    npcs_here = _npcs_at_location(location_id)
+    npcs_here = _npcs_at_location(location_id, character["chat_id"])
     if npcs_here:
         names = [CAMPAIGN["npcs"][n]["name"] for n in npcs_here if n in CAMPAIGN["npcs"]]
         lines.append(f"People here: {', '.join(names)}")
@@ -20069,16 +20126,25 @@ def _maybe_revive_standalone_ai_companions() -> None:
             character["telegram_user_id"], character["chat_id"], is_dead=0, hp_current=character["hp_max"], died_at=None,
             death_save_successes=0, death_save_failures=0,
         )
-        _log_world_event(character.get("current_location"), f"{character['name']} stirs and rises, alive once more.")
+        _log_world_event(
+            character.get("current_location"), f"{character['name']} stirs and rises, alive once more.",
+            character["chat_id"],
+        )
         logger.info(f"[world_tick] standalone AI companion {character['name']} auto-revived after death")
 
 
 async def _ai_party_autonomous_tick(bot) -> None:
     """
-    Advances ONE AI-controlled character's turn per cycle (never all at
-    once, to keep Adventure from being flooded). Skips anyone currently
-    in an active combat session — that already auto-resolves via the
-    existing is_ai=1 mechanism with no action needed here.
+    Advances ONE AI-controlled character's turn per cycle PER CHAT
+    (never all at once, to keep any one chat's Adventure from being
+    flooded) — Phase 4b: loops over every known chat
+    (db.get_all_chat_ids()) so each tenant gets its own independent
+    roster and rotation instead of everything being mixed together
+    under the single old _LAST_KNOWN_CHAT_ID global (which could pick
+    an actor from one chat and act it out using another chat's combat/
+    context state). Skips anyone currently in an active combat session
+    — that already auto-resolves via the existing is_ai=1 mechanism
+    with no action needed here.
 
     2026-07-14, per Coffee: "make recruitable able to make their own
     choices... this goes for AIs also." Previously only the separate
@@ -20087,8 +20153,8 @@ async def _ai_party_autonomous_tick(bot) -> None:
     directly talked to, with no way to notice and act on something like
     an active party gather quest on their own. Broadened to every
     AI-controlled character (db.get_ai_controlled_characters), sharing
-    the same one-actor-per-tick rotation so this doesn't flood the chat
-    any more than before.
+    the same one-actor-per-tick-per-chat rotation so this doesn't flood
+    any chat any more than before.
     """
     global _LAST_AI_PARTY_TICK_AT
     # 2026-07-14: now a live toggle (Development-topic "turn on/off ai
@@ -20097,31 +20163,50 @@ async def _ai_party_autonomous_tick(bot) -> None:
     # paused) for whenever no live override has been set yet.
     if db.get_setting("ai_party_enabled", "1" if AI_PARTY_ENABLED else "0") != "1":
         return
-    if _LAST_KNOWN_CHAT_ID is None:
-        return
 
     now = datetime.now(timezone.utc)
     if _LAST_AI_PARTY_TICK_AT and (now - _LAST_AI_PARTY_TICK_AT).total_seconds() < AI_PARTY_TICK_INTERVAL_SECONDS:
         return
 
-    _ensure_ai_party_exists(_LAST_KNOWN_CHAT_ID)
-    roster = db.get_ai_controlled_characters()
-    if not roster:
-        return
+    acted_this_cycle = False
+    for chat_id in db.get_all_chat_ids():
+        _ensure_ai_party_exists(chat_id)
+        roster = [c for c in db.get_ai_controlled_characters() if c["chat_id"] == chat_id]
+        if not roster:
+            continue
 
-    # Whoever's acted least recently goes next — a simple, fair rotation.
-    roster.sort(key=lambda c: c.get("last_active_at") or "")
-    actor = next(
-        (c for c in roster
-         if not c.get("is_dead") and not _in_active_combat(c["telegram_user_id"], _LAST_KNOWN_CHAT_ID)),
-        None,
-    )
-    if actor is None:
-        return  # everyone's currently mid-fight or dead; nothing to do this cycle
+        # Whoever's acted least recently goes next — a simple, fair rotation.
+        roster.sort(key=lambda c: c.get("last_active_at") or "")
+        actor = next(
+            (c for c in roster
+             if not c.get("is_dead") and not _in_active_combat(c["telegram_user_id"], chat_id)),
+            None,
+        )
+        if actor is None:
+            continue  # everyone's currently mid-fight or dead in this chat; nothing to do
 
-    _LAST_AI_PARTY_TICK_AT = now
+        # Real scaling concern once more than one or two tenant chats
+        # exist: each chat's turn is a real, narrated Ollama call, and
+        # this loop would otherwise fire one per known chat, every
+        # single tick, all sequentially competing for this box's one
+        # shared generation slot (see _ollama_congested's own docstring).
+        # Always advance the FIRST chat's turn (matches the original
+        # single-chat behavior exactly), but stop advancing MORE chats
+        # this tick once the shared resource is already under strain --
+        # the skipped chats simply get their turn on a later tick.
+        if acted_this_cycle and _ollama_congested():
+            break
 
+        acted_this_cycle = True
+        await _ai_party_act_one_turn(bot, actor)
+
+    if acted_this_cycle:
+        _LAST_AI_PARTY_TICK_AT = now
+
+
+async def _ai_party_act_one_turn(bot, actor: dict) -> None:
     user_id = actor["telegram_user_id"]
+    chat_id = actor["chat_id"]
 
     # Party cohesion fix (2026-07-25, per Coffee, reported twice: "the
     # parties scattered all over the place... we need them to stay in
@@ -20150,11 +20235,11 @@ async def _ai_party_autonomous_tick(bot) -> None:
                 and human_leader["current_location"] != actor["current_location"]):
             db.update_character(user_id, actor["chat_id"], current_location=human_leader["current_location"])
             _log_world_event(
-                human_leader["current_location"], f"{actor['name']} hurries to catch up with the party."
+                human_leader["current_location"], f"{actor['name']} hurries to catch up with the party.", chat_id,
             )
             return
 
-    context_like = _chat_scoped_dict(_AI_PLAYER_CONTEXTS, _LAST_KNOWN_CHAT_ID).setdefault(user_id, _AiPlayerContext())
+    context_like = _chat_scoped_dict(_AI_PLAYER_CONTEXTS, chat_id).setdefault(user_id, _AiPlayerContext())
     last_action = context_like.user_data.get("last_autonomous_action")
 
     # Recruited companions (e.g. Sarah) aren't in the hardcoded
@@ -20177,7 +20262,7 @@ async def _ai_party_autonomous_tick(bot) -> None:
     action_text = await asyncio.to_thread(choose_next_action, actor, personality, situation_facts, last_action)
     context_like.user_data["last_autonomous_action"] = action_text
 
-    update_like = _AiPlayerUpdate(bot, _LAST_KNOWN_CHAT_ID, user_id, action_text)
+    update_like = _AiPlayerUpdate(bot, chat_id, user_id, action_text)
     try:
         await adventure_master_handler(update_like, context_like)
     except Exception as e:
@@ -20203,10 +20288,6 @@ async def _idle_inactivity_loop(application: Application) -> None:
         except Exception as e:
             logger.error(f"[combat_timeout] background loop failed this cycle: {e!r}")
         try:
-            _wander_npcs()
-        except Exception as e:
-            logger.error(f"[world_tick] npc wander failed this cycle: {e!r}")
-        try:
             _apply_passive_party_regen()
         except Exception as e:
             logger.error(f"[world_tick] passive party regen failed this cycle: {e!r}")
@@ -20214,18 +20295,31 @@ async def _idle_inactivity_loop(application: Application) -> None:
             _maybe_revive_standalone_ai_companions()
         except Exception as e:
             logger.error(f"[world_tick] standalone AI companion revival check failed this cycle: {e!r}")
-        try:
-            await _maybe_post_world_heartbeat(application.bot)
-        except Exception as e:
-            logger.error(f"[world_tick] heartbeat failed this cycle: {e!r}")
+
+        # Phase 4b: everything below this point genuinely differs per
+        # tenant chat (NPC wander state, the "meanwhile" heartbeat, the
+        # hourly status post), so it runs once per real known chat_id
+        # (db.get_all_chat_ids()) rather than once against the single
+        # old _LAST_KNOWN_CHAT_ID global -- one tenant's failure or
+        # empty world state doesn't block another's.
+        for chat_id in db.get_all_chat_ids():
+            try:
+                _wander_npcs(chat_id)
+            except Exception as e:
+                logger.error(f"[world_tick] npc wander failed this cycle (chat_id={chat_id}): {e!r}")
+            try:
+                await _maybe_post_world_heartbeat(application.bot, chat_id)
+            except Exception as e:
+                logger.error(f"[world_tick] heartbeat failed this cycle (chat_id={chat_id}): {e!r}")
+            try:
+                await _maybe_post_hourly_status_update(application.bot, chat_id)
+            except Exception as e:
+                logger.error(f"[hourly_update] failed this cycle (chat_id={chat_id}): {e!r}")
+
         try:
             await _maybe_spawn_world_boss(application.bot)
         except Exception as e:
             logger.error(f"[world_tick] world boss spawn check failed this cycle: {e!r}")
-        try:
-            await _maybe_post_hourly_status_update(application.bot)
-        except Exception as e:
-            logger.error(f"[hourly_update] failed this cycle: {e!r}")
         try:
             db.expire_stale_board_quests()
         except Exception as e:

@@ -4165,6 +4165,34 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("HP", combined)
         self.assertIn("XP", combined)
 
+    async def test_monster_image_not_duplicated_when_enemy_attacks_first(self):
+        # Real live bug (2026-08-05, Coffee, Development topic screenshot:
+        # "I noticed every now and then it posts two images. Is this a
+        # glitch?"): when an enemy wins initiative and takes the very
+        # first action of the fight, _resolve_ai_turns' own "show the
+        # monster's art again the moment it attacks" flavor fired
+        # immediately after _do_start_combat's own encounter-start image,
+        # posting an identical duplicate seconds apart. Low dexterity
+        # here + a patched roll_d20 guarantees the goblin wins initiative
+        # and attacks on the very first turn, reproducing the exact
+        # reported scenario.
+        from unittest.mock import patch
+        import sessions
+        user_id = 900515
+        sessions.end_session(-999)
+        character = make_basic_character(
+            user_id, "Slowpoke", current_location="crossroads_tavern",
+            ability_scores={"strength": 15, "dexterity": 8, "constitution": 13,
+                             "intelligence": 10, "wisdom": 10, "charisma": 10},
+        )
+        sink = []
+        with patch("bot._get_combat_eligible_party_members", return_value=[character]), \
+             patch("rules.combat.roll_d20", return_value=10):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight a goblin", sink), monster_key="goblin", count=1)
+        photo_count = sum(1 for line in sink if line.startswith("<photo:") and "Goblin" in line)
+        self.assertEqual(photo_count, 1, f"expected exactly 1 Goblin image, got {photo_count}: {sink}")
+        sessions.end_session(-999)
+
     async def test_ai_companions_never_learn_monsters_for_the_human(self):
         # mark_known_monster is only ever called for non-AI party members
         # in _do_start_combat -- an AI companion in the same fight must

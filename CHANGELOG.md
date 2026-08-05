@@ -2,6 +2,45 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.86] — Background-loop multi-tenancy fix, duplicate monster-image fix
+
+**Fixed real live bug (Coffee, Development topic screenshot): "I noticed
+every now and then it posts two images. Is this a glitch?"** When an
+enemy wins initiative and takes the very first action of a fight, two
+separate pieces of code both posted that monster's portrait seconds
+apart: the "Combat Begins!" encounter-start image, and a second "show
+the monster's art again the moment it attacks" beat (added 2026-07-26)
+that fired on the enemy's own first attack — which, when the enemy goes
+first, is the exact same moment. `_do_start_combat` now flags its
+enemies right after showing the encounter-start art, and
+`_resolve_ai_turns` skips exactly that one immediate repeat; every
+later attack in the fight still gets the real "art again" beat as
+originally designed. Reproduced with a forced-initiative test before
+fixing, confirmed 1 image instead of 2 after, and promoted into the
+permanent regression suite.
+
+**Multi-tenant scaling Phase 4b, continued: the background loop is now
+genuinely per-chat.** Completes the work v1.27.85 shipped without: every
+sub-function of the idle/world-tick loop that differs per tenant (NPC
+wander state, the autonomous AI party, the "meanwhile" heartbeat, the
+hourly status post) now runs once per real known chat
+(`db.get_all_chat_ids()`, a new function reading the `chats` table plus
+this bot's own home chat) instead of silently defaulting to whichever
+chat spoke to the bot most recently. Found and fixed a real bug in the
+process: `get_autonomous_players()` had no chat filter at all, so only
+the very first chat to ever run would get the hardcoded AI party —
+every other tenant chat silently got none. World-boss spawns and the
+Moltbook integration are genuinely bot-wide, singular concerns (one
+shared event, one shared social profile), so those now always target
+this bot's real home chat instead of the old flaky fallback, rather
+than looping per tenant. Added a load-based circuit breaker so one
+background tick can't stack up unbounded sequential AI-narrated turns
+as the number of tenant chats grows. Verified with real executed
+scripts: independent AI-party creation per chat, NPC-wander self-
+healing for a brand-new chat, zero cross-chat leakage in idle-player
+warnings, and isolated per-chat SQL scoping for the heartbeat/hourly
+queries — plus the full 346-test regression suite, clean.
+
 ## [1.27.85] — Multi-tenant DB Phase 4b, 27 real spell mechanics, darkness/light system
 
 **Real live bug fixed (Coffee, Development topic): "i wasted a turn
