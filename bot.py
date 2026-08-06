@@ -2358,14 +2358,18 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         # "Fight" already prompts for a target (see the "fight"/"target"
         # actions above); damage and heal spells now get the same picker,
         # reusing that exact pattern, whenever there's more than one
-        # sensible option. Utility effects (buff/negate/ac_bonus/summon)
-        # are unchanged -- summon has no target, and the rest are still
-        # flavor-only with no mechanical target yet. Resurrect (2026-08-02,
-        # same fix as the "scroll" action's identical branch below --
-        # this is the known-spell-caster path to the exact same gap, a
-        # real Cleric/Paladin who's learned Revivify outright rather than
-        # carrying a scroll for it) needs a specific DEAD party member,
-        # not a live-combat concept since Revivify works outside combat.
+        # sensible option. Resurrect (2026-08-02, same fix as the
+        # "scroll" action's identical branch below -- this is the
+        # known-spell-caster path to the exact same gap, a real Cleric/
+        # Paladin who's learned Revivify outright rather than carrying
+        # a scroll for it) needs a specific DEAD party member, not a
+        # live-combat concept since Revivify works outside combat. Every
+        # other buff/negate/ac_bonus spell with a real per-target
+        # mechanic in _cast_utility_spell (2026-08-05) gets the same
+        # treatment further down this branch -- summon has no target,
+        # bless is party-wide, and longstrider/misty_step/dimension_door/
+        # counterspell genuinely have no meaningful target to pick (see
+        # the comment further down), so those are still immediate-cast.
         if spell and spell["effect"] == "damage":
             opposing = session.living_on_side(session.opposing_side(user_id))
             if len(opposing) > 1:
@@ -2409,6 +2413,99 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             buttons.append([InlineKeyboardButton("« Back", callback_data="bm|skills")])
             await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
             return
+        # Real gap found in the 2026-08-05 audit (buff/negate/ac_bonus
+        # spells were "still flavor-only with no mechanical target yet"
+        # per the comment above): _cast_utility_spell has always had real
+        # per-target mechanics for these, but the button flow never let
+        # a player choose WHO -- same picker pattern as damage/heal/
+        # resurrect above, reusing the same "casttarget" dispatch.
+        # Longstrider/misty_step/dimension_door aren't included: per
+        # _cast_utility_spell (bot.py ~16620-16641), all three only ever
+        # move the CASTER, ignoring any named target, so a picker for
+        # them would offer a choice with no real effect. Bless is
+        # party-wide (no single target concept). Counterspell is
+        # reaction-only and blocked before any target logic runs.
+        elif spell and value in ("shield", "invisibility", "protection_from_evil_and_good", "death_ward"):
+            own_side = session.sides.get(user_id)
+            allies = session.living_on_side(own_side) if own_side else []
+            if len(allies) > 1:
+                buttons = [
+                    [InlineKeyboardButton(
+                        f"{p['name']} ({p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP)"
+                        + (" — you" if p["telegram_user_id"] == user_id else ""),
+                        callback_data=f"bm|casttarget|{value}|{p['name']}",
+                    )]
+                    for p in allies
+                ]
+                buttons.append([InlineKeyboardButton("« Back", callback_data="bm|skills")])
+                await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+                return
+        elif spell and value == "spare_the_dying":
+            # Not a living-allies picker like the others above -- this
+            # only ever has a real effect on someone at 0 HP (see
+            # _cast_utility_spell's own check), so the picker is scoped
+            # to exactly that, not every ally.
+            own_side = session.sides.get(user_id)
+            down = [
+                p for p in session.participants
+                if session.sides.get(p["telegram_user_id"]) == own_side
+                and p["hp_current"] <= 0 and not p.get("is_dead")
+            ]
+            if not down:
+                await _safe_edit_markup(query)
+                await _do_cast_spell(update, f"cast {spell_name}")
+                return
+            if len(down) == 1:
+                await _safe_edit_markup(query)
+                await _do_cast_spell(update, f"cast {spell_name} on {down[0]['name']}")
+                return
+            buttons = [
+                [InlineKeyboardButton(f"{p['name']} (0 HP)", callback_data=f"bm|casttarget|{value}|{p['name']}")]
+                for p in down
+            ]
+            buttons.append([InlineKeyboardButton("« Back", callback_data="bm|skills")])
+            await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+            return
+        elif spell and value == "command":
+            # Real 5E Command needs BOTH a target and a command word
+            # (_cast_utility_spell checks the free text for "flee"/
+            # "drop") -- a plain enemy-picker alone would still leave
+            # every button tap failing with "needs a real command
+            # word". Each button below encodes both into target_name
+            # (e.g. "Goblin, flee"), reusing "casttarget" unchanged --
+            # _pick_target's substring match on the enemy's name still
+            # finds them fine inside that longer string.
+            opposing = session.living_on_side(session.opposing_side(user_id))
+            if not opposing:
+                await _safe_edit_markup(query)
+                await _do_cast_spell(update, f"cast {spell_name}")
+                return
+            buttons = [
+                [InlineKeyboardButton(
+                    f"{p['name']}: {word.capitalize()}",
+                    callback_data=f"bm|casttarget|{value}|{p['name']}, {word}",
+                )]
+                for p in opposing for word in ("flee", "drop")
+            ]
+            buttons.append([InlineKeyboardButton("« Back", callback_data="bm|skills")])
+            await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+            return
+        elif spell and value in (
+            "hex", "hunters_mark", "faerie_fire", "hold_person", "hold_monster",
+            "charm_person", "animal_friendship", "banishment", "polymorph", "dispel_magic",
+        ):
+            opposing = session.living_on_side(session.opposing_side(user_id))
+            if len(opposing) > 1:
+                buttons = [
+                    [InlineKeyboardButton(
+                        f"{p['name']} ({p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP)",
+                        callback_data=f"bm|casttarget|{value}|{p['name']}",
+                    )]
+                    for p in opposing
+                ]
+                buttons.append([InlineKeyboardButton("« Back", callback_data="bm|skills")])
+                await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+                return
         await _safe_edit_markup(query)
         await _do_cast_spell(update, f"cast {spell_name}")
         return

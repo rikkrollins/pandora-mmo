@@ -127,6 +127,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         for text in ("Check quests", "check my quests please", "list quests"):
             self.assertEqual(_keyword_fallback(text, [])["action"], "check_quests", text)
 
+    # -- Real live incident (2026-08-06, a real player): "Look at quests"
+    #    misclassified as examine, which would try to inspect a literal
+    #    in-world object named "quests" instead of showing the quest log --
+    #    the same recurring "bare quest phrasing with no qualifier word"
+    #    gap this file has hit many times before (#92, #99, #109, #151,
+    #    #154, #161, #185), just with "look at" as the filler this time.
+    def test_look_at_quests_not_misclassified_as_examine(self):
+        for text in ("Look at quests", "look at quest", "view my quests", "view quest", "see my quests"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "check_quests", text)
+        # Regression guard: a real object after "look at" must still
+        # route to examine, not get swallowed by the new quest phrasing.
+        self.assertEqual(_keyword_fallback("look at the strange amulet", [])["action"], "examine")
+
     # -- Typo tolerance for "accept" (2026-07-16, task #89) -------------
     def test_accept_quest_typo_tolerance(self):
         for text in ("I accepet the quest", "Accepet this quest"):
@@ -3093,6 +3106,155 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("1x", reply)
         self.assertEqual(db.get_character(ally_id, -999)["inventory"].get("healing_potion", 0), 1)
         self.assertEqual(session.current_participant_id(), leader_id)  # turn unchanged
+        sessions.end_session(-999)
+
+    async def test_hex_cast_via_battle_menu_offers_an_enemy_target_picker(self):
+        """
+        Real gap found in the 2026-08-05 audit ("make sure if any of the
+        27 abilities needs tagetting it is there"): Hex has a real
+        per-target mechanic (_cast_utility_spell marks whoever it's cast
+        on), but the battle-menu button used to cast it immediately with
+        no target chosen at all, always defaulting to the first living
+        enemy -- never a real choice when more than one enemy is present.
+        """
+        import sessions
+        sessions.end_session(-999)
+        caster_id = 950801
+        make_basic_character(caster_id, "HexCaster", char_class="Warlock",
+                              known_spells=["hex"], spell_slots_max=3, current_location="crossroads_tavern")
+        goblin_a = {"telegram_user_id": -5200001, "name": "HexGoblinA", "dexterity": 10,
+                    "hp_current": 20, "hp_max": 20, "conditions": []}
+        goblin_b = {"telegram_user_id": -5200002, "name": "HexGoblinB", "dexterity": 10,
+                    "hp_current": 20, "hp_max": 20, "conditions": []}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        session = sessions.start_session(-999, [caster, goblin_a, goblin_b],
+                                          {caster_id: "party", -5200001: "enemy", -5200002: "enemy"})
+        session.turn_order = [caster_id, -5200001, -5200002]
+
+        async def tap(data):
+            sink = []
+            await bot.battle_menu_callback(FakeCallbackUpdate(caster_id, data, sink), DummyContext())
+            return "\n".join(sink)
+
+        picker = await tap("bm|cast|hex")
+        self.assertIn("HexGoblinA", picker)
+        self.assertIn("HexGoblinB", picker)
+        self.assertIn("bm|casttarget|hex|HexGoblinB", picker)
+
+        await tap("bm|casttarget|hex|HexGoblinB")
+        caster_p = next(p for p in session.participants if p["telegram_user_id"] == caster_id)
+        self.assertEqual(caster_p.get("marked_target_id"), -5200002)  # the chosen goblin, not the default first one
+        sessions.end_session(-999)
+
+    async def test_shield_cast_via_battle_menu_offers_an_ally_target_picker(self):
+        """
+        Same gap, ally-facing side: Shield genuinely applies its AC
+        bonus to whoever it's cast on (_cast_utility_spell), but with
+        more than one living ally present the button used to always
+        cast on the caster themselves with no way to protect someone
+        else.
+        """
+        import sessions
+        sessions.end_session(-999)
+        caster_id, ally_id = 950802, 950803
+        make_basic_character(caster_id, "ShieldCaster", char_class="Wizard",
+                              known_spells=["shield"], spell_slots_max=3, current_location="crossroads_tavern")
+        make_basic_character(ally_id, "ShieldAlly", current_location="crossroads_tavern")
+        enemy = {"telegram_user_id": -5200003, "name": "ShieldGoblin", "dexterity": 10,
+                 "hp_current": 20, "hp_max": 20, "conditions": []}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        ally = db.get_character(ally_id, -999)
+        ally["telegram_user_id"] = ally_id
+        session = sessions.start_session(-999, [caster, ally, enemy],
+                                          {caster_id: "party", ally_id: "party", -5200003: "enemy"})
+        session.turn_order = [caster_id, ally_id, -5200003]
+
+        async def tap(data):
+            sink = []
+            await bot.battle_menu_callback(FakeCallbackUpdate(caster_id, data, sink), DummyContext())
+            return "\n".join(sink)
+
+        picker = await tap("bm|cast|shield")
+        self.assertIn("ShieldAlly", picker)
+        self.assertIn("— you", picker)  # the caster's own entry, per the heal-picker pattern this reuses
+
+        await tap("bm|casttarget|shield|ShieldAlly")
+        ally_p = next(p for p in session.participants if p["telegram_user_id"] == ally_id)
+        caster_p = next(p for p in session.participants if p["telegram_user_id"] == caster_id)
+        self.assertIn("shield_active", ally_p.get("conditions", []))
+        self.assertNotIn("shield_active", caster_p.get("conditions", []))
+        sessions.end_session(-999)
+
+    async def test_spare_the_dying_via_battle_menu_targets_the_one_down_ally_not_self(self):
+        """
+        Spare the Dying only ever has a real effect on someone at 0 HP
+        (_cast_utility_spell's own check) -- a plain ally-picker like
+        shield's would be wrong here since most allies at full HP
+        aren't valid targets at all. With exactly one real candidate,
+        the button must cast on THEM directly rather than falling
+        through to the free-text default of "on the caster" (who isn't
+        down and isn't a valid target).
+        """
+        import sessions
+        sessions.end_session(-999)
+        caster_id, down_ally_id = 950804, 950805
+        make_basic_character(caster_id, "SpareDyingCaster", char_class="Cleric",
+                              known_spells=["spare_the_dying"], spell_slots_max=0, current_location="crossroads_tavern")
+        make_basic_character(down_ally_id, "SpareDyingAlly", current_location="crossroads_tavern")
+        enemy = {"telegram_user_id": -5200004, "name": "SpareDyingGoblin", "dexterity": 10,
+                 "hp_current": 20, "hp_max": 20, "conditions": []}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        down_ally = db.get_character(down_ally_id, -999)
+        down_ally["telegram_user_id"] = down_ally_id
+        down_ally["hp_current"] = 0
+        session = sessions.start_session(-999, [caster, down_ally, enemy],
+                                          {caster_id: "party", down_ally_id: "party", -5200004: "enemy"})
+        session.turn_order = [caster_id, down_ally_id, -5200004]
+        down_p = next(p for p in session.participants if p["telegram_user_id"] == down_ally_id)
+        down_p["hp_current"] = 0
+
+        sink = []
+        await bot.battle_menu_callback(FakeCallbackUpdate(caster_id, "bm|cast|spare_the_dying", sink), DummyContext())
+        reply = "\n".join(sink)
+        self.assertIn("SpareDyingAlly", reply)
+        self.assertTrue(down_ally_id in session.stabilized_ids)
+        sessions.end_session(-999)
+
+    async def test_command_cast_via_battle_menu_offers_target_and_word_together(self):
+        """
+        Command genuinely needs BOTH a target and a command word
+        ("flee"/"drop") to do anything (_cast_utility_spell checks the
+        free text for one) -- a bare enemy-picker alone would leave
+        every button tap failing with "needs a real command word".
+        """
+        import sessions
+        sessions.end_session(-999)
+        caster_id = 950806
+        make_basic_character(caster_id, "CommandCaster", char_class="Cleric",
+                              known_spells=["command"], spell_slots_max=3, current_location="crossroads_tavern")
+        enemy = {"telegram_user_id": -5200005, "name": "CommandGoblin", "dexterity": 10,
+                 "hp_current": 20, "hp_max": 20, "conditions": []}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        session = sessions.start_session(-999, [caster, enemy], {caster_id: "party", -5200005: "enemy"})
+        session.turn_order = [caster_id, -5200005]
+
+        async def tap(data):
+            sink = []
+            await bot.battle_menu_callback(FakeCallbackUpdate(caster_id, data, sink), DummyContext())
+            return "\n".join(sink)
+
+        picker = await tap("bm|cast|command")
+        self.assertIn("CommandGoblin: Drop", picker)
+        self.assertIn("bm|casttarget|command|CommandGoblin, drop", picker)
+
+        reply = await tap("bm|casttarget|command|CommandGoblin, drop")
+        self.assertNotIn("needs a real command word", reply)
+        enemy_p = next(p for p in session.participants if p["telegram_user_id"] == -5200005)
+        self.assertIn("disarmed", enemy_p.get("conditions", []))
         sessions.end_session(-999)
 
     async def test_scroll_shows_up_and_targets_correctly_in_battle_menu_items(self):

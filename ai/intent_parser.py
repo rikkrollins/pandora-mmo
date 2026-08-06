@@ -299,7 +299,16 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
                                     "quest details", "current quest", "my quest", "what quest",
                                     "what's my quest", "whats my quest", "active quest",
                                     "check quest", "check my quest", "show quest", "list quest",
-                                    "any quests", "any quest", "is there a quest", "are there any quests"])
+                                    "any quests", "any quest", "is there a quest", "are there any quests",
+                                    # Real live incident (2026-08-06, a real player): "Look at
+                                    # quests" fell through every phrase above (none of them are a
+                                    # bare "look at quest(s)" with no qualifier word) all the way
+                                    # to the generic "look at <object>" examine handler, which then
+                                    # tried to examine a literal in-world object named "quests" --
+                                    # same recurring gap this block has hit many times before (see
+                                    # the task numbers in the comment above), just with "look at"
+                                    # as the new filler phrasing instead of "check"/"show"/"any".
+                                    "look at quest", "view my quest", "view quest", "see my quest"])
         or re.search(r"\bany\b(?:\s+\w+){0,3}\s+quests?\b", lowered)
         or re.search(r"\bquests?\b(?:\s+\w+){0,3}\s+available\b", lowered)
         # Real live incident (2026-07-19, Sugar): "Check for quests in

@@ -2,6 +2,48 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.89] — Battle-menu target pickers for buff/debuff spells, "look at quests" misclassification fix
+
+**Battle-menu target pickers now cover every buff/debuff spell that has
+a real mechanical target, not just damage/heal/resurrect.** Reading
+`_cast_utility_spell` in full (rather than guessing from `spells.py`'s
+`effect` field) gave the real per-spell categorization:
+- Self-or-named-ally spells (`shield`, `invisibility`,
+  `protection_from_evil_and_good`, `death_ward`) now offer an ally
+  picker from the battle menu, with the caster's own entry marked
+  "— you". `longstrider` is deliberately excluded — despite living in
+  the same code block, it always makes the caster flee regardless of
+  any named target, so an ally picker for it would be a false choice.
+- `spare_the_dying` now targets the one downed (0 HP) ally
+  automatically when there's exactly one candidate, or offers a picker
+  when there's more than one, instead of only working via free text.
+- `command` needs both a target AND a command word ("flee"/"drop") —
+  solved by encoding both into the existing `target_name` slot
+  (e.g. "Goblin, drop") rather than adding new callback-handling code,
+  reusing the existing `casttarget` dispatch unchanged.
+- Enemy-targeted control/debuff spells (`hex`, `hunters_mark`,
+  `faerie_fire`, `hold_person`/`hold_monster`, `charm_person`/
+  `animal_friendship`, `banishment`, `polymorph`, `dispel_magic`) now
+  offer an enemy picker when more than one enemy is present.
+
+**Fixed: "Look at quests" (and similar "look at"/"view"/"see" phrasing)
+misclassified as `examine`.** A real player's exact phrase fell through
+`ai/intent_parser.py`'s `check_quests` trigger block — every existing
+qualifier word list required "my"/"board"/"current"/"check"/"show"/
+"any"/etc., and "look at quests" has none of those — landing on the
+generic `examine`'s `"look at "` trigger instead, which tried (and
+failed) to find an in-world object literally named "quests". This is
+the same recurring gap this exact code block has hit repeatedly (see
+its own inline comments referencing tasks #92, #99, #109, #151, #154,
+#161, #185) — added "look at quest(s)", "view quest(s)", "see my
+quest(s)" to the trigger list.
+
+Both fixes reproduced with real regression tests confirmed to fail on
+pre-fix code (via `git stash`) and pass on the fix, then verified
+against the full `FastRegressionTests` suite (355 tests, only the one
+known pre-existing `test_fast_travel_blocks_on_locked_connection`
+ordering flake, independently confirmed to pass in isolation).
+
 ## [1.27.88] — Two more duplicate-announcement bugs fixed (same family as 1.27.86/1.27.87)
 
 A systematic sweep for the exact same "duplicate-announcement-on-crash-
