@@ -4342,6 +4342,111 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.current_participant_id(), human_id)
         sessions.end_session(-999)
 
+    async def test_human_attack_multiattack_announcement_not_repeated_on_a_crash_and_retry(self):
+        # Real gap found in a follow-up audit (2026-08-05) after fixing
+        # the AI-turn version of this bug: _do_attack's OWN "X has N
+        # attacks this turn!" line (Extra Attack/Action Surge/Flurry of
+        # Blows, for a REAL human player) had no guard at all, unlike
+        # its twin in _resolve_ai_turns fixed earlier the same day.
+        # Same crash-then-retry root cause (a downstream failure, e.g.
+        # this box's known disk-I/O contention, leaves the turn stuck
+        # un-advanced; the next retry re-announces it).
+        from unittest.mock import patch
+        import sessions
+        sessions.end_session(-999)
+        uid = 900951
+        make_basic_character(uid, "Fighter5b", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(uid, -999, level=5)  # real Extra Attack (2 attacks/turn)
+        character = db.get_character(uid, -999)
+        character["telegram_user_id"] = uid
+        goblin = {
+            "telegram_user_id": -700702, "name": "Goblin Y", "is_ai": True,
+            "hp_current": 200, "hp_max": 200, "armor_class": 1,
+            "strength": 8, "dexterity": 14, "proficiency_bonus": 2,
+            "monster_key": "goblin", "xp_reward": 10, "conditions": [],
+        }
+        session = sessions.start_session(-999, [character, goblin], {uid: "party", -700702: "enemy"})
+        session.turn_order = [uid, -700702]
+        session.current_turn_index = 0
+
+        sink = []
+        update = FakeUpdate(uid, "I attack", sink)
+
+        call_count = {"n": 0}
+        real_sync = bot._sync_player_to_db
+
+        def flaky_sync(char):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise RuntimeError("simulated transient DB failure")
+            return real_sync(char)
+
+        with patch("bot._sync_player_to_db", side_effect=flaky_sync):
+            with self.assertRaises(RuntimeError):
+                await bot._do_attack(update, "I attack")
+
+        self.assertEqual(sum(1 for line in sink if "has 2 attacks" in line), 1)
+
+        await bot._do_attack(update, "I attack")
+        self.assertEqual(
+            sum(1 for line in sink if "has 2 attacks" in line), 1,
+            f"multiattack announcement should appear exactly once total across the crash+retry, got: {sink}",
+        )
+        sessions.end_session(-999)
+
+    async def test_boss_decision_flavor_not_repeated_on_a_crash_and_retry(self):
+        # Same family of bug, same audit (2026-08-05): the boss "sizing
+        # up its target" flavor line in _resolve_ai_turns had no guard
+        # either, unlike its neighbors (enrage_warned/_opening_image_
+        # shown/_multiattack_announced right around it).
+        from unittest.mock import patch
+        import sessions
+        sessions.end_session(-999)
+        boss = {
+            "telegram_user_id": -700802, "name": "Boss Y", "is_ai": True, "is_boss": True,
+            "hp_current": 100, "hp_max": 100, "armor_class": 15,
+            "strength": 16, "dexterity": 12, "proficiency_bonus": 3,
+            "monster_key": "goblin", "xp_reward": 50, "conditions": [],
+        }
+        human_id = 900952
+        make_basic_character(human_id, "Ravenloft4", current_location="crossroads_tavern")
+        session = sessions.start_session(-999, [boss, db.get_character(human_id, -999)], {-700802: "enemy", human_id: "party"})
+        session.turn_order = [-700802, human_id]
+        session.current_turn_index = 0
+
+        sink = []
+        update = FakeUpdate(-700802, "irrelevant", sink)
+
+        async def fast_post_narrated(update, character, action_text, result, session, **kwargs):
+            sink.append(f"<narrated attack result, hit={result.get('hit')}>")
+
+        call_count = {"n": 0}
+        real_sync = bot._sync_player_to_db
+
+        def flaky_sync(char):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise RuntimeError("simulated transient DB failure")
+            return real_sync(char)
+
+        with patch("bot._sync_player_to_db", side_effect=flaky_sync), \
+             patch("bot._post_narrated", side_effect=fast_post_narrated), \
+             patch("bot.narrate_boss_decision", return_value="sizes up its prey"):
+            with self.assertRaises(RuntimeError):
+                await bot._resolve_ai_turns(update, session)
+
+        self.assertEqual(sum(1 for line in sink if "sizes up its prey" in line), 1)
+
+        with patch("bot._post_narrated", side_effect=fast_post_narrated), \
+             patch("bot.narrate_boss_decision", return_value="sizes up its prey"):
+            await bot._resolve_ai_turns(update, session)
+
+        self.assertEqual(
+            sum(1 for line in sink if "sizes up its prey" in line), 1,
+            f"boss-decision line should appear exactly once total across the crash+retry, got: {sink}",
+        )
+        sessions.end_session(-999)
+
     async def test_ai_companions_never_learn_monsters_for_the_human(self):
         # mark_known_monster is only ever called for non-AI party members
         # in _do_start_combat -- an AI companion in the same fight must

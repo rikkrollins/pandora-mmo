@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.88] — Two more duplicate-announcement bugs fixed (same family as 1.27.86/1.27.87)
+
+A systematic sweep for the exact same "duplicate-announcement-on-crash-
+retry" bug family (a handler re-entering an already-partially-resolved,
+un-advanced turn re-narrates something it already said) turned up two
+more unguarded instances beyond the three fixed in 1.27.86/1.27.87.
+
+**Fixed: the human player's own multiattack announcement ("has 2
+attacks this turn!") could repeat on a retry.** `_do_attack`'s
+announcement was the one place this exact pattern existed for a
+player's OWN turn (the AI-turn version was already fixed in 1.27.87) —
+it now checks-and-sets a `_multiattack_announced` flag the same way,
+cleared in `sessions.py`'s `advance_turn()` when the turn genuinely
+ends.
+
+**Fixed: the boss "sizing up its target" decision-flavor line could
+repeat on a retry.** Same shape, same fix: a new
+`_boss_decision_announced` flag guards `_resolve_ai_turns`'s
+`narrate_boss_decision` call.
+
+Both reproduced with real forced-failure crash-and-retry tests before
+fixing, confirmed genuinely fixed after, and promoted into the
+permanent regression suite. Full `FastRegressionTests` suite (351
+tests) run clean afterward — zero failures except the one known
+pre-existing `test_fast_travel_blocks_on_locked_connection` ordering
+flake (independently confirmed to pass in isolation).
+
 ## [1.27.87] — Two more real duplicate-message bugs fixed, item-view image fallback
 
 Same underlying bug pattern as v1.27.86's monster-image fix, found via

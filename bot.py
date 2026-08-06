@@ -4719,7 +4719,14 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
                         f"🔥 **{current['name']} flies into a desperate rage — its attacks hit "
                         f"even harder for the rest of this fight!**",
                     )
-            if current.get("is_boss") and attack_num == 0 and not narration_budget_spent and not _ollama_congested():
+            # Real live bug (2026-08-05, same family as the multiattack/
+            # turn-prompt duplicates fixed this session): a retry of
+            # this same still-current, un-advanced boss turn would
+            # re-narrate this "sizing up its target" line. Guarded the
+            # same way, cleared in sessions.py's advance_turn().
+            if (current.get("is_boss") and attack_num == 0 and not narration_budget_spent
+                    and not _ollama_congested() and not current.get("_boss_decision_announced")):
+                current["_boss_decision_announced"] = True
                 decision_flavor = await asyncio.to_thread(narrate_boss_decision, current, target)
                 await _safe_send(update, f"👁️ {decision_flavor}")
             # Per Coffee (2026-07-26): "same with enemy/boss attacks and
@@ -5847,7 +5854,15 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
         # be told so plainly -- the existing "(1/2)"/"(2/2)" suffix on
         # each attack's own narration is easy to read past; this says it
         # up front, once, before the sequence starts.
-        if attack_count > 1:
+        # Real live bug (2026-08-05, same shape as the AI-turn multiattack
+        # duplicate fixed this session in _resolve_ai_turns): a retry of
+        # this same still-current, un-advanced turn -- after a
+        # transient failure elsewhere in the request, e.g. this box's
+        # known disk-I/O contention -- would re-announce this line. Same
+        # fix: only ever send it once per real un-advanced turn, cleared
+        # in sessions.py's advance_turn().
+        if attack_count > 1 and not attacker.get("_multiattack_announced"):
+            attacker["_multiattack_announced"] = True
             await _safe_send(update, f"⚔️ **{attacker['name']}** has **{attack_count} attacks** this turn!")
         for attack_num in range(attack_count):
             opposing = session.living_on_side(session.opposing_side(user_id))

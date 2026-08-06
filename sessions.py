@@ -132,6 +132,7 @@ class Session:
             ending = self.current_participant()
             ending.pop("_multiattack_announced", None)
             ending.pop("_turn_prompt_announced", None)
+            ending.pop("_boss_decision_announced", None)
         self.current_turn_index = (self.current_turn_index + 1) % len(self.turn_order)
         if self.current_turn_index == 0:
             self.round_number += 1
