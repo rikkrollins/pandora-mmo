@@ -1240,9 +1240,17 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # actually named) -- a real but non-silent misclassification, since
     # "look" still replies, just with the wrong, generic content.
     #
+    # "gaze(d)? at" added 2026-08-07 (real player, caught via
+    # topic-activity monitoring): "Gaze at the pool of water" fell
+    # through to the low-confidence 'chat' default (no article-optional
+    # trigger above covers "gaze"), and the model call that followed
+    # picked 'look' (whole-area) over 'examine' (the specific object
+    # actually named) -- same non-silent-but-wrong shape as the
+    # touch/peer/glance gaps already fixed here, just one more common
+    # synonym for "look at" a specific thing.
     examine_verb_match = re.search(
         r"\b(?:read|observed|examined|inspected|searched|checked out|touch(?:ed)?|"
-        r"looked (?:at|closer at)|(?:peer|perr)(?:ed)? (?:at|into|in)|glanced? at)\b\s+"
+        r"looked (?:at|closer at)|(?:peer|perr)(?:ed)? (?:at|into|in)|glanced? at|gaze(?:d)? at)\b\s+"
         r"(?:the |a |an )?(.+)",
         lowered,
     )

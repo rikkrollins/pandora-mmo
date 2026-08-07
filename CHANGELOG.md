@@ -2,6 +2,18 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.93] — "Gaze at X" misclassification fix
+
+Caught via topic-activity monitoring (2026-08-07, real player): "Gaze
+at the pool of water" wasn't covered by any of the existing
+look-at-a-specific-thing triggers (`touch`, `peer`, `glance`, etc.), so
+it fell through to the low-confidence `chat` default, and the model
+call that followed resolved it as generic whole-area `look` instead of
+`examine` on the object actually named — same shape as the touch/peer/
+glance gaps already fixed here, just one more common synonym. Added
+`gaze(?:d)? at` to `_keyword_fallback`'s examine-verb regex in
+`ai/intent_parser.py`.
+
 ## [1.27.92] — Auto "look around" on arrival, for real players
 
 Per Coffee: "when we enter a location after clicking the button to go

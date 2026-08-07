@@ -109,6 +109,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         for text in ("I am out of touch with my party", "lets keep in touch"):
             self.assertNotEqual(_keyword_fallback(text, [])["action"], "examine", text)
 
+    # -- "Gaze at X" fell through to the low-confidence chat default,
+    #    which the model then resolved as generic whole-area 'look'
+    #    instead of 'examine' on the named object (2026-08-07, real
+    #    player, caught via topic-activity monitoring) --
+    def test_gaze_at_classified_as_examine(self):
+        for text in ("Gaze at the pool of water", "I gazed at the ancient tree"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "examine", text)
+
     # -- "Feel the X" misclassified as silent chat, not examine
     #    (2026-08-06, real player, caught via topic-activity monitoring) --
     def test_feel_the_x_classified_as_examine(self):
