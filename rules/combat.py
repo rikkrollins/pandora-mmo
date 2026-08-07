@@ -269,7 +269,19 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     # char_class at all always reads as proficient (is_weapon_proficient's
     # own permissive fallback), so this only ever narrows a real
     # player's own attack, never a monster's.
-    weapon_proficient = is_weapon_proficient(attacker.get("char_class"), weapon.get("weapon_category", "simple"))
+    weapon_category = weapon.get("weapon_category", "simple")
+    # Universal Manipulation "Weapon Mastery" (2026-08-06, per Coffee:
+    # "make sure they can choose proficiencies in weapons and armours
+    # too - make all items available to do so"): a real, purchased
+    # bonus proficiency (bot.py's UNIVERSAL_MANIPULATION_PROFICIENCIES,
+    # id "prof_<category>_weapons") widens is_weapon_proficient's
+    # class-based check, never replaces it -- inlined as a plain string
+    # check rather than an import to avoid a circular import (bot.py
+    # already imports this module, not the other way around).
+    weapon_proficient = (
+        is_weapon_proficient(attacker.get("char_class"), weapon_category)
+        or f"prof_{weapon_category}_weapons" in (attacker.get("skill_tree_upgrades") or [])
+    )
     # Hybrid classes (2026-07-22): a Monk/Sorcerer hybrid's AC bump is
     # computed live here rather than stored on the character -- see
     # hybrid_features.hybrid_ac_bonus's own docstring for why (freely
@@ -371,10 +383,11 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
             # (1d6 at 1-2, up to 10d6 at 19-20) -- found frozen at a flat
             # 1d6 regardless of level (2026-07-16 audit).
             extra_sneak_dice = sneak_attack_dice_count(attacker.get("level", 1)) - 1
-            # Task #131 skill-tree upgrade "killers_instinct": one extra
-            # Sneak Attack die, real per-character persisted choice.
-            if "killers_instinct" in (attacker.get("skill_tree_upgrades") or []):
-                extra_sneak_dice += 1
+            # Universal Manipulation "killers_instinct" (2026-08-06,
+            # repeatable): +1 extra Sneak Attack die per point invested,
+            # unlimited -- points invested = how many times this id
+            # appears in skill_tree_upgrades (see bot.py's _skill_points).
+            extra_sneak_dice += (attacker.get("skill_tree_upgrades") or []).count("killers_instinct")
             sneak_dmg = roll_damage("1d6", critical=attack_result["critical_hit"], extra_dice=extra_sneak_dice)
             damage_dealt += sneak_dmg["total"]
         # Hex / Hunter's Mark (real 5E spells, 2026-08-04): both grant
@@ -519,9 +532,8 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         # value, not add to it, matching the real rule.
         if hp_after == 0 and hp_before > 0 and attacker.get("char_class") == "Warlock":
             blessing_hp = max(1, ability_modifier(attacker.get("charisma", 10)) + attacker.get("level", 1))
-            # Task #131 skill-tree upgrade "darker_bargain": +2 temp HP.
-            if "darker_bargain" in (attacker.get("skill_tree_upgrades") or []):
-                blessing_hp += 2
+            # Universal Manipulation "darker_bargain" (2026-08-06, repeatable): +2 temp HP per point invested, unlimited.
+            blessing_hp += 2 * (attacker.get("skill_tree_upgrades") or []).count("darker_bargain")
             if blessing_hp > attacker.get("temp_hp", 0):
                 attacker["temp_hp"] = blessing_hp
                 dark_ones_blessing_gained = blessing_hp

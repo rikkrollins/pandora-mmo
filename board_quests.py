@@ -91,7 +91,7 @@ def _period_key(tier: str, now: datetime | None = None) -> str:
 
 
 def _generate_for_location(
-    campaign_data: dict, location_id: str, avoid: set[tuple[str, str]], tier: str = "daily",
+    campaign_data: dict, location_id: str, chat_id: int, avoid: set[tuple[str, str]], tier: str = "daily",
 ) -> dict | None:
     """
     `avoid` is a set of (objective_type, objective_target) already posted
@@ -134,7 +134,7 @@ def _generate_for_location(
         reward_xp = max(monster_data.get("xp_reward", 50) * count // 2, 10) * reward_mult
         reward_gold = 10 * count * reward_mult
         return db.create_board_quest(
-            location_id, _period_key(tier), title, description, giver_npc,
+            location_id, chat_id, _period_key(tier), title, description, giver_npc,
             "defeat_monster", monster_key, count, reward_xp, reward_gold, tier=tier,
         )
 
@@ -147,7 +147,7 @@ def _generate_for_location(
     reward_xp = 30 * count * reward_mult
     reward_gold = max(material_data.get("price", 5), 1) * count * reward_mult
     return db.create_board_quest(
-        location_id, _period_key(tier), title, description, giver_npc,
+        location_id, chat_id, _period_key(tier), title, description, giver_npc,
         "gather_material", material_id, count, reward_xp, reward_gold, tier=tier,
     )
 
@@ -161,7 +161,7 @@ def _faction_for_npc(campaign_data: dict, npc_id: str | None) -> str | None:
     return None
 
 
-def _generate_branching_quest_for_location(campaign_data: dict, location_id: str,
+def _generate_branching_quest_for_location(campaign_data: dict, location_id: str, chat_id: int,
                                             avoid: set[tuple[str, str]]) -> dict | None:
     """
     A moral-choice bounty: same real objective mechanic as a simple
@@ -256,7 +256,7 @@ def _generate_branching_quest_for_location(campaign_data: dict, location_id: str
     }
 
     board_quest = db.create_board_quest(
-        location_id, _day_key(), title, description, giver_npc_id,
+        location_id, chat_id, _day_key(), title, description, giver_npc_id,
         objective_type, objective_target, count, base_xp, base_gold, tier="daily",
     )
     db.set_board_quest_branch_data(board_quest["board_quest_id"], branch_data)
@@ -264,7 +264,7 @@ def _generate_branching_quest_for_location(campaign_data: dict, location_id: str
     return board_quest
 
 
-def get_or_generate_board_quests(campaign_data: dict, location_id: str, tier: str = "daily") -> list[dict]:
+def get_or_generate_board_quests(campaign_data: dict, location_id: str, chat_id: int, tier: str = "daily") -> list[dict]:
     """
     This period's ACTIVE board for this location — tops up to
     BOARD_QUEST_TIER_COUNT[tier] if under. Daily's first quest each
@@ -284,19 +284,19 @@ def get_or_generate_board_quests(campaign_data: dict, location_id: str, tier: st
     period (including completed ones) so a replacement isn't just a
     repeat of what was already cleared.
     """
-    all_this_period = get_todays_board_quests(location_id, tier=tier)
+    all_this_period = get_todays_board_quests(location_id, chat_id, tier=tier)
     avoid = {(q["objective_type"], q["objective_target"]) for q in all_this_period}
     active = [q for q in all_this_period if not q.get("completed_at")]
 
     if not all_this_period and tier == "daily":
-        branching = _generate_branching_quest_for_location(campaign_data, location_id, avoid)
+        branching = _generate_branching_quest_for_location(campaign_data, location_id, chat_id, avoid)
         if branching:
             active.append(branching)
             avoid.add((branching["objective_type"], branching["objective_target"]))
 
     target_count = BOARD_QUEST_TIER_COUNT.get(tier, DAILY_BOARD_QUEST_COUNT)
     while len(active) < target_count:
-        new_quest = _generate_for_location(campaign_data, location_id, avoid, tier=tier)
+        new_quest = _generate_for_location(campaign_data, location_id, chat_id, avoid, tier=tier)
         if new_quest is None:
             break
         active.append(new_quest)
@@ -304,20 +304,20 @@ def get_or_generate_board_quests(campaign_data: dict, location_id: str, tier: st
     return active
 
 
-def get_todays_board_quests(location_id: str, tier: str = "daily") -> list[dict]:
+def get_todays_board_quests(location_id: str, chat_id: int, tier: str = "daily") -> list[dict]:
     """Existing board quests for this location this period, if any (never creates one)."""
-    return db.get_active_board_quests(location_id, _period_key(tier), tier=tier)
+    return db.get_active_board_quests(location_id, chat_id, _period_key(tier), tier=tier)
 
 
-def get_all_todays_board_quests(location_id: str) -> list[dict]:
+def get_all_todays_board_quests(location_id: str, chat_id: int) -> list[dict]:
     """All 3 tiers' existing board quests for this location, combined (read-only, never generates)."""
     quests = []
     for tier in ("daily", "weekly", "monthly"):
-        quests.extend(get_todays_board_quests(location_id, tier=tier))
+        quests.extend(get_todays_board_quests(location_id, chat_id, tier=tier))
     return quests
 
 
-def get_or_generate_all_board_quests(campaign_data: dict, location_id: str) -> list[dict]:
+def get_or_generate_all_board_quests(campaign_data: dict, location_id: str, chat_id: int) -> list[dict]:
     """
     All 3 tiers combined (daily + weekly + monthly) for this location,
     in one flat list -- every existing consumer (format_board_listings,
@@ -329,18 +329,18 @@ def get_or_generate_all_board_quests(campaign_data: dict, location_id: str) -> l
     """
     quests = []
     for tier in ("daily", "weekly", "monthly"):
-        quests.extend(get_or_generate_board_quests(campaign_data, location_id, tier=tier))
+        quests.extend(get_or_generate_board_quests(campaign_data, location_id, chat_id, tier=tier))
     return quests
 
 
 # Backward-compatible singular helpers (first listing only).
-def get_or_generate_board_quest(campaign_data: dict, location_id: str) -> dict | None:
-    quests = get_or_generate_board_quests(campaign_data, location_id)
+def get_or_generate_board_quest(campaign_data: dict, location_id: str, chat_id: int) -> dict | None:
+    quests = get_or_generate_board_quests(campaign_data, location_id, chat_id)
     return quests[0] if quests else None
 
 
-def get_todays_board_quest(location_id: str) -> dict | None:
-    quests = get_todays_board_quests(location_id)
+def get_todays_board_quest(location_id: str, chat_id: int) -> dict | None:
+    quests = get_todays_board_quests(location_id, chat_id)
     return quests[0] if quests else None
 
 

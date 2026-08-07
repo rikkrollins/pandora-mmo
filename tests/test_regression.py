@@ -109,6 +109,43 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         for text in ("I am out of touch with my party", "lets keep in touch"):
             self.assertNotEqual(_keyword_fallback(text, [])["action"], "examine", text)
 
+    # -- "Feel the X" misclassified as silent chat, not examine
+    #    (2026-08-06, real player, caught via topic-activity monitoring) --
+    def test_feel_the_x_classified_as_examine(self):
+        for text in ("Feel the pulse on the weathered waystone", "I feel the tree", "She felt the wall"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "examine", text)
+
+    # -- "Look under X" fell through to the low-confidence chat default,
+    #    which the model then resolved as generic 'look' instead of
+    #    'examine' on the named object (2026-08-06, real player, caught
+    #    via topic-activity monitoring) --
+    def test_look_under_classified_as_examine(self):
+        result = _keyword_fallback("Look under the hollow stump shrine", [])
+        self.assertEqual(result["action"], "examine")
+        self.assertEqual(result["target"], "hollow stump shrine")
+
+    # -- "Invite X ti my party" (typo for "to") fell through to talk_npc
+    #    instead of recruit_npc/invite_to_party (2026-08-06, real player,
+    #    caught via topic-activity monitoring) --
+    def test_invite_npc_ti_my_party_typo_classified_as_recruit_npc(self):
+        result = _keyword_fallback("Invite pip thistledown ti my party", ["Pip Thistledown"])
+        self.assertEqual(result["action"], "recruit_npc")
+        self.assertEqual(result["npc_name"], "Pip Thistledown")
+
+    def test_invite_player_ti_my_party_typo_classified_as_invite_to_party(self):
+        result = _keyword_fallback("Invite Sheri ti my party", ["Pip Thistledown"])
+        self.assertEqual(result["action"], "invite_to_party")
+        self.assertEqual(result["target"], "Sheri")
+
+    def test_feel_as_an_emotion_verb_doesnt_misfire(self):
+        # "feel" is overwhelmingly an EMOTION verb in ordinary English --
+        # confirmed live that folding it into the shared examine-verb
+        # regex (which has an OPTIONAL article) misfired on exactly this
+        # phrasing. The fix requires a real article ("the"/"a"/"an")
+        # right after the verb, which these phrases never have.
+        for text in ("I am feeling great today", "I feel great", "I feel like resting"):
+            self.assertNotEqual(_keyword_fallback(text, [])["action"], "examine", text)
+
     # -- Stuck-location bug (v1.7.4) -----------------------------------
     def test_move_covers_generic_leave_phrasing(self):
         for text in ("Go downstairs", "Leave this area", "Leave this room", "Head upstairs"):
@@ -633,6 +670,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_keyword_fallback("give me a clue", [])["action"], "ask_clue")
         self.assertEqual(_keyword_fallback("give me a hint about this quest", [])["action"], "ask_clue")
 
+    def test_give_item_dative_phrasing_without_an_article_is_classified_correctly(self):
+        # Real live bug (2026-08-06, confirmed via topic-activity monitoring):
+        # "Give Pan bracers of the steady hand" fell through to a plain "chat"
+        # reply, and "Give Vesh ring of undertow" got hijacked to talk_npc by
+        # the known-NPC-name loop -- both real multi-word item names handed
+        # to a recipient with no article ("a"/"an"/"the"/"some") in between.
+        result1 = _keyword_fallback("Give Pan bracers of the steady hand", [])
+        self.assertEqual(result1["action"], "give_item")
+        result2 = _keyword_fallback("Give Vesh ring of undertow", [])
+        self.assertEqual(result2["action"], "give_item")
+
     async def test_give_item_transfers_between_characters_at_the_same_location(self):
         use_test_db("tests/tmp/give_item_test.db")
         giver_id, recipient_id = 900001, 900002
@@ -1108,6 +1156,31 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         for text in ["my sheet", "my character", "my stats", "my class"]:
             self.assertEqual(_keyword_fallback(text, [])["action"], "check_sheet", text)
 
+    async def test_compound_message_still_sends_its_location_image(self):
+        """
+        Real live bug, caught via topic-activity monitoring on a real
+        player's compound message (2026-08-06): a genuinely compound
+        message (2+ intents) dispatches through _BufferingChatProxy,
+        which stood in for update.effective_chat but only ever
+        implemented .send_message() -- _maybe_send_location_image (and
+        every other _maybe_send_*_image helper) calls .send_photo()
+        directly, so it raised AttributeError every time, silently
+        swallowed by _send_generated_image's broad except-and-log. The
+        location image for "look" simply never sent whenever it was
+        part of a compound message, with no visible error to the
+        player at all. Fixed by giving the proxy a real send_photo
+        that forwards straight to the actual chat.
+        """
+        use_test_db("tests/tmp/compound_image_test.db")
+        user_id = 900575
+        make_basic_character(user_id, "CompoundLooker", current_location="crossroads_tavern")
+        sink = []
+        update = FakeUpdate(user_id, "Look around, and check my inventory", sink)
+        await bot.adventure_master_handler(update, DummyContext())
+        self.assertTrue(update.effective_chat.sent_photos, "the location image never sent during a compound message")
+        combined = " ".join(sink)
+        self.assertIn("backpack", combined.lower())
+
     async def test_equip_can_target_another_party_member(self):
         use_test_db("tests/tmp/equip_other_test.db")
         equipper_id, helped_id = 900305, 900306
@@ -1138,6 +1211,45 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sheet = bot._format_character_sheet(character)
         self.assertIn("Equipped: Longsword", sheet)
         self.assertIn("Carried but not equipped: Shortsword", sheet)
+
+    def test_weapon_stats_line_shows_damage_dice_and_element(self):
+        """
+        Real live gap (2026-08-06, per Coffee: "im not seeing the attack
+        strength, stats, resistences, elements ... when i look at
+        weapons"): _format_item_stats_line never read damage_dice at
+        all -- a plain physical weapon's stats line said nothing about
+        its damage whatsoever, and an elemental one (Flametongue
+        Shortsword) showed "deals fire damage" with no dice either.
+        """
+        physical = items_module.get_item("longsword")
+        stats = bot._format_item_stats_line(physical)
+        self.assertIn("1d8", stats)
+        self.assertIn("uses Strength", stats)
+
+        elemental = items_module.get_item("flametongue_shortsword")
+        estats = bot._format_item_stats_line(elemental)
+        self.assertIn("1d6+2", estats)
+        self.assertIn("fire damage", estats)
+
+    def test_character_sheet_shows_equipped_weapon_and_armor_stats(self):
+        """
+        Real live gap (2026-08-06, per Coffee): equipping a weapon/armor
+        only ever showed its bare NAME on the character sheet, with zero
+        indication of what it actually does mechanically -- the exact
+        same stats _format_item_stats_line already computes for market/
+        examine were never surfaced here at all.
+        """
+        use_test_db("tests/tmp/sheet_gear_test2.db")
+        user_id = 900308
+        make_basic_character(user_id, "GearStatsTest", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "longsword", 1)
+        db.add_item(user_id, -999, "chain_shirt", 1)
+        db.equip_item(user_id, -999, "longsword")
+        db.equip_item(user_id, -999, "chain_shirt")
+        character = db.get_character(user_id, -999)
+        sheet = bot._format_character_sheet(character)
+        self.assertIn("1d8", sheet)
+        self.assertIn("AC 13", sheet)
 
     # -- Rings/amulets/wondrous items were completely non-functional too
     #    (same shape as potions/equipment): Ring of Protection, Ring of
@@ -2608,7 +2720,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         buyer_id = 994004
         make_basic_character(buyer_id, "MarketBuyer", current_location="crossroads_tavern", gold=10000)
-        listings = db.get_market_listings()
+        listings = db.get_market_listings(-999)
         listing_id = next(l["listing_id"] for l in listings if l["item_id"] == item_id2)
         sink3 = []
         update3 = FakeUpdate(buyer_id, f"/buy_market {listing_id}", sink3)
@@ -3992,12 +4104,12 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # previously this permanently occupied a slot for the rest of the
         # day instead of a fresh quest ever being generated to replace it.
         stale = db.create_board_quest(
-            location_id, board_quests_module._day_key(), "Old bounty", "...", None,
+            location_id, -999, board_quests_module._day_key(), "Old bounty", "...", None,
             "defeat_monster", "goblin", 2, 50, 20,
         )
         db.complete_board_quest(stale["board_quest_id"])
 
-        active = board_quests_module.get_or_generate_board_quests(bot.CAMPAIGN, location_id)
+        active = board_quests_module.get_or_generate_board_quests(bot.CAMPAIGN, location_id, -999)
         self.assertEqual(len(active), board_quests_module.DAILY_BOARD_QUEST_COUNT)
         self.assertTrue(all(not q.get("completed_at") for q in active),
                          "a completed quest should never be returned for display")
@@ -4017,6 +4129,70 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink = []
         await bot._do_check_quests(FakeUpdate(user_id, "check quests", sink))
         self.assertIn("Board quests completed", " ".join(sink))
+
+    def test_board_quests_are_isolated_per_chat(self):
+        """
+        Multi-tenant scaling Phase 4d (2026-08-06): board_quests
+        generation/read functions now take a real chat_id, so the same
+        location in two different tenant chats gets genuinely
+        independent boards -- not one shared set of rows silently
+        cross-visible/cross-acceptable between chats.
+        """
+        import board_quests as board_quests_module
+        location_id = "stonearch_bridge"
+        chat_a, chat_b = -999, -998
+
+        quests_a = board_quests_module.get_or_generate_all_board_quests(bot.CAMPAIGN, location_id, chat_a)
+        quests_b = board_quests_module.get_or_generate_all_board_quests(bot.CAMPAIGN, location_id, chat_b)
+        self.assertTrue(quests_a)
+        self.assertTrue(quests_b)
+        ids_a = {q["board_quest_id"] for q in quests_a}
+        ids_b = {q["board_quest_id"] for q in quests_b}
+        self.assertFalse(ids_a & ids_b, "the two chats' boards shared a real row -- not actually isolated")
+
+        user_a = 900700
+        make_basic_character(user_a, "TenantA", current_location=location_id, chat_id=chat_a)
+        db.accept_board_quest(quests_a[0]["board_quest_id"], user_a)
+        self.assertEqual(
+            len(db.get_accepted_board_quests_for_user(user_a, chat_a)), 1,
+        )
+        self.assertEqual(
+            len(db.get_accepted_board_quests_for_user(user_a, chat_b)), 0,
+            "a quest accepted in chat A leaked into chat B's view for the same telegram_user_id",
+        )
+
+    def test_board_quest_chat_id_backfill_heals_bad_null_rows_from_the_create_board_quest_bug(self):
+        """
+        Real live bug found 2026-08-06 during this exact retrofit:
+        create_board_quest never wrote the chat_id column at all after
+        Phase 4a added it, so every quest generated since then --
+        including 2 real, currently-accepted quests for an active
+        player on the live DB -- had chat_id stuck at NULL. Fixed at
+        the source (create_board_quest now always writes it) plus a
+        one-time, unconditional (safe-to-rerun) backfill in init_db()
+        for whatever bad rows the bug already left behind.
+        """
+        with db.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO board_quests (location_id, day_key, title, description, objective_type, "
+                "objective_target, objective_count, reward_xp, reward_gold, generated_at, tier) "
+                "VALUES ('stonearch_bridge', '2026-08-06', 'Pre-fix stray quest', '...', "
+                "'defeat_monster', 'goblin', 2, 50, 20, '2026-08-06T00:00:00+00:00', 'daily')"
+            )
+            stray_id = conn.execute(
+                "SELECT board_quest_id FROM board_quests WHERE title = 'Pre-fix stray quest'"
+            ).fetchone()[0]
+            self.assertIsNone(
+                conn.execute("SELECT chat_id FROM board_quests WHERE board_quest_id = ?", (stray_id,)).fetchone()[0]
+            )
+
+        db.init_db()
+
+        with db.get_connection() as conn:
+            healed_chat_id = conn.execute(
+                "SELECT chat_id FROM board_quests WHERE board_quest_id = ?", (stray_id,)
+            ).fetchone()[0]
+        self.assertEqual(healed_chat_id, config.TELEGRAM_CHAT_ID)
 
     # -- Real player-driven ASI level-up (2026-07-16, per Coffee) -------
     def test_level_up_phrasing_classified_correctly(self):
@@ -4134,7 +4310,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_look_hints_at_an_unclaimed_board_quest(self):
         import board_quests as board_quests_module
         location_id = "stonearch_bridge"
-        board_quests_module.get_or_generate_board_quests(bot.CAMPAIGN, location_id)
+        board_quests_module.get_or_generate_board_quests(bot.CAMPAIGN, location_id, -999)
         user_id = 900500
         make_basic_character(user_id, "Looker2", current_location=location_id)
         sink = []
@@ -4767,7 +4943,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         make_basic_character(user_id, "Standfast", current_location="whispering_wood", gold=50)
         db.add_item(user_id, -999, "woodcutters_axe", 1)
         bq = db.create_board_quest(
-            "whispering_wood", "2026-07-17", "A supply run for Wood",
+            "whispering_wood", -999, "2026-07-17", "A supply run for Wood",
             "Bring wood back to the board.", None, "gather_material", "wood", 1, 50, 20,
         )
         db.accept_board_quest(bq["board_quest_id"], user_id)
@@ -4778,7 +4954,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         }), patch("bot.narrate_skill_check", return_value="You chop the timber cleanly."):
             await bot._do_gather(FakeUpdate(user_id, "", sink), "Use my axe and chop lumber")
 
-        updated = db.get_active_board_quest("whispering_wood", "2026-07-17")
+        updated = db.get_active_board_quest("whispering_wood", -999, "2026-07-17")
         self.assertIsNotNone(updated["completed_at"])
         self.assertEqual(db.get_character(user_id, -999)["gold"], 70)
         self.assertTrue(any("Board quest complete" in msg for msg in sink))
@@ -4821,10 +4997,116 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                              "intelligence": 10, "wisdom": 10, "charisma": 10},
             hp_max=12, armor_class=15, gold=0, inventory={},
         )
-        ranked = db.get_leaderboard(limit=10)
+        ranked = db.get_leaderboard(-999, limit=10)
         names = [c["name"] for c in ranked]
         self.assertLess(names.index("TopDog"), names.index("LastPlace"))
         self.assertNotIn("CombatOnly", names)
+
+    def test_leaderboard_find_by_name_and_list_active_players_are_chat_scoped(self):
+        """
+        Multi-tenant scaling Phase 4e (2026-08-06): get_leaderboard,
+        find_character_by_name, and list_all_active_real_players all
+        now take a real chat_id -- two different tenant chats can have
+        same-named characters and completely separate leaderboards/
+        player rosters without ever leaking into each other.
+        """
+        # 901100/901101 (not 900950/900951): the 9009xx range is already
+        # used by several other, unrelated tests earlier in this same
+        # class -- confirmed live via a real full-suite run that a bare
+        # ID collision (900951 already existed as a genuinely different
+        # character in chat_a from an earlier test) produced a false
+        # failure here, since chat_a really did already have that exact
+        # user_id active, just as a different character. Not a bug in
+        # get_leaderboard/list_all_active_real_players themselves -- the
+        # queries were correctly scoped -- purely a test-isolation bug
+        # in this test's own hardcoded IDs.
+        chat_a, chat_b = -999, -997
+        make_basic_character(901100, "SameName", chat_id=chat_a, gold=10)
+        db.add_xp(901100, chat_a, 999)
+        make_basic_character(901101, "SameName", chat_id=chat_b, gold=10)
+        db.add_xp(901101, chat_b, 1)
+
+        found_a = db.find_character_by_name("SameName", chat_a)
+        found_b = db.find_character_by_name("SameName", chat_b)
+        self.assertEqual(found_a["telegram_user_id"], 901100)
+        self.assertEqual(found_b["telegram_user_id"], 901101)
+
+        ranked_a = db.get_leaderboard(chat_a, limit=10)
+        ranked_b = db.get_leaderboard(chat_b, limit=10)
+        self.assertIn(901100, [c["telegram_user_id"] for c in ranked_a])
+        self.assertNotIn(901101, [c["telegram_user_id"] for c in ranked_a])
+        self.assertIn(901101, [c["telegram_user_id"] for c in ranked_b])
+        self.assertNotIn(901100, [c["telegram_user_id"] for c in ranked_b])
+
+        players_a = db.list_all_active_real_players(chat_a)
+        players_b = db.list_all_active_real_players(chat_b)
+        self.assertIn(901100, [c["telegram_user_id"] for c in players_a])
+        self.assertNotIn(901101, [c["telegram_user_id"] for c in players_a])
+        self.assertIn(901101, [c["telegram_user_id"] for c in players_b])
+        self.assertNotIn(901100, [c["telegram_user_id"] for c in players_b])
+
+    def test_create_party_writes_chat_id_and_backfill_heals_bad_null_rows(self):
+        """
+        Real live bug found 2026-08-06 during this same retrofit pass:
+        create_party already took chat_id as a parameter but never
+        wrote it into the INSERT, so a real party on the live DB ended
+        up with chat_id NULL. Fixed at the source plus a matching
+        one-time (safe-to-rerun) backfill in init_db(), same shape as
+        the board_quests fix.
+        """
+        leader_id = 901102
+        make_basic_character(leader_id, "PartyLeader", chat_id=-999)
+        party_id = db.create_party(leader_id, -999)
+        with db.get_connection() as conn:
+            row = conn.execute("SELECT chat_id FROM parties WHERE party_id = ?", (party_id,)).fetchone()
+        self.assertEqual(row["chat_id"], -999)
+
+        with db.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO parties (created_by, created_at) VALUES (?, ?)",
+                (leader_id, "2026-08-06T00:00:00+00:00"),
+            )
+            stray_id = conn.execute(
+                "SELECT party_id FROM parties WHERE created_by = ? AND chat_id IS NULL", (leader_id,)
+            ).fetchone()[0]
+
+        db.init_db()
+
+        with db.get_connection() as conn:
+            healed = conn.execute("SELECT chat_id FROM parties WHERE party_id = ?", (stray_id,)).fetchone()[0]
+        self.assertEqual(healed, config.TELEGRAM_CHAT_ID)
+
+    async def test_idle_warning_fires_independently_per_chat_for_the_same_user(self):
+        """
+        Multi-tenant scaling gap found 2026-08-06 during this same
+        retrofit pass: _IDLE_WARNED was keyed on bare telegram_user_id,
+        with no chat_id at all -- the same real person idle in TWO
+        different tenant chats at once would only ever get warned in
+        whichever chat's check ran first; the second chat's warning was
+        silently suppressed because the set already "knew" that user_id.
+        Fixed by keying on the (telegram_user_id, chat_id) pair instead.
+        """
+        from datetime import timedelta
+        from unittest.mock import AsyncMock
+
+        user_id = 900953
+        chat_a, chat_b = -999, -996
+        make_basic_character(user_id, "DualTenant", chat_id=chat_a, current_location="crossroads_tavern")
+        make_basic_character(user_id, "DualTenant", chat_id=chat_b, current_location="crossroads_tavern")
+        idle_since = (datetime.now(timezone.utc) - timedelta(seconds=bot.IDLE_WARNING_SECONDS + 60)).isoformat()
+        db.update_character(user_id, chat_a, last_active_at=idle_since)
+        db.update_character(user_id, chat_b, last_active_at=idle_since)
+        bot._IDLE_WARNED.discard((user_id, chat_a))
+        bot._IDLE_WARNED.discard((user_id, chat_b))
+
+        mock_bot = AsyncMock()
+        await bot._check_idle_characters(mock_bot)
+
+        warned_chat_ids = {call.kwargs.get("chat_id") for call in mock_bot.send_message.await_args_list}
+        self.assertIn(chat_a, warned_chat_ids)
+        self.assertIn(chat_b, warned_chat_ids)
+        self.assertIn((user_id, chat_a), bot._IDLE_WARNED)
+        self.assertIn((user_id, chat_b), bot._IDLE_WARNED)
 
     def test_scroll_use_on_a_named_npc_still_classifies_as_cast_spell(self):
         """
@@ -5460,15 +5742,53 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         or faction standing lookup (is_banned_by_npc, shop purchases,
         etc.) crashed with sqlite3.IntegrityError. Fixed by writing
         config.TELEGRAM_CHAT_ID internally, same shape as the
-        _set_active_character ON CONFLICT fix.
+        _set_active_character ON CONFLICT fix. Phase 4c (2026-08-06)
+        threaded a real chat_id parameter through these functions
+        instead of the hardcoded config.TELEGRAM_CHAT_ID -- updated to
+        pass one explicitly.
         """
         user_id = 900564
-        rel = db.get_relationship(user_id, "some_new_npc")
+        chat_id = config.TELEGRAM_CHAT_ID
+        rel = db.get_relationship(user_id, chat_id, "some_new_npc")
         self.assertEqual(rel["banned"], 0)
-        self.assertFalse(db.is_banned_by_npc(user_id, "some_new_npc"))
-        standing = db.get_faction_standing(user_id, "some_new_faction")
+        self.assertFalse(db.is_banned_by_npc(user_id, chat_id, "some_new_npc"))
+        standing = db.get_faction_standing(user_id, chat_id, "some_new_faction")
         self.assertEqual(standing, 0)
-        self.assertEqual(db.adjust_faction_standing(user_id, "some_new_faction", 5), 5)
+        self.assertEqual(db.adjust_faction_standing(user_id, chat_id, "some_new_faction", 5), 5)
+
+    def test_npc_relationships_and_faction_standing_are_isolated_per_chat(self):
+        """
+        Multi-tenant scaling Phase 4c (2026-08-06): npc_relationships and
+        faction_standing now take a real chat_id, so the same
+        telegram_user_id in two different tenant chats gets genuinely
+        independent NPC rapport and faction standing -- not the same
+        shared row silently overwritten by whichever chat spoke last.
+        """
+        user_id = 900700
+        chat_a = config.TELEGRAM_CHAT_ID
+        chat_b = config.TELEGRAM_CHAT_ID + 999
+
+        db.adjust_affinity(user_id, chat_a, "some_isolated_npc", 30, event="Helped in chat A")
+        db.adjust_affinity(user_id, chat_b, "some_isolated_npc", -20, event="Wronged in chat B")
+        rel_a = db.get_relationship(user_id, chat_a, "some_isolated_npc")
+        rel_b = db.get_relationship(user_id, chat_b, "some_isolated_npc")
+        self.assertEqual(rel_a["affinity"], 30)
+        self.assertEqual(rel_b["affinity"], -20)
+        self.assertEqual(rel_a["memory_events"], ["Helped in chat A"])
+        self.assertEqual(rel_b["memory_events"], ["Wronged in chat B"])
+
+        db.set_banned_by_npc(user_id, chat_b, "some_isolated_npc", True)
+        self.assertFalse(db.is_banned_by_npc(user_id, chat_a, "some_isolated_npc"))
+        self.assertTrue(db.is_banned_by_npc(user_id, chat_b, "some_isolated_npc"))
+
+        db.resolve_companion(user_id, chat_a, "some_isolated_npc", "resolved_loyal")
+        self.assertEqual(db.get_companion_resolution(user_id, chat_a, "some_isolated_npc"), "resolved_loyal")
+        self.assertEqual(db.get_companion_resolution(user_id, chat_b, "some_isolated_npc"), "unresolved")
+
+        db.adjust_faction_standing(user_id, chat_a, "some_isolated_faction", 40)
+        db.adjust_faction_standing(user_id, chat_b, "some_isolated_faction", -40)
+        self.assertEqual(db.get_faction_standing(user_id, chat_a, "some_isolated_faction"), 40)
+        self.assertEqual(db.get_faction_standing(user_id, chat_b, "some_isolated_faction"), -40)
 
     # -- Dev-topic edited-message crash (2026-08-03, Coffee) -----------
     async def test_dev_topic_photo_handler_survives_an_edited_message(self):
@@ -5545,12 +5865,12 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         update = FakeUpdate(seller_id, "", sink)
         await bot._do_sell_market(update, ["1", "50", "rusty dagger"])
         self.assertIn("/cancel_market", sink[-1])
-        listing_id = db.get_market_listings()[-1]["listing_id"]
+        listing_id = db.get_market_listings(-999)[-1]["listing_id"]
 
         sink2 = []
         await bot._do_cancel_market(FakeUpdate(buyer_id, "", sink2), [str(listing_id)])
         self.assertIn("not your listing", sink2[-1])
-        self.assertIsNotNone(db.get_market_listing(listing_id))
+        self.assertIsNotNone(db.get_market_listing(listing_id, -999))
 
         seller_before = db.get_character(seller_id, -999)
         self.assertEqual(seller_before["inventory"].get("rusty_dagger", 0), 0)
@@ -5558,7 +5878,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink3 = []
         await bot._do_cancel_market(FakeUpdate(seller_id, "", sink3), [str(listing_id)])
         self.assertIn("Cancelled listing", sink3[-1])
-        self.assertIsNone(db.get_market_listing(listing_id))
+        self.assertIsNone(db.get_market_listing(listing_id, -999))
         seller_after = db.get_character(seller_id, -999)
         self.assertEqual(seller_after["inventory"].get("rusty_dagger", 0), 1)
         self.assertEqual(seller_after["gold"], seller_before["gold"])
@@ -5598,7 +5918,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink2 = []
         await bot._do_cancel_market_intent(FakeUpdate(seller_id, "", sink2), "Cancel my listing")
         self.assertIn("more than one listing", sink2[-1])
-        remaining = [l for l in db.get_market_listings() if l["seller_id"] == seller_id]
+        remaining = [l for l in db.get_market_listings(-999) if l["seller_id"] == seller_id]
         self.assertEqual(len(remaining), 2)
 
     # -- Task #265, per Coffee ("i wasted a turn ... u said it was
@@ -5745,6 +6065,174 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         reply = "\n".join(sink)
         self.assertIn("Ring of Testing", reply)
 
+    # -- Universal Manipulation (2026-08-06, per Coffee: "let players
+    #    level up skills they already have to increase power... breaking
+    #    out of the box / breaking the game") -- replaced the old
+    #    single-purchase Skill Tree with unlimited, repeatable
+    #    investment. See bot.py's UNIVERSAL_MANIPULATION_* dicts. --
+    def test_skill_points_counts_repeated_investment(self):
+        character = {"skill_tree_upgrades": ["hardened_resolve", "hardened_resolve", "vitality"]}
+        self.assertEqual(bot._skill_points(character, "hardened_resolve"), 2)
+        self.assertEqual(bot._skill_points(character, "vitality"), 1)
+        self.assertEqual(bot._skill_points(character, "iron_will"), 0)
+
+    def test_class_skill_investment_is_repeatable_not_a_one_time_unlock(self):
+        uid = 800200
+        make_basic_character(uid, "InvestFighter", char_class="Fighter")
+        db.update_character(uid, -999, skill_points=10)
+        member = db.get_character(uid, -999)
+        line1 = bot._apply_class_skill_investment(member)
+        self.assertIsNotNone(line1)
+        member = db.get_character(uid, -999)
+        line2 = bot._apply_class_skill_investment(member)
+        self.assertIsNotNone(line2)
+        member = db.get_character(uid, -999)
+        self.assertEqual(member["skill_points"], 6)  # 10 - 2 - 2
+        self.assertEqual(member["skill_tree_upgrades"].count("hardened_resolve"), 2)
+
+    async def test_vitality_purchase_raises_hp_max_and_heals_by_the_same_delta(self):
+        uid = 800201
+        make_basic_character(uid, "VitBuyer", char_class="Fighter", hp_max=50)
+        db.update_character(uid, -999, skill_points=10, hp_current=30)
+        sink = []
+        await bot.skilltree_menu_callback(
+            FakeCallbackUpdate(uid, "skilltree|buy|vitality", sink), DummyContext(),
+        )
+        after = db.get_character(uid, -999)
+        self.assertEqual(after["hp_max"], 55)  # +10%, compounding step
+        self.assertEqual(after["hp_current"], 35)
+        self.assertEqual(after["skill_points"], 7)  # 10 - 3
+
+    async def test_arcane_reserve_purchase_raises_spell_slots_max(self):
+        uid = 800202
+        make_basic_character(uid, "ArcaneBuyer", char_class="Wizard", spell_slots_max=2)
+        db.update_character(uid, -999, skill_points=10, spell_slots_current=1)
+        sink = []
+        await bot.skilltree_menu_callback(
+            FakeCallbackUpdate(uid, "skilltree|buy|arcane_reserve", sink), DummyContext(),
+        )
+        after = db.get_character(uid, -999)
+        self.assertEqual(after["spell_slots_max"], 3)  # min +1 floor
+        self.assertEqual(after["spell_slots_current"], 2)
+
+    async def test_weapon_mastery_purchase_is_one_time_and_widens_proficiency(self):
+        uid = 800203
+        make_basic_character(uid, "MasteryBuyer", char_class="Wizard")
+        db.update_character(uid, -999, skill_points=10)
+        sink = []
+        await bot.skilltree_menu_callback(
+            FakeCallbackUpdate(uid, "skilltree|buy|prof_martial_weapons", sink), DummyContext(),
+        )
+        after = db.get_character(uid, -999)
+        self.assertIn("prof_martial_weapons", after["skill_tree_upgrades"])
+        self.assertEqual(after["skill_points"], 8)  # 10 - 2
+        # Re-buying an already-owned mastery is a real no-op.
+        await bot.skilltree_menu_callback(
+            FakeCallbackUpdate(uid, "skilltree|buy|prof_martial_weapons", sink), DummyContext(),
+        )
+        after2 = db.get_character(uid, -999)
+        self.assertEqual(after2["skill_points"], 8)
+
+        # A Wizard is normally NOT proficient with martial weapons --
+        # Weapon Mastery should add the real proficiency bonus to the
+        # attack roll (same forced_roll, only the mastery differs).
+        base = {"name": "A", "char_class": "Wizard", "level": 1, "proficiency_bonus": 5,
+                "strength": 16, "dexterity": 10, "armor_class": 10, "hp_current": 10, "hp_max": 10,
+                "conditions": [], "temp_hp": 0}
+        weapon = {"name": "Longsword", "weapon_category": "martial", "damage_dice": "1d8",
+                  "ability": "strength", "damage_type": "physical"}
+
+        def defender():
+            return {"name": "D", "armor_class": 5, "hp_current": 20, "hp_max": 20, "conditions": [], "dexterity": 10, "temp_hp": 0}
+
+        no_mastery = resolve_attack({**base, "skill_tree_upgrades": []}, defender(), weapon, forced_roll=15)
+        with_mastery = resolve_attack({**base, "skill_tree_upgrades": ["prof_martial_weapons"]}, defender(), weapon, forced_roll=15)
+        self.assertEqual(with_mastery["attack_roll"] - no_mastery["attack_roll"], 5)
+
+    def test_disciples_grace_scales_with_points_invested(self):
+        cleric_0 = {"char_class": "Cleric", "level": 3, "skill_tree_upgrades": [], "guild": None,
+                    "subclass": None, "rebirth_count": 0}
+        cleric_2 = {**cleric_0, "skill_tree_upgrades": ["disciples_grace", "disciples_grace"]}
+        n = 30
+        avg0 = sum(
+            spells.resolve_heal_spell("cure_wounds", cleric_0, {"hp_current": 1, "hp_max": 1000})["healing_done"]
+            for _ in range(n)
+        ) / n
+        avg2 = sum(
+            spells.resolve_heal_spell("cure_wounds", cleric_2, {"hp_current": 1, "hp_max": 1000})["healing_done"]
+            for _ in range(n)
+        ) / n
+        self.assertGreater(avg2, avg0)
+
+    def test_killers_instinct_scales_with_points_invested(self):
+        rogue_0 = {"name": "R0", "char_class": "Rogue", "level": 3, "skill_tree_upgrades": [],
+                   "strength": 10, "dexterity": 18, "armor_class": 12, "hp_current": 20, "hp_max": 20,
+                   "proficiency_bonus": 2, "conditions": [], "temp_hp": 0}
+        rogue_3 = {**rogue_0, "name": "R3", "skill_tree_upgrades": ["killers_instinct"] * 3}
+        weapon = {"name": "Dagger", "weapon_category": "simple", "damage_dice": "1d4", "ability": "dexterity", "damage_type": "physical"}
+
+        def defender():
+            return {"name": "D", "armor_class": 5, "hp_current": 200, "hp_max": 200, "conditions": [], "dexterity": 10, "temp_hp": 0}
+
+        n = 25
+        avg0 = sum(resolve_attack(rogue_0, defender(), weapon, advantage=True, forced_roll=15)["damage_dealt"] for _ in range(n)) / n
+        avg3 = sum(resolve_attack(rogue_3, defender(), weapon, advantage=True, forced_roll=15)["damage_dealt"] for _ in range(n)) / n
+        self.assertGreater(avg3, avg0 + 5)
+
+    async def test_shrine_offering_can_revive_a_partyless_dead_alt_character(self):
+        """
+        Real live bug (2026-08-06, Coffee via dev-topic screenshot: "It's
+        not letting me revive my player"). Root cause: both the shrine's
+        free-text prayer (_do_give_offering) and its tap-to-revive menu
+        (_do_shrine_offering_menu) only ever looked at the CALLER's
+        party_id for who's revivable -- a dead character with no
+        party_id at all (confirmed live: Coffee's "Pan", died at The
+        Colosseum, party_id NULL) was invisible no matter which of his
+        other characters brought the offering. Fixed by also merging in
+        every character the CALLER owns (db.list_characters), not just
+        party members.
+        """
+        uid = 800300
+        alive = make_basic_character(uid, "AliveAlt", current_location="hollow_stump_shrine", gold=500)
+        dead = make_basic_character(uid, "DeadAlt", current_location="the_colosseum")
+        db.update_character_by_id(dead["character_id"], is_dead=1, hp_current=0)
+        db.switch_character(uid, -999, alive["character_id"])
+
+        sink = []
+        await bot._do_give_offering(FakeUpdate(uid, "Pray for DeadAlt", sink), "Pray for DeadAlt")
+
+        after = db.get_character_by_id(dead["character_id"])
+        self.assertEqual(after["is_dead"], 0)
+        self.assertEqual(after["hp_current"], after["hp_max"])
+
+    def test_get_party_members_by_id_shows_a_member_who_is_not_the_owners_active_character(self):
+        """
+        Real live bug (2026-08-06, Coffee: "Why are all our characters
+        getting dropped from party" -- confirmed the party was already
+        established, no one had left it). Root cause: get_party_members_
+        by_id used to JOIN against active_characters, so a real party
+        member whose owner simply wasn't currently on that exact
+        character (e.g. because they created ANOTHER new character,
+        which immediately becomes their new active slot -- exactly what
+        Coffee described) silently vanished from every party lookup:
+        the party status screen, the bench/unbench roster, XP-sharing to
+        absent members, "is this party all AI" detection, and more.
+        Fixed by dropping the join (matching get_party_members_by_id_
+        including_inactive_slots, the exact same fix already shipped for
+        the shrine's revival flow on 2026-07-24, just never applied here
+        too).
+        """
+        uid = 800301
+        elduinn = make_basic_character(uid, "ReproElduinn2")
+        db.update_character_by_id(elduinn["character_id"], party_id=4242)
+        # Creating a second character makes IT this owner's new active
+        # slot -- Elduinn is no longer "the" active character for uid.
+        make_basic_character(uid, "ReproPan2")
+
+        members = db.get_party_members_by_id(4242)
+        names = [m["name"] for m in members]
+        self.assertIn("ReproElduinn2", names)
+
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
     """
@@ -5876,7 +6364,7 @@ class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
             FakeUpdate(user_id, "Recruit Sarah to my party", sink), DummyContext())
 
         db.update_character(user_id, -999, current_location="whispering_wood")
-        board_quests = board_quests_module.get_or_generate_board_quests(bot.CAMPAIGN, "whispering_wood")
+        board_quests = board_quests_module.get_or_generate_board_quests(bot.CAMPAIGN, "whispering_wood", -999)
         self.assertTrue(board_quests, "expected a real board quest to generate here")
         named_quest = board_quests[0]
 
@@ -5889,6 +6377,43 @@ class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
 
         character = db.get_character(user_id, -999)
         self.assertNotIn("seras_safer_crossing", character["active_quests"])
+
+    async def test_accepting_a_self_location_quest_completes_it_immediately_not_a_soft_lock(self):
+        """
+        Real live bug (2026-08-06, Coffee via dev-topic screenshot: "This
+        quest isn't working for me... I've done everything in this area
+        and I haven't been able to complete it like I have been with my
+        other two characters"). Root cause: completion for a
+        reach_location-trigger quest was ONLY ever checked from _do_move's
+        "arrived at a new location" event, but _offerable_quest_at_location
+        only ever offers a story quest while the player is ALREADY
+        standing at quest['location']. For quests whose 'location' and
+        trigger.location are the SAME place (the_hollow_stump here,
+        confirmed via campaign.json to also affect the_wrong_color and
+        the_hush_stage1_signs), the player is by construction already at
+        the trigger location the instant they accept, and would never
+        "arrive" there again -- a real, permanent soft-lock, confirmed
+        live: Coffee's character "Pan" accepted the_hollow_stump while
+        standing in Hollow Stump Shrine and never completed it, while his
+        other two characters (who apparently wandered off and back)
+        completed it fine. Fixed by checking reach_location completion
+        immediately after accept, not just after a later move. Needs a
+        real board-quest-generation call at this location (which may hit
+        live Ollama for branching narration), hence SlowLiveTests.
+        """
+        bot.setup_default_npcs()
+        user_id = 990001
+        make_basic_character(user_id, "ReproPan", current_location="hollow_stump_shrine")
+        db.complete_quest(user_id, -999, "welcome_to_the_crossroads")
+
+        sink = []
+        await bot.adventure_master_handler(FakeUpdate(user_id, "I accept the quest", sink), DummyContext())
+
+        character = db.get_character(user_id, -999)
+        self.assertIn("the_hollow_stump", character["completed_quests"])
+        self.assertNotIn("the_hollow_stump", character["active_quests"])
+        combined = " ".join(sink)
+        self.assertIn("Quest complete", combined)
 
     # -- Boss Multiattack + The Waiting Shape's Life Drain (v1.10.6) ---
     async def test_boss_gets_two_attacks_and_drains_life(self):

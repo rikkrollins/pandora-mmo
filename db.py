@@ -354,6 +354,27 @@ def init_db() -> None:
         if "skill_tree_upgrades" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN skill_tree_upgrades TEXT NOT NULL DEFAULT '[]'")
 
+        # Universal Manipulation migration (2026-08-06): draconic_hide
+        # used to be the ONE upgrade here that mutated armor_class
+        # directly and permanently at purchase time (every other
+        # upgrade was read live). Now that every mechanic (including
+        # draconic_hide) is read/applied via the shared _um_pool_step
+        # convention, that old one-time +1 needs to be undone once for
+        # any character who already bought it under the old system --
+        # otherwise their first Universal Manipulation point would
+        # double-count (the old permanent +1, AND the new live one).
+        # Confirmed against the live DB (2026-08-06): exactly 1 real
+        # character (Charvenna, armor_class 17) has draconic_hide today.
+        # Gated on its own marker column so this is a genuine one-time
+        # fix, not something that re-fires (and re-subtracts!) on every
+        # future init_db() call once the correction has already landed.
+        if "draconic_hide_ac_migrated" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN draconic_hide_ac_migrated INTEGER NOT NULL DEFAULT 0")
+            conn.execute(
+                "UPDATE characters SET armor_class = armor_class - 1, draconic_hide_ac_migrated = 1 "
+                "WHERE draconic_hide_ac_migrated = 0 AND skill_tree_upgrades LIKE '%draconic_hide%'"
+            )
+
         npc_relationship_columns = _existing_columns(conn, "npc_relationships")
         if "resolution" not in npc_relationship_columns:
             conn.execute("ALTER TABLE npc_relationships ADD COLUMN resolution TEXT NOT NULL DEFAULT 'unresolved'")
@@ -548,11 +569,39 @@ def init_db() -> None:
             if home_chat_id is not None:
                 conn.execute("UPDATE board_quests SET chat_id = ? WHERE chat_id IS NULL", (home_chat_id,))
 
+        # Real live bug found in Phase 4c/4d (2026-08-06): create_board_quest
+        # never wrote the new chat_id column at all -- so every board quest
+        # generated AFTER the one-time migration above (which only backfills
+        # rows that existed at that exact moment) kept getting created with
+        # chat_id NULL, including 2 currently-accepted quests belonging to a
+        # real, active player. create_board_quest itself is now fixed to
+        # always write chat_id; this is the matching one-time cleanup for
+        # whatever NULL rows the bug already left behind, backfilled to the
+        # same home_chat_id every other Phase 4a/4b backfill above uses.
+        # Deliberately UNCONDITIONAL (not gated on a schema check like the
+        # migration above) since it's cleaning up bad DATA, not adding a
+        # column -- but still a no-op once every row is clean, so re-running
+        # init_db() stays safe.
+        if home_chat_id is not None:
+            conn.execute("UPDATE board_quests SET chat_id = ? WHERE chat_id IS NULL", (home_chat_id,))
+
         parties_columns = _existing_columns(conn, "parties")
         if "chat_id" not in parties_columns:
             conn.execute("ALTER TABLE parties ADD COLUMN chat_id INTEGER")
             if home_chat_id is not None:
                 conn.execute("UPDATE parties SET chat_id = ? WHERE chat_id IS NULL", (home_chat_id,))
+
+        # Real live bug found in this same Phase 4c/4d/4e retrofit pass
+        # (2026-08-06), same shape as the board_quests one above:
+        # create_party already took chat_id as a parameter but never
+        # wrote it into the INSERT, so every party created after the
+        # one-time migration above kept getting chat_id NULL -- confirmed
+        # on the live DB (one real party row). create_party is now fixed
+        # to always write it; this is the matching one-time cleanup,
+        # unconditional and idempotent for the same reason as the
+        # board_quests backfill above.
+        if home_chat_id is not None:
+            conn.execute("UPDATE parties SET chat_id = ? WHERE chat_id IS NULL", (home_chat_id,))
 
         # active_characters/npc_relationships/faction_standing all need
         # their real PRIMARY KEY to grow a chat_id column -- SQLite
@@ -1523,7 +1572,7 @@ def list_characters(telegram_user_id: int, chat_id: int) -> list[dict]:
     return [_row_to_dict(r) for r in rows]
 
 
-def get_leaderboard(limit: int = 10) -> list[dict]:
+def get_leaderboard(chat_id: int, limit: int = 10) -> list[dict]:
     """
     Real Hall of Fame ranking (task #74, 2026-07-17): every player's
     currently-ACTIVE character (same active_characters join as
@@ -1534,33 +1583,38 @@ def get_leaderboard(limit: int = 10) -> list[dict]:
     through the exact same real pipeline as any human (see CLAUDE.md's
     design philosophy: "AI-driven players sit at the same table under
     the same rules"), so their real XP counts exactly the same.
+    Scoped to one tenant chat (Phase 4e, 2026-08-06) -- a second tenant's
+    players must never show up on this bot's home group's leaderboard.
     """
     with get_connection() as conn:
         rows = conn.execute(
             """
             SELECT c.* FROM characters c
             JOIN active_characters a ON a.character_id = c.character_id
-            WHERE c.is_deleted = 0 AND c.is_ai = 0
+            WHERE c.is_deleted = 0 AND c.is_ai = 0 AND c.chat_id = ?
             ORDER BY c.xp DESC, c.level DESC
             LIMIT ?
             """,
-            (limit,),
+            (chat_id, limit),
         ).fetchall()
     return [_row_to_dict(r) for r in rows]
 
 
-def find_character_by_name(name: str) -> dict | None:
+def find_character_by_name(name: str, chat_id: int) -> dict | None:
     """
     Finds any non-deleted character (human or AI, active or a player's
     other non-active character slot) by name, case-insensitive. Used
     for read-only sheet lookups -- Coffee wants to see anyone's sheet,
-    not just whoever's currently marked active (2026-07-14).
+    not just whoever's currently marked active (2026-07-14). Scoped to
+    one tenant chat (Phase 4e, 2026-08-06) -- two different tenant chats
+    could easily have same-named characters, and a lookup must never
+    cross that boundary.
     """
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT * FROM characters WHERE is_deleted = 0 AND LOWER(name) = LOWER(?) "
+            "SELECT * FROM characters WHERE is_deleted = 0 AND chat_id = ? AND LOWER(name) = LOWER(?) "
             "ORDER BY character_id LIMIT 1",
-            (name,),
+            (chat_id, name),
         ).fetchone()
     return _row_to_dict(row) if row else None
 
@@ -1739,39 +1793,32 @@ MAX_MEMORY_EVENTS = 20  # oldest facts drop off rather than growing forever
 _RELATIONSHIP_DEFAULTS = {"affinity": 0, "memory_events": [], "banned": 0, "resolution": "unresolved"}
 
 
-def get_relationship(telegram_user_id: int, npc_id: str) -> dict:
+def get_relationship(telegram_user_id: int, chat_id: int, npc_id: str) -> dict:
     """Returns this player's relationship with an NPC, creating a neutral default row if none exists yet."""
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT * FROM npc_relationships WHERE telegram_user_id = ? AND npc_id = ?",
-            (telegram_user_id, npc_id),
+            "SELECT * FROM npc_relationships WHERE telegram_user_id = ? AND chat_id = ? AND npc_id = ?",
+            (telegram_user_id, chat_id, npc_id),
         ).fetchone()
         if row is None:
-            # npc_relationships' chat_id became NOT NULL as part of the
-            # Phase 4a composite-PK rebuild (2026-08-03) -- chat_id isn't
-            # threaded through this function's own signature yet (that's
-            # Phase 4b), so until then every new row here belongs to the
-            # one real home chat_id, matching every existing row (there
-            # is currently exactly one tenant). Same fix shape as
-            # _set_active_character's ON CONFLICT fix above.
             conn.execute(
                 "INSERT INTO npc_relationships (telegram_user_id, chat_id, npc_id) VALUES (?, ?, ?)",
-                (telegram_user_id, config.TELEGRAM_CHAT_ID, npc_id),
+                (telegram_user_id, chat_id, npc_id),
             )
-            return {"telegram_user_id": telegram_user_id, "npc_id": npc_id, **_RELATIONSHIP_DEFAULTS}
+            return {"telegram_user_id": telegram_user_id, "chat_id": chat_id, "npc_id": npc_id, **_RELATIONSHIP_DEFAULTS}
     d = dict(row)
     d["memory_events"] = json.loads(d["memory_events"])
     return d
 
 
-def adjust_affinity(telegram_user_id: int, npc_id: str, delta: int, event: str | None = None) -> dict:
+def adjust_affinity(telegram_user_id: int, chat_id: int, npc_id: str, delta: int, event: str | None = None) -> dict:
     """
     Adjusts rapport with an NPC (clamped to -100..100) and, if `event` is
     given, appends a short factual memory (e.g. "was caught stealing")
     that future conversations/ambient lines can be grounded in — real,
     persistent consequence, not just a transient combat-log line.
     """
-    relationship = get_relationship(telegram_user_id, npc_id)
+    relationship = get_relationship(telegram_user_id, chat_id, npc_id)
     new_affinity = max(-100, min(100, relationship["affinity"] + delta))
     memory_events = relationship["memory_events"]
     if event:
@@ -1782,29 +1829,29 @@ def adjust_affinity(telegram_user_id: int, npc_id: str, delta: int, event: str |
         conn.execute(
             """
             UPDATE npc_relationships SET affinity = ?, memory_events = ?
-            WHERE telegram_user_id = ? AND npc_id = ?
+            WHERE telegram_user_id = ? AND chat_id = ? AND npc_id = ?
             """,
-            (new_affinity, json.dumps(memory_events), telegram_user_id, npc_id),
+            (new_affinity, json.dumps(memory_events), telegram_user_id, chat_id, npc_id),
         )
-    return get_relationship(telegram_user_id, npc_id)
+    return get_relationship(telegram_user_id, chat_id, npc_id)
 
 
-def set_banned_by_npc(telegram_user_id: int, npc_id: str, banned: bool = True) -> dict:
+def set_banned_by_npc(telegram_user_id: int, chat_id: int, npc_id: str, banned: bool = True) -> dict:
     """A real, persistent consequence — e.g. a shopkeeper refusing to trade with a caught thief."""
-    get_relationship(telegram_user_id, npc_id)  # ensure the row exists
+    get_relationship(telegram_user_id, chat_id, npc_id)  # ensure the row exists
     with get_connection() as conn:
         conn.execute(
-            "UPDATE npc_relationships SET banned = ? WHERE telegram_user_id = ? AND npc_id = ?",
-            (int(banned), telegram_user_id, npc_id),
+            "UPDATE npc_relationships SET banned = ? WHERE telegram_user_id = ? AND chat_id = ? AND npc_id = ?",
+            (int(banned), telegram_user_id, chat_id, npc_id),
         )
-    return get_relationship(telegram_user_id, npc_id)
+    return get_relationship(telegram_user_id, chat_id, npc_id)
 
 
-def is_banned_by_npc(telegram_user_id: int, npc_id: str) -> bool:
-    return bool(get_relationship(telegram_user_id, npc_id)["banned"])
+def is_banned_by_npc(telegram_user_id: int, chat_id: int, npc_id: str) -> bool:
+    return bool(get_relationship(telegram_user_id, chat_id, npc_id)["banned"])
 
 
-def resolve_companion(telegram_user_id: int, npc_id: str, state: str) -> dict:
+def resolve_companion(telegram_user_id: int, chat_id: int, npc_id: str, state: str) -> dict:
     """
     Writes a companion's final resolution state once, at the moment their
     quest chain's final stage completes -- e.g. "resolved_loyal",
@@ -1814,17 +1861,17 @@ def resolve_companion(telegram_user_id: int, npc_id: str, state: str) -> dict:
     relationship with) rather than a new table -- see the full-storyline
     plan's "extend, don't invent" design.
     """
-    get_relationship(telegram_user_id, npc_id)  # ensure the row exists
+    get_relationship(telegram_user_id, chat_id, npc_id)  # ensure the row exists
     with get_connection() as conn:
         conn.execute(
-            "UPDATE npc_relationships SET resolution = ? WHERE telegram_user_id = ? AND npc_id = ?",
-            (state, telegram_user_id, npc_id),
+            "UPDATE npc_relationships SET resolution = ? WHERE telegram_user_id = ? AND chat_id = ? AND npc_id = ?",
+            (state, telegram_user_id, chat_id, npc_id),
         )
-    return get_relationship(telegram_user_id, npc_id)
+    return get_relationship(telegram_user_id, chat_id, npc_id)
 
 
-def get_companion_resolution(telegram_user_id: int, npc_id: str) -> str:
-    return get_relationship(telegram_user_id, npc_id)["resolution"]
+def get_companion_resolution(telegram_user_id: int, chat_id: int, npc_id: str) -> str:
+    return get_relationship(telegram_user_id, chat_id, npc_id)["resolution"]
 
 
 # ---------------------------------------------------------------------
@@ -1833,31 +1880,29 @@ def get_companion_resolution(telegram_user_id: int, npc_id: str) -> str:
 # hooks), not anything invented by narration.
 # ---------------------------------------------------------------------
 
-def get_faction_standing(telegram_user_id: int, faction_id: str, starting_standing: int = 0) -> int:
+def get_faction_standing(telegram_user_id: int, chat_id: int, faction_id: str, starting_standing: int = 0) -> int:
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT standing FROM faction_standing WHERE telegram_user_id = ? AND faction_id = ?",
-            (telegram_user_id, faction_id),
+            "SELECT standing FROM faction_standing WHERE telegram_user_id = ? AND chat_id = ? AND faction_id = ?",
+            (telegram_user_id, chat_id, faction_id),
         ).fetchone()
         if row is None:
-            # Same Phase 4a NOT NULL chat_id fix as get_relationship above --
-            # chat_id isn't threaded through this function's signature yet.
             conn.execute(
                 "INSERT INTO faction_standing (telegram_user_id, chat_id, faction_id, standing) VALUES (?, ?, ?, ?)",
-                (telegram_user_id, config.TELEGRAM_CHAT_ID, faction_id, starting_standing),
+                (telegram_user_id, chat_id, faction_id, starting_standing),
             )
             return starting_standing
     return row["standing"]
 
 
-def adjust_faction_standing(telegram_user_id: int, faction_id: str, delta: int,
+def adjust_faction_standing(telegram_user_id: int, chat_id: int, faction_id: str, delta: int,
                              starting_standing: int = 0) -> int:
-    current = get_faction_standing(telegram_user_id, faction_id, starting_standing)
+    current = get_faction_standing(telegram_user_id, chat_id, faction_id, starting_standing)
     new_standing = max(-100, min(100, current + delta))
     with get_connection() as conn:
         conn.execute(
-            "UPDATE faction_standing SET standing = ? WHERE telegram_user_id = ? AND faction_id = ?",
-            (new_standing, telegram_user_id, faction_id),
+            "UPDATE faction_standing SET standing = ? WHERE telegram_user_id = ? AND chat_id = ? AND faction_id = ?",
+            (new_standing, telegram_user_id, chat_id, faction_id),
         )
     return new_standing
 
@@ -1868,33 +1913,35 @@ def adjust_faction_standing(telegram_user_id: int, faction_id: str, delta: int,
 # version.
 # ---------------------------------------------------------------------
 
-def create_market_listing(seller_id: int, seller_name: str, item_id: str, quantity: int, price: int) -> int:
+def create_market_listing(seller_id: int, chat_id: int, seller_name: str, item_id: str, quantity: int, price: int) -> int:
     with get_connection() as conn:
         cur = conn.execute(
-            "INSERT INTO market_listings (seller_id, seller_name, item_id, quantity, price, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (seller_id, seller_name, item_id, quantity, price, datetime.now(timezone.utc).isoformat()),
+            "INSERT INTO market_listings (seller_id, chat_id, seller_name, item_id, quantity, price, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (seller_id, chat_id, seller_name, item_id, quantity, price, datetime.now(timezone.utc).isoformat()),
         )
         return cur.lastrowid
 
 
-def get_market_listings() -> list[dict]:
+def get_market_listings(chat_id: int) -> list[dict]:
     with get_connection() as conn:
-        rows = conn.execute("SELECT * FROM market_listings ORDER BY listing_id").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM market_listings WHERE chat_id = ? ORDER BY listing_id", (chat_id,)
+        ).fetchall()
     return [dict(r) for r in rows]
 
 
-def get_market_listing(listing_id: int) -> dict | None:
+def get_market_listing(listing_id: int, chat_id: int) -> dict | None:
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT * FROM market_listings WHERE listing_id = ?", (listing_id,)
+            "SELECT * FROM market_listings WHERE listing_id = ? AND chat_id = ?", (listing_id, chat_id)
         ).fetchone()
     return dict(row) if row else None
 
 
-def remove_market_listing(listing_id: int) -> None:
+def remove_market_listing(listing_id: int, chat_id: int) -> None:
     with get_connection() as conn:
-        conn.execute("DELETE FROM market_listings WHERE listing_id = ?", (listing_id,))
+        conn.execute("DELETE FROM market_listings WHERE listing_id = ? AND chat_id = ?", (listing_id, chat_id))
 
 
 # ---------------------------------------------------------------------
@@ -2268,29 +2315,29 @@ def _board_quest_row_to_dict(row) -> dict:
     return d
 
 
-def get_active_board_quests(location_id: str, day_key: str, tier: str = "daily") -> list[dict]:
+def get_active_board_quests(location_id: str, chat_id: int, day_key: str, tier: str = "daily") -> list[dict]:
     """All of this period's board quests for this location (accepted or not), oldest first."""
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT * FROM board_quests WHERE location_id = ? AND day_key = ? AND tier = ? "
+            "SELECT * FROM board_quests WHERE location_id = ? AND chat_id = ? AND day_key = ? AND tier = ? "
             "ORDER BY board_quest_id ASC",
-            (location_id, day_key, tier),
+            (location_id, chat_id, day_key, tier),
         ).fetchall()
     return [_board_quest_row_to_dict(r) for r in rows]
 
 
-def get_active_board_quest(location_id: str, day_key: str, tier: str = "daily") -> dict | None:
+def get_active_board_quest(location_id: str, chat_id: int, day_key: str, tier: str = "daily") -> dict | None:
     """The single most-recent board quest for this location this period, if any (accepted or not)."""
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT * FROM board_quests WHERE location_id = ? AND day_key = ? AND tier = ? "
+            "SELECT * FROM board_quests WHERE location_id = ? AND chat_id = ? AND day_key = ? AND tier = ? "
             "ORDER BY board_quest_id DESC LIMIT 1",
-            (location_id, day_key, tier),
+            (location_id, chat_id, day_key, tier),
         ).fetchone()
     return _board_quest_row_to_dict(row) if row else None
 
 
-def create_board_quest(location_id: str, day_key: str, title: str, description: str,
+def create_board_quest(location_id: str, chat_id: int, day_key: str, title: str, description: str,
                         giver_npc: str | None, objective_type: str, objective_target: str,
                         objective_count: int, reward_xp: int, reward_gold: int,
                         tier: str = "daily") -> dict:
@@ -2298,12 +2345,12 @@ def create_board_quest(location_id: str, day_key: str, title: str, description: 
         cur = conn.execute(
             """
             INSERT INTO board_quests (
-                location_id, day_key, title, description, giver_npc,
+                location_id, chat_id, day_key, title, description, giver_npc,
                 objective_type, objective_target, objective_count,
                 reward_xp, reward_gold, generated_at, tier
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (location_id, day_key, title, description, giver_npc,
+            (location_id, chat_id, day_key, title, description, giver_npc,
              objective_type, objective_target, objective_count,
              reward_xp, reward_gold, datetime.now(timezone.utc).isoformat(), tier),
         )
@@ -2416,17 +2463,17 @@ def increment_board_quests_completed(telegram_user_id: int, chat_id: int) -> Non
         )
 
 
-def get_accepted_board_quests_for_user(telegram_user_id: int) -> list[dict]:
-    """A player's currently-accepted, not-yet-completed board quests (any location)."""
+def get_accepted_board_quests_for_user(telegram_user_id: int, chat_id: int) -> list[dict]:
+    """A player's currently-accepted, not-yet-completed board quests (any location), scoped to one tenant chat."""
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT * FROM board_quests WHERE accepted_by = ? AND completed_at IS NULL",
-            (telegram_user_id,),
+            "SELECT * FROM board_quests WHERE accepted_by = ? AND chat_id = ? AND completed_at IS NULL",
+            (telegram_user_id, chat_id),
         ).fetchall()
     return [_board_quest_row_to_dict(r) for r in rows]
 
 
-def get_accepted_board_quests_at_location(location_id: str) -> list[dict]:
+def get_accepted_board_quests_at_location(location_id: str, chat_id: int) -> list[dict]:
     """
     Every currently-accepted, not-yet-completed board quest at this
     location, regardless of which day it was posted/accepted (task #149,
@@ -2442,9 +2489,9 @@ def get_accepted_board_quests_at_location(location_id: str) -> list[dict]:
     """
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT * FROM board_quests WHERE location_id = ? "
+            "SELECT * FROM board_quests WHERE location_id = ? AND chat_id = ? "
             "AND accepted_by IS NOT NULL AND completed_at IS NULL",
-            (location_id,),
+            (location_id, chat_id),
         ).fetchall()
     return [_board_quest_row_to_dict(r) for r in rows]
 
@@ -2486,33 +2533,35 @@ def get_party_size(party_id: int) -> int:
 
 
 def get_party_members_by_id(party_id: int) -> list[dict]:
-    with get_connection() as conn:
-        rows = conn.execute(
-            "SELECT c.* FROM characters c JOIN active_characters a ON a.character_id = c.character_id "
-            "WHERE c.party_id = ? AND c.is_deleted = 0",
-            (party_id,),
-        ).fetchall()
-    return [_row_to_dict(r) for r in rows]
-
-
-def get_party_members_by_id_including_inactive_slots(party_id: int) -> list[dict]:
     """
-    Real bug caught live (2026-07-24, Coffee: "she's currently dead"
-    but the shrine kept saying "there's no one to bring back"):
-    get_party_members_by_id's active_characters join means a dead real
-    player who has since SWITCHED to a different character (per
-    CLAUDE.md's own documented behavior -- "the player can switch to
-    another character of theirs in the meantime" while dead) silently
-    vanishes from every party lookup entirely, since her dead character
-    is no longer her account's active slot -- a different, alive
-    character of hers is. Confirmed live: Laurienna's real owner had
-    switched to a character named Charvenna, so Laurienna (is_dead=1,
-    genuinely sitting in the party) never showed up in any
-    active-characters-gated query at all. This variant is scoped by
-    party_id alone, matching every OTHER member sharing this party --
-    exactly what revival features (shrine offering, Tent/Cabin/House)
-    need, since a permanently-dead character is precisely the kind of
-    "inactive slot" real player death leaves behind.
+    Real live bug (2026-08-06, Coffee: "Why are all our characters
+    getting dropped from party" -- confirmed his party was already
+    established, no one had left it). Root cause: this used to JOIN
+    against active_characters, so a real party member whose owner
+    simply wasn't currently ON that exact character (switched to a
+    different one of their own, or -- as here -- created a brand new
+    one, which immediately becomes their new active slot) silently
+    vanished from EVERY party lookup that called this -- the party
+    status screen, the bench/unbench roster (whose own comment already
+    said "real party_id membership only, regardless of ... this is
+    planning ahead" -- directly contradicted by the JOIN it was
+    actually using), XP-sharing to absent members, "is this party all
+    AI" detection, human-leader lookup, and more. This is the exact
+    same root cause already found and fixed for the shrine's revival
+    flow on 2026-07-24 (get_party_members_by_id_including_inactive_
+    slots below) -- that fix was only ever applied to the 2 shrine call
+    sites, leaving the other ~17 real callers still silently dropping
+    any party member who wasn't their owner's current active character.
+    Audited every one of those callers (2026-08-06): none of them
+    actually wants "only if this is literally the active slot right
+    now" -- the ones that need real presence/availability semantics
+    already filter explicitly via is_benched/is_inactive/is_dead/
+    current_location, which is the real, intentional signal for that;
+    the JOIN was just silently double-filtering on top, wrongly. Now
+    identical to the "_including_inactive_slots" query below, which
+    stays as a real function (not just an alias) since several callers
+    already name it explicitly and its docstring documents the
+    original 2026-07-24 incident.
     """
     with get_connection() as conn:
         rows = conn.execute(
@@ -2522,7 +2571,39 @@ def get_party_members_by_id_including_inactive_slots(party_id: int) -> list[dict
     return [_row_to_dict(r) for r in rows]
 
 
-def list_all_active_real_players() -> list[dict]:
+def get_party_members_by_id_including_inactive_slots(party_id: int) -> list[dict]:
+    """
+    Real bug caught live (2026-07-24, Coffee: "she's currently dead"
+    but the shrine kept saying "there's no one to bring back"):
+    get_party_members_by_id used to have an active_characters join that
+    meant a dead real player who has since SWITCHED to a different
+    character (per CLAUDE.md's own documented behavior -- "the player
+    can switch to another character of theirs in the meantime" while
+    dead) silently vanished from every party lookup entirely, since her
+    dead character was no longer her account's active slot -- a
+    different, alive character of hers was. Confirmed live: Laurienna's
+    real owner had switched to a character named Charvenna, so
+    Laurienna (is_dead=1, genuinely sitting in the party) never showed
+    up in any active-characters-gated query at all. Scoped by party_id
+    alone, matching every OTHER member sharing this party -- exactly
+    what revival features (shrine offering, Tent/Cabin/House) need,
+    since a permanently-dead character is precisely the kind of
+    "inactive slot" real player death leaves behind. As of 2026-08-06
+    this is identical to get_party_members_by_id itself (see that
+    function's own docstring for why the join was removed there too,
+    not just here) -- kept as its own real function rather than
+    collapsed into an alias since several real callers already name it
+    explicitly.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM characters WHERE party_id = ? AND is_deleted = 0",
+            (party_id,),
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def list_all_active_real_players(chat_id: int) -> list[dict]:
     """
     Every real (non-AI) player's currently active character, across the
     whole game -- not scoped to one party or session. Used by task
@@ -2530,12 +2611,15 @@ def list_all_active_real_players() -> list[dict]:
     can name a real player who isn't in the current combat/party at all
     (e.g. an achievement, a guild-quest announcement), so the candidate
     list for "does this message name a real player" has to be every
-    real player, not just the ones already in scope.
+    real player, not just the ones already in scope. Scoped to one
+    tenant chat (Phase 4e, 2026-08-06) -- a narration in one tenant chat
+    must never text-mention a different tenant's player by name.
     """
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT c.* FROM characters c JOIN active_characters a ON a.character_id = c.character_id "
-            "WHERE c.is_ai = 0 AND c.is_deleted = 0",
+            "WHERE c.is_ai = 0 AND c.is_deleted = 0 AND c.chat_id = ?",
+            (chat_id,),
         ).fetchall()
     return [_row_to_dict(r) for r in rows]
 
@@ -2544,8 +2628,8 @@ def create_party(telegram_user_id: int, chat_id: int) -> int:
     """Creates a new party and immediately puts the creator's active character in it."""
     with get_connection() as conn:
         cur = conn.execute(
-            "INSERT INTO parties (created_by, created_at) VALUES (?, ?)",
-            (telegram_user_id, datetime.now(timezone.utc).isoformat()),
+            "INSERT INTO parties (created_by, chat_id, created_at) VALUES (?, ?, ?)",
+            (telegram_user_id, chat_id, datetime.now(timezone.utc).isoformat()),
         )
         party_id = cur.lastrowid
         character_id = _active_character_id(telegram_user_id, chat_id, conn)

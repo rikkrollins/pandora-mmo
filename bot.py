@@ -287,7 +287,7 @@ def _adjust_faction_standing(telegram_user_id: int, chat_id: int, faction_id: st
     toward Evil. Law/Chaos isn't touched here -- no faction currently
     carries a law/chaos lean, so that axis only moves via _do_set_alignment.
     """
-    new_standing = db.adjust_faction_standing(telegram_user_id, faction_id, delta, starting_standing)
+    new_standing = db.adjust_faction_standing(telegram_user_id, chat_id, faction_id, delta, starting_standing)
     lean = CAMPAIGN.get("factions", {}).get(faction_id, {}).get("alignment_lean")
     if lean in ("good", "evil") and delta:
         character = db.get_character(telegram_user_id, chat_id)
@@ -378,11 +378,15 @@ COMBAT_TIMEOUT_ACTION_SECONDS = 300
 COMBAT_TIMEOUT_ESCALATED_WARNING_SECONDS = 30
 COMBAT_TIMEOUT_ESCALATED_ACTION_SECONDS = 60
 
-# Real telegram_user_ids already warned about their current idle
-# stretch, so the warning fires once, not every check cycle. In-memory
+# Real (telegram_user_id, chat_id) pairs already warned about their
+# current idle stretch, so the warning fires once, not every check
+# cycle. Keyed on the pair, not bare telegram_user_id (2026-08-06 multi-
+# tenant fix) -- the same real person can have an active character in
+# two different tenant chats at once, and being warned in one must not
+# silently suppress the warning they still need in the other. In-memory
 # only, same reasoning as _UNLOCKED/_DEFEATED_NPCS — cleared the moment
 # they act again (see db.touch_last_active's call site).
-_IDLE_WARNED: set[int] = set()
+_IDLE_WARNED: set[tuple[int, int]] = set()
 
 # The auto-idle/living-world background loop has no incoming Update to
 # read a chat_id from, so it needs one cached here. Seeded from
@@ -989,7 +993,7 @@ async def _maybe_post_hourly_status_update(bot, chat_id: int) -> None:
         for q in CAMPAIGN["quests"].values()
         if q.get("location") == location_id
     ]
-    area_board_quests = board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, location_id)
+    area_board_quests = board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, location_id, chat_id)
 
     if _ollama_congested():
         # Same reasoning as _maybe_post_world_heartbeat -- no one's
@@ -2998,7 +3002,7 @@ async def _safe_send(
         # build yet on this leg.
         clean_text, entities = text, []
     else:
-        clean_text, entities = _build_message_entities(text, db.list_all_active_real_players())
+        clean_text, entities = _build_message_entities(text, db.list_all_active_real_players(update.effective_chat.id))
 
     # thread_id is None here for TWO different reasons that must NOT
     # collapse to the same behavior: "caller didn't specify a topic"
@@ -3711,7 +3715,7 @@ async def _award_victory_xp(update: Update, session: sessions.Session) -> tuple[
     if event_location:
         # Location-scoped, not day_key-scoped (task #149, 2026-07-17) --
         # see get_accepted_board_quests_at_location's docstring.
-        for board_quest in db.get_accepted_board_quests_at_location(event_location):
+        for board_quest in db.get_accepted_board_quests_at_location(event_location, update.effective_chat.id):
             if board_quest["objective_type"] != "defeat_monster":
                 continue
             defeated_matching = sum(
@@ -4199,16 +4203,9 @@ async def _do_auto_level_up_party(update: Update) -> None:
             )
             lines.append(f"📈 **{member['name']}**: +{after_value - before_value} {ability.capitalize()} (now {after_value})")
 
-        upgrade = SKILL_TREE_UPGRADES.get(member["char_class"])
-        if upgrade and not _has_skill_upgrade(member, upgrade["id"]) and member.get("skill_points", 0) >= upgrade["cost"]:
-            updates = {
-                "skill_points": member["skill_points"] - upgrade["cost"],
-                "skill_tree_upgrades": member["skill_tree_upgrades"] + [upgrade["id"]],
-            }
-            if upgrade["id"] == "draconic_hide":
-                updates["armor_class"] = member["armor_class"] + 1
-            db.update_character_by_id(member["character_id"], **updates)
-            lines.append(f"🌳 **{member['name']}** unlocks **{upgrade['name']}**!")
+        skill_line = _apply_class_skill_investment(member)
+        if skill_line:
+            lines.append(skill_line)
 
     if not lines:
         await _safe_send(update, "Nothing to auto-apply right now — no one in the party has ability points or an affordable skill upgrade banked.")
@@ -5672,7 +5669,7 @@ def _npc_combatant_from_stats(npc_id: str, npc_data: dict) -> dict:
 FACTION_HOSTILE_ESCALATION_STANDING = -50  # a faction this soured on a player turns its own members hostile
 
 
-def _effective_disposition(telegram_user_id: int, npc_id: str, npc_data: dict) -> str:
+def _effective_disposition(telegram_user_id: int, chat_id: int, npc_id: str, npc_data: dict) -> str:
     """
     An NPC's disposition isn't fixed forever: a friendly/neutral NPC
     whose faction has been badly wronged by this specific player (real,
@@ -5687,7 +5684,7 @@ def _effective_disposition(telegram_user_id: int, npc_id: str, npc_data: dict) -
     faction_id = _faction_for_npc(npc_id)
     if faction_id is None:
         return disposition
-    standing = db.get_faction_standing(telegram_user_id, faction_id, _faction_starting_standing(faction_id))
+    standing = db.get_faction_standing(telegram_user_id, chat_id, faction_id, _faction_starting_standing(faction_id))
     if standing <= FACTION_HOSTILE_ESCALATION_STANDING:
         return "hostile"
     return disposition
@@ -5720,8 +5717,8 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
         return
 
     telegram_user_id = update.effective_user.id
-    disposition = _effective_disposition(telegram_user_id, npc_id, npc_data)
-    memory_facts = db.get_relationship(telegram_user_id, npc_id)["memory_events"]
+    disposition = _effective_disposition(telegram_user_id, chat_id, npc_id, npc_data)
+    memory_facts = db.get_relationship(telegram_user_id, chat_id, npc_id)["memory_events"]
 
     if disposition == "hostile":
         if npc_id in _chat_scoped_set(_DEFEATED_NPCS, chat_id) or "stats" not in npc_data:
@@ -6744,7 +6741,16 @@ def _attack_advantage_disadvantage(attacker: dict, defender: dict) -> tuple[bool
         if not item:
             continue
         item_category = category or item.get("armor_category", "light")
-        if not class_features_module.is_armor_proficient(attacker.get("char_class"), item_category):
+        # Universal Manipulation "Armor Mastery" (2026-08-06): a real,
+        # purchased bonus proficiency widens is_armor_proficient's
+        # class-based check, never replaces it -- see
+        # UNIVERSAL_MANIPULATION_PROFICIENCIES / rules/combat.py's
+        # identical weapon-side widening.
+        is_proficient = (
+            class_features_module.is_armor_proficient(attacker.get("char_class"), item_category)
+            or f"prof_{item_category}_armor" in (attacker.get("skill_tree_upgrades") or [])
+        )
+        if not is_proficient:
             armor_unproficient = True
     # Invisibility (real 5E spell, 2026-08-04): symmetric like blinded --
     # an invisible attacker has advantage on its own attacks (below), and
@@ -6769,11 +6775,14 @@ def _attack_advantage_disadvantage(attacker: dict, defender: dict) -> tuple[bool
         if attacker_location and world_clock.is_hazardous(attacker_location["layer"]):
             weather_hazard = roll_d20() <= 5
     disadvantage = disadvantage or weather_hazard
-    # Task #131 skill-tree upgrade "true_aim": extends Favored Enemy's
-    # advantage to wolves too, this campaign's other very common enemy.
-    ranger_extra_favored = (
-        _has_skill_upgrade(attacker, "true_aim") and defender.get("monster_key") == "wolf"
-    )
+    # Universal Manipulation "true_aim" (2026-08-06, was a single flat
+    # unlock, now repeatable): each point invested extends Favored
+    # Enemy's advantage to one more real monster from
+    # TRUE_AIM_EXTRA_MONSTERS's fixed order -- "wolf" is first so a
+    # character with their original 1 old point keeps exactly the same
+    # behavior as before this became repeatable.
+    true_aim_points = _skill_points(attacker, "true_aim")
+    ranger_extra_favored = defender.get("monster_key") in TRUE_AIM_EXTRA_MONSTERS[:true_aim_points]
     favored_enemy = (attacker.get("char_class") == "Ranger"
                       and (defender.get("monster_key", "").startswith("goblin") or ranger_extra_favored))
     # Reckless Attack (Barbarian, 2026-07-16 level-2-10 audit): advantage
@@ -7506,9 +7515,9 @@ async def _check_idle_characters(bot) -> None:
             continue
 
         if idle_seconds < IDLE_TIMEOUT_SECONDS:
-            if telegram_user_id in _IDLE_WARNED or _in_active_combat(telegram_user_id, chat_id):
+            if (telegram_user_id, chat_id) in _IDLE_WARNED or _in_active_combat(telegram_user_id, chat_id):
                 continue
-            _IDLE_WARNED.add(telegram_user_id)
+            _IDLE_WARNED.add((telegram_user_id, chat_id))
             destination_name = cl.get_location(CAMPAIGN, _nearest_safe_waypoint(character))["name"]
             update_like = _ChatOnlyUpdate(bot, chat_id)
             await _safe_send(
@@ -7518,7 +7527,7 @@ async def _check_idle_characters(bot) -> None:
             )
             continue
 
-        _IDLE_WARNED.discard(telegram_user_id)
+        _IDLE_WARNED.discard((telegram_user_id, chat_id))
         if _in_active_combat(telegram_user_id, chat_id):
             async with _held_session(chat_id, telegram_user_id) as session:
                 if session is not None and session.current_participant_id() == telegram_user_id:
@@ -7739,7 +7748,7 @@ def _npc_quest_facts(character: dict, npc_id: str) -> str | None:
         reward_text = f" Reward: {', '.join(reward_bits)}." if reward_bits else ""
         lines.append(f"Your real quest to offer: \"{quest['title']}\" — {quest['description']}{reward_text}")
 
-    board_quests = board_quests_module.get_all_todays_board_quests(location_id)
+    board_quests = board_quests_module.get_all_todays_board_quests(location_id, character["chat_id"])
     for q in board_quests:
         if q.get("giver_npc") != npc_id or q.get("completed_at"):
             continue
@@ -7900,7 +7909,7 @@ async def _do_talk_party(update: Update, action_text: str) -> None:
 
     location = cl.get_location(CAMPAIGN, character["current_location"])
     context_facts = _party_companion_context_facts(character, location)
-    relationship = db.get_relationship(update.effective_user.id, npc_id)
+    relationship = db.get_relationship(update.effective_user.id, update.effective_chat.id, npc_id)
     reply = await asyncio.to_thread(
         talk_to_npc, npc_id, action_text, character["name"], relationship["memory_events"], context_facts
     )
@@ -7908,7 +7917,7 @@ async def _do_talk_party(update: Update, action_text: str) -> None:
     npc_display_name = npc_data.get("name", companion["name"])
     await _safe_send(update, f"💬 **{npc_display_name}:** {reply}")
     await _maybe_send_npc_portrait(update, npc_id, npc_data)
-    db.adjust_affinity(update.effective_user.id, npc_id, 1)
+    db.adjust_affinity(update.effective_user.id, update.effective_chat.id, npc_id, 1)
 
 
 def _story_arc_for_quest(quest_id: str) -> tuple[str, dict] | None:
@@ -8100,8 +8109,8 @@ QUEST_COMPANION_RESOLUTIONS = {
 }
 
 
-def _companion_trust_band(telegram_user_id: int, npc_id: str) -> str:
-    affinity = db.get_relationship(telegram_user_id, npc_id)["affinity"]
+def _companion_trust_band(telegram_user_id: int, chat_id: int, npc_id: str) -> str:
+    affinity = db.get_relationship(telegram_user_id, chat_id, npc_id)["affinity"]
     if affinity >= 40:
         return "high"
     if affinity <= -20:
@@ -8129,12 +8138,12 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
     if companion_resolution:
         npc_id = companion_resolution["npc_id"]
         if "banded" in companion_resolution:
-            band = _companion_trust_band(telegram_user_id, npc_id)
+            band = _companion_trust_band(telegram_user_id, update_like.effective_chat.id, npc_id)
             resolution_state, note_text = companion_resolution["banded"][band]
         else:
             resolution_state = companion_resolution["resolution"]
             note_text = companion_resolution.get("note", "has made their choice")
-        db.resolve_companion(telegram_user_id, npc_id, resolution_state)
+        db.resolve_companion(telegram_user_id, update_like.effective_chat.id, npc_id, resolution_state)
         companion_npc = CAMPAIGN["npcs"].get(npc_id)
         companion_name = companion_npc["name"] if companion_npc else npc_id
         resolution_note = f"\n\n🤝 **{companion_name}** {note_text}."
@@ -8272,7 +8281,7 @@ async def _check_board_quest_turnin(update_like, telegram_user_id: int, location
     # Player-scoped, not day_key-scoped (task #149, 2026-07-17) -- a
     # quest accepted on a previous calendar day but still inside its
     # real 24h expires_at window must still be turn-in-able.
-    for board_quest in db.get_accepted_board_quests_for_user(telegram_user_id):
+    for board_quest in db.get_accepted_board_quests_for_user(telegram_user_id, update_like.effective_chat.id):
         if not (board_quest["location_id"] == location_id
                 and not board_quest.get("branch_data")
                 and board_quest["progress_count"] >= board_quest["objective_count"]):
@@ -8350,7 +8359,7 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
 
     location_id = character["current_location"]
 
-    all_quests = board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, location_id)
+    all_quests = board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, location_id, update.effective_chat.id)
     available = [q for q in all_quests if not q.get("accepted_by") and not q.get("completed_at")]
 
     # Location-based story offer is checked BEFORE the companion offer
@@ -8382,6 +8391,27 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
             db.accept_quest(telegram_user_id, update.effective_chat.id, quest_id)
             await _safe_send(update, f"{opening_note}📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}")
             await _notify_main_topic(update, f"📜 **{character['name']}** accepted a quest: {quest['title']}")
+            # Real live bug (2026-08-06, Coffee via dev-topic screenshot:
+            # "This quest isn't working for me... I've done everything in
+            # this area and I haven't been able to complete it like I have
+            # been with my other two characters"): completion for a
+            # reach_location-trigger quest is ONLY ever checked from
+            # _do_move's "arrived at a new location" event -- but
+            # _offerable_quest_at_location only ever offers a story quest
+            # while the player is ALREADY standing at quest['location'].
+            # For the 3 quests whose 'location' and trigger.location are
+            # the SAME place (the_hollow_stump, the_wrong_color,
+            # the_hush_stage1_signs -- confirmed via campaign.json), the
+            # player is by construction already at the trigger location
+            # the instant they accept, and will never "arrive" there again
+            # unless they happen to leave and come back -- a real,
+            # reproducible permanent soft-lock, confirmed live: Pan
+            # accepted the_hollow_stump while standing in Hollow Stump
+            # Shrine and never completed it, while Ravenloft/Elduinn (who
+            # apparently wandered off and back) did. Checking right here,
+            # immediately after accepting, closes the gap for good instead
+            # of depending on incidental future movement.
+            await _check_quest_completions_reach_location(update, telegram_user_id, location_id)
             return
 
     # Confirmed live 2026-07-14 (Coffee): this shortcut was
@@ -8508,7 +8538,7 @@ async def _do_resolve_quest_choice(update: Update, text: str) -> None:
         return
 
     ready = [
-        q for q in db.get_accepted_board_quests_for_user(telegram_user_id)
+        q for q in db.get_accepted_board_quests_for_user(telegram_user_id, update.effective_chat.id)
         if q.get("branch_data") and q["progress_count"] >= q["objective_count"]
     ]
     if not ready:
@@ -8643,7 +8673,7 @@ async def quest_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         character = db.get_character(update.effective_user.id, update.effective_chat.id)
         if character is not None:
             location_id = character["current_location"]
-            for bq in board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, location_id):
+            for bq in board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, location_id, update.effective_chat.id):
                 if str(bq["board_quest_id"]) == ident:
                     title = bq["title"]
                     break
@@ -8706,7 +8736,7 @@ async def _do_check_quests(update: Update) -> None:
     # already existed (db.get_accepted_board_quests_for_user, already
     # used by _do_resolve_quest_choice) -- it just wasn't being shown
     # here, the one place a player would naturally look for it.
-    accepted_board_quests = db.get_accepted_board_quests_for_user(update.effective_user.id)
+    accepted_board_quests = db.get_accepted_board_quests_for_user(update.effective_user.id, update.effective_chat.id)
     if accepted_board_quests:
         lines.append("\n**Board quests accepted:**")
         for bq in accepted_board_quests:
@@ -8727,7 +8757,7 @@ async def _do_check_quests(update: Update) -> None:
     location_id = character["current_location"]
     location = cl.get_location(CAMPAIGN, location_id)
     story_offer = _offerable_quest_at_location(character, location_id)
-    area_board_quests = board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, location_id)
+    area_board_quests = board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, location_id, update.effective_chat.id)
     lines.append(f"\n📋 **Quest board — {location['name'] if location else location_id}**")
     if not story_offer and not area_board_quests:
         lines.append("Nothing posted here today.")
@@ -8845,7 +8875,7 @@ async def _do_sell_market(update: Update, args: list[str]) -> None:
     if not removed:
         return
     listing_id = db.create_market_listing(
-        update.effective_user.id, character["name"], item_id, quantity, price
+        update.effective_user.id, update.effective_chat.id, character["name"], item_id, quantity, price
     )
     listed_item = items_module.get_item(item_id)
     message = (
@@ -8881,7 +8911,7 @@ def _market_keyboard(listings: list[dict]) -> InlineKeyboardMarkup | None:
 
 
 async def _do_check_market(update: Update) -> None:
-    listings = db.get_market_listings()
+    listings = db.get_market_listings(update.effective_chat.id)
     if not listings:
         await _safe_send(
             update,
@@ -8936,7 +8966,7 @@ async def _do_buy_market(update: Update, args: list[str]) -> None:
             "That's not a real listing number.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
-    listing = db.get_market_listing(listing_id)
+    listing = db.get_market_listing(listing_id, update.effective_chat.id)
     if listing is None:
         await update.effective_chat.send_message(
             "That listing doesn't exist — it may have already been bought.",
@@ -8960,7 +8990,7 @@ async def _do_buy_market(update: Update, args: list[str]) -> None:
     seller = db.get_character(listing["seller_id"], update.effective_chat.id)
     if seller:
         db.update_character(listing["seller_id"], update.effective_chat.id, gold=seller["gold"] + listing["price"])
-    db.remove_market_listing(listing_id)
+    db.remove_market_listing(listing_id, update.effective_chat.id)
 
     bought_item = items_module.get_item(listing["item_id"])
     item_name = bought_item["name"]
@@ -9007,7 +9037,7 @@ async def _do_cancel_market(update: Update, args: list[str]) -> None:
             "That's not a real listing number.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
-    listing = db.get_market_listing(listing_id)
+    listing = db.get_market_listing(listing_id, update.effective_chat.id)
     if listing is None:
         await update.effective_chat.send_message(
             "That listing doesn't exist — it may have already been bought or cancelled.",
@@ -9021,7 +9051,7 @@ async def _do_cancel_market(update: Update, args: list[str]) -> None:
         return
 
     db.add_item(update.effective_user.id, update.effective_chat.id, listing["item_id"], listing["quantity"])
-    db.remove_market_listing(listing_id)
+    db.remove_market_listing(listing_id, update.effective_chat.id)
 
     cancelled_item = items_module.get_item(listing["item_id"])
     item_name = cancelled_item["name"] if cancelled_item else listing["item_id"]
@@ -9053,7 +9083,7 @@ async def _do_cancel_market_intent(update: Update, text: str) -> None:
         await _do_cancel_market(update, [match.group(1)])
         return
 
-    own_listings = [l for l in db.get_market_listings() if l["seller_id"] == seller_id]
+    own_listings = [l for l in db.get_market_listings(update.effective_chat.id) if l["seller_id"] == seller_id]
     if not own_listings:
         await _safe_send(update, "You don't have anything listed on the marketplace right now.")
         return
@@ -9236,58 +9266,213 @@ async def _do_set_alignment(update: Update, text: str) -> None:
     )
 
 
-# Task #131, per Coffee: "Path-driven subclass selection via a
-# skill-tree point system on level-up." Real 5E subclass CHOICE doesn't
-# exist anywhere in this build (every class defaults to one fixed
-# subclass -- Cleric is always Life Domain, Sorcerer always Draconic
-# Bloodline, etc., see class_features.py's docstring) -- reversing that
-# convention game-wide is a much bigger undertaking than one pass here.
-# This ships the real, working first slice instead: 1 skill point per
-# level gained (db.add_xp), spent on a single, real, class-flavored
-# upgrade that deepens the class's EXISTING fixed subclass feature
-# rather than switching to a different one. First shipped 2026-07-21
-# for the 6 classes played live at the time (Fighter/Rogue/Warlock/
-# Sorcerer/Cleric/Bard); the remaining 6 (Barbarian/Paladin/Wizard/
-# Monk/Ranger/Druid) added the same day using the identical pattern.
-SKILL_TREE_UPGRADES = {
+# Task #131 (2026-07-21), per Coffee: skill points banked 1-per-level
+# (db.add_xp), originally spent on ONE real, class-flavored, single-
+# purchase upgrade per class. Superseded 2026-08-06 by "Universal
+# Manipulation" (per Coffee: "let players level up skills they already
+# have to increase power... breaking out of the box / breaking the
+# game" -- a reality-bending mastery system tying into this game's own
+# rebirth/ascension fiction): the SAME skill_points currency now buys
+# REPEATABLE investment, unlimited, in real things a character already
+# has -- their class's signature mechanic, HP, spell slots (casters),
+# every gathering/crafting profession, and now weapon/armor mastery.
+#
+# Storage stays the SAME `skill_tree_upgrades` JSON list column with NO
+# schema change: previously each id could appear at most once ("owned"
+# = "in the list"); now the same id can appear MANY times, and points
+# invested = how many times it appears (see _skill_points below). Every
+# character who'd already bought their one upgrade under the old system
+# keeps it automatically -- their 1 existing point just becomes their
+# first Universal Manipulation point in that same mechanic.
+#
+# Two different scaling shapes, chosen per mechanic (2026-08-06 design
+# call, made explicit rather than hidden): a per-use COMBAT/UTILITY
+# EFFECT (extra sneak attack dice, extra temp HP, an extra spell slot
+# recovered...) gets a clean, linear +1-of-its-own-unit per point --
+# unlimited points still "breaks the game" through raw magnitude (10
+# points of Killer's Instinct is +10d6, ~+35 avg damage, every hit) --
+# while the two big continuously-growing POOLS (HP, and AC/spell slots
+# by extension) use real 10%-of-current-value COMPOUNDING per point,
+# since percentage growth is what actually stays meaningful against an
+# ever-larger base instead of becoming negligible. Every one of these
+# is documented at its own real call site below, not just here.
+# All 7 real professions this game tracks: the 3 crafting ones
+# (rules/crafting.py's RECIPES "profession" field) plus the 4
+# gathering ones (resource_nodes' "skill" field) -- every character's
+# skill_uses dict is keyed by exactly these strings already. Moved
+# ahead of its original later spot (2026-08-06) so
+# UNIVERSAL_MANIPULATION_PROFESSIONS below can build off it directly at
+# module-load time.
+ALL_PROFESSIONS = ["alchemy", "cooking", "blacksmithing", "herbalism", "mining", "fishing", "lumberjacking"]
+
+UNIVERSAL_MANIPULATION_CLASS_SKILLS = {
     "Fighter": {"id": "hardened_resolve", "name": "Hardened Resolve", "cost": 2,
-                "description": "Second Wind heals an extra 1d10."},
+                "description": "Second Wind heals one extra 1d10 per point invested."},
     "Rogue": {"id": "killers_instinct", "name": "Killer's Instinct", "cost": 3,
-              "description": "Sneak Attack deals one extra d6."},
+              "description": "Sneak Attack deals one extra d6 per point invested."},
     "Warlock": {"id": "darker_bargain", "name": "Darker Bargain", "cost": 2,
-                "description": "Dark One's Blessing grants 2 extra temporary HP."},
+                "description": "Dark One's Blessing grants +2 temporary HP per point invested."},
     "Sorcerer": {"id": "draconic_hide", "name": "Draconic Hide", "cost": 2,
-                 "description": "Draconic Resilience's unarmored AC improves by 1."},
+                 "description": "Draconic Resilience's unarmored AC grows +10% (compounding) per point invested."},
     "Cleric": {"id": "disciples_grace", "name": "Disciple's Grace", "cost": 2,
-               "description": "Disciple of Life's healing bonus doubles."},
+               "description": "Disciple of Life's healing bonus is multiplied by (1 + points invested)."},
     "Bard": {"id": "greater_inspiration", "name": "Greater Inspiration", "cost": 2,
-             "description": "Bardic Inspiration's die improves (d6 → d8)."},
+             "description": "Bardic Inspiration gains one extra 1d6 per point invested."},
     "Barbarian": {"id": "endless_fury", "name": "Endless Fury", "cost": 2,
-                  "description": "One extra Rage use per rest."},
+                  "description": "One extra Rage use per rest, per point invested."},
     "Paladin": {"id": "greater_mercy", "name": "Greater Mercy", "cost": 2,
-                "description": "Lay on Hands' healing pool grows (5 → 6 per level)."},
+                "description": "Lay on Hands' healing pool grows +1 per level, per point invested."},
     "Wizard": {"id": "deeper_recovery", "name": "Deeper Recovery", "cost": 2,
-               "description": "Arcane Recovery restores one extra spell slot."},
+               "description": "Arcane Recovery restores one extra spell slot per point invested."},
     "Monk": {"id": "iron_will", "name": "Iron Will", "cost": 2,
-             "description": "2 extra ki points per rest."},
+             "description": "+2 extra ki points per rest, per point invested."},
     "Ranger": {"id": "true_aim", "name": "True Aim", "cost": 2,
-               "description": "Favored Enemy advantage extends to wolves too."},
+               "description": "Favored Enemy advantage extends to one more real monster type per point invested."},
     "Druid": {"id": "primal_surge", "name": "Primal Surge", "cost": 2,
-              "description": "Wild Shape grants 2 extra temporary HP."},
+              "description": "Wild Shape grants +2 extra temporary HP per point invested."},
 }
+
+# Ranger True Aim's real, grounded unlock order (2026-08-06) -- "wolf"
+# stays first so every character who already had the old one-shot
+# true_aim keeps EXACTLY the same behavior as their first point. Goblins
+# are excluded (already always favored for every Ranger, upgrade or
+# not); boss/unique-named monsters are excluded (favored-enemy trivially
+# steamrolling a real boss fight would cheapen it) -- real monster_keys
+# from campaigns/default/campaign.json's own bestiary, nothing invented.
+TRUE_AIM_EXTRA_MONSTERS = ["wolf", "giant_spider", "crystal_spider", "shadow_wisp", "bone_legionnaire", "cairn_watcher"]
+
+# The two continuously-growing POOLS -- repeatable, 10%-compounding,
+# applied as a real permanent stat mutation right at purchase time
+# (same convention leveling up itself already uses for hp_max: a
+# one-time, permanent bump, not something recomputed live at every
+# read site). "arcane_reserve" only ever shows up for a character whose
+# class actually has spell slots (spell_slots_max > 0) -- never offered
+# to a class that can't cast at all.
+UNIVERSAL_MANIPULATION_POOLS = {
+    "vitality": {"name": "Vitality", "cost": 3, "description": "Max HP grows +10% (compounding) per point invested."},
+    "arcane_reserve": {"name": "Arcane Reserve", "cost": 3, "description": "Max spell slots grow (at least +1) per point invested."},
+}
+
+# The 7 real gathering/crafting professions this game already tracks
+# (see ALL_PROFESSIONS) -- one repeatable investment id each, +1 flat
+# bonus to that profession's own ability-check roll per point invested,
+# read live alongside the existing practiced_bonus/class-affinity/
+# equipped-gear bonus accumulator in _do_gather and _do_craft (same
+# "just one more additive term" shape those already use).
+UNIVERSAL_MANIPULATION_PROFESSIONS = {p: {"id": f"prof_{p}", "cost": 1} for p in ALL_PROFESSIONS}
+
+# Weapon & Armor Mastery (2026-08-06, per Coffee: "make sure they can
+# choose proficiencies in weapons and armours too - make all items
+# available to do so"): a ONE-TIME unlock per real category this game's
+# own catalog uses (class_features.py's WEAPON_PROFICIENCIES/
+# ARMOR_PROFICIENCIES), letting a character invest past their class's
+# own innate proficiency list into every other weapon/armor category
+# that exists -- checked as a bonus alongside is_weapon_proficient/
+# is_armor_proficient at their real call sites (rules/combat.py's
+# resolve_attack, bot.py's armor-disadvantage check), never replacing
+# the class-based check, only ever widening it. Binary (own it or
+# don't), so unlike the repeatable buckets above, buying it again once
+# owned is a no-op the UI simply never offers.
+UNIVERSAL_MANIPULATION_PROFICIENCIES = {
+    "prof_simple_weapons": {"name": "Simple Weapon Mastery", "cost": 2, "kind": "weapon", "category": "simple"},
+    "prof_martial_weapons": {"name": "Martial Weapon Mastery", "cost": 2, "kind": "weapon", "category": "martial"},
+    "prof_light_armor": {"name": "Light Armor Mastery", "cost": 2, "kind": "armor", "category": "light"},
+    "prof_medium_armor": {"name": "Medium Armor Mastery", "cost": 2, "kind": "armor", "category": "medium"},
+    "prof_heavy_armor": {"name": "Heavy Armor Mastery", "cost": 2, "kind": "armor", "category": "heavy"},
+    "prof_shield_armor": {"name": "Shield Mastery", "cost": 2, "kind": "armor", "category": "shield"},
+}
+
+# Backward-compat alias -- old name, same dict, so nothing that reads
+# SKILL_TREE_UPGRADES elsewhere by that name breaks.
+SKILL_TREE_UPGRADES = UNIVERSAL_MANIPULATION_CLASS_SKILLS
+
+
+def _skill_points(character: dict, mechanic_id: str) -> int:
+    """How many points a character has invested in a real Universal Manipulation mechanic -- 0 if none."""
+    return (character.get("skill_tree_upgrades") or []).count(mechanic_id)
 
 
 def _has_skill_upgrade(character: dict, upgrade_id: str) -> bool:
-    return upgrade_id in (character.get("skill_tree_upgrades") or [])
+    """Kept for any remaining boolean-style read site: true once at least 1 point is invested."""
+    return _skill_points(character, upgrade_id) > 0
 
 
-def _skill_tree_keyboard(upgrade: dict) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton(f"Unlock {upgrade['name']} ({upgrade['cost']} pts)", callback_data=f"skilltree|buy|{upgrade['id']}")
-    ]])
+def _apply_class_skill_investment(member: dict) -> str | None:
+    """
+    Shared purchase logic for a member's class-signature mechanic --
+    used by the auto-apply/tap-to-invest party paths (previously each
+    had its own near-identical, single-purchase-only copy of this).
+    Repeatable now: no "already owned" gate, just an affordability
+    check. Returns a real description line on success, None if there's
+    nothing affordable to invest in right now.
+    """
+    upgrade = UNIVERSAL_MANIPULATION_CLASS_SKILLS.get(member["char_class"])
+    if upgrade is None or member.get("skill_points", 0) < upgrade["cost"]:
+        return None
+    updates = {
+        "skill_points": member["skill_points"] - upgrade["cost"],
+        "skill_tree_upgrades": member["skill_tree_upgrades"] + [upgrade["id"]],
+    }
+    if upgrade["id"] == "draconic_hide":
+        updates["armor_class"] = _um_pool_step(member["armor_class"])
+    db.update_character_by_id(member["character_id"], **updates)
+    points_after = _skill_points({**member, "skill_tree_upgrades": updates["skill_tree_upgrades"]}, upgrade["id"])
+    return f"🌳 **{member['name']}** invests in **{upgrade['name']}** ({points_after} point(s) invested)"
+
+
+def _um_pool_step(current_value: int) -> int:
+    """
+    Shared +10%-compounding step for a Universal Manipulation POOL
+    (Vitality/Arcane Reserve/Draconic Hide's AC) -- rounds up to at
+    least +1 so a purchase always does something real even against a
+    small current value (e.g. a fresh level-1 caster's 2 starting spell
+    slots), never a silent no-op purchase.
+    """
+    return current_value + max(1, round(current_value * 0.10))
+
+
+def _skill_tree_keyboard(character: dict) -> InlineKeyboardMarkup:
+    """Every real, currently-affordable Universal Manipulation purchase for this character, one button each."""
+    points = character.get("skill_points", 0)
+    buttons = []
+    class_upgrade = UNIVERSAL_MANIPULATION_CLASS_SKILLS.get(character["char_class"])
+    if class_upgrade and points >= class_upgrade["cost"]:
+        buttons.append([InlineKeyboardButton(
+            f"⚔️ {class_upgrade['name']} ({class_upgrade['cost']} pts)", callback_data=f"skilltree|buy|{class_upgrade['id']}",
+        )])
+    if points >= UNIVERSAL_MANIPULATION_POOLS["vitality"]["cost"]:
+        buttons.append([InlineKeyboardButton(
+            f"❤️ Vitality ({UNIVERSAL_MANIPULATION_POOLS['vitality']['cost']} pts)", callback_data="skilltree|buy|vitality",
+        )])
+    if character.get("spell_slots_max", 0) > 0 and points >= UNIVERSAL_MANIPULATION_POOLS["arcane_reserve"]["cost"]:
+        buttons.append([InlineKeyboardButton(
+            f"🔮 Arcane Reserve ({UNIVERSAL_MANIPULATION_POOLS['arcane_reserve']['cost']} pts)", callback_data="skilltree|buy|arcane_reserve",
+        )])
+    for prof_name, info in UNIVERSAL_MANIPULATION_PROFESSIONS.items():
+        if points >= info["cost"]:
+            buttons.append([InlineKeyboardButton(
+                f"🛠️ {prof_name.capitalize()} ({info['cost']} pts)", callback_data=f"skilltree|buy|{info['id']}",
+            )])
+    for prof_id, info in UNIVERSAL_MANIPULATION_PROFICIENCIES.items():
+        if _skill_points(character, prof_id) == 0 and points >= info["cost"]:
+            buttons.append([InlineKeyboardButton(
+                f"🛡️ {info['name']} ({info['cost']} pts)", callback_data=f"skilltree|buy|{prof_id}",
+            )])
+    return InlineKeyboardMarkup(buttons)
 
 
 async def _do_show_skill_tree(update: Update) -> None:
+    """
+    Universal Manipulation (2026-08-06, replaced the old single-upgrade
+    Skill Tree screen entirely, per Coffee's explicit choice): every
+    real, repeatable investment this character can make with banked
+    skill_points, all in one screen -- their class's own signature
+    mechanic, Vitality (HP), Arcane Reserve (spell slots, casters
+    only), every profession, and any not-yet-owned weapon/armor
+    mastery. Buttons only ever show what's actually affordable right
+    now, same "don't show a pointless tap" discipline the old screen
+    used -- see _skill_tree_keyboard.
+    """
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
         await update.effective_chat.send_message(
@@ -9295,77 +9480,112 @@ async def _do_show_skill_tree(update: Update) -> None:
         )
         return
     points = character.get("skill_points", 0)
-    upgrade = SKILL_TREE_UPGRADES.get(character["char_class"])
-    if upgrade is None:
-        await _safe_send(
-            update,
-            f"🌳 **{character['name']}**'s Skill Tree — {points} point(s) banked. "
-            f"No real upgrade exists for {character['char_class']} yet — more classes are coming.",
-            speak=False,
-        )
-        return
-    owned = _has_skill_upgrade(character, upgrade["id"])
-    can_afford = points >= upgrade["cost"]
-    # Real live bug (2026-07-22, Coffee: "when I opened it up in menu it
-    # didn't have anything to tap and it didn't tell me how to level it
-    # up" / "it won't let me distribute my point"): NOT a bug -- Fighter's
-    # only real upgrade costs 2 points and Elduinn had 1 banked, so the
-    # tap button was correctly withheld (see keyboard below) -- but the
-    # old status line just said "Cost: 2 point(s)" with no indication
-    # WHY nothing was tappable, indistinguishable from something broken.
-    # Now says plainly how many more points are still needed.
-    if owned:
-        status = "✅ Unlocked"
-    elif can_afford:
-        status = f"Cost: {upgrade['cost']} point(s) — tap below to unlock"
+    lines = [f"🌌 **{character['name']}**'s Universal Manipulation — {points} point(s) banked\n"]
+
+    class_upgrade = UNIVERSAL_MANIPULATION_CLASS_SKILLS.get(character["char_class"])
+    if class_upgrade:
+        owned = _skill_points(character, class_upgrade["id"])
+        lines.append(f"⚔️ **{class_upgrade['name']}** ({owned} point(s) invested, {class_upgrade['cost']}/pt) — {class_upgrade['description']}")
+
+    vitality_pts = _skill_points(character, "vitality")
+    lines.append(f"❤️ **Vitality** ({vitality_pts} point(s) invested, {UNIVERSAL_MANIPULATION_POOLS['vitality']['cost']}/pt) — {UNIVERSAL_MANIPULATION_POOLS['vitality']['description']}")
+
+    if character.get("spell_slots_max", 0) > 0:
+        arcane_pts = _skill_points(character, "arcane_reserve")
+        lines.append(f"🔮 **Arcane Reserve** ({arcane_pts} point(s) invested, {UNIVERSAL_MANIPULATION_POOLS['arcane_reserve']['cost']}/pt) — {UNIVERSAL_MANIPULATION_POOLS['arcane_reserve']['description']}")
+
+    prof_lines = []
+    for prof_name, info in UNIVERSAL_MANIPULATION_PROFESSIONS.items():
+        pts = _skill_points(character, info["id"])
+        if pts:
+            prof_lines.append(f"{prof_name.capitalize()} +{pts}")
+    if prof_lines:
+        lines.append(f"🛠️ **Professions** ({UNIVERSAL_MANIPULATION_PROFESSIONS['herbalism']['cost']}/pt each) — " + ", ".join(prof_lines))
     else:
-        short_by = upgrade["cost"] - points
-        status = f"Cost: {upgrade['cost']} point(s) — need {short_by} more (keep leveling up to bank more points)"
-    text = (
-        f"🌳 **{character['name']}**'s Skill Tree — {points} point(s) banked\n"
-        f"**{upgrade['name']}** ({status})\n{upgrade['description']}"
-    )
-    keyboard = _skill_tree_keyboard(upgrade) if not owned and can_afford else None
-    await _safe_send(update, text, reply_markup=keyboard, speak=False)
+        lines.append(f"🛠️ **Professions** ({UNIVERSAL_MANIPULATION_PROFESSIONS['herbalism']['cost']}/pt each) — none invested yet")
+
+    owned_masteries = [info["name"] for pid, info in UNIVERSAL_MANIPULATION_PROFICIENCIES.items() if _skill_points(character, pid) > 0]
+    if owned_masteries:
+        lines.append(f"🛡️ **Weapon & Armor Mastery** — {', '.join(owned_masteries)}")
+
+    keyboard = _skill_tree_keyboard(character)
+    await _safe_send(update, "\n".join(lines), reply_markup=keyboard if keyboard.inline_keyboard else None, speak=False)
 
 
 async def skilltree_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles taps on _skill_tree_keyboard -- re-validates points/ownership server-side, never trusts the button alone."""
+    """Handles taps on _skill_tree_keyboard -- re-validates points/affordability server-side, never trusts the button alone."""
     query = update.callback_query
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
     await _safe_answer(query)
     if action != "buy" or len(parts) < 3:
         return
-    upgrade_id = parts[2]
+    mechanic_id = parts[2]
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
         return
-    upgrade = SKILL_TREE_UPGRADES.get(character["char_class"])
-    if upgrade is None or upgrade["id"] != upgrade_id:
+    points = character.get("skill_points", 0)
+
+    class_upgrade = UNIVERSAL_MANIPULATION_CLASS_SKILLS.get(character["char_class"])
+    if class_upgrade and class_upgrade["id"] == mechanic_id:
+        if points < class_upgrade["cost"]:
+            return
+        updates = {
+            "skill_points": points - class_upgrade["cost"],
+            "skill_tree_upgrades": character["skill_tree_upgrades"] + [mechanic_id],
+        }
+        if mechanic_id == "draconic_hide":
+            updates["armor_class"] = _um_pool_step(character["armor_class"])
+        db.update_character(update.effective_user.id, update.effective_chat.id, **updates)
+        invested = _skill_points({**character, "skill_tree_upgrades": updates["skill_tree_upgrades"]}, mechanic_id)
+        await _safe_send(update, f"🌌 **{character['name']}** invests in **{class_upgrade['name']}** ({invested} point(s) invested)!")
+        await _notify_main_topic(update, f"🌌 **{character['name']}** invested another point in {class_upgrade['name']}!")
         return
-    if _has_skill_upgrade(character, upgrade_id):
+
+    if mechanic_id in UNIVERSAL_MANIPULATION_POOLS:
+        cost = UNIVERSAL_MANIPULATION_POOLS[mechanic_id]["cost"]
+        if points < cost:
+            return
+        if mechanic_id == "arcane_reserve" and character.get("spell_slots_max", 0) <= 0:
+            return
+        updates = {"skill_points": points - cost, "skill_tree_upgrades": character["skill_tree_upgrades"] + [mechanic_id]}
+        if mechanic_id == "vitality":
+            new_hp_max = _um_pool_step(character["hp_max"])
+            updates["hp_max"] = new_hp_max
+            updates["hp_current"] = character["hp_current"] + (new_hp_max - character["hp_max"])
+            label = "Vitality"
+        else:
+            new_slots_max = _um_pool_step(character["spell_slots_max"])
+            updates["spell_slots_max"] = new_slots_max
+            updates["spell_slots_current"] = character["spell_slots_current"] + (new_slots_max - character["spell_slots_max"])
+            label = "Arcane Reserve"
+        db.update_character(update.effective_user.id, update.effective_chat.id, **updates)
+        await _safe_send(update, f"🌌 **{character['name']}** channels **{label}**!")
+        await _notify_main_topic(update, f"🌌 **{character['name']}** invested a point in {label}!")
         return
-    if character.get("skill_points", 0) < upgrade["cost"]:
-        await update.effective_chat.send_message(
-            "Not enough skill points yet.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+
+    prof_match = next((p for p, info in UNIVERSAL_MANIPULATION_PROFESSIONS.items() if info["id"] == mechanic_id), None)
+    if prof_match:
+        cost = UNIVERSAL_MANIPULATION_PROFESSIONS[prof_match]["cost"]
+        if points < cost:
+            return
+        updates = {"skill_points": points - cost, "skill_tree_upgrades": character["skill_tree_upgrades"] + [mechanic_id]}
+        db.update_character(update.effective_user.id, update.effective_chat.id, **updates)
+        invested = _skill_points({**character, "skill_tree_upgrades": updates["skill_tree_upgrades"]}, mechanic_id)
+        await _safe_send(update, f"🌌 **{character['name']}** masters more of **{prof_match.capitalize()}** ({invested} point(s) invested)!")
+        return
+
+    proficiency = UNIVERSAL_MANIPULATION_PROFICIENCIES.get(mechanic_id)
+    if proficiency:
+        if points < proficiency["cost"] or _skill_points(character, mechanic_id) > 0:
+            return
+        db.update_character(
+            update.effective_user.id, update.effective_chat.id,
+            skill_points=points - proficiency["cost"],
+            skill_tree_upgrades=character["skill_tree_upgrades"] + [mechanic_id],
         )
-        return
-    updates = {
-        "skill_points": character["skill_points"] - upgrade["cost"],
-        "skill_tree_upgrades": character["skill_tree_upgrades"] + [upgrade_id],
-    }
-    # Draconic Hide is the one upgrade here that touches armor_class --
-    # a static, set-once-at-creation field in this build (never
-    # recalculated from anything else, same convention as every other
-    # AC tweak in this game), so unlike the other 5 upgrades (which are
-    # read live at their own real call sites), this one applies its
-    # bonus directly, once, right here at purchase time.
-    if upgrade_id == "draconic_hide":
-        updates["armor_class"] = character["armor_class"] + 1
-    db.update_character(update.effective_user.id, update.effective_chat.id, **updates)
-    await _safe_send(update, f"🌳 **{character['name']}** unlocks **{upgrade['name']}**!")
-    await _notify_main_topic(update, f"🌳 **{character['name']}** unlocked a skill-tree upgrade: {upgrade['name']}!")
+        await _safe_send(update, f"🌌 **{character['name']}** unlocks **{proficiency['name']}**!")
+        await _notify_main_topic(update, f"🌌 **{character['name']}** unlocked {proficiency['name']}!")
 
 
 async def _do_check_party(update: Update, text: str = "") -> None:
@@ -9491,10 +9711,10 @@ def _member_level_skill_keyboard(member: dict) -> InlineKeyboardMarkup | None:
         buttons.append([InlineKeyboardButton(
             f"📈 Level Up {member['name']}", callback_data=f"memberlvl|asi|{member['character_id']}",
         )])
-    upgrade = SKILL_TREE_UPGRADES.get(member["char_class"])
-    if upgrade and not _has_skill_upgrade(member, upgrade["id"]) and member.get("skill_points", 0) >= upgrade["cost"]:
+    upgrade = UNIVERSAL_MANIPULATION_CLASS_SKILLS.get(member["char_class"])
+    if upgrade and member.get("skill_points", 0) >= upgrade["cost"]:
         buttons.append([InlineKeyboardButton(
-            f"🌳 Unlock {upgrade['name']} for {member['name']}", callback_data=f"memberlvl|skill|{member['character_id']}",
+            f"🌌 Invest in {upgrade['name']} for {member['name']}", callback_data=f"memberlvl|skill|{member['character_id']}",
         )])
     return InlineKeyboardMarkup(buttons) if buttons else None
 
@@ -9552,17 +9772,9 @@ async def member_level_callback(update: Update, context: ContextTypes.DEFAULT_TY
         member = db.get_character_by_id(character_id) if character_id else None
         if member is None:
             return
-        upgrade = SKILL_TREE_UPGRADES.get(member["char_class"])
-        if upgrade is None or _has_skill_upgrade(member, upgrade["id"]) or member.get("skill_points", 0) < upgrade["cost"]:
-            return
-        updates = {
-            "skill_points": member["skill_points"] - upgrade["cost"],
-            "skill_tree_upgrades": member["skill_tree_upgrades"] + [upgrade["id"]],
-        }
-        if upgrade["id"] == "draconic_hide":
-            updates["armor_class"] = member["armor_class"] + 1
-        db.update_character_by_id(character_id, **updates)
-        await _safe_send(update, f"🌳 **{member['name']}** unlocks **{upgrade['name']}**!")
+        skill_line = _apply_class_skill_investment(member)
+        if skill_line:
+            await _safe_send(update, skill_line)
 
 
 def _party_keyboard(character: dict) -> InlineKeyboardMarkup | None:
@@ -9973,19 +10185,40 @@ def _format_equipped_line(character: dict) -> str:
     summary (2026-07-15, per Coffee) -- what's actually worn, weapon/
     armor/shield each shown honestly as "none" rather than omitted
     when empty, so it's obvious at a glance there's nothing to equip.
+
+    Real live gap (2026-08-06, per Coffee: "when it is added it shud
+    show the stats also on the players sheet so they can clearly see
+    it") -- this line used to show bare item NAMES only, with zero
+    indication of a weapon's damage, an armor's AC, or any
+    resistance/element tethered to it, even though the exact same
+    stats were already computable via _format_item_stats_line (used
+    elsewhere for market/examine/loot). Every real equipped item now
+    gets its own indented stats sub-line underneath, same "📊" convention
+    the market listing already uses -- nothing new invented, just the
+    existing formatter finally reused here too.
     """
     weapon_item = items_module.get_item(character.get("equipped_weapon") or "")
     armor_item = items_module.get_item(character.get("equipped_armor") or "")
     shield_item = items_module.get_item(character.get("equipped_shield") or "")
     parts = [weapon_item["name"] if weapon_item else "no weapon",
              armor_item["name"] if armor_item else "no armor"]
+    equipped_items = [weapon_item, armor_item]
     if shield_item:
         parts.append(shield_item["name"])
+        equipped_items.append(shield_item)
     for acc_id in character.get("equipped_accessories") or []:
         acc_item = items_module.get_item(acc_id)
         if acc_item:
             parts.append(acc_item["name"])
-    return f"Equipped: {', '.join(parts)}\n"
+            equipped_items.append(acc_item)
+    lines = [f"Equipped: {', '.join(parts)}"]
+    for equipped_item in equipped_items:
+        if not equipped_item:
+            continue
+        stats_line = _format_item_stats_line(equipped_item)
+        if stats_line:
+            lines.append(f"     📊 {equipped_item['name']}: {stats_line}")
+    return "\n".join(lines) + "\n"
 
 
 def _format_carried_gear_line(character: dict) -> str:
@@ -10048,8 +10281,11 @@ def _format_character_sheet(character: dict) -> str:
     skill_points_line = ""
     if character.get("skill_points"):
         skill_points_line = (
-            f"🌳 {character['skill_points']} skill point(s) banked — say \"skill tree\" to spend them.\n"
+            f"🌌 {character['skill_points']} Universal Manipulation point(s) banked — say \"skill tree\" to spend them.\n"
         )
+    invested = len(character.get("skill_tree_upgrades") or [])
+    if invested:
+        skill_points_line += f"🌌 {invested} Universal Manipulation point(s) invested so far.\n"
     # Rebirth/hybrid (2026-07-22): only shown once a character has
     # actually gone through the rebirth loop at least once -- a never-
     # reborn character's sheet looks exactly as it always has.
@@ -10163,7 +10399,7 @@ async def _do_check_sheet(update: Update, target_name: str | None = None) -> Non
     # NPCs, who get honest basic info instead of a fabricated stat
     # block, since they don't have a real 5E sheet until recruited.
     if target_name:
-        target = _find_party_target_by_name(target_name) or db.find_character_by_name(target_name)
+        target = _find_party_target_by_name(target_name) or db.find_character_by_name(target_name, update.effective_chat.id)
         if target is not None:
             await _safe_send(update, _format_character_sheet(target), speak=False)
             return
@@ -10574,6 +10810,9 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
     # existing bonus accumulator" shape this function already uses for
     # the two sources above.
     bonus += _equipped_profession_bonus(character, skill_key)
+    # Universal Manipulation "prof_X" (2026-08-06, per Coffee): a real
+    # 4th additive source, +1 per point invested in this profession.
+    bonus += _skill_points(character, f"prof_{skill_key}")
     result["total"] += bonus
     result["practiced_bonus"] = bonus
     success = result["total"] >= SKILL_CHECK_DC
@@ -10610,7 +10849,7 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
         # accepted on a previous calendar day but still inside its real
         # 24h expires_at window must still be creditable; day_key is
         # only about what's currently postable, not what's still valid.
-        for board_quest in db.get_accepted_board_quests_for_user(update.effective_user.id):
+        for board_quest in db.get_accepted_board_quests_for_user(update.effective_user.id, update.effective_chat.id):
             if not (board_quest["location_id"] == character["current_location"]
                     and board_quest["objective_type"] == "gather_material"
                     and board_quest["objective_target"] == node["material"]):
@@ -10665,12 +10904,6 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
         await _check_board_quest_turnin(update, update.effective_user.id, character["current_location"])
 
 
-# All 7 real professions this game tracks: the 3 crafting ones
-# (rules/crafting.py's RECIPES "profession" field) plus the 4
-# gathering ones (resource_nodes' "skill" field) -- every character's
-# skill_uses dict is keyed by exactly these strings already, this is
-# just the first place that lists them all together in one view.
-ALL_PROFESSIONS = ["alchemy", "cooking", "blacksmithing", "herbalism", "mining", "fishing", "lumberjacking"]
 PROFESSION_RANK_TITLES = {0: "Novice", 1: "Apprentice", 2: "Adept", 3: "Master"}
 
 
@@ -10781,6 +11014,9 @@ async def _do_craft(update: Update, text: str) -> None:
     # Magic item system Phase 4 (2026-08-02): same third additive source
     # as _do_gather's identical accumulator just above.
     bonus += _equipped_profession_bonus(character, profession)
+    # Universal Manipulation "prof_X" (2026-08-06, per Coffee): a real
+    # 4th additive source, +1 per point invested in this profession.
+    bonus += _skill_points(character, f"prof_{profession}")
     result = (
         resolve_advanced_craft(character, recipe_id, practiced_bonus=bonus) if is_advanced
         else resolve_craft(character, recipe_id, practiced_bonus=bonus)
@@ -10889,6 +11125,9 @@ async def _do_forge_item(update: Update, text: str) -> None:
     bonus = _practiced_bonus_for(update.effective_user.id, update.effective_chat.id, profession)
     bonus += class_profession_affinity_bonus(character["char_class"], profession)
     bonus += _equipped_profession_bonus(character, profession)
+    # Universal Manipulation "prof_X" (2026-08-06, per Coffee): a real
+    # 4th additive source, +1 per point invested in this profession.
+    bonus += _skill_points(character, f"prof_{profession}")
     check = roll_ability_check(character, "strength", proficient=False)
     check["total"] += bonus
     check["practiced_bonus"] = bonus
@@ -10977,6 +11216,9 @@ async def _do_enchant_item(update: Update, text: str) -> None:
     bonus = _practiced_bonus_for(update.effective_user.id, update.effective_chat.id, profession)
     bonus += class_profession_affinity_bonus(character["char_class"], profession)
     bonus += _equipped_profession_bonus(character, profession)
+    # Universal Manipulation "prof_X" (2026-08-06, per Coffee): a real
+    # 4th additive source, +1 per point invested in this profession.
+    bonus += _skill_points(character, f"prof_{profession}")
     check = roll_ability_check(character, recipe["ability"], proficient=False)
     check["total"] += bonus
     check["practiced_bonus"] = bonus
@@ -11081,7 +11323,9 @@ async def _do_second_wind(update: Update) -> None:
         )
         return
 
-    heal_dice = "2d10" if _has_skill_upgrade(character, "hardened_resolve") else "1d10"
+    # Universal Manipulation "hardened_resolve" (2026-08-06, repeatable):
+    # base 1d10, +1 extra 1d10 die per point invested, unlimited.
+    heal_dice = f"{1 + _skill_points(character, 'hardened_resolve')}d10"
     healed = roll_damage(heal_dice, modifier=character["level"])["total"]
     # Real player-power rebalance (2026-07-26): keeps self-healing
     # abilities in step with the same rescaled HP pools resolve_heal_
@@ -11132,7 +11376,8 @@ async def _do_rage(update: Update) -> None:
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
-    max_rages = RAGE_MAX_USES + (1 if _has_skill_upgrade(character, "endless_fury") else 0)
+    # Universal Manipulation "endless_fury" (2026-08-06, repeatable): +1 extra Rage use per point invested, unlimited.
+    max_rages = RAGE_MAX_USES + _skill_points(character, "endless_fury")
     if db.get_feature_uses(update.effective_user.id, update.effective_chat.id, "rage") >= max_rages:
         await update.effective_chat.send_message(
             f"You've already raged {max_rages} times since your last rest.",
@@ -11312,8 +11557,8 @@ async def _do_wild_shape(update: Update) -> None:
 
     participant["wild_shaped"] = True
     bonus_temp_hp = wild_shape_temp_hp(character["level"])
-    if _has_skill_upgrade(character, "primal_surge"):
-        bonus_temp_hp += 2
+    # Universal Manipulation "primal_surge" (2026-08-06, repeatable): +2 temp HP per point invested, unlimited.
+    bonus_temp_hp += 2 * _skill_points(character, "primal_surge")
     participant["temp_hp"] = max(participant.get("temp_hp", 0), bonus_temp_hp)
     db.use_feature(update.effective_user.id, update.effective_chat.id, "wild_shape")
 
@@ -11543,7 +11788,8 @@ async def _do_flurry_of_blows(update: Update) -> None:
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
-    max_ki = character["level"] + (2 if _has_skill_upgrade(character, "iron_will") else 0)
+    # Universal Manipulation "iron_will" (2026-08-06, repeatable): +2 extra ki per point invested, unlimited.
+    max_ki = character["level"] + 2 * _skill_points(character, "iron_will")
     if db.get_feature_uses(update.effective_user.id, update.effective_chat.id, "ki") >= max_ki:
         await update.effective_chat.send_message(
             "You're out of ki points until your next rest.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
@@ -11962,8 +12208,12 @@ async def _do_bardic_inspiration(update: Update, target_text: str) -> None:
         return
 
     target_character = _find_party_target_by_name(target_text) or character
-    inspiration_die = 8 if _has_skill_upgrade(character, "greater_inspiration") else 6
-    boost = roll(1, inspiration_die)[0]
+    # Universal Manipulation "greater_inspiration" (2026-08-06,
+    # repeatable): base 1d6, +1 extra 1d6 die per point invested,
+    # unlimited -- was a flat d6->d8 die-size swap, now an extra rolled
+    # die per point (same "extra dice, not a bigger single die" shape
+    # every other dice-based mechanic here uses).
+    boost = sum(roll(1 + _skill_points(character, "greater_inspiration"), 6))
     # Real player-power rebalance (2026-07-26): same healing-keeps-pace fix as above.
     boost = int(boost * power_scale_ratio(character["level"], character.get("rebirth_count", 0)))
     new_hp = min(target_character["hp_max"], target_character["hp_current"] + boost)
@@ -12010,7 +12260,8 @@ async def _do_lay_on_hands(update: Update, target_text: str) -> None:
         )
         return
 
-    pool_per_level = 6 if _has_skill_upgrade(character, "greater_mercy") else 5
+    # Universal Manipulation "greater_mercy" (2026-08-06, repeatable): base 5/level, +1/level per point invested, unlimited.
+    pool_per_level = 5 + _skill_points(character, "greater_mercy")
     pool = pool_per_level * character["level"]
     # Real player-power rebalance (2026-07-26): same healing-keeps-pace
     # fix as Second Wind/resolve_heal_spell above.
@@ -12074,8 +12325,8 @@ async def _do_arcane_recovery(update: Update) -> None:
         return
 
     max_recoverable = (character["level"] + 1) // 2
-    if _has_skill_upgrade(character, "deeper_recovery"):
-        max_recoverable += 1
+    # Universal Manipulation "deeper_recovery" (2026-08-06, repeatable): +1 extra slot recovered per point invested, unlimited.
+    max_recoverable += _skill_points(character, "deeper_recovery")
     recovered = min(max_recoverable, missing_slots)
     new_current = character["spell_slots_current"] + recovered
     db.update_character(update.effective_user.id, update.effective_chat.id, spell_slots_current=new_current)
@@ -12647,7 +12898,7 @@ async def _do_look(update: Update) -> None:
         else:
             lines.append("📜 There's a task tied to this place, though no one's here to ask about it right now.")
 
-    board_quests_here = board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, character["current_location"])
+    board_quests_here = board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, character["current_location"], update.effective_chat.id)
     unclaimed_board_quests = [q for q in board_quests_here if not q.get("accepted_by")]
     if unclaimed_board_quests:
         lines.append("📋 There's a bounty posted on the board here — say \"check quests\" to see it.")
@@ -12903,13 +13154,31 @@ def _format_item_stats_line(item: dict) -> str | None:
     item_type = item.get("type")
     if rarity and item_type:
         parts.append(f"{rarity.replace('_', ' ').title()} {item_type}")
-    if item.get("damage_bonus"):
+    # Real live gap (2026-08-06, per Coffee: "im not seeing the attack
+    # strength ... elements ... when i look at weapons") -- every real
+    # weapon (hand-authored in items.py and generated by
+    # rules/item_generator.py alike) carries a real damage_dice field,
+    # but this function never read it at all, so a plain Longsword's
+    # stats line said nothing whatsoever about how hard it actually
+    # hits. damage_dice is the pure base value; damage_bonus (when
+    # present) is a SEPARATE affix-derived bonus on generated items
+    # only -- hand-authored weapons already bake any bonus straight
+    # into damage_dice's own string (e.g. "1d6+2"), so it's shown
+    # in addition to, never instead of, damage_dice.
+    if item.get("damage_dice"):
+        dtype = item.get("damage_type") or "physical"
+        element_label = "" if dtype == "physical" else f" {dtype}"
+        bonus_label = f" +{item['damage_bonus']}" if item.get("damage_bonus") else ""
+        parts.append(f"{item['damage_dice']}{bonus_label}{element_label} damage")
+    elif item.get("damage_bonus"):
         parts.append(f"+{item['damage_bonus']} damage")
+    if item.get("ability") and item_type == "weapon":
+        parts.append(f"uses {item['ability'].capitalize()}")
     if item.get("ac_base"):
         parts.append(f"AC {item['ac_base']}")
     if item.get("ac_bonus"):
         parts.append(f"+{item['ac_bonus']} AC")
-    if item.get("damage_type") and item["damage_type"] != "physical":
+    if item.get("damage_type") and item["damage_type"] != "physical" and not item.get("damage_dice"):
         parts.append(f"deals {item['damage_type']} damage")
     if item.get("resistances"):
         parts.append(f"resistance to {', '.join(item['resistances'])}")
@@ -13012,7 +13281,7 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if not removed:
             await _safe_send(update, "Something went wrong listing that item.")
             return
-        listing_id = db.create_market_listing(update.effective_user.id, character["name"], item_id, 1, price)
+        listing_id = db.create_market_listing(update.effective_user.id, update.effective_chat.id, character["name"], item_id, 1, price)
         message = (
             f"🏷️ **{character['name']}** lists **{item['name']}** for **{price} gold** (listing #{listing_id}). "
             f"Listed by mistake? \"/cancel_market {listing_id}\" pulls it back."
@@ -13825,7 +14094,7 @@ async def _do_leaderboard(update: Update) -> None:
     AI-played party) counts the same as anyone else, but is_ai=1
     (combat-only companions) doesn't.
     """
-    ranked = db.get_leaderboard(limit=10)
+    ranked = db.get_leaderboard(update.effective_chat.id, limit=10)
     if not ranked:
         await update.effective_chat.send_message(
             "Nobody's made it onto the board yet.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
@@ -14135,7 +14404,7 @@ def _check_story_gate(character: dict, current: dict, destination_id: str) -> st
                     if npc_id:
                         companion_npc_ids.append(npc_id)
         trusted = any(
-            db.get_relationship(character["telegram_user_id"], npc_id)["affinity"] >= min_affinity
+            db.get_relationship(character["telegram_user_id"], character["chat_id"], npc_id)["affinity"] >= min_affinity
             for npc_id in companion_npc_ids
         )
         if not trusted:
@@ -14740,6 +15009,21 @@ async def _do_give_offering(update: Update, text: str) -> None:
         db.get_party_members_by_id_including_inactive_slots(character["party_id"])
         if character.get("party_id") else []
     )
+    # Real live bug (2026-08-06, Coffee via dev-topic screenshot: "It's
+    # not letting me revive my player"): confirmed live -- his character
+    # "Pan" died at The Colosseum with no party_id at all (party_id IS
+    # NULL), so it was NEVER visible to this lookup no matter which of
+    # his OTHER characters he brought to the shrine, since party_members
+    # only ever reflects the CALLER's current party (and Pan wasn't in
+    # one). A player's own dead alt characters need to always be
+    # revivable here regardless of party membership -- merged in via
+    # list_characters, deduped by character_id so a party member who's
+    # ALSO the caller's own character isn't listed twice.
+    own_characters = db.list_characters(update.effective_user.id, update.effective_chat.id)
+    combined = {m["character_id"]: m for m in party_members}
+    for c in own_characters:
+        combined.setdefault(c["character_id"], c)
+    party_members = list(combined.values())
     target = _match_member_by_name_or_username(text, party_members)
     if target is None or not target.get("is_dead"):
         # Real live bug (2026-07-24, Coffee: "I pray at the shrine" then
@@ -14808,6 +15092,16 @@ async def _do_shrine_offering_menu(update: Update) -> None:
         db.get_party_members_by_id_including_inactive_slots(character["party_id"])
         if character.get("party_id") else []
     )
+    # Real live bug (2026-08-06, Coffee: "It's not letting me revive my
+    # player") -- same fix as _do_give_offering's identical merge above:
+    # a dead character with no party_id at all (e.g. Pan, confirmed live)
+    # was invisible here no matter which other character brought the
+    # offering.
+    own_characters = db.list_characters(update.effective_user.id, update.effective_chat.id)
+    combined = {m["character_id"]: m for m in party_members}
+    for c in own_characters:
+        combined.setdefault(c["character_id"], c)
+    party_members = list(combined.values())
     dead_members = [m for m in party_members if m.get("is_dead")]
     if not dead_members:
         # Nobody to revive -- offer the cheaper blessing instead (per
@@ -15494,7 +15788,7 @@ async def _do_steal(update: Update, text: str, forced_roll: int | None = None) -
     owner_npc = shop_data.get("owner_npc")
     owner_name = CAMPAIGN["npcs"][owner_npc]["name"] if owner_npc else "the shopkeeper"
 
-    if owner_npc and db.is_banned_by_npc(telegram_user_id, owner_npc):
+    if owner_npc and db.is_banned_by_npc(telegram_user_id, update.effective_chat.id, owner_npc):
         await update.effective_chat.send_message(
             f"{owner_name} is already watching you like a hawk after last time — not worth the risk.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
@@ -15542,10 +15836,10 @@ async def _do_steal(update: Update, text: str, forced_roll: int | None = None) -
         consequence_line = f"\n🚨 **Caught!** {owner_name} won't sell to you ever again."
         if owner_npc:
             db.adjust_affinity(
-                telegram_user_id, owner_npc, -40,
+                telegram_user_id, update.effective_chat.id, owner_npc, -40,
                 event=f"Was caught stealing {item['name']} from {owner_name}'s shop.",
             )
-            db.set_banned_by_npc(telegram_user_id, owner_npc, True)
+            db.set_banned_by_npc(telegram_user_id, update.effective_chat.id, owner_npc, True)
             faction_id = _faction_for_npc(owner_npc)
             if faction_id:
                 _adjust_faction_standing(
@@ -17374,7 +17668,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         db.update_telegram_username, update.effective_user.id, update.effective_chat.id,
         getattr(update.effective_user, "username", None),
     )
-    _IDLE_WARNED.discard(update.effective_user.id)
+    _IDLE_WARNED.discard((update.effective_user.id, update.effective_chat.id))
 
     # Universal escape hatch, checked FIRST, before any stateful flow gets
     # a chance to swallow the message. Exact-match only (never a substring
@@ -17680,13 +17974,32 @@ class _BufferingChatProxy:
     .send_message() buffers text instead of actually sending, so every
     sub-action's narration can be combined into one real message at the
     end instead of one Telegram message per sub-action.
+
+    Real live bug (2026-08-06, caught via topic-activity monitoring on
+    a real player's "Look around, check quests"-style compound
+    message): this class's own docstring claimed every handler only
+    ever touches .id/.send_message() on effective_chat, but
+    _maybe_send_location_image (and every other _maybe_send_*_image
+    helper) calls .send_photo() directly -- which this proxy never
+    implemented, so it raised AttributeError, silently swallowed by
+    _send_generated_image's broad except-and-log, losing the location/
+    item/NPC image for that sub-action every time it happened inside a
+    compound dispatch. Images were never part of the text-combining
+    scheme to begin with (they're always their own separate Telegram
+    message regardless), so send_photo simply forwards straight to the
+    real chat instead of buffering -- the same thing a non-compound
+    single-intent dispatch would already do.
     """
     def __init__(self, real_chat):
         self.id = real_chat.id
         self.buffered: list[str] = []
+        self._real_chat = real_chat
 
     async def send_message(self, text, **kwargs):
         self.buffered.append(text)
+
+    async def send_photo(self, *args, **kwargs):
+        return await self._real_chat.send_photo(*args, **kwargs)
 
 
 class _EffectiveChatOverride:
@@ -17791,7 +18104,7 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         elif npc_id and npc_id in _NPCS:
             character = db.get_character(update.effective_user.id, update.effective_chat.id)
             character_name = character["name"] if character else "the player"
-            relationship = db.get_relationship(update.effective_user.id, npc_id)
+            relationship = db.get_relationship(update.effective_user.id, update.effective_chat.id, npc_id)
             quest_facts = _npc_quest_facts(character, npc_id) if character else None
             reply = await asyncio.to_thread(
                 talk_to_npc, npc_id, text, character_name, relationship["memory_events"], quest_facts
@@ -17803,7 +18116,7 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
             # Ordinary conversation builds a small amount of rapport over
             # time — real, persistent, and separate from the short-term
             # conversation buffer talk_to_npc already keeps.
-            db.adjust_affinity(update.effective_user.id, npc_id, 1)
+            db.adjust_affinity(update.effective_user.id, update.effective_chat.id, npc_id, 1)
             faction_id = _faction_for_npc(npc_id)
             if faction_id:
                 _adjust_faction_standing(
@@ -18444,7 +18757,7 @@ async def hint_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if story_offer:
         lines.append("• Someone here looks like they need help with something — try talking to them")
 
-    board_quests_here = board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, character["current_location"])
+    board_quests_here = board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, character["current_location"], update.effective_chat.id)
     if any(not q.get("accepted_by") and not q.get("completed_at") for q in board_quests_here):
         lines.append("• There's a bounty posted on the board — say \"check quests\" to see it")
 
@@ -19519,7 +19832,7 @@ async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TY
                     else "You don't have a character yet."
                 )
                 continue
-            target = _find_party_target_by_name(raw_name) or db.find_character_by_name(raw_name)
+            target = _find_party_target_by_name(raw_name) or db.find_character_by_name(raw_name, update.effective_chat.id)
             if target is not None:
                 replies.append(_format_character_sheet(target))
                 continue
@@ -19836,7 +20149,7 @@ def _party_gather_needs_here(location_id: str) -> list[dict]:
     seen_ids = set()
     needs = []
     for member in _get_party_members():
-        for q in db.get_accepted_board_quests_for_user(member["telegram_user_id"]):
+        for q in db.get_accepted_board_quests_for_user(member["telegram_user_id"], member["chat_id"]):
             if (
                 q["board_quest_id"] in seen_ids
                 or q.get("objective_type") != "gather_material"
@@ -20097,7 +20410,7 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
     if companion_offer:
         lines.append(f"A party companion has a personal task on offer: {companion_offer[1]['title']}")
 
-    board_quests = board_quests_module.get_all_todays_board_quests(location_id)
+    board_quests = board_quests_module.get_all_todays_board_quests(location_id, character["chat_id"])
     unclaimed = [q for q in board_quests if not q.get("accepted_by") and not q.get("completed_at")]
     if unclaimed:
         lines.append(f"Quest board has something posted: {', '.join(q['title'] for q in unclaimed)}")
@@ -20109,7 +20422,7 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
     # the exact real labels (see _do_resolve_quest_choice), and nothing
     # else here ever surfaces what those labels are.
     ready_choices = [
-        q for q in db.get_accepted_board_quests_for_user(character["telegram_user_id"])
+        q for q in db.get_accepted_board_quests_for_user(character["telegram_user_id"], character["chat_id"])
         if q.get("branch_data") and q["progress_count"] >= q["objective_count"]
     ]
     for q in ready_choices:

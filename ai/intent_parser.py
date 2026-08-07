@@ -399,11 +399,20 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # "recruit " gap just above -- this only ever matched invite_to_
     # party's OWN trigger below, which never got reached because the
     # known-NPC-name loop further down already returned talk_npc first.
+    # "ti my/the party" added 2026-08-06 (real player, caught via
+    # topic-activity monitoring): "Invite Pip Thistledown ti my party"
+    # (typo for "to") matched none of the 4 exact phrases below, so this
+    # whole block was skipped and the known-NPC-name loop further down
+    # returned talk_npc instead -- the exact same root cause as the
+    # 2026-07-12 "Sarah" fix documented above, just via a typo'd
+    # preposition instead of the check being in the wrong order.
     for trigger in ["invite ", "let "]:
         if trigger in lowered and ("to my party" in lowered or "to the party" in lowered
-                                    or "join my party" in lowered or "join the party" in lowered):
+                                    or "join my party" in lowered or "join the party" in lowered
+                                    or "ti my party" in lowered or "ti the party" in lowered):
             name = text[lowered.index(trigger) + len(trigger):].strip()
-            for cut in (" to my party", " to the party", " join my party", " join the party"):
+            for cut in (" to my party", " to the party", " join my party", " join the party",
+                        " ti my party", " ti the party"):
                 if cut in name.lower():
                     name = name[:name.lower().index(cut)].strip()
                     break
@@ -488,6 +497,23 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # this is checked as its own alternative rather than loosening the
     # existing pattern.
     if re.search(r"\b(?:[Gg]ive|[Hh]and|[Tt]rade|[Ss]end)\s+(?:[A-Z]\w+|@\w+)\s+(?:a|an|the|some)\b", text):
+        return {**base, "action": "give_item"}
+
+    # Real live bug (2026-08-06, confirmed live via topic-activity
+    # monitoring): "Give Pan bracers of the steady hand" fell through
+    # to a plain "chat" reply, and "Give Vesh ring of undertow" got
+    # hijacked to talk_npc by the known-NPC-name loop below -- neither
+    # has " to " (the first check above) nor an article word right after
+    # the recipient's name (the second check above). Real players skip
+    # the article on a multi-word item name just as often as they
+    # include it. Detected here via the same capitalized-recipient/
+    # @-tag signal as the check above, but requiring at least TWO more
+    # words after the recipient -- real item names in this game are
+    # essentially always multi-word ("ring of undertow", "bracers of
+    # the steady hand", "woodcutters axe"), which keeps this narrower
+    # than a bare one-word "give Pan space/trouble/credit" false
+    # positive would need to be to slip through.
+    if re.search(r"\b(?:[Gg]ive|[Hh]and|[Tt]rade|[Ss]end)\s+(?:[A-Z]\w+|@\w+)\s+\w+\s+\w+", text):
         return {**base, "action": "give_item"}
 
     # Confirmed live 2026-07-14 (Coffee, reported as a broad "roadblock"
@@ -577,9 +603,11 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # inviting a fellow player's or AI companion's own character).
     for trigger in ["invite ", "let "]:
         if trigger in lowered and ("to my party" in lowered or "to the party" in lowered
-                                    or "join my party" in lowered or "join the party" in lowered):
+                                    or "join my party" in lowered or "join the party" in lowered
+                                    or "ti my party" in lowered or "ti the party" in lowered):
             name = text[lowered.index(trigger) + len(trigger):].strip()
-            for cut in (" to my party", " to the party", " join my party", " join the party"):
+            for cut in (" to my party", " to the party", " join my party", " join the party",
+                        " ti my party", " ti the party"):
                 if cut in name.lower():
                     name = name[:name.lower().index(cut)].strip()
                     break
@@ -1122,7 +1150,16 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # already checked first so "examine the area" can't be shadowed).
     # Target text is matched against the current location's real
     # interactables list in bot.py — never invented, same as items.
-    for trigger in ["examine the ", "examine ", "look at the ", "look closer at ", "inspect the ", "inspect ", "check out the ", "search the ", "look at "]:
+    # "look under" added 2026-08-06 (real player, caught via topic-
+    # activity monitoring): "Look under the hollow stump shrine" fell
+    # through this list (only "look at"/"look closer at" were covered,
+    # not "look under") to the low-confidence 'chat' default, and the
+    # model call that followed picked 'look' (whole-area) over
+    # 'examine' (the specific object actually named) -- the exact same
+    # non-silent-but-wrong misclassification shape as the "touch" gap
+    # documented below.
+    for trigger in ["examine the ", "examine ", "look at the ", "look closer at ", "look under the ", "look under ",
+                     "inspect the ", "inspect ", "check out the ", "search the ", "look at "]:
         if trigger in lowered:
             target = text[lowered.index(trigger) + len(trigger):].strip()
             return {**base, "action": "examine", "target": target or None}
@@ -1156,6 +1193,7 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # picked 'look' (whole-area) over 'examine' (the specific object
     # actually named) -- a real but non-silent misclassification, since
     # "look" still replies, just with the wrong, generic content.
+    #
     examine_verb_match = re.search(
         r"\b(?:read|observed|examined|inspected|searched|checked out|touch(?:ed)?|"
         r"looked (?:at|closer at)|(?:peer|perr)(?:ed)? (?:at|into|in)|glanced? at)\b\s+"
@@ -1164,6 +1202,25 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     )
     if examine_verb_match:
         target = text[examine_verb_match.start(1):examine_verb_match.end(1)].strip()
+        return {**base, "action": "examine", "target": target or None}
+
+    # "feel(s/ing)?/felt" added 2026-08-06 (real player, caught via
+    # topic-activity monitoring): "Feel the pulse on the weathered
+    # waystone" fell all the way through to the silent 'chat' default --
+    # same shape as the "touch" gap above, just a different synonym for
+    # the same physical-interaction verb, and this one IS fully silent
+    # (no reply at all) rather than a wrong-but-present one. Kept as a
+    # SEPARATE check with a REQUIRED article (unlike touch/read/etc.
+    # above, whose article is optional) specifically because "feel" is
+    # overwhelmingly used as an EMOTION verb in ordinary English ("I'm
+    # feeling great today") with no article at all -- confirmed live via
+    # direct testing that folding it into the shared optional-article
+    # regex above misfired on exactly that phrase. Requiring "the/a/an"
+    # right after the verb blocks the emotion-verb case while still
+    # matching the real physical-interaction phrasing this was added for.
+    feel_verb_match = re.search(r"\b(?:feel(?:s|ing)?|felt)\b\s+(?:the |a |an )(.+)", lowered)
+    if feel_verb_match:
+        target = text[feel_verb_match.start(1):feel_verb_match.end(1)].strip()
         return {**base, "action": "examine", "target": target or None}
 
     # Live-caught (2026-07-19, Sugar): "Try opening the barrel with a

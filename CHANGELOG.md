@@ -2,6 +2,137 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.90] — Multi-tenant scaling Phase 4c/4d/4e complete, Universal Manipulation (repeatable Skill Tree investment), weapon stats on the character sheet, 11 real bugs found via dev-bridge/topic-activity monitoring
+
+**Multi-tenant scaling Phase 4c/4d/4e** (closes out the `db.py` side
+of the retrofit begun in Phase 4a/4b): every remaining single-tenant
+table now threads a real `chat_id` through instead of assuming one
+global game world.
+- Phase 4c: `npc_relationships`/`faction_standing` (18 call sites) —
+  `get_relationship`, `adjust_affinity`, `set_banned_by_npc`,
+  `is_banned_by_npc`, `resolve_companion`, `get_companion_resolution`,
+  `get_faction_standing`, `adjust_faction_standing`.
+- Phase 4d: `market_listings` (8 call sites) and `board_quests`/
+  `parties` (9+6 call sites) — `create_market_listing`,
+  `get_market_listings`, `get_market_listing`, `remove_market_listing`,
+  the full board-quest generation/accept/progress/turn-in path, party
+  creation and membership.
+- Phase 4e: global list/search functions — `get_leaderboard`,
+  `find_character_by_name`, `list_all_active_real_players`.
+- **Two real live bugs found during the retrofit, both already
+  silently corrupting data**: `create_board_quest` and `create_party`
+  each already took `chat_id` as a parameter (added in Phase 4a) but
+  never actually wrote it into their `INSERT` — every board quest and
+  party created since then had `chat_id` stuck `NULL`. Fixed at the
+  source, plus an idempotent backfill in `init_db()` that healed the
+  real bad rows already in the live DB (confirmed: 40 board_quests
+  rows, including 2 belonging to a real active player's currently-
+  accepted quests).
+- **A third real bug**: `_IDLE_WARNED` was keyed on bare
+  `telegram_user_id`, so the same real person active in two tenant
+  chats would only ever get idle-warned in whichever chat's background
+  check happened to run first. Now keyed on `(telegram_user_id,
+  chat_id)`.
+
+**Weapon stats now show up everywhere they should**, per Coffee: "when
+i look at weapons im not seeing the attack strength, stats,
+resistances, elements... it shud show the stats also on the players
+sheet." `_format_item_stats_line` now reads `damage_dice`/
+`damage_type`/`ability`/`damage_bonus` for every weapon (previously
+silent for any weapon without a `damage_bonus` affix), and
+`_format_equipped_line` now shows a real stats sub-line per equipped
+item on the character sheet (previously bare names only).
+
+**Two more real bugs found live via dev-bridge/topic-activity
+monitoring:**
+- `_BufferingChatProxy` (the compound-multi-intent-message dispatch
+  proxy) never implemented `.send_photo()`, so every location/item/NPC
+  image silently failed to send whenever it occurred inside a compound
+  message ("recruit Sarah and look around", etc.).
+- "Feel the X" (e.g. "Feel the pulse on the weathered waystone") fell
+  through to silent `chat` instead of `examine` — added as its own
+  check with a required article, since "feel" is overwhelmingly an
+  emotion verb without one ("I'm feeling great today").
+
+All of the above verified against the full `FastRegressionTests` suite
+(367 tests at the time) before Universal Manipulation was layered on
+top of it.
+
+**Universal Manipulation**, per Coffee: "let players level up skills
+they already have to increase power... breaking out of the box /
+breaking the game." Replaces the old single-purchase Skill Tree
+(one flat, one-time upgrade per class) with unlimited, repeatable
+investment of the same banked skill_points currency:
+- Each class's signature mechanic (Second Wind, Sneak Attack, Rage
+  uses, Bardic Inspiration, Lay on Hands, Arcane Recovery, ki, Wild
+  Shape temp HP, Dark One's Blessing, Draconic Resilience's AC,
+  Disciple of Life's healing bonus, Favored Enemy) now scales
+  linearly, unlimited, per point invested — no schema change needed;
+  the existing `skill_tree_upgrades` list column just allows the same
+  id to appear more than once now.
+- **Vitality** (max HP) and **Arcane Reserve** (max spell slots,
+  casters only) — new repeatable pools, +10% compounding per point,
+  applied as a real permanent stat mutation at purchase time (same
+  convention leveling up itself already uses).
+- **Every profession** (herbalism, mining, fishing, lumberjacking,
+  alchemy, cooking, blacksmithing) — +1 flat roll bonus per point,
+  wired into the same additive bonus accumulator `_do_gather`/
+  `_do_craft` already use for practiced_bonus/class-affinity/equipped-
+  gear bonuses.
+- **Weapon & Armor Mastery** (per Coffee: "make sure they can choose
+  proficiencies in weapons and armours too"): one-time real
+  proficiency unlocks for simple/martial weapons and light/medium/
+  heavy armor/shields, widening (never replacing) the existing
+  class-based `is_weapon_proficient`/`is_armor_proficient` checks.
+- A real, one-time DB migration fixes the 2 characters (confirmed live:
+  Charvenna, Vesh Nightglass) who'd bought the old one-shot Draconic
+  Hide upgrade under the previous system, so their first Universal
+  Manipulation point in it doesn't double-count the old permanent AC
+  mutation.
+
+Verified with a full 376-test `FastRegressionTests` run (only the one
+known pre-existing `test_fast_travel_blocks_on_locked_connection`
+ordering flake, plus one Ollama-latency-induced timing flake in
+`test_in_battle_timeout_warns_then_forces_a_default_attack`
+independently confirmed to pass cleanly in isolation), plus targeted
+real-execution repro scripts for every new mechanic (point-repeatable
+purchases, Vitality/Arcane Reserve pool mutation, Weapon Mastery
+widening a real attack roll's proficiency bonus, Disciple's Grace and
+Killer's Instinct scaling averaged over many real rolls).
+
+**Six more real bugs found live via dev-bridge/topic-activity
+monitoring, each verified with a real executed test:**
+- **`the_hollow_stump` quest permanent soft-lock.** A story quest
+  whose offer-location and completion-trigger-location are the same
+  place (confirmed to also affect `the_wrong_color`/
+  `the_hush_stage1_signs`) could never complete, since completion was
+  only ever checked on a *later* "arrived at a new location" event —
+  but the player is by construction already standing at the trigger
+  location the instant they accept. Now checked immediately after
+  accepting too.
+- **"Give X [item]" without the word "to"** (e.g. "Give Pan bracers of
+  the steady hand") fell through to silent `chat` instead of
+  `give_item`.
+- **"Look under X"** fell through to the generic whole-area `look`
+  instead of examining the named object.
+- **Shrine revival couldn't find a dead character with no `party_id`.**
+  Both the free-text prayer and the tap-to-revive menu only ever
+  looked at the caller's own party members — a dead character who'd
+  left/never joined a party (confirmed live: Coffee's own "Pan",
+  died at The Colosseum) was invisible to revival no matter which
+  other character brought the offering.
+- **`get_party_members_by_id`'s `active_characters` JOIN silently
+  dropped any party member who wasn't their owner's *currently active*
+  character** — root cause of "why are all our characters getting
+  dropped from party." Affected 17 real call sites project-wide
+  (party status screen, bench/unbench roster, XP-sharing to absent
+  members, "is this party all AI" detection, human-leader lookup, and
+  more) — none of them actually wanted "only if this is literally the
+  active slot right now," so the join is removed entirely rather than
+  patched per call site.
+- **"Invite X ti my party"** (typo for "to") fell through to
+  `talk_npc`/silent chat instead of `recruit_npc`/`invite_to_party`.
+
 ## [1.27.89] — Battle-menu target pickers for buff/debuff spells, "look at quests" misclassification fix
 
 **Battle-menu target pickers now cover every buff/debuff spell that has

@@ -483,9 +483,14 @@ def resolve_heal_spell(spell_id: str, caster: dict, target: dict) -> dict:
     # cantrip) spell restores HP, real 5E formula.
     if caster.get("char_class", "").lower() == "cleric" and spell["level"] > 0:
         disciple_of_life_bonus = 2 + spell["level"]
-        # Task #131 skill-tree upgrade "disciples_grace": doubles this bonus.
-        if "disciples_grace" in (caster.get("skill_tree_upgrades") or []):
-            disciple_of_life_bonus *= 2
+        # Universal Manipulation "disciples_grace" (2026-08-06,
+        # repeatable): was a flat one-time double; now each point
+        # invested adds ANOTHER full copy of the base bonus (1 point =
+        # still exactly doubled, matching every existing character's
+        # first point unchanged; 2 points = tripled; unlimited beyond
+        # that).
+        grace_points = (caster.get("skill_tree_upgrades") or []).count("disciples_grace")
+        disciple_of_life_bonus *= 1 + grace_points
         total_healed += disciple_of_life_bonus
     # Hybrid Cleric (2026-07-22): a real, chance-gated, scaled-down
     # taste of Disciple of Life -- can't ever double up with the real
