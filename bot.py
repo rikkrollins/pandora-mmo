@@ -12846,7 +12846,41 @@ async def _do_look(update: Update) -> None:
         await _safe_send(update, "\n".join(lines))
         return
     lines.append(location["description"])
-    npcs_here = _npcs_at_location(character["current_location"], update.effective_chat.id)
+    extra_lines, reply_markup = _location_extra_detail(character, location, character["current_location"], update.effective_chat.id)
+    lines.extend(extra_lines)
+
+    # Confirmed live 2026-07-14 (Coffee): TTS was silently skipped for
+    # "look around" -- this reply went straight to
+    # update.effective_chat.send_message, bypassing _safe_send
+    # entirely, and _maybe_speak (TTS) is only ever hooked in there.
+    # This is one of many direct-send call sites in this file (~195 of
+    # them vs 64 through _safe_send) -- most are short refusal/error
+    # messages that were never meant to be narrated aloud, but "look"
+    # is real player-facing narration and should have gone through
+    # _safe_send like every other primary action reply already does.
+    await _safe_send(update, "\n".join(lines), reply_markup=reply_markup)
+    await _maybe_send_location_image(update, location, character["current_location"], already_visited)
+
+
+def _location_extra_detail(character: dict, location: dict, location_id: str, chat_id: int) -> tuple[list[str], "InlineKeyboardMarkup | None"]:
+    """
+    Everything "look around" shows beyond the location's own name and
+    description: who/what's here, how to leave, and any quest hook.
+    Extracted (2026-08-07, per Coffee: "prompt 'look around' ... once
+    we arrive there to keep the narration flowing") so _do_move's
+    real-player arrival narration can show this same detail without a
+    player needing to separately type "look around" every time they
+    walk into a room -- previously _do_move only ever showed the
+    location's bare name/description, none of this. Kept as a
+    lines-only helper (never sends anything, never sends the location
+    image) so BOTH callers stay in full control of exactly one combined
+    send/image per arrival -- calling the full _do_look from _do_move
+    directly was considered and rejected specifically because it would
+    have sent the same location image a second time back to back.
+    """
+    lines = []
+    npcs_here = _npcs_at_location(location_id, chat_id)
+    npc_names = []
     if npcs_here:
         npc_names = [cl.get_npc(CAMPAIGN, n)["name"] for n in npcs_here if cl.get_npc(CAMPAIGN, n)]
         lines.append(f"People here: {', '.join(npc_names)}")
@@ -12916,31 +12950,22 @@ async def _do_look(update: Update) -> None:
     # _npc_quest_facts's own comment on this), so any NPC actually
     # present is the approximation used to point players at someone to
     # talk to. Board quests are generated here too (not just shown),
-    # matching check_quests's own behavior, so the FIRST person to look
-    # around a location each day is the one who reveals what's posted.
-    story_offer = _offerable_quest_at_location(character, character["current_location"])
+    # matching check_quests's own behavior, so the FIRST person to see
+    # this detail (whether via "look around" or now arrival too) is the
+    # one who reveals what's posted.
+    story_offer = _offerable_quest_at_location(character, location_id)
     if story_offer:
         if npcs_here:
             lines.append(f"📜 {npc_names[0]} looks like they could use your help with something.")
         else:
             lines.append("📜 There's a task tied to this place, though no one's here to ask about it right now.")
 
-    board_quests_here = board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, character["current_location"], update.effective_chat.id)
+    board_quests_here = board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, location_id, chat_id)
     unclaimed_board_quests = [q for q in board_quests_here if not q.get("accepted_by")]
     if unclaimed_board_quests:
         lines.append("📋 There's a bounty posted on the board here — say \"check quests\" to see it.")
 
-    # Confirmed live 2026-07-14 (Coffee): TTS was silently skipped for
-    # "look around" -- this reply went straight to
-    # update.effective_chat.send_message, bypassing _safe_send
-    # entirely, and _maybe_speak (TTS) is only ever hooked in there.
-    # This is one of many direct-send call sites in this file (~195 of
-    # them vs 64 through _safe_send) -- most are short refusal/error
-    # messages that were never meant to be narrated aloud, but "look"
-    # is real player-facing narration and should have gone through
-    # _safe_send like every other primary action reply already does.
-    await _safe_send(update, "\n".join(lines), reply_markup=_look_action_keyboard(location, unclaimed_board_quests))
-    await _maybe_send_location_image(update, location, character["current_location"], already_visited)
+    return lines, _look_action_keyboard(location, unclaimed_board_quests)
 
 
 async def _do_check_weather(update: Update) -> None:
@@ -14348,6 +14373,20 @@ async def _do_move(update: Update, text: str) -> None:
     else:
         await _safe_send(update, f"🚶 **{character['name']}** travels to **{destination['name']}**.\n{destination['description']}")
         await _maybe_send_location_image(update, destination, destination_id, destination_already_visited)
+        # Auto "look around" on arrival (2026-08-07, per Coffee: "prompt
+        # 'look around' in that area once we arrive there to keep the
+        # narration flowing"). Real players only (never an AI
+        # companion's own autonomous move -- would spam the Adventure
+        # feed with a full room listing for every AI step) -- confirmed
+        # is_ai is false for a real player's own character row. Skipped
+        # entirely in the dark branch above, matching _do_look's own
+        # darkness gate: you can't see who/what's here either.
+        if not updated_character_for_light.get("is_ai"):
+            extra_lines, reply_markup = _location_extra_detail(
+                updated_character_for_light, destination, destination_id, update.effective_chat.id
+            )
+            if extra_lines:
+                await _safe_send(update, "\n".join(extra_lines), reply_markup=reply_markup)
 
     updated_character = db.get_character(update.effective_user.id, update.effective_chat.id)
     await _maybe_trigger_npc_encounter(update, updated_character, destination)
@@ -14601,6 +14640,16 @@ async def _do_fast_travel(update: Update, text: str) -> None:
     await _safe_send(update, f"🌀 You fast-travel to **{destination['name']}**.\n{destination['description']}")
 
     updated_character = db.get_character(telegram_user_id, update.effective_chat.id)
+    # Auto "look around" on arrival (2026-08-07, per Coffee: "prompt
+    # 'look around' ... once we arrive there" -- covers the waypoint-
+    # button warp too, not just walking there via _do_move). Real
+    # players only, same reasoning as _do_move's own version of this.
+    if not updated_character.get("is_ai"):
+        extra_lines, reply_markup = _location_extra_detail(
+            updated_character, destination, destination_id, update.effective_chat.id
+        )
+        if extra_lines:
+            await _safe_send(update, "\n".join(extra_lines), reply_markup=reply_markup)
     await _maybe_trigger_npc_encounter(update, updated_character, destination)
     await _check_quest_completions_reach_location(update, update.effective_user.id, destination_id)
     await _check_board_quest_turnin(update, update.effective_user.id, destination_id)

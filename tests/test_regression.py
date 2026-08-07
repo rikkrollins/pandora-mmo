@@ -5522,6 +5522,68 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("North:", reply)
         self.assertIn("West:", reply)
 
+    async def test_arriving_on_foot_auto_shows_look_around_detail_for_a_real_player(self):
+        """
+        Real feature request (2026-08-07, Coffee: "when we enter a
+        location after clicking the button to go there or after we say
+        go to a location can you then prompt 'look around' in that
+        area once we arrive there to keep the narration flowing"). Real
+        players only (Coffee's own answer to the scope question).
+        _do_move used to only ever show the destination's bare name and
+        description on arrival -- none of what "look around" shows
+        (who's here, exits, interactables, resources). Now it appends
+        that same detail as a real follow-up message right after
+        arrival, extracted into the shared _location_extra_detail
+        helper (also used by _do_look itself, so this isn't a second,
+        divergent implementation of the same listing).
+        """
+        user_id = 900560
+        make_basic_character(user_id, "ArrivalTest", current_location="whispering_wood")
+        db.mark_location_cleared(user_id, -999, "whispering_wood")
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "", sink), "go south")
+        text_messages = [s for s in sink if not s.startswith("<photo:")]
+        self.assertEqual(len(text_messages), 2)
+        self.assertIn("travels to", text_messages[0])
+        self.assertIn("You can travel to:", text_messages[1])
+
+    async def test_arriving_on_foot_does_not_auto_look_for_an_ai_companion(self):
+        """
+        Companion to the test above: the auto "look around" on arrival
+        must NOT fire for an AI companion's own autonomous move -- would
+        spam the Adventure feed with a full room listing on every AI
+        step, and Coffee's own answer to the scope question was "real
+        players only."
+        """
+        user_id = 900561
+        make_basic_character(user_id, "ArrivalTestAI", current_location="whispering_wood", is_ai=True)
+        db.mark_location_cleared(user_id, -999, "whispering_wood")
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "", sink), "go south")
+        text_messages = [s for s in sink if not s.startswith("<photo:")]
+        self.assertEqual(len(text_messages), 1)
+        self.assertIn("travels to", text_messages[0])
+
+    async def test_fast_travel_arrival_auto_shows_look_around_detail_for_a_real_player(self):
+        """
+        Same feature as the on-foot version above, covering the
+        waypoint-button warp path too (_do_fast_travel) -- Coffee's
+        request explicitly named both "clicking the button to go there
+        or after we say go to a location."
+        """
+        user_id = 900562
+        character = make_basic_character(user_id, "FastTravelArrivalTest", current_location="crossroads_tavern")
+        db.update_character_by_id(
+            character["character_id"],
+            visited_locations=list(set((character.get("visited_locations") or []) + ["market_row"])),
+        )
+        sink = []
+        await bot._do_fast_travel(FakeUpdate(user_id, "", sink), "fast travel to market row")
+        text_messages = [s for s in sink if not s.startswith("<photo:")]
+        self.assertEqual(len(text_messages), 2)
+        self.assertIn("fast-travel to", text_messages[0])
+        self.assertIn("You can travel to:", text_messages[1])
+
     # -- Real live bug (2026-07-19, Coffee): "Switch to my character
     #    Elduinn" extracted "my character elduinn" as the target name
     #    (longer than the real name "Elduinn"), which never matched --

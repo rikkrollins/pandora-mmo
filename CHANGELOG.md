@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.92] — Auto "look around" on arrival, for real players
+
+Per Coffee: "when we enter a location after clicking the button to go
+there or after we say go to a location can you then prompt 'look
+around' in that area once we arrive there to keep the narration
+flowing." Confirmed as real friction the same day via the topic-
+activity log: Coffee typing "Look around" manually right after two
+separate moves, every time, just to see who/what was actually there.
+
+Arriving anywhere — walking there (`_do_move`) or warping via a
+waypoint button (`_do_fast_travel`) — now automatically shows the same
+detail "look around" already shows (who's here, sensed danger, exits/
+directions, interactables, resource nodes, quest hooks), as a real
+follow-up message right after the arrival description and location
+image. Real players only (Coffee's own answer when asked): an AI
+companion's own autonomous move stays exactly as terse as before, so
+the Adventure feed doesn't get a full room listing spammed on every AI
+step.
+
+Implementation note: the listing itself is not a second, divergent
+copy — it's extracted out of `_do_look` into a shared
+`_location_extra_detail` helper that both `_do_look` and the new
+arrival code call, so the two can never quietly drift apart. Skipped
+entirely when arriving somewhere too dark to see (matching `_do_look`'s
+own darkness gate — you can't see who/what's here either), and never
+sends a second copy of the location image (that was one option
+considered and rejected — just calling `_do_look` directly from
+arrival would have sent the same image twice back to back).
+
 ## [1.27.91] — 7 real bugs found via dev-bridge/topic-activity monitoring: crashed-callback feedback, monster image prompts, "still working" notice, attack-with-spell/breath-weapon misclassification, bare "fight", duplicate-message timeout fix
 
 All found and fixed through the standing dev-bridge/topic-activity
