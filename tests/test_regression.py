@@ -3872,6 +3872,47 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         for text in ("I use my breath weapon", "breathe fire", "unleash my breath", "breath weapon"):
             self.assertEqual(_keyword_fallback(text, [])["action"], "breath_weapon", text)
 
+    def test_attack_with_dragon_breath_classifies_as_breath_weapon_not_a_weapon_attack(self):
+        """
+        Real live bug (2026-08-07, topic-activity log: "Attack spider 1
+        with dragon breath"). The original 2026-07-22 "dragon breath"
+        fix (see test_breath_weapon_phrasing_classified_correctly above)
+        has always been unreachable whenever the message ALSO contains a
+        bare attack word ("attack"/"hit"/"swing"/etc.) -- the generic
+        attack_words match ran first and returned immediately, so only
+        an attack-word-free phrasing ("use dragon breath on X") ever
+        actually got classified as breath_weapon; the arguably more
+        natural "attack X with dragon breath" fell through to a mundane
+        weapon attack instead, silently discarding the racial ability.
+        Same root cause and same fix shape as the "attack X with
+        <spell>" bug fixed the same day -- the breath-weapon phrase
+        check was moved ahead of the generic attack match instead of
+        after it.
+        """
+        self.assertEqual(
+            _keyword_fallback("Attack spider 1 with dragon breath", [])["action"], "breath_weapon"
+        )
+        self.assertEqual(
+            _keyword_fallback("I attack the goblin with my breath weapon", [])["action"], "breath_weapon"
+        )
+
+    def test_bare_fight_classifies_as_attack_without_misfiring_on_the_fighter_class_name(self):
+        """
+        Real live bug (2026-08-07, topic-activity log: Coffee typed a
+        bare "Fight" and got silent "chat" -- no reply, no game effect).
+        COMBAT_START_WORDS only matches "fight the"/"fight some"/"let's
+        fight" etc, never a standalone "Fight", and attack_words never
+        included "fight" at all. Fixed with a whole-WORD check (not
+        folded into attack_words' plain substring check) specifically
+        because "fight" is a substring of "Fighter" -- one of this
+        game's own 12 real class names -- a substring check would have
+        misclassified any ordinary mention of the class as an attack.
+        """
+        self.assertEqual(_keyword_fallback("Fight", [])["action"], "attack")
+        self.assertEqual(_keyword_fallback("Fight!", [])["action"], "attack")
+        self.assertNotEqual(_keyword_fallback("I made a Fighter", [])["action"], "attack")
+        self.assertNotEqual(_keyword_fallback("switch to my Fighter", [])["action"], "attack")
+
     # -- Saving throw proficiency (2026-07-16 audit): confirmed via grep
     #    every save-based spell only ever added the raw ability modifier,
     #    never a proficiency bonus, even for a class real 5E says is
@@ -6232,6 +6273,299 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         members = db.get_party_members_by_id(4242)
         names = [m["name"] for m in members]
         self.assertIn("ReproElduinn2", names)
+
+    async def test_log_unhandled_error_answers_and_replies_to_a_crashed_callback_query(self):
+        """
+        Real live bug (2026-08-06, Sheri via dev-topic screenshot: "Was
+        supposed to be skill fire ball"). Her tap on a battle-menu "cast
+        Fireball" button crashed on a transient httpcore.ReadTimeout, but
+        the old fallback-reply code only ever fired for `update.message`
+        (a typed message), which is None for a callback-query-only update
+        (a button tap) -- so ANY battle-menu/waypoint/shrine/skill-tree
+        button tap that crashed mid-handler left the player with zero
+        feedback: no error, no spinner resolution, nothing. Fixed
+        _log_unhandled_error to also handle a crashed callback_query:
+        acknowledge it (stop the tap from spinning forever) and send the
+        same fallback text to the chat/topic the button lived in.
+
+        This project's structural FakeUpdate/FakeCallbackUpdate test
+        doubles are NOT subclasses of the real telegram.Update, so they
+        can't exercise this function's `isinstance(update, Update)` guard
+        (present in the original code, not new). This test builds a real
+        (but minimal) telegram.Update/CallbackQuery/Message/Chat instead,
+        with a fake Bot swapped in via set_bot() so no network call
+        actually happens -- the only way to genuinely verify this guard.
+        """
+        import datetime as _dt
+
+        from telegram import CallbackQuery as _CallbackQuery
+        from telegram import Chat as _Chat
+        from telegram import Message as _Message
+        from telegram import Update as _Update
+        from telegram import User as _User
+
+        class _FakeBot:
+            def __init__(self):
+                self.answered = []
+                self.sent = []
+
+            async def answer_callback_query(self, **kwargs):
+                self.answered.append(kwargs)
+                return True
+
+            async def send_message(self, **kwargs):
+                self.sent.append(kwargs)
+                return None
+
+        class _DummyContext:
+            error = RuntimeError("boom - simulated crash mid-callback")
+
+        fake_bot = _FakeBot()
+        user = _User(id=700900, first_name="Sheri", is_bot=False)
+        chat = _Chat(id=-999500, type="supergroup")
+        chat.set_bot(fake_bot)
+        msg = _Message(
+            message_id=555,
+            date=_dt.datetime.now(_dt.timezone.utc),
+            chat=chat,
+            message_thread_id=23,
+        )
+        msg.set_bot(fake_bot)
+        query = _CallbackQuery(
+            id="12345", from_user=user, chat_instance="abc123",
+            data="bm|casttarget|fireball|Crystal Spider 2", message=msg,
+        )
+        query.set_bot(fake_bot)
+        update = _Update(update_id=1, callback_query=query)
+
+        await bot._log_unhandled_error(update, _DummyContext())
+
+        self.assertEqual(len(fake_bot.answered), 1)
+        self.assertEqual(len(fake_bot.sent), 1)
+        self.assertIn("tap", fake_bot.sent[0]["text"])
+        self.assertEqual(fake_bot.sent[0]["message_thread_id"], 23)
+        self.assertEqual(fake_bot.sent[0]["chat_id"], -999500)
+
+        # The pre-existing typed-message path must still work unchanged.
+        fake_bot2 = _FakeBot()
+        chat2 = _Chat(id=-999501, type="supergroup")
+        chat2.set_bot(fake_bot2)
+        msg2 = _Message(
+            message_id=1, date=_dt.datetime.now(_dt.timezone.utc),
+            chat=chat2, message_thread_id=41, text="cast fireball",
+            from_user=user,
+        )
+        msg2.set_bot(fake_bot2)
+        update2 = _Update(update_id=2, message=msg2)
+        await bot._log_unhandled_error(update2, _DummyContext())
+        self.assertEqual(len(fake_bot2.sent), 1)
+        self.assertNotIn("tap", fake_bot2.sent[0]["text"])
+        self.assertEqual(len(fake_bot2.answered), 0)
+
+        # A callback_query with no attached message (e.g. Telegram
+        # couldn't reattach an expired one) must not crash.
+        fake_bot3 = _FakeBot()
+        query3 = _CallbackQuery(
+            id="999", from_user=user, chat_instance="xyz",
+            data="bm|whatever", message=None,
+        )
+        query3.set_bot(fake_bot3)
+        update3 = _Update(update_id=3, callback_query=query3)
+        await bot._log_unhandled_error(update3, _DummyContext())
+        self.assertEqual(len(fake_bot3.answered), 1)
+        self.assertEqual(len(fake_bot3.sent), 0)
+
+    def test_monster_and_defeat_image_prompts_put_the_real_name_first(self):
+        """
+        Real live bug (2026-08-06, Coffee: "These images don't really
+        look like a crystal spider"). Confirmed via real Pollinations.ai
+        calls at the monster's own real deterministic seed
+        (monster:crystal_spider -> seed 1906563205): the old prompt
+        shape ("fantasy RPG a monster, Crystal Spider, ...") buried the
+        real name after generic "a monster" framing, and the image model
+        weighted that generic framing far more heavily -- render came
+        back as a generic shaggy dark blob, nothing crystalline or
+        spider-shaped. Moving the real name to the FRONT of the prompt
+        produced a genuinely crystalline, glowing, multi-legged render
+        at the same seed. Re-verified against Goblin (a monster whose
+        old prompt already rendered fine) at its own real seed to
+        confirm the reorder doesn't regress an already-working case.
+        This test can't re-run the live image API itself (no network
+        call belongs in the regression suite), so it verifies the one
+        thing that actually matters here: the real monster name is now
+        the first thing in the prompt string, for both a regular
+        monster, a boss, and the defeat-portrait variant of both.
+        """
+        regular = {"name": "Crystal Spider", "is_boss": False}
+        boss = {"name": "The Unspoken", "is_boss": True}
+        self.assertTrue(bot._monster_image_prompt(regular).startswith("Crystal Spider,"))
+        self.assertTrue(bot._monster_image_prompt(boss).startswith("The Unspoken,"))
+
+        defeat_entry = {"name": "Goblin", "monster_key": "goblin"}
+        self.assertTrue(bot._defeat_image_prompt(defeat_entry).startswith("Goblin,"))
+
+        fallen_player = {"name": "ReproPlayer", "monster_key": None}
+        self.assertTrue(bot._defeat_image_prompt(fallen_player).startswith("ReproPlayer,"))
+
+    async def test_still_working_notice_fires_only_for_a_genuinely_busy_user_in_adventure(self):
+        """
+        Real live bug (2026-08-06, Coffee via dev-topic screenshot: "the
+        character typed the command, but it didn't say anything so they
+        were unsure that it was still their time"). Confirmed via
+        bot_live_tmp.log: Sugar's two attacks 3 minutes apart with no
+        reply in between -- root cause is _run_in_user_order (by design,
+        see its own docstring): this exact same player's SECOND message
+        queues strictly behind the first's full processing, including a
+        real 30-160s+ Ollama narration call, with zero acknowledgment
+        that it's queued at all. text_message_router now checks
+        bot._USER_BUSY (set by _user_queue_worker while actively running
+        a job for that user) and sends an immediate "still working on
+        your last action" notice before enqueuing, but only in Adventure
+        (the "is it my turn" framing doesn't apply to Development/
+        Support, which aren't turn-based) and only for a user who is
+        genuinely already busy -- never for an ordinary single message,
+        and never leaking across different users.
+        """
+        from unittest.mock import patch
+
+        user_id = 900700
+        other_user_id = 900701
+
+        async def fake_route(update, context):
+            return None
+
+        with patch.object(bot, "_route_text_message", fake_route):
+            sink1 = []
+            await bot.text_message_router(FakeUpdate(user_id, "attack goblin", sink1), DummyContext())
+            self.assertFalse(any("Still working" in m for m in sink1))
+
+            bot._USER_BUSY.add(user_id)
+            try:
+                sink2 = []
+                await bot.text_message_router(FakeUpdate(user_id, "attack goblin again", sink2), DummyContext())
+                self.assertTrue(any("Still working" in m for m in sink2))
+            finally:
+                bot._USER_BUSY.discard(user_id)
+
+            bot._USER_BUSY.add(user_id)
+            try:
+                sink3 = []
+                await bot.text_message_router(
+                    FakeUpdate(user_id, "some dev message", sink3, thread_id=config.TOPIC_DEVELOPMENT_ID),
+                    DummyContext(),
+                )
+                self.assertFalse(any("Still working" in m for m in sink3))
+            finally:
+                bot._USER_BUSY.discard(user_id)
+
+            bot._USER_BUSY.add(other_user_id)
+            try:
+                sink4 = []
+                await bot.text_message_router(FakeUpdate(user_id, "attack goblin once more", sink4), DummyContext())
+                self.assertFalse(any("Still working" in m for m in sink4))
+            finally:
+                bot._USER_BUSY.discard(other_user_id)
+
+    def test_attack_with_a_named_spell_classifies_as_cast_spell_not_a_weapon_attack(self):
+        """
+        Real live bug, confirmed twice via dev-topic screenshots
+        (2026-08-06): "Attack spider 2 with fire ball" and "Attack
+        spider 3 with burning hands" both contain the bare word
+        "attack", so _keyword_fallback's generic attack_words match
+        claimed them before anything ever looked at what followed
+        "with" -- both resolved as a mundane weapon swing, silently
+        discarding the named spell (no fire damage, no spell slot
+        spent). Sheri's own dev-topic report ("Was supposed to be skill
+        fire ball") is exactly this. Fixed by checking for a real known
+        spell name (spells.py, never invented) before the generic
+        attack match. "fire ball" (two words) must still match the real
+        spell "Fireball" (one word) -- the comparison strips spaces on
+        both sides for exactly this reason. An ordinary weapon name
+        ("long sword") must NOT be reclassified -- it isn't a spell.
+        """
+        fireball = parse_intents("Attack the spider with fire ball")[0]
+        self.assertEqual(fireball["action"], "cast_spell")
+        self.assertEqual(fireball["spell_name"], "Fireball")
+
+        burning_hands = parse_intents("Attack spider 3 with burning hands")[0]
+        self.assertEqual(burning_hands["action"], "cast_spell")
+        self.assertEqual(burning_hands["spell_name"], "Burning Hands")
+
+        weapon = parse_intents("Attack spider 3 with long sword")[0]
+        self.assertEqual(weapon["action"], "attack")
+
+    async def test_do_cast_spell_matches_a_spaced_out_spell_name_against_its_real_one_word_name(self):
+        """
+        Companion fix to the reclassification above: _do_cast_spell's
+        own spell-name matching (character["known_spells"]) used an
+        exact-substring check that would NOT have matched "fire ball"
+        (two words, as players naturally type it) against the real
+        spell's real name "Fireball" (one word) -- reclassifying to
+        cast_spell alone would have just traded one wrong outcome
+        (silent weapon attack) for another (an incorrect "you don't
+        know a spell by that name", even though the character genuinely
+        knows Fireball). _text_mentions_spell strips spaces on both
+        sides to close this gap. Verified end-to-end: a real cast
+        through _do_cast_spell with the exact natural two-word phrasing
+        actually spends a real spell slot, confirming the spell was
+        truly recognized and cast, not just that no error was raised.
+        """
+        import sessions
+        sessions.end_session(-999)
+        caster_id = 950900
+        make_basic_character(
+            caster_id, "FireballCaster", char_class="Wizard",
+            known_spells=["fireball"], spell_slots_max=3, current_location="crossroads_tavern",
+        )
+        db.update_character(caster_id, -999, spell_slots_current=3)
+        goblin = {"telegram_user_id": -5200900, "name": "SpaceGoblin", "dexterity": 10, "strength": 10,
+                  "armor_class": 12, "hp_current": 20, "hp_max": 20, "conditions": [],
+                  "is_ai": 1, "monster_key": "goblin"}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        session = sessions.start_session(-999, [caster, goblin], {caster_id: "party", -5200900: "enemy"})
+        session.turn_order = [caster_id, -5200900]
+
+        sink = []
+        await bot._do_cast_spell(
+            FakeUpdate(caster_id, "Attack the goblin with fire ball", sink),
+            "Attack the goblin with fire ball",
+        )
+        after = db.get_character(caster_id, -999)
+        self.assertEqual(after["spell_slots_current"], 2)
+        self.assertTrue(any("Fireball" in m for m in sink))
+        sessions.end_session(-999)
+
+    def test_build_application_raises_telegram_api_timeouts_above_library_defaults(self):
+        """
+        Real live bug (2026-08-06, Coffee via dev-topic screenshot: "It
+        gave two attacks. Is this a bug?" -- the exact same "Round 4 --
+        It's now Ravenloft's turn!" battle-menu prompt sent twice, back
+        to back). Confirmed via bot_live_tmp.log at the exact timestamp:
+        a genuine "[message] send failed, retrying: TimedOut('Timed
+        out')" right before the duplicate. python-telegram-bot's
+        HTTPXRequest defaults to a 5s connect/read/write timeout (1s
+        pool timeout) for every outbound Telegram API call -- too tight
+        for this box's own already-documented characteristics (root
+        filesystem on a USB flash drive, plus a CPU-bound local Ollama
+        server this same process calls out to mid-request). _safe_send's
+        retry-on-TimedOut can't tell "genuinely failed" from "succeeded
+        but the ack was slow" apart (Telegram's sendMessage has no
+        idempotency key), so a merely-slow-but-successful send gets
+        retried and duplicated. Raising these timeouts doesn't eliminate
+        that possibility, but makes a false timeout meaningfully less
+        likely -- the same reasoning already applied to every Ollama
+        call in ai/*.py (see CLAUDE.md). build_application() itself
+        makes no network calls and doesn't touch bot_persistence.pickle
+        (PicklePersistence loads lazily, only on Application.initialize(),
+        never called here), so this is safe to build directly in a test.
+        """
+        app = bot.build_application()
+        request = app.bot.request
+        self.assertGreater(request._client.timeout.connect, 5.0)
+        self.assertGreater(request.read_timeout, 5.0)
+        self.assertGreater(request._client.timeout.write, 5.0)
+        self.assertGreater(request._client.timeout.pool, 1.0)
 
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):

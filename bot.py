@@ -12614,9 +12614,29 @@ async def _maybe_send_item_image(update: Update, item_id: str, item_data: dict) 
 
 
 def _monster_image_prompt(template: dict) -> str:
-    """Grounded only in the monster's own real name and is_boss flag -- no invented physical detail beyond generic 'fantasy monster' framing."""
+    """
+    Grounded only in the monster's own real name and is_boss flag -- no
+    invented physical detail beyond generic 'fantasy monster' framing.
+
+    Real live bug (2026-08-06, Coffee: "These images don't really look
+    like a crystal spider"). Root cause confirmed via real Pollinations.ai
+    calls at the monster's own real deterministic seed: the old prompt
+    put the monster's actual name LAST ("fantasy RPG a monster, Crystal
+    Spider, ..."), and the image model weighted the generic "a monster"
+    framing far more heavily than the real name buried after it --
+    Crystal Spider rendered as a generic shaggy dark blob, nothing
+    crystalline or spider-shaped about it. Moving the real name to the
+    FRONT of the prompt (name first, generic framing after) produced a
+    genuinely crystalline, glowing, multi-legged render at the same
+    seed -- confirmed side-by-side. Re-tested against Goblin (a monster
+    whose old prompt already rendered recognizably) at its own real seed
+    to confirm this reorder doesn't regress an already-working case --
+    it didn't, still clearly a goblin. Applies to every monster, not
+    just this one, since every monster's prompt buried its name the
+    same way.
+    """
     creature_desc = "a fearsome, powerful boss monster" if template.get("is_boss") else "a monster"
-    return f"fantasy RPG {creature_desc}, {template['name']}, digital painting, dramatic lighting, no text or labels"
+    return f"{template['name']}, {creature_desc}, fantasy RPG, digital painting, dramatic lighting, no text or labels"
 
 
 async def _maybe_send_monster_image(update: Update, monster_key: str, template: dict) -> None:
@@ -12662,12 +12682,19 @@ async def _maybe_send_spell_image(update: Update, spell: dict) -> None:
 
 
 def _defeat_image_prompt(entry: dict) -> str:
-    """Grounded only in the defeated participant's own real name and (for a real monster) its template's is_boss flag -- never invented appearance detail."""
+    """
+    Grounded only in the defeated participant's own real name and (for a
+    real monster) its template's is_boss flag -- never invented
+    appearance detail. Name moved to the front of the prompt, same fix
+    and same reasoning as _monster_image_prompt above (2026-08-06,
+    Coffee's "crystal spider" report) -- this prompt had the identical
+    name-buried-last shape.
+    """
     template = cl.get_monster_template(CAMPAIGN, entry["monster_key"]) if entry.get("monster_key") else None
     if template:
         creature_desc = "a fearsome boss monster, defeated and falling" if template.get("is_boss") else "a monster, defeated and falling"
-        return f"fantasy RPG {creature_desc}, {entry['name']}, dramatic lighting, digital painting, no text or labels"
-    return f"fantasy RPG adventurer, {entry['name']}, fallen in battle, dramatic lighting, digital painting, no text or labels"
+        return f"{entry['name']}, {creature_desc}, fantasy RPG, dramatic lighting, digital painting, no text or labels"
+    return f"{entry['name']}, a fantasy RPG adventurer, fallen in battle, dramatic lighting, digital painting, no text or labels"
 
 
 async def _maybe_send_defeat_image(update: Update, entry: dict) -> None:
@@ -16451,6 +16478,25 @@ async def _spend_cast_resource(
     return True
 
 
+def _text_mentions_spell(spell_id: str, spell_name: str, lowered_text: str) -> bool:
+    """
+    Whether lowered_text names this real spell -- either exactly
+    ("burning hands" for burning_hands) or with spaces squashed out on
+    both sides ("fire ball" for the real one-word spell "Fireball").
+    Needed once ai/intent_parser.py's own keyword fallback started
+    reclassifying "attack X with <spell>" text into cast_spell
+    (2026-08-06 fix) -- without the squashed comparison, a player typing
+    the natural two-word "fire ball" for the real spell "Fireball" would
+    get reclassified correctly but then land here as "you don't know a
+    spell by that name" anyway, a strictly worse outcome than before.
+    """
+    return (
+        spell_id.replace("_", " ") in lowered_text
+        or spell_name.lower() in lowered_text
+        or spell_name.lower().replace(" ", "") in lowered_text.replace(" ", "")
+    )
+
+
 async def _do_cast_spell(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -16463,7 +16509,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
     lowered = text.lower()
     for candidate in character["known_spells"]:
         spell = spells_module.get_spell(candidate)
-        if spell and (candidate.replace("_", " ") in lowered or spell["name"].lower() in lowered):
+        if spell and _text_mentions_spell(candidate, spell["name"], lowered):
             spell_id = candidate
             break
 
@@ -16482,7 +16528,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                 continue
             candidate = item_data.get("spell")
             spell = spells_module.get_spell(candidate) if candidate else None
-            if spell and (candidate.replace("_", " ") in lowered or spell["name"].lower() in lowered):
+            if spell and _text_mentions_spell(candidate, spell["name"], lowered):
                 spell_id, via_scroll, scroll_item_id = candidate, True, item_id
                 break
 
@@ -16507,7 +16553,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             if not candidate:
                 continue
             spell = spells_module.get_spell(candidate)
-            if spell and (candidate.replace("_", " ") in lowered or spell["name"].lower() in lowered):
+            if spell and _text_mentions_spell(candidate, spell["name"], lowered):
                 spell_id, via_gear = candidate, True
                 gear_instance_id = item_data.get("instance_id")
                 gear_spell_uses = item_data.get("grants_spell_uses", 1)
@@ -19869,11 +19915,16 @@ async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TY
 # Per-user message queues — see _run_in_user_order for why these exist.
 _USER_QUEUES: dict[int, asyncio.Queue] = {}
 _USER_WORKERS: dict[int, asyncio.Task] = {}
+# Which users currently have a message actively being processed by their
+# queue worker (not just sitting in the queue) -- see text_message_router's
+# "still working on your last action" notice below for why this exists.
+_USER_BUSY: set[int] = set()
 
 
-async def _user_queue_worker(queue: asyncio.Queue) -> None:
+async def _user_queue_worker(queue: asyncio.Queue, user_id: int) -> None:
     while True:
         coro_fn, future = await queue.get()
+        _USER_BUSY.add(user_id)
         try:
             result = await coro_fn()
             if not future.done():
@@ -19882,6 +19933,7 @@ async def _user_queue_worker(queue: asyncio.Queue) -> None:
             if not future.done():
                 future.set_exception(e)
         finally:
+            _USER_BUSY.discard(user_id)
             queue.task_done()
 
 
@@ -19889,7 +19941,7 @@ def _get_user_queue(user_id: int) -> asyncio.Queue:
     if user_id not in _USER_QUEUES:
         queue: asyncio.Queue = asyncio.Queue()
         _USER_QUEUES[user_id] = queue
-        _USER_WORKERS[user_id] = asyncio.create_task(_user_queue_worker(queue))
+        _USER_WORKERS[user_id] = asyncio.create_task(_user_queue_worker(queue, user_id))
     return _USER_QUEUES[user_id]
 
 
@@ -20027,6 +20079,25 @@ async def text_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     user_id = update.effective_user.id
+    # Real live bug (2026-08-06, Coffee via dev-topic screenshot): a
+    # player's action can take a real 30-160s+ Ollama call to narrate
+    # (see _run_in_user_order's own docstring for why this player's next
+    # message has to queue behind it, not race it). Queued silently, the
+    # player has no way to tell "the bot hasn't gotten to my last message
+    # yet" apart from a typing indicator (easy to miss/scroll past) --
+    # confirmed live: Sugar sent a second attack 3 minutes after her
+    # first with nothing in between, unsure whether it was still her
+    # turn. Only fires in Adventure (the "is it my turn" framing doesn't
+    # apply to Development/Support, which aren't turn-based), and only
+    # when this exact user genuinely already has something in flight --
+    # never fires for an ordinary single message.
+    raw_thread_id = update.effective_message.message_thread_id
+    if topics.is_adventure(update.effective_chat.id, raw_thread_id or 0) and user_id in _USER_BUSY:
+        await _safe_send(
+            update,
+            "⏳ Still working on your last action — I'll get to this one right after. No need to resend it.",
+            speak=False,
+        )
     await _run_in_user_order(user_id, lambda: _route_text_message(update, context))
 
 
@@ -20040,13 +20111,43 @@ async def _log_unhandled_error(update: object, context: ContextTypes.DEFAULT_TYP
     that from the handler simply choosing not to respond. This is the
     most likely explanation for a real incident where an NPC dialogue
     message got zero reply, not even the intended "..." fallback.
+
+    Real live bug (2026-08-06, Sheri via dev-topic screenshot: "Was
+    supposed to be skill fire ball"): confirmed live in the exact same
+    log window -- her tap on a battle-menu "cast Fireball at Crystal
+    Spider 2" button crashed on a transient httpcore.ReadTimeout, but
+    the fallback reply below only ever fired for `update.message`
+    (a typed message), which is None for a callback-query-only update
+    (a button tap). So this exact class of crash -- ANY battle-menu/
+    waypoint/shrine/skill-tree button tap, not just spell casting --
+    left the player with zero feedback: no error, no spinner
+    resolution, nothing, until whatever fallback mechanic exists
+    elsewhere (here, the in-battle inactivity timeout, many seconds
+    later) took over and did something else entirely, which read as a
+    completely different, confusing bug rather than what actually
+    happened (a network hiccup ate her real tap). Now also handles a
+    crashed callback_query: acknowledges it (stops the tap from
+    spinning forever) and sends the same fallback text to the same
+    chat/topic the button lived in.
     """
     logger.error("Unhandled exception while processing update: %r", update, exc_info=context.error)
-    if isinstance(update, Update) and update.message:
+    if not isinstance(update, Update):
+        return
+    if update.message:
         try:
             await update.effective_chat.send_message(
                 "Something went wrong processing that — try again in a moment.",
                 message_thread_id=update.effective_message.message_thread_id,
+            )
+        except Exception:
+            pass
+    elif update.callback_query:
+        await _safe_answer(update.callback_query)
+        query_message = getattr(update.callback_query, "message", None)
+        try:
+            await update.effective_chat.send_message(
+                "Something went wrong processing that tap — try again in a moment.",
+                message_thread_id=getattr(query_message, "message_thread_id", None),
             )
         except Exception:
             pass
@@ -20942,6 +21043,31 @@ def build_application() -> Application:
         .concurrent_updates(True)
         .persistence(persistence)
         .post_init(_on_startup)
+        # Real live bug (2026-08-06, Coffee via dev-topic screenshot: "It
+        # gave two attacks. Is this a bug?" -- the exact same "Round 4"
+        # battle-menu turn prompt sent twice, back to back). Confirmed
+        # via bot_live_tmp.log at the exact timestamp: a genuine
+        # `[message] send failed, retrying: TimedOut('Timed out')` right
+        # before the duplicate. python-telegram-bot's HTTPXRequest
+        # defaults to a 5s read/write/connect timeout for every outbound
+        # Telegram API call -- far too tight for this box's own already-
+        # documented characteristics (root filesystem on a USB flash
+        # drive, plus a CPU-bound local Ollama server this same process
+        # calls out to mid-request). _safe_send's retry-on-TimedOut logic
+        # (by necessity -- Telegram's sendMessage has no idempotency key,
+        # so there's no way to tell "genuinely failed" from "succeeded
+        # but the ack was slow" apart) means a merely-slow-but-successful
+        # send gets retried and duplicated. This doesn't eliminate that
+        # possibility (nothing can, without Telegram-side idempotency),
+        # but raising these from the 5s library default to something
+        # that comfortably covers this box's real observed latency makes
+        # a false-timeout meaningfully less likely -- the same reasoning
+        # already applied to every Ollama call in ai/*.py (bumped to
+        # 200s for the identical underlying reason; see CLAUDE.md).
+        .connect_timeout(15)
+        .read_timeout(30)
+        .write_timeout(30)
+        .pool_timeout(15)
         .build()
     )
 

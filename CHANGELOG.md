@@ -2,6 +2,99 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.91] — 7 real bugs found via dev-bridge/topic-activity monitoring: crashed-callback feedback, monster image prompts, "still working" notice, attack-with-spell/breath-weapon misclassification, bare "fight", duplicate-message timeout fix
+
+All found and fixed through the standing dev-bridge/topic-activity
+monitoring cron cycles — none speculative, every one traced to a real
+screenshot or log line from Coffee or Sheri, and every fix verified
+with a real executed test (never claimed fixed from reading code alone).
+
+- **Crashed callback queries left the player with zero feedback**
+  (Sheri, dev-topic: "Was supposed to be skill fire ball" — her tap on
+  a battle-menu Fireball button crashed on a transient
+  `httpcore.ReadTimeout`). `_log_unhandled_error`'s old fallback reply
+  only ever fired for `update.message` (a typed message), which is
+  always `None` for a callback-query-only update (a button tap) — so
+  ANY battle-menu/waypoint/shrine/skill-tree button tap that crashed
+  mid-handler left the player with no error, no spinner resolution,
+  nothing, until an unrelated fallback (the in-battle inactivity
+  timeout) eventually took over and did something completely
+  different. Now also handles a crashed callback_query: acknowledges
+  it (stops the tap spinning forever) and sends the fallback text to
+  the same chat/topic the button lived in. Verified against a real
+  (not the project's structural test-double) `telegram.Update`/
+  `CallbackQuery`/`Message`, since the function's own
+  `isinstance(update, Update)` guard can't be exercised any other way.
+- **Generated monster images didn't look like the monster** (Coffee:
+  "These images don't really look like a crystal spider"). Root-caused
+  against the real Pollinations.ai API at the monster's own real
+  deterministic seed: the old prompt shape
+  (`"fantasy RPG a monster, Crystal Spider, ..."`) buried the real name
+  after generic "a monster" framing, and the image model weighted that
+  generic framing far more heavily — Crystal Spider rendered as a
+  shaggy dark blob, nothing crystalline about it. Moving the real name
+  to the FRONT of the prompt produced a genuinely crystalline, glowing,
+  multi-legged render at the identical seed; re-verified against Goblin
+  (already-working case) to confirm no regression. Fixed in both
+  `_monster_image_prompt` and `_defeat_image_prompt` (identical
+  name-buried-last shape in both), affecting every monster's art, not
+  just this one.
+- **A player's second message queues silently behind their first's
+  full processing** (Coffee: "We defeated the crystal spiders, and for
+  some reason the battle started right after" investigation surfaced
+  Sugar's "Attack" sitting unanswered for 3 minutes). By design,
+  `_run_in_user_order` makes one player's own messages process
+  strictly in order — but the SAME player's next message could take a
+  real 30-160s+ Ollama narration call to even get looked at, with zero
+  acknowledgment that it's queued. `text_message_router` now checks
+  whether this user already has something actively running
+  (`_USER_BUSY`, set by the queue worker) and, in Adventure only,
+  immediately replies "⏳ Still working on your last action — I'll get
+  to this one right after."
+- **"Attack `<target>` with fire ball" / "with burning hands" resolved
+  as a mundane weapon swing**, silently discarding the named spell —
+  no fire damage, no slot spent (the literal root cause of Sheri's
+  "was supposed to be skill fire ball" report, now root-caused
+  precisely). `_keyword_fallback`'s generic `attack_words` match
+  claimed any message containing the bare word "attack" before
+  anything ever looked at what followed "with". Fixed by checking for
+  a real spells.py name first, grounded only in the real spell
+  catalog — "fire ball" (two words, natural phrasing) still matches
+  the real one-word spell "Fireball" via a space-stripped comparison.
+  Also had to fix `_do_cast_spell`'s own name-matching the same way,
+  or the reclassification alone would've just traded one wrong outcome
+  for a different one ("you don't know a spell by that name" for a
+  spell the character genuinely knows).
+- **Same bug, different ability**: "Attack `<target>` with dragon
+  breath" (topic-activity log) also fell through to a mundane weapon
+  swing — the existing "dragon breath" phrase check (from a 2026-07-22
+  fix) sat AFTER the generic attack match, so it was only ever
+  reachable for a phrasing with no attack word at all. Moved ahead of
+  the attack match, same fix shape as the spell case.
+- **Bare "Fight" classified as silent chat** — no reply, no game
+  effect (topic-activity log, Coffee). `COMBAT_START_WORDS` only
+  matches "fight the"/"fight some"/"let's fight" etc, and
+  `attack_words` never included "fight" at all. Added as a whole-WORD
+  check (not folded into `attack_words`' plain substring match)
+  specifically because "fight" is a substring of "Fighter" — one of
+  this game's own 12 real class names — a substring check would have
+  misclassified any ordinary mention of the class as an attack.
+- **Duplicate battle-menu messages** ("It gave two attacks. Is this a
+  bug?" — the exact same "Round 4" turn prompt sent twice). Traced to
+  a genuine `[message] send failed, retrying: TimedOut('Timed out')`
+  right before the duplicate: python-telegram-bot defaults to a 5s
+  connect/read/write timeout for every outbound Telegram API call, too
+  tight for this box's own already-documented characteristics (root
+  filesystem on a USB flash drive, plus a CPU-bound local Ollama
+  server this same process calls out to mid-request). `_safe_send`'s
+  retry-on-timeout can't tell "genuinely failed" from "succeeded but
+  the ack was slow" apart (Telegram's sendMessage has no idempotency
+  key), so a merely-slow-but-successful send gets retried and
+  duplicated. Raised `build_application()`'s timeouts (15s connect,
+  30s read/write, 15s pool) — doesn't eliminate the possibility, but
+  makes a false timeout meaningfully less likely, the same reasoning
+  already applied to every Ollama call in `ai/*.py`.
+
 ## [1.27.90] — Multi-tenant scaling Phase 4c/4d/4e complete, Universal Manipulation (repeatable Skill Tree investment), weapon stats on the character sheet, 11 real bugs found via dev-bridge/topic-activity monitoring
 
 **Multi-tenant scaling Phase 4c/4d/4e** (closes out the `db.py` side

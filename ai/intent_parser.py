@@ -18,6 +18,7 @@ import requests
 
 import config
 import rules.leveling as leveling
+import spells as spells_module
 from ai.text_cleanup import strip_think_tags
 from guilds import GUILDS
 
@@ -736,6 +737,62 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
         if env_words and any(w in lowered for w in env_words) and any(v in lowered for v in interact_verbs):
             return {**base, "action": "use_environment"}
 
+    # Real live bug, confirmed twice (2026-08-06, dev-topic screenshots):
+    # "Attack spider 2 with fire ball" and "Attack spider 3 with burning
+    # hands" both contain the bare word "attack", so the generic
+    # attack_words match just below claimed them BEFORE anything ever
+    # looked at what came after "with" -- the result was a mundane
+    # weapon swing that silently discarded the named spell entirely,
+    # never consuming a spell slot or dealing fire damage. Sheri's own
+    # dev-topic report ("Was supposed to be skill fire ball") is exactly
+    # this. Checked here, before the generic attack match, the same way
+    # the environment-object check just above already overrides it for a
+    # more specific case. Grounded only in spells.py's own real spell
+    # names (never invented) -- compares with spaces stripped on both
+    # sides so "fire ball" still matches the real spell "Fireball" (one
+    # word), the longest real name is preferred so no shorter spell name
+    # can accidentally match inside a longer one.
+    if "with" in lowered or "using" in lowered:
+        squashed = lowered.replace(" ", "")
+        spell_match = None
+        for spell in sorted(spells_module.SPELLS.values(), key=lambda s: -len(s["name"])):
+            if spell["name"].lower().replace(" ", "") in squashed:
+                spell_match = spell["name"]
+                break
+        if spell_match:
+            return {**base, "action": "cast_spell", "spell_name": spell_match}
+
+    # Real live bug, confirmed AGAIN (2026-08-07, topic-activity log:
+    # "Attack spider 1 with dragon breath"): the original "dragon
+    # breath" fix below (2026-07-22, Charvenna/Sugar) has always been
+    # unreachable whenever the message ALSO contains a bare attack word
+    # ("attack"/"hit"/"swing"/etc.), since the generic attack_words match
+    # just below runs first and returns immediately -- it only ever
+    # helped a phrasing with no attack word at all ("use dragon breath on
+    # X"), never the arguably more natural "attack X with dragon breath"
+    # shape. Same root cause and same fix shape as the spell-name check
+    # just above: moved ahead of the generic attack match instead of
+    # after it. Kept as its own explicit phrase list (not folded into
+    # the spell check above) since a Dragonborn's breath weapon is a
+    # racial trait, not a spell in spells.py.
+    if any(w in lowered for w in ["breath weapon", "breathe fire", "unleash my breath", "use my breath",
+                                    "dragon breath", "dragon's breath", "dragons breath"]):
+        return {**base, "action": "breath_weapon"}
+
+    # Real live bug (2026-08-07, topic-activity log: Coffee typed a bare
+    # "Fight" and got silent "chat" -- COMBAT_START_WORDS only matches
+    # "fight the"/"fight some"/"let's fight" etc, never a standalone
+    # "Fight", and attack_words (checked just below) never included
+    # "fight" at all. Checked here as a whole WORD, not folded into
+    # attack_words' plain substring check, because "fight" is a
+    # substring of "Fighter" -- one of this game's own 12 real class
+    # names -- a substring check would misclassify any ordinary mention
+    # of the class ("I made a Fighter", "switch to my Fighter") as an
+    # attack.
+    fight_words = set(re.findall(r"[a-z']+", lowered))
+    if "fight" in fight_words and not any(c in lowered for c in conditional_words):
+        return {**base, "action": "attack"}
+
     if any(w in lowered for w in attack_words) and not any(c in lowered for c in conditional_words):
         return {**base, "action": "attack"}
 
@@ -942,17 +999,6 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if any(w in lowered for w in ["arcane recovery", "recover a spell slot", "recover my spell slot",
                                     "recover spell slots"]):
         return {**base, "action": "arcane_recovery"}
-
-    # Real live bug (2026-07-22, Charvenna/Sugar): "Use dragon breath on
-    # the bark of the ancient, wide-boled tree" fell through every
-    # trigger below (none of them cover "dragon breath", the single
-    # most natural way to describe a Dragonborn's own racial ability),
-    # landed on the model as an unrecognized "chat", and got hallucinated
-    # as "show_map" -- a real action, just completely wrong -- twice in
-    # a row. "dragon breath"/"dragon's breath" added directly.
-    if any(w in lowered for w in ["breath weapon", "breathe fire", "unleash my breath", "use my breath",
-                                    "dragon breath", "dragon's breath", "dragons breath"]):
-        return {**base, "action": "breath_weapon"}
 
     if any(w in lowered for w in ["channel divinity", "turn undead", "turn the undead"]):
         return {**base, "action": "channel_divinity"}
