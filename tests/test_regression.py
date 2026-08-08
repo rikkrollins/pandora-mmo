@@ -2565,7 +2565,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         import sessions
 
         class _FakeSendBot:
+            def __init__(self):
+                self.sent = []
+
             async def send_message(self, chat_id=None, message_thread_id=None, text=None, **kwargs):
+                self.sent.append(text)
                 return None
 
             async def send_photo(self, chat_id=None, message_thread_id=None, photo=None, caption=None, **kwargs):
@@ -2606,23 +2610,37 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sessions.end_session(-999500, session1)
 
         # Action threshold: a real attack happens, player is escalated for next time.
+        # Real flaky-test bug (2026-08-08, caught by the regression suite
+        # itself): the original assertion here was "foe HP dropped OR the
+        # current participant changed" -- but _do_attack chains into
+        # _resolve_ai_turns, which auto-resolves every AI turn instantly;
+        # with only one AI companion and one AI foe besides this test's
+        # lone human player, that loop can wrap the turn index all the way
+        # back around to the SAME player before this call returns, even
+        # though the forced attack genuinely fired. Combined with a real,
+        # unmocked dice roll that can miss (leaving HP unchanged too),
+        # both halves of that OR could spuriously fail on an unlucky roll
+        # despite the production code behaving correctly -- non-
+        # deterministic despite this test's own "deterministic and fast"
+        # docstring claim. Checking for the "attack on instinct" message
+        # instead is deterministic: bot.py's _check_combat_timeouts sends
+        # it unconditionally the moment the forced-attack branch fires,
+        # before any dice are rolled or turns advance.
         session2 = new_fight()
         session2.turn_started_at[player_id] = time.time() - (bot.COMBAT_TIMEOUT_ACTION_SECONDS + 5)
-        foe_hp_before = next(p for p in session2.participants if p["telegram_user_id"] == -700002)["hp_current"]
+        fake_bot.sent.clear()
         await bot._check_combat_timeouts(fake_bot)
-        foe_after = next(p for p in session2.participants if p["telegram_user_id"] == -700002)
         self.assertIn(player_id, session2.timeout_escalated)
-        self.assertTrue(foe_after["hp_current"] < foe_hp_before or session2.current_participant_id() != player_id)
+        self.assertTrue(any("attack on instinct" in (m or "") for m in fake_bot.sent))
         sessions.end_session(-999500, session2)
 
         # Escalated: forced action fires after only the short 60s window.
         session3 = new_fight()
         session3.timeout_escalated.add(player_id)
         session3.turn_started_at[player_id] = time.time() - (bot.COMBAT_TIMEOUT_ESCALATED_ACTION_SECONDS + 5)
-        foe_hp_before3 = next(p for p in session3.participants if p["telegram_user_id"] == -700002)["hp_current"]
+        fake_bot.sent.clear()
         await bot._check_combat_timeouts(fake_bot)
-        foe_after3 = next(p for p in session3.participants if p["telegram_user_id"] == -700002)
-        self.assertTrue(foe_after3["hp_current"] < foe_hp_before3 or session3.current_participant_id() != player_id)
+        self.assertTrue(any("attack on instinct" in (m or "") for m in fake_bot.sent))
         sessions.end_session(-999500, session3)
 
         # Real activity since the turn began resets escalation back to normal.
@@ -3552,6 +3570,26 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         context_a = bot._chat_scoped_dict(bot._AI_PLAYER_CONTEXTS, chat_a).setdefault(789, bot._AiPlayerContext())
         context_a.user_data["human_guidance"] = "retreat"
         self.assertNotIn(789, bot._chat_scoped_dict(bot._AI_PLAYER_CONTEXTS, chat_b))
+
+        # Real regression (2026-08-08, caught by the regression suite
+        # itself): chat_a is -999, the same shared test chat_id reused
+        # by dozens of other tests in this file (including
+        # test_fast_travel_blocks_on_locked_connection, which also uses
+        # the door id "sealed_stone_door") -- leaving these bare
+        # module-level globals mutated with no cleanup meant this test,
+        # once it happened to run first alphabetically, permanently
+        # "unlocked" that door for every later test sharing chat -999,
+        # a real false pass/fail depending on test run order, not a
+        # production bug (_do_fast_travel's own logic was always
+        # correct). Undo everything this test added to chat_a so it
+        # cannot leak into any other test.
+        bot._chat_scoped_set(bot._UNLOCKED, chat_a).discard("sealed_stone_door")
+        bot._chat_scoped_set(bot._DEFEATED_NPCS, chat_a).discard("some_npc_id")
+        bot._chat_scoped_dict(bot._PENDING_DUELS, chat_a).pop(123, None)
+        bot._chat_scoped_dict(bot._NPC_LOCATIONS, chat_a).pop("sera_wanderer", None)
+        events_a = bot._RECENT_WORLD_EVENTS.get(chat_a, [])
+        events_a[:] = [e for e in events_a if e[2] != "a leaked test event"]
+        bot._chat_scoped_dict(bot._AI_PLAYER_CONTEXTS, chat_a).pop(789, None)
 
     async def test_active_ai_companion_joins_combat_despite_being_elsewhere(self):
         leader_id = 950501

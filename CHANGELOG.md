@@ -2,6 +2,60 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.95] — 3 real bugs found by a full regression suite run on the new server
+
+First full, uncontended run of the fast regression suite (393 tests)
+on the OVHcloud server surfaced 3 real failures, each root-caused with
+real code reading rather than guessed, then fixed and reverified:
+
+1. **`enchant_item` misclassified as `cast_spell`.** "Imbue the shield
+   with warding" was matching the real spell name "Shield" as a bare
+   substring inside the sentence — a check added 2026-08-06/07 to fix
+   an unrelated "attack X with fireball" bug scans for any known spell
+   name in a "with"/"using" clause, and ran *before* the forge/enchant/
+   imbue check further down `ai/intent_parser.py`'s keyword fallback.
+   Any real spell name that also reads as a plausible item name
+   (Shield, Light, ...) could hit the same collision. Fixed by
+   excluding forge/enchant/imbue phrasing from that spell-match check.
+
+2. **Test pollution via a shared in-memory global.**
+   `test_chat_scoped_globals_do_not_leak_across_tenant_chats` mutated
+   `_UNLOCKED`/`_DEFEATED_NPCS`/`_PENDING_DUELS`/`_NPC_LOCATIONS`/
+   `_RECENT_WORLD_EVENTS`/`_AI_PLAYER_CONTEXTS` for chat_id -999 (the
+   same shared test chat reused by dozens of other tests) and never
+   cleaned up after itself — permanently "unlocking" a door for every
+   later test sharing that chat, once this test happened to run first
+   alphabetically. `_do_fast_travel`'s real locked-connection logic was
+   correct the whole time; this was a test-isolation bug, not a
+   production one. Fixed by having the test undo everything it adds.
+
+3. **A flaky, non-deterministic test assertion.**
+   `test_in_battle_timeout_warns_then_forces_a_default_attack` asserted
+   "foe HP dropped OR the current participant changed" as proof a
+   timed-out player's turn was force-resolved into a real attack — but
+   `_do_attack` chains into `_resolve_ai_turns`, which can auto-resolve
+   the one AI companion and one AI foe in this test and wrap the turn
+   index right back to the same player before the call returns, even
+   though the forced attack genuinely fired. Combined with a real,
+   unmocked dice roll that can miss (leaving HP unchanged too), both
+   halves of that OR could spuriously fail despite correct game
+   behavior. Fixed by asserting on the "attack on instinct" message
+   `_check_combat_timeouts` sends unconditionally before any dice are
+   rolled — deterministic by construction, not just usually-passing.
+
+Also this session (2026-08-08): benchmarked `lfm2.5-1.2b-instruct`,
+`qwen2.5:3b-instruct`, `llama3.2:3b`, and `gemma2:2b` as potential
+faster replacements for the narration/intent model on the new server's
+hardware — none beat the current `lfm2.5-thinking` baseline, and
+several hung outright on this Ollama version's structured-output
+grammar mode. Kept the current model. Separately, attempted to speed
+up narration by scaling `num_predict` down proportionally to
+`STORY_MODE`; real testing showed the model's `<think>` reasoning
+overhead is a large (~950-1400 token), mostly *fixed* cost regardless
+of requested prose length, so the tighter caps produced zero visible
+narration below the maximum story mode. Reverted before it ever
+reached the live bot.
+
 ## [1.27.94] — Generated-image reliability fix, dev-bridge video support + auto-purge
 
 Real live bug (2026-08-08, found via topic-activity monitoring on the

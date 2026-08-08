@@ -752,7 +752,22 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # sides so "fire ball" still matches the real spell "Fireball" (one
     # word), the longest real name is preferred so no shorter spell name
     # can accidentally match inside a longer one.
-    if "with" in lowered or "using" in lowered:
+    # Real regression (2026-08-08, caught by the regression suite):
+    # "imbue the shield with warding" got misclassified as casting the
+    # real spell "Shield" instead of enchant_item, because "shield" is
+    # a literal substring of "...theshieldwith..." once spaces are
+    # stripped below -- this spell-match check runs BEFORE the
+    # forge/enchant/imbue check further down this function, so it wins
+    # even though the player is naming an ITEM to enchant, not casting
+    # anything. Any real spell name that also happens to be a plausible
+    # item name (Shield, Light, ...) combined with "with" in an
+    # enchant/imbue/forge sentence would hit this same collision.
+    # Guarded out the same forge/enchant/imbue phrasing this function
+    # already checks for later, so that check still wins when it should.
+    forge_enchant_words = ["forge my", "forge the", "i forge", "enchant my", "enchant the",
+                            "imbue my", "imbue the", "i enchant", "i imbue"]
+    if (("with" in lowered or "using" in lowered)
+            and not any(w in lowered for w in forge_enchant_words)):
         squashed = lowered.replace(" ", "")
         spell_match = None
         for spell in sorted(spells_module.SPELLS.values(), key=lambda s: -len(s["name"])):
