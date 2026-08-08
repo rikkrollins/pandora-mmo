@@ -12448,9 +12448,30 @@ async def _send_generated_image(
     caption anyone's blocked on) can safely ignore this return value,
     same as before.
     """
+    url = images_module.generate_image_url(prompt, width=width, height=height, seed=seed)
+    # Real live bug (2026-08-08, found via topic-activity monitoring):
+    # 'Crystal Spider 4' defeat image failed twice with Telegram's
+    # BadRequest('Wrong type of the web page content'). Root cause
+    # confirmed by fetching this exact seed/prompt combo directly: it
+    # came back `x-cache: MISS` even after two prior live attempts,
+    # meaning Pollinations had never actually finished generating and
+    # caching it -- send_photo(photo=url) makes TELEGRAM fetch the URL
+    # server-side, and Telegram gives up before a genuinely cold
+    # (first-ever-requested) image finishes generating, so the aborted
+    # fetch never lets Pollinations' generation complete far enough to
+    # cache either. Pre-fetching the URL ourselves first forces
+    # Pollinations to finish generating and cache it, so Telegram's own
+    # fetch afterward always hits a warm, instant response.
+    try:
+        await asyncio.to_thread(requests.get, url, timeout=60)
+    except requests.RequestException as e:
+        logger.warning(f"[images] pre-warm fetch failed for {log_key!r}: {e!r}")
+        # Fall through and let Telegram try anyway -- pre-warming is a
+        # best-effort latency/reliability improvement, not a hard gate.
+
     try:
         sent = await update.effective_chat.send_photo(
-            photo=images_module.generate_image_url(prompt, width=width, height=height, seed=seed),
+            photo=url,
             caption=caption,
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             reply_markup=reply_markup,

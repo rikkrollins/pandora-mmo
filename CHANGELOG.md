@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.94] — Generated-image reliability fix, dev-bridge video support + auto-purge
+
+Real live bug (2026-08-08, found via topic-activity monitoring on the
+new cloud server): "Crystal Spider 4"'s defeat image failed twice with
+Telegram's `BadRequest('Wrong type of the web page content')`. Root
+cause confirmed with real timing: a genuinely first-ever-requested
+Pollinations.ai image takes ~25s to generate (`x-cache: MISS`); a
+second fetch of the exact same URL immediately after takes ~1s
+(`x-cache: HIT`). `send_photo(photo=<url>)` makes Telegram fetch the
+URL server-side, and a 25s+ cold-generation delay is well beyond what
+Telegram's own fetch tolerates. `_send_generated_image` (the one
+shared choke point every image in the game routes through — locations,
+NPCs, monsters, items, spells, abilities, defeats) now pre-fetches the
+URL itself first, forcing Pollinations to finish generating and cache
+it, before ever handing the URL to Telegram — so Telegram's own fetch
+always lands on the fast, cached path. A pre-warm failure doesn't
+block the send attempt; Telegram still gets its own real chance.
+
+Also: `scripts/check_dev_bridge.py` (the unattended monitoring cron's
+own tool) had two real gaps found the same day. (1) Videos sent to the
+Development topic were logged under a tag this script never matched at
+all — same class of bug as a previously-fixed image gap — so a video
+walkthrough was completely invisible to every monitoring cycle. Now
+surfaced, always (unlike images, a video's own extracted frames are
+the actionable content even with no caption). (2) Per Coffee's request:
+screenshots and video frame directories under `dev_screenshots/` and
+`dev_videos/` now get automatically purged once the cursor advances
+past them, instead of accumulating on disk forever.
+
 ## [1.27.93] — "Gaze at X" misclassification fix
 
 Caught via topic-activity monitoring (2026-08-07, real player): "Gaze

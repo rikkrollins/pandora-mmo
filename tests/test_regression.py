@@ -16,6 +16,9 @@ import shutil
 import time
 import unittest
 from datetime import datetime, timezone
+from types import SimpleNamespace
+
+import requests
 
 import bot
 import campaign_loader as cl
@@ -6476,6 +6479,64 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         fallen_player = {"name": "ReproPlayer", "monster_key": None}
         self.assertTrue(bot._defeat_image_prompt(fallen_player).startswith("ReproPlayer,"))
+
+    async def test_send_generated_image_pre_warms_the_url_before_handing_it_to_telegram(self):
+        """
+        Real live bug (2026-08-08, found via topic-activity monitoring):
+        'Crystal Spider 4' defeat image failed twice live with Telegram's
+        BadRequest('Wrong type of the web page content'). Root cause
+        confirmed by directly fetching a genuinely never-before-requested
+        Pollinations seed/prompt with real timing: the FIRST fetch of a
+        cold image took 25.57s (x-cache: MISS); a second fetch of the
+        exact same URL immediately after took 1.10s (x-cache: HIT).
+        send_photo(photo=<url>) makes TELEGRAM fetch the URL server-side,
+        and a 25s+ cold-generation delay is well beyond what Telegram's
+        own fetch tolerates before giving up -- so a genuinely fresh
+        image was always at real risk of failing on its very first
+        request. Fix: _send_generated_image now pre-fetches the URL
+        itself (forcing Pollinations to finish generating and cache it)
+        before ever handing the URL to Telegram, so Telegram's own fetch
+        always lands on the fast, cached path. This test can't wait out
+        a real 25s generation (no network call belongs in the regression
+        suite), so it verifies the two things that actually matter: (1)
+        the pre-warm GET happens before send_photo is ever called, with
+        the exact same URL both times, and (2) a pre-warm failure (the
+        image API being briefly down) doesn't block the send attempt --
+        Telegram still gets a real chance to fetch it itself, same as
+        before this fix existed.
+        """
+        from unittest.mock import patch
+        sink = []
+        update = FakeUpdate(700601, "look", sink)
+        call_order = []
+
+        def fake_get(url, timeout=None):
+            call_order.append(("prewarm", url))
+            return SimpleNamespace(status_code=200, headers={"content-type": "image/jpeg"})
+
+        with patch("bot.requests.get", side_effect=fake_get):
+            ok = await bot._send_generated_image(update, "a test prompt", "caption")
+
+        self.assertTrue(ok)
+        self.assertEqual(len(update.effective_chat.sent_photos), 1)
+        prewarm_url = call_order[0][1]
+        sent_url = update.effective_chat.sent_photos[0]["photo"]
+        self.assertEqual(prewarm_url, sent_url, "the pre-warmed URL must be the exact same one handed to Telegram")
+
+        # A pre-warm failure (the image API briefly unreachable) must not
+        # block the send attempt -- Telegram still gets its own real
+        # chance to fetch the image, exactly like before this fix.
+        sink2 = []
+        update2 = FakeUpdate(700602, "look", sink2)
+
+        def failing_get(url, timeout=None):
+            raise requests.RequestException("simulated pre-warm failure")
+
+        with patch("bot.requests.get", side_effect=failing_get):
+            ok2 = await bot._send_generated_image(update2, "a test prompt", "caption")
+
+        self.assertTrue(ok2, "a pre-warm failure must not prevent the actual send_photo attempt")
+        self.assertEqual(len(update2.effective_chat.sent_photos), 1)
 
     async def test_still_working_notice_fires_only_for_a_genuinely_busy_user_in_adventure(self):
         """
