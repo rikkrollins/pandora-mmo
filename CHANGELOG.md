@@ -2,6 +2,52 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.97] — Consent-based group onboarding, DM getting-started, and 3 real combat bugs
+
+New groups now get a real onboarding conversation instead of static
+instructions: when this bot is added to a group, it asks whether an
+admin wants the Adventure/Support topics set up automatically (real
+`create_forum_topic` calls, falling back to manual instructions if
+Topics mode isn't on or the bot isn't an admin), then asks whether the
+group wants its own Private World (the existing, only-supported
+per-chat-isolated default) or the shared Public World — which just
+points at the real invite (t.me/PandoraMMO) rather than attempting any
+actual cross-tenant data sharing, which doesn't exist and isn't being
+built; every tenant's isolation is the whole point of the multi-tenant
+work shipped in earlier versions. Separately, messaging the bot
+privately (including Telegram's own auto-sent `/start`) used to be
+silently dropped entirely — now gives the same two options.
+
+Three more real bugs found via dev-bridge/topic-activity monitoring:
+- "Pull vesh back to the back row" / "Move Vesh to the backrow" both
+  misclassified as `talk_npc` instead of a formation change — the
+  battle-formation keyword checks lived AFTER the known-NPC-name loop,
+  so any formation command naming a real companion (nearly always,
+  since you have to say who to move) got intercepted first. Moved
+  ahead of that loop, plus a real gap where "pull X back to the
+  back/front row" never matched at all (only a bare trailing "...back"
+  did). The front/back split is now also shown on every turn, not just
+  once when combat starts.
+- "Attack spider 4 with silvered dagger" ignored the named weapon
+  entirely and always swung whatever was already equipped — attacking
+  with a named, owned weapon now auto-equips it first, same as
+  "equip Sarah with the longbow" already worked.
+- Casting a spell with no slots left mid-combat used to leave a bare
+  text message with no battle menu and no confirmation it was still
+  your turn — now re-shows the same round/turn announcement + tappable
+  menu every other in-combat failure path already shows.
+
+Also finished the deferred "minor multi-tenant gaps": two more
+chat_id-unscoped functions fixed (`find_character_by_telegram_username`,
+`accept_board_quest`), and 4 pending-state globals (dice rolls, ASI
+choice, description flow, pronouns flow) converted to chat-scoped.
+
+10 new regression tests this release, all passing, plus targeted
+re-runs of every existing test touching the same code paths (formation,
+combat, intent classification, multi-tenant isolation) — a full
+418-test suite run is still in progress in the background as a final
+sweep.
+
 ## [1.27.96] — Support agent game-wiki expansion + a real cross-tenant party leak fix
 
 Support now answers location/NPC/quest questions like a real encyclopedia,

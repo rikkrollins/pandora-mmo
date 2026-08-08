@@ -30,6 +30,7 @@ from telegram.ext import (
     Application,
     ApplicationBuilder,
     CallbackQueryHandler,
+    ChatMemberHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -449,7 +450,14 @@ _LAST_TOPIC_MESSAGE: dict[tuple[int, int], dict] = {}
 # _idle_inactivity_loop) can find and auto-resolve any prompt that's
 # gone unanswered for 60+ seconds, same real d20 roll a manual reply
 # would have supplied.
-_PENDING_DICE_ROLLS: dict[int, dict] = {}
+# Real multi-tenant gap fixed (2026-08-08): this and the three sibling
+# pending-state globals below (_PENDING_ASI_CHOICE, _PENDING_DESCRIPTION,
+# _PENDING_PRONOUNS) used to be keyed by bare telegram_user_id -- a
+# player active in two tenant chats at once could have one chat's
+# pending prompt silently overwritten/cleared by the other. Now
+# chat-scoped the same way _PENDING_DUELS already was (Phase 2,
+# 2026-08-01), via the same _chat_scoped_dict/_chat_scoped_set helpers.
+_PENDING_DICE_ROLLS: dict[int, dict[int, dict]] = {}
 DICE_ROLL_AUTO_TIMEOUT_SECONDS = 60
 
 
@@ -466,7 +474,7 @@ def _new_pending_roll(kind: str, action_text: str, chat_id: int, **extra) -> dic
 # and added here; adventure_master_handler checks this set on the next
 # message the same way it checks _PENDING_DICE_ROLLS, so a stray later
 # message (normal gameplay) is never misread as a stat choice.
-_PENDING_ASI_CHOICE: set[int] = set()
+_PENDING_ASI_CHOICE: dict[int, set] = {}
 
 # Task #82, per Coffee: PvP, "safe zones by design, intentional-
 # targeting only." A duel challenge is real consent, not an ambush --
@@ -486,14 +494,14 @@ _PENDING_DUELS: dict[int, dict[int, int]] = {}
 # classifier just matched a keyword trigger in -- same pending-prompt
 # pattern as _PENDING_ASI_CHOICE above, checked on the user's next message
 # before normal intent parsing.
-_PENDING_DESCRIPTION: set[int] = set()
+_PENDING_DESCRIPTION: dict[int, set] = {}
 MAX_CHARACTER_DESCRIPTION_LENGTH = 500
 
 # Character pronouns (2026-07-17, per Coffee: "no gender/pronoun field --
 # narration guesses pronouns with no real data, can guess wrong"). Same
 # pending-prompt pattern as description above. Narration falls back to
 # they/them when unset -- never guesses -- see ai/dm_agent.py.
-_PENDING_PRONOUNS: set[int] = set()
+_PENDING_PRONOUNS: dict[int, set] = {}
 MAX_PRONOUNS_LENGTH = 30
 
 # Presence/status note (task #144) -- unlike description/pronouns this
@@ -2188,6 +2196,20 @@ def _turn_announcement(session: sessions.Session) -> str:
     party_roster = ", ".join(roster_line(p) for p in session.living_on_side("party")) or "none left standing"
     enemy_roster = ", ".join(roster_line(p) for p in session.living_on_side("enemy")) or "none left standing"
 
+    # Real live request (2026-08-08, Coffee): the front/back formation
+    # split used to only ever get shown once, in the message announcing
+    # combat had started -- if a player changed formation mid-fight (or
+    # just forgot), there was no way to see who's currently front vs
+    # back without scrolling back to that first message. Shown here on
+    # every turn instead, same "none if nobody's split" behavior as
+    # _format_formation_line already has (solo fights/no back-row
+    # players stay silent, nothing new to say).
+    party_formation_line = _format_formation_line(session.living_on_side("party"))
+    enemy_formation_line = _format_formation_line(session.living_on_side("enemy"))
+    formation_lines = "".join(
+        f"\n{line}" for line in (party_formation_line, enemy_formation_line) if line
+    )
+
     hint = (
         "\n💡 Tap a button below, or just type what you want to do."
         if not current.get("is_ai") else ""
@@ -2196,6 +2218,7 @@ def _turn_announcement(session: sessions.Session) -> str:
         f"🎲 **Round {session.round_number}** — It's now **{label}**'s turn! What do you do?\n"
         f"⚔️ Party: {party_roster}\n"
         f"👹 Enemy: {enemy_roster}"
+        f"{formation_lines}"
         f"{hint}"
     )
 
@@ -4156,11 +4179,11 @@ async def _do_level_up(update: Update, text: str) -> None:
 
     resolved = _apply_asi_choice(character, text)
     if resolved:
-        _PENDING_ASI_CHOICE.discard(user_id)
+        _chat_scoped_set(_PENDING_ASI_CHOICE, update.effective_chat.id).discard(user_id)
         await _safe_send(update, resolved)
         return
 
-    _PENDING_ASI_CHOICE.add(user_id)
+    _chat_scoped_set(_PENDING_ASI_CHOICE, update.effective_chat.id).add(user_id)
     await _safe_send(
         update,
         f"You have {character['pending_asi_points']} ability point(s) to spend. Which ability would you "
@@ -4267,7 +4290,7 @@ async def _do_set_description(update: Update, text: str, *, from_prompt: bool = 
 
     description_text = text.strip() if from_prompt else _extract_inline_description(text)
     if description_text is None:
-        _PENDING_DESCRIPTION.add(user_id)
+        _chat_scoped_set(_PENDING_DESCRIPTION, update.effective_chat.id).add(user_id)
         await _safe_send(
             update,
             "Sure — what would you like your character's description to be? (backstory, "
@@ -4282,7 +4305,7 @@ async def _do_set_description(update: Update, text: str, *, from_prompt: bool = 
 
     clean = " ".join(description_text.split())[:MAX_CHARACTER_DESCRIPTION_LENGTH]
     if not clean:
-        _PENDING_DESCRIPTION.add(user_id)
+        _chat_scoped_set(_PENDING_DESCRIPTION, update.effective_chat.id).add(user_id)
         await _safe_send(update, "That didn't look like a description — try again?")
         return
 
@@ -4321,7 +4344,7 @@ async def _do_set_pronouns(update: Update, text: str, *, from_prompt: bool = Fal
 
     pronouns_text = text.strip() if from_prompt else _extract_inline_pronouns(text)
     if pronouns_text is None:
-        _PENDING_PRONOUNS.add(user_id)
+        _chat_scoped_set(_PENDING_PRONOUNS, update.effective_chat.id).add(user_id)
         await _safe_send(
             update,
             "Sure — what pronouns should the narration use for your character (he/him, "
@@ -4336,7 +4359,7 @@ async def _do_set_pronouns(update: Update, text: str, *, from_prompt: bool = Fal
 
     clean = " ".join(pronouns_text.split())[:MAX_PRONOUNS_LENGTH]
     if not clean:
-        _PENDING_PRONOUNS.add(user_id)
+        _chat_scoped_set(_PENDING_PRONOUNS, update.effective_chat.id).add(user_id)
         await _safe_send(update, "That didn't look like pronouns — try again?")
         return
 
@@ -5902,6 +5925,31 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
             )
             return
 
+        # Real live bug (2026-08-08, dev-topic screenshot: "Attack
+        # spider 4 with silvered dagger" -- "Was supposed to use the
+        # silvered dagger not shortsword"): _weapon_for_attacker only
+        # ever reads the character's already-equipped weapon --
+        # "with <weapon>" in the attack text was silently discarded, so
+        # a player naming a different owned weapon than what's currently
+        # equipped always still swung whatever was already equipped.
+        # Auto-equips a named, owned weapon before resolving the attack,
+        # the same "name it, it gets used" reading _do_equip_item already
+        # gives "equip Sarah with the longbow" -- narrated so the swap
+        # is never a silent surprise. No-ops when no weapon is named, the
+        # named one isn't actually carried, or it's already equipped.
+        owned_weapon_ids = [
+            item_id for item_id, qty in attacker.get("inventory", {}).items()
+            if qty > 0 and (items_module.get_item(item_id) or {}).get("type") == "weapon"
+        ]
+        named_weapon_id = items_module.find_item_mentioned_in_text(action_text, candidate_ids=owned_weapon_ids)
+        if named_weapon_id and named_weapon_id != attacker.get("equipped_weapon"):
+            equip_ok, _equip_msg, _updated = db.equip_item(user_id, chat_id, named_weapon_id)
+            if equip_ok:
+                attacker["equipped_weapon"] = named_weapon_id
+                await _safe_send(
+                    update, f"🗡️ **{attacker['name']}** switches to their **{items_module.get_item(named_weapon_id)['name']}**.",
+                )
+
         opposing = session.living_on_side(session.opposing_side(user_id))
         if not opposing:
             if not await _try_end_stale_combat(update, session):
@@ -5919,7 +5967,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
         if forced_roll is None and attacker.get("manual_dice_enabled") and not attacker.get("is_ai"):
             forced_roll = _extract_combined_roll(action_text)
         if forced_roll is None and attacker.get("manual_dice_enabled") and not attacker.get("is_ai"):
-            _PENDING_DICE_ROLLS[user_id] = _new_pending_roll("attack", action_text, update.effective_chat.id)
+            _chat_scoped_dict(_PENDING_DICE_ROLLS, update.effective_chat.id)[user_id] = _new_pending_roll("attack", action_text, update.effective_chat.id)
             # Task #187: routed through _safe_send (not a raw send_message)
             # so a transient TimedOut retries once instead of silently
             # dropping the prompt -- confirmed live this WAS happening
@@ -6597,7 +6645,7 @@ async def _do_skill_check(update: Update, ability: str, action_text: str, forced
     if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
         forced_roll = _extract_combined_roll(action_text)
     if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
-        _PENDING_DICE_ROLLS[update.effective_user.id] = _new_pending_roll(
+        _chat_scoped_dict(_PENDING_DICE_ROLLS, update.effective_chat.id)[update.effective_user.id] = _new_pending_roll(
             "skill_check", action_text, update.effective_chat.id, ability=ability,
         )
         # Task #187: _safe_send, not a raw send_message -- see the attack
@@ -6926,7 +6974,7 @@ async def _do_shove(update: Update, action_text: str, forced_roll: int | None = 
         if forced_roll is None and attacker.get("manual_dice_enabled") and not attacker.get("is_ai"):
             forced_roll = _extract_combined_roll(action_text)
         if forced_roll is None and attacker.get("manual_dice_enabled") and not attacker.get("is_ai"):
-            _PENDING_DICE_ROLLS[user_id] = _new_pending_roll("shove", action_text, update.effective_chat.id)
+            _chat_scoped_dict(_PENDING_DICE_ROLLS, update.effective_chat.id)[user_id] = _new_pending_roll("shove", action_text, update.effective_chat.id)
             # Task #187: _safe_send, not a raw send_message -- see the
             # attack site's comment above for why.
             await _safe_send(update, f"🎲 **{attacker['name']}**, roll a d20 for your shove and tell me the result (you have 1 minute, or I'll roll for you).")
@@ -6993,7 +7041,7 @@ async def _resolve_flee_attempt(update, session: sessions.Session, action_text: 
     if forced_roll is None and fleeing.get("manual_dice_enabled") and not fleeing.get("is_ai"):
         forced_roll = _extract_combined_roll(action_text)
     if forced_roll is None and fleeing.get("manual_dice_enabled") and not fleeing.get("is_ai"):
-        _PENDING_DICE_ROLLS[user_id] = _new_pending_roll("flee", action_text, update.effective_chat.id)
+        _chat_scoped_dict(_PENDING_DICE_ROLLS, update.effective_chat.id)[user_id] = _new_pending_roll("flee", action_text, update.effective_chat.id)
         # Task #187: _safe_send, not a raw send_message -- see the
         # attack site's comment above for why.
         await _safe_send(update, f"🎲 **{fleeing['name']}**, roll a d20 for your escape attempt and tell me the result (you have 1 minute, or I'll roll for you).")
@@ -8503,7 +8551,7 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
             )
             return
 
-    db.accept_board_quest(board_quest["board_quest_id"], telegram_user_id)
+    db.accept_board_quest(board_quest["board_quest_id"], telegram_user_id, update.effective_chat.id)
 
     # A player who already holds the target material shouldn't have to
     # gather it again from scratch -- credit whatever they already have
@@ -10811,7 +10859,7 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
     if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
         forced_roll = _extract_combined_roll(action_text)
     if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
-        _PENDING_DICE_ROLLS[update.effective_user.id] = _new_pending_roll("gather", action_text, update.effective_chat.id)
+        _chat_scoped_dict(_PENDING_DICE_ROLLS, update.effective_chat.id)[update.effective_user.id] = _new_pending_roll("gather", action_text, update.effective_chat.id)
         # Task #187: _safe_send, not a raw send_message -- this exact site
         # dropped a real prompt live to a transient TimedOut before this fix.
         await _safe_send(update, f"🎲 **{character['name']}**, roll a d20 for this {node['ability']} check and tell me the result (you have 1 minute, or I'll roll for you).")
@@ -15918,7 +15966,7 @@ async def _do_steal(update: Update, text: str, forced_roll: int | None = None) -
     if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
         forced_roll = _extract_combined_roll(text)
     if forced_roll is None and character.get("manual_dice_enabled") and not character.get("is_ai"):
-        _PENDING_DICE_ROLLS[telegram_user_id] = _new_pending_roll("steal", text, update.effective_chat.id)
+        _chat_scoped_dict(_PENDING_DICE_ROLLS, update.effective_chat.id)[telegram_user_id] = _new_pending_roll("steal", text, update.effective_chat.id)
         # Task #187: _safe_send, not a raw send_message -- see the attack
         # site's comment above for why.
         await _safe_send(update, f"🎲 **{character['name']}**, roll a d20 for your theft attempt and tell me the result (you have 1 minute, or I'll roll for you).")
@@ -16542,6 +16590,18 @@ async def _spend_cast_resource(
     real spell slot. Returns False (having already sent the player a
     real, specific reason) if the resource isn't available -- callers
     should return immediately when this is False.
+
+    Real live bug (2026-08-08, dev-topic screenshot, Coffee: "If they
+    have no slots and the spell didn't work, can you please give them
+    push buttons and indicate it is still thier turn so they know to
+    make their move?"): a failed cast used to leave nothing but a bare
+    text message -- if this happened mid-combat, the player had no
+    battle menu and no visible confirmation it was still their turn,
+    same confusion _do_attack's other failure paths already avoid by
+    re-showing both. _resend_battle_menu_if_still_their_turn is a
+    no-op outside combat (heal/revive can be cast on an inactive party
+    member with nobody currently fighting), so this only ever fires
+    when it's actually relevant.
     """
     if via_gear:
         feature_key = f"item_spell_{gear_instance_id}"
@@ -16550,6 +16610,7 @@ async def _spend_cast_resource(
                 f"You've already used {spell['name']} from that item as many times as you can since your last rest.",
                 message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
+            await _resend_battle_menu_if_still_their_turn(update)
             return False
         db.use_feature(update.effective_user.id, update.effective_chat.id, feature_key)
         return True
@@ -16562,8 +16623,25 @@ async def _spend_cast_resource(
                 f"Rest to recover them.",
                 message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
+            await _resend_battle_menu_if_still_their_turn(update)
             return False
     return True
+
+
+async def _resend_battle_menu_if_still_their_turn(update: Update) -> None:
+    """
+    Shared by _spend_cast_resource's failure paths above: if the caster
+    is currently in a live combat session AND it's genuinely still their
+    turn (a failed cast never advances the turn), re-sends the same
+    round/HP-roster announcement and tappable battle menu every other
+    in-combat failure path already shows, so a blocked player always
+    has a clear next move instead of a dead end. Silently does nothing
+    outside combat, or if -- for any reason -- it's no longer actually
+    their turn (e.g. a stale/duplicate retry).
+    """
+    session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
+    if session is not None and session.current_participant_id() == update.effective_user.id:
+        await _safe_send(update, _turn_announcement(session), reply_markup=_battle_menu_keyboard(session))
 
 
 def _text_mentions_spell(spell_id: str, spell_name: str, lowered_text: str) -> bool:
@@ -17736,7 +17814,7 @@ def setup_default_npcs() -> None:
 UNIVERSAL_ESCAPE_PHRASES = {"cancel", "start over", "nevermind", "never mind", "stop", "reset"}
 
 
-def _clear_all_stateful_flows(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bool:
+def _clear_all_stateful_flows(context: ContextTypes.DEFAULT_TYPE, user_id: int, chat_id: int) -> bool:
     """
     Clears any in-progress multi-step conversation state for this user —
     character creation today, and any future stateful flows (trading,
@@ -17748,10 +17826,10 @@ def _clear_all_stateful_flows(context: ContextTypes.DEFAULT_TYPE, user_id: int) 
         if key in context.user_data:
             del context.user_data[key]
             cleared = True
-    if _PENDING_DICE_ROLLS.pop(user_id, None) is not None:
+    if _chat_scoped_dict(_PENDING_DICE_ROLLS, chat_id).pop(user_id, None) is not None:
         cleared = True
-    if user_id in _PENDING_ASI_CHOICE:
-        _PENDING_ASI_CHOICE.discard(user_id)
+    if user_id in _chat_scoped_set(_PENDING_ASI_CHOICE, chat_id):
+        _chat_scoped_set(_PENDING_ASI_CHOICE, chat_id).discard(user_id)
         cleared = True
     return cleared
 
@@ -17810,7 +17888,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # "I reset the trap" is never misread as a cancel command.
     text_exact = update.message.text.strip().lower()
     if text_exact in UNIVERSAL_ESCAPE_PHRASES:
-        had_active_state = _clear_all_stateful_flows(context, update.effective_user.id)
+        had_active_state = _clear_all_stateful_flows(context, update.effective_user.id, update.effective_chat.id)
 
         chat_id = update.effective_chat.id
         # Multiple independent fights can now be running in this chat at
@@ -17867,7 +17945,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # cadence) auto-resolves anything still pending after
     # DICE_ROLL_AUTO_TIMEOUT_SECONDS, so this branch below only ever
     # fires for a genuinely prompt manual reply.
-    pending_roll = _PENDING_DICE_ROLLS.get(update.effective_user.id)
+    pending_roll = _chat_scoped_dict(_PENDING_DICE_ROLLS, update.effective_chat.id).get(update.effective_user.id)
     if pending_roll is None:
         # Observability for a real gap found live 2026-07-18 (Coffee: "i
         # did my roll of 9 and didnt get a reply"): _PENDING_DICE_ROLLS is
@@ -17896,7 +17974,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
                 message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
-        del _PENDING_DICE_ROLLS[update.effective_user.id]
+        del _chat_scoped_dict(_PENDING_DICE_ROLLS, update.effective_chat.id)[update.effective_user.id]
         logger.info(f"[dice] user={update.effective_user.id} resolved pending {pending_roll['kind']} roll with {manual_value}")
         if pending_roll["kind"] == "attack":
             await _do_attack(update, pending_roll["action_text"], forced_roll=manual_value)
@@ -17919,12 +17997,12 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # checked here, before normal intent parsing, so an unrelated later
     # message is never misread as a stat choice; only asked once, and
     # only while pending_asi_points is genuinely still unspent.
-    if update.effective_user.id in _PENDING_ASI_CHOICE:
+    if update.effective_user.id in _chat_scoped_set(_PENDING_ASI_CHOICE, update.effective_chat.id):
         await _do_level_up(update, update.message.text)
         return
 
-    if update.effective_user.id in _PENDING_DESCRIPTION:
-        _PENDING_DESCRIPTION.discard(update.effective_user.id)
+    if update.effective_user.id in _chat_scoped_set(_PENDING_DESCRIPTION, update.effective_chat.id):
+        _chat_scoped_set(_PENDING_DESCRIPTION, update.effective_chat.id).discard(update.effective_user.id)
         # Real bug found 2026-07-17 (incidentally, while building the
         # pronouns feature): from_prompt was never passed here, so a
         # plain reply to "what would you like your description to be?"
@@ -17937,8 +18015,8 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         await _do_set_description(update, update.message.text, from_prompt=True)
         return
 
-    if update.effective_user.id in _PENDING_PRONOUNS:
-        _PENDING_PRONOUNS.discard(update.effective_user.id)
+    if update.effective_user.id in _chat_scoped_set(_PENDING_PRONOUNS, update.effective_chat.id):
+        _chat_scoped_set(_PENDING_PRONOUNS, update.effective_chat.id).discard(update.effective_user.id)
         await _do_set_pronouns(update, update.message.text, from_prompt=True)
         return
 
@@ -18988,6 +19066,262 @@ async def _is_dev_topic_authorized(update: Update, context: ContextTypes.DEFAULT
 _SET_TOPIC_VALID_NAMES = ("main", "support", "adventure", "development")
 
 
+# Main-group Telegram invite, for admins of a new group who ask to join
+# the shared Public World instead of running their own Private World --
+# see _handle_onboarding_reply below. Not in config.py because it's
+# player-facing copy, not a runtime setting.
+_PUBLIC_WORLD_INVITE_LINK = "t.me/PandoraMMO"
+
+# Tracks, per chat_id, which question the consent-based onboarding flow
+# (2026-08-08) is currently waiting on an admin to answer. A plain
+# module-level dict keyed by chat_id is enough here (not the
+# _chat_scoped_dict/set pattern used elsewhere) because every entry IS
+# already a distinct chat_id -- there's no per-user sub-dimension to a
+# "does this group have a pending onboarding question" flag.
+_PENDING_ONBOARDING: dict[int, str] = {}  # chat_id -> "awaiting_setup_choice" | "awaiting_world_choice"
+
+_DM_GETTING_STARTED_TEXT = (
+    "👋 Hey, I'm Pandora MMO! I only play inside a Telegram *group*, not here in a private chat "
+    "with me — but here's how to get started either way:\n\n"
+    f"**Join the main group** — jump straight into our shared Public World with other players: "
+    f"{_PUBLIC_WORLD_INVITE_LINK}\n\n"
+    "**Or run your own** — add me (@PandoraMMO_Bot) to your own Telegram group instead. The moment "
+    "I'm added, I'll message that group and walk an admin through a one-time setup (topics, and "
+    "whether that group wants its own Private World or to join the Public World above)."
+)
+
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Real gap found 2026-08-08: this bot had NO /start handler and no
+    private-chat handling at all -- filters.TEXT & ~filters.COMMAND
+    (text_message_router) DOES receive private-chat messages, but
+    _route_text_message's topics.is_main() treats a private chat's
+    always-None message_thread_id exactly like the home group's Main
+    topic ("human-to-human chat only"), so a curious new user's very
+    first DM -- often literally Telegram's own auto-sent /start, the
+    button every user sees the first time they open a bot's chat --
+    got silently dropped, no reply, no hint this is even a group-based
+    game. Per Coffee's direction: a DM should serve the same purpose as
+    a getting-started guide, pointing at the real main group OR at
+    adding this bot to your own group.
+    """
+    if update.effective_chat.type == "private":
+        await update.effective_chat.send_message(_DM_GETTING_STARTED_TEXT, parse_mode="Markdown")
+
+
+_ONBOARDING_MANUAL_SETUP_TEXT = (
+    "1. If this group doesn't already have Telegram's **Topics** (forum) feature "
+    "enabled, turn it on in Group Settings first — without it, this bot can't tell "
+    "your topics apart and won't respond to gameplay at all.\n"
+    "2. Create a topic for **Adventure** (required — this is where the game itself "
+    "happens), and optionally one each for **Support** and general **Main** chat.\n"
+    "3. Inside each real topic (not here in General), an admin runs:\n"
+    "   `/set_topic adventure` (and `/set_topic support`, `/set_topic main` if you made those too)\n\n"
+    "That's it — once Adventure is set up, anyone can just start typing naturally in "
+    "it (\"I want to create a character\") to begin playing, no other commands needed."
+)
+
+
+async def bot_added_to_group_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Real onboarding gap found during a full multi-tenant setup audit
+    (2026-08-08): before this handler existed, a brand-new group admin
+    who added this bot got ZERO guidance anywhere -- no message, no
+    hint that /set_topic even exists, nothing explaining that
+    Telegram's Topics (forum) mode has to be enabled first or the bot
+    will silently never respond to anything (see topics.is_main's own
+    docstring: a message with no real thread_id is always treated as
+    Main, and Main is deliberately "human-to-human chat only -- the
+    bot never speaks here"). Fires once, the moment this bot's own
+    membership status genuinely transitions from not-a-member
+    (left/kicked/none) to a real member -- NOT on every subsequent
+    permission change (e.g. being promoted to admin later), which
+    would otherwise re-send this same welcome repeatedly for no reason.
+
+    Per Coffee's direction (2026-08-08), this is now a real consent-
+    based conversation, not just static instructions: it OFFERS to set
+    the topics up itself, and separately asks whether this group wants
+    its own isolated Private World or to join the existing Public World
+    in this bot's home group instead. See _handle_onboarding_reply,
+    which is wired into _route_text_message ahead of Main's normal
+    silent-return, for the two reply stages this kicks off.
+    """
+    result = update.my_chat_member
+    if result is None or result.new_chat_member.user.id != context.bot.id:
+        return
+    old_status = result.old_chat_member.status
+    new_status = result.new_chat_member.status
+    was_member = old_status in ("member", "administrator", "creator")
+    is_member_now = new_status in ("member", "administrator", "creator")
+    if was_member or not is_member_now:
+        return  # not a genuine "just added" transition
+
+    chat = result.chat
+    try:
+        await context.bot.send_message(
+            chat_id=chat.id,
+            text=(
+                "👋 Thanks for adding Pandora MMO!\n\n"
+                "A group admin needs to answer a couple of quick questions to get set up.\n\n"
+                "**Want me to set up the topics automatically?** I can create the Adventure/Support "
+                "topics myself, if this group already has Telegram's Topics (forum) mode on and I've "
+                "been made an admin with permission to manage topics.\n\n"
+                "Reply **auto** to have me try that, or **manual** for step-by-step instructions to "
+                "do it yourself."
+            ),
+            parse_mode="Markdown",
+        )
+        _PENDING_ONBOARDING[chat.id] = "awaiting_setup_choice"
+    except TelegramError as e:
+        logger.warning(f"[onboarding] welcome message failed for newly-added chat {chat.id}: {e!r}")
+
+
+async def _onboarding_ask_world_choice(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+    _PENDING_ONBOARDING[chat_id] = "awaiting_world_choice"
+    try:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=(
+                "One more thing — should this group run its own **Private World** (its own "
+                "characters, quests, economy, separate from everyone else), or would you rather "
+                "join the shared **Public World** in our main Telegram group instead?\n\n"
+                "Reply **private** or **public**."
+            ),
+            parse_mode="Markdown",
+        )
+    except TelegramError as e:
+        logger.warning(f"[onboarding] world-choice question failed for chat {chat_id}: {e!r}")
+
+
+async def _onboarding_attempt_auto_setup(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+    """
+    Best-effort auto-setup for the "auto" reply: creates real Telegram
+    forum topics for Adventure and Support via the Bot API and wires
+    them up the same way a manual /set_topic run would (db.register_chat
+    + db.set_chat_topic_id). Falls back to the manual instructions on
+    ANY reason this can't work -- forum mode not enabled, or this bot
+    not an admin with can_manage_topics -- since both are real
+    prerequisites only a human can fix in Group Settings.
+    """
+    reply_thread_id = update.effective_message.message_thread_id
+    try:
+        chat = await context.bot.get_chat(chat_id)
+        if not chat.is_forum:
+            raise RuntimeError("forum mode not enabled")
+        bot_member = await context.bot.get_chat_member(chat_id, context.bot.id)
+        if not getattr(bot_member, "can_manage_topics", False):
+            raise RuntimeError("bot lacks can_manage_topics")
+
+        adventure_topic = await context.bot.create_forum_topic(chat_id, name="Adventure")
+        support_topic = await context.bot.create_forum_topic(chat_id, name="Support")
+
+        db.register_chat(chat_id, chat.title, update.effective_user.id)
+        db.set_chat_topic_id(chat_id, "adventure", adventure_topic.message_thread_id)
+        db.set_chat_topic_id(chat_id, "support", support_topic.message_thread_id)
+
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="✅ Auto-setup done — created and wired up the Adventure and Support topics.",
+            message_thread_id=reply_thread_id,
+        )
+        await context.bot.send_message(
+            chat_id=chat_id,
+            message_thread_id=adventure_topic.message_thread_id,
+            text="This is your Adventure topic — just start typing naturally here "
+                 "(\"I want to create a character\") to begin playing.",
+        )
+    except (TelegramError, RuntimeError) as e:
+        logger.info(f"[onboarding] auto-setup unavailable for chat {chat_id}, falling back to manual: {e!r}")
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="Couldn't set that up automatically — I likely need Topics (forum mode) turned on "
+                 "and to be made an admin with \"Manage Topics\" permission first. Here's how to do it "
+                 "yourself instead:\n\n" + _ONBOARDING_MANUAL_SETUP_TEXT,
+            message_thread_id=reply_thread_id,
+            parse_mode="Markdown",
+        )
+
+
+async def _handle_onboarding_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> bool:
+    """
+    Handles an admin's reply to the two-stage onboarding conversation
+    kicked off by bot_added_to_group_handler above. Only ever consulted
+    for a chat with a real pending question (see _route_text_message);
+    returns True if this message was consumed as an onboarding answer
+    (so the caller should stop routing it any further -- Main normally
+    never processes text at all, so there's nothing else it could mean).
+    """
+    stage = _PENDING_ONBOARDING.get(chat_id)
+    if stage is None:
+        return False
+
+    is_admin = await _is_group_admin_or_owner(update, context)
+    if not is_admin:
+        # Stay silent for non-admins rather than repeatedly nagging Main
+        # chat about a question that isn't theirs to answer -- only a
+        # real admin reply should ever consume or advance this state.
+        return False
+
+    text = (update.effective_message.text or "").strip().lower()
+    reply_thread_id = update.effective_message.message_thread_id
+
+    if stage == "awaiting_setup_choice":
+        if "auto" in text:
+            await _onboarding_attempt_auto_setup(update, context, chat_id)
+            await _onboarding_ask_world_choice(context, chat_id)
+            return True
+        if "manual" in text:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=_ONBOARDING_MANUAL_SETUP_TEXT,
+                message_thread_id=reply_thread_id,
+                parse_mode="Markdown",
+            )
+            await _onboarding_ask_world_choice(context, chat_id)
+            return True
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="Reply **auto** to have me set up the topics myself, or **manual** for instructions "
+                 "to do it yourself.",
+            message_thread_id=reply_thread_id,
+            parse_mode="Markdown",
+        )
+        return True
+
+    if stage == "awaiting_world_choice":
+        if "public" in text:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=(
+                    f"The Public World lives in our main Telegram group — come join us there: "
+                    f"{_PUBLIC_WORLD_INVITE_LINK}\n\n"
+                    "This group will keep running as its own separate Private World in the meantime "
+                    "(every group we set up gets its own isolated characters, quests, and economy)."
+                ),
+            )
+            del _PENDING_ONBOARDING[chat_id]
+            return True
+        if "private" in text:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="Great — this group runs its own Private World: its own characters, quests, and "
+                     "economy, separate from everyone else. You're all set!",
+            )
+            del _PENDING_ONBOARDING[chat_id]
+            return True
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="Reply **private** (this group gets its own separate world) or **public** (join our "
+                 "main group's shared world instead).",
+            message_thread_id=reply_thread_id,
+            parse_mode="Markdown",
+        )
+        return True
+
+    return False
+
+
 async def set_topic_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Onboards a new Telegram group's own topic layout (multi-tenant
@@ -19033,6 +19367,32 @@ async def set_topic_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.effective_chat.send_message(
             "The Development topic is exclusive to this bot's own home group and can't be set up for any other group.",
             message_thread_id=reply_thread_id,
+        )
+        return
+
+    # Real gap found during a full multi-tenant onboarding audit
+    # (2026-08-08): "main" is the one topic name allowed to have a real
+    # None thread_id (Telegram's own General/Main topic genuinely
+    # reports None, and topics.is_main() already treats None as Main
+    # unconditionally by design) -- but adventure/support/development
+    # ALL require a real, distinct thread_id to ever match anything
+    # (is_adventure/is_support/is_development all explicitly require
+    # message_thread_id is not None). Before this fix, running this
+    # command from a group with Telegram's Topics/Forum mode not
+    # enabled at all (every message reports thread_id=None, same as
+    # Main) -- or from inside that group's own General/Main topic by
+    # mistake -- silently stored a broken None mapping and still
+    # claimed success, leaving that topic permanently non-functional
+    # with no error and no clue why gameplay never started.
+    if topic_name != "main" and reply_thread_id is None:
+        await update.effective_chat.send_message(
+            f"Can't set up '{topic_name}' here — this looks like your group's General/Main chat, or "
+            "your group doesn't have Telegram's Topics (forum) mode enabled yet.\n\n"
+            "This bot needs real, separate topics for Adventure (required) and Support/Development "
+            "(optional) to work. In your group's settings, enable **Topics**, create a topic for each "
+            "one you want, then run `/set_topic adventure` (etc.) from *inside* that real topic itself — "
+            "not from General/Main.",
+            message_thread_id=reply_thread_id, parse_mode="Markdown",
         )
         return
 
@@ -20127,7 +20487,13 @@ async def _route_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     thread_id = raw_thread_id or 0
     chat_id = update.effective_chat.id
 
+    if update.effective_chat.type == "private":
+        await update.effective_chat.send_message(_DM_GETTING_STARTED_TEXT, parse_mode="Markdown")
+        return
+
     if topics.is_main(chat_id, raw_thread_id):
+        if chat_id in _PENDING_ONBOARDING and await _handle_onboarding_reply(update, context, chat_id):
+            return
         return  # Main is human-to-human chat only — the bot never speaks here
 
     if topics.is_adventure(chat_id, thread_id):
@@ -20697,12 +21063,14 @@ async def _maybe_auto_roll_pending_dice(bot) -> None:
     instead of forever.
     """
     now = datetime.now(timezone.utc)
-    expired_user_ids = [
-        user_id for user_id, pending in _PENDING_DICE_ROLLS.items()
+    expired_keys = [
+        (chat_id, user_id)
+        for chat_id, chat_rolls in _PENDING_DICE_ROLLS.items()
+        for user_id, pending in chat_rolls.items()
         if (now - datetime.fromisoformat(pending["created_at"])).total_seconds() >= DICE_ROLL_AUTO_TIMEOUT_SECONDS
     ]
-    for user_id in expired_user_ids:
-        pending = _PENDING_DICE_ROLLS.pop(user_id, None)
+    for chat_id, user_id in expired_keys:
+        pending = _chat_scoped_dict(_PENDING_DICE_ROLLS, chat_id).pop(user_id, None)
         if pending is None:
             continue
         character = db.get_character(user_id, pending["chat_id"])
@@ -21189,7 +21557,9 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("redo", redo_command))
     application.add_handler(CommandHandler("remove_admin", remove_admin_command))
     application.add_handler(CommandHandler("report", report_command))
+    application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("set_topic", set_topic_command))
+    application.add_handler(ChatMemberHandler(bot_added_to_group_handler, ChatMemberHandler.MY_CHAT_MEMBER))
     application.add_handler(CommandHandler("reimage", reimage_command))
     application.add_handler(CommandHandler("rest", rest_command))
     application.add_handler(CommandHandler("sell", sell_command))

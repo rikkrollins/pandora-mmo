@@ -85,9 +85,10 @@ class FakeSentMessage:
 
 
 class FakeChat:
-    def __init__(self, sink, chat_id=-999, title=None):
+    def __init__(self, sink, chat_id=-999, title=None, type="group"):
         self.id = chat_id
         self.title = title
+        self.type = type
         self._sink = sink
         self.last_sent_message = None
         self.sent_photos = []

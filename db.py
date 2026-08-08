@@ -1619,7 +1619,7 @@ def find_character_by_name(name: str, chat_id: int) -> dict | None:
     return _row_to_dict(row) if row else None
 
 
-def find_character_by_telegram_username(username: str) -> dict | None:
+def find_character_by_telegram_username(username: str, chat_id: int) -> dict | None:
     """
     Resolves a real Telegram @username (2026-07-17, per Coffee: "give
     (item) to (telegram user/playername)" and /msg's target should
@@ -1631,13 +1631,20 @@ def find_character_by_telegram_username(username: str) -> dict | None:
     messages) -- a player who has never sent a message since this
     column existed simply won't resolve this way yet, same as any
     other freshly-added, backfill-free column in this file.
+
+    Real multi-tenant gap fixed (2026-08-08): this had no chat_id
+    filter at all, so a tagged @username could resolve to that
+    player's character in a DIFFERENT tenant chat. Not yet called
+    anywhere in bot.py (confirmed via grep) so never actually
+    exploitable, but fixed defensively before it's wired up rather
+    than after.
     """
     username = username.lstrip("@")
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT * FROM characters WHERE is_deleted = 0 AND LOWER(telegram_username) = LOWER(?) "
-            "ORDER BY character_id LIMIT 1",
-            (username,),
+            "SELECT * FROM characters WHERE is_deleted = 0 AND chat_id = ? "
+            "AND LOWER(telegram_username) = LOWER(?) ORDER BY character_id LIMIT 1",
+            (chat_id, username),
         ).fetchone()
     return _row_to_dict(row) if row else None
 
@@ -2364,30 +2371,40 @@ def create_board_quest(location_id: str, chat_id: int, day_key: str, title: str,
 BOARD_QUEST_TIER_EXPIRY_HOURS = {"daily": 24, "weekly": 7 * 24, "monthly": 30 * 24}
 
 
-def accept_board_quest(board_quest_id: int, telegram_user_id: int) -> dict | None:
+def accept_board_quest(board_quest_id: int, telegram_user_id: int, chat_id: int) -> dict | None:
     """
     Expiry window scales with the quest's own tier (2026-07-25,
     per Coffee's weekly/monthly missions ask) -- 24h for a daily bounty,
     same as always, but a real 7 days for a weekly one and 30 for a
     monthly one, so accepting a bigger mission doesn't hand back a
     24h-or-lose-it window that was only ever sized for the daily kind.
+
+    Real multi-tenant completeness fix (2026-08-08): board_quest_id is
+    already a globally-unique AUTOINCREMENT PK, so this was never a
+    real cross-tenant leak -- but every sibling board-quest function
+    (get_accepted_board_quests_for_user, get_accepted_board_quests_at_
+    location, etc.) already takes chat_id, and this one didn't. Added
+    for signature consistency and as a real defense-in-depth check: if
+    a caller ever passes a board_quest_id that doesn't actually belong
+    to chat_id (a bug elsewhere), this now fails to update instead of
+    silently accepting a different tenant's quest.
     """
     now = datetime.now(timezone.utc)
     with get_connection() as conn:
         existing = conn.execute(
-            "SELECT tier FROM board_quests WHERE board_quest_id = ?", (board_quest_id,)
+            "SELECT tier FROM board_quests WHERE board_quest_id = ? AND chat_id = ?", (board_quest_id, chat_id)
         ).fetchone()
         tier = existing["tier"] if existing else "daily"
         expiry_hours = BOARD_QUEST_TIER_EXPIRY_HOURS.get(tier, 24)
         expires = now.timestamp() + (expiry_hours * 3600)
         conn.execute(
             "UPDATE board_quests SET accepted_by = ?, accepted_at = ?, expires_at = ? "
-            "WHERE board_quest_id = ? AND accepted_by IS NULL",
+            "WHERE board_quest_id = ? AND chat_id = ? AND accepted_by IS NULL",
             (telegram_user_id, now.isoformat(), datetime.fromtimestamp(expires, timezone.utc).isoformat(),
-             board_quest_id),
+             board_quest_id, chat_id),
         )
         row = conn.execute(
-            "SELECT * FROM board_quests WHERE board_quest_id = ?", (board_quest_id,)
+            "SELECT * FROM board_quests WHERE board_quest_id = ? AND chat_id = ?", (board_quest_id, chat_id)
         ).fetchone()
     return _board_quest_row_to_dict(row) if row else None
 

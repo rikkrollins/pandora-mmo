@@ -517,6 +517,33 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if re.search(r"\b(?:[Gg]ive|[Hh]and|[Tt]rade|[Ss]end)\s+(?:[A-Z]\w+|@\w+)\s+\w+\s+\w+", text):
         return {**base, "action": "give_item"}
 
+    # Real live bug (2026-08-08, confirmed live via topic-activity
+    # monitoring): "Give pan health potion" fell through to a silent
+    # "chat" reply -- both dative-construction checks above rely on
+    # CAPITALIZATION (or an @-tag) as their only signal that a word is
+    # a real recipient name, but real players type in lowercase
+    # constantly, especially mid-combat. Same "at least two more words
+    # after the recipient" multi-word-item-name heuristic as the
+    # 2026-08-06 fix above, just case-insensitive -- with an explicit
+    # pronoun denylist (checked here, not baked into the regex) so
+    # "give me a hand", "hand it over", "send them away" don't newly
+    # false-positive now that capitalization is no longer required to
+    # gate this. Downstream recipient resolution (bot.py's
+    # _do_give_item -> _match_member_by_name_or_username) already
+    # matches case-insensitively -- this only had to fix classification.
+    # Excludes pronouns (a lowercase "give me/it/him/her/them a hand"
+    # etc. was never a real named recipient) AND articles/possessives
+    # (caught live while testing this very fix: "give the sword away"
+    # regressed to a false give_item without this -- "the" is never a
+    # real recipient name either).
+    _GIVE_ITEM_NON_RECIPIENTS = {
+        "me", "myself", "it", "him", "her", "them", "himself", "herself", "themselves", "us",
+        "the", "a", "an", "my", "his", "their", "your", "our", "this", "that", "these", "those",
+    }
+    dative_match = re.search(r"\b(?:give|hand|trade|send)\s+(\w+)\s+\w+\s+\w+", lowered)
+    if dative_match and dative_match.group(1) not in _GIVE_ITEM_NON_RECIPIENTS:
+        return {**base, "action": "give_item"}
+
     # Confirmed live 2026-07-14 (Coffee, reported as a broad "roadblock"
     # affecting both himself and the AI party): the per-word matching
     # below only filtered by word length (>=3), so filler words inside
@@ -566,6 +593,124 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # target no longer defeats it.
     if any(w in lowered for w in ["cast ", "i cast"]) or ("scroll" in lowered and re.search(r"\buse\b", lowered)):
         return {**base, "action": "cast_spell"}
+
+    # Real live bug (2026-08-08, confirmed live twice -- a real dev-
+    # topic screenshot AND independently via topic-activity
+    # monitoring): "Use health potion on Vesh Nightglass" got hijacked
+    # to talk_npc by the loop below, since Vesh is a real known NPC/
+    # companion name -- same root cause and same "checked before the
+    # loop" fix pattern as the scroll->cast_spell check just above,
+    # but for the far more common case of using an ordinary consumable
+    # (not a scroll) ON a named ally.
+    #
+    # Deliberately ONLY the narrow "on"-based signal here, NOT the
+    # broader drink/quaff/"use (the|my|a|an) ..." checks that live at
+    # this same function's later, general-purpose use_item block --
+    # first attempt at this fix duplicated the whole combined
+    # condition up here and it immediately shadowed "I use my breath
+    # weapon" (breath_weapon) and "use my own dice"
+    # (toggle_manual_dice), both of which are checked further down,
+    # AFTER this point, and both of which contain "use my" but never
+    # "on". The "on" requirement alone is exactly what the real
+    # reported bug needs (a real recipient always follows "on") and is
+    # narrow enough not to collide with those. Real regression caught
+    # by this fix's own test suite while writing it -- explicitly also
+    # excludes environment-use phrasing ("use the environment against
+    # it") for the same reason, since that check also lives later in
+    # this function.
+    _ENVIRONMENT_USE_PHRASES = ("use the environment", "use my surroundings", "use the surroundings",
+                                 "interact with the environment", "use the room against", "environment attack",
+                                 "use the area against")
+    if not any(w in lowered for w in _ENVIRONMENT_USE_PHRASES) and re.search(r"\buse\s+\S.*\bon\b", lowered):
+        return {**base, "action": "use_item"}
+
+    # Battle formations (2026-08-01, per Coffee: "character placement
+    # has an effect in battle" + "allow us to customize the
+    # formations"). Checked as an explicit move-to-row phrasing first
+    # (name extracted between "move "/"put " and "to the front/back"),
+    # then a same-clause "X to the front/back" fallback, then a bare
+    # "front row"/"back row" mention defaulting to self -- same layered
+    # pattern as the invite-to-party trigger above.
+    #
+    # Moved here, before the known-NPC-name loop below (2026-08-08,
+    # live-caught via topic-activity monitoring: "Pull vesh back to the
+    # back row" and "Move Vesh to the backrow" both came back as
+    # talk_npc instead of a formation change). Root cause: this whole
+    # block used to live AFTER the npc_name loop, so ANY formation
+    # command that names a real companion -- which is nearly always,
+    # since you have to say who to move -- got intercepted as talk_npc
+    # first and never reached this logic at all. Same "checked before
+    # the loop" fix shape already used for the scroll/use_item checks
+    # just above.
+    for trigger in ["move ", "put "]:
+        if trigger in lowered:
+            for row, cuts in (
+                ("back", (" to the back row", " to the back", " in the back row", " in the back", " behind")),
+                ("front", (" to the front row", " to the front", " in the front row", " in the front", " up front")),
+            ):
+                for cut in cuts:
+                    if cut in lowered:
+                        name = text[lowered.index(trigger) + len(trigger):lowered.index(cut)].strip()
+                        action = "set_back_row" if row == "back" else "set_front_row"
+                        return {**base, "action": action, "target": name or None}
+    for trigger in ("takes point", "take point"):
+        if trigger in lowered:
+            name = text[:lowered.index(trigger)].strip()
+            for cut in (" takes", " take"):
+                if name.lower().endswith(cut):
+                    name = name[:-len(cut)].strip()
+            return {**base, "action": "set_front_row", "target": name or None}
+    # Real-time tactical phrasing (2026-08-01, per Coffee: "research
+    # phrases and words used to cover, defend, pull back, move forward
+    # and other things used for formations" -- meant to work instantly
+    # mid-fight in the heat of the moment, not just the more deliberate
+    # "move X to the row" phrasing above). Deliberately conservative:
+    # only phrases specific enough to a real battlefield context to be
+    # safe as an unconditional keyword-fallback match (this fallback
+    # WINS outright over the model whenever it returns non-"chat", so a
+    # false positive here would misclassify real narrative text, e.g.
+    # "we need to protect the village" -- that's why looser words like
+    # bare "defend"/"protect"/"advance" are deliberately left out).
+    # "pull " requires a trailing "back", OPTIONALLY followed by a row
+    # phrase (a real name can sit between "pull " and "back", e.g.
+    # "pull Zara back", "pull vesh back to the back row"); everything
+    # else is a fixed phrase. The trailing-row-phrase case is the real
+    # live bug fixed 2026-08-08 above: "pull vesh back to the back row"
+    # ends in "row", not "back", so the old bare endswith("back") check
+    # missed it even once this block ran before the npc_name loop.
+    _PULL_BACK_TRAILERS = ("", " to the back row", " to the back", " to the front row", " to the front")
+    if "pull " in lowered:
+        stripped = lowered.rstrip().rstrip(".!")
+        for trailer in _PULL_BACK_TRAILERS:
+            suffix = "back" + trailer
+            if stripped.endswith(suffix):
+                start = lowered.index("pull ") + len("pull ")
+                end = len(stripped) - len(suffix)
+                name = text[start:end].strip()
+                # Guards against an unrelated sentence that happens to end
+                # in "back"/a row phrase after an earlier "pull " (e.g.
+                # "pull the lever, then head back") -- a real name is
+                # short and has no punctuation.
+                if len(name.split()) <= 3 and "," not in name and "." not in name:
+                    action = "set_front_row" if "front" in trailer else "set_back_row"
+                    return {**base, "action": action, "target": name or None}
+                break
+
+    # Bare mention fallbacks (no name -- assumed to mean the speaker's
+    # own character), checked AFTER the name-extracting blocks above so
+    # a real "pull vesh back to the back row"/"move vesh to the
+    # backrow"-style command with a real name is never shadowed by its
+    # own substring ("back row" IS a substring of "...to the back
+    # row") -- real regression caught while writing this fix's own test
+    # suite: this used to sit before the pull-back block and won first.
+    if any(w in lowered for w in ["front row", "up front", "take the front"]):
+        return {**base, "action": "set_front_row", "target": None}
+    if any(w in lowered for w in ["back row", "hang back", "stay behind", "stays behind"]):
+        return {**base, "action": "set_back_row", "target": None}
+    if any(w in lowered for w in ["fall back", "cover me"]):
+        return {**base, "action": "set_back_row", "target": None}
+    if any(w in lowered for w in ["push up", "move up", "hold the line", "hold the front"]):
+        return {**base, "action": "set_front_row", "target": None}
 
     for npc_name in known_npc_names:
         # Matches the NPC's full registered name as a substring ("old
@@ -641,61 +786,6 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
                     name = name[:name.lower().index(cut)].strip()
                     break
             return {**base, "action": "bench_party_member", "target": name or None}
-
-    # Battle formations (2026-08-01, per Coffee: "character placement
-    # has an effect in battle" + "allow us to customize the
-    # formations"). Checked as an explicit move-to-row phrasing first
-    # (name extracted between "move "/"put " and "to the front/back"),
-    # then a same-clause "X to the front/back" fallback, then a bare
-    # "front row"/"back row" mention defaulting to self -- same layered
-    # pattern as the invite-to-party trigger above.
-    for trigger in ["move ", "put "]:
-        if trigger in lowered:
-            for row, cuts in (
-                ("back", (" to the back row", " to the back", " in the back row", " in the back", " behind")),
-                ("front", (" to the front row", " to the front", " in the front row", " in the front", " up front")),
-            ):
-                for cut in cuts:
-                    if cut in lowered:
-                        name = text[lowered.index(trigger) + len(trigger):lowered.index(cut)].strip()
-                        action = "set_back_row" if row == "back" else "set_front_row"
-                        return {**base, "action": action, "target": name or None}
-    for trigger in ("takes point", "take point"):
-        if trigger in lowered:
-            name = text[:lowered.index(trigger)].strip()
-            for cut in (" takes", " take"):
-                if name.lower().endswith(cut):
-                    name = name[:-len(cut)].strip()
-            return {**base, "action": "set_front_row", "target": name or None}
-    if any(w in lowered for w in ["front row", "up front", "take the front"]):
-        return {**base, "action": "set_front_row", "target": None}
-    if any(w in lowered for w in ["back row", "hang back", "stay behind", "stays behind"]):
-        return {**base, "action": "set_back_row", "target": None}
-
-    # Real-time tactical phrasing (2026-08-01, per Coffee: "research
-    # phrases and words used to cover, defend, pull back, move forward
-    # and other things used for formations" -- meant to work instantly
-    # mid-fight in the heat of the moment, not just the more deliberate
-    # "move X to the row" phrasing above). Deliberately conservative:
-    # only phrases specific enough to a real battlefield context to be
-    # safe as an unconditional keyword-fallback match (this fallback
-    # WINS outright over the model whenever it returns non-"chat", so a
-    # false positive here would misclassify real narrative text, e.g.
-    # "we need to protect the village" -- that's why looser words like
-    # bare "defend"/"protect"/"advance" are deliberately left out).
-    # "pull " requires a trailing "back" (a real name can sit between,
-    # e.g. "pull Zara back"); everything else is a fixed phrase.
-    if "pull " in lowered and lowered.rstrip().rstrip(".!").endswith("back"):
-        name = text[lowered.index("pull ") + len("pull "):lowered.rindex("back")].strip()
-        # Guards against an unrelated sentence that happens to end in
-        # "back" after an earlier "pull " (e.g. "pull the lever, then
-        # head back") -- a real name is short and has no punctuation.
-        if len(name.split()) <= 3 and "," not in name and "." not in name:
-            return {**base, "action": "set_back_row", "target": name or None}
-    if any(w in lowered for w in ["fall back", "cover me"]):
-        return {**base, "action": "set_back_row", "target": None}
-    if any(w in lowered for w in ["push up", "move up", "hold the line", "hold the front"]):
-        return {**base, "action": "set_front_row", "target": None}
 
     # Checked BEFORE the attack-word match below: a hypothetical/defensive
     # statement like "Stand on guard in case the wolves attack" contains
@@ -1373,8 +1463,18 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if any(w in lowered for w in environment_words):
         return {**base, "action": "use_environment"}
 
+    # Real live bug (2026-08-08): "use health potion on pan" (an
+    # article-less "use X on Y" with no known NPC name in it) still
+    # needs to reach here as a fallback -- the earlier, loop-order-
+    # sensitive copy of this same "on"-based check (see the
+    # known-NPC-name loop above, right after the scroll->cast_spell
+    # check) only fires while iterating a known name, so a target
+    # that ISN'T a registered NPC/companion name (a fellow real
+    # player's own character, for instance) still needs this bare
+    # fallback copy to ever match at all.
     if any(w in lowered for w in ["drink ", "quaff"]) \
             or re.search(r"\buse (the|my|a|an)\b", lowered) \
+            or re.search(r"\buse\s+\S.*\bon\b", lowered) \
             or re.search(r"\beats?\b", lowered):
         return {**base, "action": "use_item"}
 

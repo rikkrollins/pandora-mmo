@@ -726,6 +726,23 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         result2 = _keyword_fallback("Give Vesh ring of undertow", [])
         self.assertEqual(result2["action"], "give_item")
 
+    def test_give_item_dative_phrasing_with_a_lowercase_recipient_name_is_classified_correctly(self):
+        # Real live bug (2026-08-08, confirmed via topic-activity
+        # monitoring): "Give pan health potion" fell through to a silent
+        # "chat" reply -- both dative-construction checks above rely on
+        # capitalization (or an @-tag) as their only signal that a word
+        # is a real recipient name, but real players type in lowercase
+        # constantly, especially mid-combat. Must not newly false-
+        # positive on pronoun/article phrasing now that capitalization
+        # is no longer required to gate this.
+        self.assertEqual(_keyword_fallback("Give pan health potion", [])["action"], "give_item")
+        self.assertEqual(_keyword_fallback("trade sarah my sword", [])["action"], "give_item")
+        self.assertEqual(_keyword_fallback("give me a hand", [])["action"], "chat")
+        self.assertEqual(_keyword_fallback("give it a try", [])["action"], "chat")
+        self.assertEqual(_keyword_fallback("send them away", [])["action"], "chat")
+        self.assertEqual(_keyword_fallback("give the sword away", [])["action"], "chat")
+        self.assertEqual(_keyword_fallback("give my sword away", [])["action"], "chat")
+
     async def test_give_item_transfers_between_characters_at_the_same_location(self):
         use_test_db("tests/tmp/give_item_test.db")
         giver_id, recipient_id = 900001, 900002
@@ -783,6 +800,18 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
     def test_use_item_doesnt_shadow_arcane_recovery(self):
         self.assertEqual(_keyword_fallback("I use arcane recovery", [])["action"], "arcane_recovery")
+
+    def test_use_item_on_target_without_an_article_is_classified_correctly(self):
+        # Real live bug (2026-08-08, confirmed via a real dev-topic
+        # screenshot AND independently via topic-activity monitoring):
+        # "Use health potion on pan" fell through to a silent "chat"
+        # reply -- this only ever matched "use (the|my|a|an) ...", so
+        # phrasing that skips the article entirely never matched at
+        # all, regardless of the recipient's capitalization.
+        self.assertEqual(_keyword_fallback("Use health potion on pan", [])["action"], "use_item")
+        self.assertEqual(_keyword_fallback("use antitoxin on sarah", [])["action"], "use_item")
+        # Must not shadow the environment-use check, checked earlier.
+        self.assertEqual(_keyword_fallback("use the environment against it", [])["action"], "use_environment")
 
     async def test_use_item_heals_and_consumes_the_potion(self):
         use_test_db("tests/tmp/use_item_test.db")
@@ -1778,7 +1807,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         user_id = 900481
         make_basic_character(user_id, "Sharpeyes", current_location="crossroads_tavern")
         db.update_character(user_id, -999, manual_dice_enabled=1)
-        bot._PENDING_DICE_ROLLS.pop(user_id, None)
+        bot._chat_scoped_dict(bot._PENDING_DICE_ROLLS, -999).pop(user_id, None)
 
         sink = []
         await bot._do_skill_check(FakeUpdate(user_id, "I listen at the door", sink), "wisdom", "I listen at the door")
@@ -1786,11 +1815,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # own name is capitalized/bolded) -- this test predates that
         # standardized wording and checked for a capital "Roll".
         self.assertTrue(any("roll a d20" in m.lower() for m in sink))
-        self.assertIn(user_id, bot._PENDING_DICE_ROLLS)
-        self.assertEqual(bot._PENDING_DICE_ROLLS[user_id]["kind"], "skill_check")
+        self.assertIn(user_id, bot._chat_scoped_dict(bot._PENDING_DICE_ROLLS, -999))
+        self.assertEqual(bot._chat_scoped_dict(bot._PENDING_DICE_ROLLS, -999)[user_id]["kind"], "skill_check")
 
         sink2 = []
-        pending = bot._PENDING_DICE_ROLLS.pop(user_id)
+        pending = bot._chat_scoped_dict(bot._PENDING_DICE_ROLLS, -999).pop(user_id)
         await bot._do_skill_check(
             FakeUpdate(user_id, "20", sink2), pending["ability"], pending["action_text"], forced_roll=20
         )
@@ -1845,6 +1874,66 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # own turn and resolves its unarmed attack back, which needs it.
         await bot._do_attack(FakeUpdate(user_id, "I attack the dummy", sink), "I attack the dummy", forced_roll=1)
         self.assertEqual(enemy["hp_current"], 100, "a forced natural 1 should never hit")
+        sessions.end_session(-999)
+
+    async def test_attack_with_a_named_owned_weapon_auto_equips_it(self):
+        """
+        Real live bug, dev-topic screenshot (2026-08-08): "Attack spider
+        4 with silvered dagger" -- "Was supposed to use the silvered
+        dagger not shortsword." _weapon_for_attacker only ever reads
+        the character's currently-equipped weapon; the "with <weapon>"
+        clause was silently discarded, so a player naming a different
+        carried weapon than what's equipped always still attacked with
+        whatever was already equipped. A player who owns (but hasn't
+        equipped) a silvered dagger, attacking "with silvered dagger",
+        must end the attack with it actually equipped -- and the
+        combat-result narration must name it, not the old shortsword.
+        """
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900483
+        make_basic_character(user_id, "DaggerWielder", current_location="crossroads_tavern",
+                              inventory={"shortsword": 1, "silvered_dagger": 1})
+        db.equip_item(user_id, -999, "shortsword")
+        enemy_id = -2_500_054
+        enemy = {
+            "telegram_user_id": enemy_id, "name": "Spider 4", "strength": 10, "dexterity": 10,
+            "armor_class": 5, "hp_current": 50, "hp_max": 50, "is_ai": 1, "monster_key": "goblin",
+        }
+        player = db.get_character(user_id, -999)
+        self.assertEqual(player.get("equipped_weapon"), "shortsword")
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", enemy_id: "enemy"})
+        session.turn_order = [user_id, enemy_id]
+        session.current_turn_index = 0
+
+        sink = []
+        await bot._do_attack(
+            FakeUpdate(user_id, "Attack spider 4 with silvered dagger", sink),
+            "Attack spider 4 with silvered dagger", forced_roll=20,
+        )
+        live = next(p for p in session.participants if p["telegram_user_id"] == user_id)
+        self.assertEqual(live.get("equipped_weapon"), "silvered_dagger")
+        self.assertEqual(db.get_character(user_id, -999).get("equipped_weapon"), "silvered_dagger")
+        self.assertTrue(any("silvered dagger" in line.lower() for line in sink))
+        sessions.end_session(-999)
+
+        # No regression: attacking with no weapon named, or already
+        # holding the named one, changes nothing and equips nothing new.
+        sessions.end_session(-999)
+        user_id2 = 900484
+        make_basic_character(user_id2, "PlainAttacker", current_location="crossroads_tavern")
+        enemy2 = {
+            "telegram_user_id": -2_500_055, "name": "Dummy2", "strength": 10, "dexterity": 10,
+            "armor_class": 20, "hp_current": 50, "hp_max": 50, "is_ai": 1, "monster_key": "goblin",
+        }
+        player2 = db.get_character(user_id2, -999)
+        equipped_before = player2.get("equipped_weapon")
+        player2["telegram_user_id"] = user_id2
+        session2 = sessions.start_session(-999, [player2, enemy2], {user_id2: "party", -2_500_055: "enemy"})
+        session2.turn_order = [user_id2, -2_500_055]
+        await bot._do_attack(FakeUpdate(user_id2, "I attack the dummy", []), "I attack the dummy", forced_roll=1)
+        self.assertEqual(db.get_character(user_id2, -999).get("equipped_weapon"), equipped_before)
         sessions.end_session(-999)
 
     # -- Inactive party members' XP share (2026-07-16, per Coffee) ----
@@ -2086,6 +2175,44 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(after["known_spells"], known_spells_before)
         self.assertEqual(after["spell_slots_current"], slots_before)
         self.assertEqual(db.get_feature_uses(user_id, -999, f"item_spell_{ring_id[2:]}"), 2)
+
+    async def test_cast_spell_with_no_slots_mid_combat_resends_the_battle_menu(self):
+        """
+        Real live bug, dev-topic screenshot (2026-08-08, Coffee): "If
+        they have no slots and the spell didn't work, can you please
+        give them push buttons and indicate it is still thier turn so
+        they know to make their move?" A failed cast (no spell slots
+        left) used to leave nothing but a bare "no slots" text message
+        -- mid-combat, that left the player with no battle menu and no
+        visible confirmation it was still their turn. Casting a real
+        level-1 damage spell with spell_slots_current forced to 0 must
+        now ALSO re-send the same round/turn announcement + tappable
+        battle menu every other in-combat failure path already shows.
+        """
+        import sessions
+        sessions.end_session(-999)
+        user_id = 950906
+        make_basic_character(user_id, "SlotlessCleric", char_class="Cleric", current_location="crossroads_tavern",
+                              known_spells=["guiding_bolt"])
+        db.update_character(user_id, -999, spell_slots_current=0)
+        enemy = {
+            "telegram_user_id": -2_500_056, "name": "SlotTestGoblin", "dexterity": 10,
+            "hp_current": 20, "hp_max": 20, "is_ai": 1, "monster_key": "goblin",
+        }
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", -2_500_056: "enemy"})
+        session.turn_order = [user_id, -2_500_056]
+        session.current_turn_index = 0
+
+        sink = []
+        await bot._do_cast_spell(FakeUpdate(user_id, "cast guiding bolt on the goblin", sink),
+                                  "cast guiding bolt on the goblin")
+        combined = "\n".join(sink)
+        self.assertIn("no spell slots remaining", combined.lower())
+        self.assertIn("round", combined.lower())
+        self.assertTrue(any("turn" in line.lower() for line in sink))
+        sessions.end_session(-999)
 
     async def test_equipped_profession_bonus_crosses_a_real_dc_boundary(self):
         """
@@ -3196,6 +3323,44 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     #    "let the party use formations to move forward and pull back in
     #    battle... it shudnt cost them a turn... Run, Give, Formation,
     #    Equip"). ---------------------------------------------------------
+    def test_formation_command_naming_a_known_companion_is_not_shadowed_by_talk_npc(self):
+        """
+        Real live bug, caught via topic-activity monitoring (2026-08-08):
+        a real player said "Pull vesh back to the back row" and later
+        "Move Vesh to the backrow" -- both came back as talk_npc, and a
+        Dev-topic screenshot from the same player confirmed it: "I have
+        not seen any indication that this action has worked. We are
+        trying to move Vesh to the back row during battle." Root cause:
+        the battle-formation block used to sit AFTER the known-NPC-name
+        loop, so ANY formation command naming a real companion -- which
+        is nearly always, since you have to say who to move -- got
+        intercepted as talk_npc first. Separately, "pull X back to the
+        back/front row" (as opposed to a bare trailing "...back") never
+        matched the old pull-back regex at all, since it required the
+        message to literally END in "back". Both fixed together; this
+        also guards the bare "back row"/"front row" mention fallback
+        doesn't win over a real name just because "back row" happens to
+        be a substring of "...to the back row".
+        """
+        npc_names = ["Vesh", "Zara"]
+        r = _keyword_fallback("Pull vesh back to the back row", npc_names)
+        self.assertEqual(r["action"], "set_back_row")
+        self.assertEqual((r.get("target") or "").lower(), "vesh")
+
+        r = _keyword_fallback("Move Vesh to the backrow", npc_names)
+        self.assertEqual(r["action"], "set_back_row")
+        self.assertEqual((r.get("target") or "").lower(), "vesh")
+
+        r = _keyword_fallback("pull vesh back to the front row", npc_names)
+        self.assertEqual(r["action"], "set_front_row")
+        self.assertEqual((r.get("target") or "").lower(), "vesh")
+
+        # No regression: talking to a known NPC by name still works.
+        r = _keyword_fallback("Say hello to Vesh", npc_names)
+        self.assertEqual(r["action"], "talk_npc")
+        r = _keyword_fallback("Talk to Vesh about the quest", npc_names)
+        self.assertEqual(r["action"], "talk_npc")
+
     def test_tactical_phrasing_maps_to_formation_not_flee(self):
         self.assertEqual(_keyword_fallback("pull back", [])["action"], "set_back_row")
         result = _keyword_fallback("pull Zara back", [])
@@ -3236,6 +3401,62 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(live.get("formation_row"), "back")
         self.assertEqual(db.get_character(leader_id, -999).get("formation_row"), "back")
         self.assertEqual(session.current_participant_id(), leader_id)  # turn unchanged
+        sessions.end_session(-999)
+
+    def test_turn_announcement_shows_the_formation_split_every_turn(self):
+        """
+        Real live request (2026-08-08, Coffee, prompted by the same
+        "move Vesh to the back row" incident above): the front/back
+        formation line used to only ever appear once, in the message
+        announcing combat had started -- with no way to see who's
+        currently front vs back on any later turn without scrolling
+        back. _turn_announcement (the real per-turn message, shown
+        every single turn) must now include it too, using the exact
+        same _format_formation_line the start-of-combat messages
+        already use, and must stay silent for either side that has
+        nobody in the back row -- same as the original start-of-combat
+        behavior, just repeated every turn instead of shown once.
+        """
+        import sessions
+        sessions.end_session(-999)
+        leader_id = 950605
+        make_basic_character(leader_id, "AnnounceLeader", current_location="crossroads_tavern")
+        db.update_character(leader_id, -999, formation_row="back")
+        enemy_front = {"telegram_user_id": -5100004, "name": "AnnounceGoblin", "dexterity": 10,
+                        "hp_current": 20, "hp_max": 20, "formation_row": "front"}
+        enemy_back = {"telegram_user_id": -5100005, "name": "AnnounceGoblinShaman", "dexterity": 10,
+                       "hp_current": 15, "hp_max": 15, "formation_row": "back"}
+        leader = db.get_character(leader_id, -999)
+        leader["telegram_user_id"] = leader_id
+        session = sessions.start_session(
+            -999, [leader, enemy_front, enemy_back],
+            {leader_id: "party", -5100004: "enemy", -5100005: "enemy"},
+        )
+        session.turn_order = [leader_id, -5100004, -5100005]
+
+        text = bot._turn_announcement(session)
+        self.assertIn("Back:", text)
+        self.assertIn("AnnounceLeader", text)
+        self.assertIn("AnnounceGoblinShaman", text)
+        self.assertIn("Front:", text)
+        self.assertIn("AnnounceGoblin", text)
+        sessions.end_session(-999)
+
+        # No regression: a fight where nobody's split (everyone default
+        # front row) stays silent, same as _format_formation_line's own
+        # original "nothing new to say" behavior.
+        sessions.end_session(-999)
+        leader_id2 = 950606
+        make_basic_character(leader_id2, "AnnounceLeader2", current_location="crossroads_tavern")
+        enemy2 = {"telegram_user_id": -5100006, "name": "AnnounceGoblin2", "dexterity": 10,
+                  "hp_current": 20, "hp_max": 20, "formation_row": "front"}
+        leader2 = db.get_character(leader_id2, -999)
+        leader2["telegram_user_id"] = leader_id2
+        session2 = sessions.start_session(-999, [leader2, enemy2], {leader_id2: "party", -5100006: "enemy"})
+        session2.turn_order = [leader_id2, -5100006]
+        text2 = bot._turn_announcement(session2)
+        self.assertNotIn("Back:", text2)
+        self.assertNotIn("Front:", text2)
         sessions.end_session(-999)
 
     def test_battle_menu_shows_more_button_not_a_bare_run_button(self):
@@ -3605,6 +3826,24 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         context_a.user_data["human_guidance"] = "retreat"
         self.assertNotIn(789, bot._chat_scoped_dict(bot._AI_PLAYER_CONTEXTS, chat_b))
 
+        # Real multi-tenant gap fixed (2026-08-08): _PENDING_DICE_ROLLS/
+        # _PENDING_ASI_CHOICE/_PENDING_DESCRIPTION/_PENDING_PRONOUNS were
+        # bare telegram_user_id-keyed globals -- a player active in two
+        # tenant chats at once could have one chat's pending prompt
+        # silently overwritten/cleared by the other. Now chat-scoped the
+        # same way as everything else in this test.
+        bot._chat_scoped_dict(bot._PENDING_DICE_ROLLS, chat_a)[321] = bot._new_pending_roll("attack", "I attack", chat_a)
+        self.assertNotIn(321, bot._chat_scoped_dict(bot._PENDING_DICE_ROLLS, chat_b))
+
+        bot._chat_scoped_set(bot._PENDING_ASI_CHOICE, chat_a).add(654)
+        self.assertNotIn(654, bot._chat_scoped_set(bot._PENDING_ASI_CHOICE, chat_b))
+
+        bot._chat_scoped_set(bot._PENDING_DESCRIPTION, chat_a).add(654)
+        self.assertNotIn(654, bot._chat_scoped_set(bot._PENDING_DESCRIPTION, chat_b))
+
+        bot._chat_scoped_set(bot._PENDING_PRONOUNS, chat_a).add(654)
+        self.assertNotIn(654, bot._chat_scoped_set(bot._PENDING_PRONOUNS, chat_b))
+
         # Real regression (2026-08-08, caught by the regression suite
         # itself): chat_a is -999, the same shared test chat_id reused
         # by dozens of other tests in this file (including
@@ -3624,6 +3863,159 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         events_a = bot._RECENT_WORLD_EVENTS.get(chat_a, [])
         events_a[:] = [e for e in events_a if e[2] != "a leaked test event"]
         bot._chat_scoped_dict(bot._AI_PLAYER_CONTEXTS, chat_a).pop(789, None)
+        bot._chat_scoped_dict(bot._PENDING_DICE_ROLLS, chat_a).pop(321, None)
+        bot._chat_scoped_set(bot._PENDING_ASI_CHOICE, chat_a).discard(654)
+        bot._chat_scoped_set(bot._PENDING_DESCRIPTION, chat_a).discard(654)
+        bot._chat_scoped_set(bot._PENDING_PRONOUNS, chat_a).discard(654)
+
+    async def test_onboarding_consent_flow_auto_setup_and_private_world(self):
+        """
+        Real feature (2026-08-08, per Coffee: "tell them what u need to
+        do, ask them if they want that, then continue if they agree" +
+        "ask if they want to connect to the main database or have
+        thier own (private world)"): a brand-new group's admin is asked
+        two real questions -- auto vs. manual topic setup, then Private
+        World vs. the shared Public World (which just points at the
+        real invite link, since every tenant chat's own isolated
+        Private World is the only backend that actually exists). This
+        drives the real bot_added_to_group_handler/_route_text_message/
+        _handle_onboarding_reply path end to end with a fake Bot that
+        reports forum mode on and can_manage_topics=True.
+        """
+        class _OnboardingFakeForumTopic:
+            def __init__(self, message_thread_id):
+                self.message_thread_id = message_thread_id
+
+        class _OnboardingFakeChat:
+            def __init__(self, chat_id, is_forum):
+                self.id = chat_id
+                self.title = "Test Group"
+                self.is_forum = is_forum
+
+        class _OnboardingFakeChatMember:
+            def __init__(self, status, can_manage_topics=False):
+                self.status = status
+                self.can_manage_topics = can_manage_topics
+
+        class _OnboardingFakeBot:
+            def __init__(self, bot_id, forum):
+                self.id = bot_id
+                self.forum = forum
+                self.sent = []
+                self._next_thread_id = 100
+
+            async def send_message(self, chat_id, text, message_thread_id=None, parse_mode=None):
+                self.sent.append(text)
+                return SimpleNamespace(message_id=len(self.sent))
+
+            async def get_chat(self, chat_id):
+                return _OnboardingFakeChat(chat_id, self.forum)
+
+            async def get_chat_member(self, chat_id, user_id):
+                if user_id == self.id:
+                    return _OnboardingFakeChatMember("administrator", can_manage_topics=True)
+                return _OnboardingFakeChatMember("administrator")
+
+            async def create_forum_topic(self, chat_id, name):
+                self._next_thread_id += 1
+                return _OnboardingFakeForumTopic(self._next_thread_id)
+
+        chat_id, admin_id, fake_bot_id = -5101, 611, 999999
+        tg_bot = _OnboardingFakeBot(fake_bot_id, forum=True)
+        ctx = SimpleNamespace(bot=tg_bot, user_data={}, args=[])
+
+        added = SimpleNamespace(
+            chat=SimpleNamespace(id=chat_id, title="Test Group"),
+            old_chat_member=SimpleNamespace(status="left"),
+            new_chat_member=SimpleNamespace(status="member", user=SimpleNamespace(id=fake_bot_id)),
+        )
+        await bot.bot_added_to_group_handler(
+            SimpleNamespace(effective_chat=None, effective_user=None, my_chat_member=added), ctx,
+        )
+        self.assertEqual(bot._PENDING_ONBOARDING.get(chat_id), "awaiting_setup_choice")
+
+        def make_text_update(text):
+            msg = SimpleNamespace(text=text, message_thread_id=None)
+            return SimpleNamespace(
+                effective_chat=SimpleNamespace(id=chat_id, type="group"),
+                effective_user=SimpleNamespace(id=admin_id),
+                effective_message=msg,
+            )
+
+        await bot._route_text_message(make_text_update("auto"), ctx)
+        self.assertTrue(any("Auto-setup done" in t for t in tg_bot.sent))
+        self.assertIsNotNone(db.get_chat_topic_id(chat_id, "adventure"))
+        self.assertIsNotNone(db.get_chat_topic_id(chat_id, "support"))
+        self.assertEqual(bot._PENDING_ONBOARDING.get(chat_id), "awaiting_world_choice")
+
+        await bot._route_text_message(make_text_update("private please"), ctx)
+        self.assertTrue(any("Private World" in t and "You're all set" in t for t in tg_bot.sent))
+        self.assertNotIn(chat_id, bot._PENDING_ONBOARDING)
+
+    async def test_onboarding_public_world_choice_points_at_the_real_invite_link(self):
+        """
+        Companion case to the test above: choosing "public" must never
+        try to share this tenant's data with the home group's chat_id
+        (no such cross-tenant sharing exists, deliberately -- see
+        [[project_multi_tenant_scaling_status]]) -- it just tells the
+        admin the real Telegram invite link for the shared Public World
+        and leaves this chat on its own Private World regardless.
+        """
+        chat_id, admin_id = -5102, 622
+        bot._PENDING_ONBOARDING[chat_id] = "awaiting_world_choice"
+        sent = []
+
+        class _StubBot:
+            async def send_message(self, chat_id, text, message_thread_id=None, parse_mode=None):
+                sent.append(text)
+
+            async def get_chat_member(self, chat_id, user_id):
+                return SimpleNamespace(status="administrator")
+
+        ctx = SimpleNamespace(bot=_StubBot(), user_data={}, args=[])
+        msg = SimpleNamespace(text="I'd like public", message_thread_id=None)
+        update = SimpleNamespace(
+            effective_chat=SimpleNamespace(id=chat_id, type="group"),
+            effective_user=SimpleNamespace(id=admin_id),
+            effective_message=msg,
+        )
+        await bot._route_text_message(update, ctx)
+        self.assertTrue(any(bot._PUBLIC_WORLD_INVITE_LINK in t for t in sent))
+        self.assertNotIn(chat_id, bot._PENDING_ONBOARDING)
+
+    async def test_private_dm_to_the_bot_gets_a_real_getting_started_reply(self):
+        """
+        Real gap found 2026-08-08 (per Coffee: "if someone messages the
+        Bot it serves the same purpose as getting started"): before
+        this, ANY private DM to the bot -- including Telegram's own
+        auto-sent /start on first opening a chat with it -- got
+        silently dropped by _route_text_message, since a private chat's
+        message_thread_id is always None, same as the home group's Main
+        topic ("human-to-human only"). Both a plain DM and /start must
+        now point the user at joining the main group or adding the bot
+        to their own.
+        """
+        sent = []
+
+        class _StubChat:
+            id = -7001
+            type = "private"
+
+            async def send_message(self, text, parse_mode=None):
+                sent.append(text)
+
+        stub_chat = _StubChat()
+        msg = SimpleNamespace(text="hi", message_thread_id=None)
+        update = SimpleNamespace(effective_chat=stub_chat, effective_user=SimpleNamespace(id=701),
+                                  effective_message=msg)
+        await bot._route_text_message(update, SimpleNamespace(bot=None, user_data={}, args=[]))
+        self.assertTrue(any(bot._PUBLIC_WORLD_INVITE_LINK in t for t in sent))
+        self.assertTrue(any("add me" in t.lower() for t in sent))
+
+        sent.clear()
+        start_update = SimpleNamespace(effective_chat=stub_chat, effective_user=SimpleNamespace(id=701))
+        await bot.start_command(start_update, SimpleNamespace(bot=None, user_data={}, args=[]))
+        self.assertTrue(any(bot._PUBLIC_WORLD_INVITE_LINK in t for t in sent))
 
     def test_get_party_members_does_not_leak_across_tenant_chats(self):
         """
@@ -4307,7 +4699,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         user_a = 900700
         make_basic_character(user_a, "TenantA", current_location=location_id, chat_id=chat_a)
-        db.accept_board_quest(quests_a[0]["board_quest_id"], user_a)
+        db.accept_board_quest(quests_a[0]["board_quest_id"], user_a, chat_a)
         self.assertEqual(
             len(db.get_accepted_board_quests_for_user(user_a, chat_a)), 1,
         )
@@ -4376,7 +4768,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         db.update_character(user_id, -999, pending_asi_points=2)
         sink = []
         await bot._do_level_up(FakeUpdate(user_id, "level up", sink), "level up")
-        self.assertIn(user_id, bot._PENDING_ASI_CHOICE)
+        self.assertIn(user_id, bot._chat_scoped_set(bot._PENDING_ASI_CHOICE, -999))
         self.assertTrue(any("Which ability" in m for m in sink))
 
         before_con = db.get_character(user_id, -999)["constitution"]
@@ -4385,7 +4777,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         after = db.get_character(user_id, -999)
         self.assertEqual(after["constitution"], before_con + 2)
         self.assertEqual(after["pending_asi_points"], 0)
-        self.assertNotIn(user_id, bot._PENDING_ASI_CHOICE)
+        self.assertNotIn(user_id, bot._chat_scoped_set(bot._PENDING_ASI_CHOICE, -999))
 
     async def test_level_up_auto_assigns_to_class_primary_ability(self):
         user_id = 900495
@@ -4397,7 +4789,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         after = db.get_character(user_id, -999)
         self.assertEqual(after["strength"], before_strength + 4)
         self.assertEqual(after["pending_asi_points"], 0)
-        self.assertNotIn(user_id, bot._PENDING_ASI_CHOICE)
+        self.assertNotIn(user_id, bot._chat_scoped_set(bot._PENDING_ASI_CHOICE, -999))
 
     async def test_level_up_single_ability_choice_caps_at_two_and_keeps_remainder(self):
         user_id = 900496
@@ -4494,7 +4886,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "I'd like to add a character description to my player",
         )
         self.assertIsNone(db.get_character(user_id, -999)["description"])
-        self.assertIn(user_id, bot._PENDING_DESCRIPTION)
+        self.assertIn(user_id, bot._chat_scoped_set(bot._PENDING_DESCRIPTION, -999))
         self.assertIn("what would you like your character's description", sink[-1])
 
         sink2 = []
@@ -4555,7 +4947,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink = []
         await bot._do_set_pronouns(FakeUpdate(user_id, "I'd like to set my pronouns", sink), "I'd like to set my pronouns")
         self.assertIsNone(db.get_character(user_id, -999)["pronouns"])
-        self.assertIn(user_id, bot._PENDING_PRONOUNS)
+        self.assertIn(user_id, bot._chat_scoped_set(bot._PENDING_PRONOUNS, -999))
 
         sink2 = []
         await bot._do_set_pronouns(FakeUpdate(user_id, "he/him", sink2), "he/him", from_prompt=True)
@@ -5101,7 +5493,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "whispering_wood", -999, "2026-07-17", "A supply run for Wood",
             "Bring wood back to the board.", None, "gather_material", "wood", 1, 50, 20,
         )
-        db.accept_board_quest(bq["board_quest_id"], user_id)
+        db.accept_board_quest(bq["board_quest_id"], user_id, -999)
 
         sink = []
         with patch("bot.roll_ability_check", return_value={
@@ -5283,6 +5675,28 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "I cast revivify on Wren",
         ):
             self.assertEqual(_keyword_fallback(text, known)["action"], "cast_spell", text)
+
+    def test_use_item_on_a_named_npc_still_classifies_as_use_item(self):
+        """
+        Real live bug (2026-08-08, confirmed live twice -- a real dev-
+        topic screenshot AND independently via topic-activity
+        monitoring): "Use health potion on Vesh Nightglass" got
+        hijacked to talk_npc by the same known-NPC-name loop as the
+        scroll->cast_spell bug just above, since Vesh is a real known
+        NPC/companion name -- but for the far more common case of
+        using an ordinary consumable (not a scroll) ON a named ally.
+        Same "move the check before the loop" fix pattern.
+        """
+        known = ["Vesh Nightglass", "Wren Hollowbrook"]
+        for text in (
+            "Use health potion on Vesh Nightglass",
+            "use the health potion on Vesh Nightglass",
+        ):
+            self.assertEqual(_keyword_fallback(text, known)["action"], "use_item", text)
+        # Recruiting/talking to the same real NPCs must still work --
+        # this fix must not shadow anything else that already worked.
+        self.assertEqual(_keyword_fallback("recruit Vesh Nightglass", known)["action"], "recruit_npc")
+        self.assertEqual(_keyword_fallback("talk to Wren Hollowbrook", known)["action"], "talk_npc")
 
     def test_leaderboard_trigger_recognized(self):
         from ai.intent_parser import _keyword_fallback
