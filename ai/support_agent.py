@@ -15,6 +15,7 @@ import time
 
 import requests
 
+import campaign_loader as cl
 import config
 import items as items_module
 import races as races_module
@@ -24,6 +25,12 @@ from guilds import GUILDS
 from models import VALID_CLASSES
 from rules.crafting import RECIPES
 from rules.leveling import XP_THRESHOLDS, level_for_xp, MAX_LEVEL
+
+# Loaded once at import time, same singleton-per-campaign-id caching as
+# bot.py's own CAMPAIGN (campaign_loader.load_campaign caches by id, so
+# this is not a second real load). Used to ground the location/NPC/
+# quest wiki content below.
+CAMPAIGN = cl.load_campaign(config.ACTIVE_CAMPAIGN)
 
 # Standard 5E priority order for which ability scores matter most to each
 # class -- real, sourced SRD convention, not project-specific data (unlike
@@ -203,11 +210,25 @@ SUPPORT_SYSTEM_PROMPT = (
     + CRITICAL_GROUNDING_RULE
     + """
 
-Do not reveal or speculate about story content, plot, hidden areas, or what \
-the "great evil" or threat in the world might be. Do not give hints, \
-suggestions, or strategy advice about where to go, what to do next, or how \
-to approach any in-world challenge or mystery — if asked something like \
-that, say that's part of what they'll discover by playing. You MAY answer \
+Do not reveal or speculate about PLOT: why anything matters, what a \
+mystery's answer is, what the "great evil" or any threat in the world \
+really is, what lies beyond a place the player hasn't reached yet, or \
+what to do next strategically. If asked something like that, say that's \
+part of what they'll discover by playing — never guess or improvise an \
+answer to fill the gap.
+
+You MAY act as a plain encyclopedia/wiki for facts the game has ALREADY \
+shown this exact player, given to you below as real, current ground \
+truth: (1) locations they've actually visited — relay the given \
+name/description/connections plainly, as pure physical/world facts, \
+never attaching meaning or significance beyond what's stated; (2) NPCs \
+they've actually met — their role and general character only, never \
+personal history or motives; (3) their own active quest's real title \
+and description, stated exactly as given, as a plain task — never \
+explain WHY it matters or what they'll find. Never mention, describe, \
+or hint at any location, NPC, or quest NOT explicitly given to you \
+below — if asked about one that isn't listed, say that's for them to \
+discover, exactly like any other story question. You MAY answer \
 character-BUILD mechanical questions (e.g. which ability score to assign \
 where, what a stat means, how much XP is needed to level up) using real \
 5E rules and, if given, the player's own REAL character facts below — \
@@ -230,6 +251,25 @@ def _build_character_facts(character: dict) -> str:
     known_spells = character.get("known_spells") or []
     active_quests = character.get("active_quests") or {}
 
+    # Real gap fixed (2026-08-08, game-wiki expansion): this used to list
+    # bare quest_id strings ("welcome_to_the_crossroads"), which tells a
+    # player asking "what's my next quest task" nothing usable. The exact
+    # same title/description text is already shown to the player, in the
+    # open, via the ordinary quest journal ("check quests" -- see bot.py's
+    # _do_check_quests) -- so surfacing it here through Support isn't new
+    # spoiler exposure, just the same already-seen facts through a
+    # different topic. Never adds anything beyond what that journal
+    # already shows.
+    if active_quests:
+        quest_lines = []
+        for quest_id in active_quests:
+            quest = CAMPAIGN.get("quests", {}).get(quest_id)
+            if quest:
+                quest_lines.append(f"{quest['title']} — {quest['description']}")
+        quests_text = "; ".join(quest_lines) if quest_lines else "none"
+    else:
+        quests_text = "none"
+
     return (
         "\n\nREAL FACTS ABOUT THE PLAYER'S OWN CHARACTER (answer personal "
         "questions using ONLY this, never invent or guess):\n"
@@ -242,7 +282,8 @@ def _build_character_facts(character: dict) -> str:
         f"- Gold: {character.get('gold')}\n"
         f"- Current location: {character.get('current_location')}\n"
         f"- Known spells: {', '.join(known_spells) if known_spells else 'none'}\n"
-        f"- Active quests: {', '.join(active_quests.keys()) if active_quests else 'none'}"
+        f"- Active quests (their real task, stated plainly -- never explain why it matters "
+        f"or what they'll find, just what the quest journal itself already says): {quests_text}"
     )
 
 
@@ -379,6 +420,88 @@ def _deterministic_party_answer(party_members: list[dict], question: str) -> str
     return "\n".join(lines)
 
 
+_LOCATION_CONNECTION_QUESTION_WORDS = ["connects to", "connect to", "what connects", "leads to", "lead to"]
+
+
+def _deterministic_location_connections_answer(character: dict, question: str) -> str | None:
+    """
+    Real live bug (2026-08-08, game-wiki expansion): "What connects to
+    Market Row?" got the nonsensical model answer "Market Row connects
+    directly to Market Row." even with the correct connection data
+    right there in its prompt -- same class of failure as the XP/active-
+    character/inventory hallucinations above (a small model given a
+    correct fact and still not relaying it right). This has exactly one
+    well-defined correct answer per real, already-visited location (its
+    real `connections`/descends_to/ascends_to fields), so it's answered
+    directly here instead of trusting free-form generation, same
+    reasoning as every other deterministic answer in this file. Returns
+    None (falls through to the LLM) if no visited location's name
+    appears in the question, so this never blocks a genuinely different
+    kind of question that happens to contain "connects".
+    """
+    lowered = question.lower()
+    if not any(w in lowered for w in _LOCATION_CONNECTION_QUESTION_WORDS):
+        return None
+    visited = character.get("visited_locations") or []
+    candidates = []
+    for loc_id in visited:
+        loc = cl.get_location(CAMPAIGN, loc_id)
+        if loc and loc["name"].lower() in lowered:
+            candidates.append(loc)
+    if not candidates:
+        return None
+    # Longest matching name wins, same "most specific match" convention
+    # used by _match_member_by_name_or_username, so a shorter location
+    # name never wrongly wins over one that contains it.
+    loc = max(candidates, key=lambda l: len(l["name"]))
+    connections = list(loc.get("connections", []))
+    for extra in ("descends_to", "ascends_to"):
+        if loc.get(extra):
+            connections.append(loc[extra])
+    connection_names = []
+    for c in connections:
+        connected_loc = cl.get_location(CAMPAIGN, c)
+        if connected_loc:
+            connection_names.append(connected_loc["name"])
+    if not connection_names:
+        return f"{loc['name']} doesn't connect anywhere else you've found yet."
+    return f"{loc['name']} connects to: {', '.join(connection_names)}."
+
+
+_QUEST_TASK_QUESTION_WORDS = [
+    "next quest", "quest task", "what's my quest", "whats my quest",
+    "current quest", "my objective", "what am i supposed to do", "what do i need to do",
+]
+
+
+def _deterministic_quest_task_answer(character: dict) -> str | None:
+    """
+    Real gap found alongside the location-connections bug above
+    (2026-08-08): the LLM path answered "What's my next quest task?"
+    with just the bare title ("A Favor for Grimsby"), dropping the
+    actual task description -- technically not wrong, but not useful
+    either, since the title alone doesn't say what to DO. The real
+    title+description is already known, fixed, already-shown-to-the-
+    player data (see _build_character_facts) -- no reason to let free-
+    form generation risk dropping half of it. Returns None (falls
+    through to the LLM) if the character has no active story quests
+    with real campaign.json entries, so an edge case still gets a
+    real conversational answer rather than nothing.
+    """
+    active_quests = character.get("active_quests") or {}
+    if not active_quests:
+        return "You don't have any active story quests right now."
+    lines = []
+    for quest_id in active_quests:
+        quest = CAMPAIGN.get("quests", {}).get(quest_id)
+        if quest:
+            lines.append(f"{quest['title']} — {quest['description']}")
+    if not lines:
+        return None
+    label = "Your active quest task" + ("s" if len(lines) > 1 else "") + ":"
+    return f"{label} {'; '.join(lines)}"
+
+
 def _extract_six_rolls(question: str) -> list[int] | None:
     numbers = [int(n) for n in re.findall(r"\d+", question)]
     return numbers if len(numbers) == 6 else None
@@ -428,10 +551,95 @@ def _deterministic_stat_assignment_answer(character: dict, rolls: list[int]) -> 
     return "\n".join(lines)
 
 
+def _build_location_reference(visited_location_ids: list[str]) -> str:
+    """
+    Game-wiki expansion (2026-08-08, per Coffee: Support should answer
+    location/world questions like an encyclopedia). Gated to locations
+    the player has ALREADY visited -- the exact same name/description/
+    connections text "look around" already showed them in Adventure
+    (see bot.py's location-arrival narration, which prints
+    location['description'] verbatim), so nothing here is new
+    information ahead of discovery. A location the player hasn't found
+    yet is never included, deliberately -- Support must not preview
+    unvisited content.
+    """
+    # Real bug caught before shipping (2026-08-08): campaign.json nests
+    # locations by layer (surface/underground/sky) first, so a plain
+    # CAMPAIGN["locations"].get(loc_id) always misses -- confirmed live,
+    # this returned only the 3 layer keys instead of 82 real locations.
+    # cl.get_location already handles the layer flattening correctly
+    # (same helper bot.py uses everywhere else); reused here rather than
+    # re-deriving the lookup.
+    lines = []
+    for loc_id in visited_location_ids:
+        loc = cl.get_location(CAMPAIGN, loc_id)
+        if not loc:
+            continue
+        connections = list(loc.get("connections", []))
+        for extra in ("descends_to", "ascends_to"):
+            if loc.get(extra):
+                connections.append(loc[extra])
+        connection_names = []
+        for c in connections:
+            connected_loc = cl.get_location(CAMPAIGN, c)
+            if connected_loc:
+                connection_names.append(connected_loc["name"])
+        conn_text = f" Connects to: {', '.join(connection_names)}." if connection_names else ""
+        lines.append(f"- {loc['name']}: {loc['description']}{conn_text}")
+    if not lines:
+        return ""
+    return "\n\nREAL LOCATIONS THE PLAYER HAS ALREADY VISITED (pure world/wiki facts -- never " \
+        "attach plot significance or hint at why anything matters beyond what's stated here; " \
+        "never mention or describe ANY location not in this list, visited or not):\n" + "\n".join(lines)
+
+
+def _build_npc_reference(visited_location_ids: list[str]) -> str:
+    """
+    Companion to _build_location_reference -- who's who at places the
+    player has actually been. Only name/role/personality/disposition:
+    real character-DESCRIPTION facts, the same "what are they like"
+    info a player could glean from meeting them. Deliberately excludes
+    each NPC's real 'goals'/'gives_quests' campaign.json fields, since
+    those are quest-hook/plot-adjacent by nature (memory: "NPC role/
+    class/personality, never backstory").
+    """
+    visited_npc_ids = []
+    seen = set()
+    for loc_id in visited_location_ids:
+        loc = cl.get_location(CAMPAIGN, loc_id)
+        if not loc:
+            continue
+        for npc_id in loc.get("npcs", []):
+            if npc_id not in seen:
+                seen.add(npc_id)
+                visited_npc_ids.append(npc_id)
+
+    lines = []
+    for npc_id in visited_npc_ids:
+        npc = cl.get_npc(CAMPAIGN, npc_id)
+        if not npc:
+            continue
+        role = (npc.get("role") or "").replace("_", " ")
+        char_class = npc.get("stats", {}).get("char_class")
+        role_text = f"{role}, a {char_class}" if char_class else role
+        lines.append(
+            f"- {npc['name']} ({role_text}): {npc.get('personality', '')} "
+            f"(disposition: {npc.get('disposition', 'unknown')})"
+        )
+    if not lines:
+        return ""
+    return "\n\nREAL NPCS THE PLAYER HAS ALREADY MET (their role and general character only -- " \
+        "never their personal history, motives, or secrets, even if you happen to know them; " \
+        "never mention an NPC not in this list):\n" + "\n".join(lines)
+
+
 def _build_prompt(question: str, character: dict | None = None, party_members: list[dict] | None = None) -> str:
     prompt = SUPPORT_SYSTEM_PROMPT
     if character:
         prompt += _build_character_facts(character)
+        visited = character.get("visited_locations") or []
+        prompt += _build_location_reference(visited)
+        prompt += _build_npc_reference(visited)
     if party_members is not None:
         prompt += _build_party_facts(party_members)
     return f"{prompt}\n\nPlayer question: {question}\nAnswer:"
@@ -485,6 +693,14 @@ def answer_support_question(
         return _deterministic_inventory_answer(character)
     if not character and any(w in lowered for w in _INVENTORY_QUESTION_WORDS):
         return "You don't have an active character yet — say \"I want to create a character\" in Adventure to get started."
+    if character:
+        location_answer = _deterministic_location_connections_answer(character, question)
+        if location_answer is not None:
+            return location_answer
+    if character and any(w in lowered for w in _QUEST_TASK_QUESTION_WORDS):
+        quest_answer = _deterministic_quest_task_answer(character)
+        if quest_answer is not None:
+            return quest_answer
     if character and "assign" in lowered:
         rolls = _extract_six_rolls(question)
         if rolls is not None:

@@ -1303,31 +1303,42 @@ _AI_PLAYER_CONTEXTS: dict[int, dict[int, _AiPlayerContext]] = {}
 # State is tracked per-user in context.user_data["creation"].
 # ---------------------------------------------------------------------
 
-def _get_party_members() -> list[dict]:
+def _get_party_members(chat_id: int) -> list[dict]:
     """
     Every currently-ACTIVE character — real players' active character
-    slot, plus AI companions. Deleted characters and a player's inactive
-    (non-active) character slots don't count as being "in the party."
+    slot, plus AI companions — IN THIS CHAT. Deleted characters and a
+    player's inactive (non-active) character slots don't count as being
+    "in the party."
+
+    Real cross-tenant leak, found and fixed 2026-08-08 (multi-tenant
+    audit): this used to have no chat_id filter at all, returning every
+    active character across EVERY tenant chat -- since this feeds
+    combat targeting, dueling, and "give item to nearby party member"
+    (via _get_combat_eligible_party_members below), two different
+    tenant chats' characters could target/duel/give-items to each
+    other. `characters` has had a real chat_id column since Phase 4a
+    (v1.27.84); this was simply never threaded through here.
     """
     with db.get_connection() as conn:
         rows = conn.execute(
             """
             SELECT c.* FROM characters c
             JOIN active_characters a ON a.character_id = c.character_id
-            WHERE c.is_deleted = 0
-            """
+            WHERE c.is_deleted = 0 AND c.chat_id = ?
+            """,
+            (chat_id,),
         ).fetchall()
     return [db._row_to_dict(r) for r in rows]
 
 
-def _get_combat_eligible_party_members(location_id: str) -> list[dict]:
+def _get_combat_eligible_party_members(location_id: str, chat_id: int) -> list[dict]:
     """
     Real party members who could actually join a fight breaking out at
     location_id right now (2026-07-14, per Coffee: "only characters
     that are active and at the same location shud be in the same
     battle... if a character is in the tavern and another is in the
     whispering woods they shud not be able to fight"). _get_party_members
-    deliberately returns EVERY active character globally, with no
+    deliberately returns EVERY active character in this chat, with no
     location or resting filter at all, since it's also used for things
     like "who's in my party" listings where a global roster makes
     sense -- but _do_start_combat was reusing that same unfiltered list
@@ -1337,7 +1348,7 @@ def _get_combat_eligible_party_members(location_id: str) -> list[dict]:
     location and not currently resting (is_inactive).
     """
     return [
-        p for p in _get_party_members()
+        p for p in _get_party_members(chat_id)
         if p["current_location"] == location_id and not p.get("is_inactive")
     ]
 
@@ -1520,7 +1531,7 @@ def _presence_status(character: dict, now: datetime | None = None) -> str:
     return "🟢 Online" if idle_seconds < IDLE_WARNING_SECONDS else "🌙 Away"
 
 
-def _online_party_members_elsewhere(location_id: str, exclude_ids: set[int]) -> list[dict]:
+def _online_party_members_elsewhere(location_id: str, exclude_ids: set[int], chat_id: int) -> list[dict]:
     """
     Real (non-AI) party members who are currently online (see
     _presence_status), haven't opted into Do Not Disturb, and are
@@ -1531,7 +1542,7 @@ def _online_party_members_elsewhere(location_id: str, exclude_ids: set[int]) -> 
     """
     now = datetime.now(timezone.utc)
     others = []
-    for p in _get_party_members():
+    for p in _get_party_members(chat_id):
         if p.get("is_ai") or p["telegram_user_id"] in exclude_ids:
             continue
         if p["current_location"] == location_id or p.get("is_inactive") or p.get("do_not_disturb"):
@@ -1552,13 +1563,13 @@ def _format_party_names(party: list[dict]) -> str:
     return f"{', '.join(names)} — {len(party)} member{'s' if len(party) != 1 else ''}"
 
 
-def _party_summary_text() -> str:
+def _party_summary_text(chat_id: int) -> str:
     """
     A clear, factual description of who's currently in the party and how
     many, e.g. 'Kara, Finn (AI companion) — 2 members'. Never guesses or
     invents members; only reports what's actually in the database.
     """
-    return _format_party_names(_get_party_members())
+    return _format_party_names(_get_party_members(chat_id))
 
 
 def _match_member_by_name_or_username(text: str, members: list[dict]) -> dict | None:
@@ -1604,14 +1615,14 @@ def _match_member_by_name_or_username(text: str, members: list[dict]) -> dict | 
     return None
 
 
-def _find_party_target_by_name(text: str) -> dict | None:
+def _find_party_target_by_name(text: str, chat_id: int) -> dict | None:
     """
     Finds a party member (real player, AI companion, or a currently
     inactive/resting real player — all still count as "in the party")
     named in free text, for support-spell targeting. Returns None if no
     party member's name appears, letting the caller default to self.
     """
-    return _match_member_by_name_or_username(text, _get_party_members())
+    return _match_member_by_name_or_username(text, _get_party_members(chat_id))
 
 
 async def _send_welcome_narration(update: Update, character: dict) -> None:
@@ -1639,7 +1650,7 @@ async def _send_welcome_narration(update: Update, character: dict) -> None:
         "connection_names": connection_names,
     }
 
-    party_summary = _party_summary_text()
+    party_summary = _party_summary_text(character["chat_id"])
     welcome_text = await asyncio.to_thread(
         narrate_welcome, character, location_facts, party_summary
     )
@@ -2680,7 +2691,7 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             if qty > 0 and items_module.get_item(item_id)
         ]
         others = [
-            p for p in _get_combat_eligible_party_members(character["current_location"])
+            p for p in _get_combat_eligible_party_members(character["current_location"], character["chat_id"])
             if p["telegram_user_id"] != user_id
         ] if character else []
         if not carried_ids or not others:
@@ -2697,7 +2708,7 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if action == "giveitem":
         item = items_module.get_item(value)
         others = [
-            p for p in _get_combat_eligible_party_members(character["current_location"])
+            p for p in _get_combat_eligible_party_members(character["current_location"], character["chat_id"])
             if p["telegram_user_id"] != user_id
         ] if character else []
         if item is None or not others:
@@ -2730,7 +2741,7 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         # present combatant (self included) -- picking a person shows
         # THEIR equippable gear next.
         others = [
-            p for p in _get_combat_eligible_party_members(character["current_location"])
+            p for p in _get_combat_eligible_party_members(character["current_location"], character["chat_id"])
             if p["telegram_user_id"] != user_id
         ] if character else []
         buttons = [[InlineKeyboardButton("⚡ Auto Equip Party", callback_data="bm|equipauto")]]
@@ -4186,7 +4197,7 @@ async def _do_auto_level_up_party(update: Update) -> None:
         return
 
     if requester.get("party_id"):
-        members = [p for p in _get_party_members() if p.get("party_id") == requester["party_id"]]
+        members = [p for p in _get_party_members(update.effective_chat.id) if p.get("party_id") == requester["party_id"]]
     else:
         members = [requester]
 
@@ -5038,7 +5049,7 @@ async def _do_challenge_duel(update: Update, text: str) -> None:
         )
         return
 
-    candidates = _get_combat_eligible_party_members(character["current_location"])
+    candidates = _get_combat_eligible_party_members(character["current_location"], character["chat_id"])
     lowered = text.lower()
     target = next(
         (p for p in candidates
@@ -5450,7 +5461,7 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
         # backlog description. Resting players and anyone already in
         # this fight are deliberately left out, same as DND.
         nudge_targets = _online_party_members_elsewhere(
-            requester["current_location"], {p["telegram_user_id"] for p in party}
+            requester["current_location"], {p["telegram_user_id"] for p in party}, requester["chat_id"]
         )
         if nudge_targets:
             names = ", ".join(p["name"] for p in nudge_targets)
@@ -6138,7 +6149,7 @@ async def _do_recruit_npc(update: Update, npc_name: str) -> None:
     # already correctly REASSIGNS an AI companion's party_id, see
     # db.add_ai_companion_to_party), rather than a dead end.
     already_recruited = next(
-        (p for p in _get_party_members() if p["name"] == npc["name"] and p.get("is_ai")), None
+        (p for p in _get_party_members(update.effective_chat.id) if p["name"] == npc["name"] and p.get("is_ai")), None
     )
     if already_recruited is not None:
         requester = db.get_character(update.effective_user.id, update.effective_chat.id)
@@ -6186,7 +6197,7 @@ async def _do_recruit_npc(update: Update, npc_name: str) -> None:
     # since create_character's schema default location has nothing to
     # do with where they were actually just recruited.
     recruiter = db.get_character(update.effective_user.id, update.effective_chat.id)
-    party_summary = _party_summary_text()
+    party_summary = _party_summary_text(update.effective_chat.id)
     if recruiter is not None:
         party_id = recruiter.get("party_id")
         if not party_id:
@@ -7165,7 +7176,7 @@ async def _do_message_ai(update: Update, text: str) -> None:
             if session.sides.get(p["telegram_user_id"]) == "party"
         ]
     else:
-        candidates = _get_party_members()
+        candidates = _get_party_members(update.effective_chat.id)
     candidates = [p for p in candidates if p["telegram_user_id"] != character["telegram_user_id"]]
 
     target = _match_member_by_name_or_username(text, candidates)
@@ -7272,16 +7283,23 @@ def _apply_passive_party_regen() -> None:
     system anywhere yet, and one would need to be designed for real
     rather than bolted on in this pass.
     """
-    for character in _get_party_members():
-        if character.get("is_dead"):
-            continue
-        if character["hp_current"] >= character["hp_max"]:
-            continue
-        if _in_active_combat(character["telegram_user_id"], character["chat_id"]):
-            continue
-        new_hp = min(character["hp_max"], character["hp_current"] + _passive_regen_amount(character))
-        if new_hp != character["hp_current"]:
-            db.update_character(character["telegram_user_id"], character["chat_id"], hp_current=new_hp)
+    # Real cross-tenant fix (2026-08-08): this ticks the WHOLE game's
+    # party, across every tenant chat, not just one -- _get_party_members
+    # now requires a real chat_id per call, so this loops db.get_all_
+    # chat_ids() and ticks each chat's own roster separately, same
+    # per-chat pattern _ai_party_autonomous_tick/_maybe_post_world_
+    # heartbeat already use elsewhere in this same background loop.
+    for chat_id in db.get_all_chat_ids():
+        for character in _get_party_members(chat_id):
+            if character.get("is_dead"):
+                continue
+            if character["hp_current"] >= character["hp_max"]:
+                continue
+            if _in_active_combat(character["telegram_user_id"], character["chat_id"]):
+                continue
+            new_hp = min(character["hp_max"], character["hp_current"] + _passive_regen_amount(character))
+            if new_hp != character["hp_current"]:
+                db.update_character(character["telegram_user_id"], character["chat_id"], hp_current=new_hp)
 
 
 def _song_of_rest_bonus(character: dict) -> int:
@@ -9646,7 +9664,7 @@ async def _do_check_party(update: Update, text: str = "") -> None:
         location = cl.get_location(CAMPAIGN, character["current_location"])
         location_name = location["name"] if location else "here"
         others_here = [
-            p for p in _get_party_members()
+            p for p in _get_party_members(update.effective_chat.id)
             if p["current_location"] == character["current_location"]
             and p["telegram_user_id"] != character["telegram_user_id"]
         ]
@@ -9664,7 +9682,7 @@ async def _do_check_party(update: Update, text: str = "") -> None:
             )
         return
 
-    lines = [f"👥 Everyone currently active: {_party_summary_text()}"]
+    lines = [f"👥 Everyone currently active: {_party_summary_text(update.effective_chat.id)}"]
 
     if character:
         party_id = character.get("party_id")
@@ -9852,7 +9870,7 @@ def _party_keyboard(character: dict) -> InlineKeyboardMarkup | None:
         rows.append([InlineKeyboardButton("✅ Accept Invite", callback_data="party|accept")])
 
     candidates = [
-        p for p in _get_party_members()
+        p for p in _get_party_members(character["chat_id"])
         if p["current_location"] == character["current_location"]
         and p["telegram_user_id"] != character["telegram_user_id"]
         and not (party_id is not None and p.get("party_id") == party_id)
@@ -9924,7 +9942,7 @@ async def _do_invite_to_party(update: Update, target_name: str) -> None:
         )
         return
 
-    target = _find_party_target_by_name(target_name)
+    target = _find_party_target_by_name(target_name, update.effective_chat.id)
     if target is None:
         await update.effective_chat.send_message(
             f"No one named \"{target_name}\" is around to invite.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
@@ -10002,7 +10020,7 @@ async def _do_bench_member(update: Update, target_name: str) -> None:
     if not target_name:
         await _safe_send(update, "Bench who, exactly? Try \"bench [name]\".")
         return
-    target = _find_party_target_by_name(target_name)
+    target = _find_party_target_by_name(target_name, update.effective_chat.id)
     if target is None or target.get("party_id") != party_id:
         await _safe_send(update, f"No one named \"{target_name}\" is in your party.")
         return
@@ -10025,7 +10043,7 @@ async def _do_unbench_member(update: Update, target_name: str) -> None:
     if not target_name:
         await _safe_send(update, "Un-bench who, exactly? Try \"bring [name] back\".")
         return
-    target = _find_party_target_by_name(target_name)
+    target = _find_party_target_by_name(target_name, update.effective_chat.id)
     if target is None or target.get("party_id") != party_id:
         await _safe_send(update, f"No one named \"{target_name}\" is in your party.")
         return
@@ -10067,7 +10085,7 @@ async def _do_set_formation_row(update: Update, target_name: str, row: str) -> N
     if not target_name or target_name.strip().lower() in ("me", "myself", "my own"):
         target = character
     else:
-        target = _find_party_target_by_name(target_name)
+        target = _find_party_target_by_name(target_name, update.effective_chat.id)
         party_id = character.get("party_id")
         if target is None or (party_id and target.get("party_id") != party_id) or (
             not party_id and target["telegram_user_id"] != telegram_user_id
@@ -10399,7 +10417,7 @@ async def _do_check_sheet(update: Update, target_name: str | None = None) -> Non
     # NPCs, who get honest basic info instead of a fabricated stat
     # block, since they don't have a real 5E sheet until recruited.
     if target_name:
-        target = _find_party_target_by_name(target_name) or db.find_character_by_name(target_name, update.effective_chat.id)
+        target = _find_party_target_by_name(target_name, update.effective_chat.id) or db.find_character_by_name(target_name, update.effective_chat.id)
         if target is not None:
             await _safe_send(update, _format_character_sheet(target), speak=False)
             return
@@ -10602,7 +10620,7 @@ def _give_item_keyboard(character: dict) -> InlineKeyboardMarkup | None:
     pick" case.
     """
     others = [
-        p for p in _get_combat_eligible_party_members(character["current_location"])
+        p for p in _get_combat_eligible_party_members(character["current_location"], character["chat_id"])
         if p["telegram_user_id"] != character["telegram_user_id"]
     ]
     if not others or not character.get("inventory"):
@@ -10628,7 +10646,7 @@ async def give_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if item is None or character is None:
             return
         others = [
-            p for p in _get_combat_eligible_party_members(character["current_location"])
+            p for p in _get_combat_eligible_party_members(character["current_location"], character["chat_id"])
             if p["telegram_user_id"] != character["telegram_user_id"]
         ]
         if not others:
@@ -12207,7 +12225,7 @@ async def _do_bardic_inspiration(update: Update, target_text: str) -> None:
         )
         return
 
-    target_character = _find_party_target_by_name(target_text) or character
+    target_character = _find_party_target_by_name(target_text, update.effective_chat.id) or character
     # Universal Manipulation "greater_inspiration" (2026-08-06,
     # repeatable): base 1d6, +1 extra 1d6 die per point invested,
     # unlimited -- was a flat d6->d8 die-size swap, now an extra rolled
@@ -12266,7 +12284,7 @@ async def _do_lay_on_hands(update: Update, target_text: str) -> None:
     # Real player-power rebalance (2026-07-26): same healing-keeps-pace
     # fix as Second Wind/resolve_heal_spell above.
     pool = int(pool * power_scale_ratio(character["level"], character.get("rebirth_count", 0)))
-    target_character = _find_party_target_by_name(target_text) or character
+    target_character = _find_party_target_by_name(target_text, update.effective_chat.id) or character
     new_hp = min(target_character["hp_max"], target_character["hp_current"] + pool)
     actual_healed = new_hp - target_character["hp_current"]
     db.update_character(target_character["telegram_user_id"], update.effective_chat.id, hp_current=new_hp)
@@ -13368,7 +13386,7 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await _safe_send(update, f"You don't have the {item['name']} to give.")
             return
         candidates = [
-            p for p in _get_combat_eligible_party_members(character["current_location"])
+            p for p in _get_combat_eligible_party_members(character["current_location"], character["chat_id"])
             if p["telegram_user_id"] != character["telegram_user_id"]
         ]
         if not candidates:
@@ -14757,7 +14775,7 @@ async def _do_give_item(update: Update, text: str) -> None:
         return
 
     candidates = [
-        p for p in _get_combat_eligible_party_members(character["current_location"])
+        p for p in _get_combat_eligible_party_members(character["current_location"], character["chat_id"])
         if p["telegram_user_id"] != character["telegram_user_id"]
     ]
     recipient = _match_member_by_name_or_username(text, candidates)
@@ -14947,7 +14965,7 @@ async def _do_use_item(update: Update, text: str) -> None:
             recipients = [target]
         else:
             present = [
-                p for p in _get_combat_eligible_party_members(character["current_location"])
+                p for p in _get_combat_eligible_party_members(character["current_location"], character["chat_id"])
                 if character.get("party_id") and p.get("party_id") == character["party_id"]
             ] or [character]
             # A dead party member isn't "physically present" anywhere
@@ -15296,7 +15314,7 @@ def _bless_present_party_to_full(character: dict, exclude_character_ids: set[int
         exclude_character_ids = {exclude_character_ids}
     exclude_character_ids = exclude_character_ids or set()
     present = [
-        p for p in _get_combat_eligible_party_members(character["current_location"])
+        p for p in _get_combat_eligible_party_members(character["current_location"], character["chat_id"])
         if character.get("party_id") and p.get("party_id") == character["party_id"]
     ] or [character]
     lines = []
@@ -15440,7 +15458,7 @@ async def _do_equip_item(update: Update, text: str) -> None:
 
     target = character
     others = [
-        p for p in _get_combat_eligible_party_members(character["current_location"])
+        p for p in _get_combat_eligible_party_members(character["current_location"], character["chat_id"])
         if p["telegram_user_id"] != character["telegram_user_id"]
     ]
     named_other = _match_member_by_name_or_username(text, others)
@@ -15541,7 +15559,7 @@ async def _do_auto_equip_gear(update: Update, text: str) -> None:
         return
 
     others = [
-        p for p in _get_combat_eligible_party_members(character["current_location"])
+        p for p in _get_combat_eligible_party_members(character["current_location"], character["chat_id"])
         if p["telegram_user_id"] != character["telegram_user_id"]
     ]
 
@@ -16455,7 +16473,7 @@ def _target_picker_keyboard(prefix: str, action_id: str, requester: dict) -> Inl
     skip straight to a self-cast/self-use otherwise, so this never adds
     an empty, pointless extra tap.
     """
-    eligible = _get_combat_eligible_party_members(requester["current_location"])
+    eligible = _get_combat_eligible_party_members(requester["current_location"], requester["chat_id"])
     others = [p for p in eligible if p["telegram_user_id"] != requester["telegram_user_id"]]
     if not others:
         return None
@@ -16830,7 +16848,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
         # including one currently resting/inactive — per design, an
         # inactive character can't act but can still be helped. Defaults
         # to self if no other party member is named in the text.
-        target_character = _find_party_target_by_name(text) or character
+        target_character = _find_party_target_by_name(text, update.effective_chat.id) or character
         if target_character.get("is_dead"):
             await update.effective_chat.send_message(
                 f"**{target_character['name']}** is dead, not just hurt — {spell['name']} won't bring them back. "
@@ -16871,7 +16889,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
         # the party gets a genuine chance to top them up afterward,
         # same tiering logic that already separates this from the
         # pricier, full-heal Tent/Cabin/House items.
-        target_character = _find_party_target_by_name(text)
+        target_character = _find_party_target_by_name(text, update.effective_chat.id)
         if target_character is None or not target_character.get("is_dead"):
             await update.effective_chat.send_message(
                 "Name a dead party member to revive — there's no one to bring back right now.",
@@ -17081,7 +17099,7 @@ async def _cast_utility_spell(
             return
 
         if spell_id == "spare_the_dying":
-            target_character = _find_party_target_by_name(text) or character
+            target_character = _find_party_target_by_name(text, chat_id) or character
             target_p = next((p for p in session.participants if p["telegram_user_id"] == target_character["telegram_user_id"]), None)
             if target_p is None or target_p["hp_current"] > 0 or target_p.get("is_dead"):
                 await update.effective_chat.send_message(
@@ -17110,7 +17128,7 @@ async def _cast_utility_spell(
                 await _safe_send(update, f"🌟 **{character['name']}** casts {spell['name']} — the whole party fights truer for {duration} rounds.")
                 return
 
-            target_character = _find_party_target_by_name(text) or character
+            target_character = _find_party_target_by_name(text, chat_id) or character
             target_p = next((p for p in session.participants if p["telegram_user_id"] == target_character["telegram_user_id"]), None)
             if target_p is None or target_p["hp_current"] <= 0:
                 await update.effective_chat.send_message(
@@ -18813,7 +18831,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
-    party_members = _get_party_members() if character else None
+    party_members = _get_party_members(update.effective_chat.id) if character else None
     question = f"Can you explain this: {replied_text.strip()}"
     async with _keep_typing(update.effective_chat, update.effective_message.message_thread_id):
         reply = await asyncio.to_thread(answer_support_question, question, character, party_members)
@@ -19387,7 +19405,7 @@ async def redo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     async with _keep_typing(update.effective_chat, update.effective_message.message_thread_id):
         if entry["kind"] == "support":
             character = db.get_character(entry["user_id"], update.effective_chat.id)
-            party_members = _get_party_members() if character else None
+            party_members = _get_party_members(update.effective_chat.id) if character else None
             reply = await asyncio.to_thread(answer_support_question, stored_text, character, party_members)
             logger.info(f"[redo] support user={entry['user_id']} text={stored_text!r} reply={reply!r}")
             await _safe_send(stored_update, reply, thread_id=topics.thread_id_for(update.effective_chat.id, "support"))
@@ -19913,7 +19931,7 @@ async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TY
     # 2026-07-14, per Coffee: "Is Sarah in my current party?" and "Show
     # me my party character sheets" both had nothing real to answer from
     # -- only the asking player's OWN character was ever passed here.
-    party_members = _get_party_members() if character else None
+    party_members = _get_party_members(update.effective_chat.id) if character else None
 
     # Same "show me X's sheet" capability as Adventure (same regex as
     # ai/intent_parser.py's check_sheet trigger), per Coffee's explicit
@@ -19948,7 +19966,7 @@ async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TY
                     else "You don't have a character yet."
                 )
                 continue
-            target = _find_party_target_by_name(raw_name) or db.find_character_by_name(raw_name, update.effective_chat.id)
+            target = _find_party_target_by_name(raw_name, update.effective_chat.id) or db.find_character_by_name(raw_name, update.effective_chat.id)
             if target is not None:
                 replies.append(_format_character_sheet(target))
                 continue
@@ -20297,7 +20315,7 @@ def _ensure_ai_party_exists(chat_id: int) -> None:
     logger.info(f"[ai_party] created autonomous AI party, party_id={party_id}")
 
 
-def _party_gather_needs_here(location_id: str) -> list[dict]:
+def _party_gather_needs_here(location_id: str, chat_id: int) -> list[dict]:
     """
     Real, currently-accepted party gather-quest objectives that THIS
     location's resource nodes can actually satisfy right now (2026-07-14,
@@ -20319,7 +20337,7 @@ def _party_gather_needs_here(location_id: str) -> list[dict]:
         return []
     seen_ids = set()
     needs = []
-    for member in _get_party_members():
+    for member in _get_party_members(chat_id):
         for q in db.get_accepted_board_quests_for_user(member["telegram_user_id"], member["chat_id"]):
             if (
                 q["board_quest_id"] in seen_ids
@@ -20398,7 +20416,7 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
         # recruitable NPC from an ordinary shopkeeper/one-off character in
         # "People here", so the AI party had no way to know who could
         # actually be asked to join.
-        already_in_party = {p["name"] for p in _get_party_members()}
+        already_in_party = {p["name"] for p in _get_party_members(character["chat_id"])}
         recruitable_here = [
             CAMPAIGN["npcs"][n]["name"] for n in npcs_here
             if n in CAMPAIGN["npcs"] and CAMPAIGN["npcs"][n].get("recruitable")
@@ -20472,7 +20490,7 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
             node_descriptions.append(f"{n['name']} ({proficiency_note})")
         lines.append(f"Resources here: {', '.join(node_descriptions)}")
 
-        gather_needs = _party_gather_needs_here(location_id)
+        gather_needs = _party_gather_needs_here(location_id, character["chat_id"])
         for need in gather_needs:
             lines.append(
                 f"The party's quest \"{need['quest_title']}\" still needs {need['remaining']} "

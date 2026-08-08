@@ -29,7 +29,9 @@ import items as items_module
 import spells
 import topics
 from ai.intent_parser import _keyword_fallback, parse_intents
-from ai.support_agent import _deterministic_inventory_answer
+from ai.support_agent import (
+    _deterministic_inventory_answer, _deterministic_location_connections_answer, _deterministic_quest_task_answer,
+)
 from ai.text_cleanup import strip_think_tags
 from rules.combat import resolve_attack
 from rules.crafting import RECIPES
@@ -249,7 +251,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         tavern_id, wood_id = 444444, 555555
         make_basic_character(tavern_id, "Elduinn", current_location="crossroads_tavern")
         make_basic_character(wood_id, "Roric", current_location="whispering_wood")
-        eligible_ids = {p["telegram_user_id"] for p in bot._get_combat_eligible_party_members("whispering_wood")}
+        eligible_ids = {p["telegram_user_id"] for p in bot._get_combat_eligible_party_members("whispering_wood", -999)}
         self.assertIn(wood_id, eligible_ids)
         self.assertNotIn(tavern_id, eligible_ids)
 
@@ -258,7 +260,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         make_basic_character(wood_id, "Roric2", current_location="whispering_wood")
         make_basic_character(resting_id, "Snorri", current_location="whispering_wood")
         db.update_character(resting_id, -999, is_inactive=1)
-        eligible_ids = {p["telegram_user_id"] for p in bot._get_combat_eligible_party_members("whispering_wood")}
+        eligible_ids = {p["telegram_user_id"] for p in bot._get_combat_eligible_party_members("whispering_wood", -999)}
         self.assertNotIn(resting_id, eligible_ids)
 
     # -- Gathering verb coverage (v1.7.6) ------------------------------
@@ -406,6 +408,38 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
     def test_empty_inventory_answered_without_ollama(self):
         self.assertIn("empty", _deterministic_inventory_answer({"inventory": {}}))
+
+    # -- Support game-wiki expansion (2026-08-08): location connections
+    #    and quest task never need Ollama either, same "one correct
+    #    answer" reasoning as inventory/XP/active-character above. Real
+    #    live bug this replaces: the LLM path answered "What connects to
+    #    Market Row?" with the nonsensical "Market Row connects directly
+    #    to Market Row."
+    def test_location_connections_question_answered_without_ollama(self):
+        visited = cl.get_all_location_ids(bot.CAMPAIGN)[:3]
+        character = {"visited_locations": visited}
+        loc = cl.get_location(bot.CAMPAIGN, visited[0])
+        answer = _deterministic_location_connections_answer(character, f"What connects to {loc['name']}?")
+        self.assertIsNotNone(answer)
+        self.assertNotIn(f"{loc['name']} connects directly to {loc['name']}", answer)
+
+    def test_location_connections_question_ignores_unvisited_locations(self):
+        all_ids = cl.get_all_location_ids(bot.CAMPAIGN)
+        character = {"visited_locations": all_ids[:1]}
+        unvisited_loc = cl.get_location(bot.CAMPAIGN, all_ids[5])
+        answer = _deterministic_location_connections_answer(character, f"What connects to {unvisited_loc['name']}?")
+        self.assertIsNone(answer)
+
+    def test_quest_task_question_answered_without_ollama(self):
+        quest_id = next(iter(bot.CAMPAIGN["quests"]))
+        quest = bot.CAMPAIGN["quests"][quest_id]
+        character = {"active_quests": {quest_id: True}}
+        answer = _deterministic_quest_task_answer(character)
+        self.assertIn(quest["title"], answer)
+        self.assertIn(quest["description"], answer)
+
+    def test_quest_task_question_with_no_active_quests(self):
+        self.assertIn("don't have any active", _deterministic_quest_task_answer({"active_quests": {}}))
 
     # -- Companion personal quests (v1.8.0/1.8.1) ----------------------
     def test_all_six_recruitables_have_a_real_personal_quest(self):
@@ -3590,6 +3624,37 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         events_a = bot._RECENT_WORLD_EVENTS.get(chat_a, [])
         events_a[:] = [e for e in events_a if e[2] != "a leaked test event"]
         bot._chat_scoped_dict(bot._AI_PLAYER_CONTEXTS, chat_a).pop(789, None)
+
+    def test_get_party_members_does_not_leak_across_tenant_chats(self):
+        """
+        Real cross-tenant leak, found and fixed 2026-08-08 (multi-tenant
+        audit): bot._get_party_members() used to have no chat_id filter
+        at all, returning every active character across EVERY tenant
+        chat -- since this feeds combat targeting, dueling, and "give
+        item to nearby party member" (via
+        _get_combat_eligible_party_members), two different tenant
+        chats' characters could target/duel/give-items to each other.
+        Two characters made in two different real chat_ids here --
+        each chat's own _get_party_members(chat_id) call must see only
+        its own character, never the other chat's.
+        """
+        chat_a, chat_b = -999601, -999602
+        make_basic_character(970601, "TenantA_Hero", chat_id=chat_a, current_location="crossroads_tavern")
+        make_basic_character(970602, "TenantB_Hero", chat_id=chat_b, current_location="crossroads_tavern")
+
+        members_a = bot._get_party_members(chat_a)
+        members_b = bot._get_party_members(chat_b)
+
+        names_a = {m["name"] for m in members_a}
+        names_b = {m["name"] for m in members_b}
+        self.assertIn("TenantA_Hero", names_a)
+        self.assertNotIn("TenantB_Hero", names_a)
+        self.assertIn("TenantB_Hero", names_b)
+        self.assertNotIn("TenantA_Hero", names_b)
+
+        eligible_a = bot._get_combat_eligible_party_members("crossroads_tavern", chat_a)
+        self.assertIn("TenantA_Hero", {m["name"] for m in eligible_a})
+        self.assertNotIn("TenantB_Hero", {m["name"] for m in eligible_a})
 
     async def test_active_ai_companion_joins_combat_despite_being_elsewhere(self):
         leader_id = 950501

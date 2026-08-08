@@ -2,6 +2,41 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.96] — Support agent game-wiki expansion + a real cross-tenant party leak fix
+
+Support now answers location/NPC/quest questions like a real encyclopedia,
+per Coffee's long-standing "make Support a game wiki" request — but
+strictly gated to what the game has already shown that exact player
+(locations they've actually visited, NPCs they've actually met, their
+own active quest's real title/description), so it introduces zero new
+spoiler surface: it's the same already-seen data, just answerable from
+Support too, not a new leak of undiscovered content. Location facts
+reuse the exact text "look around" already showed them; quest facts
+reuse the exact text the quest journal already showed them.
+
+Live testing (not just reasoning about the code) caught 2 real bugs in
+the LLM path before shipping: "What connects to Market Row?" got the
+nonsensical answer "Market Row connects directly to Market Row" (the
+small model mangling its own grounding data), and "What's my next
+quest task?" only gave the bare title, dropping the actual task.
+Both fixed with a deterministic answer path — same established pattern
+this file already uses for XP/inventory/active-character questions —
+instead of trusting free-form generation for something with exactly
+one correct, already-known answer. Both are now instant and always
+correct.
+
+Separately, a real cross-tenant multi-tenant audit found `bot.py`'s
+`_get_party_members`/`_get_combat_eligible_party_members` had NO
+chat_id filter at all — returning every active character across EVERY
+tenant chat, feeding combat targeting, dueling, and "give item to
+nearby party member." Fixed by threading a real chat_id through 43
+call sites. Only matters once a second tenant group is actually live;
+harmless for the current single-tenant deployment since chat_id is
+always the same value everywhere today.
+
+Full 398-test regression suite run clean (0 failures) after both
+changes.
+
 ## [1.27.95] — 3 real bugs found by a full regression suite run on the new server
 
 First full, uncontended run of the fast regression suite (393 tests)
