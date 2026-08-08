@@ -50,6 +50,7 @@ answer_puzzle, gamble, chat, second_wind, rage, bardic_inspiration, lay_on_hands
 
 Rules:
 - "attack" is for any offensive action aimed at an enemy (attack, swing, shoot, cast at, strike).
+- "throw_weapon" is for throwing a carried weapon (not the one equipped) at an enemy, e.g. "throw my dagger at the goblin", "I hurl the axe at it".
 - "flee" is for trying to run away, escape, or retreat from an active fight (a real risk, not guaranteed).
 - "talk_npc" is for addressing a specific named NPC conversationally.
 - "talk_party" is for speaking, calling out, or addressing the party/traveling companions in general \
@@ -711,6 +712,14 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
         return {**base, "action": "set_back_row", "target": None}
     if any(w in lowered for w in ["push up", "move up", "hold the line", "hold the front"]):
         return {**base, "action": "set_front_row", "target": None}
+
+    # Throw (2026-08-08, per Coffee: throw any carried weapon, not the
+    # one equipped, at an enemy). Checked before the npc_name loop for
+    # the same reason every other named-target combat action is --
+    # "throw the dagger at Grask" would otherwise get swallowed as
+    # talk_npc if "Grask" happens to also be a known companion name.
+    if lowered.startswith("throw ") or " throw " in lowered or lowered.startswith("i throw"):
+        return {**base, "action": "throw_weapon"}
 
     for npc_name in known_npc_names:
         # Matches the NPC's full registered name as a substring ("old
@@ -1837,7 +1846,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "skill_tree", "challenge_duel", "accept_duel", "check_market", "cancel_market", "join_battle",
                 "replay_intro", "visual_map", "rebirth", "choose_hybrid", "give_offering",
                 "drink_water", "choose_subclass", "start_echo_trial", "check_professions",
-                "talk_party", "use_environment",
+                "talk_party", "use_environment", "throw_weapon",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

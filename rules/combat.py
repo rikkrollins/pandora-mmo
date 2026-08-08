@@ -170,7 +170,7 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
                     advantage: bool = False, disadvantage: bool = False,
                     defender_relentless_endurance_available: bool = False,
                     round_number: int = 0, forced_roll: int | None = None,
-                    forced_damage_roll: int | None = None) -> dict:
+                    forced_damage_roll: int | None = None, damage_multiplier: int = 1) -> dict:
     """
     Resolve one attack. `weapon` is a dict like:
         {"ability": "strength", "damage_dice": "1d8", "damage_bonus": 0}
@@ -263,6 +263,14 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     -- resets naturally once round_number advances past it) so a
     defender can't Shield AND Uncanny-Dodge the same hit, matching real
     5E's one-reaction-per-round economy.
+
+    `damage_multiplier` (Assassin's Backstab, 2026-08-08): a flat
+    integer multiplier applied to the FULLY-resolved damage (every
+    bonus above already folded in) right before it's applied to HP --
+    deliberately the very last step, so a x2/x4/x8/x10 backstab still
+    correctly triggers Relentless Endurance/Death Ward/temp-HP
+    absorption on the true final number, rather than those checks
+    running against a pre-multiplier amount and getting it wrong.
     """
     attack_ability = "dexterity" if attacker.get("char_class") == "Monk" else weapon.get("ability", "strength")
     # Task #223: real weapon proficiency -- a monster/NPC with no
@@ -475,6 +483,9 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         # that absorbs damage before real HP, same combat-only,
         # in-memory-only convention as `raging`/`conditions` (reset when
         # combat ends, never persisted to the DB).
+        if damage_multiplier != 1:
+            damage_dealt = int(damage_dealt * damage_multiplier)
+
         temp_hp = defender.get("temp_hp", 0)
         if temp_hp > 0:
             absorbed = min(temp_hp, damage_dealt)
@@ -574,6 +585,114 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         "damage_type": weapon.get("damage_type", "physical") if attack_result["hit"] else None,
         "enrage_triggered": enrage_triggered,
         "bloodied_triggered": bloodied_triggered,
+    }
+
+
+def resolve_thrown_attack(attacker: dict, defender: dict, weapon: dict, forced_hit: bool = False,
+                           forced_roll: int | None = None, forced_damage_roll: int | None = None,
+                           round_number: int = 0, defender_relentless_endurance_available: bool = False) -> dict:
+    """
+    Throw (2026-08-08, per Coffee: universal -- any class can throw any
+    weapon sitting in their inventory, not the one equipped -- with an
+    Assassin's own bonus of a guaranteed hit, no roll needed). Deliberately
+    a SEPARATE, self-contained function rather than another resolve_attack
+    parameter: per Coffee's explicit spec ("dont use the players attack
+    damage only use the weapons attack damage -- so even weak players can
+    have a good attack"), this must skip every character-derived damage
+    bonus resolve_attack normally folds in (rage, wild shape, guild %,
+    subclass %, sneak attack, hex/hunter's mark, power-scale) -- pure
+    weapon["damage_dice"] + weapon["damage_bonus"], nothing else added.
+    Threading a "skip all of that" flag through resolve_attack's ~15
+    separate bonus blocks would be far riskier than a small, focused
+    function that only replicates what actually needs to carry over:
+    the to-hit roll (or forced_hit's guaranteed connect), the weapon's
+    own elemental interaction with the defender's resistances
+    (apply_damage_type_modifier -- the weapon's own stat, not the
+    thrower's), and the same real defensive saves resolve_attack
+    already has (temp HP absorption, Relentless Endurance, Death Ward)
+    so a thrown weapon can't bypass those just by using a different
+    code path. Real 5E attack-roll math (proficiency + ability
+    modifier) is UNCHANGED for accuracy -- only damage output is
+    weapon-only; a physically weak character still swings less
+    accurately than a trained one, they just hit just as hard when
+    they connect.
+    """
+    weapon_ability = weapon.get("ability", "strength")
+    weapon_category = weapon.get("weapon_category", "simple")
+    weapon_proficient = (
+        is_weapon_proficient(attacker.get("char_class"), weapon_category)
+        or f"prof_{weapon_category}_weapons" in (attacker.get("skill_tree_upgrades") or [])
+    )
+    shield_bonus = 5 if "shield_active" in defender.get("conditions", []) else 0
+    effective_defender_ac = (
+        defender["armor_class"] + hybrid_features.hybrid_ac_bonus(defender) + formation_ac_bonus(defender) + shield_bonus
+    )
+
+    if forced_hit:
+        # Assassin's Throw bonus: no roll at all, always connects. Not
+        # reported as a natural-20 critical (that's a specific dice
+        # outcome, not "guaranteed") -- a real, clean guaranteed hit.
+        attack_result = {"raw_roll": None, "critical_hit": False, "critical_fail": False,
+                          "total": effective_defender_ac, "hit": True}
+    else:
+        attack_result = roll_attack(
+            attacker, target_ac=effective_defender_ac, ability=weapon_ability,
+            proficient=weapon_proficient, forced_roll=forced_roll,
+        )
+
+    damage_dealt = 0
+    relentless_endurance_triggered = False
+    death_ward_triggered = False
+    if attack_result["hit"]:
+        dmg = roll_damage(
+            weapon["damage_dice"], modifier=weapon.get("damage_bonus", 0),
+            critical=attack_result["critical_hit"], forced_roll=forced_damage_roll,
+        )
+        damage_dealt = max(dmg["total"], 0)
+        damage_dealt = apply_damage_type_modifier(damage_dealt, weapon.get("damage_type", "physical"), defender, attacker)
+
+        temp_hp = defender.get("temp_hp", 0)
+        if temp_hp > 0:
+            absorbed = min(temp_hp, damage_dealt)
+            defender["temp_hp"] = temp_hp - absorbed
+            damage_dealt -= absorbed
+
+        hp_before = defender["hp_current"]
+        hp_after = max(hp_before - damage_dealt, 0)
+        if (hp_after == 0 and hp_before > 0 and defender.get("race") == "Half-Orc"
+                and defender_relentless_endurance_available):
+            hp_after = 1
+            relentless_endurance_triggered = True
+        elif hp_after == 0 and hp_before > 0 and "death_warded" in defender.get("conditions", []):
+            hp_after = 1
+            death_ward_triggered = True
+            defender["conditions"].remove("death_warded")
+        defender["hp_current"] = hp_after
+
+    return {
+        "attacker": attacker["name"],
+        "defender": defender["name"],
+        "hit": attack_result["hit"],
+        "critical_hit": attack_result["critical_hit"],
+        "critical_fail": attack_result["critical_fail"],
+        "raw_roll": attack_result["raw_roll"],
+        "attack_roll": attack_result["total"],
+        "target_ac": effective_defender_ac,
+        "damage_dealt": damage_dealt,
+        "relentless_endurance_triggered": relentless_endurance_triggered,
+        "death_ward_triggered": death_ward_triggered,
+        "dark_ones_blessing_gained": 0,
+        "shield_reaction_triggered": False,
+        "uncanny_dodge_triggered": False,
+        "hybrid_bonus_damage": 0,
+        "hybrid_temp_hp_gained": 0,
+        "hybrid_self_heal_gained": 0,
+        "defender_hp_remaining": defender["hp_current"],
+        "defender_hp_max": defender.get("hp_max", defender["hp_current"]),
+        "damage_type": weapon.get("damage_type", "physical") if attack_result["hit"] else None,
+        "enrage_triggered": False,
+        "bloodied_triggered": False,
+        "forced_hit": forced_hit,
     }
 
 

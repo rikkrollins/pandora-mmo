@@ -15,6 +15,21 @@ def roll(num_dice: int, sides: int) -> list[int]:
     return [random.randint(1, sides) for _ in range(num_dice)]
 
 
+def roll_percentage_check(chance_pct: float, forced_roll: float | None = None) -> bool:
+    """
+    Grindable "mastery" proficiency checks (2026-08-08, per Coffee):
+    Backstab, Throw, and general weapon/armor proficiency all share this
+    same shape -- a real percent chance, ground up +0.01 per use toward
+    100%, rolled fresh every single time. A uniform roll in [0, 100);
+    success iff the roll lands strictly below chance_pct, so chance_pct
+    <= 0 can never succeed and chance_pct >= 100 always does.
+    `forced_roll` lets tests (and any future physical-dice-mode
+    extension) substitute a real value instead of trusting randomness.
+    """
+    value = forced_roll if forced_roll is not None else random.uniform(0, 100)
+    return value < chance_pct
+
+
 def roll_d20(advantage: bool = False, disadvantage: bool = False, forced_roll: int | None = None) -> int:
     """
     Roll a d20, handling 5E advantage/disadvantage:

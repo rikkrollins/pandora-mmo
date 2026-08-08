@@ -2,6 +2,57 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.98] — Assassin Backstab, universal Throw, and grindable mastery proficiencies
+
+Real new Rogue subclass identity (per Coffee, live in the Development
+topic): choosing **Assassin** replaces the generic combat-subclass
+bonus with a real Backstab — every attack is a Backstab attempt,
+dealing x2/x4/x8/x10 damage (spread across the full 1-100 level range)
+when it lands. Landing it is its own grindable proficiency, starting
+near 1% and climbing +0.01% every single attempt, win or lose — a
+genuine long grind toward 100% reliability, with a miss just falling
+back to an ordinary attack, nothing lost. The multiplier itself is
+permanent and compounds across rebirths: whatever you've earned when
+you rebirth gets folded into your base, and climbing the same tiers
+again next life multiplies an already-inflated number — explicitly
+by design, a real "break the game" long-game reward.
+
+**Throw** is new and universal — any class can throw any weapon
+sitting in their inventory (not the one equipped) for a real ranged
+hit using that weapon's own damage/element/bonuses, deliberately
+ignoring the thrower's own stats entirely ("so even weak players can
+have a good attack"). Everyone rolls a normal attack roll to land it;
+Assassins get a guaranteed hit, no roll needed, on top of already
+having Backstab. Throw has its own grindable mastery proficiency too
+(same +0.01%/use grind) for a bonus damage roll on top of a landed
+throw. Available from the battle menu's "More" submenu with a real
+tap-to-target picker, or by typing "throw the dagger at the goblin".
+
+**General weapon/armor mastery** for every player, every class: each
+weapon category (simple/martial) and armor category (light/medium/
+heavy/shield) grinds its own separate proficiency the same way —
+switching to an unfamiliar weapon or armor type genuinely starts a
+fresh grind. A successful roll on a landed hit adds bonus "mastery
+strike" damage; a successful roll when a real player takes a hit
+softens it via "armor mastery." The item generator can now roll a real
+(rare+, ~20% chance) affix on generated weapons/armor that boosts one
+of these four proficiencies directly — real gear that helps skip part
+of the grind.
+
+Also includes an earlier same-day fix: `_check_combat_timeouts` used
+to `await` every active combat session's lock in strict sequence — one
+session with a real, slow-resolving action in flight (Ollama narration
+routinely takes 30-160s+ under load) could starve every OTHER active
+session's timeout check for as long as that one lock stayed held,
+explaining two real live reports in opposite directions ("it thinks
+I timed out" despite a real action in flight, and a turn stuck well
+past its own timeout with nothing forced). Fixed by skipping (never
+awaiting) any session whose lock is already held — real activity is
+already in progress there, so there's nothing to force anyway. The
+much slower 60-minute idle-fallback path also now forces a real attack
+instead of silently passing the turn, matching the fast path's own
+"default action is Fight" behavior.
+
 ## [1.27.97] — Consent-based group onboarding, DM getting-started, and 3 real combat bugs
 
 New groups now get a real onboarding conversation instead of static

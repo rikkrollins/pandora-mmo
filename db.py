@@ -471,6 +471,45 @@ def init_db() -> None:
         if "hybrid_class" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN hybrid_class TEXT")
 
+        # Assassin's Backstab, permanent cross-rebirth ratchet (2026-08-08,
+        # per Coffee, explicitly: "this will allow a player to 'break the
+        # game' as per say"). An Assassin's live Backstab multiplier is
+        # base_multiplier * a level-tier factor (x2/x4/x8/x10 across the
+        # 1-100 level range) -- see bot.py's _effective_backstab_multiplier.
+        # Unlike every other rebirth stat (which either stays untouched or
+        # is purely additive, see rebirth_count above), THIS one intentionally
+        # folds the fully-earned multiplier back into itself right before
+        # level resets to 1 (_do_rebirth), so climbing the tiers again next
+        # life multiplies an already-inflated base instead of starting over
+        # -- real, deliberate, unbounded compounding across rebirths.
+        if "backstab_base_multiplier" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN backstab_base_multiplier INTEGER NOT NULL DEFAULT 1")
+
+        # Grindable "mastery" proficiencies (2026-08-08, per Coffee,
+        # verbatim: "raises the % by .01 (make it an absolute grind to
+        # level up to 100% hit probability)... include in the item
+        # generator... items to help with this"). Four separate percent
+        # chances, each starting near-zero and climbing +0.01 per real
+        # use, capped at 100.0 -- see bot.py's _grind_proficiency and
+        # the four call sites that roll against these. weapon_/armor_
+        # are per-CATEGORY (items.py's existing weapon_category:
+        # simple/martial, armor_category: light/medium/heavy/shield --
+        # "if players choose to use another weapon or armour type they
+        # CAN and they can level them up to get better with them", so a
+        # fresh category genuinely starts its own fresh grind), stored
+        # as a JSON dict the same way skill_uses already is per-
+        # profession. backstab_/throw_ are flat (Backstab is Assassin-
+        # only to begin with; Throw is universal but a single ability,
+        # not a category).
+        if "weapon_proficiency_pct" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN weapon_proficiency_pct TEXT NOT NULL DEFAULT '{}'")
+        if "armor_proficiency_pct" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN armor_proficiency_pct TEXT NOT NULL DEFAULT '{}'")
+        if "backstab_proficiency_pct" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN backstab_proficiency_pct REAL NOT NULL DEFAULT 1.0")
+        if "throw_proficiency_pct" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN throw_proficiency_pct REAL NOT NULL DEFAULT 1.0")
+
         # Sequential dungeon gating (2026-07-24, Coffee: "make it so we
         # cant progress to certain areas ... until we complete the
         # dungeons or missions in sequence"): a location is "cleared"
@@ -692,6 +731,8 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     d["achievements"] = json.loads(d["achievements"])
     d["map_revealed_locations"] = json.loads(d["map_revealed_locations"])
     d["skill_tree_upgrades"] = json.loads(d["skill_tree_upgrades"])
+    d["weapon_proficiency_pct"] = json.loads(d["weapon_proficiency_pct"])
+    d["armor_proficiency_pct"] = json.loads(d["armor_proficiency_pct"])
     return d
 
 
@@ -803,7 +844,7 @@ def update_character(telegram_user_id: int, chat_id: int, **fields) -> dict | No
     if not fields:
         return get_character(telegram_user_id, chat_id)
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -847,7 +888,7 @@ def update_character_by_id(character_id: int, **fields) -> dict | None:
             row = conn.execute("SELECT * FROM characters WHERE character_id = ?", (character_id,)).fetchone()
         return _row_to_dict(row) if row else None
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -986,6 +1027,20 @@ def _apply_affix(item: dict, affix: dict) -> None:
         item["ignores_resistance"] = True
     elif kind == "free_extra_attack":
         item["free_extra_attack"] = True
+    # Grindable mastery proficiency gear (2026-08-08, per Coffee: "u can
+    # include in the item generator for weapons that increase the
+    # backstab for weapons and armor and other wearable items"). "stat"
+    # is "weapon"/"armor" (paired with "category", read by
+    # bot._equipped_weapon_proficiency_bonus/_equipped_armor_proficiency_
+    # bonus against the specific weapon_category/armor_category the item
+    # is boosting) or "backstab"/"throw" (flat, no category -- Backstab
+    # is Assassin-only to begin with; Throw is one universal ability, not
+    # a category). Appended to a list, same live-summed-at-read-time
+    # convention as profession_bonuses just above.
+    elif kind == "proficiency_bonus":
+        item.setdefault("proficiency_bonuses", []).append(
+            {"stat": affix["stat"], "category": affix.get("category"), "value": affix["value"]}
+        )
 
 
 def materialize_item_instance(item_id: str) -> dict | None:

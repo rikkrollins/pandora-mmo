@@ -153,8 +153,32 @@ COMBAT_SUBCLASS_DAMAGE_BONUS_PCT = 20
 # set -- this is the only thing rules/combat.py actually needs to know
 # (a character's own subclass is only ever set to a name valid for
 # THEIR OWN char_class by _do_choose_subclass, so a flat name check
-# here can't leak across classes).
-COMBAT_SUBCLASS_NAMES = frozenset(names[0] for names in CLASS_SUBCLASSES.values())
+# here can't leak across classes). "Assassin" (2026-08-08) is
+# deliberately EXCLUDED here even though it's Rogue's first-listed
+# subclass -- it now gets its own real, distinct Backstab multiplier
+# (see BACKSTAB_LEVEL_TIERS/bot.py's _effective_backstab_multiplier)
+# instead of this generic flat bonus, so it doesn't also double-dip
+# into the ordinary combat-subclass damage boost every other class's
+# first pick still gets.
+COMBAT_SUBCLASS_NAMES = frozenset(names[0] for names in CLASS_SUBCLASSES.values()) - {"Assassin"}
+
+# Assassin's Backstab damage multiplier tiers (2026-08-08, per Coffee:
+# spread across the full 1-100 level range, not clustered early --
+# quarters of the range). This is the LIVE, level-based factor for the
+# character's CURRENT rebirth cycle; the character's own persistent
+# backstab_base_multiplier (db.py) then multiplies on top of this, so
+# a reborn Assassin re-climbing these same tiers compounds an already-
+# earned base rather than starting flat again -- see bot.py's
+# _effective_backstab_multiplier and _do_rebirth for the actual hook.
+BACKSTAB_LEVEL_TIERS = ((75, 10), (50, 8), (25, 4), (1, 2))
+
+
+def backstab_tier_multiplier(level: int) -> int:
+    """The live x2/x4/x8/x10 tier for a given character level, before backstab_base_multiplier is applied."""
+    for threshold, multiplier in BACKSTAB_LEVEL_TIERS:
+        if level >= threshold:
+            return multiplier
+    return 1
 
 # Real mechanical hooks for the SECOND ("utility") name in each
 # CLASS_SUBCLASSES pair (2026-07-25, per Coffee: "go ahead with the

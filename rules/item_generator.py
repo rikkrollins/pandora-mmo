@@ -128,6 +128,34 @@ def _maybe_elemental_affix(tier: str, kind: str) -> list[dict]:
     return [{"kind": kind, "damage_type": random.choice(ELEMENTAL_DAMAGE_TYPES)}]
 
 
+PROFICIENCY_AFFIX_ELIGIBLE_TIERS = {"rare", "very_rare", "legendary", "mythic"}
+PROFICIENCY_AFFIX_CHANCE = 0.2
+
+
+def _maybe_proficiency_affix(tier: str, item_type: str, category: str | None) -> list[dict]:
+    """
+    Grindable mastery proficiency gear (2026-08-08, per Coffee: "include
+    in the item generator for weapons that increase the backstab for
+    weapons and armor and other wearable items"). A rare+ weapon can
+    roll a bonus to its OWN weapon_category's proficiency, OR (a real
+    chance at real Assassin-specific gear) to Backstab or Throw
+    directly; armor/shields can only roll their own armor_category's
+    proficiency (no Backstab/Throw -- those are offense-only abilities).
+    Same "real, not guaranteed, only at real rarity" shape as
+    _maybe_elemental_affix just above.
+    """
+    if tier not in PROFICIENCY_AFFIX_ELIGIBLE_TIERS or random.random() > PROFICIENCY_AFFIX_CHANCE:
+        return []
+    value = round(random.uniform(1.0, 5.0) * TIER_BONUS.get(tier, 1), 2)
+    if item_type == "weapon":
+        stat = random.choice(["weapon", "backstab", "throw"])
+    else:
+        stat = "armor"
+    if stat in ("weapon", "armor"):
+        return [{"kind": "proficiency_bonus", "stat": stat, "category": category, "value": value}]
+    return [{"kind": "proficiency_bonus", "stat": stat, "value": value}]
+
+
 def _maybe_set_id(tier: str) -> str | None:
     """
     Magic item system Phase 5 (2026-08-02): a rare+ roll has a real
@@ -194,6 +222,8 @@ def _note_for_item(tier: str, affixes: list[dict]) -> str:
             details.append("moves faster than the eye can follow")
         elif kind == "profession_bonus":
             details.append(f"marked with a craftsman's {affix['profession']} sigil")
+        elif kind == "proficiency_bonus":
+            details.append(f"seems to sharpen its wielder's {affix['stat']} mastery")
     base = f"A {tier.replace('_', ' ')} find, worked with more care than most of its kind"
     return f"{base}, {'; '.join(details)}." if details else f"{base}."
 
@@ -243,6 +273,7 @@ def generate_weapon(base_id: str | None = None, tier: str | None = None) -> dict
     affixes = (
         ([{"kind": "stat_bonus", "field": "damage_bonus", "value": bonus}] if bonus else [])
         + _maybe_elemental_affix(tier, "elemental_damage")
+        + _maybe_proficiency_affix(tier, "weapon", base["weapon_category"])
         + ([_mythic_affix("weapon")] if tier == "mythic" else [])
     )
 
@@ -274,6 +305,7 @@ def generate_armor(base_id: str | None = None, tier: str | None = None) -> dict:
     affixes = (
         ([{"kind": "stat_bonus", "field": "ac_base", "value": bonus}] if bonus else [])
         + _maybe_elemental_affix(tier, "resistance")
+        + _maybe_proficiency_affix(tier, "armor", base["armor_category"])
         + ([_mythic_affix("armor")] if tier == "mythic" else [])
     )
 
@@ -304,6 +336,7 @@ def generate_shield(base_id: str | None = None, tier: str | None = None) -> dict
     affixes = (
         ([{"kind": "stat_bonus", "field": "ac_bonus", "value": bonus}] if bonus else [])
         + _maybe_elemental_affix(tier, "resistance")
+        + _maybe_proficiency_affix(tier, "armor", base["armor_category"])
         + ([_mythic_affix("shield")] if tier == "mythic" else [])
     )
 

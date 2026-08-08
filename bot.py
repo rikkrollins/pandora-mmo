@@ -85,7 +85,7 @@ from models import (
 from rules.combat import (
     resolve_attack, resolve_death_save, UNDEAD_MONSTER_KEYS, apply_damage_type_modifier,
     ENRAGE_HP_THRESHOLD, ENRAGE_DAMAGE_BONUS_PCT, ENRAGE_WARNING_ROUND, ENRAGE_ROUND_THRESHOLD,
-    BLOODIED_HP_THRESHOLD,
+    BLOODIED_HP_THRESHOLD, resolve_thrown_attack,
 )
 from rules.crafting import (
     RECIPES, get_recipe, has_materials, resolve_craft,
@@ -93,7 +93,7 @@ from rules.crafting import (
     ADVANCED_RECIPES, get_advanced_recipe, resolve_advanced_craft,
     ENCHANT_RECIPES, get_enchant_recipe,
 )
-from rules.dice import roll, roll_damage, ability_modifier, roll_ability_check, roll_d20
+from rules.dice import roll, roll_damage, ability_modifier, roll_ability_check, roll_d20, roll_percentage_check
 from rules.item_generator import generate_item
 from rules.leveling import (
     CLASS_HIT_DICE, scaled_enemy_count, breath_weapon_dice_count,
@@ -104,7 +104,7 @@ from rules.leveling import (
     THIEF_SUBCLASS_STEAL_BONUS, TOTEM_WARRIOR_SUBCLASS_NAME, LIFE_SUBCLASS_HEAL_BONUS,
     UTILITY_SUBCLASS_ABILITY_CHECK_BONUS, UTILITY_SUBCLASS_CHECK_BONUS_VALUE,
     rebirth_hp_max, power_scale_ratio, full_hp_max_for, proficiency_bonus_for_level,
-    MEDIUM_ENCOUNTER_XP_PER_CHARACTER,
+    MEDIUM_ENCOUNTER_XP_PER_CHARACTER, backstab_tier_multiplier,
 )
 from rules.proficiency import practiced_bonus, MAX_PRACTICE_BONUS
 
@@ -186,6 +186,135 @@ def _weapon_for_attacker(attacker: dict) -> dict:
             "damage_type": attacker.get("damage_type", "physical"),
         }
     return DEFAULT_WEAPON
+
+
+def _is_assassin(character: dict) -> bool:
+    return character.get("char_class") == "Rogue" and character.get("subclass") == "Assassin"
+
+
+def _effective_backstab_multiplier(character: dict) -> int:
+    """
+    An Assassin's real, live Backstab multiplier for their CURRENT
+    rebirth cycle: backstab_base_multiplier (db.py, permanent, only
+    ever updated by _do_rebirth) times the live level tier for their
+    current level (rules.leveling.backstab_tier_multiplier: x2/x4/x8/
+    x10 across the 1-100 range). Non-Assassins always get 1 (no-op
+    multiplier) -- safe to call unconditionally from _do_attack without
+    a separate class check at every call site.
+    """
+    if not _is_assassin(character):
+        return 1
+    return character.get("backstab_base_multiplier", 1) * backstab_tier_multiplier(character.get("level", 1))
+
+
+PROFICIENCY_GRIND_INCREMENT = 0.01
+PROFICIENCY_STARTING_PCT = 1.0
+PROFICIENCY_MAX_PCT = 100.0
+ARMOR_MASTERY_DAMAGE_REDUCTION_PCT = 25
+
+
+def _equipped_proficiency_bonus(character: dict, stat: str, category: str | None = None) -> float:
+    """
+    Grindable mastery proficiency gear (2026-08-08): sum of every
+    equipped item's proficiency_bonus affix matching this stat (and,
+    for "weapon"/"armor", this exact category too) -- live-summed at
+    read time, same convention as _equipped_profession_bonus just
+    above. A weapon/armor-category bonus only ever helps that SAME
+    category's own grind, matching "if players choose to use another
+    weapon or armour type... they can level them up" -- gear doesn't
+    cross categories any more than the underlying grind does.
+    """
+    total = 0.0
+    equipped_ids = [
+        character.get("equipped_weapon"), character.get("equipped_armor"), character.get("equipped_shield"),
+    ] + character.get("equipped_accessories", [])
+    for item_id in equipped_ids:
+        if not item_id:
+            continue
+        item = items_module.get_item(item_id)
+        if not item:
+            continue
+        for entry in item.get("proficiency_bonuses", []):
+            if entry.get("stat") != stat:
+                continue
+            if stat in ("weapon", "armor") and entry.get("category") != category:
+                continue
+            total += entry.get("value", 0)
+    return total
+
+
+def _grind_flat_proficiency(telegram_user_id: int, chat_id: int, field_name: str, current_value: float) -> float:
+    """
+    Grindable mastery proficiency (2026-08-08, per Coffee, verbatim:
+    "each time they use it it raises the % by .01 (make it an absolute
+    grind to level up to 100%)"). Persists the INCREMENTED value (capped
+    at PROFICIENCY_MAX_PCT) but returns the value as it stood BEFORE
+    this use, since the roll for THIS attempt should reflect everything
+    earned up through the previous use, not include the use currently
+    in progress.
+    """
+    db.update_character(telegram_user_id, chat_id, **{field_name: min(current_value + PROFICIENCY_GRIND_INCREMENT, PROFICIENCY_MAX_PCT)})
+    return current_value
+
+
+def _grind_dict_proficiency(telegram_user_id: int, chat_id: int, field_name: str, current_dict: dict, key: str) -> float:
+    """Same as _grind_flat_proficiency, for the per-category (weapon_category/armor_category) dict fields."""
+    current_value = current_dict.get(key, PROFICIENCY_STARTING_PCT)
+    updated = dict(current_dict)
+    updated[key] = min(current_value + PROFICIENCY_GRIND_INCREMENT, PROFICIENCY_MAX_PCT)
+    db.update_character(telegram_user_id, chat_id, **{field_name: updated})
+    return current_value
+
+
+def _roll_backstab_proficiency(character: dict) -> bool:
+    """
+    Grinds and rolls Backstab's own landing chance (2026-08-08, per
+    Coffee, verbatim: "if it doesnt land they will do a normal 1x
+    attack, if it does trigger then it will do thier backstab
+    multipliar... if this fails use a dice roll so the assassin still
+    has a chance to backstab"). Only ever called for a real Assassin
+    (see _do_attack) -- grinds on every attack regardless of outcome,
+    same "use it to level it up" rule every proficiency here follows.
+    """
+    stored = character.get("backstab_proficiency_pct", PROFICIENCY_STARTING_PCT)
+    chance = min(stored + _equipped_proficiency_bonus(character, "backstab"), PROFICIENCY_MAX_PCT)
+    _grind_flat_proficiency(character["telegram_user_id"], character["chat_id"], "backstab_proficiency_pct", stored)
+    return roll_percentage_check(chance)
+
+
+def _roll_throw_proficiency(character: dict) -> bool:
+    """Same shape as _roll_backstab_proficiency, for Throw's own universal mastery-bonus chance."""
+    stored = character.get("throw_proficiency_pct", PROFICIENCY_STARTING_PCT)
+    chance = min(stored + _equipped_proficiency_bonus(character, "throw"), PROFICIENCY_MAX_PCT)
+    _grind_flat_proficiency(character["telegram_user_id"], character["chat_id"], "throw_proficiency_pct", stored)
+    return roll_percentage_check(chance)
+
+
+def _roll_weapon_proficiency(character: dict, weapon_category: str) -> bool:
+    """
+    General weapon mastery (2026-08-08, per Coffee: "make proficiencies
+    for all weapons and armors also for players... if players choose to
+    use another weapon... type they CAN and they can level them up to
+    get better with them"). Keyed by the weapon's own weapon_category
+    (items.py's existing "simple"/"martial" split) -- switching
+    categories genuinely starts a fresh grind, matching that spec
+    exactly. Only meaningful for a real player (has a char_class);
+    monsters/AI companions never call this.
+    """
+    stored_dict = character.get("weapon_proficiency_pct", {})
+    stored = stored_dict.get(weapon_category, PROFICIENCY_STARTING_PCT)
+    chance = min(stored + _equipped_proficiency_bonus(character, "weapon", weapon_category), PROFICIENCY_MAX_PCT)
+    _grind_dict_proficiency(character["telegram_user_id"], character["chat_id"], "weapon_proficiency_pct", stored_dict, weapon_category)
+    return roll_percentage_check(chance)
+
+
+def _roll_armor_proficiency(character: dict, armor_category: str) -> bool:
+    """Same shape as _roll_weapon_proficiency, for the DEFENDER's armor mastery when they take a hit."""
+    stored_dict = character.get("armor_proficiency_pct", {})
+    stored = stored_dict.get(armor_category, PROFICIENCY_STARTING_PCT)
+    chance = min(stored + _equipped_proficiency_bonus(character, "armor", armor_category), PROFICIENCY_MAX_PCT)
+    _grind_dict_proficiency(character["telegram_user_id"], character["chat_id"], "armor_proficiency_pct", stored_dict, armor_category)
+    return roll_percentage_check(chance)
 
 
 EXTRA_ATTACK_CLASSES = {"fighter", "barbarian", "paladin", "ranger", "monk"}
@@ -2685,9 +2814,54 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             buttons.append([InlineKeyboardButton("🤝 Give", callback_data="bm|give")])
         if _equip_keyboard(character) is not None:
             buttons.append([InlineKeyboardButton("⚔️ Equip", callback_data="bm|equip")])
+        if character and _throwable_weapon_ids(character):
+            buttons.append([InlineKeyboardButton("🔪 Throw", callback_data="bm|throw")])
         buttons.append([InlineKeyboardButton("🏃 Run", callback_data="bm|run")])
         buttons.append([InlineKeyboardButton("« Back", callback_data="bm|menu")])
         await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+        return
+
+    if action == "throw":
+        throwable_ids = _throwable_weapon_ids(character) if character else []
+        if not throwable_ids:
+            await _safe_edit_markup(query, _battle_menu_keyboard(session))
+            return
+        buttons = [
+            [InlineKeyboardButton(items_module.get_item(iid)["name"], callback_data=f"bm|throwweapon|{iid}")]
+            for iid in throwable_ids
+        ]
+        buttons.append([InlineKeyboardButton("« Back", callback_data="bm|more")])
+        await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+        return
+
+    if action == "throwweapon":
+        weapon_item = items_module.get_item(value)
+        opposing = session.living_on_side(session.opposing_side(user_id))
+        if weapon_item is None or not opposing:
+            await _safe_edit_markup(query, _battle_menu_keyboard(session))
+            return
+        if len(opposing) == 1:
+            await _safe_edit_markup(query)
+            await _do_throw_weapon(update, f"throw {weapon_item['name']} at {opposing[0]['name']}")
+            return
+        buttons = [
+            [InlineKeyboardButton(
+                f"{p['name']} ({p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP)",
+                callback_data=f"bm|throwtarget|{value}|{p['name']}",
+            )]
+            for p in opposing
+        ]
+        buttons.append([InlineKeyboardButton("« Back", callback_data="bm|throw")])
+        await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+        return
+
+    if action == "throwtarget":
+        weapon_item = items_module.get_item(value)
+        if weapon_item is None or target_name is None:
+            await _safe_edit_markup(query, _battle_menu_keyboard(session))
+            return
+        await _safe_edit_markup(query)
+        await _do_throw_weapon(update, f"throw {weapon_item['name']} at {target_name}")
         return
 
     if action == "formation":
@@ -3918,9 +4092,24 @@ async def _do_rebirth(update: Update) -> None:
     # own level-up HP growth (EVOLUTION_HP_MULTIPLIER) toward six-figure HP
     # by around rebirth 5.
     new_hp_max = rebirth_hp_max(character["hp_max"])
+    # Assassin's Backstab, permanent cross-rebirth ratchet (2026-08-08,
+    # per Coffee: "after they rebirth and lv goes back to 1 they keep
+    # the backstab multiplier, it is now set at that for the
+    # character... that multiplier can then be increased again" --
+    # explicitly meant to let a dedicated Assassin's damage compound
+    # without limit across repeated rebirths). Folds the FULLY-earned
+    # live multiplier (base * this life's level tier) back into the
+    # persistent base right here, before level resets to 1 -- next
+    # life's climb through the same x2/x4/x8/x10 tiers then multiplies
+    # an already-inflated base instead of starting flat. A no-op (stays
+    # at whatever it already was) for anyone not currently an Assassin.
+    new_backstab_base = character.get("backstab_base_multiplier", 1)
+    if _is_assassin(character):
+        new_backstab_base = _effective_backstab_multiplier(character)
     updated = db.update_character(
         update.effective_user.id, update.effective_chat.id,
         level=1, xp=0, rebirth_count=new_rebirth_count, hp_max=new_hp_max, hp_current=new_hp_max,
+        backstab_base_multiplier=new_backstab_base,
     )
     new_cap = ability_score_cap(new_rebirth_count)
     new_xp_bonus = int(round((xp_gain_multiplier(new_rebirth_count) - 1.0) * 100))
@@ -4122,6 +4311,19 @@ async def _do_choose_subclass(update: Update, text: str) -> None:
             update,
             f"⚔️ **{character['name']}** takes up the path of the **{match}** — weapon attacks now deal "
             f"{COMBAT_SUBCLASS_DAMAGE_BONUS_PCT}% more damage.",
+        )
+    elif match == "Assassin":
+        updated_character = db.get_character(update.effective_user.id, update.effective_chat.id)
+        multiplier = _effective_backstab_multiplier(updated_character)
+        proficiency = updated_character.get("backstab_proficiency_pct", PROFICIENCY_STARTING_PCT)
+        await _safe_send(
+            update,
+            f"🗡️ **{character['name']}** takes up the path of the **Assassin** — every attack is now a real "
+            f"**Backstab attempt**, dealing **x{multiplier}** damage when it lands (growing further as you "
+            f"level, up to x10 per life, permanently compounding with any past rebirths). Right now you "
+            f"land it **{proficiency:.2f}%** of the time — a miss just falls back to a normal attack, "
+            f"nothing lost — but every single attempt grinds that % up, so it only ever gets more reliable. "
+            f"Throwing a weapon also lands a guaranteed hit, no roll needed.",
         )
     elif match == "Thief":
         await _safe_send(
@@ -6025,15 +6227,54 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
 
             adv, disadv = _attack_advantage_disadvantage(attacker, target)
             _refresh_real_player_spell_slots(target)
+            # Backstab's own landing chance (2026-08-08, per Coffee: "if
+            # it doesnt land they will do a normal 1x attack, if it does
+            # trigger then it will do thier backstab multipliar") --
+            # grinds and rolls BEFORE the attack resolves, so a miss on
+            # the proficiency roll falls all the way back to an ordinary
+            # x1 attack, never a partial/guaranteed backstab.
+            backstab_triggered = _is_assassin(attacker) and _roll_backstab_proficiency(attacker)
+            weapon_used = _weapon_for_attacker(attacker)
             result = resolve_attack(
-                attacker, target, _weapon_for_attacker(attacker), advantage=adv, disadvantage=disadv,
+                attacker, target, weapon_used, advantage=adv, disadvantage=disadv,
                 defender_relentless_endurance_available=_relentless_endurance_available(target),
                 round_number=session.round_number,
                 forced_roll=forced_roll if attack_num == 0 else None,
                 forced_damage_roll=forced_damage_roll if attack_num == 0 else None,
+                damage_multiplier=_effective_backstab_multiplier(attacker) if backstab_triggered else 1,
             )
             if result["relentless_endurance_triggered"]:
                 db.use_feature(target["telegram_user_id"], update.effective_chat.id, "relentless_endurance")
+
+            # General weapon mastery (2026-08-08, per Coffee: "make
+            # proficiencies for all weapons and armors also for
+            # players... chance of a bonus-damage... mastery trigger").
+            # Real players only (monsters/AI never grind proficiency) --
+            # rolled after a confirmed hit, since a miss has nothing to
+            # add mastery damage onto.
+            mastery_strike_dmg = 0
+            if result["hit"] and attacker.get("char_class") and _roll_weapon_proficiency(attacker, weapon_used.get("weapon_category", "simple")):
+                mastery_strike_dmg = roll_damage(weapon_used["damage_dice"], modifier=weapon_used.get("damage_bonus", 0))["total"]
+                mastery_strike_dmg = apply_damage_type_modifier(mastery_strike_dmg, weapon_used.get("damage_type", "physical"), target, attacker)
+                result["damage_dealt"] += mastery_strike_dmg
+                target["hp_current"], _warded = _apply_damage_with_death_ward(target, mastery_strike_dmg)
+                result["defender_hp_remaining"] = target["hp_current"]
+
+            # General armor mastery -- same shape, defender's side: a
+            # real player wearing real armor gets a chance to soften a
+            # confirmed hit against them. Represented as HP given back
+            # (capped at hp_max) rather than intervening mid-calculation
+            # inside resolve_attack, same "adjust after the fact"
+            # convention Divine Smite/mastery-strike above both use.
+            armor_mastery_reduction = 0
+            defender_armor = items_module.get_item(target.get("equipped_armor")) if target.get("equipped_armor") else None
+            if result["hit"] and result["damage_dealt"] > 0 and target.get("char_class") and defender_armor:
+                if _roll_armor_proficiency(target, defender_armor.get("armor_category", "light")):
+                    armor_mastery_reduction = max(int(result["damage_dealt"] * ARMOR_MASTERY_DAMAGE_REDUCTION_PCT / 100), 1)
+                    result["damage_dealt"] -= armor_mastery_reduction
+                    target_hp_max = target.get("hp_max", target["hp_current"])
+                    target["hp_current"] = min(target["hp_current"] + armor_mastery_reduction, target_hp_max)
+                    result["defender_hp_remaining"] = target["hp_current"]
 
             # Divine Smite (Paladin, level 2+, 2026-07-16): primed via
             # _do_divine_smite before this attack; only consumed (and
@@ -6068,10 +6309,20 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                 )
             if result.get("bloodied_triggered"):
                 await _safe_send(update, f"🩸 **{target['name']} is bloodied!**")
+            if mastery_strike_dmg:
+                await _safe_send(update, f"🗡️ **Weapon mastery!** {attacker['name']}'s practice pays off — **+{mastery_strike_dmg} bonus damage!**")
+            if armor_mastery_reduction:
+                await _safe_send(update, f"🛡️ **Armor mastery!** {target['name']}'s training softens the blow — **-{armor_mastery_reduction} damage taken.**")
             attack_label = (
                 action_text if attack_count == 1 else f"{action_text} ({attack_num + 1}/{attack_count})"
             )
-            await _post_narrated(update, attacker, attack_label, result, session)
+            # Real live request (2026-08-08, per Coffee: "replace the
+            # 'attack' command for assassins to 'Backstab'"): an
+            # Assassin's ordinary attack IS their Backstab -- no
+            # separate command needed, the label and damage multiplier
+            # both just come along with the subclass automatically.
+            backstab_label = f"Backstab (x{_effective_backstab_multiplier(attacker)})" if _is_assassin(attacker) else None
+            await _post_narrated(update, attacker, attack_label, result, session, action_label=backstab_label)
 
             removed = session.remove_defeated()
             await _announce_defeats(update, session, removed)
@@ -6090,6 +6341,136 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                     await _notify_main_topic(update, note)
                 sessions.end_session(chat_id, session)
                 return
+
+        session.advance_turn()
+        await _resolve_ai_turns(update, session)
+
+
+def _throwable_weapon_ids(character: dict) -> list[str]:
+    """
+    Every real weapon this character is carrying that ISN'T the one
+    currently equipped -- per Coffee's explicit spec: "throw any weapon
+    in thier inventory (not the one they are holding)". The equipped
+    weapon stays excluded even if its inventory count happens to be >0
+    (a spare copy of the same weapon type still can't be thrown while
+    it's the one in hand -- throwing it would leave the character
+    unarmed mid-swing, which this game has no "unequip mid-turn" concept
+    for).
+    """
+    equipped = character.get("equipped_weapon")
+    return [
+        item_id for item_id, qty in character.get("inventory", {}).items()
+        if qty > 0 and item_id != equipped and (items_module.get_item(item_id) or {}).get("type") == "weapon"
+    ]
+
+
+async def _do_throw_weapon(update: Update, action_text: str) -> None:
+    """
+    Throw (2026-08-08, per Coffee): universal -- any class can throw
+    any carried weapon that ISN'T the one equipped, dealing that
+    weapon's own real damage (see rules.combat.resolve_thrown_attack's
+    own docstring for why the thrower's own stats/class bonuses never
+    factor in, deliberately, "so even weak players can have a good
+    attack"). An Assassin's Throw is a guaranteed hit -- no roll at
+    all -- on top of already having Backstab; every other class rolls
+    a normal attack same as any weapon swing. The thrown weapon is
+    consumed (thrown away), same convention as a used scroll.
+    """
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+
+    if sessions.get_session_for_user(chat_id, user_id) is None:
+        character = db.get_character(user_id, chat_id)
+        location = cl.get_location(CAMPAIGN, character["current_location"]) if character else None
+        local_monsters = location.get("monsters", []) if location else []
+        match = _find_monster_mentioned_in_text(location, action_text) if location else None
+        matched_monster = match[0] if match else (local_monsters[0] if len(local_monsters) == 1 else None)
+        if matched_monster is not None:
+            await _do_start_combat(update, monster_key=matched_monster)
+
+    async with _held_session(chat_id, user_id) as session:
+        if session is None:
+            await _safe_send(update, "No combat is active right now.")
+            return
+        if session.current_participant_id() != user_id:
+            current_name = session.current_participant()["name"]
+            await _safe_send(update, f"It's not your turn — it's **{current_name}**'s turn.")
+            return
+
+        attacker = session.current_participant()
+        if attacker["hp_current"] <= 0:
+            await _safe_send(update, "You're unconscious (0 HP) and can't act until healed.")
+            return
+
+        character = db.get_character(user_id, chat_id)
+        throwable_ids = _throwable_weapon_ids(character) if character else []
+        if not throwable_ids:
+            await _safe_send(update, "You aren't carrying any other weapon to throw right now.")
+            return
+        weapon_id = items_module.find_item_mentioned_in_text(action_text, candidate_ids=throwable_ids)
+        if weapon_id is None:
+            options = ", ".join(items_module.get_item(iid)["name"] for iid in throwable_ids)
+            await _safe_send(update, f"Throw what, exactly? You're carrying: {options}.")
+            return
+        weapon_item = items_module.get_item(weapon_id)
+
+        opposing = session.living_on_side(session.opposing_side(user_id))
+        if not opposing:
+            if not await _try_end_stale_combat(update, session):
+                await _safe_send(update, "No valid targets remain.")
+            return
+        target = _pick_target(action_text, opposing)
+
+        is_assassin = _is_assassin(attacker)
+        result = resolve_thrown_attack(
+            attacker, target, weapon_item, forced_hit=is_assassin,
+            defender_relentless_endurance_available=_relentless_endurance_available(target),
+            round_number=session.round_number,
+        )
+        if result["relentless_endurance_triggered"]:
+            db.use_feature(target["telegram_user_id"], chat_id, "relentless_endurance")
+
+        # Throw's own grindable mastery bonus (2026-08-08, per Coffee:
+        # "create a proficiency for throwing and do the same type of
+        # mechanic for it"). A successful roll adds one extra weapon-
+        # only damage die on top of an already-landed throw -- same
+        # "weapon's own stats, not the thrower's" rule resolve_thrown_
+        # attack itself already follows. Grinds every throw regardless
+        # of outcome, same as every other proficiency here.
+        mastery_throw_dmg = 0
+        if result["hit"] and _roll_throw_proficiency(attacker):
+            mastery_throw_dmg = roll_damage(weapon_item["damage_dice"], modifier=weapon_item.get("damage_bonus", 0))["total"]
+            mastery_throw_dmg = apply_damage_type_modifier(mastery_throw_dmg, weapon_item.get("damage_type", "physical"), target, attacker)
+            result["damage_dealt"] += mastery_throw_dmg
+            target["hp_current"], _warded = _apply_damage_with_death_ward(target, mastery_throw_dmg)
+            result["defender_hp_remaining"] = target["hp_current"]
+
+        _sync_player_to_db(target)
+        db.remove_item(user_id, chat_id, weapon_id, 1)
+
+        throw_label = "Backstab Throw" if is_assassin else "Throw"
+        await _post_narrated(update, attacker, f"throw {weapon_item['name']}", result, session,
+                              action_label=f"{throw_label} ({weapon_item['name']})")
+        if mastery_throw_dmg:
+            await _safe_send(update, f"🎯 **Throw mastery!** {attacker['name']}'s practice pays off — **+{mastery_throw_dmg} bonus damage!**")
+
+        removed = session.remove_defeated()
+        await _announce_defeats(update, session, removed)
+
+        if session.is_combat_over():
+            winner = _determine_winner(session)
+            xp_summary, level_up_notes = await _award_victory_xp(update, session) if winner == "party" else ("", [])
+            if winner == "party":
+                await _check_quest_completions_defeat_monster(update, session)
+                await _mark_location_cleared_for_party(update, session)
+                await _check_achievements_for_combat_party(update, session)
+                await _check_guild_quest_completion(update, session)
+                await _check_echo_trial_progress(update, session)
+            await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
+            for note in level_up_notes:
+                await _notify_main_topic(update, note)
+            sessions.end_session(chat_id, session)
+            return
 
         session.advance_turn()
         await _resolve_ai_turns(update, session)
@@ -7560,11 +7941,16 @@ async def _check_idle_characters(bot) -> None:
     IDLE_TIMEOUT_SECONDS, inactivity actually commences — UNLESS they're
     in active combat, since resting requires being out of battle first
     (same rule as the explicit command). An idle player mid-combat
-    instead just has their turn auto-passed once the full timeout is
-    reached, so they don't block everyone else, but they stay "in the
-    fight" — at whatever risk that implies — rather than getting a free
-    pass to safety by going quiet. No separate warning is given for the
-    in-combat case; the normal turn/timeout pressure already applies.
+    instead has their turn forced into a real attack once the full
+    timeout is reached (2026-08-08: this used to just auto-pass with no
+    action at all -- fixed to match _check_combat_timeouts's own real
+    "default action is Fight" behavior, since this is only ever a slow
+    60-minute backstop for that much faster mechanism, not a
+    genuinely different behavior of its own), so they don't block
+    everyone else, but they stay "in the fight" -- at whatever risk
+    that implies -- rather than getting a free pass to safety by going
+    quiet. No separate warning is given for the in-combat case; the
+    normal turn/timeout pressure already applies.
     """
     now = datetime.now(timezone.utc)
 
@@ -7595,12 +7981,35 @@ async def _check_idle_characters(bot) -> None:
 
         _IDLE_WARNED.discard((telegram_user_id, chat_id))
         if _in_active_combat(telegram_user_id, chat_id):
+            # Real live bug, reported twice (2026-08-08, dev-topic: "If
+            # Charvenna timed out, they should've attacked they
+            # shouldn't be idle" and again "If my character timed out,
+            # it should default in the attack"): this fallback used to
+            # just silently PASS the turn with no action at all, unlike
+            # _check_combat_timeouts's own much-faster mechanism (which
+            # correctly defaults to a real attack, per Coffee's explicit
+            # spec: "Default action is Fight"). This path is only ever
+            # reached as a slow (60-minute) backstop -- normally
+            # _check_combat_timeouts's own 3-5 minute (or 30-60s
+            # escalated) clock catches a stuck turn long before this
+            # one ever fires -- but per the same "checked before the
+            # loop" discipline elsewhere in this file, a backstop that
+            # behaves differently from the real mechanism it's backing
+            # up is itself a bug. Now forces the same real attack,
+            # released lock first same as _check_combat_timeouts (see
+            # that function's own docstring for why).
+            need_forced_attack = False
+            update_like = None
             async with _held_session(chat_id, telegram_user_id) as session:
                 if session is not None and session.current_participant_id() == telegram_user_id:
-                    update_like = _ChatOnlyUpdate(bot, chat_id)
-                    session.advance_turn()
-                    await _safe_send(update_like, f"⏳ **{character['name']}** is idle — turn passed.")
-                    await _resolve_ai_turns(update_like, session)
+                    update_like = _AiPlayerUpdate(bot, chat_id, telegram_user_id, "I attack")
+                    await _safe_send(
+                        update_like,
+                        f"⌛ **{character['name']}** timed out — they attack on instinct to keep the fight moving!",
+                    )
+                    need_forced_attack = True
+            if need_forced_attack and update_like is not None:
+                await _do_attack(update_like, "I attack")
             continue
 
         update_like = _ChatOnlyUpdate(bot, chat_id)
@@ -7647,6 +8056,28 @@ async def _check_combat_timeouts(bot) -> None:
     for session_id in list(sessions._ACTIVE_SESSIONS.keys()):
         need_forced_attack = False
         update_like = None
+
+        # Real live bug (2026-08-08, dev-topic reports both directions:
+        # "it thinks I timed out" despite a real action in flight, and a
+        # turn sitting stuck well past its own escalated 60s threshold
+        # with no forced attack): this loop used to `await` each
+        # session's lock in strict sequence -- a real player's own
+        # action holds their session's lock for its whole duration
+        # (narration is offloaded to a thread via asyncio.to_thread, so
+        # it doesn't block the event loop, but the lock itself stays
+        # held the entire time regardless). Under multi-tenant load,
+        # ONE session with a slow-resolving real action (Ollama
+        # narration commonly takes 30-160s+, longer than even the
+        # escalated 60s action threshold) blocked this whole cycle from
+        # ever reaching any LATER session in the same iteration --
+        # starving completely unrelated fights' timeout checks for as
+        # long as that one lock stayed held, cycle after cycle. A
+        # session whose lock is already held means real activity is
+        # already in progress there -- there's nothing for a timeout
+        # to force anyway, so skipping it (instead of waiting) is
+        # always correct, never just faster.
+        if sessions.get_session_lock(session_id).locked():
+            continue
         async with sessions.get_session_lock(session_id):
             session = sessions.get_session_by_id(session_id)
             if session is None or not session.turn_order:
@@ -18275,6 +18706,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_start_combat(update, monster_key, count=enemy_count)
     elif action == "attack":
         await _do_attack(update, intent.get("raw_text", text))
+    elif action == "throw_weapon":
+        await _do_throw_weapon(update, intent.get("raw_text", text))
     elif action == "move":
         await _do_move(update, text)
     elif action == "look":

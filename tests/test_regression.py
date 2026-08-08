@@ -1936,6 +1936,322 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.get_character(user_id2, -999).get("equipped_weapon"), equipped_before)
         sessions.end_session(-999)
 
+    # -- Assassin Backstab + universal Throw (2026-08-08, per Coffee) --
+
+    def test_backstab_tier_multiplier_spans_the_full_1_to_100_level_range(self):
+        from rules.leveling import backstab_tier_multiplier
+        self.assertEqual(backstab_tier_multiplier(1), 2)
+        self.assertEqual(backstab_tier_multiplier(24), 2)
+        self.assertEqual(backstab_tier_multiplier(25), 4)
+        self.assertEqual(backstab_tier_multiplier(49), 4)
+        self.assertEqual(backstab_tier_multiplier(50), 8)
+        self.assertEqual(backstab_tier_multiplier(74), 8)
+        self.assertEqual(backstab_tier_multiplier(75), 10)
+        self.assertEqual(backstab_tier_multiplier(99), 10)
+
+    def test_effective_backstab_multiplier_is_1_for_non_assassins(self):
+        make_basic_character(950920, "ThiefRogue", char_class="Rogue")
+        db.update_character(950920, -999, subclass="Thief", level=99)
+        rogue_thief = db.get_character(950920, -999)
+        make_basic_character(950921, "PlainFighter", char_class="Fighter")
+        db.update_character(950921, -999, level=99)
+        fighter = db.get_character(950921, -999)
+        self.assertEqual(bot._effective_backstab_multiplier(rogue_thief), 1)
+        self.assertEqual(bot._effective_backstab_multiplier(fighter), 1)
+
+    def test_effective_backstab_multiplier_combines_base_and_level_tier(self):
+        make_basic_character(950922, "TestAssassin", char_class="Rogue")
+        db.update_character(950922, -999, subclass="Assassin", level=50)
+        assassin = db.get_character(950922, -999)
+        self.assertEqual(bot._effective_backstab_multiplier(assassin), 8)  # base 1 (default) * tier 8
+        db.update_character(950922, -999, backstab_base_multiplier=3)
+        assassin_boosted = db.get_character(950922, -999)
+        self.assertEqual(bot._effective_backstab_multiplier(assassin_boosted), 24)  # base 3 * tier 8
+
+    async def test_assassin_attack_is_relabeled_backstab_and_multiplies_damage(self):
+        """
+        Real live request (2026-08-08, per Coffee): "replace the attack
+        command for assassins to Backstab" -- no separate command, an
+        Assassin's ordinary attack automatically deals x-multiplied
+        damage and is labeled Backstab in the combat log.
+        """
+        import sessions
+        sessions.end_session(-999)
+        user_id = 950923
+        make_basic_character(user_id, "BackstabTester", char_class="Rogue", current_location="crossroads_tavern")
+        # backstab_proficiency_pct=100 -- deterministic trigger, isolating
+        # this test from the separate proficiency-grind mechanic (covered
+        # by its own dedicated tests below).
+        db.update_character(user_id, -999, subclass="Assassin", level=25, backstab_proficiency_pct=100.0)
+        enemy = {"telegram_user_id": -2_500_060, "name": "BackstabDummy", "strength": 10, "dexterity": 10,
+                 "hp_current": 500, "hp_max": 500, "armor_class": 5, "is_ai": 1, "monster_key": "goblin"}
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", -2_500_060: "enemy"})
+        session.turn_order = [user_id, -2_500_060]
+
+        sink = []
+        await bot._do_attack(FakeUpdate(user_id, "I attack the dummy", sink), "I attack the dummy", forced_roll=20)
+        combined = "\n".join(sink)
+        self.assertIn("Backstab", combined)
+        # forced_roll=20 is a critical hit -- damage_dice doubles AND the
+        # x4 backstab multiplier (level 25) both apply; just confirm it's
+        # dramatically more than a single unmultiplied 1d8+mod swing could
+        # ever be (a plain hit tops out well under 20 for this weapon).
+        dummy_hp = next(p for p in session.participants if p["telegram_user_id"] == -2_500_060)["hp_current"]
+        self.assertLess(dummy_hp, 500 - 20, "backstab multiplier doesn't appear to have been applied")
+        sessions.end_session(-999)
+
+    async def test_rebirth_locks_in_the_assassins_earned_backstab_multiplier(self):
+        """
+        Real live spec (2026-08-08, per Coffee, verbatim: "after they
+        rebirth and lv goes back to 1 they keep the backstab
+        multipliar, it is now set at that for the character... that
+        multiplier can then be increased again... this will allow a
+        player to 'break the game'"). A rebirth must fold the FULLY
+        earned live multiplier (base * this life's level tier) back
+        into the persistent base, not reset it, so the next life's own
+        climb through the same tiers multiplies an already-inflated
+        number instead of starting flat.
+        """
+        user_id = 950924
+        make_basic_character(user_id, "RebirthAssassin", char_class="Rogue", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, subclass="Assassin", level=bot.MAX_LEVEL, backstab_base_multiplier=1)
+        before = db.get_character(user_id, -999)
+        live_multiplier_before_rebirth = bot._effective_backstab_multiplier(before)
+        self.assertGreaterEqual(live_multiplier_before_rebirth, 1)
+
+        sink = []
+        await bot._do_rebirth(FakeUpdate(user_id, "rebirth", sink))
+        after = db.get_character(user_id, -999)
+        self.assertEqual(after["level"], 1)
+        # The new base must equal exactly what was earned before rebirth --
+        # and applying THIS life's own level-1 tier on top of it must never
+        # drop below what they already had (level 1 always yields tier x2,
+        # so effective multiplier right after rebirth = old_base * 2).
+        self.assertEqual(after["backstab_base_multiplier"], live_multiplier_before_rebirth)
+        self.assertGreaterEqual(bot._effective_backstab_multiplier(after), live_multiplier_before_rebirth)
+
+        # Leveling back up in the new life climbs even higher than the
+        # old life's own ceiling ever could have alone.
+        db.update_character(user_id, -999, level=75)
+        after_releveled = db.get_character(user_id, -999)
+        self.assertEqual(
+            bot._effective_backstab_multiplier(after_releveled),
+            after["backstab_base_multiplier"] * 10,
+        )
+
+    def test_rebirth_does_not_touch_backstab_base_for_non_assassins(self):
+        user_id = 950925
+        make_basic_character(user_id, "RebirthFighter", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=bot.MAX_LEVEL, backstab_base_multiplier=5)  # shouldn't happen naturally, but confirm no mutation
+        import asyncio as _asyncio
+
+        async def run():
+            await bot._do_rebirth(FakeUpdate(user_id, "rebirth", []))
+
+        _asyncio.run(run())
+        after = db.get_character(user_id, -999)
+        self.assertEqual(after["backstab_base_multiplier"], 5)
+
+    async def test_throw_weapon_deals_pure_weapon_damage_regardless_of_thrower_stats(self):
+        """
+        Real live spec (2026-08-08, per Coffee, verbatim): "for
+        throwing dont use the players attack damage only use the
+        weapons attack damage - so even weak players can have a good
+        attack." A physically weak character throwing a strong weapon
+        must deal the SAME damage a strong character throwing the same
+        weapon would.
+        """
+        import sessions
+        sessions.end_session(-999)
+        user_id = 950926
+        make_basic_character(
+            user_id, "WeakThrower", char_class="Wizard", current_location="crossroads_tavern",
+            ability_scores={"strength": 6, "dexterity": 8, "constitution": 10,
+                             "intelligence": 16, "wisdom": 10, "charisma": 10},
+            inventory={"shortsword": 1, "silvered_dagger": 1},
+        )
+        db.equip_item(user_id, -999, "shortsword")
+        enemy = {"telegram_user_id": -2_500_061, "name": "ThrowDummy", "strength": 10, "dexterity": 10,
+                 "hp_current": 500, "hp_max": 500, "armor_class": 5, "is_ai": 1, "monster_key": "goblin"}
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", -2_500_061: "enemy"})
+        session.turn_order = [user_id, -2_500_061]
+        session.current_turn_index = session.turn_order.index(user_id)
+
+        sink = []
+        await bot._do_throw_weapon(
+            FakeUpdate(user_id, "throw silvered dagger at ThrowDummy", sink),
+            "throw silvered dagger at ThrowDummy",
+        )
+        combined = "\n".join(sink)
+        self.assertIn("Throw", combined)
+        # The dagger must actually be gone from inventory (thrown/consumed).
+        after = db.get_character(user_id, -999)
+        self.assertNotIn("silvered_dagger", after.get("inventory", {}))
+        # Equipped weapon (shortsword) must be untouched -- only the
+        # explicitly-named, non-equipped weapon was thrown.
+        self.assertEqual(after.get("equipped_weapon"), "shortsword")
+        self.assertIn("shortsword", after.get("inventory", {}))
+        sessions.end_session(-999)
+
+    async def test_assassin_throw_is_a_guaranteed_hit_no_roll(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 950927
+        make_basic_character(user_id, "AssassinThrower", char_class="Rogue", current_location="crossroads_tavern",
+                              inventory={"shortsword": 1, "silvered_dagger": 1})
+        db.update_character(user_id, -999, subclass="Assassin")
+        db.equip_item(user_id, -999, "shortsword")
+        # Impossibly high AC -- a normal roll could never hit this; only
+        # a genuine forced_hit (Assassin's Throw bonus) could land.
+        enemy = {"telegram_user_id": -2_500_062, "name": "ImpossibleDodge", "strength": 10, "dexterity": 10,
+                 "hp_current": 500, "hp_max": 500, "armor_class": 500, "is_ai": 1, "monster_key": "goblin"}
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", -2_500_062: "enemy"})
+        session.turn_order = [user_id, -2_500_062]
+        session.current_turn_index = session.turn_order.index(user_id)
+
+        before_hp = enemy["hp_current"]
+        await bot._do_throw_weapon(
+            FakeUpdate(user_id, "throw silvered dagger at ImpossibleDodge", []),
+            "throw silvered dagger at ImpossibleDodge",
+        )
+        live_enemy = next((p for p in session.participants if p["telegram_user_id"] == -2_500_062), None)
+        after_hp = live_enemy["hp_current"] if live_enemy else 0
+        self.assertLess(after_hp, before_hp, "Assassin's Throw must guarantee a hit even against impossible AC")
+        sessions.end_session(-999)
+
+    async def test_throw_intent_classified_and_battle_menu_offers_a_target_picker(self):
+        from ai.intent_parser import _keyword_fallback
+        r = _keyword_fallback("Throw the dagger at the goblin", [])
+        self.assertEqual(r["action"], "throw_weapon")
+
+        import sessions
+        sessions.end_session(-999)
+        user_id = 950928
+        make_basic_character(user_id, "MenuThrower", current_location="crossroads_tavern",
+                              inventory={"shortsword": 1, "silvered_dagger": 1})
+        db.equip_item(user_id, -999, "shortsword")
+        enemy_a = {"telegram_user_id": -2_500_063, "name": "MenuGoblinA", "hp_current": 20, "hp_max": 20,
+                   "is_ai": 1, "strength": 10, "dexterity": 10, "armor_class": 10}
+        enemy_b = {"telegram_user_id": -2_500_064, "name": "MenuGoblinB", "hp_current": 20, "hp_max": 20,
+                   "is_ai": 1, "strength": 10, "dexterity": 10, "armor_class": 10}
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy_a, enemy_b],
+                                          {user_id: "party", -2_500_063: "enemy", -2_500_064: "enemy"})
+        session.turn_order = [user_id, -2_500_063, -2_500_064]
+        session.current_turn_index = 0
+
+        async def tap(data):
+            sink = []
+            await bot.battle_menu_callback(FakeCallbackUpdate(user_id, data, sink), DummyContext())
+            return "\n".join(sink)
+
+        weapon_picker = await tap("bm|more")
+        self.assertIn("bm|throw", weapon_picker)
+
+        item_picker = await tap("bm|throw")
+        self.assertIn("bm|throwweapon|silvered_dagger", item_picker)
+        self.assertNotIn("bm|throwweapon|shortsword", item_picker)  # equipped weapon excluded
+
+        target_picker = await tap("bm|throwweapon|silvered_dagger")
+        self.assertIn("MenuGoblinA", target_picker)
+        self.assertIn("MenuGoblinB", target_picker)
+        self.assertIn("bm|throwtarget|silvered_dagger|MenuGoblinB", target_picker)
+        sessions.end_session(-999)
+
+    # -- Grindable mastery proficiencies (2026-08-08, per Coffee) ------
+
+    def test_roll_percentage_check_bounds_are_never_and_always(self):
+        from rules.dice import roll_percentage_check
+        # 0% must never succeed regardless of luck; 100% must always.
+        self.assertFalse(any(roll_percentage_check(0.0) for _ in range(200)))
+        self.assertTrue(all(roll_percentage_check(100.0) for _ in range(200)))
+
+    def test_grind_flat_proficiency_increments_and_caps_at_100(self):
+        user_id = 950929
+        make_basic_character(user_id, "GrindTester", current_location="crossroads_tavern")
+        used_value = bot._grind_flat_proficiency(user_id, -999, "backstab_proficiency_pct", 5.0)
+        self.assertEqual(used_value, 5.0)  # returns the value AS IT STOOD before this use
+        after = db.get_character(user_id, -999)
+        self.assertAlmostEqual(after["backstab_proficiency_pct"], 5.01, places=5)
+
+        bot._grind_flat_proficiency(user_id, -999, "backstab_proficiency_pct", 99.995)
+        capped = db.get_character(user_id, -999)
+        self.assertLessEqual(capped["backstab_proficiency_pct"], 100.0)
+
+    def test_grind_dict_proficiency_is_keyed_per_category_independently(self):
+        """
+        Real live spec (2026-08-08, per Coffee): "if players choose to
+        use another weapon or armour type they CAN and they can level
+        them up to get better with them" -- switching categories must
+        never touch a different category's own separately-earned %.
+        """
+        user_id = 950930
+        make_basic_character(user_id, "GrindTester2", current_location="crossroads_tavern")
+        bot._grind_dict_proficiency(user_id, -999, "weapon_proficiency_pct", {}, "martial")
+        after1 = db.get_character(user_id, -999)
+        self.assertAlmostEqual(after1["weapon_proficiency_pct"]["martial"], 1.01, places=5)
+        self.assertNotIn("simple", after1["weapon_proficiency_pct"])
+
+        bot._grind_dict_proficiency(user_id, -999, "weapon_proficiency_pct", after1["weapon_proficiency_pct"], "simple")
+        after2 = db.get_character(user_id, -999)
+        self.assertAlmostEqual(after2["weapon_proficiency_pct"]["simple"], 1.01, places=5)
+        self.assertAlmostEqual(after2["weapon_proficiency_pct"]["martial"], 1.01, places=5)  # untouched by the other category's grind
+
+    def test_equipped_proficiency_bonus_sums_matching_gear_only(self):
+        user_id = 950931
+        make_basic_character(user_id, "ProfGearTester", current_location="crossroads_tavern",
+                              inventory={"shortsword": 1})
+        db.equip_item(user_id, -999, "shortsword")
+        ring_id = db.create_item_instance(
+            item_type="ring", name="Ring of Martial Focus", rarity="rare", price=400,
+            base_stats={"type": "ring"},
+            affixes=[
+                {"kind": "proficiency_bonus", "stat": "weapon", "category": "martial", "value": 5.0},
+                {"kind": "proficiency_bonus", "stat": "backstab", "value": 3.0},
+            ],
+        )
+        db.add_item(user_id, -999, ring_id, 1)
+        db.equip_item(user_id, -999, ring_id)
+        character = db.get_character(user_id, -999)
+        self.assertEqual(bot._equipped_proficiency_bonus(character, "weapon", "martial"), 5.0)
+        self.assertEqual(bot._equipped_proficiency_bonus(character, "weapon", "simple"), 0)  # wrong category, not counted
+        self.assertEqual(bot._equipped_proficiency_bonus(character, "backstab"), 3.0)
+        self.assertEqual(bot._equipped_proficiency_bonus(character, "throw"), 0)  # no throw affix equipped
+
+    async def test_backstab_never_triggers_at_zero_proficiency_falls_back_to_normal_attack(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 950932
+        make_basic_character(user_id, "ZeroProfAssassin", char_class="Rogue", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, subclass="Assassin", level=75, backstab_proficiency_pct=0.0)
+        enemy = {"telegram_user_id": -2_500_065, "name": "ZeroProfDummy", "strength": 10, "dexterity": 10,
+                 "hp_current": 500, "hp_max": 500, "armor_class": 5, "is_ai": 1, "monster_key": "goblin"}
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", -2_500_065: "enemy"})
+        session.turn_order = [user_id, -2_500_065]
+
+        sink = []
+        await bot._do_attack(FakeUpdate(user_id, "I attack the dummy", sink), "I attack the dummy", forced_roll=20)
+        combined = "\n".join(sink)
+        # Still labeled Backstab (that's automatic for an Assassin's
+        # attack), but the x10 multiplier (level 75) must NOT have
+        # applied -- a plain crit on this weak weapon can't plausibly
+        # exceed 30 damage, while a x10 multiplied crit would dwarf it.
+        dummy_hp = next(p for p in session.participants if p["telegram_user_id"] == -2_500_065)["hp_current"]
+        self.assertGreater(dummy_hp, 500 - 40, "0% proficiency must fall back to a normal x1 attack, not x10")
+        sessions.end_session(-999)
+        # Grinding still happened despite the failed roll.
+        after = db.get_character(user_id, -999)
+        self.assertAlmostEqual(after["backstab_proficiency_pct"], 0.01, places=5)
+
     # -- Inactive party members' XP share (2026-07-16, per Coffee) ----
     async def test_absent_party_member_gets_partial_xp_share(self):
         import sessions
@@ -2822,6 +3138,105 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(after_char.get("current_location"), "crossroads_tavern")
         self.assertNotIn(player_id, session5.turn_order)
         self.assertNotIn(player_id, sessions._USER_SESSION)
+
+    async def test_combat_timeout_check_skips_a_contended_session_instead_of_blocking_on_it(self):
+        """
+        Real live bug, found via dev-topic reports pointing in BOTH
+        directions (2026-08-08): "it thinks that I timed out" despite a
+        real action already in flight, and separately a turn sitting
+        stuck well past its own escalated 60s threshold with no forced
+        attack at all. Root cause: _check_combat_timeouts used to
+        `await` every active session's lock in strict sequence -- a
+        real player's own action holds THEIR session's lock for its
+        whole duration (narration is offloaded to a thread via
+        asyncio.to_thread, so it doesn't block the event loop, but the
+        asyncio.Lock itself stays held the entire time regardless,
+        commonly 30-160s+ under real Ollama latency). Under multi-
+        tenant load, one session with a slow-resolving real action
+        blocked this whole cycle from ever reaching any LATER session
+        in the same iteration -- starving completely unrelated fights'
+        timeout checks for as long as that one lock stayed held, cycle
+        after cycle. Fixed by skipping (not awaiting) any session whose
+        lock is already held -- a locked session means real activity is
+        already in progress there, so there's nothing to force anyway.
+
+        Verified deterministically: session A's lock is held by an
+        asyncio.Event the test alone controls (never auto-released by a
+        timer), so if this ever regressed back to blocking, this test
+        would hang instead of silently passing.
+        """
+        import asyncio
+        import sessions
+
+        class _FakeSendBot:
+            def __init__(self):
+                self.sent = []
+
+            async def send_message(self, chat_id=None, message_thread_id=None, text=None, **kwargs):
+                self.sent.append(text)
+                return None
+
+            async def send_photo(self, chat_id=None, message_thread_id=None, photo=None, caption=None, **kwargs):
+                return None
+
+        fake_bot = _FakeSendBot()
+
+        # Session A: deliberately contended -- its lock is held until
+        # this test explicitly releases it.
+        a_player_id = 991002
+        make_basic_character(a_player_id, "ContendedTester", chat_id=-999501, current_location="crossroads_tavern")
+        foe_a = {"telegram_user_id": -700003, "name": "DummyA", "hp_current": 200, "hp_max": 200,
+                 "is_ai": True, "strength": 10, "dexterity": 10, "armor_class": 8,
+                 "damage_dice": "1d4", "damage_bonus": 0, "damage_type": "physical", "proficiency_bonus": 2}
+        session_a = sessions.start_session(-999501, [db.get_character(a_player_id, -999501), foe_a],
+                                            sides={a_player_id: "party", -700003: "enemy"})
+        session_a.turn_started_at[a_player_id] = time.time()
+
+        # Session B: a completely unrelated fight, past its escalated
+        # 60s action threshold, needs a forced attack.
+        b_player_id = 991003
+        make_basic_character(b_player_id, "StarvedTester", chat_id=-999502, current_location="crossroads_tavern")
+        foe_b = {"telegram_user_id": -700004, "name": "DummyB", "hp_current": 200, "hp_max": 200,
+                 "is_ai": True, "strength": 10, "dexterity": 10, "armor_class": 8,
+                 "damage_dice": "1d4", "damage_bonus": 0, "damage_type": "physical", "proficiency_bonus": 2}
+        session_b = sessions.start_session(-999502, [db.get_character(b_player_id, -999502), foe_b],
+                                            sides={b_player_id: "party", -700004: "enemy"})
+        session_b.timeout_escalated.add(b_player_id)
+        session_b.turn_started_at[b_player_id] = time.time() - (bot.COMBAT_TIMEOUT_ESCALATED_ACTION_SECONDS + 5)
+
+        release_a = asyncio.Event()
+
+        async def hold_lock_a():
+            async with sessions.get_session_lock(session_a.session_id):
+                await release_a.wait()
+
+        hold_task = asyncio.create_task(hold_lock_a())
+        await asyncio.sleep(0.05)  # let it actually acquire the lock first
+        self.assertTrue(sessions.get_session_lock(session_a.session_id).locked())
+
+        # Session A's lock is ONLY ever released by this test (release_a.set()
+        # below) -- a true regression back to blocking would hang forever,
+        # not just run long, so a generous timeout still reliably catches
+        # it without false-failing on session B's own legitimate real
+        # narration time (documented 30-160s+ under real Ollama load).
+        try:
+            await asyncio.wait_for(bot._check_combat_timeouts(fake_bot), timeout=280)
+        except asyncio.TimeoutError:
+            self.fail(
+                "_check_combat_timeouts blocked on session A's contended lock instead of skipping "
+                "it, starving session B's own timeout check (this would hang forever on a real "
+                "regression -- 280s is just a generous safety net, not an expected duration)"
+            )
+
+        # Session A's lock must still be held -- proves the check never
+        # touched it at all (skipped outright, not raced-and-won).
+        self.assertTrue(sessions.get_session_lock(session_a.session_id).locked())
+        self.assertTrue(any("attack on instinct" in (m or "") for m in fake_bot.sent))
+
+        release_a.set()
+        await hold_task
+        sessions.end_session(-999501, session_a)
+        sessions.end_session(-999502, session_b)
 
     async def test_examine_a_generated_item_no_longer_crashes(self):
         """
@@ -5654,6 +6069,48 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(chat_b, warned_chat_ids)
         self.assertIn((user_id, chat_a), bot._IDLE_WARNED)
         self.assertIn((user_id, chat_b), bot._IDLE_WARNED)
+
+    async def test_idle_timeout_in_combat_forces_a_real_attack_not_a_silent_pass(self):
+        """
+        Real live bug, reported twice via dev-topic screenshots
+        (2026-08-08): "If Charvenna timed out, they should've attacked
+        they shouldn't be idle until after the battle is completed" and
+        later "First, it said I missed my turn... If my character timed
+        out, it should default in the attack." The screenshot for the
+        second report showed the exact OLD message this fixes: "Pan is
+        idle — turn passed" with no attack at all, followed by Coffee
+        manually typing "Fight" to unstick it. This backstop (60-minute
+        clock, only ever reached when _check_combat_timeouts's own much
+        faster mechanism somehow hasn't already caught it -- see that
+        function's own starvation fix, tested separately) must now
+        force a real attack, same as the fast path already does, not
+        silently pass the turn.
+        """
+        import sessions
+        from datetime import timedelta
+        sessions.end_session(-999503)
+        user_id = 991004
+        make_basic_character(user_id, "IdleForcedAttacker", chat_id=-999503, current_location="crossroads_tavern")
+        foe = {"telegram_user_id": -700005, "name": "IdleForcedGoblin", "hp_current": 200, "hp_max": 200,
+               "is_ai": True, "strength": 10, "dexterity": 10, "armor_class": 8,
+               "damage_dice": "1d4", "damage_bonus": 0, "damage_type": "physical", "proficiency_bonus": 2}
+        session = sessions.start_session(-999503, [db.get_character(user_id, -999503), foe],
+                                          sides={user_id: "party", -700005: "enemy"})
+        session.current_turn_index = session.turn_order.index(user_id)
+        session.turn_started_at[user_id] = time.time()
+
+        idle_since = (datetime.now(timezone.utc) - timedelta(seconds=bot.IDLE_TIMEOUT_SECONDS + 60)).isoformat()
+        db.update_character(user_id, -999503, last_active_at=idle_since)
+        bot._IDLE_WARNED.discard((user_id, -999503))
+
+        from unittest.mock import AsyncMock
+        mock_bot = AsyncMock()
+        await bot._check_idle_characters(mock_bot)
+
+        sent_texts = [call.kwargs.get("text") or (call.args[0] if call.args else "") for call in mock_bot.send_message.await_args_list]
+        self.assertFalse(any("turn passed" in t for t in sent_texts), "old silent-pass message must be gone")
+        self.assertTrue(any("attack on instinct" in t for t in sent_texts), "must force a real attack instead")
+        sessions.end_session(-999503, session)
 
     def test_scroll_use_on_a_named_npc_still_classifies_as_cast_spell(self):
         """
