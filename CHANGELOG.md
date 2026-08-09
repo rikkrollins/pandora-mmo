@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.100] — Real-time battle formation image (v1)
+
+Real live request (per Coffee): "when we are in battle, are you able
+to create an image with enemy sprites and character sprites that show
+the formations and locations of where the players are battling?"
+New `battle_render.py`: a clean, locally-rendered (Pillow, no network
+call, no Ollama, near-instant) tactical diagram of the current fight —
+party on the left facing right, enemies on the right facing left,
+each side split into its own real front/back row (the existing
+`formation_row` mechanic), each combatant shown as a labeled token
+with a live HP bar and a gold ring for boss-tier enemies. Grounded
+entirely in the real combat session state (`session.living_on_side`)
+— never an invented layout. Sent once, alongside the existing monster
+art, the moment a fight starts (the main wandering-encounter path).
+
+Scoped as v1: only wired into the primary combat-start path so far,
+not the echo-trial/ambush/world-boss variants, and not yet refreshed
+mid-fight as formation/HP genuinely changes — both are real follow-up
+work, tracked as a separate task rather than silently left undone.
+
 ## [1.27.99] — Enemy battle banter
 
 Real live request (per Coffee): "in battle give the enemies small

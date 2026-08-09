@@ -7770,6 +7770,133 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(captured["include_banter"])
         sessions.end_session(-996)
 
+    # -- Battle formation image (2026-08-09, task #9-followup) -----------
+    def test_render_battle_formation_produces_a_valid_png_reflecting_real_state(self):
+        """
+        Real live request (per Coffee): "show the formations and
+        locations of where the players are battling." Pure rendering
+        check, no bot.py/network involved -- confirms real PNG bytes
+        come back at the expected canvas size for a real front/back,
+        boss-included roster, so a false positive here can't silently
+        mean the renderer is broken.
+        """
+        import io
+        from PIL import Image
+        import battle_render
+        party = [
+            {"name": "Ravenloft", "hp_current": 40, "hp_max": 40, "formation_row": "front"},
+            {"name": "Willowmere", "hp_current": 18, "hp_max": 30, "formation_row": "back"},
+        ]
+        enemies = [
+            {"name": "Goblin Boss", "hp_current": 60, "hp_max": 93, "formation_row": "front", "is_boss": True},
+            {"name": "Goblin Shaman", "hp_current": 10, "hp_max": 25, "formation_row": "back"},
+        ]
+        png_bytes = battle_render.render_battle_formation(party, enemies)
+        self.assertGreater(len(png_bytes), 0)
+        image = Image.open(io.BytesIO(png_bytes))
+        image.verify()
+        image = Image.open(io.BytesIO(png_bytes))
+        self.assertEqual(image.format, "PNG")
+        self.assertEqual(image.size, (battle_render.CANVAS_WIDTH, battle_render.CANVAS_HEIGHT))
+
+    def test_render_battle_formation_handles_a_single_combatant_per_side(self):
+        """A 1v1 (the most common real fight shape) must render without error -- no divide-by-zero on row spacing."""
+        import io
+        from PIL import Image
+        import battle_render
+        png_bytes = battle_render.render_battle_formation(
+            [{"name": "Solo", "hp_current": 20, "hp_max": 20, "formation_row": "front"}],
+            [{"name": "Goblin", "hp_current": 25, "hp_max": 25, "formation_row": "front"}],
+        )
+        image = Image.open(io.BytesIO(png_bytes))
+        self.assertEqual(image.format, "PNG")
+
+    async def test_maybe_send_battle_formation_image_sends_a_real_png_from_session_state(self):
+        """
+        bot._maybe_send_battle_formation_image must pull the REAL, live
+        session state (session.living_on_side, which already excludes
+        anyone at 0 HP) rather than anything invented, and hand back
+        real decodable PNG bytes as the sent photo.
+        """
+        import io
+        from PIL import Image
+        import sessions
+        sessions.end_session(-995)
+        player_id = 900520
+        make_basic_character(player_id, "FormationTester", chat_id=-995, current_location="crossroads_tavern")
+        player = db.get_character(player_id, -995)
+        player["telegram_user_id"] = player_id
+        enemy = {"telegram_user_id": -2_500_090, "name": "FormationGoblin", "dexterity": 10, "strength": 10,
+                 "hp_current": 25, "hp_max": 25, "armor_class": 10, "is_ai": 1, "monster_key": "goblin"}
+        session = sessions.start_session(-995, [player, enemy], {player_id: "party", -2_500_090: "enemy"})
+
+        sink = []
+        update = FakeUpdate(player_id, "n/a", sink, chat_id=-995)
+        await bot._maybe_send_battle_formation_image(update, session)
+
+        self.assertEqual(len(update.effective_chat.sent_photos), 1)
+        photo = update.effective_chat.sent_photos[0]
+        image = Image.open(io.BytesIO(photo["photo"]))
+        self.assertEqual(image.format, "PNG")
+        self.assertIn("formation", photo["caption"].lower())
+        sessions.end_session(-995)
+
+    async def test_maybe_send_battle_formation_image_skips_when_a_side_is_wiped(self):
+        """
+        Defensive guard: if this were ever called with one side already
+        at 0 HP (living_on_side excludes them), it must skip silently
+        rather than render a one-sided/empty diagram.
+        """
+        import sessions
+        sessions.end_session(-994)
+        player_id = 900521
+        make_basic_character(player_id, "AloneTester", chat_id=-994, current_location="crossroads_tavern")
+        player = db.get_character(player_id, -994)
+        player["telegram_user_id"] = player_id
+        enemy = {"telegram_user_id": -2_500_091, "name": "DeadGoblin", "dexterity": 10, "strength": 10,
+                 "hp_current": 25, "hp_max": 25, "armor_class": 10, "is_ai": 1, "monster_key": "goblin"}
+        session = sessions.start_session(-994, [player, enemy], {player_id: "party", -2_500_091: "enemy"})
+        dead_enemy = next(p for p in session.participants if p["telegram_user_id"] == -2_500_091)
+        dead_enemy["hp_current"] = 0
+
+        sink = []
+        update = FakeUpdate(player_id, "n/a", sink, chat_id=-994)
+        await bot._maybe_send_battle_formation_image(update, session)
+        self.assertEqual(len(update.effective_chat.sent_photos), 0)
+        sessions.end_session(-994)
+
+    async def test_battle_formation_image_sent_when_combat_starts(self):
+        """
+        End-to-end wiring check: a real combat start (_do_start_combat)
+        must send both the existing monster-art image AND the new
+        battle-formation image. requests.get is mocked (same pattern as
+        test_send_generated_image_pre_warms_the_url_before_handing_it_
+        to_telegram) so this never depends on a real Pollinations
+        network call -- only the LOCAL battle_render call is real.
+        """
+        from unittest.mock import patch
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900522
+        character = make_basic_character(user_id, "ComboStarter", current_location="crossroads_tavern")
+
+        def fake_get(url, timeout=None):
+            return SimpleNamespace(status_code=200, headers={"content-type": "image/jpeg"})
+
+        sink = []
+        with patch("bot._get_combat_eligible_party_members", return_value=[character]), \
+             patch("bot.requests.get", side_effect=fake_get):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight a goblin", sink), monster_key="goblin", count=1)
+
+        # sink only captures each sent photo's caption marker, same
+        # convention test_monster_image_not_duplicated_when_enemy_
+        # attacks_first already uses -- good enough to confirm both
+        # images actually fired.
+        photo_markers = [line for line in sink if line.startswith("<photo:")]
+        self.assertTrue(any("Goblin" in m for m in photo_markers), f"monster art missing: {sink}")
+        self.assertTrue(any("formation" in m.lower() for m in photo_markers), f"battle formation image missing: {sink}")
+        sessions.end_session(-999)
+
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
     """

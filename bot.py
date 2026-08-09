@@ -38,6 +38,7 @@ from telegram.ext import (
     filters,
 )
 
+import battle_render
 import board_quests as board_quests_module
 import campaign_loader as cl
 import config
@@ -5720,6 +5721,7 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             header += f"\n\n📢 {names} — a fight just broke out at **{location_name}**, come join if you can!"
         await _safe_send(update, header, reply_markup=_battle_menu_keyboard(session))
         await _maybe_send_monster_image(update, monster_key, template)
+        await _maybe_send_battle_formation_image(update, session)
         # Real live bug (2026-08-05, Coffee: "it posts two images... is
         # this a glitch?"): when an enemy that wins initiative takes the
         # very first action of the fight, _resolve_ai_turns' own "show
@@ -13196,6 +13198,34 @@ async def _maybe_send_monster_image(update: Update, monster_key: str, template: 
         update, prompt, f"⚔️ {template['name']}",
         seed=_deterministic_image_seed(f"monster:{monster_key}"), log_key=monster_key,
     )
+
+
+async def _maybe_send_battle_formation_image(update: Update, session: sessions.Session) -> None:
+    """
+    Real tactical battle-formation image (task #9-followup, per Coffee:
+    "show the formations and locations of where the players are
+    battling"). Unlike every other _maybe_send_*_image helper, this
+    renders entirely locally (battle_render.render_battle_formation,
+    pure Pillow, no network call) from the REAL current combat state --
+    session.living_on_side already returns only who's actually still
+    standing on each side, with each participant's real formation_row
+    and hp_current/hp_max -- never an invented layout. Wrapped the same
+    "never breaks the real feature it accompanies" way as every other
+    optional-flavor sender here: a rendering failure logs and moves on,
+    it never blocks combat from proceeding.
+    """
+    party = session.living_on_side("party")
+    enemies = session.living_on_side("enemy")
+    if not party or not enemies:
+        return
+    try:
+        png_bytes = await asyncio.to_thread(battle_render.render_battle_formation, party, enemies)
+        await update.effective_chat.send_photo(
+            photo=png_bytes, caption="🗺️ Current battle formation",
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        )
+    except Exception as e:
+        logger.warning(f"[battle_render] formation image failed: {e!r}")
 
 
 def _spell_image_prompt(spell: dict) -> str:
