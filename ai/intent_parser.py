@@ -274,7 +274,27 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # this quest" (no "I") was never a trigger at all. raw_text is passed
     # through unchanged so _do_accept_quest's existing find_board_quest_by_name
     # can still resolve a quoted/named quest exactly as before.
-    if any(w in lowered for w in ["accept the quest", "accept this quest", "accept that quest"]):
+    # Real live bug (2026-08-09, found via topic-activity monitoring):
+    # "I head to The Goblin Warrens to accept the quest." came back as
+    # accept_quest instead of move -- the check just below unconditionally
+    # wins even when "accept the quest" is only the STATED PURPOSE of an
+    # explicit "head to <destination>" travel clause, not the player's
+    # actual immediate action. _do_accept_quest always checks
+    # character['current_location'], never a stated destination, so this
+    # silently accepted whatever was available wherever the player
+    # ALREADY was (or replied "nothing to accept") instead of moving them
+    # to Goblin Warrens at all -- worse than the analogous "head to X to
+    # buy Y" phrasing (already reviewed live and confirmed safe: _do_buy
+    # hard-gates on a shop actually being present), accept_quest has no
+    # such gate and could silently accept a real but unrelated quest.
+    # Mirrors the "go to the market row" fix above: an explicit movement
+    # clause with a real destination should win over a same-sentence
+    # purpose infinitive. Doesn't touch the comma/"then"-separated case
+    # ("go to the tavern, then accept the quest") -- that already splits
+    # into two real actions via parse_intents's compound-message handling
+    # before this function ever sees a single merged segment.
+    move_then_accept = re.search(r"\b(?:go to|goto|head to|walk to|travel to|move to)\b.+\bto\s+accept\b", lowered)
+    if not move_then_accept and any(w in lowered for w in ["accept the quest", "accept this quest", "accept that quest"]):
         return {**base, "action": "accept_quest"}
 
     # Checked BEFORE the known-NPC-name loop below: naming an NPC while

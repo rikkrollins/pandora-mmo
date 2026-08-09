@@ -7178,6 +7178,28 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_keyword_fallback("show me the market listings", [])["action"], "check_market")
         self.assertEqual(_keyword_fallback("Cancel my listing in the market", [])["action"], "cancel_market")
 
+    def test_move_with_accept_quest_purpose_clause_classified_as_move(self):
+        """
+        Real live bug (2026-08-09, found via topic-activity monitoring):
+        "I head to The Goblin Warrens to accept the quest." came back as
+        accept_quest instead of move -- the old "accept the quest" check
+        unconditionally won even though it's only the stated PURPOSE of
+        an explicit "head to <destination>" travel clause. accept_quest
+        always resolves against the character's CURRENT location (never
+        a stated destination), so this silently either accepted whatever
+        was available where the player already stood, or replied
+        "nothing to accept" -- either way the player never actually
+        moved. Same "specific case before the general one" shape as the
+        market-row fix just above.
+        """
+        self.assertEqual(_keyword_fallback("I head to The Goblin Warrens to accept the quest.", [])["action"], "move")
+        self.assertEqual(_keyword_fallback("go to the tavern to accept the quest", [])["action"], "move")
+        self.assertEqual(_keyword_fallback("travel to the crossroads to accept the quest", [])["action"], "move")
+        # Genuine, non-movement accept_quest phrasing must still work exactly as before.
+        self.assertEqual(_keyword_fallback("Accept the quest", [])["action"], "accept_quest")
+        self.assertEqual(_keyword_fallback("I accept this quest", [])["action"], "accept_quest")
+        self.assertEqual(_keyword_fallback("accept that quest on the board", [])["action"], "accept_quest")
+
     async def test_cancel_market_intent_auto_resolves_a_single_listing(self):
         seller_id = 900573
         make_basic_character(seller_id, "SoloSeller", inventory={"rusty_dagger": 1})

@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.105] — "head to X to accept the quest" move fix
+
+Found via topic-activity monitoring: an AI companion said "I head to
+The Goblin Warrens to accept the quest." and it came back classified
+as `accept_quest` instead of `move` — the keyword fallback's "accept
+the quest" check unconditionally won even when it's only the STATED
+PURPOSE of an explicit "head to <destination>" travel clause, not the
+player's actual immediate action. `_do_accept_quest` always resolves
+against the character's CURRENT location, never a stated destination,
+so this silently either accepted whatever quest happened to be
+available wherever the player already stood, or replied "nothing to
+accept" — either way the player never actually moved. Worse than the
+analogous (and already-reviewed-safe) "head to X to buy Y" phrasing,
+since `_do_buy` hard-gates on a shop actually being present but
+`accept_quest` has no such gate. Fixed in `ai/intent_parser.py`'s
+`_keyword_fallback`: an explicit "go to/head to/travel to/walk to/move
+to <place> ... to accept" purpose-clause pattern now falls through to
+`move` instead. Genuine, non-movement accept_quest phrasing ("Accept
+the quest", "I accept this quest") is unaffected. Same "specific case
+before the general one" shape as the "go to the market row" fix.
+
 ## [1.27.104] — Startup-restore image gap fix
 
 Found live, caught immediately after deploying 1.27.103: restoring a
