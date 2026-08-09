@@ -21917,6 +21917,18 @@ class _StartupChatStub:
     async def send_message(self, text, **kwargs):
         return await self._bot.send_message(chat_id=self.id, text=text, **kwargs)
 
+    async def send_photo(self, photo, **kwargs):
+        # Real live gap, caught 2026-08-09 right after this exact
+        # restore path started resolving a spider's turn: this stub
+        # only ever implemented send_message, so _maybe_send_monster_
+        # image/_maybe_send_battle_formation_image's own send_photo
+        # call failed with a plain AttributeError (caught and logged,
+        # never fatal -- combat itself kept working via send_message --
+        # but the player restoring mid-fight silently lost the art a
+        # normal turn would have shown). Same delegate-to-application.
+        # bot pattern send_message already uses.
+        return await self._bot.send_photo(chat_id=self.id, photo=photo, **kwargs)
+
 
 class _StartupUpdateStub:
     """Bare Update stand-in for the same startup-only AI-turn-resolution case — see _StartupChatStub."""

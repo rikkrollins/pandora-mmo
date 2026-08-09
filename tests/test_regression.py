@@ -8179,7 +8179,34 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         updated_leader = next(p for p in session.participants if p["telegram_user_id"] == leader_id)
         self.assertEqual(updated_leader.get("formation_row", "front"), "front", "the tapper must be untouched")
         sessions.end_session(-999)
-        sessions.end_session(-999)
+
+    async def test_startup_chat_stub_can_actually_send_a_photo(self):
+        """
+        Real live gap, caught 2026-08-09 right after a restart resumed
+        a combat session mid-spider-turn: bot._StartupChatStub (used to
+        resolve a restored session's already-pending AI turn at startup,
+        when there's no real incoming Update to hang a chat object off
+        of) only ever implemented send_message -- _maybe_send_monster_
+        image/_maybe_send_battle_formation_image's real send_photo call
+        failed with a plain AttributeError (caught and logged, never
+        fatal, but the player restoring mid-fight silently lost the art
+        a normal turn would have shown). Confirms send_photo now
+        delegates to application.bot.send_photo, same pattern
+        send_message already used.
+        """
+        calls = []
+
+        class FakeAppBot:
+            async def send_photo(self, chat_id, photo, **kwargs):
+                calls.append((chat_id, photo, kwargs))
+                return SimpleNamespace(message_id=1)
+
+        stub = bot._StartupChatStub(FakeAppBot(), chat_id=-999)
+        await stub.send_photo(b"fake-png-bytes", caption="A monster!")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], -999)
+        self.assertEqual(calls[0][1], b"fake-png-bytes")
+        self.assertEqual(calls[0][2].get("caption"), "A monster!")
 
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):

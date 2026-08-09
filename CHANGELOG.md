@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.104] — Startup-restore image gap fix
+
+Found live, caught immediately after deploying 1.27.103: restoring a
+combat session mid-AI-turn at bot startup (task #159's `_StartupChatStub`,
+used when there's no real incoming Update to resolve the pending turn
+against) only ever implemented `send_message` — the real monster/
+battle-formation image sends failed with a plain `AttributeError`
+(caught and logged, never fatal to combat itself, but the player
+restoring mid-fight silently lost the art a normal turn would have
+shown). `_StartupChatStub` now implements `send_photo` too, delegating
+to `application.bot.send_photo` the same way `send_message` already
+does.
+
 ## [1.27.103] — First-name party targeting fix, monster art dedup for identical enemies
 
 Real live report (Coffee, dev-topic screenshot): "Move Vesh to the
