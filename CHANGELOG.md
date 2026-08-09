@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.102] — "Take X from Y" misclassification fix
+
+Found via topic-activity monitoring: "Take a key from the locksmith
+window" (a real, described location interactable) fell all the way
+through to the silent 'chat' default (no reply at all) — this game has
+no generic "take/pick up an item from the environment" mechanic, only
+real, campaign-defined interactables you can examine, and bot.py's
+`_find_interactable` already correctly matches this exact phrasing to
+the right object; only the classification was missing. Same "verb not
+covered" shape as the touch/gaze/feel/read/open fixes before it, now
+covering "take/grab/pick up X FROM Y" -> examine. Deliberately requires
+a "from" clause (unlike those other verbs) so a bare "take the potion"
+(much more often meaning "drink it") still falls through to the real
+model's own use_item read, untouched.
+
 ## [1.27.101] — Party roster cap raised, "go to Market Row" misclassification fix
 
 Real live report (Coffee): "i cant invite more than 6 players to the

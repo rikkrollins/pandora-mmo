@@ -1550,6 +1550,31 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if any(w in lowered for w in rest_words):
         return {**base, "action": "rest"}
 
+    # Real live bug (2026-08-09, found via topic-activity monitoring):
+    # "Take a key from the locksmith window" fell all the way through
+    # to the silent 'chat' default (no reply at all) -- this game has
+    # no generic "take/pick up an item from the environment" mechanic,
+    # only real, campaign-defined interactables you can examine (bot.py's
+    # _find_interactable already correctly matches this exact phrase to
+    # "rows of hanging keys in the locksmith's window", confirmed live --
+    # the ONLY gap was classification, not the lookup itself). Same
+    # "verb not covered, falls through to examine" shape as touch/gaze/
+    # feel/read/open above, just for "take"/"grab"/"pick up" -- but
+    # deliberately narrower (requires a "from" clause) than those, since
+    # a bare "take/grab the X" with no "from" is far more often really
+    # about a carried, already-owned item ("take the healing potion" =
+    # drink it, i.e. use_item) than a location prop; this fallback
+    # already returns 'chat' (no opinion) for that bare phrasing, which
+    # lets the real model's own -- typically correct -- use_item read
+    # through untouched (see the trust-priority rule below: only a
+    # non-chat fallback opinion ever overrides the model).
+    take_from_match = re.search(
+        r"\b(?:take|took|grab|grabbed|pick up|picked up)\b\s+(?:the |a |an )?(.+\bfrom\b.+)", lowered,
+    )
+    if take_from_match:
+        target = text[take_from_match.start(1):take_from_match.end(1)].strip()
+        return {**base, "action": "examine", "target": target or None}
+
     # Per Coffee (2026-07-24): "a local church we can go to pray and
     # give an offering to the dead which revives the characters too" --
     # grounded in the Hollow Stump Shrine's existing "offering_line"

@@ -128,6 +128,31 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         for text in ("Feel the pulse on the weathered waystone", "I feel the tree", "She felt the wall"):
             self.assertEqual(_keyword_fallback(text, [])["action"], "examine", text)
 
+    # -- "Take/grab X from Y" fell through to the silent chat default --
+    #    no generic take/pick-up-from-environment mechanic exists, only
+    #    real interactables you can examine (bot.py's _find_interactable
+    #    already correctly matches this exact phrasing to the real
+    #    interactable; only the classification was missing)
+    #    (2026-08-09, real player, caught via topic-activity monitoring) --
+    def test_take_x_from_y_classified_as_examine(self):
+        for text in ("Take a key from the locksmith window", "Grab the letter from the desk",
+                     "I took the coin from the fountain"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "examine", text)
+
+    def test_take_without_a_from_clause_stays_chat_so_the_model_can_still_call_use_item(self):
+        """
+        Deliberately narrower than touch/gaze/feel above: a bare "take/
+        grab the X" with no "from" clause is far more often really about
+        a carried, already-owned consumable ("take the healing potion" =
+        drink it) than a location prop. This fallback must keep
+        returning 'chat' (no opinion) for that bare phrasing so the real
+        model's own -- typically correct -- use_item read passes through
+        untouched, per the trust-priority rule (only a non-chat fallback
+        opinion ever overrides the model).
+        """
+        for text in ("Take the healing potion", "I take the antitoxin", "grab my sword"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "chat", text)
+
     # -- "Look under X" fell through to the low-confidence chat default,
     #    which the model then resolved as generic 'look' instead of
     #    'examine' on the named object (2026-08-06, real player, caught
