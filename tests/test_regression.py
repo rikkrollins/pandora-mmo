@@ -8298,6 +8298,194 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(formation_markers), 1, f"battle formation image missing on ambush start: {sink}")
         sessions.end_session(-990)
 
+    # -- Task #11, real live request (2026-08-09, Coffee, Development-
+    #    topic screenshot): "This does not look like a map. I want an
+    #    accurate map... use circles and names with labels" -- the old
+    #    _do_show_visual_map generated AI-painted atmospheric art from
+    #    Pollinations (task #221), never an accurate schematic. Replaced
+    #    with map_render.py, a real local Pillow renderer. ------------
+    def test_visible_nodes_and_edges_enforces_fog_of_war(self):
+        """
+        The core fog-of-war rule, tested directly against real
+        campaign.json data rather than through rendered pixels: an edge
+        must exist ONLY between two ACTUALLY VISITED locations -- a
+        connection leading to an unvisited (or merely map-revealed)
+        location must never become a drawn line, since the line itself
+        is the real spoiler (mirrors _do_show_map's text-map rule).
+        """
+        import map_render
+        surface = bot.CAMPAIGN["locations"]["surface"]
+        # crossroads_tavern's real connections include whispering_wood,
+        # stonearch_bridge, market_row, tavern_cellar, tavern_upstairs,
+        # the_colosseum (6 total) -- only market_row and the_colosseum
+        # are marked visited here.
+        visited = {"crossroads_tavern", "market_row", "the_colosseum"}
+        revealed = {"the_weeping_well"}  # not connected to crossroads_tavern at all -- must never appear as a node
+        visited_here, revealed_here, edges, unexplored = map_render._visible_nodes_and_edges(surface, visited, revealed)
+
+        self.assertEqual(visited_here, sorted(visited))
+        self.assertEqual(revealed_here, ["the_weeping_well"])
+        self.assertIn(("crossroads_tavern", "market_row"), edges)
+        self.assertIn(("crossroads_tavern", "the_colosseum"), edges)
+        # whispering_wood/stonearch_bridge/tavern_cellar/tavern_upstairs are real
+        # connections but NOT visited -- none of them may appear in any edge.
+        for edge in edges:
+            for loc_id in edge:
+                self.assertIn(loc_id, visited, f"edge {edge} touches an unvisited location -- fog-of-war leak")
+        self.assertEqual(unexplored["crossroads_tavern"], 4)  # the 4 real connections that aren't visited
+
+    def test_visited_takes_priority_over_revealed_when_both_are_true(self):
+        """A location that's genuinely been visited must never also show up in the weaker revealed-only list."""
+        import map_render
+        surface = bot.CAMPAIGN["locations"]["surface"]
+        visited = {"crossroads_tavern", "market_row"}
+        revealed = {"market_row"}  # revealed AND visited -- visited wins
+        visited_here, revealed_here, edges, unexplored = map_render._visible_nodes_and_edges(surface, visited, revealed)
+        self.assertIn("market_row", visited_here)
+        self.assertNotIn("market_row", revealed_here)
+
+    def test_render_layer_map_produces_a_valid_png(self):
+        import io
+        import map_render
+        from PIL import Image
+        surface = bot.CAMPAIGN["locations"]["surface"]
+        png = map_render.render_layer_map(
+            "surface", surface, {"crossroads_tavern", "market_row"}, {"the_weeping_well"}, "crossroads_tavern",
+        )
+        image = Image.open(io.BytesIO(png))
+        self.assertEqual(image.format, "PNG")
+        self.assertEqual(image.size, (map_render.CANVAS_WIDTH, map_render.CANVAS_HEIGHT))
+
+    def test_render_layer_map_handles_a_single_visited_location(self):
+        """Real edge case: a brand-new character has visited exactly one place (their start) -- must not crash with no edges at all."""
+        import map_render
+        surface = bot.CAMPAIGN["locations"]["surface"]
+        png = map_render.render_layer_map("surface", surface, {"crossroads_tavern"}, set(), "crossroads_tavern")
+        self.assertTrue(png)
+
+    def test_render_layer_map_grows_the_canvas_for_a_heavily_explored_layer(self):
+        """
+        Confirmed visually (2026-08-09): rendering every real location in
+        the underground layer (43 total) on the fixed base canvas
+        crammed labels into unreadable overlap. The canvas now scales up
+        with node count -- this locks that fix in as a real regression
+        test rather than something only ever re-caught by eyeballing a
+        screenshot again.
+        """
+        import io
+        import map_render
+        from PIL import Image
+        underground = bot.CAMPAIGN["locations"]["underground"]
+        all_ids = set(underground.keys())
+        png = map_render.render_layer_map("underground", underground, all_ids, set(), next(iter(all_ids)))
+        image = Image.open(io.BytesIO(png))
+        self.assertGreater(image.size[0], map_render.CANVAS_WIDTH)
+        self.assertLessEqual(image.size[0], map_render._MAX_CANVAS_WIDTH)
+
+    def test_assign_label_sides_alternates_within_the_same_horizontal_band(self):
+        """
+        The actual overlap-reduction logic, tested directly on plain
+        coordinates rather than through rendered pixels: three nodes on
+        the same row (y within the ~30px band tolerance) must not all
+        get the same label side, or their labels would still collide
+        same as before this fix.
+        """
+        import map_render
+        positions = {"a": (100, 200), "b": (200, 202), "c": (300, 198)}
+        sides = map_render._assign_label_sides(positions)
+        self.assertEqual(set(sides.keys()), {"a", "b", "c"})
+        self.assertIn("above", sides.values())
+        self.assertIn("below", sides.values())
+
+    def test_character_layer_content_groups_by_layer_and_skips_empty_ones(self):
+        import sessions
+        sessions.end_session(-989)
+        user_id = 900940
+        make_basic_character(user_id, "MapLayerTester", chat_id=-989, current_location="crossroads_tavern")
+        # A real underground location, visited -- so both surface (from
+        # character creation's own starting location) and underground
+        # should show up; sky (never touched) must not.
+        db.update_character(
+            user_id, -989, visited_locations=["crossroads_tavern", "sunken_root_caverns"],
+        )
+        character = db.get_character(user_id, -989)
+        content = bot._character_layer_content(character)
+        self.assertIn("surface", content)
+        self.assertIn("underground", content)
+        self.assertNotIn("sky", content)
+        self.assertIn("crossroads_tavern", content["surface"][0])
+        self.assertIn("sunken_root_caverns", content["underground"][0])
+
+    def test_map_layer_keyboard_offers_a_button_only_for_other_layers_with_content(self):
+        """
+        Task #11, per Coffee: "if u have above and below locations have
+        button available." No button for the layer already being shown;
+        exactly one button per OTHER layer that has real content.
+        """
+        import sessions
+        sessions.end_session(-988)
+        user_id = 900941
+        make_basic_character(user_id, "MapButtonTester", chat_id=-988, current_location="crossroads_tavern")
+        db.update_character(user_id, -988, visited_locations=["crossroads_tavern", "sunken_root_caverns"])
+        character = db.get_character(user_id, -988)
+
+        keyboard = bot._map_layer_keyboard(character, "surface")
+        self.assertIsNotNone(keyboard)
+        all_callback_data = [btn.callback_data for row in keyboard.inline_keyboard for btn in row]
+        self.assertEqual(all_callback_data, ["map|underground"])
+
+        # Only ever visited surface -- no other layer has content, so no keyboard at all.
+        db.update_character(user_id, -988, visited_locations=["crossroads_tavern"])
+        character = db.get_character(user_id, -988)
+        self.assertIsNone(bot._map_layer_keyboard(character, "surface"))
+
+    async def test_visual_map_sends_a_real_labeled_map_not_ai_art(self):
+        import sessions
+        sessions.end_session(-987)
+        user_id = 900942
+        make_basic_character(user_id, "VisualMapTester", chat_id=-987, current_location="crossroads_tavern")
+        db.update_character(user_id, -987, visited_locations=["crossroads_tavern", "market_row"])
+
+        sink = []
+        update = FakeUpdate(user_id, "show me the map", sink, chat_id=-987)
+        await bot._do_show_visual_map(update)
+
+        self.assertEqual(len(update.effective_chat.sent_photos), 1)
+        photo = update.effective_chat.sent_photos[0]
+        import io
+        from PIL import Image
+        image = Image.open(io.BytesIO(photo["photo"]))
+        self.assertEqual(image.format, "PNG")
+        self.assertIn("explored world", photo["caption"].lower())
+
+    async def test_visual_map_button_switches_to_the_requested_layer(self):
+        # FakeCallbackUpdate always uses chat_id -999 (no override param) -- character must live there too.
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900943
+        make_basic_character(user_id, "MapSwitchTester", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, visited_locations=["crossroads_tavern", "sunken_root_caverns"])
+
+        sink = []
+        update = FakeCallbackUpdate(user_id, "map|underground", sink)
+        await bot.map_menu_callback(update, DummyContext())
+
+        self.assertEqual(len(update.effective_chat.sent_photos), 1)
+        sessions.end_session(-999)
+
+    async def test_visual_map_says_so_when_nothing_explored_yet(self):
+        import sessions
+        sessions.end_session(-985)
+        user_id = 900944
+        make_basic_character(user_id, "FreshMapTester", chat_id=-985, current_location="crossroads_tavern")
+        db.update_character(user_id, -985, visited_locations=[])
+
+        sink = []
+        update = FakeUpdate(user_id, "show me the map", sink, chat_id=-985)
+        await bot._do_show_visual_map(update)
+        self.assertTrue(any("haven't explored" in s.lower() for s in sink), sink)
+        self.assertEqual(len(update.effective_chat.sent_photos), 0)
+
     # -- Battle-menu formation submenu only showed the tapper's own row
     #    (2026-08-09, Coffee, dev-topic screenshot: "I wanted to show
     #    all of my party that is in battle so I can actively move

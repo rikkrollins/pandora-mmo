@@ -2,6 +2,38 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.107] — Real labeled world map, replacing the AI-painted visual_map
+
+Real live request (2026-08-09, Coffee, Development-topic screenshot):
+"This does not look like a map. I want an accurate map, you can use
+sprites similar to the formation image. Try to make a map and then
+use circles and names with labels," plus two follow-ups in the same
+conversation: "use fog of war on the map - if u have above and below
+locations have button available" and "other maps like the ones we buy
+dont use fog of war."
+
+`/visual_map` (task #221) used to hand Pollinations.ai a text list of
+visited location names and get back atmospheric painted art — real,
+but never an accurate schematic, since no current image model reliably
+renders legible labels. New module `map_render.py` (same "local,
+deterministic Pillow render, no network call" shape as `battle_render.py`)
+replaces it: real location nodes as labeled circles, real connections
+as lines, laid out with a plain from-scratch force-directed algorithm
+(no new dependency). Same fog-of-war rule the existing text `/map`
+already enforces, so the two never disagree: a connection is only ever
+drawn between two locations the character has ACTUALLY visited (a line
+to somewhere unvisited would leak the connection itself); a location
+only revealed via a purchased/found "map" item is listed by name only,
+no position or connections, since that's the real, intentional weaker
+tier `_do_use_item`'s "map" branch already grants — and, per Coffee's
+clarification, that reveal is never additionally hidden by fog-of-war
+once granted, exactly like the existing item mechanic already behaves.
+
+One layer (surface/underground/sky) renders per image; a new inline
+button (`map|<layer>`, `map_menu_callback`) appears for every OTHER
+layer the character has real content in, so switching between "above"
+and "below" is always one tap away.
+
 ## [1.27.106] — Battle-formation image: echo trials, ambushes, and per-round refresh
 
 Task #10 follow-up to the original battle-formation image (task #9-

@@ -39,6 +39,7 @@ from telegram.ext import (
 )
 
 import battle_render
+import map_render
 import board_quests as board_quests_module
 import campaign_loader as cl
 import config
@@ -14210,19 +14211,81 @@ async def _do_show_map(update: Update) -> None:
     await _safe_send(update, "\n".join(lines), speak=False)
 
 
+def _character_layer_content(character: dict) -> dict[str, tuple[set, set]]:
+    """
+    {layer_name: (visited_ids_in_layer, revealed_ids_in_layer)} for
+    every layer (CAMPAIGN["locations"] key) this character has any
+    real content in at all -- either actually visited, or revealed via
+    a purchased/found "map" item (map_revealed_locations, see
+    _do_use_item's "map" branch). A layer with neither is omitted
+    entirely, same "don't show what isn't there" rule _do_show_map's
+    text version already follows.
+    """
+    visited = set(character.get("visited_locations") or [])
+    revealed = set(character.get("map_revealed_locations") or []) - visited
+    result = {}
+    for layer, layer_locations in CAMPAIGN["locations"].items():
+        v = {loc_id for loc_id in layer_locations if loc_id in visited}
+        r = {loc_id for loc_id in layer_locations if loc_id in revealed}
+        if v or r:
+            result[layer] = (v, r)
+    return result
+
+
+def _map_layer_keyboard(character: dict, current_layer: str) -> InlineKeyboardMarkup | None:
+    """
+    Task #11, per Coffee: "if u have above and below locations have
+    button available" -- one button per OTHER layer (surface/
+    underground/sky) this character has real content in, so switching
+    between them is always one tap away regardless of whether the
+    current location itself has a direct descends_to/ascends_to link.
+    None (no keyboard at all) when this is the only layer with content.
+    """
+    other_layers = sorted(l for l in _character_layer_content(character) if l != current_layer)
+    if not other_layers:
+        return None
+    buttons = [[InlineKeyboardButton(f"🗺️ {layer.title()} Map", callback_data=f"map|{layer}")] for layer in other_layers]
+    return InlineKeyboardMarkup(buttons)
+
+
+async def _send_layer_map(update: Update, character: dict, layer_name: str) -> None:
+    """Real render (map_render.render_layer_map), shared by the initial /visual_map send and the layer-switch button tap."""
+    layer_locations = CAMPAIGN["locations"].get(layer_name, {})
+    visited = set(character.get("visited_locations") or [])
+    revealed = set(character.get("map_revealed_locations") or [])
+    try:
+        png_bytes = await asyncio.to_thread(
+            map_render.render_layer_map, layer_name, layer_locations, visited, revealed, character.get("current_location"),
+        )
+    except Exception as e:
+        logger.warning(f"[map_render] layer map failed: {e!r}")
+        await update.effective_chat.send_message(
+            "Couldn't render the map right now.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    await update.effective_chat.send_photo(
+        photo=png_bytes, caption="🗺️ Your explored world, so far.",
+        message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        reply_markup=_map_layer_keyboard(character, layer_name),
+    )
+
+
 async def _do_show_visual_map(update: Update) -> None:
     """
-    Task #221, per Coffee: "design a visual/graphical fog-of-war map
-    (image, not just text)." Real, but honestly scoped: Pollinations.ai
-    (task #81's image service) is a generative model, not a cartography
-    engine -- it can't take this game's real location/connection graph
-    and render an accurate schematic the way _do_show_map's text output
-    does, and asking any current image model to render legible text
-    labels reliably fails. So this generates real atmospheric map ART,
-    grounded ONLY in the real names of locations this character has
-    actually visited (the exact same fog-of-war set _do_show_map reads,
-    never anything undiscovered) -- a genuine visual complement to the
-    precise text map, not a replacement for it.
+    Task #11, real live request (2026-08-09, Coffee via Development-
+    topic screenshot): "This does not look like a map. I want an
+    accurate map... use circles and names with labels" -- the previous
+    version (task #221) generated atmospheric Pollinations.ai art from
+    a text list of visited location names, honestly scoped at the time
+    since no image model reliably renders legible labels, but never an
+    accurate schematic. Now renders a real, local, deterministic map
+    (map_render.render_layer_map) instead -- same fog-of-war rule
+    _do_show_map's text version already enforces (only real visited/
+    revealed locations, never anything undiscovered), plus a button to
+    switch layers when the character has content in more than one.
+    Starts on whichever layer the character is CURRENTLY standing in,
+    falling back to any other layer with content if that one somehow
+    has none (shouldn't happen -- being somewhere means it's visited).
     """
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -14230,19 +14293,30 @@ async def _do_show_visual_map(update: Update) -> None:
             "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
-    visited = character.get("visited_locations") or []
-    if not visited:
+    content = _character_layer_content(character)
+    if not content:
         await update.effective_chat.send_message(
             "You haven't explored anywhere yet.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
-    names = [cl.get_location(CAMPAIGN, loc_id)["name"] for loc_id in visited if cl.get_location(CAMPAIGN, loc_id)]
-    prompt = (
-        "an old hand-drawn fantasy world map on weathered parchment, aged ink and watercolor "
-        f"illustration style, depicting these named regions: {', '.join(names)}, "
-        "no readable text or labels, cartography art"
+    current_location_id = character.get("current_location")
+    current_layer = next(
+        (layer for layer, locs in CAMPAIGN["locations"].items() if current_location_id in locs and layer in content),
+        next(iter(content)),
     )
-    await _send_generated_image(update, prompt, "🗺️ Your explored world, so far.", width=768, height=768, log_key="visual_map")
+    await _send_layer_map(update, character, current_layer)
+
+
+async def map_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _map_layer_keyboard's layer-switch buttons."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    layer_name = parts[1] if len(parts) > 1 else ""
+    await _safe_answer(query)
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None or layer_name not in CAMPAIGN["locations"]:
+        return
+    await _send_layer_map(update, character, layer_name)
 
 
 def _format_bestiary_entry(monster_key: str, template: dict) -> str:
@@ -22184,6 +22258,7 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(creation_menu_callback, pattern=r"^create\|"))
     application.add_handler(CallbackQueryHandler(hybrid_menu_callback, pattern=r"^hybrid\|"))
     application.add_handler(CallbackQueryHandler(title_menu_callback, pattern=r"^title\|"))
+    application.add_handler(CallbackQueryHandler(map_menu_callback, pattern=r"^map\|"))
 
     application.add_error_handler(_log_unhandled_error)
 
