@@ -10,8 +10,13 @@ A text-based, natural-language D&D 5E multiplayer game running in a
 Telegram group, across four topics: Main, Adventure, Support, and
 Development. No slash commands are required for gameplay — everything
 happens in plain English via natural-language intent classification.
-Dev/owner is "Coffee" (@Coffee13333). Bot: @PandoraMMO_Bot. Runs on a
-Debian laptop (pandora@openclaw), CPU-only inference via local Ollama.
+Dev/owner is "Coffee" (@Coffee13333). Bot: @PandoraMMO_Bot. Runs on an
+OVHcloud Canada VPS (hostname `vps-250247fb`, 8 vCores/24GB RAM/200GB
+NVMe, user `debian`, repo at `/home/debian/pandora_mmo`) — migrated
+here 2026-08-08 from a Debian laptop (pandora@openclaw), which Coffee
+has since powered off and retired; don't suggest failing over to "the
+laptop" as if it's still standing by. CPU-only inference via local
+Ollama, same as before the migration — no GPU on this plan either.
 
 Current version: see `VERSION`. Full history: `CHANGELOG.md`.
 
@@ -60,18 +65,22 @@ true by construction, not by a prompt telling the model to behave:
   `BUILD_MODEL` and `DM_NARRATION_MODEL` in `.env`/`config.py`).
   `qwen2.5-coder:3b` reliably fails to load on this hardware — don't
   suggest switching back to it.
-- **Ollama response time is genuinely 30–160+ seconds per call** on
-  this CPU. This is normal, not a bug. Silence for under ~2 minutes
+- **Ollama response time is genuinely tens of seconds per call** on
+  this CPU-only VPS — ~46–73s measured for a typical narration call
+  post-migration (2026-08-08), faster than the old laptop's documented
+  30–160+s but still real, not instant. Silence for under ~2 minutes
   after an action that needs AI narration (spell casting, NPC dialogue,
   welcome messages) is expected, not broken. All `requests.post(...,
   timeout=...)` calls in `ai/*.py` are set to 200s specifically so they
   don't cut this off early — if you add a new Ollama call, match that.
-- **OpenClaw gateway must stay stopped** — `sudo systemctl stop
-  openclaw-gateway.service && sudo systemctl disable
-  openclaw-gateway.service`. If it's running, it polls the same bot
-  token and causes a 409 Conflict.
-- **Always `cd ~/pandora_mmo` before running `python3 bot.py`** — an
-  old copy in the Trash has caused confusion before.
+  Still single-slot (`OLLAMA_NUM_PARALLEL` is a confirmed no-op for
+  `lfm2.5-thinking`'s architecture) — never run the regression suite or
+  any other Ollama-touching test/benchmark while a real player might be
+  active, it will queue behind/in front of live traffic on the same
+  instance.
+- **Always `cd ~/pandora_mmo` before running `python3 bot.py`** — keep
+  this habit even though the old laptop's stray Trash-copy confusion
+  doesn't apply to this server.
 - **Telegram topic IDs**: Main=1 (but `message_thread_id` is `None` for
   Main via the API — `topics.is_main()` must handle both), Support=22,
   Adventure=23, Development=41.
