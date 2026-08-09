@@ -4783,6 +4783,30 @@ async def _try_end_stale_combat(update: Update, session: sessions.Session) -> bo
 
 async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
     """
+    Task #10: thin wrapper around _resolve_ai_turns_inner (the actual
+    turn-resolution loop, which has many internal early-return points —
+    stalemate detection, the iteration safety cap, combat-over, etc.) so
+    the battle-formation image refresh only needs one check, run once no
+    matter which of those paths was actually taken, instead of having to
+    be threaded through every individual return. session.round_number
+    only ever advances (never resets mid-fight), so a plain before/after
+    comparison is enough to detect "at least one new round started
+    during this call" — HP/formation genuinely can have changed by then,
+    which is exactly what the image is meant to reflect. Safe to call
+    even if combat just ended inside the inner call: end_session() only
+    ever unregisters the session from the module-level lookup dicts, it
+    never mutates the passed-in Session object itself, and
+    _maybe_send_battle_formation_image already no-ops once either side
+    has no living members left (which a just-ended fight always has).
+    """
+    round_before = session.round_number
+    await _resolve_ai_turns_inner(update, session)
+    if session.round_number != round_before:
+        await _maybe_send_battle_formation_image(update, session)
+
+
+async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> None:
+    """
     Resolves consecutive AI-controlled turns AND auto-resolved death-save
     turns for downed real players. Assumes the caller already holds
     sessions.get_session_lock(session.session_id) — this function does
@@ -5926,6 +5950,7 @@ async def _do_start_echo_trial(update: Update, text: str) -> None:
             + echo_formation_block + _rushed_in_note(party) + _turn_announcement(session)
         )
         await _safe_send(update, header, reply_markup=_battle_menu_keyboard(session))
+        await _maybe_send_battle_formation_image(update, session)
         await _resolve_ai_turns(update, session)
 
 
@@ -6073,6 +6098,7 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
                 env_name = combat_env["name"]
                 header += f"\n\n⚠️ {env_name[0].upper()}{env_name[1:]} — {combat_env['description']}"
             await _safe_send(update, header, reply_markup=_battle_menu_keyboard(session))
+            await _maybe_send_battle_formation_image(update, session)
             await _notify_main_topic(update, f"⚔️ {_format_party_names(party)} entered battle against **{npc_data['name']}**!")
             await _resolve_ai_turns(update, session)
     elif len(npc_ids) >= 2 and random.random() < 0.5:

@@ -8112,6 +8112,192 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("Goblin" in m for m in photo_markers), f"monster art missing: {sink}")
         self.assertTrue(any("formation" in m.lower() for m in photo_markers), f"battle formation image missing: {sink}")
 
+    async def test_battle_formation_image_refreshes_exactly_once_per_completed_round(self):
+        """
+        Task #10 (per Coffee follow-up): the battle-formation image
+        previously only ever sent once, at combat start, and never
+        reflected genuine mid-fight HP/formation changes. _resolve_ai_
+        turns is now a thin wrapper (_resolve_ai_turns_inner does the
+        real work) that compares session.round_number before/after its
+        own call and sends a fresh formation image only if at least one
+        full round actually completed during it -- same 3-identical-
+        enemies rig as test_monster_image_shown_once_for_multiple_
+        identical_enemies (human already "went", all 3 spiders resolve
+        back to back, current_turn_index wraps back to the human at the
+        end, which is exactly one round completing), confirming the
+        image posts exactly ONCE for the whole call, not once per
+        spider turn and not zero times.
+        """
+        from unittest.mock import patch
+        import sessions
+        sessions.end_session(-993)
+        human_id = 900932
+        make_basic_character(human_id, "RoundRefreshTester", chat_id=-993, current_location="crossroads_tavern", hp_max=300)
+        human = db.get_character(human_id, -993)
+        spiders = [
+            {
+                "telegram_user_id": -700800 - i, "name": f"Giant Spider {i + 1}", "is_ai": True,
+                "hp_current": 108, "hp_max": 108, "armor_class": 14,
+                "strength": 14, "dexterity": 16, "proficiency_bonus": 3,
+                "monster_key": "giant_spider", "xp_reward": 200, "conditions": [],
+            }
+            for i in range(3)
+        ]
+        sides = {human_id: "party"}
+        for spider in spiders:
+            sides[spider["telegram_user_id"]] = "enemy"
+        session = sessions.start_session(-993, [human] + spiders, sides)
+        session.turn_order = [human_id] + [s["telegram_user_id"] for s in spiders]
+        session.current_turn_index = 1  # first spider's turn is up next, human already "went"
+        round_before = session.round_number
+
+        sink = []
+        update = FakeUpdate(human_id, "irrelevant", sink, chat_id=-993)
+
+        def fake_get(url, timeout=None):
+            return SimpleNamespace(status_code=200, headers={"content-type": "image/jpeg"})
+
+        with patch("bot.requests.get", side_effect=fake_get), \
+             patch("bot.narrate_action", return_value="The spider strikes."):
+            await bot._resolve_ai_turns(update, session)
+
+        self.assertEqual(session.round_number, round_before + 1, "test setup assumption broke: expected exactly one round to complete")
+        formation_markers = [line for line in sink if line.startswith("<photo:") and "formation" in line.lower()]
+        self.assertEqual(
+            len(formation_markers), 1,
+            f"expected exactly 1 formation-image refresh for one completed round, got {len(formation_markers)}: {sink}",
+        )
+        sessions.end_session(-993)
+
+    async def test_battle_formation_image_does_not_refresh_mid_round(self):
+        """
+        Companion to the round-refresh test above: if _resolve_ai_turns
+        resolves an AI turn WITHOUT completing a full round (the next
+        turn belongs to another AI, not wrapping back to the first
+        participant), no formation-image refresh should fire at all --
+        it's not free to call battle_render on every single turn, only
+        when the state has genuinely moved a full round forward.
+        """
+        from unittest.mock import patch
+        import sessions
+        sessions.end_session(-992)
+        human_id = 900933
+        make_basic_character(human_id, "NoMidRoundTester", chat_id=-992, current_location="crossroads_tavern", hp_max=300)
+        human = db.get_character(human_id, -992)
+        spiders = [
+            {
+                "telegram_user_id": -700900 - i, "name": f"Giant Spider {i + 1}", "is_ai": True,
+                "hp_current": 108, "hp_max": 108, "armor_class": 14,
+                "strength": 14, "dexterity": 16, "proficiency_bonus": 3,
+                "monster_key": "giant_spider", "xp_reward": 200, "conditions": [],
+            }
+            for i in range(3)
+        ]
+        sides = {human_id: "party"}
+        for spider in spiders:
+            sides[spider["telegram_user_id"]] = "enemy"
+        session = sessions.start_session(-992, [human] + spiders, sides)
+        # Human "acted" but the mock only lets ONE spider resolve before
+        # a second human turn is next -- achieved by putting a human
+        # placeholder right after the first spider so the loop stops
+        # there, never wrapping back to turn_order[0].
+        session.turn_order = [human_id, spiders[0]["telegram_user_id"], human_id, spiders[1]["telegram_user_id"]]
+        session.current_turn_index = 1  # first (only) spider's turn is up next
+        round_before = session.round_number
+
+        sink = []
+        update = FakeUpdate(human_id, "irrelevant", sink, chat_id=-992)
+
+        def fake_get(url, timeout=None):
+            return SimpleNamespace(status_code=200, headers={"content-type": "image/jpeg"})
+
+        with patch("bot.requests.get", side_effect=fake_get), \
+             patch("bot.narrate_action", return_value="The spider strikes."):
+            await bot._resolve_ai_turns(update, session)
+
+        self.assertEqual(session.round_number, round_before, "test setup assumption broke: round shouldn't have advanced")
+        formation_markers = [line for line in sink if line.startswith("<photo:") and "formation" in line.lower()]
+        self.assertEqual(formation_markers, [], f"formation image should not refresh mid-round: {sink}")
+        sessions.end_session(-992)
+
+    async def test_battle_formation_image_sent_when_echo_trial_starts(self):
+        """
+        Task #10: v1 of the battle-formation image only ever wired into
+        the primary wandering-encounter path (_do_start_combat) -- the
+        echo-trial combat-start block (_do_start_echo_trial) never sent
+        it at all. Real preconditions per _do_start_echo_trial: at
+        the_colosseum, a Silver Wardens member, with at least one real
+        known_monsters entry to mirror.
+        """
+        from unittest.mock import patch
+        import sessions
+        sessions.end_session(-991)
+        user_id = 900934
+        make_basic_character(user_id, "EchoStarter", chat_id=-991, current_location="the_colosseum")
+        db.update_character(user_id, -991, guild="silver_wardens", known_monsters=["goblin"])
+
+        def fake_get(url, timeout=None):
+            return SimpleNamespace(status_code=200, headers={"content-type": "image/jpeg"})
+
+        sink = []
+        # narrate_action is mocked since an echo could win initiative and
+        # act before the human -- deterministic and avoids a real,
+        # slow (30-160s+) Ollama call this test has no need for.
+        with patch("bot.requests.get", side_effect=fake_get), \
+             patch("bot.narrate_action", return_value="The echo lashes out."):
+            await bot._do_start_echo_trial(FakeUpdate(user_id, "start an echo trial", sink, chat_id=-991), "start an echo trial")
+
+        formation_markers = [line for line in sink if line.startswith("<photo:") and "formation" in line.lower()]
+        self.assertEqual(len(formation_markers), 1, f"battle formation image missing on echo-trial start: {sink}")
+        sessions.end_session(-991)
+
+    async def test_battle_formation_image_sent_when_hostile_npc_ambush_starts(self):
+        """
+        Task #10, second gap: the ambush combat-start block (the
+        `disposition == "hostile"` branch inside _maybe_trigger_npc_
+        encounter) never sent the battle-formation image either.
+        AMBIENT_NPC_ENCOUNTER_CHANCE is patched to 1.0 (deterministic
+        trigger) and random.random patched to 0.0 so the "hostile"
+        branch is the one actually taken, not the two ambient-flavor
+        branches this same function can also pick.
+        """
+        from unittest.mock import patch
+        import sessions
+        bot.setup_default_npcs()
+        sessions.end_session(-990)
+        user_id = 900935
+        character = make_basic_character(user_id, "AmbushTarget", chat_id=-990, current_location="crossroads_tavern")
+
+        # Disposition is mocked to "hostile" directly below regardless of
+        # this NPC's actual alignment -- only needs a real NPC whose
+        # stats block is actually combat-ready (_npc_combatant_from_
+        # stats requires proficiency_bonus; the recruitable companions'
+        # "stats" blocks are recruitment-preview data only and lack it —
+        # kess_the_bandit is the one real NPC built for this).
+        hostile_npc_id = next(
+            (nid for nid, data in bot.CAMPAIGN["npcs"].items() if "proficiency_bonus" in data.get("stats", {})), None,
+        )
+        self.assertIsNotNone(hostile_npc_id, "test needs at least one real NPC with combat-ready stats in campaign.json")
+        location = cl.get_location(bot.CAMPAIGN, "crossroads_tavern")
+
+        def fake_get(url, timeout=None):
+            return SimpleNamespace(status_code=200, headers={"content-type": "image/jpeg"})
+
+        sink = []
+        update = FakeUpdate(user_id, "irrelevant", sink, chat_id=-990)
+        with patch("bot.requests.get", side_effect=fake_get), \
+             patch("bot.AMBIENT_NPC_ENCOUNTER_CHANCE", 1.0), \
+             patch("bot.random.random", return_value=0.0), \
+             patch("bot._npcs_at_location", return_value=[hostile_npc_id]), \
+             patch("bot._effective_disposition", return_value="hostile"), \
+             patch("bot.generate_ambient_line", return_value="You won't escape!"), \
+             patch("bot.narrate_action", return_value="Kess lunges in."):
+            await bot._maybe_trigger_npc_encounter(update, character, location)
+
+        formation_markers = [line for line in sink if line.startswith("<photo:") and "formation" in line.lower()]
+        self.assertEqual(len(formation_markers), 1, f"battle formation image missing on ambush start: {sink}")
+        sessions.end_session(-990)
+
     # -- Battle-menu formation submenu only showed the tapper's own row
     #    (2026-08-09, Coffee, dev-topic screenshot: "I wanted to show
     #    all of my party that is in battle so I can actively move

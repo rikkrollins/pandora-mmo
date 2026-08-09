@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.106] — Battle-formation image: echo trials, ambushes, and per-round refresh
+
+Task #10 follow-up to the original battle-formation image (task #9-
+followup): v1 only ever sent the tactical formation diagram once, at
+the very start of a fight, and only from the primary wandering-
+encounter combat-start path (_do_start_combat) — echo trials (the
+Colosseum's repeatable Silver Wardens grind) and hostile-NPC ambushes
+never sent it at all, and no combat mode ever refreshed it as HP or
+formation genuinely changed mid-fight. (World bosses turned out to
+already be covered — they're just a real monster fought via the same
+_do_start_combat path as any other encounter, no separate code path
+exists for them.)
+
+Two changes:
+- `_do_start_echo_trial` and the hostile-NPC-encounter branch of
+  `_maybe_trigger_npc_encounter` (ambushes) now both send the initial
+  battle-formation image right after their own "Combat Begins!" header,
+  same as `_do_start_combat` already did.
+- `_resolve_ai_turns` is now a thin wrapper around the actual turn-
+  resolution loop (renamed `_resolve_ai_turns_inner`, unchanged
+  otherwise) that compares `session.round_number` before/after its own
+  call and sends a fresh formation image if at least one full round
+  completed — covers every combat action in the game (attack, cast
+  spell, flee, pass turn, environment use, channel divinity, etc.) from
+  one place, since nearly all of them call `_resolve_ai_turns` right
+  after ending their own turn. Safe to call even after combat just
+  ended inside that call: `end_session()` only unregisters the session,
+  never mutates the object, and `_maybe_send_battle_formation_image`
+  already no-ops once either side has no living members left.
+
 ## [1.27.105] — "head to X to accept the quest" move fix
 
 Found via topic-activity monitoring: an AI companion said "I head to
