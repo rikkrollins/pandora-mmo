@@ -3800,6 +3800,45 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.get_character(member_id, -999).get("formation_row"), "back")
         self.assertEqual(db.get_character(leader_id, -999).get("formation_row", "front"), "front")
 
+    async def test_set_formation_row_matches_a_party_member_by_first_name_alone(self):
+        """
+        Real live bug (2026-08-09, Coffee, dev-topic screenshot): "Move
+        Vesh to the backrow" said 'No one named "Vesh" is in your
+        party' even though Vesh Nightglass was plainly fighting in the
+        very same battle status line shown moments earlier --
+        _match_member_by_name_or_username only ever matched a member's
+        COMPLETE stored name verbatim, with no fallback for the
+        entirely natural "refer to them by first name" phrasing. Two-
+        word display name here mirrors the real recruitable companions
+        (e.g. "Vesh Nightglass").
+        """
+        leader_id = 950406
+        member_id = 950407
+        make_basic_character(leader_id, "FirstNameLeader", current_location="crossroads_tavern")
+        make_basic_character(member_id, "Vesh Nightglass", current_location="crossroads_tavern")
+        party_id = db.create_party(leader_id, -999)
+        db.update_character(member_id, -999, party_id=party_id)
+
+        sink = []
+        await bot._do_set_formation_row(FakeUpdate(leader_id, "move vesh to the backrow", sink), "vesh", "back")
+        self.assertNotIn("no one named", "\n".join(sink).lower(), "\n".join(sink))
+        self.assertEqual(db.get_character(member_id, -999).get("formation_row"), "back")
+
+    def test_first_name_fallback_never_guesses_between_two_shared_first_names(self):
+        """
+        Sibling to the first-name fix above: two party members sharing
+        a first name must stay unmatched rather than guessed -- same
+        "don't guess when ambiguous" philosophy as every other fallback
+        in this codebase.
+        """
+        members = [
+            {"name": "Vesh Nightglass", "telegram_user_id": -1, "telegram_username": None, "party_id": 1},
+            {"name": "Vesh Ironhand", "telegram_user_id": -2, "telegram_username": None, "party_id": 1},
+        ]
+        self.assertIsNone(bot._match_member_by_name_or_username("vesh", members))
+        # The full name is still unambiguous even with a shared first name.
+        self.assertEqual(bot._match_member_by_name_or_username("vesh ironhand", members)["telegram_user_id"], -2)
+
     async def test_set_formation_row_refuses_a_non_party_member(self):
         leader_id = 950404
         stranger_id = 950405
@@ -5571,6 +5610,59 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot._do_start_combat(FakeUpdate(user_id, "fight a goblin", sink), monster_key="goblin", count=1)
         photo_count = sum(1 for line in sink if line.startswith("<photo:") and "Goblin" in line)
         self.assertEqual(photo_count, 1, f"expected exactly 1 Goblin image, got {photo_count}: {sink}")
+        sessions.end_session(-999)
+
+    async def test_monster_image_shown_once_for_multiple_identical_enemies(self):
+        """
+        Real live feedback (2026-08-09, Coffee): "if you have three of
+        the same enemy only show one image of them - its abit spammy."
+        The old per-PARTICIPANT dedup (_opening_image_shown) only ever
+        stopped the immediate same-instance duplicate the sibling test
+        above covers -- it did nothing for 3 genuinely DIFFERENT
+        participants sharing the same monster_key, each re-posting the
+        identical picture on their own turn. Forces all 3 Giant Spiders
+        to take a real attack turn back to back (turn order rigged so
+        the human goes first, then all 3 spiders resolve consecutively
+        via _resolve_ai_turns) and confirms the art posts exactly once
+        total for the whole fight, not once per spider.
+        """
+        from unittest.mock import patch
+        import sessions
+        sessions.end_session(-999)
+        human_id = 900931
+        make_basic_character(human_id, "SpamTester", current_location="crossroads_tavern", hp_max=300)
+        human = db.get_character(human_id, -999)
+        spiders = [
+            {
+                "telegram_user_id": -700700 - i, "name": f"Giant Spider {i + 1}", "is_ai": True,
+                "hp_current": 108, "hp_max": 108, "armor_class": 14,
+                "strength": 14, "dexterity": 16, "proficiency_bonus": 3,
+                "monster_key": "giant_spider", "xp_reward": 200, "conditions": [],
+            }
+            for i in range(3)
+        ]
+        sides = {human_id: "party"}
+        for spider in spiders:
+            sides[spider["telegram_user_id"]] = "enemy"
+        session = sessions.start_session(-999, [human] + spiders, sides)
+        session.turn_order = [human_id] + [s["telegram_user_id"] for s in spiders]
+        session.current_turn_index = 1  # first spider's turn is up next, human already "went"
+
+        sink = []
+        update = FakeUpdate(human_id, "irrelevant", sink)
+
+        def fake_get(url, timeout=None):
+            return SimpleNamespace(status_code=200, headers={"content-type": "image/jpeg"})
+
+        with patch("bot.requests.get", side_effect=fake_get), \
+             patch("bot.narrate_action", return_value="The spider strikes."):
+            await bot._resolve_ai_turns(update, session)
+
+        photo_markers = [line for line in sink if line.startswith("<photo:") and "Giant Spider" in line]
+        self.assertEqual(
+            len(photo_markers), 1,
+            f"expected exactly 1 monster image for 3 identical spiders, got {len(photo_markers)}: {sink}",
+        )
         sessions.end_session(-999)
 
     async def test_multiattack_announcement_not_repeated_on_a_crash_and_retry(self):
@@ -7997,6 +8089,96 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         photo_markers = [line for line in sink if line.startswith("<photo:")]
         self.assertTrue(any("Goblin" in m for m in photo_markers), f"monster art missing: {sink}")
         self.assertTrue(any("formation" in m.lower() for m in photo_markers), f"battle formation image missing: {sink}")
+
+    # -- Battle-menu formation submenu only showed the tapper's own row
+    #    (2026-08-09, Coffee, dev-topic screenshot: "I wanted to show
+    #    all of my party that is in battle so I can actively move
+    #    their formation in this menu. It only lets me see mine, not
+    #    the other two members in battle.") -------------------------
+    async def test_formation_menu_lists_every_real_party_member_in_the_fight(self):
+        from unittest.mock import patch
+        import sessions
+        sessions.end_session(-999)
+        leader_id = 900550
+        member_id = 900551
+        make_basic_character(leader_id, "FormLeader", current_location="crossroads_tavern")
+        make_basic_character(member_id, "FormAlly", current_location="crossroads_tavern")
+        party_id = db.create_party(leader_id, -999)
+        db.update_character(leader_id, -999, formation_row="back")
+        db.update_character(member_id, -999, party_id=party_id, formation_row="front")
+        leader = db.get_character(leader_id, -999)
+        member = db.get_character(member_id, -999)
+
+        def fake_get(url, timeout=None):
+            return SimpleNamespace(status_code=200, headers={"content-type": "image/jpeg"})
+
+        sink = []
+        # Real 2026-08-01 formation feature means initiative order is
+        # random -- if the enemy or companion wins it, _do_start_combat
+        # can resolve a real AI turn (and a real Ollama narration call)
+        # before ever returning here. Patched out for speed/determinism,
+        # same as the enemy-banter tests -- this test is about the menu
+        # wiring, not narration.
+        with patch("bot._get_combat_eligible_party_members", return_value=[leader, member]), \
+             patch("bot.requests.get", side_effect=fake_get), \
+             patch("bot.narrate_action", return_value="A blow lands."):
+            await bot._do_start_combat(FakeUpdate(leader_id, "fight a goblin", sink), monster_key="goblin", count=1)
+
+        session = sessions.get_session_for_user(-999, leader_id)
+        self.assertIsNotNone(session)
+        session.current_turn_index = session.turn_order.index(leader_id)
+
+        sink2 = []
+        await bot.battle_menu_callback(FakeCallbackUpdate(leader_id, "bm|formation", sink2), DummyContext())
+        combined = "\n".join(sink2)
+        self.assertIn("FormLeader", combined)
+        self.assertIn("FormAlly", combined)
+        self.assertIn("setrow|front|FormLeader", combined)
+        self.assertIn("setrow|back|FormAlly", combined)
+        sessions.end_session(-999)
+
+    async def test_setrow_button_repositions_the_named_target_not_the_tapper(self):
+        # Real note: FakeCallbackUpdate/FakeUpdate/make_basic_character
+        # all default to chat_id -999 with no override, so (like every
+        # other test in this file) this stays on -999 rather than
+        # trying to isolate onto a different chat -- sessions.end_
+        # session(-999) at the top defensively clears any session a
+        # PRIOR -999 test left behind (e.g. on its own failure, before
+        # reaching its own cleanup call), same as every other test here.
+        from unittest.mock import patch
+        import sessions
+        sessions.end_session(-999)
+        leader_id = 900552
+        member_id = 900553
+        make_basic_character(leader_id, "RepoLeader", current_location="crossroads_tavern")
+        make_basic_character(member_id, "RepoAlly", current_location="crossroads_tavern")
+        party_id = db.create_party(leader_id, -999)
+        db.update_character(member_id, -999, party_id=party_id, formation_row="front")
+        leader = db.get_character(leader_id, -999)
+        member = db.get_character(member_id, -999)
+
+        def fake_get(url, timeout=None):
+            return SimpleNamespace(status_code=200, headers={"content-type": "image/jpeg"})
+
+        sink = []
+        with patch("bot._get_combat_eligible_party_members", return_value=[leader, member]), \
+             patch("bot.requests.get", side_effect=fake_get), \
+             patch("bot.narrate_action", return_value="A blow lands."):
+            await bot._do_start_combat(FakeUpdate(leader_id, "fight a goblin", sink), monster_key="goblin", count=1)
+
+        session = sessions.get_session_for_user(-999, leader_id)
+        self.assertIsNotNone(session)
+        session.current_turn_index = session.turn_order.index(leader_id)
+
+        sink2 = []
+        await bot.battle_menu_callback(
+            FakeCallbackUpdate(leader_id, "bm|setrow|back|RepoAlly", sink2), DummyContext(),
+        )
+        updated_member = next(p for p in session.participants if p["telegram_user_id"] == member_id)
+        self.assertEqual(updated_member["formation_row"], "back", "the NAMED target (RepoAlly) should have moved")
+        updated_leader = next(p for p in session.participants if p["telegram_user_id"] == leader_id)
+        self.assertEqual(updated_leader.get("formation_row", "front"), "front", "the tapper must be untouched")
+        sessions.end_session(-999)
         sessions.end_session(-999)
 
 

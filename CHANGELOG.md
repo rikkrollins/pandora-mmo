@@ -2,6 +2,38 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.103] — First-name party targeting fix, monster art dedup for identical enemies
+
+Real live report (Coffee, dev-topic screenshot): "Move Vesh to the
+backrow" said 'No one named "Vesh" is in your party' even though Vesh
+Nightglass was plainly fighting in the very same battle status line
+shown moments earlier. Root cause: `_match_member_by_name_or_username`
+(the single shared matcher behind EVERY "name a party member in free
+text" lookup in the game — give/equip/use_item/cast_spell targeting,
+combat target picking, and the battle-menu formation submenu) only
+ever matched a member's complete stored name verbatim, with no
+fallback for the entirely natural "refer to them by first name alone"
+phrasing. Now falls back to a first-name-only match, but only when
+exactly one party member's first name matches — an ambiguous shared
+first name is left unmatched rather than guessed, same "don't guess"
+philosophy as every other fallback in this codebase.
+
+Also fixed, same investigation: the battle-menu's "formation" submenu
+only ever offered ONE button (toggle the tapping player's own row) —
+now lists every real party member actually in the fight, each with
+their own toggle, and tapping a companion's button repositions that
+companion, not the tapper.
+
+Also, per Coffee's separate live feedback ("if you have three of the
+same enemy only show one image of them - its abit spammy"): the "show
+monster art again when it attacks" flavor was deduped per PARTICIPANT,
+not per monster TYPE, so 3 identical Giant Spiders each re-posted the
+same picture on their own turn. Now tracked per monster_key at the
+session level (`Session.shown_monster_keys`, persisted through a bot
+restart same as the rest of live combat state) — a given monster's art
+posts at most once per fight, regardless of how many identical copies
+are in it.
+
 ## [1.27.102] — "Take X from Y" misclassification fix
 
 Found via topic-activity monitoring: "Take a key from the locksmith

@@ -1757,6 +1757,24 @@ def _match_member_by_name_or_username(text: str, members: list[dict]) -> dict | 
     for member in sorted(members, key=lambda m: -len(m["name"])):
         if re.search(r"\b" + re.escape(member["name"].lower()) + r"\b", lowered):
             return member
+
+    # Real live bug (2026-08-09, Coffee, dev-topic screenshot): "Move
+    # Vesh to the backrow" said 'No one named "Vesh" is in your party'
+    # even though Vesh Nightglass was plainly fighting in the very same
+    # battle status line shown moments earlier -- the check above only
+    # ever matched a member's COMPLETE stored name verbatim ("vesh
+    # nightglass"), with no fallback for the entirely natural way
+    # players actually refer to someone by first name alone. Only
+    # matches when EXACTLY ONE member's first word matches -- an
+    # ambiguous shared first name is left unmatched rather than
+    # guessed, same "don't guess when ambiguous" philosophy as every
+    # other fallback in this codebase (interactables, locations, NPCs).
+    first_name_matches = [
+        member for member in members
+        if re.search(r"\b" + re.escape(member["name"].lower().split()[0]) + r"\b", lowered)
+    ]
+    if len(first_name_matches) == 1:
+        return first_name_matches[0]
     return None
 
 
@@ -2873,20 +2891,34 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     if action == "formation":
-        current_row = character.get("formation_row", "front") if character else "front"
-        if current_row == "back":
-            label, new_row = "🛡️ Move to Front Row", "front"
-        else:
-            label, new_row = "🔮 Move to Back Row", "back"
-        buttons = [
-            [InlineKeyboardButton(label, callback_data=f"bm|setrow|{new_row}")],
-            [InlineKeyboardButton("« Back", callback_data="bm|more")],
-        ]
+        # Real live bug (2026-08-09, Coffee, dev-topic screenshot: "I
+        # wanted to show all of my party that is in battle so I can
+        # actively move their formation in this menu. It only lets me
+        # see mine, not the other two members in battle."): this only
+        # ever offered ONE button, toggling the tapping player's OWN
+        # row -- confirmed live via the screenshot's own battle status
+        # line ("Front: Vesh Nightglass, Wren Hollowbrook — Back: Pan")
+        # showing 3 real party members mid-fight, but the menu had no
+        # way to reposition anyone but Pan. Now lists every real party
+        # member actually IN this fight (session.living_on_side("party"),
+        # same combatant list the new battle-formation image already
+        # uses), one toggle button each -- not the player's whole
+        # roster, just who's actually here to reposition.
+        party_members = session.living_on_side("party") if session else ([character] if character else [])
+        buttons = []
+        for member in party_members:
+            member_row = member.get("formation_row", "front")
+            if member_row == "back":
+                label, new_row = f"🛡️ {member['name']}: Move to Front", "front"
+            else:
+                label, new_row = f"🔮 {member['name']}: Move to Back", "back"
+            buttons.append([InlineKeyboardButton(label, callback_data=f"bm|setrow|{new_row}|{member['name']}")])
+        buttons.append([InlineKeyboardButton("« Back", callback_data="bm|more")])
         await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
         return
 
     if action == "setrow" and value in ("front", "back"):
-        await _do_set_formation_row(update, "", value)
+        await _do_set_formation_row(update, target_name or "", value)
         await _safe_edit_markup(query, _battle_menu_keyboard(session))
         return
 
@@ -5091,13 +5123,18 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
             # encounter start again at the moment it actually attacks.
             # Once per turn (attack_num == 0), not per Multiattack swing,
             # same spam-avoidance shape as the boss decision flavor above.
-            if attack_num == 0 and current.get("monster_key"):
-                if current.pop("_opening_image_shown", False):
-                    pass  # combat-start already posted this monster's art moments ago -- skip the immediate duplicate
-                else:
-                    monster_template = cl.get_monster_template(CAMPAIGN, current["monster_key"])
-                    if monster_template:
-                        await _maybe_send_monster_image(update, current["monster_key"], monster_template)
+            # Gated on session.shown_monster_keys (2026-08-09, per
+            # Coffee: "if you have three of the same enemy only show one
+            # image of them - its abit spammy") -- tracked per MONSTER
+            # TYPE for the whole fight, not per participant, so 3x
+            # Giant Spider each taking their own turn only ever shows
+            # that identical picture once total, not once per spider.
+            if (attack_num == 0 and current.get("monster_key")
+                    and current["monster_key"] not in session.shown_monster_keys):
+                monster_template = cl.get_monster_template(CAMPAIGN, current["monster_key"])
+                if monster_template:
+                    session.shown_monster_keys.add(current["monster_key"])
+                    await _maybe_send_monster_image(update, current["monster_key"], monster_template)
             adv, disadv = _attack_advantage_disadvantage(current, target)
             _refresh_real_player_spell_slots(target)
             result = resolve_attack(
@@ -5721,18 +5758,19 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             header += f"\n\n📢 {names} — a fight just broke out at **{location_name}**, come join if you can!"
         await _safe_send(update, header, reply_markup=_battle_menu_keyboard(session))
         await _maybe_send_monster_image(update, monster_key, template)
-        await _maybe_send_battle_formation_image(update, session)
         # Real live bug (2026-08-05, Coffee: "it posts two images... is
-        # this a glitch?"): when an enemy that wins initiative takes the
-        # very first action of the fight, _resolve_ai_turns' own "show
-        # the monster's art again the moment it attacks" flavor (below)
-        # fired immediately after this same image, posting an identical
-        # duplicate seconds apart. Flagging every enemy here so
-        # _resolve_ai_turns can skip exactly that one immediate repeat
-        # -- their FIRST attack only -- while every later attack still
-        # gets the real "show art again" beat as originally designed.
-        for enemy in enemies:
-            enemy["_opening_image_shown"] = True
+        # this a glitch?"), later broadened (2026-08-09, Coffee: "if you
+        # have three of the same enemy only show one image of them -
+        # its abit spammy"): this monster_key's art has now been shown
+        # once for this whole fight -- _resolve_ai_turns' own "show the
+        # monster's art again the moment it attacks" flavor (below)
+        # checks this SAME session-level set (not a per-participant
+        # flag) before ever re-sending, so identical duplicate
+        # monsters (3x Giant Spider) never each re-post the same
+        # picture on their own turn, and the immediate same-fight-start
+        # duplicate this originally fixed stays fixed too.
+        session.shown_monster_keys.add(monster_key)
+        await _maybe_send_battle_formation_image(update, session)
         await _notify_main_topic(update, f"⚔️ {_format_party_names(party)} entered battle against {enemy_description}!")
         await _resolve_ai_turns(update, session)
 

@@ -87,6 +87,17 @@ class Session:
     turn_started_at: dict = field(default_factory=dict)
     timeout_escalated: set = field(default_factory=set)
     timeout_warned: set = field(default_factory=set)
+    # Real live feedback (2026-08-09, Coffee: "if you have three of the
+    # same enemy only show one image of them - its abit spammy"):
+    # bot.py's "show the monster's art again the moment it attacks"
+    # flavor (per-PARTICIPANT, not per-monster-type) meant 3 identical
+    # Giant Spiders each re-posted the exact same picture on their own
+    # turn. Tracked here (monster_key -> already shown this fight, at
+    # ANY point -- opening image or an on-attack repeat) rather than on
+    # any one participant, since it's a real fact about what the whole
+    # BATTLEFIELD has already shown the player, not any single
+    # combatant, same reasoning as environment_used above.
+    shown_monster_keys: set = field(default_factory=set)
 
     def current_participant_id(self) -> int:
         return self.turn_order[self.current_turn_index]
@@ -327,6 +338,7 @@ class Session:
             "turn_started_at": {str(k): v for k, v in self.turn_started_at.items()},
             "timeout_escalated": list(self.timeout_escalated),
             "timeout_warned": list(self.timeout_warned),
+            "shown_monster_keys": list(self.shown_monster_keys),
         }
 
     @classmethod
@@ -355,6 +367,10 @@ class Session:
             turn_started_at={int(k): v for k, v in data.get("turn_started_at", {}).items()},
             timeout_escalated=set(data.get("timeout_escalated", [])),
             timeout_warned=set(data.get("timeout_warned", [])),
+            # .get(...) with a default: a snapshot written before this
+            # shipped won't have this key -- must not crash restoring a
+            # real in-progress fight.
+            shown_monster_keys=set(data.get("shown_monster_keys", [])),
         )
 
 
