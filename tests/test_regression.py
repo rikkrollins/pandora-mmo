@@ -8027,6 +8027,46 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         image = Image.open(io.BytesIO(png_bytes))
         self.assertEqual(image.format, "PNG")
 
+    def test_battle_formation_crowded_row_tokens_dont_overlap(self):
+        """
+        Real live bug (2026-08-09, Coffee, Development-topic screenshot):
+        4 party members stacked in the front row rendered with each
+        token's circle overlapping the name/HP-bar text of the token
+        above it -- the old code always drew every token at a fixed
+        40px radius and just divided the available height evenly, which
+        for 4+ per row left far less room than a full-size token's
+        label/bar block actually needs. _row_token_radius now shrinks
+        the token (and everything scaled off it) only as much as a
+        crowded row needs; confirm directly that for a real 4-per-row
+        formation shaped like the reported one, the computed radius is
+        small enough that consecutive token centers are spaced further
+        apart than one token's own diameter (i.e. the circles themselves
+        can't overlap, and by construction via _FOOTPRINT_RATIO neither
+        can the label/bar block below them).
+        """
+        import battle_render
+        top_margin, bottom_margin = 100, 60
+        canvas_height = battle_render._canvas_height(4)
+        usable_height = canvas_height - top_margin - bottom_margin
+        radius = battle_render._row_token_radius(4, usable_height)
+        spacing = usable_height / 4
+        self.assertGreaterEqual(spacing, radius * 2, "tokens are close enough their circles overlap")
+        self.assertGreaterEqual(radius, battle_render._TOKEN_RADIUS_MIN)
+
+    def test_battle_formation_uses_first_name_to_save_space(self):
+        """Real request (Coffee): "you can use first names to save in spacing."""
+        import battle_render
+        self.assertEqual(battle_render._first_name("Brandywine Fieldstone"), "Brandywine")
+        self.assertEqual(battle_render._first_name("Grimsby"), "Grimsby")
+
+    def test_battle_formation_sparse_row_keeps_the_original_full_size(self):
+        """A normal, non-crowded 1-2 per row fight must render identically to before -- no unnecessary shrinking."""
+        import battle_render
+        self.assertEqual(battle_render._canvas_height(2), battle_render.CANVAS_HEIGHT)
+        top_margin, bottom_margin = 100, 60
+        usable_height = battle_render.CANVAS_HEIGHT - top_margin - bottom_margin
+        self.assertEqual(battle_render._row_token_radius(2, usable_height), battle_render._TOKEN_RADIUS)
+
     async def test_maybe_send_battle_formation_image_sends_a_real_png_from_session_state(self):
         """
         bot._maybe_send_battle_formation_image must pull the REAL, live

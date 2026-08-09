@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.109] — Battle formation image: crowded rows no longer overlap
+
+Real live bug (2026-08-09, Coffee, Development-topic screenshot):
+"I like what you did here, but can you arrange it in a way so that the
+green bars in the names arent overlapping (you can use first names to
+save in spacing) circles can also be slightly smaller if needed." With
+4 combatants stacked in one formation row (a common real fight size),
+`battle_render.py` always drew every token at a fixed 40px radius and
+just divided the available height evenly between them -- for 4+ per
+row that left far less room than a token's own name/HP-bar block
+actually needs, so each circle landed on top of the label above it.
+
+- New `_row_token_radius` shrinks a crowded row's tokens (and every
+  size scaled off them -- fonts, HP bar) only as much as actually
+  needed to keep them from overlapping, never below a legible 20px
+  floor; a sparse 1-2-per-row fight still renders at the original full
+  size, unchanged.
+- `_canvas_height` grows the image for a very crowded row (5+) rather
+  than let tokens shrink past that floor into illegibility -- same
+  "grow the canvas, don't degrade past readable" precedent as
+  `map_render.py`'s `_canvas_size`.
+- Labels now show first name only (`_first_name`), per Coffee's own
+  suggestion, freeing up horizontal room too.
+
 ## [1.27.108] — Map layout follow-up: real compass directions, no more collapsed/runaway nodes
 
 Real live bug (2026-08-09, Coffee, Development-topic screenshot, sent
