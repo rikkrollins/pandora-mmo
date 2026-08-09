@@ -8397,6 +8397,146 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("above", sides.values())
         self.assertIn("below", sides.values())
 
+    def test_stonearch_bridge_to_weeping_well_renders_south(self):
+        """
+        Real live bug (2026-08-09, Coffee, Development-topic screenshot
+        + follow-up): standing at Stonearch Bridge, "to the south of me
+        is supposed to be the weeping well but on the map it doesn't
+        show that." Root cause: campaign.json's real, structured
+        `directions` field ({"south": "the_weeping_well", ...}, present
+        on 73/82 real locations) was never read at all -- the layout
+        was pure undirected physics. Now seeded from real compass data;
+        this asserts the exact reported relationship actually holds in
+        the rendered pixel layout, not just that the two nodes exist.
+        """
+        import map_render
+        surface = bot.CAMPAIGN["locations"]["surface"]
+        visited = {"crossroads_tavern", "stonearch_bridge", "the_weeping_well", "greymoor_downs"}
+        visited_here, revealed_here, edges, unexplored = map_render._visible_nodes_and_edges(surface, visited, set())
+        bidi = map_render._bidirectional_directions(surface, set(visited_here))
+        raw = map_render._compute_layout(visited_here, edges, bidi)
+        bridge_y = raw["stonearch_bridge"][1]
+        well_y = raw["the_weeping_well"][1]
+        self.assertGreater(well_y, bridge_y, "the Weeping Well must render BELOW (south of) Stonearch Bridge on the canvas y-axis")
+
+    def test_bidirectional_directions_infers_the_logical_reverse(self):
+        """
+        Real campaign.json data often only declares a direction from
+        ONE side (stonearch_bridge says south is the_weeping_well, but
+        the_weeping_well doesn't necessarily declare north back) --
+        this must fill in the real, logically-implied reverse rather
+        than leaving the graph only half-navigable by the BFS seed.
+        """
+        import map_render
+        surface = bot.CAMPAIGN["locations"]["surface"]
+        bidi = map_render._bidirectional_directions(surface, {"stonearch_bridge", "the_weeping_well"})
+        self.assertEqual(bidi["stonearch_bridge"].get("south"), "the_weeping_well")
+        self.assertEqual(bidi["the_weeping_well"].get("north"), "stonearch_bridge")
+
+    def test_disconnected_components_never_collapse_onto_the_same_point(self):
+        """
+        Real bug found while testing the directional layout: a node
+        the directional BFS never reaches (real campaign.json shape --
+        e.g. a sub-dungeon area only linked in via descends_to, a
+        separate field this module never treats as an in-layer
+        connection) used to fall back to a hardcoded (0.0, 0.0), and
+        with MULTIPLE such disconnected components all landing on that
+        exact same point, the repulsion force between them is
+        mathematically zero (dx=dy=0 makes the push direction
+        undefined) -- they could never separate for the rest of the
+        relaxation. Confirmed against a real worst case: every location
+        in the underground layer at once, which includes several real,
+        genuinely disconnected-within-this-layer sub-clusters.
+        """
+        import map_render
+        underground = bot.CAMPAIGN["locations"]["underground"]
+        visited = set(underground.keys())
+        visited_here, revealed_here, edges, unexplored = map_render._visible_nodes_and_edges(underground, visited, set())
+        bidi = map_render._bidirectional_directions(underground, set(visited_here))
+        raw = map_render._compute_layout(visited_here, edges, bidi)
+        import itertools
+        collapsed = [
+            (a, b) for a, b in itertools.combinations(visited_here, 2)
+            if ((raw[a][0] - raw[b][0]) ** 2 + (raw[a][1] - raw[b][1]) ** 2) ** 0.5 < 1.0
+        ]
+        self.assertEqual(collapsed, [], f"nodes landed on the exact same point: {collapsed}")
+
+    def test_disconnected_components_stay_near_the_main_cluster(self):
+        """
+        Real bug (2026-08-09, found visually re-rendering a small layer
+        right after fixing the (0,0)-collapse bug above): removing the
+        old hard position clamp let a genuinely disconnected node (no
+        real connections/directions to anything else visited) drift
+        arbitrarily far from the rest of the graph over 400 relaxation
+        iterations -- nothing bounded it but a mild centroid pull. That
+        blew up _normalize_to_canvas's bounding box and squeezed the
+        real, connected chain into a sliver of the rendered map.
+        _contain_disconnected_components rigidly translates (never
+        reshapes) any non-main component back within a bounded distance
+        of the main component's centroid -- confirm it actually holds
+        on a small, sparse graph shaped like the real one that exposed
+        this (a 5-room chain plus one real, truly isolated room).
+        """
+        import map_render
+        node_ids = ["room_1", "room_2", "room_3", "room_4", "room_5", "loner"]
+        edges = [("room_1", "room_2"), ("room_2", "room_3"), ("room_3", "room_4"), ("room_4", "room_5")]
+        bidi = {
+            "room_1": {"south": "room_2"}, "room_2": {"north": "room_1", "south": "room_3"},
+            "room_3": {"north": "room_2", "south": "room_4"}, "room_4": {"north": "room_3", "south": "room_5"},
+            "room_5": {"north": "room_4"}, "loner": {},
+        }
+        raw = map_render._compute_layout(node_ids, edges, bidi)
+        main_ids = ["room_1", "room_2", "room_3", "room_4", "room_5"]
+        main_cx = sum(raw[nid][0] for nid in main_ids) / len(main_ids)
+        main_cy = sum(raw[nid][1] for nid in main_ids) / len(main_ids)
+        dist = ((raw["loner"][0] - main_cx) ** 2 + (raw["loner"][1] - main_cy) ** 2) ** 0.5
+        k = (map_render._LAYOUT_AREA ** 2 / len(node_ids)) ** 0.5
+        self.assertLessEqual(dist, k * 6.0 + 1.0, f"isolated node drifted too far from the main cluster: {dist}")
+
+    def test_floor_levels_reflects_real_up_down_chains(self):
+        """
+        Real live request (2026-08-09, Coffee: "F3 - F2 - F1 - B1 - B2
+        - B3 for floors and basements in dungeons"). Grounded entirely
+        in real "up"/"down" entries -- a chain of 3 real rooms each one
+        real step below the last must read as levels 0, -1, -2 (i.e.
+        the map would label them B1 and B2), never invented for a
+        location with no real up/down relationship to anything else.
+        """
+        import map_render
+        bidi = {
+            "room_a": {"down": "room_b"},
+            "room_b": {"up": "room_a", "down": "room_c"},
+            "room_c": {"up": "room_b"},
+            "unrelated_room": {},
+        }
+        levels = map_render._floor_levels(bidi)
+        self.assertEqual(levels["room_a"], 0)
+        self.assertEqual(levels["room_b"], -1)
+        self.assertEqual(levels["room_c"], -2)
+        self.assertNotIn("unrelated_room", levels)
+
+    def test_legend_lines_each_fit_the_narrow_canvas_width(self):
+        """
+        Real bug (2026-08-09, found visually re-rendering a small layer
+        right after adding the F1-B3 floor badges): the base legend
+        line and the new floor-badge clause used to be concatenated
+        into ONE draw.text() call with no width check at all (only the
+        separate "revealed but not visited" line ever checked width) --
+        on a narrow, un-scaled 900px canvas the combined text ran well
+        past the edge and got clipped mid-word. They're now separate,
+        independently width-checked lines; confirm each one (with a
+        real floor-badge clause AND a real "revealed" clause both
+        present, the worst case) actually fits under the same
+        int(width / 8.5) character budget render_layer_map itself uses.
+        """
+        import map_render
+        width = map_render.CANVAS_WIDTH
+        line_limit = int(width / 8.5)
+        base_line = "red ring = where you are  •  dot = visited  •  gold +N = unexplored paths from there"
+        floor_line = "blue F/B = floor above/below the chain's entry point"
+        self.assertLessEqual(len(base_line), line_limit)
+        self.assertLessEqual(len(floor_line), line_limit)
+
     def test_character_layer_content_groups_by_layer_and_skips_empty_ones(self):
         import sessions
         sessions.end_session(-989)

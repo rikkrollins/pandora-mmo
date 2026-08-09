@@ -26,6 +26,23 @@ exactly, so both renderings always agree with each other):
   "still needs to be physically visited to unlock connections" rule
   _do_show_map already enforces.
 
+Real cardinal directions (2026-08-09, Coffee, Development-topic
+screenshot: standing at Stonearch Bridge, "to the south of me is
+supposed to be the weeping well but on the map it doesn't show that"):
+campaign.json locations carry a real, structured `directions` dict
+({"south": "the_weeping_well", ...}) alongside the plain `connections`
+list on 73/82 locations (132/148 real edges campaign-wide) -- this was
+missed in the first pass (only the free-prose `sensory_connections`
+text was checked, which turned out to have almost no parseable
+directional wording). The layout now seeds itself from these real
+compass directions via a breadth-first walk from a deterministic root,
+and keeps a real per-iteration corrective force during the force-
+directed relaxation pass so a known "south" relationship stays visually
+south even after repulsion/spacing adjustments. The ~11% of edges with
+no declared direction are never assigned a fake one -- they're seeded
+near their nearest already-placed neighbor and positioned purely by
+the undirected spring/repulsion forces, same as before this change.
+
 One layer (surface/underground/sky) is rendered per image; bot.py is
 responsible for offering buttons to switch layers when the character
 has real content in more than one.
@@ -57,6 +74,8 @@ _EDGE_COLOR = (90, 60, 30, 160)
 _LABEL_COLOR = (30, 18, 8)
 _UNEXPLORED_BADGE_FILL = (212, 175, 55)
 _UNEXPLORED_BADGE_TEXT = (40, 25, 10)
+_FLOOR_BADGE_FILL = (110, 140, 165)
+_FLOOR_BADGE_TEXT = (20, 30, 40)
 _LEGEND_COLOR = (60, 45, 25)
 
 _NODE_RADIUS = 16
@@ -67,9 +86,35 @@ _FONT_BOLD_PATH = os.path.join(_FONT_DIR, "DejaVuSans-Bold.ttf")
 _FONT_REGULAR_PATH = os.path.join(_FONT_DIR, "DejaVuSans.ttf")
 
 _LAYOUT_SEED = 1337
-_LAYOUT_ITERATIONS = 300
+_LAYOUT_ITERATIONS = 400
 _LAYOUT_AREA = 1000.0  # arbitrary units, normalized to the canvas afterward
+_CENTER_GRAVITY = 0.4  # keeps the whole graph compact; _contain_disconnected_components below
+                        # is a generous safety net for the rare component gravity alone can't reach
 _MAX_REVEALED_IN_LEGEND = 6
+
+_DIAG = 0.7071067811865476  # sqrt(2)/2, unit-length diagonal component
+_DIRECTION_VECTORS = {
+    "north": (0.0, -1.0), "south": (0.0, 1.0), "east": (1.0, 0.0), "west": (-1.0, 0.0),
+    "northeast": (_DIAG, -_DIAG), "northwest": (-_DIAG, -_DIAG),
+    "southeast": (_DIAG, _DIAG), "southwest": (-_DIAG, _DIAG),
+    # "up"/"down" are real direction words too (confirmed against every
+    # actual campaign.json `directions` value, not assumed) -- used
+    # within a single layer for a room stacked above/below another,
+    # e.g. inside a multi-level dungeon sub-area. Missing these meant
+    # every such sub-cluster's internal layout was entirely unseeded by
+    # real data -- treated the same as north/south (visually "up" =
+    # higher on the rendered map, matching how a player would expect a
+    # vertical shaft to read).
+    "up": (0.0, -1.0), "down": (0.0, 1.0),
+}
+_OPPOSITE_DIRECTION = {
+    "north": "south", "south": "north", "east": "west", "west": "east",
+    "northeast": "southwest", "southwest": "northeast",
+    "northwest": "southeast", "southeast": "northwest",
+    "up": "down", "down": "up",
+}
+_DIRECTION_STEP = 220.0  # real-direction seed distance, roughly matches the layout's natural node spacing
+_DIRECTION_FORCE = 0.015  # per-iteration corrective pull keeping a directed edge visually on-axis
 
 
 def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
@@ -84,22 +129,209 @@ def _truncate_name(name: str, limit: int = 22) -> str:
     return name if len(name) <= limit else name[: limit - 1] + "…"
 
 
-def _compute_layout(node_ids: list[str], edges: list[tuple[str, str]]) -> dict[str, tuple[float, float]]:
+def _bidirectional_directions(layer_locations: dict, node_set: set[str]) -> dict[str, dict[str, str]]:
     """
-    Plain Fruchterman-Reingold force-directed layout, pure Python, no
+    {loc_id: {direction: neighbor_loc_id}}, restricted to node_set (the
+    real visited-here set) on both ends. Real campaign.json data often
+    only declares a direction from ONE side ("stonearch_bridge" says
+    south is "the_weeping_well", but the_weeping_well may not declare
+    north back) -- this fills in the logical inverse wherever it's
+    genuinely implied and missing (never invents a NEW relationship,
+    only the opposite-facing description of one that's already real),
+    which roughly doubles how far the BFS seed below can walk using
+    only real, declared-or-implied compass data.
+    """
+    result: dict[str, dict[str, str]] = {nid: {} for nid in node_set}
+    for lid in node_set:
+        for direction, neighbor in (layer_locations.get(lid, {}).get("directions") or {}).items():
+            if neighbor in node_set and direction in _DIRECTION_VECTORS:
+                result[lid][direction] = neighbor
+    for lid in node_set:
+        for direction, neighbor in list(result[lid].items()):
+            opposite = _OPPOSITE_DIRECTION[direction]
+            if opposite not in result[neighbor]:
+                result[neighbor][opposite] = lid
+    return result
+
+
+def _seed_positions_from_directions(node_ids: list[str], bidi_directions: dict[str, dict[str, str]]) -> dict[str, tuple[float, float]]:
+    """
+    Real compass data in, an initial (x, y) per node out -- a plain
+    breadth-first walk from a deterministic root (the lowest-sorted
+    loc_id, so the same visited set always seeds the same way
+    regardless of who's viewing or where they currently stand),
+    placing each newly-reached node at its parent's position plus the
+    REAL direction's unit vector. Any node never reached via a real
+    directed edge (the ~11% of campaign-wide edges with no declared
+    direction, or a node disconnected from the directed portion of the
+    graph entirely) is seeded near whichever already-placed neighbor
+    it has a plain connection to -- never given a fake direction, just
+    a reasonable starting point for the force-directed relaxation
+    pass to actually resolve.
+    """
+    if not node_ids:
+        return {}
+    root = min(node_ids)
+    positions: dict[str, tuple[float, float]] = {root: (0.0, 0.0)}
+    queue = [root]
+    while queue:
+        current = queue.pop(0)
+        cx, cy = positions[current]
+        for direction, neighbor in bidi_directions.get(current, {}).items():
+            if neighbor in positions:
+                continue
+            vx, vy = _DIRECTION_VECTORS[direction]
+            positions[neighbor] = (cx + vx * _DIRECTION_STEP, cy + vy * _DIRECTION_STEP)
+            queue.append(neighbor)
+    return positions
+
+
+def _floor_levels(bidi_directions: dict[str, dict[str, str]]) -> dict[str, int]:
+    """
+    Real per-node floor number for a vertical up/down dungeon chain
+    (2026-08-09, Coffee: "F3 - F2 - F1 - B1 - B2 - B3 for floors and
+    basements in dungeons"). Grounded entirely in real "up"/"down"
+    entries in bidi_directions -- level 0 is the deterministic entry
+    point into each such vertical chain (lowest-sorted member), +1 per
+    real "up" step, -1 per real "down" step from there. A location
+    with no up/down relationship to anything else visited in this
+    layer never appears in the result at all -- it isn't part of a
+    multi-floor structure, nothing to invent a floor number for.
+    """
+    vertical_nodes = set()
+    for nid, directions in bidi_directions.items():
+        for direction, neighbor in directions.items():
+            if direction in ("up", "down"):
+                vertical_nodes.add(nid)
+                vertical_nodes.add(neighbor)
+
+    levels: dict[str, int] = {}
+    for start in sorted(vertical_nodes):
+        if start in levels:
+            continue
+        levels[start] = 0
+        queue = [start]
+        while queue:
+            current = queue.pop(0)
+            for direction, neighbor in bidi_directions.get(current, {}).items():
+                if direction not in ("up", "down") or neighbor not in vertical_nodes or neighbor in levels:
+                    continue
+                levels[neighbor] = levels[current] + (1 if direction == "up" else -1)
+                queue.append(neighbor)
+    return levels
+
+
+def _fill_unseeded_positions(node_ids: list[str], edges: list[tuple[str, str]], positions: dict[str, tuple[float, float]]) -> None:
+    """
+    Mutates positions in place. Confirmed live (2026-08-09, all-43-
+    underground-locations worst case): a real, genuine campaign.json
+    shape -- several sub-dungeon clusters (e.g. stonearch_bridge_*,
+    wordless_choir_*) are only reachable from the surface via
+    descends_to, a separate field this module deliberately never
+    treats as an in-layer connection, so they're a REAL, disconnected
+    component within this single layer's own connection graph. Every
+    such node used to collapse onto the exact same (0.0, 0.0) fallback
+    point -- and repulsion between two nodes at an EXACTLY identical
+    coordinate is mathematically zero (the push direction is undefined
+    when dx=dy=0), so they could never separate from each other for
+    the rest of the relaxation. Each disconnected component now gets
+    its own distinct, deterministic random anchor instead, with a
+    small jitter between chained members of the same component so
+    even they don't start exactly coincident.
+
+    The anchor is placed NEAR whatever's already been seeded from real
+    direction data (its centroid), not a raw random point anywhere
+    across the full layout area -- confirmed live (2026-08-09): an
+    anchor picked from the full range could land far outside the
+    tightly-packed, real-direction-accurate main cluster's own natural
+    coordinate range, which badly skewed _normalize_to_canvas's later
+    min/max rescale (the real cluster ends up compressed into a sliver
+    of the canvas just to also fit one far-flung random point).
+    """
+    adjacency: dict[str, list[str]] = {nid: [] for nid in node_ids}
+    for a, b in edges:
+        adjacency[a].append(b)
+        adjacency[b].append(a)
+
+    remaining = {nid for nid in node_ids if nid not in positions}
+    rng = random.Random(_LAYOUT_SEED)
+    if positions:
+        base_x = sum(p[0] for p in positions.values()) / len(positions)
+        base_y = sum(p[1] for p in positions.values()) / len(positions)
+    else:
+        base_x = base_y = _LAYOUT_AREA / 2
+    spread = _DIRECTION_STEP * 2.5
+
+    while remaining:
+        start = min(remaining)
+        component = []
+        stack = [start]
+        seen = {start}
+        while stack:
+            nid = stack.pop()
+            component.append(nid)
+            for neighbor in adjacency[nid]:
+                if neighbor in remaining and neighbor not in seen:
+                    seen.add(neighbor)
+                    stack.append(neighbor)
+
+        placed_this_component = {start: (base_x + rng.uniform(-spread, spread), base_y + rng.uniform(-spread, spread))}
+        queue = [start]
+        component_set = set(component)
+        while queue:
+            current = queue.pop(0)
+            cx, cy = placed_this_component[current]
+            for neighbor in adjacency[current]:
+                if neighbor not in component_set or neighbor in placed_this_component:
+                    continue
+                placed_this_component[neighbor] = (cx + rng.uniform(-40, 40), cy + rng.uniform(-40, 40))
+                queue.append(neighbor)
+
+        positions.update(placed_this_component)
+        remaining -= component_set
+
+
+def _compute_layout(
+    node_ids: list[str], edges: list[tuple[str, str]], bidi_directions: dict[str, dict[str, str]] | None = None,
+) -> dict[str, tuple[float, float]]:
+    """
+    Fruchterman-Reingold force-directed relaxation, pure Python, no
     numpy/networkx -- same "no new heavy dependency" spirit as
-    battle_render.py. Deterministic: seeded with a fixed constant, and
-    node_ids/edges are always iterated in the SAME order the caller
-    already sorted them in, so the same visited set always lays out
-    the same way rather than jittering between calls.
+    battle_render.py. Deterministic: node_ids/edges are always iterated
+    in the SAME order the caller already sorted them in, and random.Random
+    is only ever used as a last-resort fallback (no real direction data
+    at all) so the same visited set always lays out the same way.
+
+    When bidi_directions is given, positions are seeded from real
+    compass data (_seed_positions_from_directions) instead of pure
+    random placement, and a real per-iteration corrective force keeps
+    each directed edge visually on-axis (e.g. a real "south"
+    relationship doesn't drift into looking like "east" once repulsion
+    and spacing forces start moving things around).
     """
     if not node_ids:
         return {}
     if len(node_ids) == 1:
         return {node_ids[0]: (_LAYOUT_AREA / 2, _LAYOUT_AREA / 2)}
 
-    rng = random.Random(_LAYOUT_SEED)
-    pos = {nid: [rng.uniform(0, _LAYOUT_AREA), rng.uniform(0, _LAYOUT_AREA)] for nid in node_ids}
+    directed_edges: list[tuple[str, str, float, float]] = []
+    if bidi_directions:
+        pos_dict = _seed_positions_from_directions(node_ids, bidi_directions)
+        _fill_unseeded_positions(node_ids, edges, pos_dict)
+        pos = {nid: list(pos_dict[nid]) for nid in node_ids}
+        seen_pairs = set()
+        for a, directions in bidi_directions.items():
+            for direction, b in directions.items():
+                pair = (a, b)
+                if pair in seen_pairs or b not in pos:
+                    continue
+                seen_pairs.add(pair)
+                vx, vy = _DIRECTION_VECTORS[direction]
+                directed_edges.append((a, b, vx, vy))
+    else:
+        rng = random.Random(_LAYOUT_SEED)
+        pos = {nid: [rng.uniform(0, _LAYOUT_AREA), rng.uniform(0, _LAYOUT_AREA)] for nid in node_ids}
+
     area = _LAYOUT_AREA * _LAYOUT_AREA
     k = (area / len(node_ids)) ** 0.5
 
@@ -133,6 +365,46 @@ def _compute_layout(node_ids: list[str], edges: list[tuple[str, str]]) -> dict[s
             disp[b][0] += fx
             disp[b][1] += fy
 
+        # Real-direction corrective force (2026-08-09, Coffee: Stonearch
+        # Bridge -> the Weeping Well is a real, declared "south"
+        # relationship in campaign.json that the pure physics layout
+        # had no notion of at all). Decomposes the current offset
+        # between a directed edge's two nodes into a component ALONG
+        # the real direction (left alone -- distance is still governed
+        # by the ordinary spring/repulsion forces above) and a
+        # component PERPENDICULAR to it (pulled toward zero) -- keeps
+        # a real "south" edge visually south without fighting how far
+        # apart the two nodes actually end up.
+        for a, b, vx, vy in directed_edges:
+            ax, ay = pos[a]
+            bx, by = pos[b]
+            dx, dy = bx - ax, by - ay
+            parallel = dx * vx + dy * vy
+            perp_x, perp_y = dx - parallel * vx, dy - parallel * vy
+            disp[a][0] += perp_x * _DIRECTION_FORCE
+            disp[a][1] += perp_y * _DIRECTION_FORCE
+            disp[b][0] -= perp_x * _DIRECTION_FORCE
+            disp[b][1] -= perp_y * _DIRECTION_FORCE
+
+        # Mild pull toward the layout's own CENTROID (2026-08-09, Coffee
+        # follow-up: "cleaner layout... more even spacing"; fixed to use
+        # the real centroid rather than a hardcoded (500, 500) the same
+        # day -- the compass-direction seed is centered on an arbitrary
+        # root at (0, 0) and can legitimately sit anywhere, so pulling
+        # toward a FIXED point fights the real seeded layout instead of
+        # just keeping it compact). Pure repulsion + spring attraction
+        # alone lets a loosely-connected node (or sub-cluster) drift
+        # arbitrarily far from the rest, wasting canvas space and
+        # leaving the rest of the graph cramped together -- a small
+        # constant pull toward wherever the graph's own current center
+        # of mass is keeps it compact without fighting its real shape.
+        centroid_x = sum(p[0] for p in pos.values()) / len(node_ids)
+        centroid_y = sum(p[1] for p in pos.values()) / len(node_ids)
+        for nid in node_ids:
+            nx, ny = pos[nid]
+            disp[nid][0] += (centroid_x - nx) * _CENTER_GRAVITY
+            disp[nid][1] += (centroid_y - ny) * _CENTER_GRAVITY
+
         temperature = _LAYOUT_AREA * 0.1 * (1 - iteration / _LAYOUT_ITERATIONS)
         for nid in node_ids:
             dx, dy = disp[nid]
@@ -140,10 +412,105 @@ def _compute_layout(node_ids: list[str], edges: list[tuple[str, str]]) -> dict[s
             capped = min(dist, temperature)
             pos[nid][0] += (dx / dist) * capped
             pos[nid][1] += (dy / dist) * capped
-            pos[nid][0] = min(max(pos[nid][0], 0), _LAYOUT_AREA)
-            pos[nid][1] = min(max(pos[nid][1], 0), _LAYOUT_AREA)
+            # Real bug (2026-08-09, found testing the directional
+            # layout against the full underground layer): this used to
+            # hard-clamp every position to [0, _LAYOUT_AREA] every
+            # single iteration -- harmless for the old pure-random seed
+            # (always already inside that range), but the real compass-
+            # direction seed is naturally centered on an arbitrary root
+            # at (0, 0) and goes genuinely negative (west/north).
+            # Re-clamping a negative coordinate to exactly 0 every
+            # iteration silently collapsed multiple UNRELATED nodes
+            # onto that same boundary, over and over, so they could
+            # never separate again -- confirmed live: 3 real, distinct
+            # goblin_warrens sub-locations landed on the exact same
+            # pixel. _normalize_to_canvas already rescales whatever
+            # raw coordinate range comes out of this loop into the
+            # real canvas bounds afterward, so there was never any
+            # real need to constrain the intermediate physics space at
+            # all -- removed rather than widened.
 
+    _contain_disconnected_components(node_ids, edges, pos, k)
     return {nid: (x, y) for nid, (x, y) in pos.items()}
+
+
+def _contain_disconnected_components(
+    node_ids: list[str], edges: list[tuple[str, str]], pos: dict[str, list[float]], k: float,
+) -> None:
+    """
+    Real bug (2026-08-09, found visually re-rendering a small layer after
+    the clamp-removal fix above): with the hard per-iteration clamp gone,
+    a genuinely disconnected sub-cluster (or a single isolated node with
+    no edges at all) is only held back by the mild centroid gravity, and
+    for a SMALL layer that isn't nearly enough -- one lone node drifted
+    to 1500+ units away while the real chain it should sit near stayed
+    under 200 units wide, so _normalize_to_canvas's bounding box got
+    dominated by that one outlier and squeezed the real, connected chain
+    into a sliver of the canvas. Tuning _CENTER_GRAVITY higher fights
+    this at the cost of over-compressing the main cluster's own internal
+    spacing (it pulls on every node, not just the stray ones), so instead:
+    a real, targeted fix -- find each connected component, and rigidly
+    translate (not reshape) any component that isn't the largest one so
+    its centroid sits within a bounded distance of the largest
+    component's centroid. Internal structure/directions inside every
+    component are untouched; only where the whole component sits moves.
+    """
+    if len(node_ids) < 2:
+        return
+    adjacency: dict[str, list[str]] = {nid: [] for nid in node_ids}
+    for a, b in edges:
+        if a in adjacency and b in adjacency:
+            adjacency[a].append(b)
+            adjacency[b].append(a)
+
+    components: list[list[str]] = []
+    seen: set[str] = set()
+    for nid in node_ids:
+        if nid in seen:
+            continue
+        component = []
+        stack = [nid]
+        seen.add(nid)
+        while stack:
+            cur = stack.pop()
+            component.append(cur)
+            for neighbor in adjacency[cur]:
+                if neighbor not in seen:
+                    seen.add(neighbor)
+                    stack.append(neighbor)
+        components.append(component)
+
+    if len(components) < 2:
+        return
+
+    main = max(components, key=lambda c: len(c), default=components[0])
+    main_cx = sum(pos[nid][0] for nid in main) / len(main)
+    main_cy = sum(pos[nid][1] for nid in main) / len(main)
+    # Generous on purpose: _CENTER_GRAVITY already keeps ordinarily-sized
+    # sub-clusters reasonably close on its own (confirmed visually on the
+    # 43-node underground layer -- no clamp needed there at all). This
+    # only needs to catch the rare case gravity alone can't pull in
+    # enough (e.g. a single isolated node in a small, sparse layer) --
+    # too tight a bound here fights gravity's own placement and forces
+    # otherwise well-separated real clusters to overlap.
+    max_gap = k * 6.0
+
+    for component in components:
+        if component is main:
+            continue
+        ccx = sum(pos[nid][0] for nid in component) / len(component)
+        ccy = sum(pos[nid][1] for nid in component) / len(component)
+        dx, dy = ccx - main_cx, ccy - main_cy
+        dist = max((dx * dx + dy * dy) ** 0.5, 0.01)
+        if dist <= max_gap:
+            continue
+        scale = max_gap / dist
+        target_cx = main_cx + dx * scale
+        target_cy = main_cy + dy * scale
+        shift_x, shift_y = target_cx - ccx, target_cy - ccy
+        for nid in component:
+            pos[nid][0] += shift_x
+            pos[nid][1] += shift_y
 
 
 def _canvas_size(node_count: int) -> tuple[int, int]:
@@ -202,6 +569,52 @@ def _assign_label_sides(positions: dict[str, tuple[int, int]]) -> dict[str, str]
         sides[nid] = "below" if idx % 2 == 0 else "above"
         counts[band] = idx + 1
     return sides
+
+
+def _label_boxes_overlap(a: tuple[float, float, float, float], b: tuple[float, float, float, float], pad: int = 2) -> bool:
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    return not (ax + aw + pad < bx or bx + bw + pad < ax or ay + ah + pad < by or by + bh + pad < ay)
+
+
+def _resolve_label_layout(
+    draw: ImageDraw.ImageDraw, positions: dict[str, tuple[int, int]], layer_locations: dict,
+    visited_here: list[str], current_location_id: str | None, name_font: ImageFont.FreeTypeFont,
+) -> dict[str, tuple[float, float, float, float]]:
+    """
+    Task #11 follow-up (2026-08-09, Coffee: "reduce remaining label
+    overlap"). Returns {loc_id: (label_x, label_y, w, h)} -- the real
+    draw position and measured size for each node's name label.
+    Starts from _assign_label_sides' band alternation (above/below
+    within each horizontal row), then does an actual pairwise bounding-
+    box collision check per node against every already-placed label and
+    flips its side if that removes the overlap. This is a real,
+    bounded improvement (reduces, not guarantees-zero, overlap) --
+    a full label-placement solver is out of scope for a map that's
+    still meant to render in well under a second.
+    """
+    sides = _assign_label_sides(positions)
+
+    def box_for(loc_id: str, side: str) -> tuple[float, float, float, float]:
+        x, y = positions[loc_id]
+        is_current = loc_id == current_location_id
+        radius = _NODE_RADIUS_CURRENT if is_current else _NODE_RADIUS
+        label = _truncate_name(layer_locations[loc_id]["name"])
+        bbox = draw.textbbox((0, 0), label, font=name_font)
+        w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        label_y = (y - radius - 6 - h) if side == "above" else (y + radius + 4)
+        return (x - w / 2, label_y, w, h)
+
+    placed: dict[str, tuple[float, float, float, float]] = {}
+    for loc_id in sorted(visited_here, key=lambda nid: positions[nid][1]):
+        side = sides[loc_id]
+        box = box_for(loc_id, side)
+        if any(_label_boxes_overlap(box, other) for other in placed.values()):
+            flipped_box = box_for(loc_id, "above" if side == "below" else "below")
+            if not any(_label_boxes_overlap(flipped_box, other) for other in placed.values()):
+                box = flipped_box
+        placed[loc_id] = box
+    return placed
 
 
 def _draw_background(draw: ImageDraw.ImageDraw, width: int, height: int) -> None:
@@ -278,7 +691,9 @@ def render_layer_map(
     )
 
     width, height = _canvas_size(len(visited_here))
-    raw_positions = _compute_layout(visited_here, edges)
+    bidi_directions = _bidirectional_directions(layer_locations, set(visited_here))
+    floor_levels = _floor_levels(bidi_directions)
+    raw_positions = _compute_layout(visited_here, edges, bidi_directions)
     positions = _normalize_to_canvas(raw_positions, width, height)
 
     image = Image.new("RGB", (width, height), _BG_TOP)
@@ -297,7 +712,7 @@ def render_layer_map(
         if a in positions and b in positions:
             draw.line([positions[a], positions[b]], fill=_EDGE_COLOR, width=3)
 
-    label_sides = _assign_label_sides(positions)
+    label_layout = _resolve_label_layout(draw, positions, layer_locations, visited_here, current_location_id, name_font)
     for loc_id in visited_here:
         if loc_id not in positions:
             continue
@@ -312,14 +727,8 @@ def render_layer_map(
             )
 
         label = _truncate_name(layer_locations[loc_id]["name"])
-        label_bbox = draw.textbbox((0, 0), label, font=name_font)
-        label_w = label_bbox[2] - label_bbox[0]
-        label_h = label_bbox[3] - label_bbox[1]
-        if label_sides.get(loc_id) == "above":
-            label_y = y - radius - 6 - label_h
-        else:
-            label_y = y + radius + 4
-        draw.text((x - label_w / 2, label_y), label, font=name_font, fill=_LABEL_COLOR)
+        label_x, label_y, _, _ = label_layout[loc_id]
+        draw.text((label_x, label_y), label, font=name_font, fill=_LABEL_COLOR)
 
         unexplored = unexplored_counts.get(loc_id)
         if unexplored:
@@ -331,11 +740,26 @@ def render_layer_map(
             draw.ellipse([bx, by, bx + bw, by + bh], fill=_UNEXPLORED_BADGE_FILL, outline=_NODE_OUTLINE)
             draw.text((bx + 4, by + 2), badge_text, font=badge_font, fill=_UNEXPLORED_BADGE_TEXT)
 
+        # Real floor badge (2026-08-09, Coffee: "F3 - F2 - F1 - B1 - B2
+        # - B3 for floors and basements in dungeons") -- only drawn for
+        # a node that's actually part of a real up/down chain, and
+        # never for the chain's own entry point (level 0 -- "you're on
+        # the floor you arrived on" needs no label). Bottom-left corner
+        # so it never collides with the unexplored-paths badge above.
+        floor_level = floor_levels.get(loc_id)
+        if floor_level:
+            floor_text = f"F{floor_level}" if floor_level > 0 else f"B{-floor_level}"
+            floor_bbox = draw.textbbox((0, 0), floor_text, font=badge_font)
+            fw = floor_bbox[2] - floor_bbox[0] + 8
+            fh = floor_bbox[3] - floor_bbox[1] + 6
+            fx, fy = x - radius - fw + 4, y + radius - 4
+            draw.ellipse([fx, fy, fx + fw, fy + fh], fill=_FLOOR_BADGE_FILL, outline=_NODE_OUTLINE)
+            draw.text((fx + 4, fy + 2), floor_text, font=badge_font, fill=_FLOOR_BADGE_TEXT)
+
     legend_font = _load_font(14)
-    draw.text(
-        (20, height - 50), "red ring = where you are  •  dot = visited  •  gold +N = unexplored paths from there",
-        font=legend_font, fill=_LEGEND_COLOR,
-    )
+    legend_lines = ["red ring = where you are  •  dot = visited  •  gold +N = unexplored paths from there"]
+    if floor_levels:
+        legend_lines.append("blue F/B = floor above/below the chain's entry point")
     if revealed_here:
         # Capped at a fixed count (never unbounded, matching this
         # codebase's usual "no silently-growing UI" convention) so this
@@ -347,8 +771,18 @@ def render_layer_map(
         extra = len(revealed_here) - len(shown)
         if extra:
             revealed_names += f", +{extra} more"
-        legend_text = _truncate_name(f"Marked but not yet visited: {revealed_names}", limit=int(width / 8.5))
-        draw.text((20, height - 28), legend_text, font=legend_font, fill=_LEGEND_COLOR)
+        legend_lines.append(f"Marked but not yet visited: {revealed_names}")
+    # Real bug (2026-08-09, found re-rendering a narrow layer after adding
+    # the floor-badge clause): the base legend line plus the floor-badge
+    # clause together ran wider than a 900px-wide canvas and got clipped
+    # mid-word -- only the "revealed" line was ever width-checked before.
+    # Every line now gets the same _truncate_name width check, and lines
+    # stack bottom-up so adding a 3rd line (floor badges + a revealed-map
+    # note at once) never overlaps the one above it.
+    line_limit = int(width / 8.5)
+    for i, line in enumerate(reversed(legend_lines)):
+        y = height - 22 - i * 20
+        draw.text((20, y), _truncate_name(line, limit=line_limit), font=legend_font, fill=_LEGEND_COLOR)
 
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")

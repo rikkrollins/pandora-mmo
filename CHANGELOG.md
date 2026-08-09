@@ -2,6 +2,44 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.108] — Map layout follow-up: real compass directions, no more collapsed/runaway nodes
+
+Real live bug (2026-08-09, Coffee, Development-topic screenshot, sent
+twice): "I'm currently at the Stone Ark Bridge and it is showing the
+locations and to the south of me is supposed to be the weeping well
+but on the map it doesn't show that... I want the map to represent
+the locations that you give me so the map is accurate," plus a
+follow-up request: "F3 - F2 - F1 - B1 - B2 - B3 for floors and
+basements in dungeons." `map_render.py`'s force-directed layout
+(shipped 1.27.107) had no notion of real compass data at all — it only
+ever knew THAT two visited locations connected, never which direction.
+campaign.json actually has a real, structured `directions` field per
+location (`{"south": "the_weeping_well", ...}`) on 73/82 locations that
+had gone unused. Fixed:
+
+- Layout now seeds from real direction data (`_seed_positions_from_directions`)
+  and a per-iteration corrective force keeps each directed edge visually
+  on-axis, so a real "south" relationship reliably renders south —
+  confirmed directly against the exact reported case (Stonearch Bridge
+  → the Weeping Well).
+- Real "up"/"down" chains (dungeon floor levels) get an F1-F3/B1-B3
+  badge per Coffee's request, via a new `_floor_levels` BFS.
+- Fixed a critical regression found testing the above against the full
+  underground layer: a hard per-iteration position clamp (inherited
+  from the old pure-random-seed layout, never needed once real
+  direction data goes negative from an arbitrary root) was silently
+  resetting negative coordinates to exactly 0 every iteration,
+  collapsing unrelated nodes onto the same point. Removed the clamp;
+  added `_contain_disconnected_components` (rigid per-component
+  translation, never reshaping) as a generous safety net so a
+  genuinely disconnected node/sub-cluster can no longer drift
+  unboundedly far and skew the whole canvas's scale, which the clamp's
+  removal alone would have allowed.
+- Legend text (base line + the new floor-badge clause) used to be one
+  unchecked `draw.text()` call that could run past a narrow canvas's
+  edge and clip mid-word; each legend line is now independently
+  width-checked and stacked.
+
 ## [1.27.107] — Real labeled world map, replacing the AI-painted visual_map
 
 Real live request (2026-08-09, Coffee, Development-topic screenshot):
