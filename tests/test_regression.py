@@ -1828,6 +1828,43 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.get_character(user_id, -999)["manual_dice_enabled"], 0)
         self.assertTrue(any("now OFF" in m for m in sink2))
 
+    # -- Oversized-message truncation (2026-08-09, found triaging live logs) --
+    def test_truncate_for_telegram_limit_leaves_short_text_alone(self):
+        text = "A short line of narration."
+        self.assertEqual(bot._truncate_for_telegram_limit(text), text)
+
+    def test_truncate_for_telegram_limit_shrinks_an_oversized_message(self):
+        """
+        Real live bug (2026-08-09, bot_live_tmp.log): a narration message
+        overran Telegram's real ~4096-char sendMessage ceiling and
+        _safe_send's retry loop resent the SAME oversized text three
+        times -- guaranteed to fail identically -- so the player got
+        nothing at all. Confirms the truncated result is genuinely under
+        Telegram's real limit (in UTF-16 units, matching how Telegram
+        itself counts) and still ends with real content, not just "…".
+        """
+        text = "x" * 10_000
+        truncated = bot._truncate_for_telegram_limit(text)
+        self.assertLess(bot._utf16_len(truncated), bot._TELEGRAM_MESSAGE_LIMIT)
+        self.assertTrue(truncated.endswith("…"))
+        self.assertGreater(len(truncated), 100)
+
+    async def test_safe_send_truncates_before_ever_calling_telegram(self):
+        """
+        End-to-end: _safe_send itself, not just the helper in isolation --
+        confirms the actual text handed to effective_chat.send_message
+        (what would really go over the wire to Telegram) is already
+        truncated, for every caller, without each one needing its own
+        length guard.
+        """
+        user_id = 900482
+        make_basic_character(user_id, "Verbose", current_location="crossroads_tavern")
+        sink = []
+        update = FakeUpdate(user_id, "n/a", sink)
+        await bot._safe_send(update, "y" * 10_000, speak=False)
+        self.assertEqual(len(sink), 1)
+        self.assertLess(bot._utf16_len(sink[0]), bot._TELEGRAM_MESSAGE_LIMIT)
+
     async def test_skill_check_prompts_for_manual_roll_and_resumes_with_it(self):
         user_id = 900481
         make_basic_character(user_id, "Sharpeyes", current_location="crossroads_tavern")

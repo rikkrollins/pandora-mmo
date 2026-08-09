@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.110] — Oversized narration messages no longer vanish silently
+
+Real bug found proactively triaging `bot_live_tmp.log` (2026-08-09,
+not player-reported): a narration message ran past Telegram's real
+~4096-character `sendMessage` ceiling. `_safe_send`'s own retry loop
+just resent the IDENTICAL oversized text three times — guaranteed to
+fail the same way every attempt, since retrying doesn't shrink a
+message — so the player got nothing at all after an already-long
+AI-narration wait (confirmed live: three straight
+`BadRequest('Message is too long')` attempts, then "giving up," no
+fallback). This exact failure mode already happened once before for
+party sheets (2026-07-25, fixed by splitting into one message per
+member), but that was a caller-side fix specific to one screen.
+
+New `_truncate_for_telegram_limit` now runs inside `_safe_send`
+itself — the shared choke point every caller (narration, menus,
+combat, dev/support replies) already goes through — so an oversized
+message gets shortened to fit before the first send attempt, instead
+of every future caller needing to independently remember Telegram's
+limit.
+
 ## [1.27.109] — Battle formation image: crowded rows no longer overlap
 
 Real live bug (2026-08-09, Coffee, Development-topic screenshot):

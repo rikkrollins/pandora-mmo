@@ -3104,6 +3104,37 @@ def _utf16_len(s: str) -> int:
     return len(s.encode("utf-16-le")) // 2
 
 
+_TELEGRAM_MESSAGE_LIMIT = 4096  # Telegram's real sendMessage text ceiling, in UTF-16 code units
+_SAFE_MESSAGE_LIMIT = 3900  # margin below that for the "…" suffix and any Python-char/UTF-16 slack
+
+
+def _truncate_for_telegram_limit(text: str) -> str:
+    """
+    Real live bug (2026-08-09, found triaging bot_live_tmp.log): a
+    narration message ran past Telegram's real ~4096-character
+    sendMessage ceiling, and _safe_send's own retry loop just resent
+    the IDENTICAL oversized text three times -- guaranteed to fail the
+    same way every attempt, since retrying doesn't shrink a message --
+    so the player got nothing at all after an already-long AI-narration
+    wait (confirmed live: three straight `BadRequest('Message is too
+    long')` attempts, then "giving up", no fallback). This exact
+    failure mode already happened once before for party sheets
+    (2026-07-25, get_party_sheets's own fix -- see its docstring --
+    fixed by splitting into one message per member), but that was a
+    caller-side fix specific to that one screen. This truncates at
+    _safe_send itself, the shared choke point every caller already goes
+    through, so no future caller has to independently remember
+    Telegram's limit.
+    """
+    if _utf16_len(text) <= _SAFE_MESSAGE_LIMIT:
+        return text
+    # Plain Python-character slicing (not a UTF-16-exact cut) is safe
+    # here because _SAFE_MESSAGE_LIMIT already sits well below the real
+    # 4096 ceiling -- even if every character were an astral-plane
+    # emoji (2 UTF-16 units each), the result still can't exceed it.
+    return text[: _SAFE_MESSAGE_LIMIT - 1] + "…"
+
+
 def _build_message_entities(text: str, mentionable_players: list[dict]) -> tuple[str, list[MessageEntity]]:
     """
     Converts this game's one hand-authored markup convention --
@@ -3251,6 +3282,7 @@ async def _safe_send(
         # build yet on this leg.
         clean_text, entities = text, []
     else:
+        text = _truncate_for_telegram_limit(text)
         clean_text, entities = _build_message_entities(text, db.list_all_active_real_players(update.effective_chat.id))
 
     # thread_id is None here for TWO different reasons that must NOT
