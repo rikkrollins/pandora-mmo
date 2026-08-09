@@ -2726,7 +2726,7 @@ def accept_party_invite(telegram_user_id: int, chat_id: int) -> tuple[bool, str]
     if not party_id:
         return False, "You don't have a pending party invite."
     if get_party_size(party_id) >= PARTY_MAX_MEMBERS:
-        return False, "That party is already full (6 members)."
+        return False, f"That party is already full ({PARTY_MAX_MEMBERS} members)."
     with get_connection() as conn:
         character_id = _active_character_id(telegram_user_id, chat_id, conn)
         conn.execute(

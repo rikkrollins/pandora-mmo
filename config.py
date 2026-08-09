@@ -92,7 +92,20 @@ NATURAL_HEALING_FULL_REST_HOURS = float(os.getenv("NATURAL_HEALING_FULL_REST_HOU
 # Largest a single formed party (invite/accept, not the whole active
 # player roster) can grow to. Moved here from db.py 2026-07-14, same
 # reason as SKILL_CHECK_DC.
-PARTY_MAX_MEMBERS = int(os.getenv("PARTY_MAX_MEMBERS", "6"))
+#
+# Raised 6 -> 12 (2026-08-09, real live report, Coffee: "i cant invite
+# more than 6 players to the party... we shud be able to have all the
+# characters but then use party to pick with ones we want"). There are
+# exactly 6 recruitable AI companions in campaign.json -- with the real
+# human player themselves also counting toward this same total (see
+# db.get_party_size, which counts every characters row with this
+# party_id, not just AI ones), the old cap of 6 meant a solo player
+# could only ever have 5 of the 6 companions along at once, one short
+# of "all of them". This is deliberately independent of
+# PARTY_ACTIVE_COMBAT_CAP just below (still 6) -- that's the real
+# "pick who fights" bench/unbench system Coffee is describing; this
+# constant only ever limited ROSTER membership, not combat size.
+PARTY_MAX_MEMBERS = int(os.getenv("PARTY_MAX_MEMBERS", "12"))
 
 # Largest a party's ACTIVE (non-benched) roster can be for a single
 # fight (2026-07-31, per Coffee: parties can now grow past a

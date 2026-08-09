@@ -1083,7 +1083,18 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
             return {**base, "action": "accept_duel"}
         return {**base, "action": "challenge_duel"}
 
-    if any(w in lowered for w in ["the market", "marketplace", "market listings"]):
+    # Real live bug (2026-08-09, found via topic-activity monitoring):
+    # "Go to the market row" came back check_market instead of move --
+    # "market row" is a REAL location (campaigns/default/campaign.json's
+    # "market_row"), and its full display name "Market Row" contains
+    # "market" as a substring of "the market", so the general
+    # marketplace check below swallowed a perfectly explicit "go to <a
+    # real place>" travel command before move_words ever got a chance
+    # (confirmed live: "go to market row", no "the", already correctly
+    # returned move -- only the "the market row" phrasing tripped this).
+    # Excluded here rather than reordered, so every other genuine
+    # marketplace phrase (check/cancel) below is completely unaffected.
+    if "market row" not in lowered and any(w in lowered for w in ["the market", "marketplace", "market listings"]):
         # Real live gap (2026-08-03, Coffee): "Cancel my listing in the
         # market" got swallowed by the plain "the market" check below
         # and showed him the market instead of cancelling anything --

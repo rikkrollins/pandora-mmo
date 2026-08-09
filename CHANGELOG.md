@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.101] — Party roster cap raised, "go to Market Row" misclassification fix
+
+Real live report (Coffee): "i cant invite more than 6 players to the
+party... we shud be able to have all the characters but then use party
+to pick with ones we want." `PARTY_MAX_MEMBERS` (roster cap) was
+hardcoded to 6, the same number as `PARTY_ACTIVE_COMBAT_CAP` (the real
+"pick who fights" bench/unbench system this was actually asking for,
+already built) — with the human player themselves also counting
+toward that 6, a solo player could only ever recruit 5 of the game's 6
+real companions. Raised to 12; the active-combat cap is untouched, so
+combat sizing is unaffected. Also fixed a stale hardcoded "(6 members)"
+in the full-party rejection message that would have silently gone
+wrong the moment this cap changed.
+
+Also, found via topic-activity monitoring: "Go to the market row" (a
+real, named location) was misclassified as check_market instead of
+move — "Market Row"'s name contains "market" as a substring of "the
+market", so the general marketplace-listing keyword check swallowed an
+explicit travel command before move ever got a chance. Fixed by
+excluding "market row" from that check.
+
 ## [1.27.100] — Real-time battle formation image (v1)
 
 Real live request (per Coffee): "when we are in battle, are you able

@@ -3640,6 +3640,61 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("already full", reply.lower())
         self.assertTrue(db.get_character(ids["Extra"], -999).get("is_benched"))
 
+    async def test_party_max_members_allows_all_six_recruitable_companions_plus_the_player(self):
+        """
+        Real live report (2026-08-09, Coffee): "i cant invite more than
+        6 players to the party... we shud be able to have all the
+        characters but then use party to pick with ones we want. RN its
+        not letting me invite anymore of the AI Characters." There are
+        exactly 6 recruitable AI companions in campaign.json -- with the
+        human player themselves also counting toward PARTY_MAX_MEMBERS
+        (db.get_party_size counts every characters row with the
+        party_id, not just AI ones), the old cap of 6 meant a solo
+        player could only ever have 5 of the 6 along at once. Confirms
+        the raised roster cap (config.PARTY_MAX_MEMBERS) actually lets a
+        real player recruit all 6 through the real _do_recruit_npc
+        handler, with none of them hitting "already full" -- separate
+        from PARTY_ACTIVE_COMBAT_CAP (still 6), which is the real
+        bench/unbench "pick who fights" system Coffee is describing.
+        """
+        player_id = 900530
+        make_basic_character(player_id, "CollectorPlayer", current_location="crossroads_tavern")
+        companions = ["Sarah", "Borin Ironjaw", "Wren Hollowbrook", "Pip Thistledown",
+                      "Grask Emberscale", "Vesh Nightglass"]
+        for name in companions:
+            sink = []
+            await bot._do_recruit_npc(FakeUpdate(player_id, f"recruit {name}", sink), name)
+            reply = "\n".join(sink)
+            self.assertNotIn("already full", reply.lower(), f"{name} failed to join: {reply}")
+            self.assertIn("joins your party", reply.lower(), f"{name} didn't actually join: {reply}")
+
+        player = db.get_character(player_id, -999)
+        self.assertEqual(db.get_party_size(player["party_id"]), 7)  # player + all 6 companions
+
+    def test_accept_party_invite_full_message_reflects_the_real_configured_cap(self):
+        """
+        db.accept_party_invite's rejection message used to hardcode the
+        literal string "(6 members)" regardless of the real configured
+        PARTY_MAX_MEMBERS -- would have silently gone stale and wrong
+        the moment the cap above was raised. Confirms it reports the
+        real live configured value instead.
+        """
+        leader_id = 900540
+        make_basic_character(leader_id, "CapLeader", current_location="crossroads_tavern")
+        party_id = db.create_party(leader_id, -999)
+        for i in range(db.PARTY_MAX_MEMBERS - 1):
+            uid = 900541 + i
+            make_basic_character(uid, f"CapFill{i}", current_location="crossroads_tavern")
+            db.update_character(uid, -999, party_id=party_id)
+        self.assertEqual(db.get_party_size(party_id), db.PARTY_MAX_MEMBERS)
+
+        latecomer_id = 900541 + db.PARTY_MAX_MEMBERS
+        make_basic_character(latecomer_id, "Latecomer", current_location="crossroads_tavern")
+        db.set_pending_party_invite(latecomer_id, -999, party_id)
+        ok, message = db.accept_party_invite(latecomer_id, -999)
+        self.assertFalse(ok)
+        self.assertIn(str(db.PARTY_MAX_MEMBERS), message)
+
     async def test_benched_member_still_gets_xp_and_gold_share(self):
         import sessions
         sessions.end_session(-999)
@@ -6983,6 +7038,28 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         """
         self.assertEqual(_keyword_fallback("Cancel my listing in the market", [])["action"], "cancel_market")
         self.assertEqual(_keyword_fallback("Check the market", [])["action"], "check_market")
+
+    def test_go_to_market_row_moves_instead_of_opening_the_market(self):
+        """
+        Real live bug (2026-08-09, found via topic-activity monitoring):
+        "Go to the market row" came back check_market instead of move --
+        Market Row is a real, travelable location (campaign.json's
+        "market_row"), and its name contains "market" as a substring of
+        "the market", so the general marketplace-listing check above
+        swallowed an explicit "go to <real place>" travel command before
+        move_words ever got a chance. Same "specific case before the
+        general one" shape as the cancel_market fix right above --
+        "market row" is excluded from the marketplace trigger so it
+        falls through to the real move classification instead, without
+        touching any other genuine marketplace phrase (verified below).
+        """
+        self.assertEqual(_keyword_fallback("Go to the market row", [])["action"], "move")
+        self.assertEqual(_keyword_fallback("go to market row", [])["action"], "move")
+        self.assertEqual(_keyword_fallback("head to Market Row", [])["action"], "move")
+        # Genuine marketplace phrasing must still work exactly as before.
+        self.assertEqual(_keyword_fallback("the marketplace", [])["action"], "check_market")
+        self.assertEqual(_keyword_fallback("show me the market listings", [])["action"], "check_market")
+        self.assertEqual(_keyword_fallback("Cancel my listing in the market", [])["action"], "cancel_market")
 
     async def test_cancel_market_intent_auto_resolves_a_single_listing(self):
         seller_id = 900573
