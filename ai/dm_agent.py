@@ -253,9 +253,38 @@ def _drama_instruction(raw_roll: int | None, critical_hit: bool, critical_fail: 
     return "This was an ordinary, middling roll — narrate it with a normal, measured tone."
 
 
+# Real live feature request (2026-08-09, per Coffee): "in battle give
+# the enemies small talk banter, teasing, coaxing type narrations to
+# keep the fights entertaining, enjoyable, funny." Folded into this
+# EXISTING per-attack narration call rather than a separate Ollama
+# call -- this session's own dev-topic monitoring has repeatedly
+# observed severe single-slot Ollama contention (a single generation
+# slot shared with the live bot means a second call per enemy attack
+# would double an already-scarce resource), and bot.py only sets
+# include_banter=True for a fraction of enemy turns (see
+# _post_narrated's include_banter roll) so this never fires every
+# single attack even for the calls that do use it. Most monsters have
+# no personality field (plain stat blocks in campaign.json), so this
+# instruction leans on the model inferring in-character flavor from
+# the attacker's own name/type (a goblin sounds cocky, a spider
+# hisses, a boss monologues) rather than requiring one.
+_BANTER_INSTRUCTION = (
+    "As part of this narration, have the attacker speak ONE short line "
+    "of in-character dialogue (in quotation marks) — taunting, teasing, "
+    "or coaxing the target, fitting whatever kind of creature or "
+    "villain it is (a goblin might sound cocky and gleeful, a spider "
+    "might just hiss or click, a boss-tier enemy might monologue a "
+    "little). Keep it fun, alive, and a little funny where it fits — "
+    "this is meant to make the fight more entertaining, not grim. "
+    "Never let the line reveal hidden mechanics (exact HP, dice "
+    "numbers, or what the attacker will do next) or contradict the "
+    "real hit/miss and damage outcome you're narrating."
+)
+
+
 def _build_prompt(character: dict, action_text: str, mechanical_result: dict,
                    recent_events: list[str] | None = None, actor_personality: str | None = None,
-                   location_description: str | None = None) -> str:
+                   location_description: str | None = None, include_banter: bool = False) -> str:
     recent_events = recent_events or []
     history = "\n".join(f"- {e}" for e in recent_events[-10:]) or "(no prior events)"
 
@@ -270,6 +299,7 @@ def _build_prompt(character: dict, action_text: str, mechanical_result: dict,
         f"they act: {actor_personality}\n\n"
         if actor_personality else ""
     )
+    banter_line = f"{_BANTER_INSTRUCTION}\n\n" if include_banter else ""
     # Real, already-decided physical surroundings -- the ONLY environment
     # detail the model is allowed to react to, never invented. Lets a
     # lightning/fire effect meaningfully play off a real wet/dry/enclosed
@@ -291,6 +321,7 @@ def _build_prompt(character: dict, action_text: str, mechanical_result: dict,
         f"HP: {character.get('hp_current')}/{character.get('hp_max')}\n"
         f"{_pronoun_line(character)}\n\n"
         f"{personality_line}"
+        f"{banter_line}"
         f"{environment_line}"
         f"Player action: {action_text}\n\n"
         f"Mechanical result (already decided, narrate faithfully): {mechanical_result}\n\n"
@@ -302,7 +333,7 @@ def _build_prompt(character: dict, action_text: str, mechanical_result: dict,
 
 def narrate_action(character: dict, action_text: str, mechanical_result: dict,
                     recent_events: list[str] | None = None, actor_personality: str | None = None,
-                    location_description: str | None = None) -> str:
+                    location_description: str | None = None, include_banter: bool = False) -> str:
     """
     Sends the mechanical result to the narration model and returns prose.
     Falls back to a plain template if Ollama is unreachable or errors.
@@ -313,9 +344,14 @@ def narrate_action(character: dict, action_text: str, mechanical_result: dict,
     `location_description` (bot.py's _post_narrated resolves this from the
     real, current location) lets the environment genuinely inform the
     prose — see its note in _build_prompt for why and its limits.
+    `include_banter` (see _BANTER_INSTRUCTION) asks the model to weave in
+    one short in-character taunt/tease/coax line from the attacker —
+    bot.py only ever sets this for enemy-side attackers, and only some
+    of the time, never for a real player's own action.
     """
     prompt = _build_prompt(
-        character, action_text, mechanical_result, recent_events, actor_personality, location_description
+        character, action_text, mechanical_result, recent_events, actor_personality,
+        location_description, include_banter,
     )
 
     try:

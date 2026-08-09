@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.99] — Enemy battle banter
+
+Real live request (per Coffee): "in battle give the enemies small
+talk banter, teasing, coaxing type narrations to keep the fights
+entertaining, enjoyable, funny." Roughly a third of enemy-side attacks
+(monsters, hostile NPCs, world bosses alike — never a real player or a
+friendly AI companion, both of whom take their turn through this same
+code path) now weave in one short in-character taunt/tease/coax line
+from the attacker as part of the existing per-attack narration, in
+quotes — fitting whatever kind of creature or villain it is (a goblin
+sounds cocky, a spider hisses, a boss-tier enemy monologues), never
+revealing hidden mechanics or contradicting the real hit/miss and
+damage outcome. Deliberately folded into the EXISTING narration call
+(`ai/dm_agent.narrate_action`'s new `include_banter` flag) rather than
+adding a second Ollama call per enemy attack, given this session's own
+repeated observation of severe single-generation-slot contention.
+
 ## [1.27.98] — Assassin Backstab, universal Throw, and grindable mastery proficiencies
 
 Real new Rogue subclass identity (per Coffee, live in the Development

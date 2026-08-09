@@ -822,6 +822,13 @@ OLLAMA_CONGESTION_LOAD_THRESHOLD = 12.0
 # or whether load average happens to catch the contention.
 AI_TURN_NARRATION_BUDGET_SECONDS = 45.0
 
+# Enemy battle banter (2026-08-09, task #9, see _post_narrated): fraction
+# of enemy-side attacks that roll a short in-character taunt/tease/coax
+# line woven into the existing narration call. Deliberately well under
+# 1.0 -- every enemy attack getting a quip would turn a fun surprise
+# into noise, on top of the extra generation cost per real occurrence.
+ENEMY_BANTER_CHANCE = 1 / 3
+
 
 def _ollama_congested() -> bool:
     """
@@ -3542,9 +3549,28 @@ async def _post_narrated(update: Update, character: dict, action_text: str,
     if skip_narration or (character.get("is_ai") and _ollama_congested()):
         flavor = _fallback_narration(mechanical_result)
     else:
+        # Enemy battle banter (2026-08-09, per Coffee): "in battle give
+        # the enemies small talk banter, teasing, coaxing type
+        # narrations to keep the fights entertaining, enjoyable, funny."
+        # session.sides is "party"/"enemy" per telegram_user_id -- this
+        # is true for a plain monster, a hostile hand-authored NPC, AND
+        # a world boss alike, and false for a real player or a
+        # friendly AI companion (who also take turns through this same
+        # function, see _resolve_ai_turns), so it's the one check that
+        # correctly scopes "enemies" without special-casing per caller.
+        # Only a fraction of enemy turns roll it (ENEMY_BANTER_CHANCE)
+        # rather than every single attack, both so it stays a fun
+        # surprise rather than noise, and because this session's own
+        # monitoring has repeatedly observed severe single-Ollama-slot
+        # contention -- folded into this EXISTING narration call rather
+        # than adding a second one, per that same cost tradeoff.
+        include_banter = (
+            session.sides.get(character.get("telegram_user_id")) == "enemy"
+            and random.random() < ENEMY_BANTER_CHANCE
+        )
         flavor = await asyncio.to_thread(
             narrate_action, character, action_text, mechanical_result, session.recent_events(),
-            actor_personality, location_description,
+            actor_personality, location_description, include_banter,
         )
     message = _format_combat_result(
         flavor, mechanical_result,

@@ -7672,6 +7672,104 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(request._client.timeout.write, 5.0)
         self.assertGreater(request._client.timeout.pool, 1.0)
 
+    # -- Enemy battle banter (2026-08-09, task #9) -----------------------
+    def test_build_prompt_includes_banter_instruction_only_when_requested(self):
+        """
+        Real live request (2026-08-09, per Coffee): "in battle give the
+        enemies small talk banter, teasing, coaxing type narrations to
+        keep the fights entertaining, enjoyable, funny." Pure prompt-
+        construction check, no Ollama call -- confirms _BANTER_
+        INSTRUCTION is actually threaded into the final prompt when
+        include_banter=True and completely absent otherwise, so a false
+        positive here can't silently mean the flag never reaches the
+        model.
+        """
+        from ai.dm_agent import _BANTER_INSTRUCTION, _build_prompt
+        character = {"name": "Grubnak", "char_class": None, "hp_current": 20, "hp_max": 20}
+        result = {"hit": True, "damage_dealt": 5, "raw_roll": 12}
+
+        with_banter = _build_prompt(character, "attacks Fenwick", result, include_banter=True)
+        self.assertIn(_BANTER_INSTRUCTION, with_banter)
+
+        without_banter = _build_prompt(character, "attacks Fenwick", result, include_banter=False)
+        self.assertNotIn(_BANTER_INSTRUCTION, without_banter)
+        default_omits = _build_prompt(character, "attacks Fenwick", result)
+        self.assertNotIn(_BANTER_INSTRUCTION, default_omits, "include_banter must default to off")
+
+    async def test_enemy_banter_only_rolled_for_enemy_side_attackers(self):
+        """
+        _post_narrated must only ever ask narrate_action for banter when
+        the attacker is on the "enemy" side of the fight -- never a real
+        player, and never a friendly AI-controlled party companion, even
+        though both take their combat turn through this exact same
+        function (see _resolve_ai_turns). Forces random.random() to 0.0
+        (always below ENEMY_BANTER_CHANCE) so this tests the actual side
+        check, not dice luck.
+        """
+        from unittest.mock import patch
+        import sessions
+        sessions.end_session(-997)
+        enemy_id = -2_500_080
+        companion_id = -2_500_081
+        monster = {"telegram_user_id": enemy_id, "name": "BanterGoblin", "dexterity": 10, "strength": 10,
+                   "hp_current": 20, "hp_max": 20, "armor_class": 10, "is_ai": 1, "monster_key": "goblin"}
+        companion = {"telegram_user_id": companion_id, "name": "FriendlyAI", "dexterity": 10, "strength": 10,
+                     "hp_current": 20, "hp_max": 20, "armor_class": 10, "is_ai": 1}
+        session = sessions.start_session(-997, [monster, companion], {enemy_id: "enemy", companion_id: "party"})
+        mechanical_result = {"hit": True, "damage_dealt": 5, "attacker": "BanterGoblin", "defender": "FriendlyAI",
+                              "raw_roll": 15, "critical_hit": False, "critical_fail": False}
+
+        captured = {}
+
+        def fake_narrate_action(character, action_text, mech_result, recent_events=None,
+                                 actor_personality=None, location_description=None, include_banter=False):
+            captured["include_banter"] = include_banter
+            return "The goblin swings."
+
+        sink = []
+        update = FakeUpdate(enemy_id, "n/a", sink)
+
+        with patch("bot.narrate_action", fake_narrate_action), patch("bot.random.random", return_value=0.0):
+            await bot._post_narrated(update, monster, "attacks FriendlyAI", mechanical_result, session)
+        self.assertTrue(captured["include_banter"], "enemy-side attacker with a below-threshold roll should get banter")
+
+        with patch("bot.narrate_action", fake_narrate_action), patch("bot.random.random", return_value=0.0):
+            await bot._post_narrated(update, companion, "attacks BanterGoblin", mechanical_result, session)
+        self.assertFalse(captured["include_banter"], "party-side (friendly AI companion) attacker must never get banter")
+
+        sessions.end_session(-997)
+
+    async def test_enemy_banter_respects_the_random_roll_not_always_on(self):
+        """
+        Even for a genuine enemy-side attacker, banter must only fire on
+        a fraction of turns (ENEMY_BANTER_CHANCE) -- an above-threshold
+        roll must NOT request banter, confirming this isn't accidentally
+        wired to fire on every single enemy attack.
+        """
+        from unittest.mock import patch
+        import sessions
+        sessions.end_session(-996)
+        enemy_id = -2_500_082
+        monster = {"telegram_user_id": enemy_id, "name": "QuietGoblin", "dexterity": 10, "strength": 10,
+                   "hp_current": 20, "hp_max": 20, "armor_class": 10, "is_ai": 1, "monster_key": "goblin"}
+        session = sessions.start_session(-996, [monster], {enemy_id: "enemy"})
+        mechanical_result = {"hit": True, "damage_dealt": 5, "attacker": "QuietGoblin", "defender": "Someone",
+                              "raw_roll": 10, "critical_hit": False, "critical_fail": False}
+
+        captured = {}
+
+        def fake_narrate_action(character, action_text, mech_result, recent_events=None,
+                                 actor_personality=None, location_description=None, include_banter=False):
+            captured["include_banter"] = include_banter
+            return "The goblin swings."
+
+        sink = []
+        update = FakeUpdate(enemy_id, "n/a", sink)
+        with patch("bot.narrate_action", fake_narrate_action), patch("bot.random.random", return_value=0.999):
+            await bot._post_narrated(update, monster, "attacks Someone", mechanical_result, session)
+        self.assertFalse(captured["include_banter"])
+        sessions.end_session(-996)
+
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
     """
