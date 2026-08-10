@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.119] — "Travel west" no longer silently misclassifies as chat
+
+Real live bug (2026-08-10, found via topic-activity monitoring):
+"Travel west" got silently misclassified as `chat` (intentionally
+silent by design), leaving the player with no reply at all.
+`_keyword_fallback`'s `move_words` only recognized a movement verb
+paired with a NAMED destination ("travel to X"), never a bare compass
+direction with no place name -- `bot.py`'s `_do_move` already fully
+supports compass-direction movement (it re-derives the destination
+straight from the raw text via the current location's real
+`directions` map in campaign.json, and already had its own passing
+tests for exactly this), the classifier just never routed
+"Travel west"/"Go north"/"Head south"-style phrasing there in the
+first place. Added a regex match (movement verb + bare compass
+direction word) right alongside `move_words`. Deliberately requires
+the verb, not the bare direction word alone, so something like "west
+of here is dangerous" or "talk to Westley" can't false-positive.
+Verified directly against `_keyword_fallback` (no Ollama needed) plus
+the existing `_do_move` compass-resolution tests, all passing.
+
 ## [1.27.118] — Battle formation image now shows active conditions
 
 Self-initiated (2026-08-10, per Coffee: "implementing things that

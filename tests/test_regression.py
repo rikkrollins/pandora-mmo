@@ -5121,6 +5121,28 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_keyword_fallback("fight the goblin, not the spider", [])["action"], "attack")
         self.assertEqual(_keyword_fallback("lets fight", [])["action"], "attack")
 
+    def test_bare_compass_direction_movement_no_longer_misclassifies_as_chat(self):
+        """
+        Real live bug (2026-08-10, topic-activity log): "Travel west"
+        got silently misclassified as chat. move_words only recognized
+        a movement verb paired with a NAMED destination ("travel to
+        X"), never a bare compass direction with no place name --
+        bot.py's _do_move already fully supports this (it re-derives
+        the destination from the raw text via the current location's
+        real "directions" map, campaign.json), the classifier just
+        never routed compass-direction phrasing there. Deliberately a
+        movement VERB + direction word, not the bare direction word
+        alone -- "west" by itself is too likely to be part of
+        something else (a name/sentence containing it).
+        """
+        for text in ["Travel west", "Go north", "Head south", "I want to travel east",
+                     "let's move north", "ride west", "walk south", "march east"]:
+            self.assertEqual(_keyword_fallback(text, [])["action"], "move", text)
+        # A bare direction word with no movement verb, or the word
+        # appearing as part of something else, must NOT false-positive.
+        self.assertNotEqual(_keyword_fallback("west of here is dangerous", [])["action"], "move")
+        self.assertNotEqual(_keyword_fallback("talk to Westley", [])["action"], "move")
+
     # -- Saving throw proficiency (2026-07-16 audit): confirmed via grep
     #    every save-based spell only ever added the raw ability modifier,
     #    never a proficiency bonus, even for a class real 5E says is

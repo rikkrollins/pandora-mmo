@@ -1371,6 +1371,22 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if any(w in lowered for w in move_words):
         return {**base, "action": "move"}
 
+    # Real live bug (2026-08-10, found via topic-activity monitoring):
+    # "Travel west" got silently misclassified as chat -- move_words
+    # above only recognizes movement verbs paired with a NAMED
+    # destination ("travel to X"), never a bare compass direction with
+    # no place name. _do_move (bot.py) already fully supports this --
+    # it re-derives the destination straight from the raw text via the
+    # current location's real "directions" map (compass word -> real
+    # location id, campaign.json) -- the classifier just never sent
+    # compass-direction phrasing there in the first place. Deliberately
+    # a movement VERB + direction word, not the bare word alone
+    # ("west" by itself is too likely to be part of something else,
+    # e.g. a location/NPC name containing it).
+    if re.search(r"\b(?:travel|go|goto|head|walk|move|ride|run|march|sail)\s+"
+                 r"(?:north|south|east|west|northeast|northwest|southeast|southwest)\b", lowered):
+        return {**base, "action": "move"}
+
     if any(w in lowered for w in ["look around", "where am i", "look at my surroundings", "examine the area",
                                     "describe this place", "what's around me", "whats around me",
                                     "survey the area", "look like", "what is this place", "observe the"]):
