@@ -2137,14 +2137,22 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         after = db.get_character(user_id, -999)
         self.assertEqual(after["backstab_base_multiplier"], 5)
 
-    async def test_throw_weapon_deals_pure_weapon_damage_regardless_of_thrower_stats(self):
+    async def test_throw_weapon_still_consumes_the_item_and_narrates_with_throws_not_casts(self):
         """
         Real live spec (2026-08-08, per Coffee, verbatim): "for
         throwing dont use the players attack damage only use the
         weapons attack damage - so even weak players can have a good
-        attack." A physically weak character throwing a strong weapon
-        must deal the SAME damage a strong character throwing the same
-        weapon would.
+        attack" -- STILL true for every character-derived bonus (rage,
+        guild %, subclass %, sneak attack, etc.), just no longer true
+        for the thrower's own ability modifier specifically (see
+        test_throw_damage_now_adds_the_weapons_own_ability_modifier
+        below for that real 2026-08-10 reversal).
+
+        Also covers a real live regression (2026-08-10, Coffee,
+        dev-bridge screenshot): "Pan casts Throw (Rusty Dagger) at ..."
+        read wrong -- "casts" implies spellcasting. Confirms the
+        message now says "throws" (lowercase, the real verb), never
+        the old "Throw" action-label text.
         """
         import sessions
         sessions.end_session(-999)
@@ -2170,7 +2178,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "throw silvered dagger at ThrowDummy",
         )
         combined = "\n".join(sink)
-        self.assertIn("Throw", combined)
+        self.assertIn("throws", combined)
+        self.assertNotIn("casts", combined)
         # The dagger must actually be gone from inventory (thrown/consumed).
         after = db.get_character(user_id, -999)
         self.assertNotIn("silvered_dagger", after.get("inventory", {}))
@@ -2179,6 +2188,30 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(after.get("equipped_weapon"), "shortsword")
         self.assertIn("shortsword", after.get("inventory", {}))
         sessions.end_session(-999)
+
+    def test_throw_damage_now_adds_the_weapons_own_ability_modifier(self):
+        """
+        Real live bug (2026-08-10, Coffee, dev-bridge screenshot): a
+        thrown Rusty Dagger (1d4, previously zero ability modifier at
+        all) hit for a real, confirmed 1 damage against a 200 HP boss
+        -- "that is pathetic lol.. maybe use the players stats in some
+        way?! Which stat do u think?" resolve_thrown_attack now adds
+        the attacker's modifier for whichever ability the weapon
+        already uses for its OWN to-hit roll (weapon["ability"] --
+        dexterity for a finesse weapon like a dagger, matching real 5E
+        thrown-weapon rules), answering "which stat" with the same one
+        the accuracy roll already reads from that weapon's own real
+        data. Forces the damage die to its minimum (1) so the only
+        variable left is the ability modifier itself.
+        """
+        from rules.combat import resolve_thrown_attack
+        attacker = {"name": "Pan", "dexterity": 16, "strength": 8}
+        weapon = {"name": "Rusty Dagger", "damage_dice": "1d4", "ability": "dexterity", "weapon_category": "simple", "damage_type": "physical"}
+        defender = {"name": "The Unspoken 3", "armor_class": 10, "hp_current": 200, "hp_max": 200, "conditions": []}
+        result = resolve_thrown_attack(attacker, defender, weapon, forced_hit=True, forced_damage_roll=1)
+        # Dexterity 16 -> +3 modifier (real 5E: (16-10)//2). 1 (forced
+        # minimum roll) + 3 (dex mod) = 4, not the old flat 1.
+        self.assertEqual(result["damage_dealt"], 4)
 
     async def test_assassin_throw_is_a_guaranteed_hit_no_roll(self):
         import sessions
@@ -3827,6 +3860,42 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         back_alive = {"telegram_user_id": 2, "name": "Mage", "hp_current": 50, "formation_row": "back"}
         target = bot._pick_formation_weighted_target([back_alive])
         self.assertEqual(target["name"], "Mage")
+
+    def test_formation_targeting_no_longer_locks_onto_the_single_lowest_hp_member(self):
+        """
+        Real live bug (2026-08-10, Coffee, dev-bridge screenshot: "Is
+        there a reason why bram is the only one getting targeted? Is
+        that a glitch is there agro im not aware of"). Root cause: the
+        within-row pick used to be a hard `min(pool, key=hp_current)`
+        -- not a tie-break, the entire rule -- so the moment one member
+        dropped even slightly below their row-mates' HP, every future
+        attack against that row locked onto them again forever, while
+        full-HP row-mates could never be picked. Confirmed live: Bram
+        at 3/325 HP, Wren at a completely untouched 507/507. This
+        reproduces that exact shape (one member heavily damaged, three
+        others at/near full HP, all same row so row-selection logic
+        never enters into it) over many real trials and asserts EVERY
+        member gets picked at least once -- the previous code would
+        have picked the damaged member 100% of the time, every trial.
+        """
+        import random
+        random.seed(11)
+        pool = [
+            {"telegram_user_id": 1, "name": "Bram", "hp_current": 3, "hp_max": 325, "formation_row": "back"},
+            {"telegram_user_id": 2, "name": "Charvenna", "hp_current": 253, "hp_max": 290, "formation_row": "back"},
+            {"telegram_user_id": 3, "name": "Vesh", "hp_current": 282, "hp_max": 282, "formation_row": "back"},
+            {"telegram_user_id": 4, "name": "Pan", "hp_current": 159, "hp_max": 159, "formation_row": "back"},
+        ]
+        picks = [bot._pick_formation_weighted_target(pool)["name"] for _ in range(2000)]
+        picked_names = set(picks)
+        self.assertEqual(
+            picked_names, {"Bram", "Charvenna", "Vesh", "Pan"},
+            f"at least one party member was never targeted across 2000 trials: only {picked_names} were picked",
+        )
+        # Still real, tactical weighting -- the badly wounded member
+        # should be picked noticeably more often than a full-HP one,
+        # just never exclusively.
+        self.assertGreater(picks.count("Bram"), picks.count("Vesh"))
 
     def test_enemy_formation_row_heuristic_grounded_in_real_monster_data(self):
         self.assertEqual(bot._enemy_formation_row("goblin", {"name": "Goblin"}), "front")

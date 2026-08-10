@@ -2241,7 +2241,8 @@ async def creation_menu_callback(update: Update, context: ContextTypes.DEFAULT_T
 # ---------------------------------------------------------------------
 
 def _format_combat_result(flavor_text: str, result: dict, actor_label: str, defender_label: str,
-                           action_label: str | None = None, weapon_name: str | None = None) -> str:
+                           action_label: str | None = None, weapon_name: str | None = None,
+                           verb: str | None = None) -> str:
     """
     Builds the visually structured combat message: a banner (critical hit /
     success / miss / fumble), the AI's short flavor line as a quote, then a
@@ -2293,7 +2294,15 @@ def _format_combat_result(flavor_text: str, result: dict, actor_label: str, defe
     lines.append("")
     lines.append("⚔️ **Combat Resolution**")
     dmg = result.get("damage_dealt", 0)
-    verb = f"casts **{action_label}** at" if action_label else "attacks"
+    # Real live feedback (2026-08-10, Coffee, dev-bridge screenshot): a
+    # thrown weapon read as "Pan casts Throw (Rusty Dagger) at ..." --
+    # "casts" implies spellcasting, wrong for a plain physical throw --
+    # "say it like 'Pan throws (item)'". `verb` (default "casts", same
+    # as before) lets a physical action like Throw override just the
+    # verb while still naming the real action_label, instead of every
+    # non-spell action_label being forced through "casts" the way a
+    # spell/ability genuinely should be.
+    resolved_verb = f"{verb or 'casts'} **{action_label}** at" if action_label else "attacks"
     weapon_suffix = f" with their **{weapon_name}**" if (weapon_name and not action_label) else ""
     # Real damage type (2026-07-27, per Coffee: surface the damage-type
     # system in narration, not just apply it silently) -- only called
@@ -2303,9 +2312,9 @@ def _format_combat_result(flavor_text: str, result: dict, actor_label: str, defe
     damage_type = result.get("damage_type")
     type_suffix = f" **{damage_type}**" if damage_type and damage_type != "physical" else ""
     if result.get("hit", True):
-        lines.append(f"- 🗡️ **{actor_label}** {verb} **{defender_label}**{weapon_suffix} → **Hits for {dmg}{type_suffix} damage!**")
+        lines.append(f"- 🗡️ **{actor_label}** {resolved_verb} **{defender_label}**{weapon_suffix} → **Hits for {dmg}{type_suffix} damage!**")
     else:
-        lines.append(f"- 🗡️ **{actor_label}** {verb} **{defender_label}**{weapon_suffix} → **Misses!**")
+        lines.append(f"- 🗡️ **{actor_label}** {resolved_verb} **{defender_label}**{weapon_suffix} → **Misses!**")
 
     hp_now = result.get("defender_hp_remaining")
     hp_max = result.get("defender_hp_max")
@@ -3586,7 +3595,8 @@ async def _announce_reaction(update: Update, defender: dict, result: dict) -> No
 
 async def _post_narrated(update: Update, character: dict, action_text: str,
                           mechanical_result: dict, session: sessions.Session,
-                          action_label: str | None = None, skip_narration: bool = False) -> None:
+                          action_label: str | None = None, skip_narration: bool = False,
+                          verb: str | None = None) -> None:
     """
     Real live finding (2026-07-23/24, a full-playthrough simulation run
     hit this twice, once for 2+ hours): a multi-monster fight against a
@@ -3644,6 +3654,7 @@ async def _post_narrated(update: Update, character: dict, action_text: str,
         defender_label=mechanical_result.get("defender", "?"),
         action_label=action_label,
         weapon_name=None if action_label else _weapon_for_attacker(character).get("name"),
+        verb=verb,
     )
     session.log_event(f"{mechanical_result.get('attacker')} vs {mechanical_result.get('defender')}: {flavor}")
     await _safe_send(update, message)
@@ -5507,8 +5518,27 @@ def _pick_formation_weighted_target(opposing: list[dict]) -> dict:
     row is only drawn from at a FRONT_ROW_TARGET_CHANCE-complement
     chance while front row still has someone standing (a real, if
     lower, chance to be targeted -- not immunity), or unconditionally
-    once front row is wiped. Whichever pool is chosen keeps the exact
-    same lowest-HP deterministic tie-break this always used.
+    once front row is wiped.
+
+    Real live bug (2026-08-10, Coffee, dev-bridge screenshot: "Is there
+    a reason why bram is the only one getting targeted? Is that a
+    glitch is there agro im not aware of"): despite this function's own
+    name and docstring both promising "weighted" selection with "all
+    players can still be targeted," the actual pick within a chosen
+    row used to be a hard deterministic `min(pool, key=hp_current)` --
+    not a tie-break, THE entire selection rule. The moment any one
+    member's HP dropped even slightly below their row-mates', every
+    single subsequent attack against that row locked onto them again
+    (now-even-lower HP re-winning the same min() every time), while
+    full-HP row-mates could never be picked at all -- a self-
+    reinforcing death spiral on whoever happened to get hit first,
+    confirmed live: Bram at 3/325 HP while Wren sat at a completely
+    untouched 507/507 the entire fight. Real weighted-random draw now
+    used instead -- lower HP genuinely raises a member's odds (the
+    same "focus the wounded" tactical feel this was always meant to
+    have), but every row member keeps a real, non-zero chance
+    regardless of current HP, matching "all players can still be
+    targeted" as an actual guarantee, not just a docstring claim.
     """
     front = [p for p in opposing if p.get("formation_row", "front") != "back"]
     back = [p for p in opposing if p.get("formation_row") == "back"]
@@ -5518,7 +5548,17 @@ def _pick_formation_weighted_target(opposing: list[dict]) -> dict:
         pool = front
     else:
         pool = back
-    return min(pool, key=lambda p: p["hp_current"])
+    if len(pool) == 1:
+        return pool[0]
+    weights = []
+    for p in pool:
+        hp_max = p.get("hp_max") or p["hp_current"] or 1
+        hp_pct = p["hp_current"] / hp_max
+        # Range (0.1, 1.1]: a member at full HP still keeps a real
+        # 0.1 floor of weight (never immune), a member near death
+        # approaches 1.1 (favored, not guaranteed).
+        weights.append((1.0 - hp_pct) + 0.1)
+    return random.choices(pool, weights=weights, k=1)[0]
 
 
 def _format_formation_line(combatants: list[dict]) -> str | None:
@@ -6573,9 +6613,17 @@ async def _do_throw_weapon(update: Update, action_text: str) -> None:
         _sync_player_to_db(target)
         db.remove_item(user_id, chat_id, weapon_id, 1)
 
-        throw_label = "Backstab Throw" if is_assassin else "Throw"
+        # Real live feedback (2026-08-10, Coffee, dev-bridge screenshot):
+        # "say it like 'Pan throws (item)'" -- the old action_label
+        # ("Throw (Rusty Dagger)") went through _format_combat_result's
+        # generic "casts **{label}** at" phrasing meant for real spells/
+        # abilities, reading as "Pan casts Throw (Rusty Dagger) at ...",
+        # which is wrong for a plain physical throw. verb="throws" (see
+        # _format_combat_result) overrides just the verb; action_label
+        # is now the weapon's own real name, no wrapping needed.
+        throw_action_label = f"{weapon_item['name']} (Backstab)" if is_assassin else weapon_item["name"]
         await _post_narrated(update, attacker, f"throw {weapon_item['name']}", result, session,
-                              action_label=f"{throw_label} ({weapon_item['name']})")
+                              action_label=throw_action_label, verb="throws")
         if mastery_throw_dmg:
             await _safe_send(update, f"🎯 **Throw mastery!** {attacker['name']}'s practice pays off — **+{mastery_throw_dmg} bonus damage!**")
 

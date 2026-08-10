@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.115] — Formation targeting no longer death-spirals one party member; throw fixes
+
+Real live bug (2026-08-10, Coffee, dev-bridge screenshot): "Is there a
+reason why bram is the only one getting targeted? Is that a glitch is
+there agro im not aware of" -- confirmed live: Bram at 3/325 HP while
+Wren sat at a completely untouched 507/507 the whole fight. Root
+cause: `_pick_formation_weighted_target`'s own name and docstring both
+promised "weighted" selection with "all players can still be
+targeted," but the real within-row pick was a hard deterministic
+`min(pool, key=hp_current)` -- not a tie-break, the entire rule. The
+moment one member's HP dropped even slightly below their row-mates',
+every future attack against that row locked onto them again forever
+(now-even-lower HP re-winning the same min() every time), while
+full-HP row-mates could never be picked at all. Now a real
+weighted-random draw: lower HP genuinely raises a member's odds (the
+intended "focus the wounded" tactical feel), but every row member
+keeps a real, non-zero chance regardless of current HP.
+
+Also, two more real live reports from the same conversation:
+
+- "say it like 'Pan throws (item)'" -- a thrown weapon read as "Pan
+  casts Throw (Rusty Dagger) at ...", which is wrong ("casts" implies
+  spellcasting). Now says "Pan throws **Rusty Dagger** at ...".
+- "make it have more damage.. that is pathetic lol.. maybe use the
+  players stats in some way?! Which stat do u think?" -- a thrown
+  Rusty Dagger (1d4, zero ability modifier under the original
+  "weapon-only damage" design) hit for a real, confirmed 1 damage
+  against a 200 HP boss. Thrown-weapon damage now adds the attacker's
+  modifier for whichever ability the weapon already uses for its own
+  to-hit roll (dexterity for a finesse weapon like a dagger, matching
+  real 5E thrown-weapon rules) -- every OTHER character-derived bonus
+  (rage, guild %, subclass %, sneak attack, etc.) still deliberately
+  does not carry over, per the original spec.
+
 ## [1.27.114] — Battle formation image: real names no longer collapse to "The"
 
 Real live bug (2026-08-10, Coffee, dev-bridge screenshot): fighting

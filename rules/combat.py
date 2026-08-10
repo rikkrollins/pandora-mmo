@@ -611,11 +611,27 @@ def resolve_thrown_attack(attacker: dict, defender: dict, weapon: dict, forced_h
     thrower's), and the same real defensive saves resolve_attack
     already has (temp HP absorption, Relentless Endurance, Death Ward)
     so a thrown weapon can't bypass those just by using a different
-    code path. Real 5E attack-roll math (proficiency + ability
-    modifier) is UNCHANGED for accuracy -- only damage output is
-    weapon-only; a physically weak character still swings less
-    accurately than a trained one, they just hit just as hard when
-    they connect.
+    code path.
+
+    Real live follow-up (2026-08-10, Coffee, dev-bridge screenshot): a
+    thrown Rusty Dagger (1d4, no ability modifier at all under the
+    original "weapon-only" design above) hit for a real, confirmed 1
+    damage against a 200 HP boss -- "that is pathetic... maybe use the
+    players stats in some way?! Which stat do u think?" Reversing the
+    "weapon-only damage" half of the original design specifically:
+    damage now adds the attacker's own modifier for whichever ability
+    the weapon already uses for its TO-HIT roll (weapon_ability below --
+    dexterity for a finesse weapon like a dagger, strength otherwise),
+    matching real 5E's actual thrown-weapon rule (ability modifier
+    always applies to a thrown weapon's damage, same as any other
+    weapon attack) and directly answering "which stat" with the same
+    one the accuracy roll already reads from that weapon's own data,
+    not a new invented rule. The rest of the original rationale still
+    holds -- every OTHER character-derived bonus (rage, wild shape,
+    guild %, subclass %, sneak attack, hex/hunter's mark, power-scale)
+    still deliberately does NOT carry over, so a weak character still
+    doesn't get a fully-loaded main-hand attack's damage just by
+    throwing instead, only their own raw physical/finesse aptitude.
     """
     weapon_ability = weapon.get("ability", "strength")
     weapon_category = weapon.get("weapon_category", "simple")
@@ -644,8 +660,9 @@ def resolve_thrown_attack(attacker: dict, defender: dict, weapon: dict, forced_h
     relentless_endurance_triggered = False
     death_ward_triggered = False
     if attack_result["hit"]:
+        ability_bonus = ability_modifier(attacker.get(weapon_ability, 10))
         dmg = roll_damage(
-            weapon["damage_dice"], modifier=weapon.get("damage_bonus", 0),
+            weapon["damage_dice"], modifier=weapon.get("damage_bonus", 0) + ability_bonus,
             critical=attack_result["critical_hit"], forced_roll=forced_damage_roll,
         )
         damage_dealt = max(dmg["total"], 0)
