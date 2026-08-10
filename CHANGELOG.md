@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.116] — "We don't have to fight" no longer misclassifies as attack
+
+Real bug found via topic-activity monitoring: "we dont have to
+fight" (half of a compound message also addressing an NPC by name,
+"Wait kess, we dont have to fight") matched the bare "fight" word
+rule and returned 'attack' — exactly backwards, a plea to avoid
+combat, not start it. `conditional_words` already guarded
+hypothetical phrasing ("if X") but never negation. A small, explicit
+list of negated-fight phrasings now skips the attack match (falling
+through to chat instead), while a real attack that happens to contain
+"not" elsewhere ("fight the goblin, not the spider") still correctly
+classifies as attack.
+
 ## [1.27.115] — Formation targeting no longer death-spirals one party member; throw fixes
 
 Real live bug (2026-08-10, Coffee, dev-bridge screenshot): "Is there a

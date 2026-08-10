@@ -5080,6 +5080,26 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(_keyword_fallback("I made a Fighter", [])["action"], "attack")
         self.assertNotEqual(_keyword_fallback("switch to my Fighter", [])["action"], "attack")
 
+    def test_negated_fight_phrasing_never_misclassifies_as_attack(self):
+        """
+        Real live bug (2026-08-10, topic-activity log): "we dont have
+        to fight" (half of a compound message also addressing an NPC
+        by name, "Wait kess, we dont have to fight") matched the bare
+        "fight" word rule above and returned 'attack' -- exactly
+        backwards, a plea to AVOID combat, not start it.
+        conditional_words already guarded hypothetical phrasing ("if
+        X") but never negation. A real attack that happens to contain
+        the word "not" elsewhere ("fight the goblin, not the spider")
+        must still classify as attack -- this isn't a blanket "not"
+        strip, just the specific negated-fight phrasings.
+        """
+        for text in ["we dont have to fight", "we don't have to fight", "no need to fight",
+                     "we won't fight", "we refuse to fight", "we don't want to fight"]:
+            self.assertNotEqual(_keyword_fallback(text, [])["action"], "attack", text)
+        # A real attack containing "not" elsewhere must still work.
+        self.assertEqual(_keyword_fallback("fight the goblin, not the spider", [])["action"], "attack")
+        self.assertEqual(_keyword_fallback("lets fight", [])["action"], "attack")
+
     # -- Saving throw proficiency (2026-07-16 audit): confirmed via grep
     #    every save-based spell only ever added the raw ability modifier,
     #    never a proficiency bonus, even for a class real 5E says is

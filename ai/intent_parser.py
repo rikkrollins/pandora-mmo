@@ -923,8 +923,26 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # names -- a substring check would misclassify any ordinary mention
     # of the class ("I made a Fighter", "switch to my Fighter") as an
     # attack.
+    # Real live bug (2026-08-10, topic-activity log): "we dont have to
+    # fight" (part of a compound message also addressing an NPC by
+    # name, "Wait kess, we dont have to fight") matched the bare
+    # "fight" word rule below and returned 'attack' -- exactly
+    # backwards, this is a plea to AVOID combat, not start it.
+    # conditional_words above only guards hypothetical/conditional
+    # phrasing ("if X"), never negation. A small, explicit list of
+    # negated-fight phrasings (deliberately NOT a blanket "not" strip,
+    # which would wrongly exclude a real attack like "fight the
+    # goblin, not the spider") skips this match so it falls through
+    # to whatever this actually is instead (talk_npc/chat), same
+    # "skip rather than guess wrong" shape as conditional_words itself.
+    negated_fight_phrases = [
+        "don't have to fight", "dont have to fight", "don't need to fight", "dont need to fight",
+        "no need to fight", "not going to fight", "won't fight", "wont fight", "refuse to fight",
+        "don't want to fight", "dont want to fight", "we shouldn't fight", "we shouldnt fight",
+    ]
     fight_words = set(re.findall(r"[a-z']+", lowered))
-    if "fight" in fight_words and not any(c in lowered for c in conditional_words):
+    if ("fight" in fight_words and not any(c in lowered for c in conditional_words)
+            and not any(p in lowered for p in negated_fight_phrases)):
         return {**base, "action": "attack"}
 
     if any(w in lowered for w in attack_words) and not any(c in lowered for c in conditional_words):
