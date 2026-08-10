@@ -7728,6 +7728,33 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         fallen_player = {"name": "ReproPlayer", "monster_key": None}
         self.assertTrue(bot._defeat_image_prompt(fallen_player).startswith("ReproPlayer,"))
 
+    def test_spell_and_ability_image_prompts_exclude_a_person(self):
+        """
+        Real live feedback (2026-08-10, Coffee, dev-bridge screenshot):
+        the generated "Mage Hand" image showed a human hand reaching
+        toward the spell effect -- "please show the [effect] but not
+        show a person or any human appendages or the monster... it
+        looks pretty creepy." The old prompts said "spellcasting" and
+        "character using a special ability... dynamic action pose,"
+        both of which invited a human figure. This can't re-run the
+        live image API (no network call belongs in the regression
+        suite), so it verifies the one thing that actually matters:
+        both prompts now explicitly exclude a person/hands/creature and
+        no longer contain the old people-inviting phrasing.
+        """
+        spell = {"name": "Mage Hand", "effect": "utility"}
+        spell_prompt = bot._spell_image_prompt(spell)
+        self.assertIn("no person", spell_prompt)
+        self.assertIn("no human hands or body parts", spell_prompt)
+        self.assertIn("no creature or monster", spell_prompt)
+        self.assertNotIn("spellcasting", spell_prompt)
+
+        ability_prompt = bot._ability_image_prompt("Second Wind", "a burst of restorative vigor")
+        self.assertIn("no person", ability_prompt)
+        self.assertIn("no human hands or body parts", ability_prompt)
+        self.assertIn("no creature or monster", ability_prompt)
+        self.assertNotIn("dynamic action pose", ability_prompt)
+
     async def test_send_generated_image_pre_warms_the_url_before_handing_it_to_telegram(self):
         """
         Real live bug (2026-08-08, found via topic-activity monitoring):

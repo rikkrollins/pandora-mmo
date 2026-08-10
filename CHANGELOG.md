@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.112] — Spell/ability images no longer show a person or human hands
+
+Real live feedback (2026-08-10, Coffee, dev-bridge screenshot of a
+generated "Mage Hand" image): "please show the [effect] but not show
+a person or any human appendages or the monster just when it comes to
+spells and abilities... it looks pretty creepy in all honesty." The
+old prompts said "spellcasting" and "character using a special
+ability... dynamic action pose" — both phrasings that reliably invited
+Pollinations.ai to render a human hand/figure into the image.
+
+`_spell_image_prompt` and `_ability_image_prompt` now describe only
+the magical effect itself and explicitly instruct the model to exclude
+a person, human hands/body parts, and any creature or monster from
+spell/ability art. Item/monster/location/NPC/interactable art is
+unaffected — this only touches the two prompt builders where a person
+was actually leaking in.
+
 ## [1.27.111] — "Look at X in my inventory" now examines X, not the whole backpack
 
 Real live bug (2026-08-10, found via topic-activity monitoring): "Look

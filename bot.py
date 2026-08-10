@@ -13326,7 +13326,19 @@ async def _maybe_send_battle_formation_image(update: Update, session: sessions.S
 
 
 def _spell_image_prompt(spell: dict) -> str:
-    """Grounded only in the spell's own real name/effect/damage_type -- no invented visual detail beyond generic fantasy spell-effect framing."""
+    """
+    Grounded only in the spell's own real name/effect/damage_type -- no
+    invented visual detail beyond generic fantasy spell-effect framing.
+
+    Real live feedback (2026-08-10, Coffee, dev-bridge screenshot of a
+    generated "Mage Hand" image): the old prompt said "spellcasting,"
+    which Pollinations reliably rendered as a human hand/figure casting
+    the effect -- Coffee: "please show the [effect] but not show a
+    person or any human appendages or the monster... it looks pretty
+    creepy." Rewritten to describe ONLY the magical effect itself and
+    explicitly exclude a person/hand/creature, rather than leaving that
+    up to the image model's own interpretation of "spellcasting."
+    """
     damage_type = spell.get("damage_type")
     if spell.get("effect") == "damage" and damage_type:
         flavor = f"a {damage_type} elemental magical effect"
@@ -13334,7 +13346,11 @@ def _spell_image_prompt(spell: dict) -> str:
         flavor = "a warm, restorative golden magical light"
     else:
         flavor = "a swirling magical effect"
-    return f"fantasy RPG spellcasting, {spell['name']}, {flavor}, dramatic magical energy, digital painting, no text or labels"
+    return (
+        f"fantasy RPG magical effect, {spell['name']}, {flavor}, dramatic magical energy, "
+        f"pure abstract arcane visual, no person, no human hands or body parts, no caster, "
+        f"no creature or monster, digital painting, no text or labels"
+    )
 
 
 async def _maybe_send_spell_image(update: Update, spell: dict) -> None:
@@ -13386,8 +13402,24 @@ async def _maybe_send_defeat_image(update: Update, entry: dict) -> None:
 
 
 def _ability_image_prompt(ability_name: str, flavor: str) -> str:
-    """Grounded only in the ability's own real name and its own one-line mechanical flavor -- no invented visual detail."""
-    return f"fantasy RPG character using a special ability, {ability_name}, {flavor}, dynamic action pose, digital painting, no text or labels"
+    """
+    Grounded only in the ability's own real name and its own one-line
+    mechanical flavor -- no invented visual detail.
+
+    Real live feedback (2026-08-10, Coffee, dev-bridge, same report as
+    _spell_image_prompt above): "not show a person or any human
+    appendages or the monster just when it comes to spells and
+    abilities." The old prompt explicitly said "character... dynamic
+    action pose," which is exactly what invited a human figure into
+    the generated image. Rewritten the same way spells were, to
+    describe only the ability's effect and explicitly exclude a
+    person/hand/creature.
+    """
+    return (
+        f"fantasy RPG special ability effect, {ability_name}, {flavor}, dynamic magical energy, "
+        f"pure abstract effect visual, no person, no human hands or body parts, no character, "
+        f"no creature or monster, digital painting, no text or labels"
+    )
 
 
 async def _maybe_send_ability_image(update: Update, ability_name: str, flavor: str, emoji: str = "✨") -> None:
