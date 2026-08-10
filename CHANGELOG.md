@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.121] — Interactable images nudged against warped-object distortion
+
+Real dev-bridge screenshot report (2026-08-10): "The bottles in the
+picture have bent necks that look unnatural. Glass Bottles don't
+normally bend" — Pollinations (the free image API this game uses)
+distorted a shelf-of-bottles interactable image, the same "warped
+hands/fingers" failure generative image models are broadly known for,
+here applied to bottles in a close-up scene. A/B tested directly
+against the real reported prompt+seed (fetched both, compared
+visually): adding "well-formed objects, correct proportions" to
+`_interactable_image_prompt` produced visibly straighter, more
+consistent bottle necks. Not a guaranteed fix — still a generative,
+probabilistic model — but a real, visually confirmed improvement, not
+a guess.
+
 ## [1.27.120] — "Break open the barrel" now triggers a real strength check
 
 Real live bug (2026-08-10, found via topic-activity monitoring):

@@ -13504,8 +13504,25 @@ async def _maybe_send_ability_image(update: Update, ability_name: str, flavor: s
 
 
 def _interactable_image_prompt(obj_data: dict) -> str:
-    """Grounded only in the interactable's own real name/description -- never invented detail beyond what's already written."""
-    return f"fantasy RPG environment detail, {obj_data['name']}, {obj_data['description']}, close-up, atmospheric, digital painting, no text or labels"
+    """
+    Grounded only in the interactable's own real name/description --
+    never invented detail beyond what's already written.
+
+    "well-formed objects, correct proportions" (2026-08-10, real
+    dev-bridge screenshot report: "The bottles in the picture have
+    bent necks that look unnatural. Glass Bottles don't normally
+    bend") -- Pollinations (this free image API) sometimes distorts
+    small repeated objects in a close-up scene, the same "warped
+    hands/fingers" failure mode generative image models are broadly
+    known for, just applied to bottles here. A/B tested directly
+    against the real reported prompt+seed: the same shelf-of-bottles
+    scene rendered with visibly straighter, more consistent bottle
+    necks with this addition. Not a guaranteed fix (still a
+    generative model, still probabilistic) but a real, visually
+    confirmed improvement, not a guess.
+    """
+    return (f"fantasy RPG environment detail, {obj_data['name']}, {obj_data['description']}, "
+            f"close-up, atmospheric, digital painting, well-formed objects, correct proportions, no text or labels")
 
 
 async def _maybe_send_interactable_image(update: Update, obj_data: dict) -> None:

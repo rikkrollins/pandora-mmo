@@ -7909,6 +7909,30 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("no creature or monster", ability_prompt)
         self.assertNotIn("dynamic action pose", ability_prompt)
 
+    def test_interactable_image_prompt_nudges_against_warped_objects(self):
+        """
+        Real live feedback (2026-08-10, dev-bridge screenshot): "The
+        bottles in the picture have bent necks that look unnatural.
+        Glass Bottles don't normally bend" -- a real, visually
+        confirmed Pollinations distortion artifact on a shelf-of-
+        bottles interactable image (the same "warped hands/fingers"
+        failure mode generative image models are broadly known for).
+        A/B tested directly against the real reported prompt+seed
+        (fetched both images, compared visually): adding "well-formed
+        objects, correct proportions" produced visibly straighter,
+        more consistent bottle necks. Can't re-run the live image API
+        in the regression suite (no network call belongs here, same
+        convention as the spell/ability image prompt test above) --
+        this verifies the actual prompt text carries the addition.
+        """
+        prompt = bot._interactable_image_prompt(
+            {"name": "a shelf of dusty bottles",
+             "description": "Vintages going back further than the tavern's own sign out front."})
+        self.assertIn("well-formed objects", prompt)
+        self.assertIn("correct proportions", prompt)
+        # Still grounded only in the real name/description -- no invented detail.
+        self.assertIn("a shelf of dusty bottles", prompt)
+
     async def test_send_generated_image_pre_warms_the_url_before_handing_it_to_telegram(self):
         """
         Real live bug (2026-08-08, found via topic-activity monitoring):
