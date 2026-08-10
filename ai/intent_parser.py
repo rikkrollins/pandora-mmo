@@ -995,6 +995,27 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if lowered.strip(" .!?").strip() in ("shop", "shops", "the shop"):
         return {**base, "action": "list_shop"}
 
+    # Real live bug (2026-08-10, found via topic-activity monitoring):
+    # "Look at the shard of dim light in my inventory" matched "my
+    # inventory" below and got misclassified as check_inventory, whose
+    # handler always dumps the WHOLE backpack list, ignoring any item
+    # name in the message -- confirmed by the very next message from
+    # the same player, "Examine the shard of dim light" (same item, no
+    # "in my inventory" suffix), which correctly returned 'examine'.
+    # Naming a specific item "in my inventory"/"in my backpack"/"in my
+    # bag" is asking to inspect THAT item, not list everything carried.
+    # Checked BEFORE check_inventory below so it can't be shadowed,
+    # same "check the narrower phrasing first" shape as the "what items
+    # do you have for sale" guard above.
+    examine_named_item_in_inventory = re.search(
+        r"\b(?:look at|examine|inspect|check(?: out)?)\s+(?:the |a |an )?(.+?)\s+in my (?:inventory|backpack|bag)\b",
+        lowered,
+    )
+    if examine_named_item_in_inventory:
+        target = text[examine_named_item_in_inventory.start(1):examine_named_item_in_inventory.end(1)].strip()
+        if target:
+            return {**base, "action": "examine", "target": target or None}
+
     # Real live bug (2026-07-15): "auto equip my equipment" contains "my
     # equipment", which otherwise matches here and never reaches
     # auto_equip's own check further down -- same shadowing shape as

@@ -1151,6 +1151,27 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                      "what weapons do i have"]:
             self.assertEqual(_keyword_fallback(text, [])["action"], "check_inventory", text)
 
+    # -- Real live bug (2026-08-10, found via topic-activity monitoring):
+    #    "Look at the shard of dim light in my inventory" matched
+    #    check_inventory's "my inventory" trigger and dumped the whole
+    #    backpack instead of examining the named item -- confirmed by
+    #    the very next message from the same player, "Examine the shard
+    #    of dim light" (same item, no "in my inventory" suffix), which
+    #    correctly returned 'examine'. A named item "in my inventory/
+    #    backpack/bag" must route to examine with that item as the
+    #    target, never the generic full-list action. ---------------------
+    def test_named_item_in_inventory_routes_to_examine_not_check_inventory(self):
+        cases = [
+            ("Look at the shard of dim light in my inventory", "shard of dim light"),
+            ("Check the shard of dim light in my inventory", "shard of dim light"),
+            ("Examine the healing potion in my backpack", "healing potion"),
+            ("inspect the rusty key in my bag", "rusty key"),
+        ]
+        for text, expected_target in cases:
+            result = _keyword_fallback(text, [])
+            self.assertEqual(result["action"], "examine", text)
+            self.assertEqual(result["target"], expected_target, text)
+
     # -- Real live incident (2026-07-16): a Support question failed when
     #    Ollama was transiently unreachable (contention from concurrent
     #    dev-side model calls), and the fallback reply was generic

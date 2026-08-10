@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.111] — "Look at X in my inventory" now examines X, not the whole backpack
+
+Real live bug (2026-08-10, found via topic-activity monitoring): "Look
+at the shard of dim light in my inventory" matched `check_inventory`'s
+"my inventory" keyword and dumped the player's whole backpack list,
+ignoring the item they actually named — confirmed by the very next
+message from the same player, "Examine the shard of dim light" (same
+item, no "in my inventory" suffix), which correctly returned
+'examine'. A real, reproducible misclassification, not a hypothetical
+edge case.
+
+`ai/intent_parser.py`'s `_keyword_fallback` now checks for a named
+item followed by "in my inventory"/"in my backpack"/"in my bag"
+*before* the generic check_inventory keyword match, routing to
+`examine` with that item as the target instead — same "check the
+narrower phrasing first" shape as the existing "what items do you
+have for sale" guard right above it. Plain "check my inventory"/
+"what am I carrying" phrasing (no named item) is unaffected.
+
 ## [1.27.110] — Oversized narration messages no longer vanish silently
 
 Real bug found proactively triaging `bot_live_tmp.log` (2026-08-09,
