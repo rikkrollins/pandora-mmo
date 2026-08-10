@@ -142,18 +142,20 @@ async def run_simulation():
             await bot.adventure_master_handler(FakeUpdate(user_id, text, sink), DummyContext())
         return inner
 
-    # --- Non-combat sweep (also real intent-classification coverage) ---
+    # --- Cheap, deterministic steps first (no Ollama call at all) ---
     if not await step("look around", await do_adv(wizard_id, "look around")):
         return report
     if not await step("check inventory", await do_adv(wizard_id, "check my inventory")):
         return report
-    if not await step("examine item in inventory", await do_adv(wizard_id, "examine the rusty dagger in my inventory")):
-        return report
-    if not await step("talk to Grimsby", await do_adv(wizard_id, "talk to Grimsby")):
-        return report
 
-    # --- Combat sweep: direct session setup (matches tests/test_regression.py
-    # convention), real narration for every action taken through it. ---
+    # --- Combat sweep FIRST among the real-narration steps (2026-08-10,
+    # after 3 real runs all aborted on real player activity before
+    # reaching it): idle windows on a live bot are short and get
+    # interrupted often, so the steps most likely to actually catch a
+    # live bug (narration wording, targeting, damage math -- the exact
+    # class of bug the last several real fixes this session were) go
+    # first, while the already-recently-verified non-combat steps
+    # (examine, NPC dialogue) move to the end where an abort costs less. ---
     if not require_idle("combat setup"):
         return report
     sessions.end_session(-999)
@@ -189,6 +191,10 @@ async def run_simulation():
 
     sessions.end_session(-999)
 
+    if not await step("examine item in inventory", await do_adv(wizard_id, "examine the rusty dagger in my inventory")):
+        return report
+    if not await step("talk to Grimsby", await do_adv(wizard_id, "talk to Grimsby")):
+        return report
     if not await step("rest", await do_adv(wizard_id, "I rest")):
         return report
 
