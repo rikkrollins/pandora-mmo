@@ -409,6 +409,8 @@ _SPELL_SLOT_RESTORE_QUESTION_WORDS = [
     "replenish spell slot", "restore spell slot", "recover spell slot",
     "regain spell slot", "spell slots back", "recharge spell slot",
     "refill spell slot", "get my spell slot", "get spell slots back",
+    "run out of spell slot", "ran out of spell slot", "out of spell slot",
+    "no spell slots left", "no more spell slot",
 ]
 
 
@@ -427,12 +429,24 @@ def _deterministic_spell_slot_restore_answer(character: dict | None) -> str:
     model verbatim, still not trusted over free-form generation.
     Answered directly from the real constants, no Ollama call, so this
     specific question can never come out wrong again.
+
+    Also folds in Coffee's own follow-up on the dev-topic screenshot
+    of that wrong answer ("what can we do in battle so we can cast
+    magic ... once we run out"): the real, honest answer per bot.py's
+    _do_cast_spell is that cantrips (level 0) are free/unlimited and
+    never cost a spell slot, so a caster who's out of slots can still
+    use any cantrip their class knows, or fall back to a normal weapon
+    attack -- there is no item or ability anywhere in items.py that
+    restores a spell slot mid-battle, confirmed by grep.
     """
     full_rest_hours = config.NATURAL_HEALING_FULL_REST_HOURS
     base = (
-        "Spell slots can't be replenished mid-battle in this game — the only way to recover them is "
-        "resting (say \"I rest\" or go quiet for a while). Resting heals HP and spell slots gradually "
-        f"over real-world elapsed time, not instantly, capped at full after {full_rest_hours:g} hours."
+        "Spell slots can't be replenished mid-battle in this game — nothing (no potion, item, or "
+        "ability) restores them in combat. The only way to recover them is resting (say \"I rest\" or "
+        "go quiet for a while), which heals HP and spell slots gradually over real-world elapsed time, "
+        f"not instantly, capped at full after {full_rest_hours:g} hours. Once you're out of spell slots "
+        "mid-battle, you can still cast any cantrip you know (cantrips are free and unlimited, no slot "
+        "cost) or just attack with your weapon."
     )
     if character and character.get("char_class") == "Warlock":
         # Real Pact Magic rule (see bot.py's WARLOCK_PACT_MAGIC_REST_HOURS):

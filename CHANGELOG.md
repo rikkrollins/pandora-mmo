@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.129] — Support topic: broaden and improve the spell-slot answer
+
+Direct follow-up from Coffee on the dev-topic screenshot of v1.27.128's
+still-pending fix: "Is this correct? I meant ... when we run out of
+spell slots and can no longer cast magic what can we do in battle so
+we can cast magic and or replenish those spell slots."
+
+Two real gaps in the just-written deterministic answer:
+1. Narrower phrasing only ("replenish/restore/recover spell slot")
+   missed the natural way players actually ask this — "run out of
+   spell slots", "no spell slots left" — now covered too.
+2. The answer only said what DOESN'T work; it never said what DOES.
+   Checked `bot.py`'s real `_do_cast_spell` — cantrips (level 0) are
+   confirmed free/unlimited, no slot cost, real 5E rule already
+   correctly implemented — and grepped `items.py` for anything that
+   restores a spell slot mid-battle (nothing exists). The answer now
+   states both facts plainly: no item/potion/ability restores a spell
+   slot in combat, but cantrips and ordinary weapon attacks still work
+   once you're out.
+
+Test updated to cover the broader phrasing and confirm the cantrip
+guidance is present.
+
 ## [1.27.128] — Support topic: fix spell-slot-restoration hallucination
 
 Found via topic-activity monitoring, right after v1.27.127 finally got

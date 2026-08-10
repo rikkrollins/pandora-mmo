@@ -1405,6 +1405,15 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("resting", answer.lower())
         self.assertNotIn("casting spells again", answer.lower())
         self.assertNotIn("activating abilities", answer.lower())
+        # Coffee's real dev-topic follow-up on the wrong answer: "what can
+        # we do in battle ... once we run out" -- both the broader phrasing
+        # and the actual honest fallback (cantrips) must be covered.
+        with patch("ai.support_agent.requests.post") as mock_post:
+            followup_answer = support_agent_module.answer_support_question(
+                "What can we do in battle once we run out of spell slots?"
+            )
+        mock_post.assert_not_called()
+        self.assertIn("cantrip", followup_answer.lower())
 
         warlock = make_basic_character(555555, "Zeraphine", char_class="Warlock")
         with patch("ai.support_agent.requests.post") as mock_post:
