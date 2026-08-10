@@ -100,6 +100,16 @@ async def run_simulation():
     )
     db.update_character(rogue_id, -999, subclass="Assassin", level=10, backstab_proficiency_pct=100.0)
     db.equip_item(rogue_id, -999, "shortsword")
+    # Real bug in THIS harness, caught by its own first run (2026-08-10):
+    # without this, ai.npc_agent's module-level _NPCS registry is empty
+    # in a fresh process, so "talk to Grimsby" silently fell through
+    # talk_npc's "not npc_id in _NPCS" branch into the fast, no-Ollama
+    # _do_examine fallback instead of exercising real NPC dialogue --
+    # returned instantly (0.0s) and looked like a pass, not a bug, but
+    # never actually tested the thing it claimed to test. bot.py itself
+    # calls this once at real startup (line ~22400); tests that touch
+    # talk_npc call it too (see tests/test_regression.py).
+    bot.setup_default_npcs()
 
     async def step(label: str, coro_fn):
         if not require_idle(label):
