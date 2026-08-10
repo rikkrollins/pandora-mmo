@@ -1339,6 +1339,49 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         mock_dice.assert_called_once()
         mock_moltbook_check.assert_called_once()
 
+    def test_support_retries_and_logs_when_a_real_response_has_no_text_after_stripping_think_tags(self):
+        """
+        Real live bug (2026-08-10, Coffee: "How do i enchant my weapon?"
+        still failed even after the world-tick priority fix). journalctl
+        -u ollama showed all 5 attempts got a genuine HTTP 200 in a
+        normal ~25-45s each -- Ollama was healthy and answering every
+        time. The real failure was silent: strip_think_tags() left an
+        empty string on every attempt because num_predict=600 (half of
+        ai/dm_agent.py's proven 1200) let this thinking model exhaust
+        its whole budget reasoning before ever emitting a real answer,
+        and the old code had no log line and no backoff for that case --
+        straight to the next attempt, indistinguishable from a working
+        loop from the outside. Confirms this case now logs a real
+        diagnostic and still backs off, and that num_predict was bumped
+        to match dm_agent's working value.
+        """
+        import ai.support_agent as support_agent_module
+        from unittest.mock import patch, Mock
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "<think>reasoning that never concludes"}
+
+        captured_options = []
+
+        def fake_post(*a, **k):
+            captured_options.append(k["json"]["options"])
+            return FakeResponse()
+
+        with patch("ai.support_agent.requests.post", side_effect=fake_post), \
+             self.assertLogs("pandora_mmo", level="WARNING") as log_ctx, \
+             patch("ai.support_agent.time.sleep") as mock_sleep:
+            answer = support_agent_module.answer_support_question("How do i enchant my weapon?")
+        self.assertIn("overloaded", answer.lower())
+        self.assertTrue(any("no usable text" in m for m in log_ctx.output))
+        self.assertEqual(mock_sleep.call_count, 4)
+        self.assertTrue(captured_options, "requests.post was never actually called")
+        for options in captured_options:
+            self.assertEqual(options["num_predict"], 1200)
+
     # -- Real live bug (2026-07-16): this model has a documented bias
     #    toward guessing "pass_turn" for phrasing it doesn't recognize --
     #    "I'll take a mug, ale!!! how are you doing old buddy?" (ordinary

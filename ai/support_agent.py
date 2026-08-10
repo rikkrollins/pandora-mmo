@@ -840,10 +840,22 @@ def answer_support_question(
                         "model": config.DM_NARRATION_MODEL,
                         "prompt": prompt,
                         "stream": False,
-                        # Real perf fix (2026-07-17): bounds worst-case
-                        # generation time -- see ai/dm_agent.py's
-                        # _NARRATION_OPTIONS for the full reasoning.
-                        "options": {"num_predict": 600},
+                        # Real live bug (2026-08-10, Coffee: "How do i
+                        # enchant my weapon?" still failed after the
+                        # world-tick priority fix): journalctl -u ollama
+                        # showed all 5 attempts got a real HTTP 200 in a
+                        # normal ~25-45s each -- Ollama was healthy and
+                        # answering every time. The actual failure was
+                        # silent: strip_think_tags() left an EMPTY
+                        # string on every attempt, because 600 tokens
+                        # (half of ai/dm_agent.py's proven 1200) wasn't
+                        # enough for this thinking model to finish
+                        # reasoning before ever emitting a real answer --
+                        # see _UNCLOSED_THINK_RE's own docstring: a
+                        # generation cut off mid-<think> strips to
+                        # nothing. Matched to dm_agent's real working
+                        # budget instead of a narrower guess.
+                        "options": {"num_predict": 1200},
                     },
                     timeout=200,
                 )
@@ -854,6 +866,18 @@ def answer_support_question(
                     if character:
                         text = _correct_own_class_hallucination(text, character)
                     return text
+                # Real response, but nothing usable survived stripping
+                # <think> tags -- the model spent its whole token budget
+                # reasoning and never got to a real answer. This used to
+                # be entirely silent (no log, no backoff, straight to
+                # the next attempt) which is exactly what made this bug
+                # invisible through every prior investigation.
+                logger.warning(
+                    f"[support_agent] attempt {attempt + 1}/{attempts} got a real response with no "
+                    f"usable text after stripping <think> tags (raw len={len(data.get('response', ''))})"
+                )
+                if attempt < len(delays):
+                    time.sleep(delays[attempt])
             except (requests.RequestException, ValueError) as e:
                 logger.warning(f"[support_agent] model call failed (attempt {attempt + 1}/{attempts}): {e!r}")
                 if attempt < len(delays):

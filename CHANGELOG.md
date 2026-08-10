@@ -2,6 +2,44 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.127] — Support topic: fix silent empty-response failures (num_predict too tight)
+
+Real live bug report from Coffee, right after v1.27.126: "How do i
+enchant my weapon?" STILL failed with "Pandora AI is genuinely
+overloaded" — so the world-tick starvation fix wasn't the whole
+story either.
+
+Root-caused with real evidence again, not guessing —
+`journalctl -u ollama` for the exact failure window showed all 5
+retry attempts got a genuine HTTP 200 in a normal ~25-45s each, with
+no gaps between them (confirming v1.27.126's world-tick priority fix
+IS working — `bot_live_tmp.log` shows `[world_tick] skipping this
+cycle's ambient AI calls` firing exactly while the question was in
+flight). Ollama was healthy and answering every single time. So the
+failure had to be happening AFTER a successful response, inside
+`answer_support_question` itself — and it was silent, because the old
+code had no log line for it: `strip_think_tags()` was leaving an
+EMPTY string every attempt. `ai/text_cleanup.py`'s own docstring
+already documented why: a generation cut off mid-`<think>` block (no
+closing tag reached) gets stripped entirely, by design, since a raw
+chain-of-thought leaking to a player is worse than no answer. Support
+was capping generation at `num_predict: 600` — HALF of
+`ai/dm_agent.py`'s real, already-proven `_NARRATION_OPTIONS` value of
+1200 — leaving this thinking model too little room to finish
+reasoning AND still write a real answer, especially now that Support
+prompts include a catalog-grounding section.
+
+Fix: bumped Support's `num_predict` from 600 to 1200, matching
+dm_agent's real working value instead of a narrower, untested guess.
+Also closed the actual observability gap that let this go undetected
+through 3 separate incidents: the "got a response, but nothing usable
+after stripping think tags" case now logs a real warning (raw response
+length included) and applies the same backoff as a network failure,
+instead of silently falling through to the next attempt with zero
+trace. New test reproduces the exact failure shape (a response that's
+pure unclosed `<think>...`) and confirms both the log line and the
+1200 budget.
+
 ## [1.27.126] — Support topic: fix real starvation by the background "living world" tick
 
 Real live bug report from Coffee, right after v1.27.125's catalog-size
