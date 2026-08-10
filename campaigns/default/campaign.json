@@ -1229,6 +1229,15 @@
             "gold": 55
           }
         ],
+        "resource_nodes": [
+          {
+            "id": "glimmerdeep_moss_growth",
+            "name": "faintly glowing moss clinging to the pool's rim",
+            "material": "glimmerdeep_moss",
+            "ability": "wisdom",
+            "skill": "herbalism"
+          }
+        ],
         "interactables": {
           "pool_buried_light": {
             "name": "whatever's glowing at the bottom of the pool",

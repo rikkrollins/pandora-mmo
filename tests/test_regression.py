@@ -955,6 +955,82 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result_item["type"], "consumable")
         self.assertIn("heal_dice", result_item)
 
+    def test_glimmerdeep_moss_is_a_real_gatherable_rare_material(self):
+        """
+        Real feature (2026-08-10, per Coffee: "make crafting Ethers
+        possible but difficult, shud be rare herbs to craft this") --
+        confirms the new rare herb is a real items.py material AND
+        actually gatherable from a real resource node in the live
+        campaign, not just a name referenced by a recipe with no way to
+        ever obtain it.
+        """
+        material = items_module.get_item("glimmerdeep_moss")
+        self.assertEqual(material["type"], "material")
+        self.assertEqual(material["rarity"], "rare")
+
+        found_node = False
+        for layer in bot.CAMPAIGN["locations"].values():
+            for location in layer.values():
+                for node in location.get("resource_nodes", []):
+                    if node.get("material") == "glimmerdeep_moss":
+                        found_node = True
+        self.assertTrue(found_node, "glimmerdeep_moss has no real gathering node anywhere")
+
+    def test_spell_tonic_recipes_are_harder_than_the_previous_dc_ceiling(self):
+        """
+        Real feature (2026-08-10): "advanced crafting recipes" per
+        Coffee -- confirms all three craftable tonic tiers require the
+        rare herb and exceed chain_mail's DC 18, the highest DC
+        anywhere else in RECIPES before this. Deliberately checked
+        against RECIPES, not ADVANCED_RECIPES -- that system produces
+        procedurally generated gear (rules/item_generator.py), the
+        wrong shape for a fixed-effect catalog consumable.
+        """
+        from rules.crafting import RECIPES, ADVANCED_RECIPES
+        prior_ceiling = max(
+            r["dc"] for rid, r in RECIPES.items()
+            if rid not in ("spell_tonic", "greater_spell_tonic", "supreme_spell_tonic")
+        )
+        self.assertEqual(prior_ceiling, 18)
+        for recipe_id in ("spell_tonic", "greater_spell_tonic", "supreme_spell_tonic"):
+            recipe = RECIPES[recipe_id]
+            self.assertGreater(recipe["dc"], prior_ceiling)
+            self.assertIn("glimmerdeep_moss", recipe["materials"])
+            self.assertEqual(recipe["result_item"], recipe_id)
+        # The top-tier full-restore item stays deliberately uncraftable --
+        # boss-drop/hidden-treasure only, same as this file's existing
+        # Fireball/Revivify convention.
+        self.assertNotIn("elixir_of_the_arcane_circle", RECIPES)
+        self.assertNotIn("elixir_of_the_arcane_circle", ADVANCED_RECIPES)
+
+    def test_crafting_a_spell_tonic_succeeds_with_materials_and_consumes_them(self):
+        from rules.crafting import resolve_craft
+        from unittest.mock import patch
+        character = make_basic_character(
+            900301, "Alchemist", char_class="Wizard", current_location="crossroads_tavern",
+        )
+        db.add_item(900301, -999, "moonpetal", 2)
+        db.add_item(900301, -999, "glimmerdeep_moss", 1)
+        character = db.get_character(900301, -999)
+
+        with patch("rules.dice.roll_d20", return_value=20):
+            result = resolve_craft(character, "spell_tonic")
+        self.assertEqual(result["outcome"], "success")
+        self.assertEqual(result["result_item"], "spell_tonic")
+        self.assertEqual(result["materials_consumed"], {"moonpetal": 2, "glimmerdeep_moss": 1})
+
+    def test_crafting_a_spell_tonic_fails_cleanly_without_the_rare_herb(self):
+        from rules.crafting import resolve_craft
+        character = make_basic_character(
+            900302, "NoHerbs", char_class="Wizard", current_location="crossroads_tavern",
+        )
+        db.add_item(900302, -999, "moonpetal", 2)  # no glimmerdeep_moss at all
+        character = db.get_character(900302, -999)
+
+        result = resolve_craft(character, "spell_tonic")
+        self.assertEqual(result["outcome"], "missing_materials")
+        self.assertIn("glimmerdeep_moss", result["missing"])
+
     # -- Equipment never affected combat: items.py's weapon damage_dice/
     #    ability and armor ac_base fields existed but nothing ever
     #    equipped anything or read them (v1.10.9) -----------------------

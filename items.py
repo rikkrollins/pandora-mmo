@@ -568,6 +568,12 @@ ITEMS = {
     "sulfur_dust": {"name": "Sulfur Dust", "type": "material", "rarity": "common", "price": 6, "weight": 0.1, "description": "A fine yellow powder that smells exactly as bad as you'd expect."},
     "raw_fish": {"name": "Raw Fish", "type": "material", "rarity": "common", "price": 3, "weight": 0.3, "description": "Still cold from the water. Best cooked before eating."},
     "wood": {"name": "Wood", "type": "material", "rarity": "common", "price": 2, "weight": 1, "description": "A few solid, unremarkable logs — good for a fire or a repair."},
+    # Per Coffee (2026-08-10): "make crafting Ethers possible but
+    # difficult, shud be rare herbs to craft this" -- a genuinely rare
+    # material, gathered from exactly one real node (The Glimmering
+    # Pool, campaign.json), used only by the advanced spell-tonic
+    # recipes in rules/crafting.py.
+    "glimmerdeep_moss": {"name": "Glimmerdeep Moss", "type": "material", "rarity": "rare", "price": 60, "weight": 0.05, "description": "A faint, cold light clings to it even out of the water. It never fully dries."},
 
     # --- Cooking (2026-07-15: raw_fish was gatherable but had zero
     # recipe using it -- a real cooking recipe below turns it, plus

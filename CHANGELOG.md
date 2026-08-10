@@ -2,6 +2,37 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.132] — Spell tonics: a third acquisition path — advanced alchemy
+
+Direct follow-up from Coffee: "make crafting Ethers possible but
+difficult, shud be rare herbs to craft this. maybe use advanced
+crafting recipies for this." A third, genuinely difficult path in,
+alongside v1.27.131's boss drops and hidden treasure — not a shortcut
+around either.
+
+New rare material, **Glimmerdeep Moss** (`items.py`, rarity "rare"),
+gatherable from exactly one real herbalism node — The Glimmering
+Pool (`campaign.json`), the same already-gated, hard-to-reach
+underground location where the Greater Spell Tonic hidden-treasure
+chest lives.
+
+New recipes in `rules/crafting.py`'s `RECIPES` (checked
+`ADVANCED_RECIPES` first — that system produces a procedurally
+GENERATED item via `rules/item_generator.py`, the wrong shape for a
+fixed-effect catalog consumable, so this deliberately stays in the
+plain recipe system instead): Spell Tonic (DC 19), Greater Spell Tonic
+(DC 22), Supreme Spell Tonic (DC 25) — every one of these exceeds
+`chain_mail`'s DC 18, the highest DC anywhere else in this file before
+now, genuinely earning the "advanced" label. The top-tier Elixir of
+the Arcane Circle stays deliberately uncraftable, same
+find-only convention already used for Fireball/Revivify/etc.
+
+New tests confirm: the herb is real and gatherable, all three recipes
+exceed the prior DC ceiling and require the rare herb, a real craft
+attempt succeeds and consumes materials with a good roll, a craft
+attempt without the herb fails cleanly with the right missing-item
+name, and the elixir has no recipe in either system.
+
 ## [1.27.131] — Spell tonics are now hard to find, not shop-bought
 
 Direct follow-up from Coffee, minutes after v1.27.130 shipped: "make it

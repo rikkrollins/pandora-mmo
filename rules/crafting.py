@@ -56,6 +56,42 @@ RECIPES = {
         "result_item": "scroll_cure_wounds", "result_qty": 1,
         "ability": "intelligence", "dc": 14, "profession": "alchemy",
     },
+    # Advanced alchemy (2026-08-10, per Coffee: "make crafting Ethers
+    # possible but difficult, shud be rare herbs to craft this. maybe
+    # use advanced crafting recipes for this" -- the spell-slot tonics
+    # (items.py, v1.27.130) are boss-drop/hidden-treasure-only otherwise
+    # (see BOSS_SPELL_TONIC_DROP_CHANCE in bot.py), and this is the
+    # THIRD path in, not a shortcut around the other two: every DC here
+    # exceeds chain_mail's 18, the previous ceiling in this whole file,
+    # and glimmerdeep_moss (items.py) only grows at one real gathering
+    # node (The Glimmering Pool, campaign.json), a genuinely deep,
+    # hard-to-reach location. Deliberately in RECIPES, not
+    # ADVANCED_RECIPES below -- that system produces a procedurally
+    # GENERATED item (rules/item_generator.py, random affixes at a fixed
+    # tier), built for gear, which a fixed-effect catalog consumable
+    # like a spell tonic doesn't fit; RECIPES' plain result_item/
+    # result_qty shape is the correct one here, just pushed to a new,
+    # genuinely harder DC ceiling ("advanced" as in difficulty, not as
+    # in which dict it lives in). The top-tier Elixir of the Arcane
+    # Circle is deliberately NOT craftable at all -- same "left as a
+    # real find only" convention scroll_cure_wounds's own comment above
+    # already documents for Fireball/Revivify/etc, so crafting can't
+    # trivialize the single rarest item in the game.
+    "spell_tonic": {
+        "materials": {"moonpetal": 2, "glimmerdeep_moss": 1},
+        "result_item": "spell_tonic", "result_qty": 1,
+        "ability": "intelligence", "dc": 19, "profession": "alchemy",
+    },
+    "greater_spell_tonic": {
+        "materials": {"moonpetal": 4, "glimmerdeep_moss": 2},
+        "result_item": "greater_spell_tonic", "result_qty": 1,
+        "ability": "intelligence", "dc": 22, "profession": "alchemy",
+    },
+    "supreme_spell_tonic": {
+        "materials": {"moonpetal": 6, "glimmerdeep_moss": 4},
+        "result_item": "supreme_spell_tonic", "result_qty": 1,
+        "ability": "intelligence", "dc": 25, "profession": "alchemy",
+    },
     # Cooking (2026-07-15): raw_fish was gatherable but no recipe used
     # it at all -- uses wood too (cooking over a fire), producing an
     # actually usable food item now that _do_use_item exists.
