@@ -6487,7 +6487,14 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
             # separate command needed, the label and damage multiplier
             # both just come along with the subclass automatically.
             backstab_label = f"Backstab (x{_effective_backstab_multiplier(attacker)})" if _is_assassin(attacker) else None
-            await _post_narrated(update, attacker, attack_label, result, session, action_label=backstab_label)
+            # Same "casts" mislabeling as the v1.27.115 Throw fix, missed
+            # at the time: Backstab is a martial technique, not a spell,
+            # but action_label alone defaults _format_combat_result's verb
+            # to "casts" -- every Assassin attack read "Pan casts
+            # **Backstab (x8)** at Goblin". verb="performs" fixes it the
+            # same way "throws" did for Throw.
+            await _post_narrated(update, attacker, attack_label, result, session, action_label=backstab_label,
+                                  verb="performs" if backstab_label else None)
 
             removed = session.remove_defeated()
             await _announce_defeats(update, session, removed)

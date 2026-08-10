@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.117] — Assassin Backstab no longer says "casts"
+
+Found while reviewing the task list for anything else worth adding
+(2026-08-10): same bug class as v1.27.115's Throw fix, just missed at
+the time. An Assassin's ordinary attack sets `action_label` to
+"Backstab (xN)" but never overrode `verb`, so
+`_format_combat_result`'s default ("casts") applied to every single
+Assassin attack — "Pan casts **Backstab (x8)** at Goblin," which is
+wrong; Backstab is a martial technique, not a spell. Now passes
+`verb="performs"` for the Backstab case, same fix shape as
+`verb="throws"` did for Throw. Verified with a direct
+`_format_combat_result` call (no Ollama).
+
 ## [1.27.116] — "We don't have to fight" no longer misclassifies as attack
 
 Real bug found via topic-activity monitoring: "we dont have to

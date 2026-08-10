@@ -2189,6 +2189,27 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("shortsword", after.get("inventory", {}))
         sessions.end_session(-999)
 
+    def test_assassin_backstab_narration_says_performs_not_casts(self):
+        """
+        Real bug, same class as the Throw fix above but missed at the
+        time (found via direct code read, 2026-08-10): an Assassin's
+        ordinary attack sets action_label to "Backstab (xN)" but never
+        overrode verb, so _format_combat_result's default ("casts")
+        applied -- every Assassin attack read "Pan casts **Backstab
+        (x8)** at Goblin", which is wrong; Backstab is a martial
+        technique, not a spell. Pure-function check against
+        _format_combat_result directly (no Ollama call) -- this is the
+        same deterministic line the live bug lived in, no narration
+        text involved.
+        """
+        result = {"hit": True, "damage_dealt": 40, "critical_hit": False, "critical_fail": False}
+        message = bot._format_combat_result(
+            "", result, actor_label="Pan", defender_label="Goblin",
+            action_label="Backstab (x8)", verb="performs",
+        )
+        self.assertIn("performs **Backstab (x8)** at", message)
+        self.assertNotIn("casts", message)
+
     def test_throw_damage_now_adds_the_weapons_own_ability_modifier(self):
         """
         Real live bug (2026-08-10, Coffee, dev-bridge screenshot): a
