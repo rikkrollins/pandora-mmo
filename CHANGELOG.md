@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.113] — Battle formation image: joining mid-fight refreshes it, all circles now one size
+
+Two real live reports (2026-08-10, Coffee), both in `battle_render.py`/
+its `bot.py` caller:
+
+- "im not seeing the formations in our current battle" — root cause:
+  `_do_join_battle` (a player traveling to and joining an
+  already-running fight) never sent or refreshed the formation image
+  at all, only text messages. It's otherwise sent just once at a
+  fight's own start and once per completed round, so a late joiner
+  (and everyone else) kept seeing a stale roster missing the new
+  arrival until the next round happened to complete. Now refreshes
+  right after the join.
+- "make all the players circle in formations the same size" — root
+  cause: token radius used to be computed PER ROW off that row's own
+  member count, so a crowded row shrank while a sparser row (on either
+  side) stayed full-size, leaving visibly mismatched circle sizes in
+  the same image. Every token now shares one radius, sized off the
+  single most-crowded row across the whole formation.
+
 ## [1.27.112] — Spell/ability images no longer show a person or human hands
 
 Real live feedback (2026-08-10, Coffee, dev-bridge screenshot of a

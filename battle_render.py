@@ -189,6 +189,14 @@ def _row_token_radius(member_count: int, usable_height: int) -> int:
     overlap the next token down -- see the _FOOTPRINT_RATIO comment
     above for how that 132px-per-token-at-full-size number was measured.
     Never grows past the original fixed 40px design for a sparse row.
+
+    Called ONCE per image now (2026-08-10, Coffee: "make all the
+    players circle in formations the same size"), with member_count
+    being the single most-crowded row across the WHOLE formation, not
+    each row's own count -- see render_battle_formation. Keeping this
+    function itself row-count-generic (rather than folding the "which
+    row is worst" logic in here) is what let that caller reuse it
+    as-is for both the earlier canvas-sizing need and this one.
     """
     if member_count <= 0:
         return _TOKEN_RADIUS
@@ -210,7 +218,7 @@ def _canvas_height(max_row_count: int) -> int:
     return int(max(CANVAS_HEIGHT, min_needed))
 
 
-def _draw_side(draw: ImageDraw.ImageDraw, combatants: list[dict], is_party: bool, canvas_height: int) -> None:
+def _draw_side(draw: ImageDraw.ImageDraw, combatants: list[dict], is_party: bool, canvas_height: int, radius: int) -> None:
     color = _PARTY_COLOR if is_party else _ENEMY_COLOR
     x_positions = _row_x_positions(is_party)
     by_row = {"front": [], "back": []}
@@ -225,7 +233,6 @@ def _draw_side(draw: ImageDraw.ImageDraw, combatants: list[dict], is_party: bool
             continue
         x = x_positions[row]
         spacing = usable_height / len(members)
-        radius = _row_token_radius(len(members), usable_height)
         for i, combatant in enumerate(members):
             y = int(top_margin + spacing * (i + 0.5))
             _draw_token(draw, x, y, combatant, color, radius)
@@ -260,8 +267,19 @@ def render_battle_formation(party: list[dict], enemies: list[dict]) -> bytes:
     title_bbox = draw.textbbox((0, 0), title, font=title_font)
     draw.text(((CANVAS_WIDTH - (title_bbox[2] - title_bbox[0])) / 2, 16), title, font=title_font, fill=(255, 255, 255))
 
-    _draw_side(draw, party, is_party=True, canvas_height=canvas_height)
-    _draw_side(draw, enemies, is_party=False, canvas_height=canvas_height)
+    # Real live request (2026-08-10, Coffee: "make all the players
+    # circle in formations the same size"): _row_token_radius used to
+    # be called PER ROW with that row's own member count, so a crowded
+    # row shrank while a sparser row on the same side (or the other
+    # side entirely) stayed full-size -- every token in the image now
+    # shares ONE radius, sized off the single most-crowded row across
+    # the whole formation (party AND enemies), so a fight is never
+    # visually lopsided between differently-sized circles.
+    top_margin, bottom_margin = 100, 60
+    radius = _row_token_radius(max_row_count, canvas_height - top_margin - bottom_margin)
+
+    _draw_side(draw, party, is_party=True, canvas_height=canvas_height, radius=radius)
+    _draw_side(draw, enemies, is_party=False, canvas_height=canvas_height, radius=radius)
 
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")

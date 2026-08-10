@@ -8144,6 +8144,56 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(battle_render._first_name("Brandywine Fieldstone"), "Brandywine")
         self.assertEqual(battle_render._first_name("Grimsby"), "Grimsby")
 
+    def test_battle_formation_all_circles_share_one_uniform_size(self):
+        """
+        Real live request (2026-08-10, Coffee: "make all the players
+        circle in formations the same size"). Before this, radius was
+        computed PER ROW off that row's own member count -- a crowded
+        4-member front row shrank while a sparser 2-member back row (or
+        a small enemy side) stayed full-size, so the same image had
+        visibly different-sized circles. render_battle_formation now
+        sizes every token off the single most-crowded row across BOTH
+        sides. Confirmed directly by spying on _draw_token (the real
+        function that actually draws each circle) across a genuinely
+        uneven formation -- 4 in the party's front row, 2 in its back
+        row, 2 enemies -- and asserting every single call received the
+        IDENTICAL radius, not one that varies by which row/side it's
+        on.
+        """
+        import battle_render
+        from unittest.mock import patch
+
+        party = [
+            {"name": "Pan", "hp_current": 129, "hp_max": 129, "formation_row": "back"},
+            {"name": "Vesh", "hp_current": 282, "hp_max": 282, "formation_row": "back"},
+            {"name": "Brandywine", "hp_current": 90, "hp_max": 100, "formation_row": "front"},
+            {"name": "Wrenford", "hp_current": 80, "hp_max": 100, "formation_row": "front"},
+            {"name": "Chelara", "hp_current": 70, "hp_max": 100, "formation_row": "front"},
+            {"name": "Grask", "hp_current": 619, "hp_max": 619, "formation_row": "front"},
+        ]
+        enemies = [
+            {"name": "Giant Spider 4", "hp_current": 60, "hp_max": 60, "formation_row": "front"},
+            {"name": "Giant Spider 3", "hp_current": 55, "hp_max": 60, "formation_row": "front"},
+        ]
+
+        real_draw_token = battle_render._draw_token
+        seen_radii = []
+
+        def spy(draw, x, y, combatant, color, radius):
+            seen_radii.append(radius)
+            return real_draw_token(draw, x, y, combatant, color, radius)
+
+        with patch("battle_render._draw_token", side_effect=spy):
+            battle_render.render_battle_formation(party, enemies)
+
+        self.assertEqual(len(seen_radii), 8, "expected one _draw_token call per combatant")
+        self.assertEqual(len(set(seen_radii)), 1, f"circles rendered at more than one size: {seen_radii}")
+        # And that shared size must actually be the SHRUNK one (fit for
+        # the 4-member row), not the original full 40px -- otherwise
+        # this test would trivially pass even if the bug regressed back
+        # to "every row happens to get the same count."
+        self.assertLess(seen_radii[0], battle_render._TOKEN_RADIUS)
+
     def test_battle_formation_sparse_row_keeps_the_original_full_size(self):
         """A normal, non-crowded 1-2 per row fight must render identically to before -- no unnecessary shrinking."""
         import battle_render
@@ -8422,6 +8472,39 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         formation_markers = [line for line in sink if line.startswith("<photo:") and "formation" in line.lower()]
         self.assertEqual(len(formation_markers), 1, f"battle formation image missing on ambush start: {sink}")
         sessions.end_session(-990)
+
+    async def test_battle_formation_image_refreshes_when_a_player_joins_an_ongoing_fight(self):
+        """
+        Real live bug (2026-08-10, Coffee: "im not seeing the formations
+        in our current battle"). Root cause: _do_join_battle -- a
+        player traveling to and joining an ALREADY-running fight -- only
+        ever sent text messages, never refreshed the formation image at
+        all. The image is otherwise only sent at the fight's own start
+        and on each completed round, so a late joiner (and everyone
+        else in the chat) kept seeing a stale roster missing the new
+        arrival until the next round happened to complete. No Ollama
+        call is on this path (_do_join_battle never resolves a turn),
+        so nothing needs mocking here.
+        """
+        import sessions
+        sessions.end_session(-989)
+        starter_id = 900940
+        joiner_id = 900941
+        make_basic_character(starter_id, "FightStarter", chat_id=-989, current_location="crossroads_tavern")
+        make_basic_character(joiner_id, "LateJoiner", chat_id=-989, current_location="crossroads_tavern")
+        starter = db.get_character(starter_id, -989)
+        starter["telegram_user_id"] = starter_id
+        enemy = {"telegram_user_id": -2_500_099, "name": "JoinTestGoblin", "dexterity": 10, "strength": 10,
+                 "hp_current": 25, "hp_max": 25, "armor_class": 10, "is_ai": 1, "monster_key": "goblin"}
+        sessions.start_session(-989, [starter, enemy], {starter_id: "party", -2_500_099: "enemy"})
+
+        sink = []
+        update = FakeUpdate(joiner_id, "join the battle", sink, chat_id=-989)
+        await bot._do_join_battle(update)
+
+        formation_markers = [line for line in sink if line.startswith("<photo:") and "formation" in line.lower()]
+        self.assertEqual(len(formation_markers), 1, f"battle formation image missing on join: {sink}")
+        sessions.end_session(-989)
 
     # -- Task #11, real live request (2026-08-09, Coffee, Development-
     #    topic screenshot): "This does not look like a map. I want an

@@ -12114,6 +12114,17 @@ async def _do_join_battle(update: Update) -> None:
         sessions.join_session(session, character, "party")
         await _safe_send(update, f"⚔️ **{character['name']}** joins the battle!")
         await _notify_main_topic(update, f"⚔️ **{character['name']}** joined an in-progress battle!")
+        # Real live bug (2026-08-10, Coffee: "im not seeing the
+        # formations in our current battle"): joining an ALREADY-running
+        # fight never refreshed the formation image at all -- it's only
+        # ever sent at the fight's own start (_do_start_combat) and on
+        # each completed round (_resolve_ai_turns' wrapper) -- so a
+        # player who joined mid-fight, and everyone else, kept seeing a
+        # stale roster missing the new arrival until the next round
+        # happened to complete. One refresh right here, same real,
+        # never-invented session.living_on_side data every other
+        # formation-image send already uses.
+        await _maybe_send_battle_formation_image(update, session)
 
 
 async def _do_wild_shape(update: Update) -> None:
