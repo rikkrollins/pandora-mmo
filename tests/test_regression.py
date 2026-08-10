@@ -8563,6 +8563,118 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         png_bytes = battle_render.render_battle_formation(party, enemies)
         self.assertTrue(png_bytes.startswith(b"\x89PNG"))
 
+    def test_location_background_composites_and_falls_back_cleanly(self):
+        """
+        Real live request (Task #14, per Coffee: "instead of a plain
+        background can we use location background?"). battle_render.py
+        stays network-free itself -- bot.py's caller fetches the real
+        location image bytes and hands them in. Tests here use a
+        synthetic in-memory JPEG (no network call) to verify: (1) a
+        real photo composites and cover-fits without distortion or a
+        crash, (2) corrupt/non-image bytes fall back to the original
+        plain gradient rather than breaking the whole formation image,
+        (3) None (no bytes at all, e.g. the fetch failed) behaves
+        identically to before this feature existed.
+        """
+        import battle_render
+        from PIL import Image
+        import io
+        fake_photo = Image.new("RGB", (640, 480), (100, 150, 200))
+        buf = io.BytesIO()
+        fake_photo.save(buf, format="JPEG")
+        fake_bytes = buf.getvalue()
+
+        party = [{"name": "Pan", "hp_current": 50, "hp_max": 100, "formation_row": "front"}]
+        enemies = [{"name": "Goblin", "hp_current": 20, "hp_max": 30, "formation_row": "front"}]
+
+        with_bg = battle_render.render_battle_formation(party, enemies, background_image_bytes=fake_bytes)
+        self.assertTrue(with_bg.startswith(b"\x89PNG"))
+
+        without_bg = battle_render.render_battle_formation(party, enemies, background_image_bytes=None)
+        self.assertTrue(without_bg.startswith(b"\x89PNG"))
+
+        bad_bytes = battle_render.render_battle_formation(party, enemies, background_image_bytes=b"not a real image")
+        self.assertTrue(bad_bytes.startswith(b"\x89PNG"))
+
+    def test_composite_location_background_cover_fits_without_distorting(self):
+        """
+        Direct check of the actual compositing math: a photo with a
+        DIFFERENT aspect ratio than the canvas must be cropped to fill
+        it completely (cover-fit), never squashed/stretched -- confirms
+        the pasted region is exactly the real canvas size, and that a
+        genuinely corrupt image returns False (caller's cue to fall
+        back) rather than raising.
+        """
+        import battle_render
+        from PIL import Image
+        import io
+        # Deliberately square photo against this file's wide canvas --
+        # a real mismatch, same shape real location art would have.
+        square_photo = Image.new("RGB", (500, 500), (10, 20, 30))
+        buf = io.BytesIO()
+        square_photo.save(buf, format="PNG")
+        canvas = Image.new("RGB", (battle_render.CANVAS_WIDTH, battle_render.CANVAS_HEIGHT), (0, 0, 0))
+        composited = battle_render._composite_location_background(canvas, battle_render.CANVAS_HEIGHT, buf.getvalue())
+        self.assertTrue(composited)
+        self.assertEqual(canvas.size, (battle_render.CANVAS_WIDTH, battle_render.CANVAS_HEIGHT))
+
+        canvas2 = Image.new("RGB", (battle_render.CANVAS_WIDTH, battle_render.CANVAS_HEIGHT), (0, 0, 0))
+        self.assertFalse(battle_render._composite_location_background(canvas2, battle_render.CANVAS_HEIGHT, b"garbage"))
+
+    async def test_fetch_location_background_bytes_returns_real_bytes_on_success(self):
+        """
+        Direct check of _fetch_location_background_bytes's success
+        path -- requests.get mocked to a real, valid (synthetic) JPEG
+        response (not just a bare SimpleNamespace, so .raise_for_status()
+        and .content both behave like the real requests.Response they
+        stand in for). Confirms the real location's own description
+        genuinely drives the prompt (same grounding discipline as
+        _location_image_prompt) and that the returned bytes are exactly
+        what the mocked response provided, unmodified.
+        """
+        from unittest.mock import patch, Mock
+        from PIL import Image
+        import io
+        fake_photo = Image.new("RGB", (100, 100), (5, 10, 15))
+        buf = io.BytesIO()
+        fake_photo.save(buf, format="JPEG")
+        fake_bytes = buf.getvalue()
+        fake_response = Mock(content=fake_bytes)
+        fake_response.raise_for_status = Mock(return_value=None)
+
+        with patch("bot.requests.get", return_value=fake_response) as mock_get:
+            result = await bot._fetch_location_background_bytes("crossroads_tavern")
+
+        self.assertEqual(result, fake_bytes)
+        self.assertEqual(mock_get.call_count, 1)
+        # The real URL must be built from the same real prompt
+        # _location_image_prompt uses -- never invented, same grounding
+        # discipline as every other _maybe_send_*_image prompt here.
+        called_url = mock_get.call_args[0][0]
+        self.assertIn("environment%20concept%20art", called_url)
+
+    async def test_fetch_location_background_bytes_never_raises_on_a_bad_response(self):
+        """
+        A malformed/unexpected response shape (missing .raise_for_status,
+        same as a genuinely broken API response could look) must
+        degrade to None, never propagate an exception -- confirmed live
+        via faulthandler after this exact gap let a mocked-but-
+        incomplete response object silently break the WHOLE formation
+        image send (background AND tokens) in
+        test_battle_formation_image_sent_when_combat_starts before the
+        except clause here was broadened from requests.RequestException
+        to a plain Exception.
+        """
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        with patch("bot.requests.get", return_value=SimpleNamespace(status_code=200)):
+            result = await bot._fetch_location_background_bytes("crossroads_tavern")
+        self.assertIsNone(result)
+
+    async def test_fetch_location_background_bytes_returns_none_for_an_unknown_location(self):
+        result = await bot._fetch_location_background_bytes("not_a_real_location_id")
+        self.assertIsNone(result)
+
     def test_battle_formation_all_circles_share_one_uniform_size(self):
         """
         Real live request (2026-08-10, Coffee: "make all the players
@@ -8626,9 +8738,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         bot._maybe_send_battle_formation_image must pull the REAL, live
         session state (session.living_on_side, which already excludes
         anyone at 0 HP) rather than anything invented, and hand back
-        real decodable PNG bytes as the sent photo.
+        real decodable PNG bytes as the sent photo. _fetch_location_
+        background_bytes (Task #14, a real Pollinations network call)
+        is mocked to None -- this test cares about the token/HP layout
+        being real, not the background art, same "never touch a real
+        network call in the regression suite" convention as elsewhere.
         """
         import io
+        from unittest.mock import patch, AsyncMock
         from PIL import Image
         import sessions
         sessions.end_session(-995)
@@ -8642,7 +8759,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         sink = []
         update = FakeUpdate(player_id, "n/a", sink, chat_id=-995)
-        await bot._maybe_send_battle_formation_image(update, session)
+        with patch("bot._fetch_location_background_bytes", new=AsyncMock(return_value=None)):
+            await bot._maybe_send_battle_formation_image(update, session)
 
         self.assertEqual(len(update.effective_chat.sent_photos), 1)
         photo = update.effective_chat.sent_photos[0]
@@ -8683,8 +8801,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         test_send_generated_image_pre_warms_the_url_before_handing_it_
         to_telegram) so this never depends on a real Pollinations
         network call -- only the LOCAL battle_render call is real.
+        _resolve_ai_turns is also mocked out (2026-08-10, found via
+        faulthandler.dump_traceback_later after this exact test hung
+        past its own timeout): whether this passes or hangs depended
+        on a real, unforced initiative coin-flip -- if the single
+        goblin enemy happened to win it, _resolve_ai_turns made it act
+        immediately, touching real Ollama narration this test never
+        accounted for. Pre-existing gap in this test, not something
+        this task introduced, but blocks reliably verifying the new
+        background-image wiring below it either way.
         """
-        from unittest.mock import patch
+        from unittest.mock import patch, AsyncMock
         import sessions
         sessions.end_session(-999)
         user_id = 900522
@@ -8695,7 +8822,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         sink = []
         with patch("bot._get_combat_eligible_party_members", return_value=[character]), \
-             patch("bot.requests.get", side_effect=fake_get):
+             patch("bot.requests.get", side_effect=fake_get), \
+             patch("bot._resolve_ai_turns", new=AsyncMock()):
             await bot._do_start_combat(FakeUpdate(user_id, "fight a goblin", sink), monster_key="goblin", count=1)
 
         # sink only captures each sent photo's caption marker, same
@@ -8902,10 +9030,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         and on each completed round, so a late joiner (and everyone
         else in the chat) kept seeing a stale roster missing the new
         arrival until the next round happened to complete. No Ollama
-        call is on this path (_do_join_battle never resolves a turn),
-        so nothing needs mocking here.
+        call is on this path (_do_join_battle never resolves a turn).
+        _fetch_location_background_bytes (Task #14, a real Pollinations
+        network call for the formation image's background art) IS
+        mocked, though -- a real network call this test shouldn't
+        depend on.
         """
         import sessions
+        from unittest.mock import patch, AsyncMock
         sessions.end_session(-989)
         starter_id = 900940
         joiner_id = 900941
@@ -8919,7 +9051,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         sink = []
         update = FakeUpdate(joiner_id, "join the battle", sink, chat_id=-989)
-        await bot._do_join_battle(update)
+        with patch("bot._fetch_location_background_bytes", new=AsyncMock(return_value=None)):
+            await bot._do_join_battle(update)
 
         formation_markers = [line for line in sink if line.startswith("<photo:") and "formation" in line.lower()]
         self.assertEqual(len(formation_markers), 1, f"battle formation image missing on join: {sink}")

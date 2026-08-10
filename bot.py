@@ -13260,6 +13260,23 @@ def _location_image_seed(location_id: str) -> int:
     return _deterministic_image_seed(f"location:{location_id}")
 
 
+def _location_image_prompt(location: dict) -> str:
+    """
+    Extracted (2026-08-10, Task #14) from _maybe_send_location_image so
+    the battle-formation background compositor (_maybe_send_battle_
+    formation_image) can build the EXACT same prompt for the EXACT same
+    location -- reusing the real, already-generated (and, by the time a
+    fight starts, almost always already-cached, since real players get
+    an automatic "look around" on arrival) image instead of a new,
+    separate one. Grounded only in the location's own real description
+    text already in campaign.json, never invented detail.
+    """
+    return (
+        f"{location['description']}, fantasy tabletop RPG environment concept art, "
+        "atmospheric lighting, detailed digital painting, no text or labels"
+    )
+
+
 async def _maybe_send_location_image(update: Update, location: dict, location_id: str, already_visited: bool) -> None:
     """
     Real location art, sent every time (2026-07-22, per Coffee: "show
@@ -13275,12 +13292,8 @@ async def _maybe_send_location_image(update: Update, location: dict, location_id
     (_location_image_seed) so the SAME place always shows the SAME
     image, never a different random one each visit.
     """
-    prompt = (
-        f"{location['description']}, fantasy tabletop RPG environment concept art, "
-        "atmospheric lighting, detailed digital painting, no text or labels"
-    )
     await _send_generated_image(
-        update, prompt, f"📍 {location['name']}", width=768, height=512,
+        update, _location_image_prompt(location), f"📍 {location['name']}", width=768, height=512,
         seed=_location_image_seed(location_id), log_key=location_id,
     )
 
@@ -13384,26 +13397,82 @@ async def _maybe_send_monster_image(update: Update, monster_key: str, template: 
     )
 
 
+async def _fetch_location_background_bytes(location_id: str) -> bytes | None:
+    """
+    Real location art as raw bytes for battle_render.py to composite
+    into the formation image's background (2026-08-10, Task #14, per
+    Coffee: "instead of a plain background can we use location
+    background?") -- battle_render.py itself stays network-free (its
+    whole documented point), so the actual fetch happens here. Uses
+    the EXACT same prompt+seed _maybe_send_location_image already uses
+    for this same location, so this is virtually always a cache hit by
+    the time a fight starts (real players get an automatic "look
+    around" on arrival, which already triggered the real generation).
+    A real network call regardless -- bounded to a shorter timeout
+    than _send_generated_image's own 60s pre-warm (this is a flavor
+    layer riding along on the ALREADY-instant formation image, not the
+    main thing a player is waiting on; better to show the formation
+    promptly with a plain background than stall combat on a slow,
+    genuinely-cold fetch). Never raises -- returns None on any failure,
+    battle_render.py's own compositor already falls back cleanly.
+    """
+    location = cl.get_location(CAMPAIGN, location_id)
+    if location is None:
+        return None
+    url = images_module.generate_image_url(
+        _location_image_prompt(location), width=768, height=512, seed=_location_image_seed(location_id),
+    )
+    try:
+        response = await asyncio.to_thread(requests.get, url, timeout=15)
+        response.raise_for_status()
+        return response.content
+    except Exception as e:
+        # Broad on purpose (not just requests.RequestException) -- this
+        # really must never raise, since it rides along inside
+        # _maybe_send_battle_formation_image's own broader try/except,
+        # and an unhandled exception here would silently kill the
+        # WHOLE formation image send (background AND tokens), not just
+        # the background layer. Confirmed live: a test double lacking
+        # a real .raise_for_status()/.content shape (same as a
+        # genuinely malformed response could look) raised AttributeError,
+        # not RequestException, and slipped past the original narrower
+        # except entirely.
+        logger.warning(f"[battle_render] location background fetch failed for {location_id!r}: {e!r}")
+        return None
+
+
 async def _maybe_send_battle_formation_image(update: Update, session: sessions.Session) -> None:
     """
     Real tactical battle-formation image (task #9-followup, per Coffee:
     "show the formations and locations of where the players are
     battling"). Unlike every other _maybe_send_*_image helper, this
     renders entirely locally (battle_render.render_battle_formation,
-    pure Pillow, no network call) from the REAL current combat state --
-    session.living_on_side already returns only who's actually still
-    standing on each side, with each participant's real formation_row
-    and hp_current/hp_max -- never an invented layout. Wrapped the same
-    "never breaks the real feature it accompanies" way as every other
-    optional-flavor sender here: a rendering failure logs and moves on,
-    it never blocks combat from proceeding.
+    pure Pillow, no network call for the tokens/layout themselves) from
+    the REAL current combat state -- session.living_on_side already
+    returns only who's actually still standing on each side, with each
+    participant's real formation_row and hp_current/hp_max -- never an
+    invented layout. Wrapped the same "never breaks the real feature it
+    accompanies" way as every other optional-flavor sender here: a
+    rendering failure logs and moves on, it never blocks combat from
+    proceeding.
+
+    background_image_bytes (Task #14): every party member fights at the
+    same real location (combat is scoped to "same location" already),
+    so any party member's own current_location is the real fight
+    location. A background-fetch failure/timeout still lets the
+    formation image send with the original plain gradient -- never
+    lets flavor art block or break the real tactical information.
     """
     party = session.living_on_side("party")
     enemies = session.living_on_side("enemy")
     if not party or not enemies:
         return
     try:
-        png_bytes = await asyncio.to_thread(battle_render.render_battle_formation, party, enemies)
+        location_id = party[0].get("current_location")
+        background_bytes = await _fetch_location_background_bytes(location_id) if location_id else None
+        png_bytes = await asyncio.to_thread(
+            battle_render.render_battle_formation, party, enemies, background_bytes,
+        )
         await update.effective_chat.send_photo(
             photo=png_bytes, caption="🗺️ Current battle formation",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),

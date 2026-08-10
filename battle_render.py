@@ -416,12 +416,61 @@ def _draw_background(draw: ImageDraw.ImageDraw, canvas_height: int = CANVAS_HEIG
         g = int(top[1] + (bottom[1] - top[1]) * t)
         b = int(top[2] + (bottom[2] - top[2]) * t)
         draw.line([(0, y), (CANVAS_WIDTH, y)], fill=(r, g, b))
-    # Faint center divider so the two facing sides read clearly, same
-    # "two facing columns" shape as the reference JRPG battle screen.
+
+
+def _draw_center_divider(draw: ImageDraw.ImageDraw, canvas_height: int) -> None:
+    """
+    Faint center divider so the two facing sides read clearly, same
+    "two facing columns" shape as the reference JRPG battle screen.
+    Pulled out of _draw_background (2026-08-10, Task #14) so a real
+    location-photo background still gets this same divider -- it's
+    about formation readability, not tied to the gradient specifically.
+    """
     draw.line(
         [(CANVAS_WIDTH // 2, 60), (CANVAS_WIDTH // 2, canvas_height - 30)],
         fill=(255, 255, 255, 40), width=1,
     )
+
+
+def _composite_location_background(image: Image.Image, canvas_height: int, background_bytes: bytes) -> bool:
+    """
+    Real location art (2026-08-10, Task #14, per Coffee: "instead of a
+    plain background can we use location background?"), reusing the
+    EXACT same real, already-generated Pollinations image a player
+    already saw when they arrived here (bot.py's caller builds the
+    identical prompt+seed _maybe_send_location_image already uses for
+    that same location) -- never a new, separate image call, and since
+    that image is almost always already cached server-side by the time
+    a fight starts (real players get an automatic "look around" on
+    arrival), this rarely pays the slow first-fetch cost. Cover-fit
+    (crop to aspect, never stretched/distorted) then darkened so token
+    labels/HP bars/name text stay legible on top of potentially busy
+    art -- same "never let the flavor layer break the real
+    information" convention as every other _maybe_send_*_image helper
+    in this codebase. Returns whether it actually composited -- the
+    caller falls back to the plain gradient on any failure (corrupt
+    bytes, wrong format, no bytes at all), never a broken image.
+    """
+    try:
+        photo = Image.open(io.BytesIO(background_bytes)).convert("RGB")
+    except Exception:
+        return False
+    photo_ratio = photo.width / photo.height
+    canvas_ratio = CANVAS_WIDTH / canvas_height
+    if photo_ratio > canvas_ratio:
+        new_height = canvas_height
+        new_width = max(1, round(canvas_height * photo_ratio))
+    else:
+        new_width = CANVAS_WIDTH
+        new_height = max(1, round(CANVAS_WIDTH / photo_ratio))
+    photo = photo.resize((new_width, new_height))
+    left = (new_width - CANVAS_WIDTH) // 2
+    top = (new_height - canvas_height) // 2
+    photo = photo.crop((left, top, left + CANVAS_WIDTH, top + canvas_height))
+    darken = Image.new("RGB", photo.size, (0, 0, 0))
+    photo = Image.blend(photo, darken, 0.55)
+    image.paste(photo, (0, 0))
+    return True
 
 
 def _condition_badge_text(conditions: list | None) -> str | None:
@@ -564,7 +613,7 @@ def _draw_side(draw: ImageDraw.ImageDraw, combatants: list[dict], is_party: bool
             _draw_token(draw, x, y, combatant, color, radius)
 
 
-def render_battle_formation(party: list[dict], enemies: list[dict]) -> bytes:
+def render_battle_formation(party: list[dict], enemies: list[dict], background_image_bytes: bytes | None = None) -> bytes:
     """
     Real, current combat state in, PNG bytes out -- party (left,
     facing right) vs enemies (right, facing left), each side split by
@@ -573,6 +622,12 @@ def render_battle_formation(party: list[dict], enemies: list[dict]) -> bytes:
     whatever `party`/`enemies` are handed in (bot.py's caller passes
     the real live session.living_on_side("party"/"enemy") lists) --
     never invents a combatant, a row, or an HP value.
+
+    background_image_bytes (2026-08-10, Task #14): optional real
+    location art (bot.py's caller fetches it, this file stays
+    network-free itself -- see _composite_location_background). None
+    (no location image available/fetch failed) falls back to the
+    original plain gradient, same as before this feature existed.
     """
     def _row_count(combatants: list[dict], row: str) -> int:
         return sum(1 for c in combatants if ("back" if c.get("formation_row") == "back" else "front") == row)
@@ -585,8 +640,11 @@ def render_battle_formation(party: list[dict], enemies: list[dict]) -> bytes:
     canvas_height = _canvas_height(max_row_count)
 
     image = Image.new("RGB", (CANVAS_WIDTH, canvas_height), (0, 0, 0))
+    composited = bool(background_image_bytes) and _composite_location_background(image, canvas_height, background_image_bytes)
     draw = ImageDraw.Draw(image)
-    _draw_background(draw, canvas_height)
+    if not composited:
+        _draw_background(draw, canvas_height)
+    _draw_center_divider(draw, canvas_height)
 
     title_font = _load_font(28, bold=True)
     title = "BATTLE FORMATION"

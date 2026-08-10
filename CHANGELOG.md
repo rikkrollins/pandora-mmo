@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.124] — Battle formation image gets a real location background
+
+Real feature request (Task #14, per Coffee: "instead of a plain
+background can we use location background?"). Reuses the EXACT same
+real, already-generated Pollinations image a player already saw when
+they arrived at this location (same prompt+seed as
+`_maybe_send_location_image`) — never a new, separate image call — and
+since real players get an automatic "look around" on arrival, this is
+almost always already cached by the time a fight starts, rarely
+paying the slow first-fetch cost. Cover-fit (cropped, never
+stretched/distorted) then darkened so token labels/HP bars/name text
+stay legible on top. battle_render.py itself stays network-free — the
+real fetch happens in bot.py's new `_fetch_location_background_bytes`,
+bounded to a shorter timeout than a player-facing image send, so a
+slow/failed fetch still lets the formation image send promptly with
+the original plain gradient rather than stalling combat.
+
+Caught and fixed a real robustness gap in its own new code before
+shipping: the fetch helper's except clause only caught
+`requests.RequestException`, but a malformed/unexpected response
+shape raises `AttributeError` instead — confirmed live via
+`faulthandler.dump_traceback_later` after this exact gap silently
+broke an existing test's ENTIRE formation-image send (background AND
+tokens), not just the background layer, since it rides inside the
+same broad try/except as everything else in
+`_maybe_send_battle_formation_image`. Broadened to a plain `Exception`
+so a bad response degrades to no background, never a broken image.
+
+Also found and fixed a second, unrelated pre-existing test gap while
+verifying this: `test_battle_formation_image_sent_when_combat_starts`
+could hang on a real, unforced Ollama narration call depending purely
+on an initiative coin-flip — not something this task introduced, but
+it blocked reliably testing the new wiring either way.
+
 ## [1.27.123] — Battle formation tokens use real icons instead of a bare letter
 
 Real feature request (Task #14, per Coffee: "Is it possible too use
