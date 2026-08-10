@@ -2838,6 +2838,89 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updated_character["gold"], gold_before)  # no gold awarded for the roll itself
         sessions.end_session(-999)
 
+    async def test_boss_defeat_can_drop_a_spell_tonic(self):
+        """
+        Real feature (2026-08-10, per Coffee: "make it so the ethers are
+        hard to find, they can be dropped after boss battles or found
+        as hidden treasure") -- removed from every shop entirely, only
+        obtainable this way or from one of a handful of hidden chests
+        in campaign.json now. Gated to real is_boss fights.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        leader_id = 950905
+        make_basic_character(leader_id, "BossSlayer", current_location="crossroads_tavern")
+        enemy = {
+            "telegram_user_id": -2_600_304, "name": "Test Boss", "dexterity": 10,
+            "xp_reward": 10, "is_boss": True,
+        }
+        leader = db.get_character(leader_id, -999)
+        leader["telegram_user_id"] = leader_id
+        session = sessions.start_session(-999, [leader, enemy], {leader_id: "party", -2_600_304: "enemy"})
+        session.turn_order = [leader_id, -2_600_304]
+
+        # random.random() < MAP_LOOT_DROP_CHANCE (0.08) also fires at 0.0 --
+        # that's fine (real, independent roll), but random.choice needs to
+        # stay correct for BOTH that draw and this test's own finder draw.
+        def fake_choice(seq):
+            return leader_id if leader_id in seq else seq[0]
+
+        with patch("bot._grant_generated_loot", new=AsyncMock(return_value="")), \
+             patch("bot.random.random", return_value=0.0), \
+             patch("bot.random.choices", return_value=["spell_tonic"]), \
+             patch("bot.random.choice", side_effect=fake_choice):
+            summary, _ = await bot._award_victory_xp(FakeUpdate(leader_id, "", []), session)
+        self.assertIn("Spell Tonic", summary)
+        self.assertIn("boss's remains", summary)
+
+        updated = db.get_character(leader_id, -999)
+        self.assertEqual(updated["inventory"].get("spell_tonic", 0), 1)
+        sessions.end_session(-999)
+
+    async def test_non_boss_defeat_never_drops_a_spell_tonic(self):
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        leader_id = 950906
+        make_basic_character(leader_id, "RegularSlayer", current_location="crossroads_tavern")
+        enemy = {
+            "telegram_user_id": -2_600_305, "name": "Regular Goblin", "dexterity": 10, "xp_reward": 10,
+        }
+        leader = db.get_character(leader_id, -999)
+        leader["telegram_user_id"] = leader_id
+        session = sessions.start_session(-999, [leader, enemy], {leader_id: "party", -2_600_305: "enemy"})
+        session.turn_order = [leader_id, -2_600_305]
+
+        with patch("bot._grant_generated_loot", new=AsyncMock(return_value="")), \
+             patch("bot.random.random", return_value=0.0):
+            summary, _ = await bot._award_victory_xp(FakeUpdate(leader_id, "", []), session)
+        self.assertNotIn("boss's remains", summary)
+        updated = db.get_character(leader_id, -999)
+        self.assertNotIn("spell_tonic", updated["inventory"])
+        sessions.end_session(-999)
+
+    def test_spell_tonics_are_not_sold_in_any_shop(self):
+        """
+        Real feature (2026-08-10): the whole point of "hard to find" is
+        that gold alone can't get you one -- confirms none of the four
+        tiers appear in any shop's inventory in the live campaign data.
+        """
+        tonic_ids = {"spell_tonic", "greater_spell_tonic", "supreme_spell_tonic", "elixir_of_the_arcane_circle"}
+        for shop_id, shop in bot.CAMPAIGN["shops"].items():
+            overlap = tonic_ids & set(shop["inventory"])
+            self.assertFalse(overlap, f"{shop_id} sells {overlap}, but tonics must be find-only")
+
+    def test_spell_tonics_are_reachable_as_real_hidden_treasure(self):
+        """Confirms at least one lockable chest in the live campaign actually carries each tonic tier."""
+        tonic_ids = {"spell_tonic", "greater_spell_tonic", "supreme_spell_tonic", "elixir_of_the_arcane_circle"}
+        found = set()
+        for layer in bot.CAMPAIGN["locations"].values():
+            for location in layer.values():
+                for lockable in location.get("lockables", []):
+                    found |= tonic_ids & set(lockable.get("loot", {}) or {})
+        self.assertEqual(found, tonic_ids)
+
     def test_equipped_elemental_resistance_actually_halves_matching_damage(self):
         """
         Real Phase 2 deliverable of the magic item system (2026-08-02):

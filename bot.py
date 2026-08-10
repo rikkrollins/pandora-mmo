@@ -680,6 +680,19 @@ WORLD_BOSS_BONUS_GOLD = 100  # flat, on top of the same real loot/XP any monster
 
 MAP_LOOT_DROP_CHANCE = 0.08  # task #141 (discoverable half): rare map find on any combat victory
 
+# Per Coffee (2026-08-10): "make it so the ethers are hard to find, they
+# can be dropped after boss battles or found as hidden treasure" -- the
+# spell-slot tonics (items.py) are no longer sold in any shop at all
+# (see vanes_curiosities' inventory), only found this way or in a
+# handful of hidden chests (campaign.json lockables). Gated to real
+# is_boss fights only, never an ordinary encounter -- same random-
+# finder-among-the-party pattern as MAP_LOOT_DROP_CHANCE above. The
+# top-tier Elixir of the Arcane Circle (restore-all) never drops from a
+# boss at all, only from one specific hidden chest -- reserved as the
+# rarest possible find, not a repeatable farm.
+BOSS_SPELL_TONIC_DROP_CHANCE = 0.35
+BOSS_SPELL_TONIC_DROP_WEIGHTS = {"spell_tonic": 50, "greater_spell_tonic": 35, "supreme_spell_tonic": 15}
+
 # ---------------------------------------------------------------------
 # Moltbook heartbeat — PandoraMMO_Bot's agent profile on Moltbook (the
 # social network for AI agents) is meant to help other AI agents
@@ -4093,6 +4106,25 @@ async def _award_victory_xp(update: Update, session: sessions.Session) -> tuple[
         finder_name = db.get_character(finder_id, update.effective_chat.id)["name"]
         map_note = f"\n🗺️ **{finder_name}** finds a {map_item['name']} tucked away on the fallen!"
 
+    # Per Coffee (2026-08-10): spell-slot tonics are meant to be hard to
+    # find -- gated to real is_boss fights only, never an ordinary
+    # encounter, and no longer sold in any shop at all (see
+    # BOSS_SPELL_TONIC_DROP_CHANCE's own comment for the full reasoning).
+    tonic_note = ""
+    defeated_a_boss = any(
+        session.sides.get(p["telegram_user_id"]) == "enemy" and p.get("is_boss")
+        for p in session.participants
+    )
+    if defeated_a_boss and random.random() < BOSS_SPELL_TONIC_DROP_CHANCE:
+        tonic_id = random.choices(
+            list(BOSS_SPELL_TONIC_DROP_WEIGHTS.keys()), weights=list(BOSS_SPELL_TONIC_DROP_WEIGHTS.values()),
+        )[0]
+        tonic_item = items_module.get_item(tonic_id)
+        finder_id = random.choice(real_party_ids)
+        db.add_item(finder_id, update.effective_chat.id, tonic_id, 1)
+        finder_name = db.get_character(finder_id, update.effective_chat.id)["name"]
+        tonic_note = f"\n✨ **{finder_name}** finds a {tonic_item['name']} among the boss's remains!"
+
     summary = f"\n✨ Party gains {xp_each} XP each ({enemy_xp_total} total)."
     if absent_bonus_recipients:
         bonus_xp = max(int(xp_each * INACTIVE_PARTY_XP_SHARE), 1)
@@ -4102,6 +4134,7 @@ async def _award_victory_xp(update: Update, session: sessions.Session) -> tuple[
         )
     summary += loot_line
     summary += map_note
+    summary += tonic_note
     summary += "".join(board_notes)
     if newly_proven_names:
         summary += (

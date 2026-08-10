@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.131] — Spell tonics are now hard to find, not shop-bought
+
+Direct follow-up from Coffee, minutes after v1.27.130 shipped: "make it
+so the ethers are hard to find, they can be dropped after boss battles
+or found as hidden treasure." Reworked acquisition entirely rather
+than just tuning shop prices:
+
+- Removed all four spell-tonic tiers from `vanes_curiosities`
+  (Ossian Vane's shop) — gold alone can no longer buy one.
+- New `BOSS_SPELL_TONIC_DROP_CHANCE` (35%) in `bot.py`'s
+  `_award_victory_xp`: a real chance for Spell Tonic / Greater / Supreme
+  (weighted 50/35/15) to drop after defeating an enemy actually flagged
+  `is_boss` — never an ordinary encounter — mirroring the existing
+  `MAP_LOOT_DROP_CHANCE` random-finder-among-the-party pattern already
+  used for map drops.
+- The top-tier **Elixir of the Arcane Circle** (full restore) never
+  drops from a boss at all — reserved as a genuinely rare hidden-
+  treasure find in exactly one lockable chest (`barrow_strongbox`, "a
+  real strongbox, well hidden," in The Sunken Barrow). The three lower
+  tiers are also placed in existing hidden chests, tiered by dungeon
+  depth (Forgotten Cistern → Spell Tonic, Glimmering Pool → Greater,
+  Sunken Archive → Supreme), alongside their existing loot.
+
+New tests confirm: a boss kill can drop a tonic (deterministic via
+mocked `random`), an ordinary kill never can, no shop sells any tier,
+and every tier is reachable from at least one real hidden chest in the
+live campaign data.
+
 ## [1.27.130] — New consumables: spell-slot restoration tonics (real feature)
 
 Real feature request from Coffee, right after the spell-slot Support

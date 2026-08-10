@@ -1126,7 +1126,8 @@
             "name": "a sealed cache half-buried in dry silt",
             "loot": {
               "healing_potion": 2,
-              "scroll_bless": 1
+              "scroll_bless": 1,
+              "spell_tonic": 1
             },
             "gold": 40
           }
@@ -1222,7 +1223,8 @@
             "kind": "chest",
             "name": "a corroded coffer resting on the pool's floor",
             "loot": {
-              "greater_healing_potion": 1
+              "greater_healing_potion": 1,
+              "greater_spell_tonic": 1
             },
             "gold": 55
           }
@@ -1394,7 +1396,8 @@
             "kind": "chest",
             "name": "a sealed vault set into the archive's far wall",
             "loot": {
-              "scroll_invisibility": 1
+              "scroll_invisibility": 1,
+              "supreme_spell_tonic": 1
             },
             "gold": 90
           }
@@ -1553,7 +1556,8 @@
             "name": "a real strongbox, well hidden",
             "loot": {
               "shortsword": 1,
-              "scroll_shield": 1
+              "scroll_shield": 1,
+              "elixir_of_the_arcane_circle": 1
             },
             "gold": 60
           }
@@ -2650,11 +2654,7 @@
         "scroll_revivify",
         "scroll_fireball",
         "weathered_surface_map",
-        "tattered_underground_chart",
-        "spell_tonic",
-        "greater_spell_tonic",
-        "supreme_spell_tonic",
-        "elixir_of_the_arcane_circle"
+        "tattered_underground_chart"
       ]
     },
     "grimsbys_tavern": {
