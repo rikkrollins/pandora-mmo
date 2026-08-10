@@ -8279,6 +8279,40 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(battle_render._first_name("Brandywine Fieldstone"), "Brandywine")
         self.assertEqual(battle_render._first_name("Grimsby"), "Grimsby")
 
+    def test_condition_badge_text_reflects_real_active_conditions(self):
+        """
+        Self-initiated visual improvement (2026-08-10): sessions.py's
+        real in-memory conditions (prone/poisoned/paralyzed/etc, see
+        bot.py's condition-setting code around _apply_condition) were
+        tracked and narrated in text but never shown on the formation
+        image -- a player had to scroll back to remember who was
+        currently prone mid-fight. _condition_badge_text is the pure
+        (non-Pillow) piece of that feature -- direct, fast checks here.
+        """
+        import battle_render
+        self.assertIsNone(battle_render._condition_badge_text(None))
+        self.assertIsNone(battle_render._condition_badge_text([]))
+        # An unrecognized/future condition string must never crash the
+        # renderer -- silently omitted rather than shown as a raw key.
+        self.assertIsNone(battle_render._condition_badge_text(["some_future_condition"]))
+        self.assertEqual(battle_render._condition_badge_text(["prone"]), "PRONE")
+        self.assertEqual(
+            battle_render._condition_badge_text(["prone", "poisoned"]), "PRONE • POISONED",
+        )
+
+    def test_battle_formation_image_renders_cleanly_with_active_conditions(self):
+        """
+        End-to-end: a combatant with real active conditions must not
+        break image rendering -- confirms render_battle_formation still
+        returns valid PNG bytes with the new condition-badge drawing
+        step wired into _draw_token.
+        """
+        import battle_render
+        party = [{"name": "Pan", "hp_current": 50, "hp_max": 100, "conditions": ["prone", "poisoned"]}]
+        enemies = [{"name": "Goblin", "hp_current": 10, "hp_max": 30, "conditions": []}]
+        png_bytes = battle_render.render_battle_formation(party, enemies)
+        self.assertTrue(png_bytes.startswith(b"\x89PNG"))
+
     def test_battle_formation_all_circles_share_one_uniform_size(self):
         """
         Real live request (2026-08-10, Coffee: "make all the players

@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.118] — Battle formation image now shows active conditions
+
+Self-initiated (2026-08-10, per Coffee: "implementing things that
+would make this more visually stimulating with what u have
+available"). `sessions.py`'s real in-memory conditions (prone,
+poisoned, paralyzed, frightened, banished, death_warded) were already
+tracked and narrated in text, but never shown on the tactical
+formation image itself — a player had to scroll back through combat
+log lines to remember who was currently prone or poisoned mid-fight.
+Small color-coded text badges now render under each token's HP line
+whenever that combatant has an active condition, pulled straight from
+the real per-participant `conditions` list combat already reads/
+writes — same "never invent, only ground truth from the rules layer"
+convention as everything else `battle_render.py` draws. Pure Pillow,
+no new dependency, no network call, no asset pipeline. Verified with
+a direct `render_battle_formation()` call (valid PNG bytes) plus a
+rendered preview image inspected visually.
+
+Also spun up `scripts/ai_party_simulation.py`: a reusable, idle-gated
+AI-party simulation harness that drives real bot handlers (with real
+Ollama narration) through a scripted sequence of actions to catch
+live gameplay bugs the way the project's biggest past bugs (HP not
+persisting, an infinite loop, a narration mismatch) were actually
+found. Refuses to start, and aborts mid-run, whenever
+`bot_live_tmp.log` shows real non-`getUpdates` activity in the last 5
+minutes — reversing the older "run continuously regardless of live
+players" guidance per Coffee's explicit 2026-08-10 instruction and a
+same-day live-overload incident.
+
 ## [1.27.117] — Assassin Backstab no longer says "casts"
 
 Found while reviewing the task list for anything else worth adding

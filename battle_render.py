@@ -56,6 +56,27 @@ _HP_BAR_BG = (40, 40, 40)
 # a crowded row, never below _TOKEN_RADIUS_MIN.
 _FOOTPRINT_RATIO = 3.3
 
+# Condition badges (2026-08-10, self-initiated -- "make this more
+# visually stimulating with what you have available"): sessions.py's
+# real in-memory conditions (prone/poisoned/paralyzed/etc, see
+# bot.py's _apply_condition and friends) were already tracked and
+# narrated in text, but never shown on the formation image itself --
+# a player had to scroll back through text to remember who was
+# currently prone or poisoned mid-fight. Small colored text badges
+# under the HP line, drawn only when a combatant actually has an
+# active condition, using the exact same real per-participant
+# `conditions` list combat already reads from -- never a new/invented
+# fact, same "ground truth from the rules layer" convention as
+# everything else this file draws.
+_CONDITION_LABELS = {
+    "prone": ("PRONE", (200, 200, 90)),
+    "poisoned": ("POISONED", (110, 210, 110)),
+    "paralyzed": ("PARALYZED", (230, 200, 50)),
+    "frightened": ("FRIGHTENED", (170, 110, 220)),
+    "banished": ("BANISHED", (140, 140, 140)),
+    "death_warded": ("WARDED", (212, 175, 55)),
+}
+
 _FONT_DIR = "/usr/share/fonts/truetype/dejavu"
 _FONT_BOLD_PATH = os.path.join(_FONT_DIR, "DejaVuSans-Bold.ttf")
 _FONT_REGULAR_PATH = os.path.join(_FONT_DIR, "DejaVuSans.ttf")
@@ -145,6 +166,14 @@ def _draw_background(draw: ImageDraw.ImageDraw, canvas_height: int = CANVAS_HEIG
     )
 
 
+def _condition_badge_text(conditions: list | None) -> str | None:
+    """Pure, testable-without-Pillow piece of the condition-badge feature -- see _CONDITION_LABELS."""
+    active = [c for c in (conditions or []) if c in _CONDITION_LABELS]
+    if not active:
+        return None
+    return " • ".join(_CONDITION_LABELS[c][0] for c in active)
+
+
 def _draw_token(draw: ImageDraw.ImageDraw, x: int, y: int, combatant: dict, color: tuple,
                  radius: int) -> None:
     name = combatant.get("name", "?")
@@ -192,7 +221,19 @@ def _draw_token(draw: ImageDraw.ImageDraw, x: int, y: int, combatant: dict, colo
     hp_label = f"{hp_current}/{hp_max}"
     hp_bbox = draw.textbbox((0, 0), hp_label, font=hp_font)
     hp_w = hp_bbox[2] - hp_bbox[0]
-    draw.text((x - hp_w / 2, bar_y + hp_bar_height + 2 * scale), hp_label, font=hp_font, fill=(200, 200, 200))
+    hp_text_y = bar_y + hp_bar_height + 2 * scale
+    draw.text((x - hp_w / 2, hp_text_y), hp_label, font=hp_font, fill=(200, 200, 200))
+
+    badge_text = _condition_badge_text(combatant.get("conditions"))
+    if badge_text:
+        active = [c for c in combatant.get("conditions", []) if c in _CONDITION_LABELS]
+        badge_color = _CONDITION_LABELS[active[0]][1]
+        badge_font = _load_font(max(round(10 * scale), 8), bold=True)
+        badge_bbox = draw.textbbox((0, 0), badge_text, font=badge_font)
+        badge_w = badge_bbox[2] - badge_bbox[0]
+        badge_h = badge_bbox[3] - badge_bbox[1]
+        badge_y = hp_text_y + (hp_bbox[3] - hp_bbox[1]) + 4 * scale
+        draw.text((x - badge_w / 2, badge_y), badge_text, font=badge_font, fill=badge_color)
 
 
 def _row_x_positions(is_party: bool) -> dict:
