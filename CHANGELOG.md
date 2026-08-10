@@ -2,6 +2,32 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.128] — Support topic: fix spell-slot-restoration hallucination
+
+Found via topic-activity monitoring, right after v1.27.127 finally got
+Support answering again: the same real player asked "How can i
+replenish spell slot in battle?" a THIRD time, and this time Ollama
+answered promptly and successfully — but with a wrong answer: "You can
+replenish by using your spell slot through actions like casting spells
+again or activating abilities." That flatly contradicts this game's
+actual rules (spell slots can ONLY be recovered by resting, over
+real-world elapsed time — see `NATURAL_HEALING_FULL_REST_HOURS` in
+bot.py — never mid-battle at all), even though the correct fact was
+already sitting verbatim in `SUPPORT_SYSTEM_PROMPT_HEADER` ("I rest ...
+heals HP and spell slots over real-world elapsed time"). Same failure
+shape as the 2026-07-10 XP hallucination this file already has a fix
+pattern for: a fact handed to the model directly, still not trusted
+over free-form generation.
+
+Fix: `_deterministic_spell_slot_restore_answer()` answers this
+question directly from the real constants (`config.
+NATURAL_HEALING_FULL_REST_HOURS`), no Ollama call at all, matching
+the same no-hallucination-possible approach already used for XP,
+active-character, and inventory questions. Also covers the real
+Warlock Pact Magic exception (spell slots recover on a much shorter
+curve for that one class) when a character is known. New test covers
+both the general case and the Warlock-specific wording.
+
 ## [1.27.127] — Support topic: fix silent empty-response failures (num_predict too tight)
 
 Real live bug report from Coffee, right after v1.27.126: "How do i

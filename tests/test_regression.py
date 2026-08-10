@@ -1382,6 +1382,38 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         for options in captured_options:
             self.assertEqual(options["num_predict"], 1200)
 
+    def test_support_spell_slot_restoration_question_is_answered_deterministically(self):
+        """
+        Real live bug (2026-08-10, found via topic-activity monitoring):
+        the same real player asked "How can i replenish spell slot in
+        battle?" three separate times, and even with the correct fact
+        already in SUPPORT_SYSTEM_PROMPT_HEADER ("I rest ... heals HP
+        and spell slots over real-world elapsed time"), the model
+        answered "casting spells again or activating abilities" -- a
+        real hallucination that flatly contradicts the game's actual
+        mechanics (spell slots cannot be restored mid-battle at all).
+        Same failure shape as the 2026-07-10 XP hallucination this file
+        already works around. No Ollama call should happen at all for
+        this question now.
+        """
+        import ai.support_agent as support_agent_module
+        from unittest.mock import patch
+
+        with patch("ai.support_agent.requests.post") as mock_post:
+            answer = support_agent_module.answer_support_question("How can i replenish spell slot in battle?")
+        mock_post.assert_not_called()
+        self.assertIn("resting", answer.lower())
+        self.assertNotIn("casting spells again", answer.lower())
+        self.assertNotIn("activating abilities", answer.lower())
+
+        warlock = make_basic_character(555555, "Zeraphine", char_class="Warlock")
+        with patch("ai.support_agent.requests.post") as mock_post:
+            warlock_answer = support_agent_module.answer_support_question(
+                "How do i restore spell slots?", character=warlock,
+            )
+        mock_post.assert_not_called()
+        self.assertIn("warlock", warlock_answer.lower())
+
     # -- Real live bug (2026-07-16): this model has a documented bias
     #    toward guessing "pass_turn" for phrasing it doesn't recognize --
     #    "I'll take a mug, ale!!! how are you doing old buddy?" (ordinary

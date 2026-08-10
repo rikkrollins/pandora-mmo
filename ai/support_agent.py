@@ -405,6 +405,46 @@ def _deterministic_xp_answer(character: dict) -> str:
     return f"You're level {level} with {xp} XP. You need {next_level_xp - xp} more XP to reach level {level + 1}."
 
 
+_SPELL_SLOT_RESTORE_QUESTION_WORDS = [
+    "replenish spell slot", "restore spell slot", "recover spell slot",
+    "regain spell slot", "spell slots back", "recharge spell slot",
+    "refill spell slot", "get my spell slot", "get spell slots back",
+]
+
+
+def _deterministic_spell_slot_restore_answer(character: dict | None) -> str:
+    """
+    Real live bug (2026-08-10, found via topic-activity monitoring):
+    the SAME question ("How can i replenish spell slot in battle?")
+    was asked three separate times by the same real player, and even
+    with the correct fact already sitting in SUPPORT_SYSTEM_PROMPT_
+    HEADER ("I rest ... heals HP and spell slots over real-world
+    elapsed time"), the model still answered "casting spells again or
+    activating abilities" — a real hallucination that flatly
+    contradicts its own grounding, not a missing-fact problem. This is
+    the exact same failure shape as the 2026-07-10 XP hallucination
+    (`_deterministic_xp_answer`'s docstring): a fact handed to the
+    model verbatim, still not trusted over free-form generation.
+    Answered directly from the real constants, no Ollama call, so this
+    specific question can never come out wrong again.
+    """
+    full_rest_hours = config.NATURAL_HEALING_FULL_REST_HOURS
+    base = (
+        "Spell slots can't be replenished mid-battle in this game — the only way to recover them is "
+        "resting (say \"I rest\" or go quiet for a while). Resting heals HP and spell slots gradually "
+        f"over real-world elapsed time, not instantly, capped at full after {full_rest_hours:g} hours."
+    )
+    if character and character.get("char_class") == "Warlock":
+        # Real Pact Magic rule (see bot.py's WARLOCK_PACT_MAGIC_REST_HOURS):
+        # a Warlock's spell slots specifically recover on a short-rest-like
+        # curve, ~1/8th the time everyone else's full rest takes.
+        base += (
+            f" Warlocks are the one exception (real Pact Magic rule): your spell slots specifically "
+            f"recover much faster, on a roughly {full_rest_hours / 8:g}-hour curve instead."
+        )
+    return base
+
+
 _ACTIVE_CHARACTER_QUESTION_WORDS = [
     "active character", "current character", "who am i playing",
     "which character am i", "what character am i", "who is my character",
@@ -780,6 +820,8 @@ def answer_support_question(
     deterministic party-roster answer below and the general LLM prompt.
     """
     lowered = question.lower()
+    if any(w in lowered for w in _SPELL_SLOT_RESTORE_QUESTION_WORDS):
+        return _deterministic_spell_slot_restore_answer(character)
     if character and any(w in lowered for w in _XP_QUESTION_WORDS):
         return _deterministic_xp_answer(character)
     if character and any(w in lowered for w in _ACTIVE_CHARACTER_QUESTION_WORDS):
