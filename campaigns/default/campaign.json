@@ -3902,7 +3902,9 @@
       "life_drain": true,
       "damage_dice": "1d8",
       "damage_bonus": 17,
-      "damage_type": "fire"
+      "damage_type": "fire",
+      "vulnerabilities": ["cold"],
+      "elemental_resistance_pct": {"fire": 150}
     },
     "the_waiting_shape": {
       "name": "The Waiting Shape",

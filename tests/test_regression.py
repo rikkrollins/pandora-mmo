@@ -935,6 +935,103 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(live["spell_slots_current"], 4)  # 0 + 5, capped at max 4
         sessions.end_session(-999)
 
+    async def test_use_item_heal_potion_damages_undead_enemy_instead_of_healing(self):
+        """
+        Real feature (2026-08-10, per Coffee: "create an undead type
+        also and have healing type potions hurt the Undead", confirmed
+        "combat only works"). verge_wraith is a real UNDEAD_MONSTER_KEYS
+        entry (rules/combat.py) already vulnerable to radiant -- this
+        potion's damage is flavored radiant specifically so that real
+        vulnerability doubles it, a genuine synergy with existing data,
+        not a separate new number.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        from rules.combat import UNDEAD_MONSTER_KEYS
+        sessions.end_session(-999)
+        self.assertIn("verge_wraith", UNDEAD_MONSTER_KEYS)
+        user_id = 950930
+        make_basic_character(user_id, "UndeadHunter", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "healing_potion", 1)
+        character = db.get_character(user_id, -999)
+        character["telegram_user_id"] = user_id
+        enemy = {
+            "telegram_user_id": -2_600_401, "name": "Test Wraith", "dexterity": 10,
+            "hp_current": 500, "hp_max": 500, "monster_key": "verge_wraith", "is_ai": 1,
+            "vulnerabilities": ["radiant"], "resistances": [], "immunities": [],
+        }
+        session = sessions.start_session(-999, [character, enemy], {user_id: "party", -2_600_401: "enemy"})
+        session.turn_order = [user_id, -2_600_401]
+
+        sink = []
+        with patch("bot._resolve_ai_turns", new=AsyncMock()):
+            await bot._do_use_item(
+                FakeUpdate(user_id, "use healing potion on test wraith", sink), "use healing potion on test wraith",
+            )
+        combined = " ".join(sink)
+        self.assertIn("burns it for", combined.lower())  # the undead-damage branch's own distinct phrasing
+        self.assertIn("damage", combined.lower())
+        live_enemy = next(p for p in session.participants if p["telegram_user_id"] == -2_600_401)
+        self.assertLess(live_enemy["hp_current"], 500)
+        sessions.end_session(-999)
+
+    async def test_use_item_heal_potion_can_kill_a_low_hp_undead_and_end_combat(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 950931
+        make_basic_character(user_id, "UndeadFinisher", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "supreme_healing_potion", 1)  # heals/damages a guaranteed 10,000
+        character = db.get_character(user_id, -999)
+        character["telegram_user_id"] = user_id
+        enemy = {
+            "telegram_user_id": -2_600_402, "name": "Weak Wraith", "dexterity": 10,
+            "hp_current": 5, "hp_max": 5, "monster_key": "verge_wraith", "xp_reward": 10, "is_ai": 1,
+            "vulnerabilities": [], "resistances": [], "immunities": [],
+        }
+        session = sessions.start_session(-999, [character, enemy], {user_id: "party", -2_600_402: "enemy"})
+        session.turn_order = [user_id, -2_600_402]
+
+        sink = []
+        await bot._do_use_item(
+            FakeUpdate(user_id, "use supreme healing potion on weak wraith", sink),
+            "use supreme healing potion on weak wraith",
+        )
+        combined = " ".join(sink)
+        self.assertIn("destroyed", combined.lower())
+        self.assertIn("combat over", combined.lower())
+        self.assertIsNone(sessions.get_session_for_user(-999, user_id))
+        sessions.end_session(-999)
+
+    async def test_use_item_heal_potion_cannot_target_a_non_undead_enemy(self):
+        """A living, non-undead enemy stays untargetable by a heal item -- falls back to healing self, not attacking it."""
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        user_id = 950932
+        make_basic_character(user_id, "NotUndeadHunter", current_location="crossroads_tavern", hp_max=20)
+        db.update_character(user_id, -999, hp_current=5)
+        db.add_item(user_id, -999, "healing_potion", 1)
+        character = db.get_character(user_id, -999)
+        character["telegram_user_id"] = user_id
+        enemy = {
+            "telegram_user_id": -2_600_403, "name": "Test Goblin", "dexterity": 10,
+            "hp_current": 20, "hp_max": 20, "monster_key": "goblin", "is_ai": 1,
+            "vulnerabilities": [], "resistances": [], "immunities": [],
+        }
+        session = sessions.start_session(-999, [character, enemy], {user_id: "party", -2_600_403: "enemy"})
+        session.turn_order = [user_id, -2_600_403]
+
+        sink = []
+        with patch("bot._resolve_ai_turns", new=AsyncMock()):
+            await bot._do_use_item(
+                FakeUpdate(user_id, "use healing potion on test goblin", sink), "use healing potion on test goblin",
+            )
+        live_enemy = next(p for p in session.participants if p["telegram_user_id"] == -2_600_403)
+        self.assertEqual(live_enemy["hp_current"], 20)  # untouched -- never a valid target
+        character_after = db.get_character(user_id, -999)
+        self.assertGreater(character_after["hp_current"], 5)  # healed the caster instead
+        sessions.end_session(-999)
+
     async def test_use_item_rejects_when_none_carried(self):
         use_test_db("tests/tmp/use_item_test2.db")
         user_id = 900103
@@ -3082,6 +3179,137 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("fire", combatant.get("resistances", []))
         self.assertEqual(apply_damage_type_modifier(20, "fire", combatant), 10)
         self.assertEqual(apply_damage_type_modifier(20, "cold", combatant), 20)
+
+    def test_elemental_resistance_pct_stacking_nullifies_then_heals(self):
+        """
+        Real feature (2026-08-10, per Coffee: "enchant armour and other
+        equipables to raise resistences in Frost/Flame/Spark... if the
+        players gain enough resistences... it shud nullify the damage OR
+        in extreme cases heal the player" -- and, mirrored for enemies,
+        "if enemies are strong in an element, it shud nullify the damage
+        OR in extreme cases Heal the enemy"). This new, NUMERIC,
+        stacking elemental_resistance_pct layer is deliberately separate
+        from the old flat boolean resistances list (which stays a plain
+        50%, tested above) -- covers 0%/50%/100%/150% against a defender
+        with no attacker (so magic_penetration_pct is a no-op at 0%).
+        """
+        from rules.combat import apply_damage_type_modifier, elemental_overflow_heal
+        no_resist = {"hp_current": 100, "hp_max": 100}
+        self.assertEqual(apply_damage_type_modifier(40, "fire", no_resist), 40)
+        self.assertEqual(elemental_overflow_heal(40, "fire", no_resist), 0)
+
+        half = {"hp_current": 100, "hp_max": 100, "elemental_resistance_pct": {"fire": 50}}
+        self.assertEqual(apply_damage_type_modifier(40, "fire", half), 20)
+        self.assertEqual(elemental_overflow_heal(40, "fire", half), 0)
+        # Untouched for a different damage type -- stacking is per-type.
+        self.assertEqual(apply_damage_type_modifier(40, "cold", half), 40)
+
+        nullified = {"hp_current": 100, "hp_max": 100, "elemental_resistance_pct": {"fire": 100}}
+        self.assertEqual(apply_damage_type_modifier(40, "fire", nullified), 0)
+        self.assertEqual(elemental_overflow_heal(40, "fire", nullified), 0)
+
+        heals = {"hp_current": 100, "hp_max": 100, "elemental_resistance_pct": {"fire": 150}}
+        self.assertEqual(apply_damage_type_modifier(40, "fire", heals), 0)
+        self.assertEqual(elemental_overflow_heal(40, "fire", heals), 20)  # 50% of the raw 40 overflows into healing
+
+        # Immunity is still an absolute wall -- no damage, no heal either.
+        immune = {"hp_current": 100, "hp_max": 100, "immunities": ["fire"], "elemental_resistance_pct": {"fire": 200}}
+        self.assertEqual(apply_damage_type_modifier(40, "fire", immune), 0)
+        self.assertEqual(elemental_overflow_heal(40, "fire", immune), 0)
+
+        # A mythic "ignores_resistance" attacker cuts through the numeric
+        # layer exactly like it already cuts through the boolean one.
+        ignorer = {"ignores_resistance": True}
+        self.assertEqual(apply_damage_type_modifier(40, "fire", heals, ignorer), 40)
+        self.assertEqual(elemental_overflow_heal(40, "fire", heals, ignorer), 0)
+
+    async def test_elemental_resistance_heals_a_defender_on_a_real_weapon_hit(self):
+        """
+        End-to-end version of the pure-math test above: a real
+        resolve_attack call against a defender strong enough in an
+        element to heal actually raises their HP, not just nullifies
+        the hit -- confirms elemental_heal_gained is both applied to
+        hp_current AND surfaced in the return dict for narration.
+        """
+        from rules.combat import resolve_attack
+        attacker = make_basic_character(950920, "ElementalAttacker", current_location="crossroads_tavern")
+        weapon = {"name": "Fire Dagger", "damage_dice": "1d1", "damage_bonus": 20, "ability": "strength", "damage_type": "fire"}
+        defender = {
+            "name": "Ember Golem", "telegram_user_id": -777001, "hp_current": 50, "hp_max": 200,
+            "armor_class": 1, "dexterity": 10, "elemental_resistance_pct": {"fire": 150},
+        }
+        result = resolve_attack(attacker, defender, weapon, forced_roll=20, forced_damage_roll=1)
+        self.assertTrue(result["hit"])
+        self.assertEqual(result["damage_dealt"], 0)
+        self.assertGreater(result["elemental_heal_gained"], 0)
+        self.assertGreater(defender["hp_current"], 50)
+
+    async def test_equipped_elemental_resistance_wards_stack_across_two_items(self):
+        """
+        Real feature (2026-08-10): the whole point is STACKING -- two
+        separately-enchanted equipped items each granting 50% fire
+        resistance must add up to 100% (a full nullify) on the live
+        combatant, not just take the higher/last one.
+        """
+        from rules.combat import apply_damage_type_modifier
+        from rules.item_generator import generate_armor, generate_shield
+        user_id = 950921
+        make_basic_character(user_id, "WardStacker", current_location="crossroads_tavern")
+
+        armor = generate_armor(tier="legendary")
+        armor["affixes"] = [a for a in armor["affixes"] if a.get("kind") != "elemental_resistance"]
+        armor["affixes"].append({"kind": "elemental_resistance", "damage_type": "fire", "value": 50})
+        armor_id = db.create_item_instance(
+            item_type=armor["type"], name=armor["name"], rarity=armor["rarity"],
+            price=armor["price"], base_stats=armor, affixes=armor["affixes"],
+        )
+        db.add_item(user_id, -999, armor_id, 1)
+        self.assertTrue(db.equip_item(user_id, -999, armor_id)[0])
+
+        shield = generate_shield(tier="legendary")
+        shield["affixes"] = [a for a in shield["affixes"] if a.get("kind") != "elemental_resistance"]
+        shield["affixes"].append({"kind": "elemental_resistance", "damage_type": "fire", "value": 50})
+        shield_id = db.create_item_instance(
+            item_type=shield["type"], name=shield["name"], rarity=shield["rarity"],
+            price=shield["price"], base_stats=shield, affixes=shield["affixes"],
+        )
+        db.add_item(user_id, -999, shield_id, 1)
+        self.assertTrue(db.equip_item(user_id, -999, shield_id)[0])
+
+        party = bot._get_real_party_combatants(db.get_character(user_id, -999))
+        combatant = next(p for p in party if p["telegram_user_id"] == user_id)
+        self.assertEqual(combatant.get("elemental_resistance_pct", {}).get("fire"), 100)
+        self.assertEqual(apply_damage_type_modifier(40, "fire", combatant), 0)
+
+    def test_elemental_ward_enchant_recipes_are_real_and_armor_only(self):
+        from rules.crafting import ENCHANT_RECIPES
+        for recipe_id, dtype in (
+            ("enchant_flame_ward", "fire"), ("enchant_frost_ward", "cold"), ("enchant_spark_ward", "lightning"),
+        ):
+            recipe = ENCHANT_RECIPES[recipe_id]
+            self.assertEqual(recipe["affix"], {"kind": "elemental_resistance", "damage_type": dtype, "value": 50})
+            self.assertNotIn("weapon", recipe["applies_to"])
+            self.assertIn("armor", recipe["applies_to"])
+
+    def test_apply_affix_builds_elemental_resistances_list_on_materialize(self):
+        item = {"type": "armor"}
+        db._apply_affix(item, {"kind": "elemental_resistance", "damage_type": "lightning", "value": 50})
+        self.assertEqual(item["elemental_resistances"], [{"damage_type": "lightning", "value": 50}])
+
+    def test_bestiary_shows_the_waking_embers_real_elemental_strength(self):
+        """
+        Real feature (2026-08-10, per Coffee: "note them on the
+        Bestiary") -- The Waking Ember is the one real boss in this
+        campaign whose own damage_type IS fire (see campaign.json), now
+        hand-set strong enough in it to heal, plus a real cold weakness
+        as its narrative counterpart. Both must actually surface.
+        """
+        template = bot.CAMPAIGN["monsters"]["the_waking_ember"]
+        self.assertEqual(template.get("elemental_resistance_pct", {}).get("fire"), 150)
+        self.assertIn("cold", template.get("vulnerabilities", []))
+        entry = bot._format_bestiary_entry("the_waking_ember", template)
+        self.assertIn("heals from fire damage", entry)
+        self.assertIn("vulnerable to cold", entry)
 
     async def test_equipped_item_can_grant_a_spell_gated_by_feature_uses(self):
         """
@@ -5798,6 +6026,32 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         template = cl.get_monster_template(bot.CAMPAIGN, "the_unasked")
         self.assertEqual(enemy["hp_max"], template["hp_max"])
         self.assertEqual(enemy["xp_reward"], template.get("xp_reward", 0))
+        sessions.end_session(-999)
+
+    async def test_start_combat_copies_elemental_resistance_pct_from_template(self):
+        """
+        Real feature (2026-08-10): the_waking_ember's real, hand-set
+        elemental_resistance_pct (campaign.json) must actually reach the
+        live combat participant dict when a fight against it starts --
+        same real bug class as the resistances/vulnerabilities/
+        immunities copy this file already had to fix once before
+        (2026-07-25, see the comment right above this dict in bot.py).
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock, Mock
+        sessions.end_session(-999)
+        user_id = 900702
+        make_basic_character(user_id, "EmberFighter", char_class="Fighter", current_location="crossroads_tavern")
+        sink = []
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()), \
+             patch("bot.narrate_boss_intro", new=Mock(return_value="The embers stir.")):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the waking ember", sink),
+                                        monster_key="the_waking_ember", count=1)
+        session = sessions.get_session_for_user(-999, user_id)
+        enemy = next(p for p in session.participants if p["telegram_user_id"] != user_id)
+        self.assertEqual(enemy.get("elemental_resistance_pct", {}).get("fire"), 150)
+        self.assertIn("cold", enemy.get("vulnerabilities", []))
         sessions.end_session(-999)
 
     async def test_skill_check_handler_applies_proficiency_for_the_right_class(self):

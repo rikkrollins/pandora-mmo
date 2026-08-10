@@ -994,6 +994,19 @@ def _apply_affix(item: dict, affix: dict) -> None:
     elif kind in ("resistance", "vulnerability", "immunity"):
         list_field = f"{kind}s"
         item.setdefault(list_field, []).append(affix["damage_type"])
+    # Numeric, STACKING resistance (2026-08-10, per Coffee: "enchant
+    # armour and other equipables to raise resistences in Frost/Flame/
+    # Spark... if the players gain enough resistences... nullify the
+    # damage OR ... heal"). Deliberately separate from the flat boolean
+    # "resistance" kind above (which stays a plain 50%, no stacking) --
+    # appended to a list, same live-summed-at-read-time convention as
+    # profession_bonuses just below, read by bot.py's
+    # _apply_equipped_elemental_profile and consumed by rules.combat's
+    # apply_damage_type_modifier/elemental_overflow_heal.
+    elif kind == "elemental_resistance":
+        item.setdefault("elemental_resistances", []).append(
+            {"damage_type": affix["damage_type"], "value": affix["value"]}
+        )
     # Phase 3 (2026-08-02): an item that grants a spell the wearer
     # doesn't otherwise know -- bot._do_cast_spell's own third fallback
     # branch (after known_spells, after a carried scroll) reads these two

@@ -125,22 +125,55 @@ def apply_damage_type_modifier(damage: int, damage_type: str | None, defender: d
     it doesn't create a new vulnerability exploit. Immunity stays a
     real, absolute wall (untouched by penetration); vulnerability
     already favors the attacker and has nothing to counter.
+
+    Stacking elemental resistance (2026-08-10, per Coffee: "allow the
+    player to enchant armour and other equipables to raise resistences
+    in Frost/Flame/Spark... if the players gain enough resistences...
+    it shud nullify the damage" -- and, for enemies, "if enemies are
+    strong in an element, it shud nullify the damage"): defender.
+    elemental_resistance_pct is a NEW, separate, numeric, STACKING layer
+    (0-100+ percent per damage type) -- for players it's live-summed
+    from every equipped enchanted item's real elemental_resistance
+    affix (see bot.py's _apply_equipped_elemental_profile); for
+    monsters it's a real, hand-set field in campaign.json for creatures
+    "strong in an element". Deliberately kept separate from the old
+    boolean resistances list above rather than replacing it -- when
+    present for a damage type, it wins outright (a numeric, explicitly-
+    stacked resistance is always at least as strong as the flat 50%
+    boolean case, so there's no real ambiguity to resolve). At exactly
+    100% this nullifies the hit completely (still returned as a plain
+    0, same as immunity/a fully-absorbed hit -- see this function's own
+    "never returns negative" contract, kept deliberately intact so
+    every call site that multiplies/gates/halves damage_dealt further
+    afterward never has to guard against a sign it was never written to
+    expect). Anything ABOVE 100% is NOT reflected in this return value
+    at all -- see the separate elemental_overflow_heal() below for the
+    "in extreme cases heal" half of the same feature, called
+    independently by callers right after this function, exactly so
+    that overflow can never leak into this one's always-non-negative
+    contract.
     """
     if damage <= 0 or not damage_type:
         return damage
     resistances, vulnerabilities, immunities = _defender_resistance_profile(defender)
     if damage_type in immunities:
         return 0
+    # Mythic-tier weapon affix (magic item system Phase 6, 2026-08-02):
+    # ignore_resistance is a real, guaranteed mechanical effect that cuts
+    # through BOTH the old boolean resistance and this new stacking
+    # elemental layer alike -- checked once, up front, rather than
+    # duplicated in each branch below.
+    ignores = bool(attacker and attacker.get("ignores_resistance"))
+    elemental_pct = 0.0 if ignores else float((defender.get("elemental_resistance_pct") or {}).get(damage_type, 0))
+    if elemental_pct > 0:
+        penetration = magic_penetration_pct(attacker.get("rebirth_count", 0) if attacker else 0) / 100.0
+        effective_pct = min(elemental_pct * (1 - penetration), 100.0)
+        return max(0, int(round(damage * (1 - effective_pct / 100))))
     resistant = damage_type in resistances
     vulnerable = damage_type in vulnerabilities
     if resistant and vulnerable:
         return damage
-    # Mythic-tier weapon affix (magic item system Phase 6, 2026-08-02):
-    # ignore_resistance is a real, guaranteed mechanical effect, not a
-    # bigger version of magic_penetration_pct -- checked before the
-    # normal halving math, same "genuine escape hatch" spirit as
-    # immunity above, but attacker-side instead of defender-side.
-    if resistant and attacker and attacker.get("ignores_resistance"):
+    if resistant and ignores:
         return damage
     if resistant:
         halved = damage // 2
@@ -151,6 +184,39 @@ def apply_damage_type_modifier(damage: int, damage_type: str | None, defender: d
     if vulnerable:
         return damage * 2
     return damage
+
+
+def elemental_overflow_heal(raw_damage: int, damage_type: str | None, defender: dict, attacker: dict | None = None) -> int:
+    """
+    The "in extreme cases heal" half of the elemental-resistance feature
+    above (2026-08-10, per Coffee) -- called SEPARATELY by callers right
+    after apply_damage_type_modifier, on the same raw pre-modifier
+    damage value, never folded into that function's own return so its
+    "always non-negative" contract stays intact for every existing call
+    site. Zero whenever elemental_resistance_pct (after magic
+    penetration) doesn't clear 100% -- i.e. this only ever fires on top
+    of an already-fully-nullified hit, never as a separate/smaller
+    effect. The amount healed scales with how far past 100% the
+    (post-penetration) resistance goes, applied to the SAME raw_damage
+    apply_damage_type_modifier was given, so a bigger hit against a
+    heavily-elemental-resistant defender means a bigger heal, not a
+    fixed number.
+    """
+    if raw_damage <= 0 or not damage_type:
+        return 0
+    if attacker and attacker.get("ignores_resistance"):
+        return 0
+    _, _, immunities = _defender_resistance_profile(defender)
+    if damage_type in immunities:
+        return 0
+    elemental_pct = float((defender.get("elemental_resistance_pct") or {}).get(damage_type, 0))
+    if elemental_pct <= 100:
+        return 0
+    penetration = magic_penetration_pct(attacker.get("rebirth_count", 0) if attacker else 0) / 100.0
+    effective_pct = elemental_pct * (1 - penetration)
+    if effective_pct <= 100:
+        return 0
+    return int(round(raw_damage * (effective_pct - 100) / 100))
 
 
 def start_combat(participants: list[dict]) -> list[dict]:
@@ -348,6 +414,7 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     hybrid_self_heal_gained = 0
     enrage_triggered = False
     bloodied_triggered = False
+    elemental_heal_gained = 0
     if attack_result["hit"]:
         savage_attacks_die = 1 if (attacker.get("race") == "Half-Orc" and attack_result["critical_hit"]) else 0
         sneak_attack_die = 1 if (attacker.get("char_class") == "Rogue" and advantage) else 0
@@ -410,8 +477,12 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         if marked_target_id is not None and marked_target_id == defender.get("telegram_user_id"):
             mark_dmg = roll_damage("1d6", critical=attack_result["critical_hit"])
             damage_dealt += mark_dmg["total"]
+        pre_elemental_damage = damage_dealt
         damage_dealt = apply_damage_type_modifier(
             damage_dealt, weapon.get("damage_type", "physical"), defender, attacker
+        )
+        elemental_heal_gained = elemental_overflow_heal(
+            pre_elemental_damage, weapon.get("damage_type", "physical"), defender, attacker
         )
         # Real subclass choice, non-Wizard classes (2026-07-25): a
         # character whose chosen subclass is one of the "combat" picks
@@ -510,6 +581,9 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
             death_ward_triggered = True
             defender["conditions"].remove("death_warded")
         defender["hp_current"] = hp_after
+        if elemental_heal_gained:
+            defender_hp_max = defender.get("hp_max", defender["hp_current"])
+            defender["hp_current"] = min(defender["hp_current"] + elemental_heal_gained, defender_hp_max)
 
         # Boss Enrage (2026-07-27, per Coffee: "I want the battles to be
         # difficult" -- a real playthrough simulation confirmed even
@@ -585,6 +659,7 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         "damage_type": weapon.get("damage_type", "physical") if attack_result["hit"] else None,
         "enrage_triggered": enrage_triggered,
         "bloodied_triggered": bloodied_triggered,
+        "elemental_heal_gained": elemental_heal_gained,
     }
 
 
@@ -659,6 +734,7 @@ def resolve_thrown_attack(attacker: dict, defender: dict, weapon: dict, forced_h
     damage_dealt = 0
     relentless_endurance_triggered = False
     death_ward_triggered = False
+    elemental_heal_gained = 0
     if attack_result["hit"]:
         ability_bonus = ability_modifier(attacker.get(weapon_ability, 10))
         dmg = roll_damage(
@@ -666,7 +742,11 @@ def resolve_thrown_attack(attacker: dict, defender: dict, weapon: dict, forced_h
             critical=attack_result["critical_hit"], forced_roll=forced_damage_roll,
         )
         damage_dealt = max(dmg["total"], 0)
+        pre_elemental_damage = damage_dealt
         damage_dealt = apply_damage_type_modifier(damage_dealt, weapon.get("damage_type", "physical"), defender, attacker)
+        elemental_heal_gained = elemental_overflow_heal(
+            pre_elemental_damage, weapon.get("damage_type", "physical"), defender, attacker
+        )
 
         temp_hp = defender.get("temp_hp", 0)
         if temp_hp > 0:
@@ -685,6 +765,9 @@ def resolve_thrown_attack(attacker: dict, defender: dict, weapon: dict, forced_h
             death_ward_triggered = True
             defender["conditions"].remove("death_warded")
         defender["hp_current"] = hp_after
+        if elemental_heal_gained:
+            defender_hp_max = defender.get("hp_max", defender["hp_current"])
+            defender["hp_current"] = min(defender["hp_current"] + elemental_heal_gained, defender_hp_max)
 
     return {
         "attacker": attacker["name"],
@@ -710,6 +793,7 @@ def resolve_thrown_attack(attacker: dict, defender: dict, weapon: dict, forced_h
         "enrage_triggered": False,
         "bloodied_triggered": False,
         "forced_hit": forced_hit,
+        "elemental_heal_gained": elemental_heal_gained,
     }
 
 

@@ -351,6 +351,41 @@ ENCHANT_RECIPES = {
         "applies_to": ("weapon", "armor", "shield", "ring", "amulet", "wondrous"),
         "ability": "intelligence", "dc": 17, "profession": "alchemy",
     },
+    # Elemental resistance wards (2026-08-10, per Coffee: "allow the
+    # player to enchant armour and other equipables to raise resistences
+    # in Frost/Flame/Spark... if the players gain enough resistences...
+    # nullify the damage OR in extreme cases heal the player" -- a
+    # NUMERIC, STACKING affix ("elemental_resistance", a real percentage
+    # value) rather than enchant_warding's existing flat boolean
+    # "resistance" affix above, which stays untouched. Each ward grants
+    # 50 percentage points to ONE specific damage type, live-summed
+    # across every equipped item by bot.py's
+    # _apply_equipped_elemental_profile -- 2 matching wards on 2
+    # different slots reaches 100% (rules.combat.apply_damage_type_
+    # modifier fully nullifies the hit), 3 reaches 150% (rules.combat.
+    # elemental_overflow_heal converts the 50% overflow into real
+    # healing instead). Deliberately armor/shield/ring/amulet/wondrous
+    # only, never weapon -- this is defense, matching enchant_warding's
+    # own scoping, and matching Coffee's own wording ("armour and other
+    # equipables").
+    "enchant_flame_ward": {
+        "materials": {"sulfur_dust": 2, "iron_ore": 1},
+        "affix": {"kind": "elemental_resistance", "damage_type": "fire", "value": 50},
+        "applies_to": ("armor", "shield", "ring", "amulet", "wondrous"),
+        "ability": "intelligence", "dc": 16, "profession": "alchemy",
+    },
+    "enchant_frost_ward": {
+        "materials": {"moonpetal": 2, "silverleaf_herb": 2},
+        "affix": {"kind": "elemental_resistance", "damage_type": "cold", "value": 50},
+        "applies_to": ("armor", "shield", "ring", "amulet", "wondrous"),
+        "ability": "intelligence", "dc": 16, "profession": "alchemy",
+    },
+    "enchant_spark_ward": {
+        "materials": {"iron_ore": 2, "moonpetal": 1},
+        "affix": {"kind": "elemental_resistance", "damage_type": "lightning", "value": 50},
+        "applies_to": ("armor", "shield", "ring", "amulet", "wondrous"),
+        "ability": "intelligence", "dc": 16, "profession": "alchemy",
+    },
 }
 
 

@@ -2,6 +2,70 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.134] — Elemental resistance system + Undead type (real feature)
+
+Real, multi-part feature request from Coffee, built as one cohesive
+system:
+
+**Stacking elemental resistance (players AND enemies).** New numeric
+`elemental_resistance_pct` layer in `rules/combat.py`, deliberately
+separate from the existing flat boolean resistance system (which stays
+untouched, still a plain 50%). Stacks additively per damage type; at
+100% a hit is fully nullified (returned as a plain 0, same as
+immunity — every one of `apply_damage_type_modifier`'s existing call
+sites that further multiplies/gates/halves damage afterward never has
+to handle a sign it wasn't written for); past 100%, the NEW
+`elemental_overflow_heal()` converts the excess into real healing,
+computed and applied as a fully separate step right after the existing
+function returns, precisely so nothing had to change about that
+function's own "never negative" contract. Both magic penetration and
+the mythic `ignores_resistance` affix correctly counter this new layer
+the same way they already counter the old one.
+
+- **For players**: three new enchant recipes (`enchant_flame_ward`/
+  `enchant_frost_ward`/`enchant_spark_ward` in `rules/crafting.py`,
+  fire/cold/lightning) apply a real, stacking `elemental_resistance`
+  affix to armor/shield/ring/amulet/wondrous items only (never
+  weapons) — two matching wards on two different slots reaches 100%,
+  three reaches 150%. New `_apply_affix` branch in `db.py`, new
+  live-summed accumulation in `bot.py`'s
+  `_apply_equipped_elemental_profile`.
+- **For enemies**: The Waking Ember (the one real fire-typed boss in
+  this campaign) is now hand-set strong enough in fire to heal from it
+  (150%), with a real cold vulnerability as its narrative
+  counterpart — grounded in its actual name and existing `damage_type:
+  "fire"`, not invented. Copied through to real combat participants at
+  `_do_start_combat`'s enemy-construction loop, same real gap this
+  file's resistances/vulnerabilities/immunities fields already had to
+  fix once before (2026-07-25).
+- **Bestiary**: `_format_bestiary_entry` now shows a monster's real
+  elemental strength once a player has actually learned it (same
+  fog-of-war boundary the existing resistance display already uses).
+
+**Undead type + "life potions can kill Undead".** `rules/combat.py`'s
+existing `UNDEAD_MONSTER_KEYS` set (already used by Channel Divinity/
+Silver Wardens) is the real creature-type infrastructure this needed —
+no new field required. `bot.py`'s `_do_use_item` now lets a heal-type
+item ALSO target a live, hostile undead enemy mid-combat (scope
+confirmed with Coffee: combat only): the same `heal_dice` roll every
+other use of the item already makes is applied as real, radiant-
+flavored damage instead of healing — flavored radiant specifically so
+it correctly interacts with real existing radiant vulnerability data
+on several undead (verge_wraith/bone_legionnaire/cairn_watcher/etc.),
+a genuine "can kill" case, not just a number flip. Properly ends
+combat and awards victory XP/loot when this is the killing blow, since
+this is the first path through `_do_use_item` that can ever defeat an
+enemy at all. A non-undead enemy stays untargetable by a heal item,
+same as before.
+
+New tests across `rules/combat.py`'s pure math, an end-to-end weapon
+hit that actually heals a fire-strong defender, equipped-gear
+stacking across two real generated items, the enchant recipes' real
+shape, `_apply_affix`'s new branch, the Bestiary display, the
+Waking Ember's real template data reaching a real combat session, and
+all three real undead-potion-damage scenarios (non-lethal, lethal
+combat-ending, and the non-undead-enemy rejection case).
+
 ## [1.27.133] — Support topic: fix "How do I enchant my weapon?" hallucination
 
 Real live bug, dev-topic screenshot (2026-08-10): the exact question

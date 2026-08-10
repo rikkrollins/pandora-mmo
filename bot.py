@@ -85,7 +85,7 @@ from models import (
     BASE_ARMOR_CLASS,
 )
 from rules.combat import (
-    resolve_attack, resolve_death_save, UNDEAD_MONSTER_KEYS, apply_damage_type_modifier,
+    resolve_attack, resolve_death_save, UNDEAD_MONSTER_KEYS, apply_damage_type_modifier, elemental_overflow_heal,
     ENRAGE_HP_THRESHOLD, ENRAGE_DAMAGE_BONUS_PCT, ENRAGE_WARNING_ROUND, ENRAGE_ROUND_THRESHOLD,
     BLOODIED_HP_THRESHOLD, resolve_thrown_attack,
 )
@@ -1567,6 +1567,7 @@ def _apply_equipped_elemental_profile(character: dict) -> None:
     ] + character.get("equipped_accessories", [])
     ignores_resistance = False
     free_extra_attack = False
+    elemental_resistance_pct = {}
     for item_id in equipped_ids:
         if not item_id:
             continue
@@ -1580,6 +1581,16 @@ def _apply_equipped_elemental_profile(character: dict) -> None:
             ignores_resistance = True
         if item.get("free_extra_attack"):
             free_extra_attack = True
+        # Elemental resistance wards (2026-08-10, per Coffee: enchant
+        # armor/equipables to stack REAL, numeric resistance in Frost/
+        # Flame/Spark) -- additive across every equipped slot, same
+        # live-summed-at-read-time convention as everything else in this
+        # function, never baked into a stored column. rules.combat's
+        # apply_damage_type_modifier/elemental_overflow_heal read this
+        # dict directly.
+        for entry in item.get("elemental_resistances", []):
+            dtype = entry["damage_type"]
+            elemental_resistance_pct[dtype] = elemental_resistance_pct.get(dtype, 0) + entry["value"]
     if resistances:
         character["resistances"] = list(set(character.get("resistances", [])) | resistances)
     if vulnerabilities:
@@ -1590,6 +1601,11 @@ def _apply_equipped_elemental_profile(character: dict) -> None:
         character["ignores_resistance"] = True
     if free_extra_attack:
         character["free_extra_attack"] = True
+    if elemental_resistance_pct:
+        merged = dict(character.get("elemental_resistance_pct") or {})
+        for dtype, pct in elemental_resistance_pct.items():
+            merged[dtype] = merged.get(dtype, 0) + pct
+        character["elemental_resistance_pct"] = merged
 
 
 def _get_real_party_combatants(requester: dict) -> list[dict]:
@@ -5803,6 +5819,14 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 "resistances": template.get("resistances", []),
                 "vulnerabilities": template.get("vulnerabilities", []),
                 "immunities": template.get("immunities", []),
+                # Elemental resistance stacking (2026-08-10, per Coffee:
+                # "if enemies are strong in an element... nullify... or
+                # heal") -- same real-data-not-invented convention as the
+                # boolean fields just above, copied from the template so
+                # a hand-set "strong in an element" monster (e.g. The
+                # Waking Ember's real fire elemental_resistance_pct)
+                # actually reaches the live combat participant dict.
+                "elemental_resistance_pct": dict(template.get("elemental_resistance_pct", {})),
                 # Real, tier-scaled natural attack (2026-07-26 monster/
                 # area rebalance) -- see _weapon_for_attacker's matching
                 # comment. Only set for monsters the rebalance actually
@@ -14622,6 +14646,21 @@ def _format_bestiary_entry(monster_key: str, template: dict) -> str:
         resist_bits.append(f"vulnerable to {', '.join(template['vulnerabilities'])}")
     if resist_bits:
         lines.append(f"  {'; '.join(resist_bits)}")
+    # Elemental resistance stacking (2026-08-10, per Coffee: "note them
+    # on the Bestiary" -- a creature "strong in an element" enough to
+    # nullify or even heal from it is exactly the kind of build-diversity
+    # fact a player needs to actually SEE to plan around, same reasoning
+    # as the resist_bits block just above.
+    elemental_bits = []
+    for dtype, pct in (template.get("elemental_resistance_pct") or {}).items():
+        if pct >= 150:
+            elemental_bits.append(f"heals from {dtype} damage")
+        elif pct >= 100:
+            elemental_bits.append(f"nullifies {dtype} damage")
+        else:
+            elemental_bits.append(f"strongly resistant to {dtype} ({pct}%)")
+    if elemental_bits:
+        lines.append(f"  {'; '.join(elemental_bits)}")
     return "\n".join(lines)
 
 
@@ -15819,9 +15858,30 @@ async def _do_use_item(update: Update, text: str) -> None:
     all_party_members = (
         db.get_party_members_by_id_including_inactive_slots(party_id) if party_id else []
     )
-    target = _match_member_by_name_or_username(text, all_party_members) or character
-    is_self = target["telegram_user_id"] == character["telegram_user_id"]
-    target_note = "" if is_self else f" on **{target['name']}**"
+    effect = item.get("effect", "none")
+    # Real feature (2026-08-10, per Coffee: "healing type potions hurt
+    # the Undead", "life potions can kill Undead", confirmed "combat
+    # only works"): a heal-type item can ALSO be aimed at a live,
+    # hostile UNDEAD enemy mid-fight -- real 5E rule, positive/life
+    # energy hurts (and can genuinely kill) undead instead of healing
+    # them. Checked before the normal party lookup so this never needs
+    # to touch that path at all; only fires when the text actually names
+    # a living undead enemy currently in this fight.
+    undead_enemy_target = None
+    if effect == "heal" and session is not None and user_id in session.turn_order:
+        opposing = session.living_on_side(session.opposing_side(user_id))
+        undead_opposing = [p for p in opposing if p.get("monster_key") in UNDEAD_MONSTER_KEYS]
+        if undead_opposing:
+            undead_enemy_target = _match_member_by_name_or_username(text, undead_opposing)
+
+    if undead_enemy_target is not None:
+        target = undead_enemy_target
+        is_self = False
+        target_note = f" on **{target['name']}**"
+    else:
+        target = _match_member_by_name_or_username(text, all_party_members) or character
+        is_self = target["telegram_user_id"] == character["telegram_user_id"]
+        target_note = "" if is_self else f" on **{target['name']}**"
 
     removed, _ = db.remove_item(update.effective_user.id, update.effective_chat.id, item_id, 1)
     if not removed:
@@ -15830,8 +15890,55 @@ async def _do_use_item(update: Update, text: str) -> None:
         )
         return
 
-    effect = item.get("effect", "none")
-    if effect == "heal" and item.get("heal_dice"):
+    combat_ended_by_undead_kill = False
+    if effect == "heal" and item.get("heal_dice") and undead_enemy_target is not None:
+        # "Life potions can kill Undead" -- the exact heal_dice roll
+        # every other use of this item already rolls, applied as REAL
+        # damage instead of healing, flavored as radiant (positive
+        # energy) so it correctly interacts with any real radiant
+        # vulnerability this undead already has (verge_wraith/
+        # bone_legionnaire/cairn_watcher/etc. -- see rules.combat.
+        # UNDEAD_MONSTER_KEYS's own comment) -- a big potion against a
+        # radiant-vulnerable undead can be a genuine, literal kill.
+        # Enemies have no DB row (negative synthetic telegram_user_id,
+        # no character_id) -- mutates the live session participant dict
+        # only, same as every other enemy HP change in this game.
+        healing = roll_damage(item["heal_dice"])
+        damage_dealt = apply_damage_type_modifier(healing["total"], "radiant", target, character)
+        target["hp_current"] = max(target["hp_current"] - damage_dealt, 0)
+        message = (
+            f"✨ **{character['name']}** hurls a {item['name']}{target_note} — the life energy "
+            f"burns it for **{damage_dealt} damage** ({target['hp_current']}/"
+            f"{target.get('hp_max', target['hp_current'])} HP)."
+        )
+        if target["hp_current"] <= 0:
+            message += f" **{target['name']}** is destroyed!"
+        await _safe_send(update, message)
+
+        defeated_removed = session.remove_defeated()
+        await _announce_defeats(update, session, defeated_removed)
+        if session.is_combat_over():
+            combat_ended_by_undead_kill = True
+            winner = _determine_winner(session)
+            xp_summary, level_up_notes = await _award_victory_xp(update, session) if winner == "party" else ("", [])
+            if winner == "party":
+                await _check_quest_completions_defeat_monster(update, session)
+                await _mark_location_cleared_for_party(update, session)
+                await _check_achievements_for_combat_party(update, session)
+                await _check_guild_quest_completion(update, session)
+                await _check_echo_trial_progress(update, session)
+            await update.effective_chat.send_message(
+                f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}",
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+            )
+            for note in level_up_notes:
+                await _notify_main_topic(update, note)
+            sessions.end_session(chat_id, session)
+        # Already sent above (before the possible "Combat over!"
+        # follow-up) -- the shared send/advance-turn tail below must not
+        # repeat it or try to advance a session that may have just ended.
+        message = None
+    elif effect == "heal" and item.get("heal_dice"):
         # Real bug (2026-07-23, live report: "healing 0 HP (11/11)" posted
         # for a companion the roster showed at 3/11 both before and after):
         # target came straight from _find_party_target_by_name -> a plain
@@ -15998,9 +16105,10 @@ async def _do_use_item(update: Update, text: str) -> None:
         # honesty convention as every other unmodeled mechanic in this build.
         message = f"🧺 **{character['name']}** uses a {item['name']}{target_note}."
 
-    await _safe_send(update, message)
+    if message is not None:
+        await _safe_send(update, message)
 
-    if in_combat:
+    if in_combat and not combat_ended_by_undead_kill:
         async with _held_session(chat_id, user_id) as session:
             if session is not None:
                 session.advance_turn()
@@ -17766,9 +17874,23 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             # rules/combat.py's docstring), so it needs its own call to
             # the same resistance/vulnerability/immunity + magic-
             # penetration math a weapon hit already gets.
+            pre_elemental_spell_damage = result["damage_dealt"]
             result["damage_dealt"] = apply_damage_type_modifier(
                 result["damage_dealt"], spell.get("damage_type", "physical"), target, character
             )
+            # Elemental resistance stacking (2026-08-10, per Coffee: "if
+            # enemies are strong in an element... heal the enemy") --
+            # same overflow-heal step resolve_attack/resolve_thrown_attack
+            # already apply for weapon hits, mirrored here since spell
+            # damage is its own separate pipeline (see the comment just
+            # above on why apply_damage_type_modifier is called again here
+            # at all).
+            elemental_heal_gained = elemental_overflow_heal(
+                pre_elemental_spell_damage, spell.get("damage_type", "physical"), target, character
+            )
+            if elemental_heal_gained:
+                target_hp_max = target.get("hp_max", target["hp_current"])
+                target["hp_current"] = min(target["hp_current"] + elemental_heal_gained, target_hp_max)
             # Totem Warrior subclass hook (2026-07-25): real 5E's Bear
             # Totem Spirit extends Rage's damage resistance to nearly
             # everything, including magic -- unlike base Rage (which
