@@ -8483,6 +8483,86 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         png_bytes = battle_render.render_battle_formation(party, enemies)
         self.assertTrue(png_bytes.startswith(b"\x89PNG"))
 
+    def test_icon_key_for_combatant_prefers_class_falls_back_to_damage_type(self):
+        """
+        Real live request (2026-08-10, Coffee: "Is it possible too use
+        face profile icons instead of letters?!"). Real portraits would
+        need a per-combatant network image-generation call (at odds
+        with this file's whole "instant, network-free" point) or an
+        invented monster appearance this codebase never allows --
+        instead, procedurally drawn pictograms keyed off REAL, already-
+        existing facts: a party member's own char_class, or an enemy's
+        own damage_type. Pure resolver checks, no Pillow needed.
+        """
+        import battle_render
+        self.assertEqual(battle_render._icon_key_for_combatant({"char_class": "Wizard"}), "wizard")
+        self.assertEqual(battle_render._icon_key_for_combatant({"char_class": "wizard"}), "wizard")
+        self.assertEqual(battle_render._icon_key_for_combatant({"damage_type": "fire"}), "fire")
+        # char_class wins when a dict somehow has both (never happens
+        # in practice -- enemies don't have char_class, party members
+        # don't have damage_type -- but the resolver order should
+        # still be deterministic, not accidental).
+        self.assertEqual(battle_render._icon_key_for_combatant({"char_class": "rogue", "damage_type": "fire"}), "rogue")
+        # An unrecognized/missing value -- e.g. a companion mid-load,
+        # or a genuinely new damage_type this file hasn't been taught
+        # yet -- must fall back to None, never a crash or a made-up key.
+        self.assertIsNone(battle_render._icon_key_for_combatant({}))
+        self.assertIsNone(battle_render._icon_key_for_combatant({"char_class": "not_a_real_class"}))
+        self.assertIsNone(battle_render._icon_key_for_combatant({"damage_type": "thunder"}))
+
+    def test_every_real_class_and_damage_type_has_a_working_icon(self):
+        """
+        Every one of the 12 real classes (rules/leveling.CLASS_HIT_DICE)
+        and every damage_type this codebase's own monster templates or
+        ECHO_TRIAL_RESISTANT_TYPES actually use must have a real,
+        crash-free icon -- confirmed by rendering each one directly
+        against a real PIL ImageDraw surface (not just checking the
+        dict has a key, in case a draw function itself has a bug that
+        only Pillow would catch, e.g. a bad point count for .polygon()).
+        """
+        import battle_render
+        from PIL import Image, ImageDraw
+        from rules.leveling import CLASS_HIT_DICE
+        img = Image.new("RGB", (100, 100))
+        draw = ImageDraw.Draw(img)
+        for char_class in CLASS_HIT_DICE:
+            drawn = battle_render._draw_icon(draw, 50, 50, 40, char_class, background=(59, 110, 168))
+            self.assertTrue(drawn, f"no icon for real class {char_class!r}")
+        for damage_type in ["physical", "fire", "cold", "lightning", "poison",
+                             "necrotic", "radiant", "force", "psychic"]:
+            drawn = battle_render._draw_icon(draw, 50, 50, 40, damage_type, background=(168, 59, 59))
+            self.assertTrue(drawn, f"no icon for real damage_type {damage_type!r}")
+        # A radius at the crowded-row minimum must not crash either.
+        for char_class in CLASS_HIT_DICE:
+            battle_render._draw_icon(draw, 50, 50, battle_render._TOKEN_RADIUS_MIN, char_class, background=(59, 110, 168))
+
+    def test_battle_formation_falls_back_to_initial_letter_without_a_real_class_or_damage_type(self):
+        """
+        A combatant with no char_class/damage_type at all (an older
+        session snapshot from before this feature, or a genuinely
+        untagged monster) must still render -- the existing
+        initial-letter treatment, never a blank token.
+        """
+        import battle_render
+        party = [{"name": "Mystery", "hp_current": 10, "hp_max": 10}]
+        enemies = [{"name": "Blob", "hp_current": 5, "hp_max": 5}]
+        png_bytes = battle_render.render_battle_formation(party, enemies)
+        self.assertTrue(png_bytes.startswith(b"\x89PNG"))
+
+    def test_battle_formation_renders_real_class_and_damage_type_icons_end_to_end(self):
+        """Real end-to-end smoke test across every class/damage_type, matching the actual combatant shape sessions.py produces."""
+        import battle_render
+        from rules.leveling import CLASS_HIT_DICE
+        party = [{"name": c.capitalize(), "hp_current": 50, "hp_max": 100, "char_class": c,
+                  "formation_row": "front" if i % 2 == 0 else "back"}
+                 for i, c in enumerate(CLASS_HIT_DICE)]
+        enemies = [{"name": d.capitalize(), "hp_current": 30, "hp_max": 60, "damage_type": d,
+                    "formation_row": "front" if i % 2 == 0 else "back"}
+                   for i, d in enumerate(["physical", "fire", "cold", "lightning", "poison",
+                                          "necrotic", "radiant", "force", "psychic"])]
+        png_bytes = battle_render.render_battle_formation(party, enemies)
+        self.assertTrue(png_bytes.startswith(b"\x89PNG"))
+
     def test_battle_formation_all_circles_share_one_uniform_size(self):
         """
         Real live request (2026-08-10, Coffee: "make all the players

@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.123] — Battle formation tokens use real icons instead of a bare letter
+
+Real feature request (Task #14, per Coffee: "Is it possible too use
+face profile icons instead of letters?!"). Real portraits per
+combatant would need a network image-generation call per token (at
+odds with battle_render.py's whole point — instant, network-free
+tactical diagrams), and a real face for a generic monster template
+would need an invented appearance this codebase's own "never invent a
+game fact" discipline doesn't allow. Instead: simple, procedurally
+drawn (pure Pillow, zero asset files, zero new dependency) pictograms
+keyed off REAL, already-existing per-combatant facts — a party
+member's own char_class (all 12 real classes), or an enemy's own
+damage_type (a real field on every monster template, the same
+elemental-flavor system already narrated in combat text). A sword for
+Fighter, a bow-turned-arrow for Ranger, a flame for Fire damage, a
+skull for Necrotic, and so on — falls back to the existing
+initial-letter treatment whenever neither is present (an older session
+snapshot, an untagged monster), never a blank token. Iterated on
+several icon shapes after visually reviewing a rendered test PNG
+caught real collisions (Fighter's sword and Cleric's cross were
+indistinguishable at token size; the axe read as a flag; Sorcerer's
+reused flame icon looked like Druid's diamond) — fixed with a diagonal
+blade, a bigger single-lobe axe blade, a simpler arrow, and a distinct
+8-point star burst for Sorcerer. Verified every real class and damage
+type renders without crashing (including at the crowded-row minimum
+token size), plus real end-to-end formation renders.
+
 ## [1.27.122] — Wild encounters no longer spawn "way out of its league"
 
 Real feature request (per Coffee, scoped and built 2026-08-10: "Make

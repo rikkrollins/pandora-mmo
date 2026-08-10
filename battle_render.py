@@ -148,6 +148,264 @@ def _hp_bar_color(hp_current: int, hp_max: int) -> tuple:
     return (211, 47, 47)
 
 
+# Battle-formation icons (2026-08-10, per Coffee: "Is it possible too
+# use face profile icons instead of letters?!"). Real portraits per
+# combatant would need a network image-generation call per token, at
+# odds with this file's whole point (instant, network-free -- see the
+# module docstring); a real face for a monster template would also
+# need an invented appearance this codebase's own "never invent a
+# game fact" discipline doesn't allow. Instead: simple, procedurally
+# drawn (pure Pillow, no asset files) pictograms keyed off REAL,
+# already-existing per-combatant facts -- a party member's own
+# char_class (12 real classes, rules/leveling.CLASS_HIT_DICE), or an
+# enemy's own damage_type (real field on every monster template, the
+# same elemental-flavor system already narrated in combat text). Falls
+# back to the existing initial-letter treatment whenever neither is
+# present/recognized (e.g. a companion's stats haven't loaded, or a
+# genuinely new damage_type this file hasn't been taught yet) -- never
+# a blank token.
+_CLASS_ICON_KEYS = {
+    "barbarian", "fighter", "paladin", "ranger", "bard", "cleric",
+    "druid", "monk", "rogue", "warlock", "sorcerer", "wizard",
+}
+_DAMAGE_TYPE_ICON_KEYS = {
+    "physical", "fire", "cold", "lightning", "poison", "necrotic",
+    "radiant", "force", "psychic",
+}
+
+
+def _icon_key_for_combatant(combatant: dict) -> str | None:
+    """Pure, testable-without-Pillow resolver -- see the icon system's own module comment above."""
+    char_class = (combatant.get("char_class") or "").lower()
+    if char_class in _CLASS_ICON_KEYS:
+        return char_class
+    damage_type = (combatant.get("damage_type") or "").lower()
+    if damage_type in _DAMAGE_TYPE_ICON_KEYS:
+        return damage_type
+    return None
+
+
+def _draw_sword(draw: ImageDraw.ImageDraw, x: float, y: float, r: float, color: tuple) -> None:
+    # Diagonal blade (not vertical) so this reads as a sword, not a
+    # plain "+" -- confirmed live via a rendered test PNG that a
+    # straight vertical blade + horizontal guard is visually
+    # indistinguishable from _draw_cross (cleric) at small token sizes.
+    import math
+    w = max(2, r * 0.12)
+    hilt = (x - r * 0.42, y + r * 0.42)
+    tip = (x + r * 0.42, y - r * 0.42)
+    draw.line([hilt, tip], fill=color, width=round(w))
+    # Crossguard: a short perpendicular line 30% of the way up the blade.
+    guard_center = (hilt[0] + (tip[0] - hilt[0]) * 0.3, hilt[1] + (tip[1] - hilt[1]) * 0.3)
+    perp = (-1 / math.sqrt(2), -1 / math.sqrt(2))
+    guard_len = r * 0.28
+    draw.line(
+        [(guard_center[0] - perp[0] * guard_len, guard_center[1] - perp[1] * guard_len),
+         (guard_center[0] + perp[0] * guard_len, guard_center[1] + perp[1] * guard_len)],
+        fill=color, width=round(w * 0.9),
+    )
+    pommel_r = r * 0.1
+    draw.ellipse([hilt[0] - pommel_r, hilt[1] - pommel_r, hilt[0] + pommel_r, hilt[1] + pommel_r], fill=color)
+
+
+def _draw_crossed_daggers(draw: ImageDraw.ImageDraw, x: float, y: float, r: float, color: tuple) -> None:
+    w = max(2, r * 0.1)
+    draw.line([(x - r * 0.45, y - r * 0.45), (x + r * 0.45, y + r * 0.45)], fill=color, width=round(w))
+    draw.line([(x - r * 0.45, y + r * 0.45), (x + r * 0.45, y - r * 0.45)], fill=color, width=round(w))
+
+
+def _draw_axe(draw: ImageDraw.ImageDraw, x: float, y: float, r: float, color: tuple) -> None:
+    # A single big, unmistakably curved blade on ONE side of the
+    # handle (a real axe silhouette), not the small triangular nub the
+    # first version drew -- confirmed live via a rendered test PNG
+    # that read as a flag/pennant, not an axe.
+    w = max(2, r * 0.11)
+    draw.line([(x, y - r * 0.6), (x, y + r * 0.6)], fill=color, width=round(w))
+    draw.pieslice([x - r * 0.75, y - r * 0.62, x + r * 0.05, y + r * 0.05], start=290, end=90, fill=color)
+
+
+def _draw_arrow(draw: ImageDraw.ImageDraw, x: float, y: float, r: float, color: tuple) -> None:
+    # A simple arrow (shaft + broad triangular head) -- switched from
+    # an earlier bow-silhouette attempt that a rendered test PNG
+    # showed reading as an ambiguous flag/checkmark at small token
+    # sizes; an arrow's diagonal shaft + clear triangle head stays
+    # legible even shrunk down for a crowded row.
+    w = max(2, r * 0.1)
+    tail = (x - r * 0.5, y + r * 0.5)
+    head = (x + r * 0.35, y - r * 0.35)
+    draw.line([tail, head], fill=color, width=round(w))
+    draw.polygon(
+        [(head[0] + r * 0.22, head[1] - r * 0.22), (head[0] - r * 0.15, head[1] + r * 0.05),
+         (head[0] + r * 0.05, head[1] - r * 0.15)],
+        fill=color,
+    )
+
+
+def _draw_shield(draw: ImageDraw.ImageDraw, x: float, y: float, r: float, color: tuple) -> None:
+    draw.polygon(
+        [(x - r * 0.5, y - r * 0.6), (x + r * 0.5, y - r * 0.6), (x + r * 0.5, y + r * 0.05),
+         (x, y + r * 0.6), (x - r * 0.5, y + r * 0.05)],
+        outline=color, width=max(2, round(r * 0.1)),
+    )
+
+
+def _draw_sparkle(draw: ImageDraw.ImageDraw, x: float, y: float, r: float, color: tuple) -> None:
+    w = max(2, r * 0.1)
+    d = r * 0.7
+    draw.line([(x, y - d), (x, y + d)], fill=color, width=round(w))
+    draw.line([(x - d, y), (x + d, y)], fill=color, width=round(w))
+    diag = d * 0.7
+    draw.line([(x - diag, y - diag), (x + diag, y + diag)], fill=color, width=max(1, round(w * 0.7)))
+    draw.line([(x - diag, y + diag), (x + diag, y - diag)], fill=color, width=max(1, round(w * 0.7)))
+
+
+def _draw_musical_note(draw: ImageDraw.ImageDraw, x: float, y: float, r: float, color: tuple) -> None:
+    w = max(2, r * 0.1)
+    draw.ellipse([x - r * 0.28, y + r * 0.12, x + r * 0.08, y + r * 0.45], fill=color)
+    draw.line([(x + r * 0.08, y + r * 0.28), (x + r * 0.08, y - r * 0.55)], fill=color, width=round(w))
+    draw.line([(x + r * 0.08, y - r * 0.55), (x + r * 0.35, y - r * 0.35)], fill=color, width=round(w))
+
+
+def _draw_cross(draw: ImageDraw.ImageDraw, x: float, y: float, r: float, color: tuple) -> None:
+    draw.rectangle([x - r * 0.09, y - r * 0.6, x + r * 0.09, y + r * 0.6], fill=color)
+    draw.rectangle([x - r * 0.4, y - r * 0.1, x + r * 0.4, y + r * 0.1], fill=color)
+
+
+def _draw_leaf(draw: ImageDraw.ImageDraw, x: float, y: float, r: float, color: tuple) -> None:
+    draw.polygon(
+        [(x, y - r * 0.6), (x + r * 0.35, y - r * 0.1), (x, y + r * 0.6), (x - r * 0.35, y - r * 0.1)],
+        fill=color,
+    )
+
+
+def _draw_fist(draw: ImageDraw.ImageDraw, x: float, y: float, r: float, color: tuple) -> None:
+    draw.rounded_rectangle(
+        [x - r * 0.35, y - r * 0.35, x + r * 0.35, y + r * 0.35], radius=max(2, round(r * 0.15)), fill=color,
+    )
+
+
+def _draw_eye(draw: ImageDraw.ImageDraw, x: float, y: float, r: float, color: tuple) -> None:
+    draw.ellipse([x - r * 0.55, y - r * 0.28, x + r * 0.55, y + r * 0.28], outline=color, width=max(2, round(r * 0.09)))
+    draw.ellipse([x - r * 0.12, y - r * 0.12, x + r * 0.12, y + r * 0.12], fill=color)
+
+
+def _draw_flame(draw: ImageDraw.ImageDraw, x: float, y: float, r: float, color: tuple) -> None:
+    draw.polygon(
+        [(x, y - r * 0.6), (x + r * 0.32, y - r * 0.05), (x + r * 0.2, y + r * 0.3),
+         (x, y + r * 0.15), (x - r * 0.2, y + r * 0.3), (x - r * 0.32, y - r * 0.05)],
+        fill=color,
+    )
+    draw.polygon([(x, y - r * 0.1), (x + r * 0.15, y + r * 0.3), (x, y + r * 0.55), (x - r * 0.15, y + r * 0.3)], fill=color)
+
+
+def _draw_droplet(draw: ImageDraw.ImageDraw, x: float, y: float, r: float, color: tuple) -> None:
+    draw.ellipse([x - r * 0.32, y - r * 0.05, x + r * 0.32, y + r * 0.55], fill=color)
+    draw.polygon([(x, y - r * 0.55), (x - r * 0.3, y + r * 0.08), (x + r * 0.3, y + r * 0.08)], fill=color)
+
+
+def _draw_snowflake(draw: ImageDraw.ImageDraw, x: float, y: float, r: float, color: tuple) -> None:
+    import math
+    w = max(1, round(r * 0.08))
+    for angle_deg in (90, 30, 150):
+        rad = math.radians(angle_deg)
+        dx, dy = math.cos(rad) * r * 0.6, math.sin(rad) * r * 0.6
+        draw.line([(x - dx, y - dy), (x + dx, y + dy)], fill=color, width=w)
+
+
+def _draw_lightning_bolt(draw: ImageDraw.ImageDraw, x: float, y: float, r: float, color: tuple) -> None:
+    draw.polygon(
+        [(x + r * 0.15, y - r * 0.65), (x - r * 0.25, y + r * 0.05), (x, y + r * 0.05),
+         (x - r * 0.15, y + r * 0.65), (x + r * 0.3, y - r * 0.15), (x + r * 0.05, y - r * 0.15)],
+        fill=color,
+    )
+
+
+def _draw_skull(draw: ImageDraw.ImageDraw, x: float, y: float, r: float, color: tuple, background: tuple) -> None:
+    draw.ellipse([x - r * 0.45, y - r * 0.5, x + r * 0.45, y + r * 0.25], fill=color)
+    draw.rectangle([x - r * 0.28, y + r * 0.1, x + r * 0.28, y + r * 0.4], fill=color)
+    eye_r = r * 0.13
+    draw.ellipse([x - r * 0.28 - eye_r, y - r * 0.15 - eye_r, x - r * 0.28 + eye_r, y - r * 0.15 + eye_r], fill=background)
+    draw.ellipse([x + r * 0.28 - eye_r, y - r * 0.15 - eye_r, x + r * 0.28 + eye_r, y - r * 0.15 + eye_r], fill=background)
+
+
+def _draw_sun(draw: ImageDraw.ImageDraw, x: float, y: float, r: float, color: tuple) -> None:
+    import math
+    draw.ellipse([x - r * 0.22, y - r * 0.22, x + r * 0.22, y + r * 0.22], fill=color)
+    w = max(1, round(r * 0.09))
+    for i in range(8):
+        rad = math.radians(i * 45)
+        inner = r * 0.32
+        outer = r * 0.62
+        draw.line(
+            [(x + math.cos(rad) * inner, y + math.sin(rad) * inner),
+             (x + math.cos(rad) * outer, y + math.sin(rad) * outer)],
+            fill=color, width=w,
+        )
+
+
+def _draw_diamond(draw: ImageDraw.ImageDraw, x: float, y: float, r: float, color: tuple) -> None:
+    draw.polygon([(x, y - r * 0.55), (x + r * 0.55, y), (x, y + r * 0.55), (x - r * 0.55, y)], fill=color)
+
+
+def _draw_star_burst(draw: ImageDraw.ImageDraw, x: float, y: float, r: float, color: tuple) -> None:
+    # A 4-point spike star (innate/wild magic burst) -- switched
+    # sorcerer off reusing _draw_flame after a rendered test PNG
+    # showed it collapsing into something indistinguishable from
+    # _draw_leaf/_draw_diamond at small token sizes; sharp alternating
+    # long/short points read as a distinct "spark" shape instead.
+    long_r, short_r = r * 0.62, r * 0.2
+    points = []
+    for i in range(8):
+        import math
+        rad = math.radians(i * 45)
+        radius = long_r if i % 2 == 0 else short_r
+        points.append((x + math.cos(rad) * radius, y + math.sin(rad) * radius))
+    draw.polygon(points, fill=color)
+
+
+_ICON_DRAW_FUNCS = {
+    "fighter": _draw_sword,
+    "physical": _draw_sword,
+    "barbarian": _draw_axe,
+    "paladin": _draw_shield,
+    "ranger": _draw_arrow,
+    "rogue": _draw_crossed_daggers,
+    "wizard": _draw_sparkle,
+    "sorcerer": _draw_star_burst,
+    "bard": _draw_musical_note,
+    "cleric": _draw_cross,
+    "druid": _draw_leaf,
+    "monk": _draw_fist,
+    "warlock": _draw_eye,
+    "psychic": _draw_eye,
+    "fire": _draw_flame,
+    "poison": _draw_droplet,
+    "cold": _draw_snowflake,
+    "lightning": _draw_lightning_bolt,
+    "radiant": _draw_sun,
+    "force": _draw_diamond,
+}
+
+
+def _draw_icon(draw: ImageDraw.ImageDraw, x: float, y: float, radius: float, icon_key: str,
+               background: tuple, icon_color: tuple = (255, 255, 255)) -> bool:
+    """
+    Draws the icon for icon_key centered at (x, y), sized off the
+    token's own real radius. Returns whether a real icon was drawn --
+    _draw_token falls back to the initial letter when this is False,
+    same "never a blank token" guarantee as _icon_key_for_combatant's
+    own fallback design.
+    """
+    if icon_key == "necrotic":
+        _draw_skull(draw, x, y, radius, icon_color, background)
+        return True
+    func = _ICON_DRAW_FUNCS.get(icon_key)
+    if func is None:
+        return False
+    func(draw, x, y, radius, icon_color)
+    return True
+
+
 def _draw_background(draw: ImageDraw.ImageDraw, canvas_height: int = CANVAS_HEIGHT) -> None:
     """A simple dark, warm vertical gradient -- an arena feel with zero external assets."""
     top = (54, 30, 20)
@@ -198,13 +456,15 @@ def _draw_token(draw: ImageDraw.ImageDraw, x: int, y: int, combatant: dict, colo
         [x - radius, y - radius, x + radius, y + radius],
         fill=color, outline=_TOKEN_OUTLINE, width=2,
     )
-    initial = (_meaningful_first_word(name)[0] if name else "?").upper()
-    initial_font = _load_font(radius, bold=True)
-    bbox = draw.textbbox((0, 0), initial, font=initial_font)
-    draw.text(
-        (x - (bbox[2] - bbox[0]) / 2, y - (bbox[3] - bbox[1]) / 2 - bbox[1]),
-        initial, font=initial_font, fill=(255, 255, 255),
-    )
+    icon_key = _icon_key_for_combatant(combatant)
+    if not (icon_key and _draw_icon(draw, x, y, radius, icon_key, background=color)):
+        initial = (_meaningful_first_word(name)[0] if name else "?").upper()
+        initial_font = _load_font(radius, bold=True)
+        bbox = draw.textbbox((0, 0), initial, font=initial_font)
+        draw.text(
+            (x - (bbox[2] - bbox[0]) / 2, y - (bbox[3] - bbox[1]) / 2 - bbox[1]),
+            initial, font=initial_font, fill=(255, 255, 255),
+        )
 
     label = _first_name(name)
     label_bbox = draw.textbbox((0, 0), label, font=name_font)
