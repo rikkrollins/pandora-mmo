@@ -5143,6 +5143,28 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(_keyword_fallback("west of here is dangerous", [])["action"], "move")
         self.assertNotEqual(_keyword_fallback("talk to Westley", [])["action"], "move")
 
+    def test_break_open_routes_to_a_real_strength_check_not_passive_examine(self):
+        """
+        Real live bug (2026-08-10, topic-activity log): "Break open the
+        barrel with a chalk symbol on it" got classified as a passive
+        "examine" instead of a real strength skill_check. The examine
+        path's own "open"-verb exclusion list (added 2026-07-19 for
+        the sibling bug "Try opening the barrel...") already excludes
+        "force open"/"break down"/"smash" specifically so the object
+        can resist and needs forcing -- but never listed "break open",
+        so it slipped through that exclusion. Fixed in two places: the
+        exclusion list (so it stops being swallowed as examine) and the
+        strength-ability trigger list (so it actually resolves as a
+        real skill_check once it isn't).
+        """
+        result = _keyword_fallback("Break open the barrel with a chalk symbol on it", [])
+        self.assertEqual(result["action"], "skill_check")
+        self.assertEqual(result["ability"], "strength")
+        # The sibling case this exclusion list already existed for
+        # must keep working -- an unobstructed "open" is still just a
+        # passive look, no forcing implied.
+        self.assertEqual(_keyword_fallback("Try opening the barrel with a chalk symbol", [])["action"], "examine")
+
     # -- Saving throw proficiency (2026-07-16 audit): confirmed via grep
     #    every save-based spell only ever added the raw ability modifier,
     #    never a proficiency bonus, even for a class real 5E says is

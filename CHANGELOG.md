@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.120] — "Break open the barrel" now triggers a real strength check
+
+Real live bug (2026-08-10, found via topic-activity monitoring):
+"Break open the barrel with a chalk symbol on it" got classified as a
+passive `examine` instead of a real strength `skill_check`. The
+examine path's own "open"-verb exclusion list (added 2026-07-19 for
+the sibling bug "Try opening the barrel...") already excludes "force
+open"/"break down"/"smash" specifically -- those need the object to
+resist and be forced, a different intent from just looking inside
+something unobstructed -- but never listed "break open", so it
+slipped through. Added to both the exclusion list and the
+strength-ability skill_check trigger list. Verified directly against
+`_keyword_fallback` (no Ollama needed), including the sibling
+"Try opening..." case still correctly resolving to a passive examine.
+
 ## [1.27.119] — "Travel west" no longer silently misclassifies as chat
 
 Real live bug (2026-08-10, found via topic-activity monitoring):

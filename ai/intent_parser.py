@@ -1482,11 +1482,16 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # of its verb forms appeared in either examine trigger list above,
     # the exact same "verb not covered" gap this file has hit many
     # times before (touch/peer/read/observe, all added the same way).
-    # Deliberately excludes "force open"/"break down"/"smash" -- those
-    # already route to a real strength skill check further below (the
-    # object resists and needs to be forced), a genuinely different
-    # intent from just looking inside/at something unobstructed.
-    if not any(w in lowered for w in ["force open", "break down", "smash"]):
+    # Deliberately excludes "force open"/"break down"/"break open"/
+    # "smash" -- those already route to a real strength skill check
+    # further below (the object resists and needs to be forced), a
+    # genuinely different intent from just looking inside/at something
+    # unobstructed. "break open" added 2026-08-10 (found via topic-
+    # activity monitoring): "Break open the barrel with a chalk symbol
+    # on it" slipped through this exclusion (only "break down" was
+    # listed, not "break open") and got a passive "examine" instead of
+    # the real strength check it should trigger.
+    if not any(w in lowered for w in ["force open", "break down", "break open", "smash"]):
         open_match = re.search(r"\bopen(?:ing|ed)?\b\s+(?:the |a |an )?(.+)", lowered)
         if open_match:
             target = text[open_match.start(1):open_match.end(1)].strip()
@@ -1814,7 +1819,7 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     skill_check_verb_abilities = [
         (["sneak", "hide", "climb", "balance", "pick the lock", "disarm the trap", "tiptoe",
           "palm the", "pickpocket", "lift the coin purse", "plant this on", "swap the", "conceal the"], "dexterity"),
-        (["lift", "push", "break down", "force open", "shove the", "smash"], "strength"),
+        (["lift", "push", "break down", "break open", "force open", "shove the", "smash"], "strength"),
         (["recall", "remember lore", "investigate", "decipher", "figure out the puzzle",
           "identify the magic", "sense the magic", "what spell is this", "arcane knowledge",
           "what kind of creature", "what plant is this", "identify the plant", "identify the animal",
