@@ -872,6 +872,69 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("poisoned", live.get("conditions", []))
         sessions.end_session(-999)
 
+    async def test_use_item_restores_spell_slots_and_consumes_the_tonic(self):
+        """
+        Real feature request (2026-08-10, per Coffee: "make an item to
+        replenish spell slots... Like Final Fantasy games, they have
+        Ethers"), built right after fixing Support's answer that spell
+        slots have NO in-battle recovery option at all -- these tonics
+        actually give players one for real, not just a wiki correction.
+        """
+        use_test_db("tests/tmp/use_item_spellslot_test.db")
+        user_id = 900201
+        make_basic_character(
+            user_id, "Caster", char_class="Wizard", current_location="crossroads_tavern", spell_slots_max=5,
+        )
+        db.update_character(user_id, -999, spell_slots_current=0)
+        db.add_item(user_id, -999, "spell_tonic", 1)
+
+        sink = []
+        await bot._do_use_item(FakeUpdate(user_id, "drink the spell tonic", sink), "drink the spell tonic")
+        combined = " ".join(sink)
+        self.assertIn("2 spell slot", combined)
+        self.assertIn("(2/5)", combined)
+
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["spell_slots_current"], 2)
+        self.assertEqual(character["inventory"].get("spell_tonic", 0), 0)  # consumed
+
+    async def test_use_item_elixir_restores_all_spell_slots(self):
+        use_test_db("tests/tmp/use_item_spellslot_test2.db")
+        user_id = 900202
+        make_basic_character(
+            user_id, "FullCaster", char_class="Sorcerer", current_location="crossroads_tavern", spell_slots_max=8,
+        )
+        db.update_character(user_id, -999, spell_slots_current=1)
+        db.add_item(user_id, -999, "elixir_of_the_arcane_circle", 1)
+
+        sink = []
+        await bot._do_use_item(FakeUpdate(user_id, "drink the elixir of the arcane circle", sink), "drink the elixir of the arcane circle")
+        combined = " ".join(sink)
+        self.assertIn("(8/8)", combined)
+
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["spell_slots_current"], 8)
+
+    async def test_use_item_restores_spell_slots_mid_combat_on_the_live_participant(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900203
+        make_basic_character(
+            user_id, "MidFight", char_class="Cleric", current_location="crossroads_tavern", spell_slots_max=4,
+        )
+        db.update_character(user_id, -999, spell_slots_current=0)
+        db.add_item(user_id, -999, "greater_spell_tonic", 1)
+        character = db.get_character(user_id, -999)
+        session = sessions.start_session(-999, [character], {user_id: "party"})
+
+        sink = []
+        await bot._do_use_item(
+            FakeUpdate(user_id, "use my greater spell tonic", sink), "use my greater spell tonic",
+        )
+        live = next(p for p in session.participants if p["telegram_user_id"] == user_id)
+        self.assertEqual(live["spell_slots_current"], 4)  # 0 + 5, capped at max 4
+        sessions.end_session(-999)
+
     async def test_use_item_rejects_when_none_carried(self):
         use_test_db("tests/tmp/use_item_test2.db")
         user_id = 900103

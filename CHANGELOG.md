@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.130] — New consumables: spell-slot restoration tonics (real feature)
+
+Real feature request from Coffee, right after the spell-slot Support
+fixes: "make an item to replenish spell slots (magic) Like Final
+Fantasy games, they have Ethers... make something that matches this
+game and story." Support was correct that nothing restored spell
+slots mid-battle — this actually gives players a real option now,
+rather than leaving that correct-but-unsatisfying answer as the final
+word.
+
+Four new consumables, tiered like the existing healing potions
+(Minor/Greater/Supreme), sold at Ossian Vane's Arcane Nook shop
+(`vanes_curiosities`) alongside the game's other real magic items —
+flavored as products of The Arcane Circle (the real spellcaster guild
+in `guilds.py`), not a generic reskinned "mana potion":
+- **Spell Tonic** (common, 40g) — restores 2 spell slots
+- **Greater Spell Tonic** (uncommon, 175g) — restores 5
+- **Supreme Spell Tonic** (rare, 700g) — restores 10
+- **Elixir of the Arcane Circle** (legendary, 2,500g) — restores ALL
+
+New `effect: "restore_spell_slots"` branch in `bot.py`'s
+`_do_use_item`, mirroring the existing heal branch's exact live-vs-DB
+sourcing (spell_slots_current can be mid-combat-fresh only on the
+session's in-memory participant dict, same reasoning as the
+2026-07-23 HP-heal bug this file already fixed) — so these work
+correctly whether used in or out of combat. New tests cover a partial
+restore, the full-restore elixir, and mid-combat live-participant sync.
+
 ## [1.27.129] — Support topic: broaden and improve the spell-slot answer
 
 Direct follow-up from Coffee on the dev-topic screenshot of v1.27.128's

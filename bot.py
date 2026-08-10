@@ -15916,6 +15916,35 @@ async def _do_use_item(update: Update, text: str) -> None:
             healed_lines.append(f"**{recipient['name']}** fully restored{revive_note} ({hp_max}/{hp_max} HP)")
         message = f"🏕️ **{character['name']}** sets up the {item['name']} — " + "; ".join(healed_lines) + "."
 
+    elif effect == "restore_spell_slots":
+        # Per Coffee (2026-08-10): a genuine in-battle way to recover
+        # spell slots, since the real game rule (see Support's
+        # deterministic answer in ai/support_agent.py) is that nothing
+        # else does -- resting is otherwise the only option, and that
+        # only works out of combat. Mirrors the heal branch's live-vs-DB
+        # sourcing exactly (spell_slots_current can be mid-combat-fresh
+        # only on the in-memory participant dict, same reasoning as the
+        # 2026-07-23 HP bug this file already fixed above).
+        live_target = None
+        if session is not None:
+            live_target = next(
+                (p for p in session.participants if p["telegram_user_id"] == target["telegram_user_id"]), None,
+            )
+        slot_source = live_target if live_target is not None else target
+        slots_before = slot_source.get("spell_slots_current", 0)
+        slots_max = slot_source.get("spell_slots_max", slots_before)
+        new_slots = slots_max if item.get("restore_all") else min(
+            slots_before + item.get("restore_spell_slots_amount", 0), slots_max
+        )
+        if live_target is not None:
+            live_target["spell_slots_current"] = new_slots
+        db.update_character_by_id(target["character_id"], spell_slots_current=new_slots)
+        restored = new_slots - slots_before
+        message = (
+            f"✨ **{character['name']}** drinks a {item['name']}{target_note}, restoring "
+            f"{restored} spell slot{'s' if restored != 1 else ''} ({new_slots}/{slots_max})."
+        )
+
     elif effect == "cure_poison":
         cured = False
         if session is not None:

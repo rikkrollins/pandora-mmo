@@ -2650,7 +2650,11 @@
         "scroll_revivify",
         "scroll_fireball",
         "weathered_surface_map",
-        "tattered_underground_chart"
+        "tattered_underground_chart",
+        "spell_tonic",
+        "greater_spell_tonic",
+        "supreme_spell_tonic",
+        "elixir_of_the_arcane_circle"
       ]
     },
     "grimsbys_tavern": {

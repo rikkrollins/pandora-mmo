@@ -112,6 +112,36 @@ ITEMS = {
         "price": 15, "weight": 0.1, "effect": "cure_poison",
         "description": "Cures poison. A thin, bitter tonic. Smells like it's already working before you drink it.",
     },
+    # Per Coffee (2026-08-10): spell slots have no in-battle recovery
+    # option at all in this game (real rule, see Support's deterministic
+    # answer in ai/support_agent.py) -- these give casters a genuine
+    # item-based alternative, same tiered Minor/Greater/Supreme pattern
+    # as the healing potions above, distilled by The Arcane Circle (the
+    # real spellcaster guild, see guilds.py) rather than a generic
+    # unbranded "mana potion". restore_spell_slots_amount is read by
+    # bot.py's _do_use_item; the top tier sets restore_all instead of a
+    # fixed number.
+    "spell_tonic": {
+        "name": "Spell Tonic", "type": "consumable", "rarity": "common",
+        "price": 40, "weight": 0.5, "effect": "restore_spell_slots", "restore_spell_slots_amount": 2,
+        "description": "Restores 2 spell slots. A faintly glowing draught the Arcane Circle sells to apprentices who keep running dry mid-lesson.",
+    },
+    "greater_spell_tonic": {
+        "name": "Greater Spell Tonic", "type": "consumable", "rarity": "uncommon",
+        "price": 175, "weight": 0.5, "effect": "restore_spell_slots", "restore_spell_slots_amount": 5,
+        "description": "Restores 5 spell slots. Brewed stronger, and it shows — the glow doesn't fade until well after the bottle's empty.",
+    },
+    "supreme_spell_tonic": {
+        "name": "Supreme Spell Tonic", "type": "consumable", "rarity": "rare",
+        "price": 700, "weight": 0.5, "effect": "restore_spell_slots", "restore_spell_slots_amount": 10,
+        "description": "Restores 10 spell slots. The Arcane Circle only distills this for members they actually trust with it.",
+    },
+    "elixir_of_the_arcane_circle": {
+        "name": "Elixir of the Arcane Circle", "type": "consumable", "rarity": "legendary",
+        "price": 2500, "weight": 0.5, "effect": "restore_spell_slots", "restore_all": True,
+        "note": "Fully restores every spell slot in a single swallow.",
+        "description": "Fully restores every spell slot in a single swallow. The Arcane Circle brews vanishingly little of it, and never explains why.",
+    },
     # Per Coffee (2026-07-24): "add items like tents and cabins and
     # houses to reviving and healing characters to full" -- a stronger
     # alternative to Revivify (which only restores 1 HP): these fully
