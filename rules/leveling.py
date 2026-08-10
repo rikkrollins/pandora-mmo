@@ -580,3 +580,37 @@ def scaled_enemy_count(party_levels: list[int], monster_xp_reward: int, max_coun
         else:
             break
     return best
+
+
+def overtuned_monster_stat_multiplier(party_levels: list[int], monster_xp_reward: int, floor: float = 0.2) -> float:
+    """
+    Real live bug (2026-08-10, per Coffee: "Make it so when these ai
+    characters attack, they are the average party level. This one was
+    clearly way out of its league."): scaled_enemy_count above already
+    scales the encounter's NUMBER of monsters to the party's real 5E
+    Medium-difficulty XP budget, but never touches a single monster's
+    own raw stats -- so a party far below a monster's native challenge
+    level still faced its full, untouched (and potentially crushing)
+    HP/damage even at the minimum count of 1.
+
+    One-directional by design, same precedent as
+    _balance_companion_level_to_party (2026-08-01, bot.py: "only ever
+    RAISES a companion... never lowers one back down"): only ever
+    shrinks an OVERTUNED monster down toward the party's real level,
+    never buffs an already-easy one up for a high-level party --
+    the reported problem was a monster too strong for the party, never
+    the reverse, and inflating harmless low-tier monsters would be new,
+    unrequested difficulty, not a fix for what was actually reported.
+
+    Floored (never below `floor`) so an extreme mismatch (a very
+    high-level monster template vs a level-1 party) still leaves a
+    REAL fight, not a one-shot joke -- same "clamp to avoid a
+    degenerate result" convention as ECHO_TRIAL_TIER_STAT_BONUS_PCT.
+    """
+    if not party_levels or monster_xp_reward <= 0:
+        return 1.0
+    avg_level = round(sum(party_levels) / len(party_levels))
+    reference_budget = MEDIUM_ENCOUNTER_XP_PER_CHARACTER.get(min(max(avg_level, 1), 20), 5700)
+    if monster_xp_reward <= reference_budget:
+        return 1.0
+    return max(floor, reference_budget / monster_xp_reward)

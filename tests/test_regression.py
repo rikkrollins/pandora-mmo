@@ -5201,6 +5201,108 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(is_proficient_in_skill("Rogue", "charisma"))
         self.assertFalse(is_proficient_in_skill("Wizard", "strength"))
 
+    def test_overtuned_monster_stat_multiplier_shrinks_only_a_too_strong_monster(self):
+        """
+        Real live bug (2026-08-10, per Coffee: "Make it so when these
+        ai characters attack, they are the average party level. This
+        one was clearly way out of its league."). Pure-function checks
+        against overtuned_monster_stat_multiplier directly.
+        """
+        from rules.leveling import overtuned_monster_stat_multiplier
+        # A level-1 party's medium budget (50) is nowhere close to a
+        # 1800-xp monster -- floored at 0.2, never lower.
+        self.assertAlmostEqual(overtuned_monster_stat_multiplier([1], 1800), 0.2)
+        # A level-10 party (budget 1200) vs the same monster (1800) --
+        # a real, non-floored ratio (1200/1800).
+        self.assertAlmostEqual(overtuned_monster_stat_multiplier([10], 1800), 1200 / 1800)
+        # One-directional: an UNDERtuned monster (xp well under budget)
+        # is never buffed -- multiplier stays exactly 1.0.
+        self.assertEqual(overtuned_monster_stat_multiplier([10], 50), 1.0)
+        # No party / no real xp_reward -- safe no-op, never a crash or
+        # a zero-division.
+        self.assertEqual(overtuned_monster_stat_multiplier([], 1800), 1.0)
+        self.assertEqual(overtuned_monster_stat_multiplier([1], 0), 1.0)
+
+    async def test_start_combat_shrinks_an_overtuned_wild_monster_to_party_level(self):
+        """
+        Real end-to-end check: a level-1 party fighting bound_loom_warden
+        (a real, genuinely strong non-boss campaign monster: 1800 xp,
+        646 hp) must get a real, floored-down monster (0.2x = 129 hp),
+        never the full, crushing template stats. armor_class and
+        damage_dice stay UNCHANGED by design (only HP/damage/xp scale,
+        per Coffee's own "way out of its league" report being about raw
+        danger, not accuracy).
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        user_id = 900700
+        make_basic_character(user_id, "Underdog", char_class="Fighter", current_location="crossroads_tavern")
+        sink = []
+        # Combat start rolls initiative -- if the enemy happens to go
+        # first, _resolve_ai_turns would make it act immediately,
+        # touching real Ollama narration. _maybe_send_monster_image is
+        # unconditional (real Pollinations network fetch, genuinely
+        # slow on a first-ever request for a seed/prompt -- confirmed
+        # live, this alone hung the test past its own timeout). Both
+        # patched to no-ops so this test only ever exercises the
+        # deterministic enemy-construction stats it actually cares
+        # about -- same "never touch a real network call in the
+        # regression suite" convention as the spell/ability image
+        # prompt tests above.
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the loom warden", sink),
+                                        monster_key="bound_loom_warden", count=1)
+        session = sessions.get_session_for_user(-999, user_id)
+        enemy = next(p for p in session.participants if p["telegram_user_id"] != user_id)
+        import campaign_loader as cl
+        template = cl.get_monster_template(bot.CAMPAIGN, "bound_loom_warden")
+        self.assertEqual(enemy["hp_max"], round(template["hp_max"] * 0.2))
+        self.assertEqual(enemy["hp_current"], enemy["hp_max"])
+        self.assertLess(enemy["hp_max"], template["hp_max"])
+        self.assertEqual(enemy["armor_class"], template["armor_class"])
+        self.assertEqual(enemy["damage_dice"], template.get("damage_dice"))
+        self.assertLess(enemy["xp_reward"], template.get("xp_reward", 0))
+        sessions.end_session(-999)
+
+    async def test_start_combat_never_shrinks_a_hand_placed_boss(self):
+        """
+        A story/world boss's difficulty spike is deliberate -- must
+        NEVER be touched by overtuned_monster_stat_multiplier even
+        when its xp_reward implies a level far above the party.
+        the_unasked is a deliberately absurd secret superboss (1,000,000
+        xp, 100,000,000 hp) -- if boss exclusion silently broke, this
+        would be the case most likely to reveal it (a visibly wrong,
+        still-floored-but-nonsensical HP number).
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock, Mock
+        sessions.end_session(-999)
+        user_id = 900701
+        make_basic_character(user_id, "Overmatched", char_class="Fighter", current_location="crossroads_tavern")
+        sink = []
+        # is_boss also triggers a real, separate Ollama call
+        # (narrate_boss_intro, a sync function run via
+        # asyncio.to_thread) that _resolve_ai_turns' own patch above
+        # doesn't cover -- confirmed live via faulthandler.
+        # dump_traceback_later after this exact test hung past its own
+        # timeout: the stuck thread was genuinely blocked inside
+        # requests.post from narrate_boss_intro. Patched with a plain
+        # Mock (not AsyncMock), matching its real sync signature.
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()), \
+             patch("bot.narrate_boss_intro", new=Mock(return_value="A shadow falls.")):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the unasked", sink),
+                                        monster_key="the_unasked", count=1)
+        session = sessions.get_session_for_user(-999, user_id)
+        enemy = next(p for p in session.participants if p["telegram_user_id"] != user_id)
+        import campaign_loader as cl
+        template = cl.get_monster_template(bot.CAMPAIGN, "the_unasked")
+        self.assertEqual(enemy["hp_max"], template["hp_max"])
+        self.assertEqual(enemy["xp_reward"], template.get("xp_reward", 0))
+        sessions.end_session(-999)
+
     async def test_skill_check_handler_applies_proficiency_for_the_right_class(self):
         user_id = 900501
         make_basic_character(user_id, "Sneaky", char_class="Rogue", current_location="crossroads_tavern")

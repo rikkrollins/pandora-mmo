@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.122] — Wild encounters no longer spawn "way out of its league"
+
+Real feature request (per Coffee, scoped and built 2026-08-10: "Make
+it so when these ai characters attack, they are the average party
+level. This one was clearly way out of its league.").
+`scaled_enemy_count` already scaled the encounter's NUMBER of monsters
+to a real 5E Medium-difficulty XP budget, but never touched a single
+monster's own raw stats -- so a party far below a monster's native
+challenge level still faced its full, untouched (and potentially
+crushing) HP/damage even at the minimum count of 1.
+
+New `overtuned_monster_stat_multiplier` (rules/leveling.py), wired
+into `_do_start_combat`: when a wild/random monster's implied
+challenge level (its real xp_reward against the same Medium-XP table
+`_monster_danger_line` already uses to show players a monster's
+danger level) exceeds the party's average level, its HP, damage
+bonus, and awarded XP all scale down proportionally (floored at 0.2x,
+never a one-shot joke). Deliberately one-directional -- same
+precedent as `_balance_companion_level_to_party`'s "only ever raises,
+never lowers" -- never buffs an already-easy monster up for a
+high-level party, since that wasn't the reported problem. Deliberately
+never applied to a hand-placed story/world boss (`is_boss`), whose
+difficulty spike is intentional. armor_class and the weapon's own
+damage_dice stay unscaled by design (only raw danger scales, not
+accuracy). Verified with real end-to-end `_do_start_combat` calls
+against real campaign monsters — a genuinely strong non-boss template
+(`bound_loom_warden`, 1800 xp) correctly shrinks for a level-1 party,
+while a deliberately absurd secret superboss (`the_unasked`, 1,000,000
+xp / 100,000,000 hp) stays completely untouched.
+
 ## [1.27.121] — Interactable images nudged against warped-object distortion
 
 Real dev-bridge screenshot report (2026-08-10): "The bottles in the

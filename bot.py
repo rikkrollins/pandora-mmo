@@ -98,7 +98,7 @@ from rules.crafting import (
 from rules.dice import roll, roll_damage, ability_modifier, roll_ability_check, roll_d20, roll_percentage_check
 from rules.item_generator import generate_item
 from rules.leveling import (
-    CLASS_HIT_DICE, scaled_enemy_count, breath_weapon_dice_count,
+    CLASS_HIT_DICE, scaled_enemy_count, overtuned_monster_stat_multiplier, breath_weapon_dice_count,
     CLASS_PRIMARY_ABILITY, CLASS_SAVE_PROFICIENCIES, is_proficient_in_skill, is_proficient_in_save,
     skill_check_proficiency_bonus, wild_shape_temp_hp, XP_THRESHOLDS,
     MAX_LEVEL, ability_score_cap, xp_gain_multiplier, hybrid_tier, HYBRID_MAX_TIER,
@@ -5724,17 +5724,34 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 [p.get("level", 1) for p in party], template.get("xp_reward", 0)
             )
 
+        # Real live bug (2026-08-10, per Coffee: "Make it so when these
+        # ai characters attack, they are the average party level. This
+        # one was clearly way out of its league."): scaled_enemy_count
+        # above only ever adjusted the NUMBER of monsters, never a
+        # single one's own raw stats -- deliberately never applied to a
+        # hand-placed story boss (template.get("is_boss")), whose
+        # difficulty spike is intentional, not a bug. See
+        # overtuned_monster_stat_multiplier's own docstring for the
+        # one-directional (never buffs an easy monster up), floored
+        # design.
+        stat_mult = 1.0
+        if not template.get("is_boss", False):
+            stat_mult = overtuned_monster_stat_multiplier(
+                [p.get("level", 1) for p in party], template.get("xp_reward", 0)
+            )
+
         enemies = []
         for i in range(count):
             enemy_id = -2_000_000 - (abs(hash(monster_key)) % 100_000) - i
             enemy_name = f"{template['name']} {i + 1}" if count > 1 else template["name"]
+            scaled_hp = max(1, round(template["hp_max"] * stat_mult))
             enemies.append({
                 "formation_row": _enemy_formation_row(monster_key, template),
                 "telegram_user_id": enemy_id, "name": enemy_name,
                 "dexterity": template["dexterity"], "strength": template["strength"],
-                "armor_class": template["armor_class"], "hp_current": template["hp_max"],
-                "hp_max": template["hp_max"], "proficiency_bonus": template["proficiency_bonus"],
-                "is_ai": 1, "xp_reward": template.get("xp_reward", 0),
+                "armor_class": template["armor_class"], "hp_current": scaled_hp,
+                "hp_max": scaled_hp, "proficiency_bonus": template["proficiency_bonus"],
+                "is_ai": 1, "xp_reward": round(template.get("xp_reward", 0) * stat_mult),
                 "on_hit_condition": template.get("on_hit_condition"),
                 "monster_key": monster_key,
                 "is_boss": template.get("is_boss", False),
@@ -5760,7 +5777,11 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 # deliberately untouched) safely falls back to
                 # DEFAULT_WEAPON's flat 1d8, same as always.
                 "damage_dice": template.get("damage_dice"),
-                "damage_bonus": template.get("damage_bonus", 0),
+                # damage_bonus scales with stat_mult (dice string itself
+                # doesn't -- same "scale the flat bonus, not the dice"
+                # convention _build_echo_enemy already established, no
+                # string-parsing needed).
+                "damage_bonus": round(template.get("damage_bonus", 0) * stat_mult),
                 # Real elemental flavor per monster (2026-07-26 damage-
                 # type pass) -- read by _weapon_for_attacker's natural-
                 # attack branch, then apply_damage_type_modifier against
