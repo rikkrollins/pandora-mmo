@@ -1246,6 +1246,99 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("REAL SPELLS IN THIS GAME", result)
         self.assertNotIn("REAL GUILDS IN THIS GAME", result)
 
+    def test_support_call_active_flag_is_set_during_the_retry_loop_and_cleared_after(self):
+        """
+        Real live bug (dev-topic screenshot, 2026-08-10, Coffee: "Support
+        topic is still not working" even after the catalog-size fix):
+        Ollama's own request log showed bot.py's 60s world tick (NPC
+        heartbeat, hourly status, AI-party turns, Moltbook chatter)
+        saturating the single inference slot back-to-back for the whole
+        ~18 minutes a real Support question was retrying -- it never got
+        a gap to land in. is_support_call_active() is the flag the world
+        tick now checks to pause its own ambient Ollama calls while a
+        real Support answer is in flight. Confirms the flag is True for
+        the full span of the retry loop (both mid-attempt and during the
+        backoff sleep) and False again once the loop gives up.
+        """
+        import ai.support_agent as support_agent_module
+        from unittest.mock import patch
+
+        self.assertFalse(support_agent_module.is_support_call_active())
+        seen_active_mid_attempt = []
+
+        def fake_post(*a, **k):
+            seen_active_mid_attempt.append(support_agent_module.is_support_call_active())
+            raise requests.exceptions.ConnectionError("no real Ollama in this test")
+
+        with patch("ai.support_agent.requests.post", side_effect=fake_post), \
+             patch("ai.support_agent.time.sleep") as mock_sleep:
+            answer = support_agent_module.answer_support_question("What can I do in this game?")
+        self.assertIn("overloaded", answer.lower())
+        self.assertTrue(seen_active_mid_attempt, "requests.post was never actually called")
+        self.assertTrue(all(seen_active_mid_attempt), "flag must be True during every retry attempt")
+        # Confirms the sleeps themselves (not just the request attempts) fall
+        # inside the active window, since that's most of the real 18-minute span.
+        for call in mock_sleep.call_args_list:
+            self.assertIn(call.args[0], (5, 10, 20, 30))
+        self.assertFalse(support_agent_module.is_support_call_active())
+
+    async def test_world_tick_skips_ambient_ai_calls_while_a_support_answer_is_in_flight(self):
+        """
+        Real wiring check for the fix above: bot.py's world-tick loop
+        body must actually SKIP its Ollama-touching sub-calls (world
+        heartbeat, hourly status, AI-party autonomous turns, Moltbook
+        social tick) when is_support_call_active() is True, while still
+        running the deterministic, non-Ollama ones (NPC wander, world
+        boss spawn check, board-quest expiry, dice auto-roll, Moltbook's
+        plain HTTP activity check) every cycle regardless. Runs exactly
+        one real iteration of the loop body by making asyncio.sleep
+        raise on its second call, so the `while True` loop stops itself
+        after one pass instead of needing an external cancel.
+        """
+        from unittest.mock import patch, AsyncMock, Mock
+
+        class _StopLoop(Exception):
+            pass
+
+        sleep_calls = {"n": 0}
+
+        async def fake_sleep(seconds):
+            sleep_calls["n"] += 1
+            if sleep_calls["n"] > 1:
+                raise _StopLoop()
+
+        with patch("bot.asyncio.sleep", side_effect=fake_sleep), \
+             patch("bot.is_support_call_active", return_value=True), \
+             patch("bot._check_idle_characters", new=AsyncMock()), \
+             patch("bot._check_combat_timeouts", new=AsyncMock()), \
+             patch("bot._apply_passive_party_regen", new=Mock()), \
+             patch("bot._maybe_revive_standalone_ai_companions", new=Mock()), \
+             patch("bot.db.get_all_chat_ids", return_value=[999999]), \
+             patch("bot._wander_npcs", new=Mock()) as mock_wander, \
+             patch("bot._maybe_post_world_heartbeat", new=AsyncMock()) as mock_heartbeat, \
+             patch("bot._maybe_post_hourly_status_update", new=AsyncMock()) as mock_hourly, \
+             patch("bot._maybe_spawn_world_boss", new=AsyncMock()) as mock_boss, \
+             patch("bot.db.expire_stale_board_quests", new=Mock()) as mock_expire, \
+             patch("bot._maybe_auto_roll_pending_dice", new=AsyncMock()) as mock_dice, \
+             patch("bot._ai_party_autonomous_tick", new=AsyncMock()) as mock_ai_party, \
+             patch("bot._maybe_check_moltbook_activity", new=AsyncMock()) as mock_moltbook_check, \
+             patch("bot._maybe_run_moltbook_social_tick", new=AsyncMock()) as mock_moltbook_social:
+            fake_app = SimpleNamespace(bot=object())
+            with self.assertRaises(_StopLoop):
+                await bot._idle_inactivity_loop(fake_app)
+
+        # Ollama-touching ambient calls: skipped this cycle.
+        mock_heartbeat.assert_not_called()
+        mock_hourly.assert_not_called()
+        mock_ai_party.assert_not_called()
+        mock_moltbook_social.assert_not_called()
+        # Deterministic / non-Ollama calls: still run every cycle.
+        mock_wander.assert_called_once()
+        mock_boss.assert_called_once()
+        mock_expire.assert_called_once()
+        mock_dice.assert_called_once()
+        mock_moltbook_check.assert_called_once()
+
     # -- Real live bug (2026-07-16): this model has a documented bias
     #    toward guessing "pass_turn" for phrasing it doesn't recognize --
     #    "I'll take a mug, ale!!! how are you doing old buddy?" (ordinary

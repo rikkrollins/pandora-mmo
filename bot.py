@@ -69,7 +69,7 @@ from ai.dm_agent import (
 )
 from ai.intent_parser import parse_intents
 from ai.npc_agent import register_npc, talk_to_npc, generate_ambient_line, _NPCS
-from ai.support_agent import answer_support_question
+from ai.support_agent import answer_support_question, is_support_call_active
 from ai.text_cleanup import to_speakable_text
 from ai import tts_piper, stt_groq
 from guilds import (
@@ -22188,19 +22188,41 @@ async def _idle_inactivity_loop(application: Application) -> None:
         # (db.get_all_chat_ids()) rather than once against the single
         # old _LAST_KNOWN_CHAT_ID global -- one tenant's failure or
         # empty world state doesn't block another's.
+        # Real live bug (dev-topic screenshot, 2026-08-10, Coffee:
+        # "Support topic is still not working" / "I want this working
+        # in unison with the adventure topic"): a real Support question
+        # starved out its whole 5-attempt retry budget (~18 real
+        # minutes) because this world tick keeps firing its own Ollama
+        # calls (NPC heartbeat, hourly status, AI-party turns, Moltbook
+        # chatter) every 60s regardless of whether anyone's waiting on
+        # an answer -- confirmed via Ollama's own request log showing
+        # back-to-back /api/generate calls saturating the single
+        # inference slot for the entire window, never leaving a gap
+        # long enough for one of Support's attempts to land. Skip this
+        # cycle's ambient AI-touching sub-calls (not the deterministic
+        # ones -- NPC wander, board-quest expiry, dice auto-roll, world
+        # boss spawn stay real-time) whenever a Support answer is
+        # actively in flight, so it gets a real shot at the shared slot
+        # instead of losing every race to background chatter. They
+        # simply run next tick (60s later) once Support is done.
+        skip_ambient_ai = is_support_call_active()
+        if skip_ambient_ai:
+            logger.info("[world_tick] skipping this cycle's ambient AI calls -- a Support answer is in flight")
+
         for chat_id in db.get_all_chat_ids():
             try:
                 _wander_npcs(chat_id)
             except Exception as e:
                 logger.error(f"[world_tick] npc wander failed this cycle (chat_id={chat_id}): {e!r}")
-            try:
-                await _maybe_post_world_heartbeat(application.bot, chat_id)
-            except Exception as e:
-                logger.error(f"[world_tick] heartbeat failed this cycle (chat_id={chat_id}): {e!r}")
-            try:
-                await _maybe_post_hourly_status_update(application.bot, chat_id)
-            except Exception as e:
-                logger.error(f"[hourly_update] failed this cycle (chat_id={chat_id}): {e!r}")
+            if not skip_ambient_ai:
+                try:
+                    await _maybe_post_world_heartbeat(application.bot, chat_id)
+                except Exception as e:
+                    logger.error(f"[world_tick] heartbeat failed this cycle (chat_id={chat_id}): {e!r}")
+                try:
+                    await _maybe_post_hourly_status_update(application.bot, chat_id)
+                except Exception as e:
+                    logger.error(f"[hourly_update] failed this cycle (chat_id={chat_id}): {e!r}")
 
         try:
             await _maybe_spawn_world_boss(application.bot)
@@ -22214,18 +22236,20 @@ async def _idle_inactivity_loop(application: Application) -> None:
             await _maybe_auto_roll_pending_dice(application.bot)
         except Exception as e:
             logger.error(f"[dice] auto-roll check failed this cycle: {e!r}")
-        try:
-            await _ai_party_autonomous_tick(application.bot)
-        except Exception as e:
-            logger.error(f"[ai_party] autonomous tick failed this cycle: {e!r}")
+        if not skip_ambient_ai:
+            try:
+                await _ai_party_autonomous_tick(application.bot)
+            except Exception as e:
+                logger.error(f"[ai_party] autonomous tick failed this cycle: {e!r}")
         try:
             await _maybe_check_moltbook_activity(application.bot)
         except Exception as e:
             logger.error(f"[moltbook_heartbeat] failed this cycle: {e!r}")
-        try:
-            await _maybe_run_moltbook_social_tick(application.bot)
-        except Exception as e:
-            logger.error(f"[moltbook_social] tick failed this cycle: {e!r}")
+        if not skip_ambient_ai:
+            try:
+                await _maybe_run_moltbook_social_tick(application.bot)
+            except Exception as e:
+                logger.error(f"[moltbook_social] tick failed this cycle: {e!r}")
         try:
             # Task #159 combat-persistence safety net (see sessions.py's
             # module docstring): a periodic snapshot rather than one on

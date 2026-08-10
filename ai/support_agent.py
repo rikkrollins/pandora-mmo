@@ -10,6 +10,7 @@ a spell that was never defined in spells.py).
 Uses config.DM_NARRATION_MODEL, since this is a natural, conversational
 task rather than a structured/technical one.
 """
+import logging
 import re
 import time
 
@@ -25,6 +26,16 @@ from guilds import GUILDS
 from models import VALID_CLASSES
 from rules.crafting import RECIPES
 from rules.leveling import XP_THRESHOLDS, level_for_xp, MAX_LEVEL
+
+# Same logger name/handlers as bot.py, so Support failures actually
+# land in bot_live_tmp.log -- real gap found 2026-08-10: this file's
+# retry-failure diagnostic was a bare print(), and stdout is
+# block-buffered (not a tty) under the systemd service, so EVERY prior
+# Support failure (2026-07-18, 2026-08-08 x2, 2026-08-10) had its real
+# per-attempt error swallowed into an unflushed buffer -- confirmed by
+# grepping bot_live_tmp.log for zero matches across the file's entire
+# history despite multiple real, reproduced failures.
+logger = logging.getLogger("pandora_mmo")
 
 # Loaded once at import time, same singleton-per-campaign-id caching as
 # bot.py's own CAMPAIGN (campaign_loader.load_campaign caches by id, so
@@ -350,6 +361,27 @@ def _build_character_facts(character: dict) -> str:
         f"- Active quests (their real task, stated plainly -- never explain why it matters "
         f"or what they'll find, just what the quest journal itself already says): {quests_text}"
     )
+
+
+# Real live bug (dev-topic screenshot, 2026-08-10, Coffee: "Support
+# topic is still not working"): a Support question could still starve
+# out its full 5-attempt retry budget even after the catalog-size fix,
+# because bot.py's 60s world tick (NPC heartbeat narration, hourly
+# status updates, AI-companion autonomous turns, Moltbook chatter)
+# keeps firing its OWN Ollama calls on a fixed cadence regardless of
+# whether any real player is around -- confirmed via Ollama's own
+# request log showing back-to-back /api/generate calls saturating the
+# single inference slot for the entire ~18 minutes a real Support
+# question was retrying, with no gap ever long enough for one of
+# Support's attempts to land. This flag lets bot.py's world tick check
+# whether a Support answer is actively in flight and skip its own
+# ambient AI calls for that cycle, so Support gets a real shot at the
+# shared slot instead of losing every race to background chatter.
+_support_call_active = False
+
+
+def is_support_call_active() -> bool:
+    return _support_call_active
 
 
 _XP_QUESTION_WORDS = ["level up", "next level", "xp do i need", "xp to level", "experience do i need"]
@@ -797,32 +829,37 @@ def answer_support_question(
     # ~1065s (~18min) of retrying, vs. giving up for good after ~405s.
     delays = [5, 10, 20, 30]
     attempts = len(delays) + 1
-    for attempt in range(attempts):
-        try:
-            response = requests.post(
-                f"{config.OLLAMA_BASE_URL}/api/generate",
-                json={
-                    "model": config.DM_NARRATION_MODEL,
-                    "prompt": prompt,
-                    "stream": False,
-                    # Real perf fix (2026-07-17): bounds worst-case
-                    # generation time -- see ai/dm_agent.py's
-                    # _NARRATION_OPTIONS for the full reasoning.
-                    "options": {"num_predict": 600},
-                },
-                timeout=200,
-            )
-            response.raise_for_status()
-            data = response.json()
-            text = strip_think_tags(data.get("response", ""))
-            if text:
-                if character:
-                    text = _correct_own_class_hallucination(text, character)
-                return text
-        except (requests.RequestException, ValueError) as e:
-            print(f"[support_agent] model call failed (attempt {attempt + 1}/{attempts}): {e}")
-            if attempt < len(delays):
-                time.sleep(delays[attempt])
+    global _support_call_active
+    _support_call_active = True
+    try:
+        for attempt in range(attempts):
+            try:
+                response = requests.post(
+                    f"{config.OLLAMA_BASE_URL}/api/generate",
+                    json={
+                        "model": config.DM_NARRATION_MODEL,
+                        "prompt": prompt,
+                        "stream": False,
+                        # Real perf fix (2026-07-17): bounds worst-case
+                        # generation time -- see ai/dm_agent.py's
+                        # _NARRATION_OPTIONS for the full reasoning.
+                        "options": {"num_predict": 600},
+                    },
+                    timeout=200,
+                )
+                response.raise_for_status()
+                data = response.json()
+                text = strip_think_tags(data.get("response", ""))
+                if text:
+                    if character:
+                        text = _correct_own_class_hallucination(text, character)
+                    return text
+            except (requests.RequestException, ValueError) as e:
+                logger.warning(f"[support_agent] model call failed (attempt {attempt + 1}/{attempts}): {e!r}")
+                if attempt < len(delays):
+                    time.sleep(delays[attempt])
+    finally:
+        _support_call_active = False
 
     return (
         "Pandora AI is genuinely overloaded right now and couldn't get "

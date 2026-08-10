@@ -2,6 +2,66 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.126] — Support topic: fix real starvation by the background "living world" tick
+
+Real live bug report from Coffee, right after v1.27.125's catalog-size
+fix went out: "I have tried to use the Support topic for two days and
+it is NOT working! ... I want this working in unison with the
+adventure topic." A dev-topic screenshot confirmed a fresh Support
+question STILL failed with "Pandora AI is genuinely overloaded" post-
+fix, so v1.27.125 alone wasn't the whole story.
+
+Root-caused with real evidence, not guessing — `journalctl -u ollama`
+during the exact failure window showed Ollama's own request log
+completing one real `/api/generate` call after another, back-to-back,
+every ~60-70 seconds, for the ENTIRE ~18 minutes the Support question
+was retrying, all returning HTTP 200 (Ollama itself was healthy, just
+continuously busy). Traced the source: bot.py's `_idle_inactivity_loop`
+("world tick") runs every 60s (`IDLE_CHECK_INTERVAL_SECONDS`) and
+fires its own real Ollama calls every single cycle regardless of
+whether any human is even in the game — NPC "meanwhile" heartbeat
+narration, the hourly status update, each AI companion's autonomous
+turn (`_ai_party_autonomous_tick`), and Moltbook's social-post
+decision. This is the documented, deliberate "living world" feature
+(CLAUDE.md: NPCs "wander, and talk to each other whether or not
+anyone's watching") — not a bug in itself, but on this CPU-only,
+single-Ollama-slot box it means Support's bounded 5-attempt/200s-
+timeout retry budget was racing a real, PERMANENT stream of fresh
+background requests, not just occasional transient contention as the
+existing retry logic assumed. Every attempt kept losing that race.
+
+Fix: `ai/support_agent.py` now exposes `is_support_call_active()`, a
+simple flag set for the real duration of `answer_support_question`'s
+retry loop (covering both the request attempts AND the backoff
+sleeps). `bot.py`'s world tick checks this flag each cycle and skips
+ONLY its own Ollama-touching sub-calls (heartbeat, hourly update,
+AI-party turns, Moltbook social tick) whenever a Support answer is in
+flight — the deterministic, non-Ollama parts of the same tick (NPC
+wander, world-boss spawn check, board-quest expiry, dice auto-roll,
+Moltbook's plain HTTP activity check) still run every cycle
+unaffected. This gives a real Support question genuine priority
+access to the shared inference slot instead of losing every race to
+ambient chatter, without disabling the living-world system itself —
+it just waits one cycle (60s) longer, same as it would if a real
+player action were in progress.
+
+Also fixed, found while root-causing this: the retry loop's own
+per-attempt failure diagnostic was a bare `print()`, and this file had
+no logger at all — under systemd, unflushed stdout meant that
+diagnostic NEVER once reached `bot_live_tmp.log` across every real
+Support failure in this project's history (2026-07-18, both 2026-08-08
+failures, and this one), forcing this investigation to go through
+`journalctl` archaeology instead of just reading the app log. Now
+routes through the same `logging.getLogger("pandora_mmo")` bot.py
+uses, so future Support failures are diagnosable directly from the log.
+
+New tests: confirms `is_support_call_active()` is True for the full
+span of a real (mocked-failure) retry loop, including the backoff
+sleeps, and False once it gives up; confirms the world tick's loop
+body actually skips its four Ollama-touching sub-calls while the flag
+is set, while still running its five deterministic ones — first real
+test coverage for this loop body at all.
+
 ## [1.27.125] — Support topic: fix 100% failure rate ("Pandora AI is genuinely overloaded")
 
 Real bug report from Coffee: "next we need the support topic working."
