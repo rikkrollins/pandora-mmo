@@ -88,8 +88,8 @@ async def run_simulation():
         telegram_user_id=wizard_id, chat_id=-999, name="SimWren", race="Human", char_class="Wizard",
         ability_scores={"strength": 8, "dexterity": 12, "constitution": 12,
                          "intelligence": 16, "wisdom": 10, "charisma": 10},
-        hp_max=14, armor_class=12, gold=20, inventory={"rusty_dagger": 1}, known_spells=["fire_bolt"],
-        current_location="crossroads_tavern",
+        hp_max=14, armor_class=12, gold=20, inventory={"rusty_dagger": 1, "healing_potion": 1},
+        known_spells=["fire_bolt"], current_location="crossroads_tavern",
     )
     db.create_character(
         telegram_user_id=rogue_id, chat_id=-999, name="SimBram", race="Human", char_class="Rogue",
@@ -191,7 +191,11 @@ async def run_simulation():
 
     sessions.end_session(-999)
 
-    if not await step("examine item in inventory", await do_adv(wizard_id, "examine the rusty dagger in my inventory")):
+    # healing_potion, not rusty_dagger: the dagger was just thrown/consumed
+    # by the combat sweep above (2026-08-10, caught by this harness's own
+    # first combat-first run -- examine silently tested "item not found"
+    # instead of a real item lookup once the dagger was gone).
+    if not await step("examine item in inventory", await do_adv(wizard_id, "examine the healing potion in my inventory")):
         return report
     if not await step("talk to Grimsby", await do_adv(wizard_id, "talk to Grimsby")):
         return report
