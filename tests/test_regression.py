@@ -1197,6 +1197,55 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ask again", answer.lower())
         self.assertNotIn("pinned message", answer.lower())
 
+    def test_support_prompt_shrinks_for_a_topic_specific_question(self):
+        """
+        Real live bug (2026-08-10, found via topic-activity monitoring):
+        both real Support questions ever asked in the live log failed
+        with "Pandora AI is genuinely overloaded" -- 2 for 2, not a rare
+        fluke. Root cause: the old SUPPORT_SYSTEM_PROMPT unconditionally
+        baked in the ENTIRE item/spell/guild/crafting/race catalog
+        (~16,600 chars, ~4,150 tokens) into every single question
+        regardless of topic, on top of the header -- real, direct
+        prompt-processing latency on this box's CPU-only, single-slot
+        inference, paid even by a question about exactly one narrow
+        thing. The real prompt from the exact question that actually
+        failed live ("What guilds can i join...") must now be
+        dramatically smaller -- confirmed it drops by more than half.
+        """
+        from ai.support_agent import _build_prompt
+        real_failed_question = "What guilds can i join and what do they do for the characters?"
+        filtered = _build_prompt(real_failed_question)
+        broad = _build_prompt("What can I do in this game?")
+        self.assertLess(len(filtered), len(broad) * 0.6)
+        self.assertIn("REAL GUILDS IN THIS GAME", filtered)
+        self.assertNotIn("REAL ITEMS IN THIS GAME", filtered)
+        self.assertNotIn("REAL SPELLS IN THIS GAME", filtered)
+
+    def test_support_catalog_reference_falls_back_to_everything_for_an_ambiguous_question(self):
+        """
+        A genuinely broad/ambiguous question (no real keyword match to
+        any specific category) must NOT lose grounding -- it gets the
+        full catalog, identical to this function's original always-
+        everything behavior, same safety-net design as every other
+        "when in doubt, don't under-ground" convention in this file.
+        """
+        from ai.support_agent import _build_catalog_reference
+        full = _build_catalog_reference(None)
+        ambiguous = _build_catalog_reference("What can I do in this game?")
+        self.assertEqual(full, ambiguous)
+        for section in ("REAL ITEMS IN THIS GAME", "REAL SPELLS IN THIS GAME",
+                         "REAL GUILDS IN THIS GAME", "REAL CRAFTING RECIPES IN THIS GAME",
+                         "REAL RACE ABILITY SCORE BONUSES IN THIS GAME"):
+            self.assertIn(section, ambiguous)
+
+    def test_support_catalog_reference_matches_multiple_relevant_sections(self):
+        """A question naming two real categories gets both sections, not just one."""
+        from ai.support_agent import _build_catalog_reference
+        result = _build_catalog_reference("What weapons and spells does a Fighter get?")
+        self.assertIn("REAL ITEMS IN THIS GAME", result)
+        self.assertIn("REAL SPELLS IN THIS GAME", result)
+        self.assertNotIn("REAL GUILDS IN THIS GAME", result)
+
     # -- Real live bug (2026-07-16): this model has a documented bias
     #    toward guessing "pass_turn" for phrasing it doesn't recognize --
     #    "I'll take a mug, ale!!! how are you doing old buddy?" (ordinary

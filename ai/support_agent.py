@@ -125,8 +125,7 @@ general. Only describe mechanics for things that appear below, using \
 exactly the facts given for them."""
 
 
-def _build_catalog_reference() -> str:
-    """Builds the real, current item/spell/guild catalog text to ground the model."""
+def _items_catalog_text() -> str:
     lines = ["\nREAL ITEMS IN THIS GAME:"]
     for item_id, data in items_module.ITEMS.items():
         details = f"{data['name']} ({data['type']}"
@@ -142,8 +141,11 @@ def _build_catalog_reference() -> str:
             details += f" — {data['note']}"
         details += ")"
         lines.append(f"- {details}")
+    return "\n".join(lines)
 
-    lines.append("\nREAL SPELLS IN THIS GAME, BY CLASS:")
+
+def _spells_catalog_text() -> str:
+    lines = ["\nREAL SPELLS IN THIS GAME, BY CLASS:"]
     for cls in spells_module.CLASS_SPELL_LISTS:
         cantrip_ids = spells_module.CLASS_CANTRIPS.get(cls, [])
         leveled_ids = spells_module.CLASS_SPELL_LISTS.get(cls, [])
@@ -155,20 +157,26 @@ def _build_catalog_reference() -> str:
             spell = spells_module.get_spell(sid)
             spell_descriptions.append(f"{spell['name']} ({spell.get('effect', '')})")
         lines.append(f"- {cls.title()}: {', '.join(spell_descriptions)}")
+    return "\n".join(lines)
 
-    lines.append("\nREAL GUILDS IN THIS GAME:")
+
+def _guilds_catalog_text() -> str:
+    lines = ["\nREAL GUILDS IN THIS GAME:"]
     for guild_id, guild in GUILDS.items():
         lines.append(
             f"- {guild['name']}: requires level {guild['join_requirement_level']}"
             + (f", classes: {', '.join(guild['join_requirement_classes'])}"
                if guild.get("join_requirement_classes") else "")
         )
+    return "\n".join(lines)
 
+
+def _crafting_catalog_text() -> str:
     # Per Coffee (2026-07-14): Support should be "like an encyclopedia
     # or wiki" -- crafting recipes and the real gathering skills were
     # never grounded here at all, so a question like "what can I craft"
     # had nothing real to answer from.
-    lines.append("\nREAL CRAFTING RECIPES IN THIS GAME:")
+    lines = ["\nREAL CRAFTING RECIPES IN THIS GAME:"]
     for recipe_id, recipe in RECIPES.items():
         result = items_module.get_item(recipe["result_item"])
         material_names = ", ".join(
@@ -179,14 +187,16 @@ def _build_catalog_reference() -> str:
             f"- {result['name'] if result else recipe_id}: needs {material_names} "
             f"({recipe['ability']} check, DC {recipe['dc']})"
         )
-
     lines.append(
         "\nREAL GATHERING SKILLS IN THIS GAME: herbalism, mining, lumberjacking, "
         "fishing -- each is tied to real resource nodes at specific locations, "
         "uses a real ability check to succeed, and gets a persistent proficiency "
         "bonus the more it's successfully practiced (shown on the character sheet)."
     )
+    return "\n".join(lines)
 
+
+def _race_bonus_catalog_text() -> str:
     # Confirmed live (2026-07-11): asked to help assign rolled stats for an
     # Elf Ranger, the model ignored the character's actual race/class
     # entirely and suggested switching to Fighter or Barbarian instead --
@@ -194,19 +204,74 @@ def _build_catalog_reference() -> str:
     # prompt at all, so it had nothing concrete to reason from. These are
     # this project's own real bonuses (some 5E subraces/variants are
     # simplified here), not to be confused with generic D&D lore.
-    lines.append("\nREAL RACE ABILITY SCORE BONUSES IN THIS GAME:")
+    lines = ["\nREAL RACE ABILITY SCORE BONUSES IN THIS GAME:"]
     for race_name, race_data in races_module.RACES.items():
         bonus_text = ", ".join(
             f"+{v} {k}" for k, v in race_data["ability_bonuses"].items()
         )
         lines.append(f"- {race_name}: {bonus_text}")
-
     return "\n".join(lines)
 
 
-SUPPORT_SYSTEM_PROMPT = (
+# Real live bug (2026-08-10, found via topic-activity monitoring): both
+# real Support questions ever asked in the live log failed with
+# "Pandora AI is genuinely overloaded" -- confirmed root cause by
+# measuring the actual prompt: SUPPORT_SYSTEM_PROMPT's OLD, unconditional
+# full-catalog dump ran ~16,600 characters (~4,150 tokens) BEFORE even
+# adding character/location/party facts, for every single question
+# regardless of topic -- a "what guilds can I join" question paid the
+# same huge prompt-processing cost as a question that actually needed
+# the whole catalog. On this box's CPU-only, single-Ollama-slot,
+# already-documented 30-160s+ latency, that's real, direct latency
+# added to EVERY Support call, not a rare edge case -- explains a 2-for-2
+# real failure rate better than "genuinely rare" congestion alone would.
+# Filters the catalog to only the section(s) the question's own real
+# keywords suggest are relevant, falling back to EVERY section
+# (identical to the old always-everything behavior) whenever nothing
+# matches -- a genuinely broad/ambiguous question never loses real
+# grounding, it just no longer pays the full cost for a narrow one.
+_CATALOG_SECTION_KEYWORDS = {
+    "items": (["item", "weapon", "armor", "potion", "ring", "amulet", "shield",
+               "sword", "dagger", "scroll", "gear", "equip", "wear", "wield"], _items_catalog_text),
+    "spells": (["spell", "cast", "cantrip", "magic"], _spells_catalog_text),
+    "guilds": (["guild", "join a", "join the", "guilds"], _guilds_catalog_text),
+    "crafting": (["craft", "recipe", "brew", "gather", "herbalism", "mining",
+                  "lumberjack", "fishing", "forage"], _crafting_catalog_text),
+    "races": (["race", "ability score", "ability bonus", "stat bonus", "racial"], _race_bonus_catalog_text),
+}
+
+
+def _build_catalog_reference(question: str | None = None) -> str:
+    """
+    Builds the real, current item/spell/guild/crafting/race catalog
+    text to ground the model. `question=None` (or a question matching
+    none of the real keyword categories) returns EVERY section, same
+    as this function's original unconditional behavior -- only a
+    question that clearly names one or more specific categories gets
+    the smaller, filtered prompt.
+    """
+    if question is not None:
+        lowered = question.lower()
+        matched = [builder for keywords, builder in _CATALOG_SECTION_KEYWORDS.values()
+                   if any(kw in lowered for kw in keywords)]
+        if matched:
+            return "\n".join(builder() for builder in matched)
+    return "\n".join(builder() for _, builder in _CATALOG_SECTION_KEYWORDS.values())
+
+
+def _build_support_system_prompt(question: str | None = None) -> str:
+    """
+    Real live bug fix (2026-08-10): this used to be a module-level
+    constant built ONCE at import time with the full, unconditional
+    catalog baked in -- now a real function so each call can pass the
+    real question through to _build_catalog_reference's own relevance
+    filtering (see that function's docstring for the actual bug this
+    fixes). `question=None` reproduces the exact old always-everything
+    behavior, so any other caller is unaffected.
+    """
+    return (
     SUPPORT_SYSTEM_PROMPT_HEADER
-    + _build_catalog_reference()
+    + _build_catalog_reference(question)
     + CRITICAL_GROUNDING_RULE
     + """
 
@@ -238,7 +303,7 @@ character using ONLY those facts — never invent or guess a stat, item, \
 location, or quest that isn't actually listed. If no character facts are \
 given, and the question is clearly about "my character", say they don't \
 have one yet. Keep answers short and friendly."""
-)
+    )
 
 
 def _build_character_facts(character: dict) -> str:
@@ -634,7 +699,7 @@ def _build_npc_reference(visited_location_ids: list[str]) -> str:
 
 
 def _build_prompt(question: str, character: dict | None = None, party_members: list[dict] | None = None) -> str:
-    prompt = SUPPORT_SYSTEM_PROMPT
+    prompt = _build_support_system_prompt(question)
     if character:
         prompt += _build_character_facts(character)
         visited = character.get("visited_locations") or []

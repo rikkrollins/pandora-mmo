@@ -2,6 +2,46 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.125] — Support topic: fix 100% failure rate ("Pandora AI is genuinely overloaded")
+
+Real bug report from Coffee: "next we need the support topic working."
+Checked `bot_live_tmp.log` — both real Support questions ever asked
+in production had failed with the "genuinely overloaded" fallback
+message, a 2-for-2 (100%) failure rate, not the "rare" case that
+message implies to players.
+
+Root cause, found by direct measurement, not guessing:
+`ai/support_agent.py`'s `SUPPORT_SYSTEM_PROMPT` was a module-level
+constant that unconditionally embedded the ENTIRE item/spell/guild/
+crafting/race catalog (~16,600 characters, ~4,150 tokens) into every
+single Support prompt, regardless of what the player actually asked.
+On this VPS's CPU-only, single-slot Ollama inference, that's a lot of
+extra prompt to process before the model can even start answering —
+a real, measurable contributor to Support's timeouts, on top of the
+already-long per-call latency documented for this hardware.
+
+Fix: `_build_catalog_reference()` now takes the player's actual
+question and only includes the catalog SECTIONS relevant to it
+(items/spells/guilds/crafting/races), matched via keyword lists
+(`_CATALOG_SECTION_KEYWORDS`) — e.g. a spell question no longer drags
+along the entire item and crafting catalogs. Falls back to the FULL
+catalog whenever no section's keywords match, so an ambiguous
+question is never under-grounded (this is the same
+never-hallucinate-content guarantee the grounding block already
+enforced, just now conditionally scoped instead of always-everything).
+`SUPPORT_SYSTEM_PROMPT` (module-level constant) became
+`_build_support_system_prompt(question)` (a real function of the
+question) to make this possible.
+
+Measured, not assumed: a guild question's full prompt shrank from
+~16,604 to ~6,366 characters; a spell question to ~8,289 characters;
+a broad/ambiguous question correctly stays at the full ~16,658 (the
+safety net firing as designed). New tests cover topic-specific
+shrinkage, the ambiguous-question fallback, and a question matching
+multiple sections at once. Existing Support tests re-verified passing
+unchanged, including the sheet-lookup path (which never reaches this
+code at all — it returns real DB rows directly).
+
 ## [1.27.124] — Battle formation image gets a real location background
 
 Real feature request (Task #14, per Coffee: "instead of a plain
