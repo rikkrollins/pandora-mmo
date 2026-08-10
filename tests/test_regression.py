@@ -8138,6 +8138,31 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(spacing, radius * 2, "tokens are close enough their circles overlap")
         self.assertGreaterEqual(radius, battle_render._TOKEN_RADIUS_MIN)
 
+    def test_battle_formation_skips_a_leading_article_for_a_meaningful_label(self):
+        """
+        Real live bug (2026-08-10, Coffee, dev-bridge screenshot): 4
+        copies of a boss whose real name starts with "The" (fighting
+        "The Unspoken") all rendered with an identical, useless "T"
+        initial letter and "The" label -- both the token's big initial
+        and its short name label took the LITERAL first word, and
+        "The" is a real, common naming convention in this campaign (9
+        of 56 monsters, overwhelmingly bosses: "The Unspoken," "The
+        Waking Ember," "The Colosseum Champion," etc.). Confirms both
+        the label helper and the initial-letter source skip a leading
+        article and use the next real word instead.
+        """
+        import battle_render
+        self.assertEqual(battle_render._meaningful_first_word("The Unspoken"), "Unspoken")
+        self.assertEqual(battle_render._meaningful_first_word("The Waking Ember"), "Waking")
+        self.assertEqual(battle_render._meaningful_first_word("A Nameless Dread"), "Nameless")
+        # A name that's genuinely just "The" alone (no real second
+        # word) falls back to the article itself rather than crashing
+        # or returning empty.
+        self.assertEqual(battle_render._meaningful_first_word("The"), "The")
+        # Real, ordinary names (no leading article) are unaffected.
+        self.assertEqual(battle_render._meaningful_first_word("Grimsby"), "Grimsby")
+        self.assertEqual(battle_render._first_name("The Unspoken"), "Unspoken")
+
     def test_battle_formation_uses_first_name_to_save_space(self):
         """Real request (Coffee): "you can use first names to save in spacing."""
         import battle_render

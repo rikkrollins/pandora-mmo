@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.114] — Battle formation image: real names no longer collapse to "The"
+
+Real live bug (2026-08-10, Coffee, dev-bridge screenshot): fighting
+"The Unspoken" (a real boss), all 4 enemy circles rendered with an
+identical, useless "T" initial letter and "The" label. Root cause:
+the previous version's "show first name only" fix (v1.27.109) and the
+token's own big initial letter both took the LITERAL first word of a
+name, and "The" is a real, common naming convention in this campaign
+(9 of 56 monsters, overwhelmingly bosses: "The Unspoken," "The Waking
+Ember," "The Colosseum Champion," etc.) — exactly the fights where a
+clear, distinguishing label matters most.
+
+New `_meaningful_first_word` skips a leading "the"/"a"/"an" article
+and uses the next real word for both the label and the initial letter
+("The Unspoken" → "U"/"Unspoken" instead of "T"/"The"). Ordinary names
+with no leading article are unaffected.
+
 ## [1.27.113] — Battle formation image: joining mid-fight refreshes it, all circles now one size
 
 Two real live reports (2026-08-10, Coffee), both in `battle_render.py`/

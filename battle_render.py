@@ -79,6 +79,32 @@ def _truncate_name(name: str, limit: int = 14) -> str:
     return name if len(name) <= limit else name[: limit - 1] + "…"
 
 
+_LEADING_ARTICLES = {"the", "a", "an"}
+
+
+def _meaningful_first_word(name: str) -> str:
+    """
+    Real live bug (2026-08-10, Coffee, dev-bridge screenshot): 4 copies
+    of a boss rendered with an identical, useless "T"/"The" initial
+    and label -- both _first_name below and the token's own big
+    initial letter took the LITERAL first word, and "The" is a real,
+    common naming convention in this campaign (9 of 56 monsters: "The
+    Unspoken," "The Waking Ember," "The Colosseum Champion," etc.) --
+    overwhelmingly BOSSES, exactly the fights where a clear,
+    distinguishing label matters most, and exactly where Coffee hit
+    this (fighting "The Unspoken"). Skips a leading "the"/"a"/"an"
+    article and uses the next real word instead; a name that's ONLY
+    an article plus nothing else falls back to the article itself
+    rather than returning empty.
+    """
+    words = name.split()
+    if not words:
+        return "?"
+    if len(words) > 1 and words[0].lower() in _LEADING_ARTICLES:
+        return words[1]
+    return words[0]
+
+
 def _first_name(name: str, limit: int = 14) -> str:
     """
     Real request (2026-08-09, Coffee: "you can use first names to save
@@ -87,8 +113,7 @@ def _first_name(name: str, limit: int = 14) -> str:
     """
     if not name:
         return "?"
-    first = name.split()[0]
-    return _truncate_name(first, limit)
+    return _truncate_name(_meaningful_first_word(name), limit)
 
 
 def _hp_bar_color(hp_current: int, hp_max: int) -> tuple:
@@ -144,7 +169,7 @@ def _draw_token(draw: ImageDraw.ImageDraw, x: int, y: int, combatant: dict, colo
         [x - radius, y - radius, x + radius, y + radius],
         fill=color, outline=_TOKEN_OUTLINE, width=2,
     )
-    initial = (name[0] if name else "?").upper()
+    initial = (_meaningful_first_word(name)[0] if name else "?").upper()
     initial_font = _load_font(radius, bold=True)
     bbox = draw.textbbox((0, 0), initial, font=initial_font)
     draw.text(
