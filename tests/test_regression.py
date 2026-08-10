@@ -1510,10 +1510,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             captured_options.append(k["json"]["options"])
             return FakeResponse()
 
+        # Not "enchant my weapon" -- that question is now answered
+        # deterministically (see the enchant test below), which would
+        # never reach requests.post at all and make this test moot.
         with patch("ai.support_agent.requests.post", side_effect=fake_post), \
              self.assertLogs("pandora_mmo", level="WARNING") as log_ctx, \
              patch("ai.support_agent.time.sleep") as mock_sleep:
-            answer = support_agent_module.answer_support_question("How do i enchant my weapon?")
+            answer = support_agent_module.answer_support_question("How do i join a guild?")
         self.assertIn("overloaded", answer.lower())
         self.assertTrue(any("no usable text" in m for m in log_ctx.output))
         self.assertEqual(mock_sleep.call_count, 4)
@@ -1561,6 +1564,52 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             )
         mock_post.assert_not_called()
         self.assertIn("warlock", warlock_answer.lower())
+
+    def test_support_enchant_question_is_answered_deterministically_and_correctly(self):
+        """
+        Real live bug (dev-topic screenshot, 2026-08-10): the exact
+        question that failed live ("How do i enchant my weapon?") got
+        back "Apply a suitable enchantment based on your stats." -- a
+        genuine hallucination, not just vague, because the crafting
+        catalog grounding never included ENCHANT_RECIPES at all before
+        this fix, so the model had zero real facts to answer from.
+        Coffee's own follow-up asked for a step-by-step guide with real
+        example phrasing, so this is answered directly from
+        rules.crafting.ENCHANT_RECIPES, no Ollama call at all. Confirms
+        the one easiest-to-miss real rule (plain shop items can NEVER
+        be enchanted) is stated, and that the example phrase given
+        would actually work against bot.py's own _find_enchant_recipe_in_text
+        (i.e. uses the real recipe label "flame", not a guessed "fire").
+        """
+        import ai.support_agent as support_agent_module
+        from unittest.mock import patch
+
+        with patch("ai.support_agent.requests.post") as mock_post:
+            answer = support_agent_module.answer_support_question("How do i enchant my weapon?")
+        mock_post.assert_not_called()
+        self.assertIn("found-or-crafted", answer.lower())
+        self.assertIn("shop-bought", answer.lower())
+        self.assertIn("flame", answer.lower())
+        self.assertIn("frost", answer.lower())
+        self.assertIn("warding", answer.lower())
+        self.assertIn("arcana", answer.lower())
+        self.assertIn("commission an enchantment", answer.lower())
+        self.assertNotIn("suitable enchantment based on your stats", answer.lower())
+
+        # The example phrase this answer gives must actually work against
+        # the real handler's own recipe-matching, not a plausible-sounding
+        # guess (this is exactly the kind of subtle mismatch a hand-typed
+        # example could get wrong without this check).
+        from bot import _find_enchant_recipe_in_text
+        example = "enchant my masterwork longsword with flame"
+        self.assertEqual(_find_enchant_recipe_in_text(example), "enchant_flame")
+
+    def test_support_crafting_catalog_includes_real_enchantments(self):
+        from ai.support_agent import _crafting_catalog_text
+        catalog = _crafting_catalog_text()
+        self.assertIn("REAL ENCHANTMENTS IN THIS GAME", catalog)
+        for recipe_id in ("flame", "frost", "warding", "arcana"):
+            self.assertIn(recipe_id, catalog)
 
     # -- Real live bug (2026-07-16): this model has a documented bias
     #    toward guessing "pass_turn" for phrasing it doesn't recognize --

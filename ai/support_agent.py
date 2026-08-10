@@ -24,7 +24,7 @@ import spells as spells_module
 from ai.text_cleanup import strip_think_tags
 from guilds import GUILDS
 from models import VALID_CLASSES
-from rules.crafting import RECIPES
+from rules.crafting import RECIPES, ENCHANT_RECIPES
 from rules.leveling import XP_THRESHOLDS, level_for_xp, MAX_LEVEL
 
 # Same logger name/handlers as bot.py, so Support failures actually
@@ -204,6 +204,24 @@ def _crafting_catalog_text() -> str:
         "uses a real ability check to succeed, and gets a persistent proficiency "
         "bonus the more it's successfully practiced (shown on the character sheet)."
     )
+    # Real live bug (2026-08-10, dev-topic screenshot): "How do i enchant
+    # my weapon?" got a fully ungrounded, hallucinated answer -- this
+    # catalog builder never included ENCHANT_RECIPES at all before now,
+    # so the model had zero real facts to work from. Defense in depth
+    # alongside _deterministic_enchant_item_answer's exact-phrase bypass
+    # -- a differently-worded enchant question that slips past that
+    # keyword list still lands on real facts here instead of guessing.
+    lines.append("\nREAL ENCHANTMENTS IN THIS GAME (only apply to a real found/crafted magic item, never a plain shop item):")
+    for recipe_id, recipe in ENCHANT_RECIPES.items():
+        label = recipe_id.replace("enchant_", "")
+        material_names = ", ".join(
+            f"{qty}x {items_module.get_item(mat)['name'] if items_module.get_item(mat) else mat}"
+            for mat, qty in recipe["materials"].items()
+        )
+        lines.append(
+            f"- {label}: needs {material_names} ({recipe['ability']} check, DC {recipe['dc']}), "
+            f"applies to {'/'.join(recipe['applies_to'])} items"
+        )
     return "\n".join(lines)
 
 
@@ -247,7 +265,7 @@ _CATALOG_SECTION_KEYWORDS = {
     "spells": (["spell", "cast", "cantrip", "magic"], _spells_catalog_text),
     "guilds": (["guild", "join a", "join the", "guilds"], _guilds_catalog_text),
     "crafting": (["craft", "recipe", "brew", "gather", "herbalism", "mining",
-                  "lumberjack", "fishing", "forage"], _crafting_catalog_text),
+                  "lumberjack", "fishing", "forage", "enchant", "imbue"], _crafting_catalog_text),
     "races": (["race", "ability score", "ability bonus", "stat bonus", "racial"], _race_bonus_catalog_text),
 }
 
@@ -457,6 +475,51 @@ def _deterministic_spell_slot_restore_answer(character: dict | None) -> str:
             f"recover much faster, on a roughly {full_rest_hours / 8:g}-hour curve instead."
         )
     return base
+
+
+_ENCHANT_QUESTION_WORDS = [
+    "enchant my", "enchant a", "enchant the", "how do i enchant", "how to enchant",
+    "enchanting my", "enchanting a", "imbue my", "imbue a", "how do i imbue", "how to imbue",
+]
+
+
+def _deterministic_enchant_item_answer() -> str:
+    """
+    Real live bug (dev-topic screenshot, 2026-08-10, Coffee: "How do i
+    enchant my weapon?" got back "Apply a suitable enchantment based on
+    your stats." -- a real hallucination, not just a vague answer:
+    ai/support_agent.py's catalog grounding (_crafting_catalog_text)
+    only ever built from RECIPES, never ENCHANT_RECIPES, so the model
+    had ZERO real grounding for this question at all and fell back to
+    general D&D knowledge -- exactly what CLAUDE.md's "never answer
+    ungrounded" rule exists to prevent. Coffee's own follow-up asked
+    for "a step by step guide... tell the user what to type or
+    examples," so this is answered directly and completely from the
+    real mechanics (bot.py's _do_enchant_item/_do_commission_enchantment),
+    not left to a re-grounded but still free-form LLM call: the single
+    easiest way to get this wrong is missing the ONE non-obvious real
+    requirement (a plain shop-bought weapon can't be enchanted at all,
+    only a real found/crafted magic item) -- a fact worth never leaving
+    to chance.
+    """
+    recipe_lines = []
+    for recipe_id, recipe in ENCHANT_RECIPES.items():
+        label = recipe_id.replace("enchant_", "")
+        materials = ", ".join(f"{qty}x {items_module.get_item(mid)['name']}" for mid, qty in recipe["materials"].items())
+        applies_to = "/".join(recipe["applies_to"])
+        recipe_lines.append(f"- \"{label}\" (DC {recipe['dc']} {recipe['ability']}): needs {materials}, applies to {applies_to} items")
+    return (
+        "Enchanting only works on a REAL found-or-crafted magic item — a plain shop-bought weapon or "
+        "armor can never be enchanted, no matter what. If you don't have one yet, craft an advanced "
+        "recipe (e.g. \"craft a masterwork longsword\") or find one as combat loot first.\n\n"
+        "Once you have one, say something like \"enchant my [item name] with [enchantment]\" "
+        "(or \"imbue\" instead of \"enchant\") — for example: \"enchant my masterwork longsword with flame\". "
+        "The real enchantments are:\n" + "\n".join(recipe_lines) + "\n\n"
+        "Materials are only consumed on a successful roll — a failed attempt doesn't waste them.\n\n"
+        "Separately, Enchanters' Guild members can say something like \"commission an enchantment\" "
+        "instead — no item or materials needed, the Guild grants a real random magic item for you, "
+        "once per rest."
+    )
 
 
 _ACTIVE_CHARACTER_QUESTION_WORDS = [
@@ -836,6 +899,8 @@ def answer_support_question(
     lowered = question.lower()
     if any(w in lowered for w in _SPELL_SLOT_RESTORE_QUESTION_WORDS):
         return _deterministic_spell_slot_restore_answer(character)
+    if any(w in lowered for w in _ENCHANT_QUESTION_WORDS):
+        return _deterministic_enchant_item_answer()
     if character and any(w in lowered for w in _XP_QUESTION_WORDS):
         return _deterministic_xp_answer(character)
     if character and any(w in lowered for w in _ACTIVE_CHARACTER_QUESTION_WORDS):

@@ -2,6 +2,38 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.133] — Support topic: fix "How do I enchant my weapon?" hallucination
+
+Real live bug, dev-topic screenshot (2026-08-10): the exact question
+"How do i enchant my weapon?" got back "Apply a suitable enchantment
+based on your stats." — a genuine hallucination, not just vague.
+Root-caused: `ai/support_agent.py`'s crafting catalog grounding
+(`_crafting_catalog_text`) only ever built from `RECIPES`, and never
+included `rules/crafting.py`'s separate `ENCHANT_RECIPES` at all — the
+model had ZERO real facts about enchanting to work from, so it filled
+the gap from general D&D knowledge, exactly what CLAUDE.md's grounding
+rule exists to prevent. Coffee's own follow-up asked for "a step by
+step guide... tell the user what to type or examples."
+
+Fix: `_deterministic_enchant_item_answer()` answers this directly from
+the real mechanics (`bot.py`'s `_do_enchant_item`/
+`_do_commission_enchantment`), no Ollama call at all — states the one
+easiest-to-miss real rule (a plain shop-bought weapon can NEVER be
+enchanted, only a real found/crafted magic item), gives a real example
+phrase that actually matches the handler's own recipe-matching (caught
+and fixed a real "fire" vs. the actual recipe name "flame" mismatch
+while writing this, via a real print-and-check before shipping), lists
+all four real enchantments with their real materials/DC/applies-to,
+and mentions the separate Enchanters' Guild "commission an enchantment"
+path. Also added `ENCHANT_RECIPES` to the crafting catalog grounding
+itself as defense in depth, for any differently-worded enchant
+question that slips past the deterministic keyword match.
+
+New tests confirm the deterministic answer's content and that its
+example phrase round-trips correctly through the real handler; updated
+one pre-existing test that happened to reuse the same now-intercepted
+question for an unrelated retry-logic check.
+
 ## [1.27.132] — Spell tonics: a third acquisition path — advanced alchemy
 
 Direct follow-up from Coffee: "make crafting Ethers possible but
