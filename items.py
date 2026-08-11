@@ -544,6 +544,32 @@ ITEMS = {
         "description": "Torn along one edge, the surviving ink tracing passages that never see daylight.",
     },
 
+    # --- Recipe books (2026-08-11, per Coffee: real, buyable reference
+    # items teaching a profession's real level-1 recipes -- "make basic,
+    # make tiered books that will be available in the game as the
+    # players progress. also buy basic Crafting book in the market. Only
+    # show Lv 1 items tho (players must join guild for advanced
+    # recipies)"). "teaches_profession" is read by bot._do_read_recipe_
+    # book, which builds the actual recipe list live from rules.crafting.
+    # RECIPES -- never ADVANCED_RECIPES/ENCHANT_RECIPES, so a book can
+    # never leak guild-ladder content. Not consumed on use (see
+    # bot._do_use_item's "book" branch) -- a reference book is reused. ---
+    "cook_book_basic": {
+        "name": "Cook Book", "type": "book", "rarity": "common",
+        "price": 15, "weight": 1, "teaches_profession": "cooking",
+        "description": "Grease-stained, dog-eared, and clearly used by someone who actually cooked from it.",
+    },
+    "herbalism_guide_basic": {
+        "name": "Herbalism Guide", "type": "book", "rarity": "common",
+        "price": 20, "weight": 1, "teaches_profession": "alchemy",
+        "description": "Pressed leaves still mark a few of its pages, decades after whoever put them there.",
+    },
+    "crafting_book_basic": {
+        "name": "Crafting Book", "type": "book", "rarity": "common",
+        "price": 15, "weight": 1, "teaches_profession": "blacksmithing",
+        "description": "Soot-smudged and warped from heat, like it's spent as much time by the forge as in a bag.",
+    },
+
     # --- Quest items (never sellable, never have a price) ---
     "waterlogged_journal": {
         "name": "Waterlogged Journal", "type": "quest_item", "rarity": "unique",

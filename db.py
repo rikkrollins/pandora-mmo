@@ -510,6 +510,16 @@ def init_db() -> None:
         if "throw_proficiency_pct" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN throw_proficiency_pct REAL NOT NULL DEFAULT 1.0")
 
+        # Crafting/enchanting mastery (2026-08-11, per Coffee: "grinding
+        # for better weapons and RNG allowing us to make better ones" --
+        # same real per-profession 0-100% grind as weapon_proficiency_pct
+        # above, just keyed by profession id (blacksmithing/alchemy)
+        # instead of weapon/armor category. Read by bot._do_craft/
+        # _do_enchant_item's new quality roll -- see rules/crafting.py's
+        # roll_craft_quality.
+        if "profession_mastery_pct" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN profession_mastery_pct TEXT NOT NULL DEFAULT '{}'")
+
         # Sequential dungeon gating (2026-07-24, Coffee: "make it so we
         # cant progress to certain areas ... until we complete the
         # dungeons or missions in sequence"): a location is "cleared"
@@ -733,6 +743,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     d["skill_tree_upgrades"] = json.loads(d["skill_tree_upgrades"])
     d["weapon_proficiency_pct"] = json.loads(d["weapon_proficiency_pct"])
     d["armor_proficiency_pct"] = json.loads(d["armor_proficiency_pct"])
+    d["profession_mastery_pct"] = json.loads(d["profession_mastery_pct"])
     return d
 
 
@@ -844,7 +855,7 @@ def update_character(telegram_user_id: int, chat_id: int, **fields) -> dict | No
     if not fields:
         return get_character(telegram_user_id, chat_id)
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -888,7 +899,7 @@ def update_character_by_id(character_id: int, **fields) -> dict | None:
             row = conn.execute("SELECT * FROM characters WHERE character_id = ?", (character_id,)).fetchone()
         return _row_to_dict(row) if row else None
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -991,6 +1002,16 @@ def _apply_affix(item: dict, affix: dict) -> None:
     # populate them (see bot._equipped_elemental_profile).
     elif kind == "elemental_damage":
         item["damage_type"] = affix["damage_type"]
+    # Numeric, STACKING damage bonus (2026-08-11, per Coffee: "use the %
+    # to increase damage of physical damage, damage types, and elemental
+    # type" -- same real numeric-sibling-to-a-boolean-affix relationship
+    # elemental_resistance already has to resistance above, just for
+    # OFFENSE instead of defense. Deliberately damage-type-agnostic (a
+    # plain physical weapon can carry this too, via enchant_sharpen) --
+    # read by bot._weapon_for_attacker, which adds
+    # round(average_damage(dice) * pct / 100) onto damage_bonus.
+    elif kind == "elemental_damage_bonus":
+        item["elemental_damage_bonus_pct"] = item.get("elemental_damage_bonus_pct", 0) + affix["value"]
     elif kind in ("resistance", "vulnerability", "immunity"):
         list_field = f"{kind}s"
         item.setdefault(list_field, []).append(affix["damage_type"])

@@ -2,6 +2,62 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.144] — Crafting/enchanting mastery, RNG quality, discard, recipe books, Adventurers' Guild rework
+
+Per Coffee: a level 60, rebirth-3 crafter and a level 5 one produced
+the *identical* item at the same recipe tier — level only affected
+success odds, never output quality. "i would much prefer grinding for
+better weapons and RNG allowing us to make better ones, or having to
+discard bad ones... use the % to increase damage of physical damage,
+damage types, and elemental type... enchanters shud be able to use
+thier own spells or abilities to enchant also... i want this mechanic
+used anywhere its applicable."
+
+- **Mastery %** (`profession_mastery_pct`, new DB column): a real,
+  grindable 0-100% stat per profession, same shape as the existing
+  weapon/armor proficiency grind, rising only on a successful
+  craft/enchant.
+- **Masterwork quality roll**: an independent RNG roll against that
+  mastery %, on top of the craft's own success check. On an advanced
+  (generated-item) recipe it bumps the result one real tier higher
+  (`rules.item_generator.TIERS`); on a static recipe (potions, food —
+  covers alchemy/cooking, which have no tier concept) it grants +1
+  bonus yield instead; on an enchant it scales a numeric affix value
+  1.5x, grants an extra `grants_spell` charge, or adds a bonus
+  `elemental_damage_bonus` affix for a plain elemental retype.
+- **`elemental_damage_bonus`** (new numeric, stacking affix,
+  `db._apply_affix`): a real % damage bonus, damage-type-agnostic —
+  works on a plain physical weapon exactly like a retyped elemental
+  one. `enchant_sharpen` (new, ungated) is the first recipe to grant
+  it. Read by `bot._weapon_for_attacker`, converted into a flat
+  `damage_bonus` addition off the weapon's own average dice damage.
+- **Spell-gated elemental enchanting**: enchanting fire/cold/lightning
+  onto gear now requires actually knowing a spell of that damage type
+  — an Enchanter's own spellbook shapes what they can imbue, not
+  materials alone.
+- **Discard** (new `discard_item` action): permanently scraps an
+  inventory item, no refund — the real "grind and toss a bad roll"
+  loop this whole system is built around.
+- **Recipe books** (`cook_book_basic`/`herbalism_guide_basic`/
+  `crafting_book_basic`, new `book` item type): real, buyable,
+  reusable reference items (Cook Book + Crafting Book at Maren's
+  Wares, Herbalism Guide at Vane's Curiosities/the Arcane Nook) that
+  print a profession's real level-1 `RECIPES` — never guild-ladder
+  `ADVANCED_RECIPES`/`ENCHANT_RECIPES` content, so a book can never
+  leak guild secrets.
+- **Adventurers' Guild rework**: it was the only guild with zero real
+  benefit beyond the standard shop discount. Now members earn
+  `ADVENTURERS_GUILD_BOARD_QUEST_GOLD_BONUS_PCT` (20%) bonus gold on
+  any board quest turn-in, and can ask the guild "any work?"/"what's
+  next?" for a real job-board listing of currently open board quests
+  across locations they've actually visited — never an invented
+  destination, never spoiling an unfound location.
+
+22 new regression tests. A richer guild-quest curriculum (daily
+pinned per-guild quest chains teaching a profession end-to-end, gated
+so it can't be rushed) is scoped as the next follow-up, not part of
+this release.
+
 ## [1.27.143] — Guild tier ladder: Enchanters' & Forge Guild, level 1 to end game
 
 Per Coffee: rework the Enchanters' Guild away from the commissioned-

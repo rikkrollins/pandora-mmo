@@ -6,7 +6,7 @@ rules/. The AI layer only narrates what happened here; it never invents
 whether a craft attempt worked or what it produced.
 """
 from rules.dice import roll_ability_check
-from rules.item_generator import generate_item
+from rules.item_generator import generate_item, TIERS
 
 # recipe_id -> {materials: {item_id: qty}, result_item: item_id,
 # result_qty: int, ability: str, dc: int}. Materials are only consumed
@@ -330,7 +330,13 @@ def get_advanced_recipe(recipe_id: str) -> dict | None:
     return ADVANCED_RECIPES.get(recipe_id)
 
 
-def resolve_advanced_craft(character: dict, recipe_id: str, practiced_bonus: int = 0) -> dict:
+def next_tier_up(tier: str) -> str:
+    """One real step up TIERS, capped at the top (mythic) -- never overflows."""
+    idx = TIERS.index(tier)
+    return TIERS[min(idx + 1, len(TIERS) - 1)]
+
+
+def resolve_advanced_craft(character: dict, recipe_id: str, practiced_bonus: int = 0, masterwork: bool = False) -> dict:
     """
     Same shape/convention as resolve_craft above (materials only consumed
     on success, practiced_bonus added to the roll here in the rules
@@ -338,6 +344,14 @@ def resolve_advanced_craft(character: dict, recipe_id: str, practiced_bonus: int
     dict from rules/item_generator.py at the recipe's fixed tier, instead
     of a static result_item/result_qty. The caller (bot.py) persists it
     via db.create_item_instance exactly like combat loot already does.
+
+    `masterwork` (2026-08-11, per Coffee: "grinding for better weapons
+    and RNG allowing us to make better ones") -- the caller has already
+    rolled this off the crafter's own mastery %
+    (bot._roll_profession_mastery); True bumps the generated item one
+    real tier higher than the recipe's own fixed tier via next_tier_up,
+    so a highly practiced crafter's SAME recipe can meaningfully
+    outclass a fresh one's.
     """
     recipe = ADVANCED_RECIPES.get(recipe_id)
     if recipe is None:
@@ -356,9 +370,12 @@ def resolve_advanced_craft(character: dict, recipe_id: str, practiced_bonus: int
     success = check["total"] >= recipe["dc"]
 
     generated_item = None
+    result_tier = recipe["tier"]
     if success:
+        if masterwork:
+            result_tier = next_tier_up(recipe["tier"])
         generated_item = generate_item(
-            item_type=recipe["item_type"], base_id=recipe.get("base_id"), tier=recipe["tier"],
+            item_type=recipe["item_type"], base_id=recipe.get("base_id"), tier=result_tier,
         )
 
     return {
@@ -369,6 +386,7 @@ def resolve_advanced_craft(character: dict, recipe_id: str, practiced_bonus: int
         "check": check,
         "dc": recipe["dc"],
         "ability": recipe["ability"],
+        "masterwork": masterwork if success else False,
     }
 
 
@@ -382,6 +400,19 @@ def resolve_advanced_craft(character: dict, recipe_id: str, practiced_bonus: int
 # item_generator only ever offering weapons an elemental_damage affix
 # and armor/shields a resistance one.
 ENCHANT_RECIPES = {
+    # Physical/any-type damage % (2026-08-11, per Coffee: "use the % to
+    # increase damage of physical damage, damage types, and elemental
+    # type") -- damage-type-agnostic on purpose, unlike enchant_flame/
+    # enchant_frost below which retype the weapon. A plain physical
+    # weapon keeps its own damage_type and still gets a real numeric
+    # bonus; an elemental one stacks this on top of its retype. Base
+    # tier, no guild gate -- every enchanter gets a real damage lever.
+    "enchant_sharpen": {
+        "materials": {"iron_ore": 2, "sulfur_dust": 1},
+        "affix": {"kind": "elemental_damage_bonus", "value": 15},
+        "applies_to": ("weapon",),
+        "ability": "intelligence", "dc": 15, "profession": "alchemy",
+    },
     "enchant_flame": {
         "materials": {"sulfur_dust": 2, "moonpetal": 1},
         "affix": {"kind": "elemental_damage", "damage_type": "fire"},

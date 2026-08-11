@@ -76,6 +76,7 @@ from ai import tts_piper, stt_groq
 from guilds import (
     GUILDS, eligible_for_guild, GUILD_QUESTS,
     ARCANE_CIRCLE_SPELL_DAMAGE_BONUS_PCT, THIEVES_GUILD_STEAL_BONUS, ARCANE_CIRCLE_EXCLUSIVE_SPELLS,
+    ADVENTURERS_GUILD_BOARD_QUEST_GOLD_BONUS_PCT,
 )
 from models import (
     VALID_CLASSES,
@@ -95,7 +96,7 @@ from rules.crafting import (
     ADVANCED_RECIPES, get_advanced_recipe, resolve_advanced_craft,
     ENCHANT_RECIPES, get_enchant_recipe, recipe_requirement_gate,
 )
-from rules.dice import roll, roll_damage, ability_modifier, roll_ability_check, roll_d20, roll_percentage_check
+from rules.dice import roll, roll_damage, ability_modifier, roll_ability_check, roll_d20, roll_percentage_check, average_damage
 from rules.item_generator import generate_item
 from rules.leveling import (
     CLASS_HIT_DICE, scaled_enemy_count, overtuned_monster_stat_multiplier, breath_weapon_dice_count,
@@ -158,10 +159,17 @@ def _weapon_for_attacker(attacker: dict) -> dict:
     if equipped_id:
         item = items_module.get_item(equipped_id)
         if item and item.get("type") == "weapon":
+            # elemental_damage_bonus_pct (2026-08-11): a real, stacking %
+            # bonus (enchant_sharpen and masterwork elemental enchants),
+            # converted to a flat damage_bonus addition off the weapon's
+            # own average dice damage -- works for a physical weapon
+            # exactly the same as a retyped elemental one.
+            pct = item.get("elemental_damage_bonus_pct", 0)
+            pct_bonus = round(average_damage(item["damage_dice"]) * pct / 100) if pct else 0
             return {
                 "ability": item.get("ability", "strength"),
                 "damage_dice": item["damage_dice"],
-                "damage_bonus": item.get("damage_bonus", 0),
+                "damage_bonus": item.get("damage_bonus", 0) + pct_bonus,
                 "weapon_category": item.get("weapon_category", "simple"),
                 "name": item["name"],
                 "damage_type": item.get("damage_type", "physical"),
@@ -317,6 +325,48 @@ def _roll_armor_proficiency(character: dict, armor_category: str) -> bool:
     chance = min(stored + _equipped_proficiency_bonus(character, "armor", armor_category), PROFICIENCY_MAX_PCT)
     _grind_dict_proficiency(character["telegram_user_id"], character["chat_id"], "armor_proficiency_pct", stored_dict, armor_category)
     return roll_percentage_check(chance)
+
+
+def _profession_mastery_pct(character: dict, profession: str) -> float:
+    """Current stored 0-100% mastery for this profession -- read only, no grind (see _grind_profession_mastery)."""
+    return character.get("profession_mastery_pct", {}).get(profession, PROFICIENCY_STARTING_PCT)
+
+
+def _roll_masterwork_quality(character: dict, profession: str, forced_roll: float | None = None) -> bool:
+    """
+    Crafting/enchanting mastery (2026-08-11, per Coffee: "i would much
+    prefer grinding for better weapons and RNG allowing us to make
+    better ones, or having to discard bad ones"). A real dice roll
+    against the crafter's own stored mastery % -- rolled BEFORE the
+    underlying craft/enchant's own success check is even known, since
+    it's an independent quality roll, not a second success gate; the
+    caller only acts on this result once the base craft/enchant has
+    actually succeeded (see _grind_profession_mastery for why the %
+    itself only advances on real success, not on every attempt).
+
+    A True result means this craft/enchant rolls "masterwork" quality:
+    _do_craft bumps the generated item one real tier higher
+    (rules.item_generator.TIERS already supports any tier string);
+    _do_enchant_item scales the affix's own numeric value up, or grants
+    an extra grants_spell use, or a bonus elemental_damage_bonus affix
+    for a plain retype-only affix like elemental_damage. This is what
+    makes a rebirth-3, heavily-practiced Enchanter's craft genuinely
+    BETTER than a fresh Journeyman's at the identical recipe, not just
+    more likely to succeed at all.
+    """
+    return roll_percentage_check(_profession_mastery_pct(character, profession), forced_roll=forced_roll)
+
+
+def _grind_profession_mastery(telegram_user_id: int, chat_id: int, character: dict, profession: str) -> None:
+    """
+    Advances profession_mastery_pct by the same PROFICIENCY_GRIND_INCREMENT
+    every other grindable proficiency uses. Called only on a SUCCESSFUL
+    craft/enchant (matching db.record_skill_use's own success-only
+    convention in _do_craft/_do_enchant_item) -- a failed attempt already
+    wastes materials and a turn; it shouldn't also fail to advance this.
+    """
+    stored_dict = character.get("profession_mastery_pct", {})
+    _grind_dict_proficiency(telegram_user_id, chat_id, "profession_mastery_pct", stored_dict, profession)
 
 
 EXTRA_ATTACK_CLASSES = {"fighter", "barbarian", "paladin", "ranger", "monk"}
@@ -9080,15 +9130,26 @@ async def _check_board_quest_turnin(update_like, telegram_user_id: int, location
             db.remove_item(telegram_user_id, update_like.effective_chat.id, board_quest["objective_target"], board_quest["objective_count"])
         await _award_xp_and_announce_level_up(update_like, telegram_user_id, update_like.effective_chat.id, board_quest["reward_xp"])
         character = db.get_character(telegram_user_id, update_like.effective_chat.id)
-        db.update_character(telegram_user_id, update_like.effective_chat.id, gold=character["gold"] + board_quest["reward_gold"])
+        # Adventurers' Guild real benefit (2026-08-11, per Coffee: every
+        # other guild had one, this one didn't) -- real bonus gold on
+        # top of the quest's own listed reward, for real board-quest
+        # work specifically, matching the guild's own "paid work" theme.
+        reward_gold = board_quest["reward_gold"]
+        guild_bonus_gold = (
+            round(reward_gold * ADVENTURERS_GUILD_BOARD_QUEST_GOLD_BONUS_PCT / 100)
+            if character.get("guild") == "adventurers_guild" else 0
+        )
+        total_gold = reward_gold + guild_bonus_gold
+        db.update_character(telegram_user_id, update_like.effective_chat.id, gold=character["gold"] + total_gold)
         await _share_quest_rewards_with_party(
             update_like, character, telegram_user_id, board_quest["reward_xp"], board_quest["reward_gold"],
         )
         db.increment_board_quests_completed(telegram_user_id, update_like.effective_chat.id)
+        guild_bonus_note = f" (+{guild_bonus_gold} Adventurers' Guild bonus)" if guild_bonus_gold else ""
         await _safe_send(
             update_like,
             f"📜 **Board quest complete: {board_quest['title']}!** "
-            f"You earn {board_quest['reward_xp']} XP, {board_quest['reward_gold']} gold.",
+            f"You earn {board_quest['reward_xp']} XP, {total_gold} gold{guild_bonus_note}.",
         )
         # Task #172 gap, same fix as _complete_quest_and_announce above.
         await _notify_main_topic(
@@ -11751,6 +11812,35 @@ async def _do_check_professions(update: Update) -> None:
     await _safe_send(update, "\n".join(lines), speak=False)
 
 
+async def _do_read_recipe_book(update: Update, item: dict) -> None:
+    """
+    Recipe books (2026-08-11, per Coffee: real "Cook Book"/"Herbalism
+    Guide"/"Crafting Book" items, buyable in-world, that teach a
+    profession's real level-1 recipes). Deliberately built from
+    rules.crafting.RECIPES only, never ADVANCED_RECIPES/ENCHANT_RECIPES
+    -- per Coffee: "Only show Lv 1 items tho (players must join guild
+    for advanced recipies)" -- so a book can never leak guild-ladder
+    content. Same real, dynamically-grounded-from-the-actual-catalog
+    convention as ai/support_agent.py's deterministic answers, so this
+    never goes stale if a recipe's materials/DC change later.
+    """
+    profession = item.get("teaches_profession")
+    recipe_lines = [
+        f"- **{items_module.get_item(r['result_item'])['name']}** (DC {r['dc']} {r['ability']}): needs "
+        + ", ".join(f"{qty}x {items_module.get_item(mid)['name']}" for mid, qty in r["materials"].items())
+        for r in RECIPES.values() if r.get("profession", "crafting") == profession
+    ]
+    if not recipe_lines:
+        await _safe_send(update, f"The {item['name']} is oddly blank — there's nothing written in it yet.")
+        return
+    await _safe_send(
+        update,
+        f"📖 **{item['name']}**\n" + "\n".join(recipe_lines) +
+        "\n\nMore advanced recipes exist, but they're guild secrets — join the right guild to learn those.",
+        speak=False,
+    )
+
+
 async def _do_craft(update: Update, text: str) -> None:
     """
     Crafting is fully resolved by rules/crafting.py — material checks and
@@ -11839,8 +11929,17 @@ async def _do_craft(update: Update, text: str) -> None:
     # Universal Manipulation "prof_X" (2026-08-06, per Coffee): a real
     # 4th additive source, +1 per point invested in this profession.
     bonus += _skill_points(character, f"prof_{profession}")
+    # Masterwork quality roll (2026-08-11, per Coffee: "i want this
+    # mechanic used anywhere its applicable" -- alchemy/cooking's own
+    # RECIPES have no tier to bump, but every profession still deserves
+    # a real payoff for grinding, so a static recipe's masterwork bonus
+    # is +1 yield instead (see the success branch below). Rolled up
+    # front against the crafter's own stored mastery %, independent of
+    # the craft's own success check just below -- see
+    # _roll_masterwork_quality's docstring for why.
+    masterwork = _roll_masterwork_quality(character, profession)
     result = (
-        resolve_advanced_craft(character, recipe_id, practiced_bonus=bonus) if is_advanced
+        resolve_advanced_craft(character, recipe_id, practiced_bonus=bonus, masterwork=masterwork) if is_advanced
         else resolve_craft(character, recipe_id, practiced_bonus=bonus)
     )
 
@@ -11859,15 +11958,22 @@ async def _do_craft(update: Update, text: str) -> None:
 
     success = result["outcome"] == "success"
     result_item = None
+    static_qty = result.get("result_qty", 0)
     if success:
         db.record_skill_use(update.effective_user.id, update.effective_chat.id, profession)
+        _grind_profession_mastery(update.effective_user.id, update.effective_chat.id, character, profession)
         if is_advanced:
             loot_item = result["generated_item"]
             generated_item_id = _persist_generated_item(loot_item)
             db.add_item(update.effective_user.id, update.effective_chat.id, generated_item_id, 1)
             result_item = loot_item
         else:
-            db.add_item(update.effective_user.id, update.effective_chat.id, result["result_item"], result["result_qty"])
+            # Masterwork bonus yield (2026-08-11, per Coffee: alchemy/
+            # cooking need this mechanic too, and their RECIPES have no
+            # tier to bump -- +1 extra unit on a masterwork roll instead.
+            if masterwork:
+                static_qty += 1
+            db.add_item(update.effective_user.id, update.effective_chat.id, result["result_item"], static_qty)
             result_item = items_module.get_item(result["result_item"])
 
     flavor = await asyncio.to_thread(
@@ -11877,12 +11983,14 @@ async def _do_craft(update: Update, text: str) -> None:
     message = _format_skill_check_result(flavor, result["check"], result["ability"], result["dc"], success)
     if success:
         if is_advanced:
+            masterwork_note = " — a masterwork strike, forged above the recipe's usual tier!" if result.get("masterwork") else ""
             message += (
                 f"\n⚗️ You craft a **{result_item['name']}** "
-                f"({result_item['rarity'].replace('_', ' ')}) — a real magic item, ready to equip!"
+                f"({result_item['rarity'].replace('_', ' ')}) — a real magic item, ready to equip!{masterwork_note}"
             )
         else:
-            message += f"\n⚗️ You craft **{result['result_qty']}x {result_item['name']}**."
+            masterwork_note = " — a masterwork batch, one extra made!" if masterwork else ""
+            message += f"\n⚗️ You craft **{static_qty}x {result_item['name']}**.{masterwork_note}"
     else:
         message += "\n⚗️ The attempt fails, but your materials aren't wasted — you can try again."
     await _safe_send(update, message)
@@ -11977,6 +12085,35 @@ async def _do_forge_item(update: Update, text: str) -> None:
         await _maybe_send_item_image(update, item_id, forged_item)
 
 
+async def _do_discard_item(update: Update, text: str) -> None:
+    """
+    Mastery-grind discard (2026-08-11, per Coffee: RNG crafting quality
+    means a real chance of a weak roll, and grinding for a better one
+    should mean "having to discard bad ones" -- a real, permanent,
+    no-refund way to clear inventory space and try again. Works on ANY
+    inventory item (not just generated magic gear), unlike forge/enchant
+    which are real-magic-item-only.
+    """
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+
+    item_id = items_module.find_item_mentioned_in_text(text, candidate_ids=list(character["inventory"].keys()))
+    item = items_module.get_item(item_id) if item_id else None
+    if item_id is None or item is None or character["inventory"].get(item_id, 0) < 1:
+        await _safe_send(update, "You're not carrying that.")
+        return
+
+    db.remove_item(update.effective_user.id, update.effective_chat.id, item_id, 1)
+    await _safe_send(
+        update,
+        f"🗑️ **{character['name']}** discards the {item['name']} — it's gone for good, no refund.",
+    )
+
+
 def _find_advanced_recipe_in_text(text: str) -> str | None:
     """Matches an ADVANCED_RECIPES entry by its own "name" field -- see _do_craft's docstring comment for why this can't reuse items_module.find_item_mentioned_in_text."""
     lowered = text.lower()
@@ -12036,6 +12173,26 @@ async def _do_enchant_item(update: Update, text: str) -> None:
     if gate_rejection:
         await _safe_send(update, gate_rejection)
         return
+    # Spell-gated elemental enchanting (2026-08-11, per Coffee:
+    # "enchanters shud be able to use thier own spells or abilities to
+    # enchant also") -- any enchantment carrying a real damage_type
+    # (the elemental retypes/wards) now requires the caster to actually
+    # know a spell of that same damage_type, tying the Enchanters'
+    # Guild's craft to the caster's own spellbook instead of materials
+    # alone. Recipes with no damage_type (enchant_sharpen, enchant_warding,
+    # enchant_arcana, the profession_bonus/ignore_resistance capstones)
+    # are unaffected.
+    affix_damage_type = recipe["affix"].get("damage_type")
+    if affix_damage_type and not any(
+        spells_module.get_spell(sid) and spells_module.get_spell(sid).get("damage_type") == affix_damage_type
+        for sid in character["known_spells"]
+    ):
+        await _safe_send(
+            update,
+            f"You don't know any {affix_damage_type} spell — an enchanter channels their own magic into "
+            f"the work, and you have nothing of that element to draw on yet.",
+        )
+        return
     if not has_materials(character["inventory"], recipe):
         need = ", ".join(f"{qty}x {items_module.get_item(mid)['name']}" for mid, qty in recipe["materials"].items())
         await _safe_send(update, f"You don't have the materials for that enchantment. You need: {need}.")
@@ -12053,6 +12210,9 @@ async def _do_enchant_item(update: Update, text: str) -> None:
     check["practiced_bonus"] = bonus
     dc = recipe["dc"]
     success = check["total"] >= dc
+    # Masterwork quality roll (2026-08-11): same independent-of-success
+    # roll as _do_craft's, against this same profession's mastery %.
+    masterwork = _roll_masterwork_quality(character, profession)
 
     flavor = await asyncio.to_thread(
         narrate_skill_check, character, text, recipe["ability"],
@@ -12067,8 +12227,28 @@ async def _do_enchant_item(update: Update, text: str) -> None:
     for mid, qty in recipe["materials"].items():
         db.remove_item(update.effective_user.id, update.effective_chat.id, mid, qty)
     db.record_skill_use(update.effective_user.id, update.effective_chat.id, profession)
-    _ok, enchant_msg, enchanted_item = db.enchant_item_instance(item_id, dict(recipe["affix"]))
-    message += f"\n✨ {enchant_msg}"
+    _grind_profession_mastery(update.effective_user.id, update.effective_chat.id, character, profession)
+
+    affix = dict(recipe["affix"])
+    masterwork_note = ""
+    bonus_affix = None
+    if masterwork:
+        if "value" in affix:
+            affix["value"] = round(affix["value"] * 1.5)
+            masterwork_note = " — a masterwork working, stronger than the usual result!"
+        elif affix["kind"] == "grants_spell":
+            affix["uses"] = affix.get("uses", 1) + 1
+            masterwork_note = " — a masterwork working, one extra charge bound in!"
+        elif affix["kind"] == "elemental_damage":
+            bonus_affix = {"kind": "elemental_damage_bonus", "value": 20}
+            masterwork_note = " — a masterwork working, biting harder than a plain retype!"
+        else:
+            masterwork_note = " — a masterwork working!"
+
+    _ok, enchant_msg, enchanted_item = db.enchant_item_instance(item_id, affix)
+    if bonus_affix:
+        _ok, _bonus_msg, enchanted_item = db.enchant_item_instance(item_id, bonus_affix)
+    message += f"\n✨ {enchant_msg}{masterwork_note}"
     await _safe_send(update, message)
     if enchanted_item:
         await _maybe_send_item_image(update, item_id, enchanted_item)
@@ -15000,6 +15180,44 @@ async def guild_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             "the last needs a Godshard, found only in a boss's remains.",
             thread_id=update.effective_message.message_thread_id,
         )
+        return
+    if guild_id == "adventurers_guild" and any(
+        w in lowered for w in ["job board", "job", "work", "what's next", "whats next", "where should i go", "any leads"]
+    ):
+        await _do_check_job_board(update)
+
+
+async def _do_check_job_board(update: Update) -> None:
+    """
+    Adventurers' Guild job board (2026-08-11, per Coffee: give the
+    guild a real reason to exist -- this answers "what should I do
+    next?" with REAL, already-posted board quests, never an invented
+    destination. Scoped to character["visited_locations"] on purpose --
+    same fog-of-war boundary examine/the map already respect -- so this
+    never spoils a location the player hasn't found on their own yet.
+    """
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    reply_thread_id = update.effective_message.message_thread_id
+    leads = []
+    for location_id in character["visited_locations"]:
+        location = cl.get_location(CAMPAIGN, location_id)
+        if location is None:
+            continue
+        for quest in board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, location_id, update.effective_chat.id):
+            if quest.get("completed_at") or quest.get("accepted_by"):
+                continue
+            leads.append(f"📍 **{location['name']}** — {quest['title']}: {quest['description']}")
+    if not leads:
+        await update.effective_chat.send_message(
+            "No fresh work posted anywhere you've already been — explore a bit further, or check back "
+            "after finishing what's out there now.",
+            message_thread_id=reply_thread_id,
+        )
+        return
+    await update.effective_chat.send_message(
+        "📋 **Real work posted right now:**\n" + "\n".join(leads[:5]),
+        message_thread_id=reply_thread_id,
+    )
 
 
 async def _do_learn_guild_spell(update: Update, text: str) -> None:
@@ -15891,7 +16109,7 @@ async def _do_use_item(update: Update, text: str) -> None:
     # so they share this same dispatch path rather than a separate command.
     consumable_ids = [
         item_id for item_id in character["inventory"]
-        if (items_module.get_item(item_id) or {}).get("type") in ("consumable", "map")
+        if (items_module.get_item(item_id) or {}).get("type") in ("consumable", "map", "book")
     ]
     item_id = items_module.find_item_mentioned_in_text(text, candidate_ids=consumable_ids)
     if item_id is None:
@@ -15902,6 +16120,16 @@ async def _do_use_item(update: Update, text: str) -> None:
         return
 
     item = items_module.get_item(item_id)
+    # Recipe books (2026-08-11, per Coffee: a "Cook Book"/"Herbalism
+    # Guide"/"Crafting Book" real players can buy and read for the real
+    # level-1 (ungated) recipes of a profession). Deliberately NOT
+    # consumed on use (a reference book is reused, unlike a potion or a
+    # one-shot map) and short-circuits out here, before the combat-turn
+    # machinery below -- reading a book isn't a real combat action, and
+    # it never mutates game state, so it never needs to consume a turn.
+    if item.get("type") == "book":
+        await _do_read_recipe_book(update, item)
+        return
     # Real bug caught live (2026-07-24, Coffee: "revival can't see
     # inactive characters... shrine, tent, cabin, house, it all needs
     # to work this way"): _find_party_target_by_name only ever sees a
@@ -19556,6 +19784,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_forge_item(update, intent.get("raw_text", text))
     elif action == "enchant_item":
         await _do_enchant_item(update, intent.get("raw_text", text))
+    elif action == "discard_item":
+        await _do_discard_item(update, intent.get("raw_text", text))
     elif action == "make_campfire":
         await _do_make_campfire(update)
     elif action == "second_wind":

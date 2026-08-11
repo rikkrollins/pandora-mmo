@@ -14,11 +14,20 @@ with genuinely wider guild access instead of narrowing it.
 """
 
 GUILDS = {
+    # 2026-08-11, per Coffee: every other guild has a real combat/utility
+    # benefit and a real reason to seek it out; the Adventurers' Guild
+    # had neither -- just the same shop_discount_10 every guild grants.
+    # Now it's the one place a member can ask what real, already-posted
+    # board-quest work exists across the locations they've actually
+    # found (bot.guild_topic_handler's job-board query), and completing
+    # any board quest as a member pays out real bonus gold on top of the
+    # quest's own listed reward -- see ADVENTURERS_GUILD_BOARD_QUEST_
+    # GOLD_BONUS_PCT below, applied in bot._check_board_quest_turnin.
     "adventurers_guild": {
         "name": "Adventurers' Guild",
         "description": "A loose, practical association open to anyone willing to take on paid work.",
         "join_requirement_level": 1,
-        "benefits": ["shop_discount_10"],
+        "benefits": ["shop_discount_10", "board_quest_gold_bonus_20"],
     },
     "arcane_circle": {
         "name": "The Arcane Circle",
@@ -130,6 +139,7 @@ ARCANE_CIRCLE_SPELL_DAMAGE_BONUS_PCT = 15
 THIEVES_GUILD_STEAL_BONUS = 3
 FAITH_CIRCLE_HEAL_BONUS = 3
 FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT = 10
+ADVENTURERS_GUILD_BOARD_QUEST_GOLD_BONUS_PCT = 20
 
 # Arcane Circle exclusive spells (2026-07-25, per Coffee: "let them
 # learn new spells not otherwise available unless in the guilds") --

@@ -126,6 +126,8 @@ without naming a specific item (e.g. "auto equip my character", "put on my gear 
 - "enchant_item" is for adding a new magic effect to a real, previously found/crafted item -- "enchant" and \
 "imbue" mean the same thing here (e.g. "enchant my longsword with flame", "imbue the shield with warding"). \
 Set "item_name" to the item.
+- "discard_item" is for permanently scrapping/throwing away an item from inventory, no refund \
+(e.g. "discard my rusty dagger", "scrap the longsword"). Set "item_name" to the item.
 - "join_guild" is for joining/asking to join a specific guild or order.
 - "pass_turn" is for skipping, waiting, or passing.
 - "resolve_choice" is for declaring a decision on a moral choice/quest resolution (e.g. "I choose to...", "I'll go with...").
@@ -1560,6 +1562,13 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if any(w in lowered for w in ["enchant my", "enchant the", "imbue my", "imbue the", "i enchant", "i imbue"]):
         return {**base, "action": "enchant_item"}
 
+    # Mastery-grind discard (2026-08-11, per Coffee: RNG crafting quality
+    # means a real risk of a weak roll -- "having to discard bad ones"
+    # needs a real action to do that with, checked right alongside
+    # forge/enchant since it shares the same "my inventory item" phrasing.
+    if any(w in lowered for w in ["discard my", "discard the", "scrap my", "scrap the", "i discard", "i scrap"]):
+        return {**base, "action": "discard_item"}
+
     # "eat" needs a real word-boundary check (not the bare substring style
     # used above) -- confirmed live 2026-07-18: a naive "eat " substring
     # check false-positives on any word ending in those letters followed
@@ -1982,7 +1991,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "unbench_party_member", "set_front_row", "set_back_row", "find_merchant",
                 "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "arcane_recovery",
                 "make_campfire", "give_item", "use_item", "equip_item", "unequip_item", "auto_equip", "breath_weapon",
-                "forge_item", "enchant_item",
+                "forge_item", "enchant_item", "discard_item",
                 "channel_divinity", "action_surge", "reckless_attack", "divine_smite",
                 "flurry_of_blows", "wild_shape", "toggle_manual_dice", "level_up", "auto_level_up_party",
                 "set_description", "set_pronouns",

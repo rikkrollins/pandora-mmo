@@ -2644,7 +2644,9 @@
         "shovel",
         "tent",
         "cabin",
-        "house"
+        "house",
+        "cook_book_basic",
+        "crafting_book_basic"
       ]
     },
     "vanes_curiosities": {
@@ -2663,7 +2665,8 @@
         "scroll_revivify",
         "scroll_fireball",
         "weathered_surface_map",
-        "tattered_underground_chart"
+        "tattered_underground_chart",
+        "herbalism_guide_basic"
       ]
     },
     "grimsbys_tavern": {

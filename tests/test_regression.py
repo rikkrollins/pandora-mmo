@@ -4067,6 +4067,242 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ladder", sink[-1].lower())
         self.assertNotIn("delivers", sink[-1].lower())
 
+    def test_adventurers_guild_board_quest_turnin_grants_bonus_gold(self):
+        """
+        Real feature (2026-08-11, per Coffee: every other guild had a
+        real benefit, Adventurers' Guild didn't) -- a real member
+        collects ADVENTURERS_GUILD_BOARD_QUEST_GOLD_BONUS_PCT (20%) extra
+        gold on top of a board quest's own listed reward.
+        """
+        import board_quests as board_quests_module
+        import asyncio
+        location_id = "stonearch_bridge"
+        user_id = 950940
+        character = make_basic_character(user_id, "GuildBountyHunter", current_location=location_id)
+        db.update_character(user_id, -999, guild="adventurers_guild")
+        quest = db.create_board_quest(
+            location_id, -999, board_quests_module._day_key(), "Test Bounty", "...", None,
+            "gather_material", "silverleaf_herb", 1, 20, 50,
+        )
+        db.accept_board_quest(quest["board_quest_id"], user_id, -999)
+        db.add_item(user_id, -999, "silverleaf_herb", 1)
+        db.record_board_quest_progress(quest["board_quest_id"], 1)
+
+        gold_before = db.get_character(user_id, -999)["gold"]
+        sink = []
+        update = FakeUpdate(user_id, "", sink, chat_id=-999)
+        asyncio.get_event_loop().run_until_complete(bot._check_board_quest_turnin(update, user_id, location_id))
+        gold_after = db.get_character(user_id, -999)["gold"]
+        self.assertEqual(gold_after - gold_before, 60)  # 50 base + 20% (10) guild bonus
+        self.assertIn("Adventurers' Guild bonus", sink[0])
+
+    def test_non_guild_member_board_quest_turnin_gets_no_bonus(self):
+        import board_quests as board_quests_module
+        import asyncio
+        location_id = "stonearch_bridge"
+        user_id = 950941
+        make_basic_character(user_id, "SoloBountyHunter", current_location=location_id)
+        quest = db.create_board_quest(
+            location_id, -999, board_quests_module._day_key(), "Test Bounty Solo", "...", None,
+            "gather_material", "silverleaf_herb", 1, 20, 50,
+        )
+        db.accept_board_quest(quest["board_quest_id"], user_id, -999)
+        db.add_item(user_id, -999, "silverleaf_herb", 1)
+        db.record_board_quest_progress(quest["board_quest_id"], 1)
+
+        gold_before = db.get_character(user_id, -999)["gold"]
+        sink = []
+        update = FakeUpdate(user_id, "", sink, chat_id=-999)
+        asyncio.get_event_loop().run_until_complete(bot._check_board_quest_turnin(update, user_id, location_id))
+        gold_after = db.get_character(user_id, -999)["gold"]
+        self.assertEqual(gold_after - gold_before, 50)
+        self.assertNotIn("Adventurers' Guild bonus", sink[0])
+
+    async def test_job_board_lists_real_open_quests_at_visited_locations(self):
+        """Real feature (2026-08-11): the Adventurers' Guild job board answers "what's next" with real, already-posted board quests, never an invented one."""
+        location_id = "stonearch_bridge"
+        user_id = 950942
+        make_basic_character(user_id, "JobSeeker", current_location=location_id)
+        db.update_character(user_id, -999, guild="adventurers_guild", visited_locations=[location_id])
+        sink = []
+        update = FakeUpdate(user_id, "any work?", sink, thread_id=config.GUILD_TOPIC_IDS["adventurers_guild"])
+        context = DummyContext()
+        await bot.guild_topic_handler(update, context, "adventurers_guild")
+        self.assertIn("posted", sink[-1].lower())
+        location_name = bot.cl.get_location(bot.CAMPAIGN, location_id)["name"]
+        self.assertIn(location_name, sink[-1])
+
+    def test_elemental_damage_bonus_affix_stacks_and_scales_weapon_damage_bonus(self):
+        """
+        Real feature (2026-08-11, per Coffee: "use the % to increase
+        damage of physical damage, damage types, and elemental type") --
+        the new numeric elemental_damage_bonus affix (db._apply_affix)
+        stacks additively across multiple applications, and
+        bot._weapon_for_attacker converts the stored % into a real flat
+        damage_bonus addition off the weapon's own average dice damage.
+        """
+        from rules.item_generator import generate_weapon
+        base_weapon = generate_weapon(tier="common")
+        base_weapon["damage_dice"] = "1d8"
+        base_weapon["damage_bonus"] = 0
+        item_id = db.create_item_instance(
+            item_type=base_weapon["type"], name=base_weapon["name"], rarity=base_weapon["rarity"],
+            price=base_weapon["price"], base_stats={k: v for k, v in base_weapon.items() if k != "affixes"},
+            affixes=[],
+        )
+        db.enchant_item_instance(item_id, {"kind": "elemental_damage_bonus", "value": 20})
+        ok, _msg, enchanted = db.enchant_item_instance(item_id, {"kind": "elemental_damage_bonus", "value": 15})
+        self.assertTrue(ok)
+        self.assertEqual(enchanted["elemental_damage_bonus_pct"], 35)
+
+        character = make_basic_character(950930, "DamageBonusTester", current_location="crossroads_tavern")
+        db.update_character(950930, -999, equipped_weapon=item_id)
+        character = db.get_character(950930, -999)
+        weapon = bot._weapon_for_attacker(character)
+        # average_damage("1d8") == 4.5; 35% of that rounds to 2.
+        self.assertEqual(weapon["damage_bonus"], 2)
+
+    def test_advanced_craft_masterwork_bumps_generated_item_tier(self):
+        """Real feature (2026-08-11): a masterwork roll bumps the generated item one real tier above the recipe's own fixed tier."""
+        from rules.crafting import resolve_advanced_craft, next_tier_up
+        character = make_basic_character(950931, "MasterworkTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.add_item(950931, -999, "iron_ore", 6)
+        db.add_item(950931, -999, "moonpetal", 1)
+        character = db.get_character(950931, -999)
+        succeeded = False
+        for _ in range(30):
+            result = resolve_advanced_craft(character, "masterwork_longsword", practiced_bonus=50, masterwork=True)
+            if result["outcome"] == "success":
+                succeeded = True
+                break
+        self.assertTrue(succeeded)
+        self.assertTrue(result["masterwork"])
+        self.assertEqual(result["generated_item"]["rarity"], next_tier_up("rare"))
+        self.assertEqual(next_tier_up("rare"), "very_rare")
+        self.assertEqual(next_tier_up("mythic"), "mythic")  # never overflows past the top tier
+
+    async def test_enchant_flame_requires_a_known_fire_spell(self):
+        """
+        Real feature (2026-08-11, per Coffee: "enchanters shud be able
+        to use thier own spells or abilities to enchant also") -- a
+        character with no fire spell known can't enchant fire onto a
+        weapon, even with materials and a passing roll; learning one
+        (fire_bolt) unlocks it.
+        """
+        from rules.item_generator import generate_weapon
+        make_basic_character(950932, "FlameEnchanter", char_class="Wizard", current_location="crossroads_tavern")
+        db.add_item(950932, -999, "sulfur_dust", 4)
+        db.add_item(950932, -999, "moonpetal", 4)
+        base_weapon = generate_weapon(tier="common")
+        item_id = db.create_item_instance(
+            item_type=base_weapon["type"], name=base_weapon["name"], rarity=base_weapon["rarity"],
+            price=base_weapon["price"], base_stats={k: v for k, v in base_weapon.items() if k != "affixes"},
+            affixes=[],
+        )
+        db.add_item(950932, -999, item_id, 1)
+
+        sink = []
+        update = FakeUpdate(950932, f"enchant my {base_weapon['name']} with flame", sink)
+        await bot._do_enchant_item(update, f"enchant my {base_weapon['name']} with flame")
+        self.assertIn("fire spell", sink[-1].lower())
+        unchanged = db.get_character(950932, -999)
+        self.assertEqual(unchanged["inventory"].get("sulfur_dust", 0), 4)  # materials untouched
+
+        db.learn_spell(950932, -999, "fire_bolt")
+        sink2 = []
+        update2 = FakeUpdate(950932, f"enchant my {base_weapon['name']} with flame", sink2)
+        from unittest.mock import patch
+        with patch("bot.narrate_skill_check", return_value="You channel real fire into the blade."):
+            for _ in range(20):
+                sink2.clear()
+                await bot._do_enchant_item(update2, f"enchant my {base_weapon['name']} with flame")
+                # A successful enchant also sends a real item-image caption
+                # (bot._maybe_send_item_image), so the LAST sink entry may
+                # be a "<photo:...>" marker, not the enchant text itself.
+                if not any("fizzles" in s.lower() for s in sink2):
+                    break
+        self.assertFalse(any("fire spell" in s.lower() for s in sink2))
+        self.assertEqual(db.materialize_item_instance(item_id)["damage_type"], "fire")
+
+    async def test_masterwork_enchant_scales_a_numeric_affix_value(self):
+        """Real feature (2026-08-11): a masterwork roll on a value-bearing enchant (enchant_sharpen) scales the affix value up 1.5x."""
+        from unittest.mock import patch
+        from rules.item_generator import generate_weapon
+        make_basic_character(950933, "SharpenTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.add_item(950933, -999, "iron_ore", 4)
+        db.add_item(950933, -999, "sulfur_dust", 2)
+        base_weapon = generate_weapon(tier="common")
+        item_id = db.create_item_instance(
+            item_type=base_weapon["type"], name=base_weapon["name"], rarity=base_weapon["rarity"],
+            price=base_weapon["price"], base_stats={k: v for k, v in base_weapon.items() if k != "affixes"},
+            affixes=[],
+        )
+        db.add_item(950933, -999, item_id, 1)
+
+        sink = []
+        update = FakeUpdate(950933, f"enchant my {base_weapon['name']} with sharpen", sink)
+        with patch("bot.roll_percentage_check", return_value=True), \
+             patch("bot.narrate_skill_check", return_value="You work the blade's edge."):
+            for _ in range(20):
+                sink.clear()
+                await bot._do_enchant_item(update, f"enchant my {base_weapon['name']} with sharpen")
+                if not any("fizzles" in s.lower() for s in sink):
+                    break
+        self.assertTrue(any("masterwork" in s.lower() for s in sink))
+        updated_item = db.materialize_item_instance(item_id)
+        self.assertEqual(updated_item["elemental_damage_bonus_pct"], round(15 * 1.5))
+
+    async def test_masterwork_craft_static_recipe_grants_bonus_yield(self):
+        """Real feature (2026-08-11, per Coffee: alchemy/cooking need this mechanic too): a masterwork roll on a static recipe crafts +1 extra unit."""
+        from unittest.mock import patch
+        make_basic_character(950934, "PotionMaster", char_class="Wizard", current_location="crossroads_tavern")
+        db.add_item(950934, -999, "silverleaf_herb", 2)
+        db.add_item(950934, -999, "moonpetal", 1)
+        sink = []
+        update = FakeUpdate(950934, "craft a healing potion", sink)
+        with patch("bot.roll_percentage_check", return_value=True), \
+             patch("bot.narrate_skill_check", return_value="You brew it carefully."):
+            for _ in range(20):
+                sink.clear()
+                db.add_item(950934, -999, "silverleaf_herb", 2)
+                db.add_item(950934, -999, "moonpetal", 1)
+                await bot._do_craft(update, "craft a healing potion")
+                if not any("attempt fails" in s.lower() for s in sink):
+                    break
+        self.assertTrue(any("2x Healing Potion" in s for s in sink))
+        self.assertTrue(any("masterwork batch" in s.lower() for s in sink))
+
+    async def test_discard_item_removes_one_unit_via_real_handler(self):
+        make_basic_character(950935, "Discarder", current_location="crossroads_tavern")
+        db.add_item(950935, -999, "rusty_dagger", 2)
+        sink = []
+        update = FakeUpdate(950935, "discard my rusty dagger", sink)
+        await bot._do_discard_item(update, "discard my rusty dagger")
+        self.assertIn("discards", sink[-1].lower())
+        updated = db.get_character(950935, -999)
+        self.assertEqual(updated["inventory"].get("rusty_dagger", 0), 1)
+
+    async def test_read_recipe_book_lists_only_base_recipes_for_its_profession(self):
+        """Real feature (2026-08-11): a recipe book is grounded from RECIPES only for its own profession, never guild-ladder ADVANCED_RECIPES/ENCHANT_RECIPES content."""
+        make_basic_character(950936, "BookReader", current_location="crossroads_tavern")
+        db.add_item(950936, -999, "cook_book_basic", 1)
+        sink = []
+        update = FakeUpdate(950936, "use my cook book", sink)
+        await bot._do_use_item(update, "use my cook book")
+        self.assertIn("Cooked Fish", sink[-1])
+        self.assertIn("Rations", sink[-1])
+        self.assertNotIn("Longsword", sink[-1])
+        self.assertIn("guild secrets", sink[-1].lower())
+        # Not consumed -- still carrying it after reading.
+        updated = db.get_character(950936, -999)
+        self.assertEqual(updated["inventory"].get("cook_book_basic", 0), 1)
+
+    def test_profession_mastery_pct_persists_across_reload(self):
+        character = make_basic_character(950937, "MasteryPersistTester", current_location="crossroads_tavern")
+        bot._grind_profession_mastery(950937, -999, character, "blacksmithing")
+        reloaded = db.get_character(950937, -999)
+        self.assertAlmostEqual(reloaded["profession_mastery_pct"]["blacksmithing"], bot.PROFICIENCY_STARTING_PCT + bot.PROFICIENCY_GRIND_INCREMENT)
+
     def test_forge_and_enchant_keyword_fallback_classification(self):
         """Real Phase 7 deliverable: "forge my X" / "enchant my X" / "imbue the X" classify correctly without a model call."""
         self.assertEqual(_keyword_fallback("forge my longsword", [])["action"], "forge_item")
