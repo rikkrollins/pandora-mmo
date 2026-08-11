@@ -155,6 +155,29 @@ def _items_catalog_text() -> str:
     return "\n".join(lines)
 
 
+# Real gap found 2026-08-11 (dev-topic report: "what does mage hand do?"
+# got back "lets you cast spells without mana cost", a pure
+# hallucination). "effect": "buff" alone gives the model zero real
+# information about what a buff cantrip actually DOES, so it filled the
+# gap from general D&D knowledge (Mage Hand's real-5E floating-hand
+# effect, not even that correctly) instead of this game's actual
+# mechanic -- exactly the grounding gap CLAUDE.md's rule exists to
+# prevent. These four cantrips share one real, deterministic mechanic
+# (bot.py's _do_cast_spell, `spell_id in ("guidance", "thaumaturgy",
+# "mage_hand", "prestidigitation")`): a real +2 bonus to the caster's
+# own next skill/ability check -- narrative-utility cantrips reflavored
+# with one real mechanical hook per Coffee's direction, not their
+# real-5E effects (Mage Hand's floating hand, Prestidigitation's minor
+# tricks, etc.), so the override text says so explicitly rather than
+# leaving room for the model to reach for the real-5E answer instead.
+_CHECK_BONUS_CANTRIPS = ("guidance", "thaumaturgy", "mage_hand", "prestidigitation")
+_SPELL_REAL_MECHANIC_OVERRIDES = {
+    sid: "gives a real +2 bonus to your own next skill/ability check -- "
+         "NOT its real-5E effect, this game reflavors it as a check-boost utility cantrip"
+    for sid in _CHECK_BONUS_CANTRIPS
+}
+
+
 def _spells_catalog_text() -> str:
     lines = ["\nREAL SPELLS IN THIS GAME, BY CLASS:"]
     for cls in spells_module.CLASS_SPELL_LISTS:
@@ -163,10 +186,12 @@ def _spells_catalog_text() -> str:
         spell_descriptions = []
         for sid in cantrip_ids:
             spell = spells_module.get_spell(sid)
-            spell_descriptions.append(f"{spell['name']} (cantrip, {spell.get('effect', '')})")
+            detail = _SPELL_REAL_MECHANIC_OVERRIDES.get(sid, spell.get('effect', ''))
+            spell_descriptions.append(f"{spell['name']} (cantrip, {detail})")
         for sid in leveled_ids:
             spell = spells_module.get_spell(sid)
-            spell_descriptions.append(f"{spell['name']} ({spell.get('effect', '')})")
+            detail = _SPELL_REAL_MECHANIC_OVERRIDES.get(sid, spell.get('effect', ''))
+            spell_descriptions.append(f"{spell['name']} ({detail})")
         lines.append(f"- {cls.title()}: {', '.join(spell_descriptions)}")
     return "\n".join(lines)
 

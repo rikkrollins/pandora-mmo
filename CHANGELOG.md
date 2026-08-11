@@ -2,6 +2,78 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.136] — Three real dev-topic bug reports, root-caused and fixed
+
+Caught by the dev-bridge monitor (three screenshotted reports,
+2026-08-11):
+
+**"Pan is there too but it doesn't mention that they are present when
+I looked around."** Confirmed live in the real production DB: Pan is a
+real human player character (`is_ai=0`), not a campaign NPC, whose
+`current_location` genuinely matched the reporting player's. "People
+here" only ever listed `campaign.json` NPCs
+(`_npcs_at_location`) — never other real players or AI companions
+actually standing at the same location. Fixed in
+`_location_extra_detail`: reuses `_get_combat_eligible_party_members`
+(already has the exact right filter — active, not resting, actually at
+this location, since it decides who can join a fight breaking out
+here) to list other real characters alongside campaign NPCs, excluding
+the viewer themselves.
+
+**"We are currently in battle... hitting the push buttons... you will
+render human players inactive."** Confirmed: `db.touch_last_active`
+(resets the idle/time-out clock) was only ever called from the
+typed-text path in `adventure_master_handler` — `battle_menu_callback`
+(the RPG-style Fight/Skills/Items/Run button menu) never called it at
+all, so a player who only ever plays combat via buttons got flagged
+and eventually timed out mid-fight no matter how often they actually
+acted. Fixed by touching last-active at the top of every battle-menu
+tap.
+
+**"What does mage hand do?" → "Mage Hand lets you cast spells without
+mana cost."** A pure Support hallucination. Root cause:
+`_spells_catalog_text()` only ever passed the model the bare word
+"buff" for cantrips like Mage Hand, with zero real description of what
+that means in this game (a real +2 bonus to the caster's own next
+skill check, per `bot.py`'s `_do_cast_spell` — Guidance/Thaumaturgy/
+Mage Hand/Prestidigitation all share this one reflavored mechanic, not
+their real-5E effects), so the model filled the gap from general D&D
+knowledge instead. Fixed by grounding all four cantrips with their real
+mechanic directly in the catalog text.
+
+New regression tests for all three (a real button tap resetting the
+idle clock, `_do_look` listing a real co-located character while never
+listing the viewer, and the spell catalog naming the real +2-check
+mechanic instead of the bare word "buff").
+
+## [1.27.135] — Fix: private-chat DM to the bot always 400'd
+
+Real live bug found by auditing `bot_live_tmp.log` for unhandled
+exceptions: every private DM to @PandoraMMO_Bot (including Telegram's
+own auto-sent `/start`) has been silently broken since the getting-
+started reply was added (2026-08-08) — `_DM_GETTING_STARTED_TEXT`
+contains a bare, unescaped underscore in "@PandoraMMO_Bot", and
+Telegram's legacy `parse_mode="Markdown"` treats a lone `_` as an
+unclosed italic delimiter, so `sendMessage` 400'd
+(`Can't parse entities: can't find end of the entity starting at byte
+offset 299`) on every single call. The global unhandled-error handler
+caught it and silently sent a generic "something broke" fallback
+instead — from a user's side, indistinguishable from the DM feature
+never having shipped at all.
+
+Fix: escaped the underscore (`PandoraMMO\_Bot`) and switched the two
+`**bold**` runs to real legacy-Markdown single-`*` bold, since `**`
+isn't valid Markdown V1 syntax either (harmless — always resolves to
+matched empty-bold pairs — but not what was intended).
+
+Reproduced and fixed against the real Bot API (not just reasoned
+about): sent the original string with `parse_mode="Markdown"` and
+confirmed the exact same 400 production hit, then confirmed the fixed
+string sends cleanly. New regression test checks
+`_DM_GETTING_STARTED_TEXT` itself for unescaped `_`/unbalanced `*`,
+since the existing DM test only stubs `send_message` and never
+exercises Telegram's real entity parser.
+
 ## [1.27.134] — Elemental resistance system + Undead type (real feature)
 
 Real, multi-part feature request from Coffee, built as one cohesive

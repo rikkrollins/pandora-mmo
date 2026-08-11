@@ -2522,6 +2522,13 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
+    # Real bug (2026-08-11, dev-topic report): a player who only ever
+    # plays combat via this button menu (never typing) was getting
+    # flagged and eventually timed out for "inactivity" mid-fight --
+    # db.touch_last_active was only ever called from the typed-text path
+    # in adventure_master_handler, so tapping Fight/Skills/Items/Run here
+    # never reset the idle clock no matter how often the player acted.
+    await asyncio.to_thread(db.touch_last_active, user_id, chat_id)
     session = sessions.get_session_for_user(chat_id, user_id)
     if session is None or session.current_participant_id() != user_id:
         await query.answer("It's not your turn right now.", show_alert=True)
@@ -13816,7 +13823,26 @@ def _location_extra_detail(character: dict, location: dict, location_id: str, ch
     npc_names = []
     if npcs_here:
         npc_names = [cl.get_npc(CAMPAIGN, n)["name"] for n in npcs_here if cl.get_npc(CAMPAIGN, n)]
-        lines.append(f"People here: {', '.join(npc_names)}")
+    # Real gap found 2026-08-11 (dev-topic report: "Pan is there too but
+    # it doesn't mention that they are present when I looked around") --
+    # confirmed live: Pan is a real player character (is_ai=0), not a
+    # campaign NPC, whose current_location genuinely matched the
+    # reporting player's. "People here" only ever listed campaign.json
+    # NPCs (_npcs_at_location), never other real players/companions
+    # actually standing at the same location -- exactly the kind of gap
+    # CLAUDE.md's "never lets the game distinguish human from AI" design
+    # would call a real miss, since a human party member is just as
+    # real a presence here as an AI one. _get_combat_eligible_party_members
+    # already has the exact right filter (active, not resting, actually
+    # AT this location) since it's used to decide who can join a fight
+    # breaking out here -- reused as-is, excluding the viewer themselves.
+    other_people_here = [
+        p["name"] for p in _get_combat_eligible_party_members(location_id, chat_id)
+        if p.get("telegram_user_id") != character.get("telegram_user_id")
+    ]
+    people_names = npc_names + other_people_here
+    if people_names:
+        lines.append(f"People here: {', '.join(people_names)}")
     monsters_here = location.get("monsters", [])
     if monsters_here:
         lines.append(f"You sense danger here: {_monster_danger_line(monsters_here)}")
@@ -20131,9 +20157,9 @@ _PENDING_ONBOARDING: dict[int, str] = {}  # chat_id -> "awaiting_setup_choice" |
 _DM_GETTING_STARTED_TEXT = (
     "👋 Hey, I'm Pandora MMO! I only play inside a Telegram *group*, not here in a private chat "
     "with me — but here's how to get started either way:\n\n"
-    f"**Join the main group** — jump straight into our shared Public World with other players: "
+    f"*Join the main group* — jump straight into our shared Public World with other players: "
     f"{_PUBLIC_WORLD_INVITE_LINK}\n\n"
-    "**Or run your own** — add me (@PandoraMMO_Bot) to your own Telegram group instead. The moment "
+    "*Or run your own* — add me (@PandoraMMO\\_Bot) to your own Telegram group instead. The moment "
     "I'm added, I'll message that group and walk an admin through a one-time setup (topics, and "
     "whether that group wants its own Private World or to join the Public World above)."
 )

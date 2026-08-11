@@ -12,6 +12,7 @@ take minutes each under load; run these when you have time to spare,
 or when touching code they cover directly.
 """
 import os
+import re
 import shutil
 import time
 import unittest
@@ -1708,6 +1709,31 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         for recipe_id in ("flame", "frost", "warding", "arcana"):
             self.assertIn(recipe_id, catalog)
 
+    def test_support_spell_catalog_grounds_check_bonus_cantrips_real_mechanic(self):
+        """
+        Real live bug (2026-08-11, dev-topic report): "What does mage
+        hand do?" got back "Mage Hand lets you cast spells without mana
+        cost" -- a pure hallucination. Root cause: _spells_catalog_text
+        only ever passed the model the bare word "buff" for cantrips like
+        Mage Hand, with no real description of what that actually means
+        in this game (a +2 bonus to the caster's own next skill check,
+        per bot.py's _do_cast_spell), so the model filled the gap from
+        general D&D knowledge instead. The catalog text itself must name
+        the real mechanic for all four cantrips that share it, and must
+        not just say the bare word "buff" for them anymore.
+        """
+        from ai.support_agent import _spells_catalog_text
+        catalog = _spells_catalog_text()
+        for spell_name in ("Mage Hand", "Guidance", "Thaumaturgy", "Prestidigitation"):
+            self.assertIn(spell_name, catalog)
+        self.assertIn("+2 bonus to your own next skill/ability check", catalog)
+        # Every mention of these four cantrips must carry the real
+        # mechanic, never the bare unexplained "buff" tag alone.
+        for line in catalog.splitlines():
+            if "Mage Hand" in line:
+                self.assertNotIn("(cantrip, buff)", line)
+                self.assertIn("+2 bonus", line)
+
     # -- Real live bug (2026-07-16): this model has a documented bias
     #    toward guessing "pass_turn" for phrasing it doesn't recognize --
     #    "I'll take a mug, ale!!! how are you doing old buddy?" (ordinary
@@ -2811,6 +2837,44 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("MenuGoblinA", target_picker)
         self.assertIn("MenuGoblinB", target_picker)
         self.assertIn("bm|throwtarget|silvered_dagger|MenuGoblinB", target_picker)
+
+    async def test_battle_menu_tap_resets_inactivity_clock(self):
+        """
+        Real live bug (2026-08-11, dev-topic report): a player who only
+        ever plays combat via the RPG battle-menu buttons (never typing)
+        got "About to Time-Out due to inactivity!" mid-fight, right after
+        tapping a real action (casting Mage Hand). Root cause:
+        db.touch_last_active was only ever called from the typed-text
+        path in adventure_master_handler -- battle_menu_callback never
+        called it at all, so tapping the menu did nothing to reset the
+        idle clock no matter how often the player acted. Confirms a
+        stale last_active_at gets refreshed by a real button tap now.
+        """
+        import sessions
+        from datetime import datetime, timedelta, timezone
+
+        sessions.end_session(-999)
+        user_id = 950929
+        make_basic_character(user_id, "MenuTapper", current_location="crossroads_tavern")
+        stale = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        db.update_character(user_id, -999, last_active_at=stale)
+
+        enemy = {"telegram_user_id": -2_500_065, "name": "MenuTapGoblin", "hp_current": 20, "hp_max": 20,
+                 "is_ai": 1, "strength": 10, "dexterity": 10, "armor_class": 10}
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", -2_500_065: "enemy"})
+        session.turn_order = [user_id, -2_500_065]
+        session.current_turn_index = 0
+
+        sink = []
+        await bot.battle_menu_callback(FakeCallbackUpdate(user_id, "bm|menu", sink), DummyContext())
+
+        refreshed = db.get_character(user_id, -999)
+        refreshed_at = datetime.fromisoformat(refreshed["last_active_at"])
+        self.assertGreater(refreshed_at, datetime.fromisoformat(stale))
+        self.assertLess((datetime.now(timezone.utc) - refreshed_at).total_seconds(), 30)
+        sessions.end_session(-999)
         sessions.end_session(-999)
 
     # -- Grindable mastery proficiencies (2026-08-08, per Coffee) ------
@@ -5424,6 +5488,32 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot.start_command(start_update, SimpleNamespace(bot=None, user_data={}, args=[]))
         self.assertTrue(any(bot._PUBLIC_WORLD_INVITE_LINK in t for t in sent))
 
+    def test_dm_getting_started_text_has_no_unescaped_markdown_entities(self):
+        """
+        Real live bug (2026-08-10 to 2026-08-11): _DM_GETTING_STARTED_TEXT
+        contained a bare, unescaped underscore in "@PandoraMMO_Bot".
+        Telegram's legacy parse_mode="Markdown" treats a lone '_' as an
+        unclosed italic delimiter, so every real private-chat DM to the
+        bot got a 400 "can't find end of the entity" from sendMessage and
+        silently fell through to the generic unhandled-error reply --
+        confirmed live via bot_live_tmp.log (byte offset 299 landed
+        exactly on that underscore) and reproduced/fixed live against the
+        real Bot API. The existing test above stubs send_message and
+        can't catch this class of bug (it never touches Telegram's real
+        entity parser), so this checks the actual string content instead:
+        every literal '_' must be backslash-escaped, and every run of
+        literal (non-escaped, non-double) '*' must be balanced.
+        """
+        text = bot._DM_GETTING_STARTED_TEXT
+        unescaped_underscores = re.findall(r"(?<!\\)_", text)
+        self.assertEqual(unescaped_underscores, [],
+                          "found a bare, unescaped '_' -- Telegram's legacy Markdown parser "
+                          "treats it as an unclosed italic delimiter and rejects the whole message")
+        single_asterisks = re.findall(r"(?<!\*)\*(?!\*)", text)
+        self.assertEqual(len(single_asterisks) % 2, 0,
+                          "odd number of single '*' markers -- Telegram's legacy Markdown parser "
+                          "will fail to find a matching close for an unpaired one")
+
     def test_get_party_members_does_not_leak_across_tenant_chats(self):
         """
         Real cross-tenant leak, found and fixed 2026-08-08 (multi-tenant
@@ -7743,6 +7833,29 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         reply = next(s for s in reversed(sink) if not s.startswith("<photo:"))
         self.assertIn("North:", reply)
         self.assertIn("West:", reply)
+
+    async def test_look_around_lists_other_real_players_at_the_same_location(self):
+        """
+        Real live bug (2026-08-11, dev-topic report): "Pan is there too
+        but it doesn't mention that they are present when I looked
+        around." Confirmed live in the real production DB: Pan is a real
+        human player character (is_ai=0), not a campaign NPC, whose
+        current_location genuinely matched the reporting player's --
+        "People here" only ever listed campaign.json NPCs
+        (_npcs_at_location), never other real players/companions
+        actually standing at the same location. Two real characters at
+        the same location here; the viewer must see the other one named
+        (and never see themselves listed).
+        """
+        viewer_id, other_id = 900560, 900561
+        make_basic_character(viewer_id, "LookViewer", current_location="greymoor_downs")
+        make_basic_character(other_id, "LookCompanion", current_location="greymoor_downs")
+        sink = []
+        await bot._do_look(FakeUpdate(viewer_id, "", sink))
+        reply = next(s for s in reversed(sink) if not s.startswith("<photo:"))
+        people_here_line = next(line for line in reply.splitlines() if line.startswith("People here:"))
+        self.assertIn("LookCompanion", people_here_line)
+        self.assertNotIn("LookViewer", people_here_line)
 
     async def test_arriving_on_foot_auto_shows_look_around_detail_for_a_real_player(self):
         """
