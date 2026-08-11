@@ -3797,7 +3797,13 @@
       "xp_reward": 50,
       "damage_dice": "1d8",
       "damage_bonus": 2,
-      "damage_type": "physical"
+      "damage_type": "physical",
+      "stealable_items": [
+        {
+          "item_id": "sulfur_dust",
+          "weight": 100
+        }
+      ]
     },
     "goblin_shaman": {
       "name": "Goblin Shaman",
@@ -3810,7 +3816,17 @@
       "on_hit_condition": "silenced",
       "damage_dice": "1d8",
       "damage_bonus": 4,
-      "damage_type": "poison"
+      "damage_type": "poison",
+      "stealable_items": [
+        {
+          "item_id": "healing_potion",
+          "weight": 90
+        },
+        {
+          "item_id": "rusty_dagger",
+          "weight": 10
+        }
+      ]
     },
     "goblin_boss": {
       "name": "Goblin Boss",
@@ -3824,7 +3840,17 @@
       "on_hit_condition": "paralyzed",
       "damage_dice": "1d8",
       "damage_bonus": 15,
-      "damage_type": "physical"
+      "damage_type": "physical",
+      "stealable_items": [
+        {
+          "item_id": "silverleaf_herb",
+          "weight": 90
+        },
+        {
+          "item_id": "shortsword",
+          "weight": 10
+        }
+      ]
     },
     "wolf": {
       "name": "Wolf",
@@ -3837,7 +3863,13 @@
       "on_hit_condition": "frightened",
       "damage_dice": "1d8",
       "damage_bonus": 1,
-      "damage_type": "physical"
+      "damage_type": "physical",
+      "stealable_items": [
+        {
+          "item_id": "silverleaf_herb",
+          "weight": 100
+        }
+      ]
     },
     "giant_spider": {
       "name": "Giant Spider",
@@ -3850,7 +3882,17 @@
       "on_hit_condition": "poisoned",
       "damage_dice": "1d8",
       "damage_bonus": 14,
-      "damage_type": "poison"
+      "damage_type": "poison",
+      "stealable_items": [
+        {
+          "item_id": "iron_ore",
+          "weight": 90
+        },
+        {
+          "item_id": "shortsword",
+          "weight": 10
+        }
+      ]
     },
     "crystal_spider": {
       "name": "Crystal Spider",
@@ -3863,7 +3905,17 @@
       "on_hit_condition": "poisoned",
       "damage_dice": "1d8",
       "damage_bonus": 15,
-      "damage_type": "poison"
+      "damage_type": "poison",
+      "stealable_items": [
+        {
+          "item_id": "healing_potion",
+          "weight": 90
+        },
+        {
+          "item_id": "rusty_dagger",
+          "weight": 10
+        }
+      ]
     },
     "shadow_wisp": {
       "name": "Shadow Wisp",
@@ -3876,7 +3928,17 @@
       "on_hit_condition": "blinded",
       "damage_dice": "1d8",
       "damage_bonus": 16,
-      "damage_type": "necrotic"
+      "damage_type": "necrotic",
+      "stealable_items": [
+        {
+          "item_id": "iron_ore",
+          "weight": 90
+        },
+        {
+          "item_id": "rusty_dagger",
+          "weight": 10
+        }
+      ]
     },
     "the_unspoken": {
       "name": "The Unspoken",
@@ -3890,7 +3952,17 @@
       "on_hit_condition": "silenced",
       "damage_dice": "1d8",
       "damage_bonus": 17,
-      "damage_type": "psychic"
+      "damage_type": "psychic",
+      "stealable_items": [
+        {
+          "item_id": "greater_spell_tonic",
+          "weight": 90
+        },
+        {
+          "item_id": "longsword",
+          "weight": 5
+        }
+      ]
     },
     "the_waking_ember": {
       "name": "The Waking Ember",
@@ -3907,7 +3979,17 @@
       "damage_bonus": 17,
       "damage_type": "fire",
       "vulnerabilities": ["cold"],
-      "elemental_resistance_pct": {"fire": 150}
+      "elemental_resistance_pct": {"fire": 150},
+      "stealable_items": [
+        {
+          "item_id": "greater_spell_tonic",
+          "weight": 90
+        },
+        {
+          "item_id": "longsword",
+          "weight": 5
+        }
+      ]
     },
     "the_waiting_shape": {
       "name": "The Waiting Shape",
@@ -3922,7 +4004,17 @@
       "life_drain": true,
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "necrotic"
+      "damage_type": "necrotic",
+      "stealable_items": [
+        {
+          "item_id": "greater_spell_tonic",
+          "weight": 90
+        },
+        {
+          "item_id": "longsword",
+          "weight": 5
+        }
+      ]
     },
     "the_unrepeating": {
       "name": "The Unrepeating",
@@ -3937,7 +4029,17 @@
       "life_drain": true,
       "damage_dice": "1d8",
       "damage_bonus": 17,
-      "damage_type": "force"
+      "damage_type": "force",
+      "stealable_items": [
+        {
+          "item_id": "spell_tonic",
+          "weight": 90
+        },
+        {
+          "item_id": "greataxe",
+          "weight": 5
+        }
+      ]
     },
     "colosseum_champion": {
       "name": "The Colosseum Champion",
@@ -3951,7 +4053,17 @@
       "on_hit_condition": "frightened",
       "damage_dice": "1d8",
       "damage_bonus": 17,
-      "damage_type": "physical"
+      "damage_type": "physical",
+      "stealable_items": [
+        {
+          "item_id": "silverleaf_herb",
+          "weight": 90
+        },
+        {
+          "item_id": "rusty_dagger",
+          "weight": 10
+        }
+      ]
     },
     "verge_wraith": {
       "name": "Verge Wraith",
@@ -3970,7 +4082,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "necrotic"
+      "damage_type": "necrotic",
+      "stealable_items": [
+        {
+          "item_id": "healing_potion",
+          "weight": 92
+        },
+        {
+          "item_id": "longbow",
+          "weight": 8
+        }
+      ]
     },
     "bone_legionnaire": {
       "name": "Bone Legionnaire",
@@ -3985,7 +4107,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "necrotic"
+      "damage_type": "necrotic",
+      "stealable_items": [
+        {
+          "item_id": "healing_potion",
+          "weight": 92
+        },
+        {
+          "item_id": "longsword",
+          "weight": 8
+        }
+      ]
     },
     "cairn_watcher": {
       "name": "Cairn Watcher",
@@ -4003,7 +4135,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "necrotic"
+      "damage_type": "necrotic",
+      "stealable_items": [
+        {
+          "item_id": "moonpetal",
+          "weight": 92
+        },
+        {
+          "item_id": "longsword",
+          "weight": 8
+        }
+      ]
     },
     "the_verge_warden": {
       "name": "The Verge Warden",
@@ -4025,7 +4167,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "necrotic"
+      "damage_type": "necrotic",
+      "stealable_items": [
+        {
+          "item_id": "greater_spell_tonic",
+          "weight": 90
+        },
+        {
+          "item_id": "longsword",
+          "weight": 5
+        }
+      ]
     },
     "choir_remnant": {
       "name": "Choir Remnant",
@@ -4044,7 +4196,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "psychic"
+      "damage_type": "psychic",
+      "stealable_items": [
+        {
+          "item_id": "moonpetal",
+          "weight": 92
+        },
+        {
+          "item_id": "longbow",
+          "weight": 8
+        }
+      ]
     },
     "still_machinery_sentinel": {
       "name": "Still Machinery Sentinel",
@@ -4062,7 +4224,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "force"
+      "damage_type": "force",
+      "stealable_items": [
+        {
+          "item_id": "healing_potion",
+          "weight": 92
+        },
+        {
+          "item_id": "longsword",
+          "weight": 8
+        }
+      ]
     },
     "voiceless_warden": {
       "name": "Voiceless Warden",
@@ -4081,7 +4253,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "psychic"
+      "damage_type": "psychic",
+      "stealable_items": [
+        {
+          "item_id": "healing_potion",
+          "weight": 95
+        },
+        {
+          "item_id": "longsword",
+          "weight": 5
+        }
+      ]
     },
     "the_undertone": {
       "name": "The Undertone",
@@ -4103,7 +4285,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "psychic"
+      "damage_type": "psychic",
+      "stealable_items": [
+        {
+          "item_id": "spell_tonic",
+          "weight": 90
+        },
+        {
+          "item_id": "greataxe",
+          "weight": 5
+        }
+      ]
     },
     "hollow_watcher": {
       "name": "Hollow Watcher",
@@ -4122,7 +4314,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "necrotic"
+      "damage_type": "necrotic",
+      "stealable_items": [
+        {
+          "item_id": "greater_healing_potion",
+          "weight": 95
+        },
+        {
+          "item_id": "greataxe",
+          "weight": 5
+        }
+      ]
     },
     "turning_stair_guardian": {
       "name": "Turning Stair Guardian",
@@ -4141,7 +4343,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "force"
+      "damage_type": "force",
+      "stealable_items": [
+        {
+          "item_id": "healing_potion",
+          "weight": 95
+        },
+        {
+          "item_id": "longsword",
+          "weight": 5
+        }
+      ]
     },
     "loom_warden": {
       "name": "Loom Warden",
@@ -4159,7 +4371,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "psychic"
+      "damage_type": "psychic",
+      "stealable_items": [
+        {
+          "item_id": "healing_potion",
+          "weight": 95
+        },
+        {
+          "item_id": "longsword",
+          "weight": 5
+        }
+      ]
     },
     "the_unbegun": {
       "name": "The Unbegun",
@@ -4182,7 +4404,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "force"
+      "damage_type": "force",
+      "stealable_items": [
+        {
+          "item_id": "spell_tonic",
+          "weight": 90
+        },
+        {
+          "item_id": "greataxe",
+          "weight": 5
+        }
+      ]
     },
     "elder_bone_legionnaire": {
       "name": "Elder Bone Legionnaire",
@@ -4197,7 +4429,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "necrotic"
+      "damage_type": "necrotic",
+      "stealable_items": [
+        {
+          "item_id": "greater_healing_potion",
+          "weight": 92
+        },
+        {
+          "item_id": "longbow",
+          "weight": 8
+        }
+      ]
     },
     "bound_verge_wraith": {
       "name": "Bound Verge Wraith",
@@ -4216,7 +4458,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "necrotic"
+      "damage_type": "necrotic",
+      "stealable_items": [
+        {
+          "item_id": "greater_healing_potion",
+          "weight": 92
+        },
+        {
+          "item_id": "longsword",
+          "weight": 8
+        }
+      ]
     },
     "young_cairn_watcher": {
       "name": "Young Cairn Watcher",
@@ -4234,7 +4486,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "necrotic"
+      "damage_type": "necrotic",
+      "stealable_items": [
+        {
+          "item_id": "moonpetal",
+          "weight": 92
+        },
+        {
+          "item_id": "longbow",
+          "weight": 8
+        }
+      ]
     },
     "elder_choir_remnant": {
       "name": "Elder Choir Remnant",
@@ -4253,7 +4515,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "psychic"
+      "damage_type": "psychic",
+      "stealable_items": [
+        {
+          "item_id": "healing_potion",
+          "weight": 92
+        },
+        {
+          "item_id": "longsword",
+          "weight": 8
+        }
+      ]
     },
     "bound_voiceless_warden": {
       "name": "Bound Voiceless Warden",
@@ -4272,7 +4544,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "psychic"
+      "damage_type": "psychic",
+      "stealable_items": [
+        {
+          "item_id": "greater_healing_potion",
+          "weight": 95
+        },
+        {
+          "item_id": "greataxe",
+          "weight": 5
+        }
+      ]
     },
     "young_choir_remnant": {
       "name": "Young Choir Remnant",
@@ -4290,7 +4572,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "psychic"
+      "damage_type": "psychic",
+      "stealable_items": [
+        {
+          "item_id": "moonpetal",
+          "weight": 92
+        },
+        {
+          "item_id": "longsword",
+          "weight": 8
+        }
+      ]
     },
     "elder_hollow_watcher": {
       "name": "Elder Hollow Watcher",
@@ -4309,7 +4601,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "necrotic"
+      "damage_type": "necrotic",
+      "stealable_items": [
+        {
+          "item_id": "healing_potion",
+          "weight": 95
+        },
+        {
+          "item_id": "longsword",
+          "weight": 5
+        }
+      ]
     },
     "bound_loom_warden": {
       "name": "Bound Loom Warden",
@@ -4327,7 +4629,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "psychic"
+      "damage_type": "psychic",
+      "stealable_items": [
+        {
+          "item_id": "greater_healing_potion",
+          "weight": 95
+        },
+        {
+          "item_id": "greataxe",
+          "weight": 5
+        }
+      ]
     },
     "young_turning_stair_guardian": {
       "name": "Young Turning Stair Guardian",
@@ -4346,7 +4658,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "force"
+      "damage_type": "force",
+      "stealable_items": [
+        {
+          "item_id": "healing_potion",
+          "weight": 92
+        },
+        {
+          "item_id": "longsword",
+          "weight": 8
+        }
+      ]
     },
     "veteran_goblin": {
       "name": "Veteran Goblin",
@@ -4358,7 +4680,17 @@
       "xp_reward": 100,
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "physical"
+      "damage_type": "physical",
+      "stealable_items": [
+        {
+          "item_id": "silverleaf_herb",
+          "weight": 90
+        },
+        {
+          "item_id": "shortsword",
+          "weight": 10
+        }
+      ]
     },
     "goblin_shaman_elder": {
       "name": "Elder Goblin Shaman",
@@ -4371,7 +4703,17 @@
       "on_hit_condition": "silenced",
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "poison"
+      "damage_type": "poison",
+      "stealable_items": [
+        {
+          "item_id": "iron_ore",
+          "weight": 90
+        },
+        {
+          "item_id": "shortsword",
+          "weight": 10
+        }
+      ]
     },
     "young_goblin": {
       "name": "Young Goblin",
@@ -4383,7 +4725,13 @@
       "xp_reward": 30,
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "physical"
+      "damage_type": "physical",
+      "stealable_items": [
+        {
+          "item_id": "silverleaf_herb",
+          "weight": 100
+        }
+      ]
     },
     "root_bound_goblin": {
       "name": "Root-Bound Goblin",
@@ -4395,7 +4743,13 @@
       "xp_reward": 70,
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "physical"
+      "damage_type": "physical",
+      "stealable_items": [
+        {
+          "item_id": "moonpetal",
+          "weight": 100
+        }
+      ]
     },
     "channel_bound_goblin": {
       "name": "Channel-Bound Goblin",
@@ -4407,7 +4761,13 @@
       "xp_reward": 90,
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "physical"
+      "damage_type": "physical",
+      "stealable_items": [
+        {
+          "item_id": "iron_ore",
+          "weight": 100
+        }
+      ]
     },
     "elder_root_shaman": {
       "name": "Elder Root Shaman",
@@ -4420,7 +4780,17 @@
       "on_hit_condition": "poisoned",
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "poison"
+      "damage_type": "poison",
+      "stealable_items": [
+        {
+          "item_id": "iron_ore",
+          "weight": 90
+        },
+        {
+          "item_id": "rusty_dagger",
+          "weight": 10
+        }
+      ]
     },
     "root_goblin_pup": {
       "name": "Root Goblin Pup",
@@ -4432,7 +4802,13 @@
       "xp_reward": 25,
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "physical"
+      "damage_type": "physical",
+      "stealable_items": [
+        {
+          "item_id": "iron_ore",
+          "weight": 100
+        }
+      ]
     },
     "brood_spider": {
       "name": "Brood Spider",
@@ -4445,7 +4821,17 @@
       "on_hit_condition": "poisoned",
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "poison"
+      "damage_type": "poison",
+      "stealable_items": [
+        {
+          "item_id": "iron_ore",
+          "weight": 90
+        },
+        {
+          "item_id": "rusty_dagger",
+          "weight": 10
+        }
+      ]
     },
     "current_bound_spider": {
       "name": "Current-Bound Spider",
@@ -4458,7 +4844,17 @@
       "on_hit_condition": "poisoned",
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "poison"
+      "damage_type": "poison",
+      "stealable_items": [
+        {
+          "item_id": "silverleaf_herb",
+          "weight": 90
+        },
+        {
+          "item_id": "rusty_dagger",
+          "weight": 10
+        }
+      ]
     },
     "elder_web_spider": {
       "name": "Elder Web Spider",
@@ -4471,7 +4867,17 @@
       "on_hit_condition": "poisoned",
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "poison"
+      "damage_type": "poison",
+      "stealable_items": [
+        {
+          "item_id": "moonpetal",
+          "weight": 92
+        },
+        {
+          "item_id": "longbow",
+          "weight": 8
+        }
+      ]
     },
     "spiderling": {
       "name": "Spiderling",
@@ -4483,7 +4889,13 @@
       "xp_reward": 40,
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "poison"
+      "damage_type": "poison",
+      "stealable_items": [
+        {
+          "item_id": "moonpetal",
+          "weight": 100
+        }
+      ]
     },
     "watchtower_stalker": {
       "name": "Watchtower Stalker",
@@ -4496,7 +4908,13 @@
       "on_hit_condition": "frightened",
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "physical"
+      "damage_type": "physical",
+      "stealable_items": [
+        {
+          "item_id": "moonpetal",
+          "weight": 100
+        }
+      ]
     },
     "alpha_wolf": {
       "name": "Alpha Wolf",
@@ -4509,7 +4927,17 @@
       "on_hit_condition": "frightened",
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "physical"
+      "damage_type": "physical",
+      "stealable_items": [
+        {
+          "item_id": "healing_potion",
+          "weight": 90
+        },
+        {
+          "item_id": "shortsword",
+          "weight": 10
+        }
+      ]
     },
     "wolf_pup": {
       "name": "Wolf Pup",
@@ -4521,7 +4949,13 @@
       "xp_reward": 30,
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "physical"
+      "damage_type": "physical",
+      "stealable_items": [
+        {
+          "item_id": "silverleaf_herb",
+          "weight": 100
+        }
+      ]
     },
     "barrow_bound_wolf": {
       "name": "Barrow-Bound Wolf",
@@ -4534,7 +4968,17 @@
       "on_hit_condition": "frightened",
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "physical"
+      "damage_type": "physical",
+      "stealable_items": [
+        {
+          "item_id": "iron_ore",
+          "weight": 90
+        },
+        {
+          "item_id": "shortsword",
+          "weight": 10
+        }
+      ]
     },
     "den_bound_wolf": {
       "name": "Den-Bound Wolf",
@@ -4547,7 +4991,13 @@
       "on_hit_condition": "frightened",
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "physical"
+      "damage_type": "physical",
+      "stealable_items": [
+        {
+          "item_id": "moonpetal",
+          "weight": 100
+        }
+      ]
     },
     "stray_wood_wolf": {
       "name": "Stray Wood Wolf",
@@ -4559,7 +5009,13 @@
       "xp_reward": 40,
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "physical"
+      "damage_type": "physical",
+      "stealable_items": [
+        {
+          "item_id": "iron_ore",
+          "weight": 100
+        }
+      ]
     },
     "root_wrought_sentinel": {
       "name": "Root-Wrought Sentinel",
@@ -4577,7 +5033,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "force"
+      "damage_type": "force",
+      "stealable_items": [
+        {
+          "item_id": "healing_potion",
+          "weight": 90
+        },
+        {
+          "item_id": "rusty_dagger",
+          "weight": 10
+        }
+      ]
     },
     "deep_root_warden": {
       "name": "Deep Root Warden",
@@ -4595,7 +5061,17 @@
       ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "force"
+      "damage_type": "force",
+      "stealable_items": [
+        {
+          "item_id": "silverleaf_herb",
+          "weight": 90
+        },
+        {
+          "item_id": "shortsword",
+          "weight": 10
+        }
+      ]
     },
     "pool_wrought_spider": {
       "name": "Pool-Wrought Spider",
@@ -4608,7 +5084,17 @@
       "on_hit_condition": "poisoned",
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "poison"
+      "damage_type": "poison",
+      "stealable_items": [
+        {
+          "item_id": "silverleaf_herb",
+          "weight": 90
+        },
+        {
+          "item_id": "shortsword",
+          "weight": 10
+        }
+      ]
     },
     "elder_crystal_spider": {
       "name": "Elder Crystal Spider",
@@ -4621,7 +5107,17 @@
       "on_hit_condition": "poisoned",
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "poison"
+      "damage_type": "poison",
+      "stealable_items": [
+        {
+          "item_id": "greater_healing_potion",
+          "weight": 92
+        },
+        {
+          "item_id": "longbow",
+          "weight": 8
+        }
+      ]
     },
     "crystal_spiderling": {
       "name": "Crystal Spiderling",
@@ -4633,7 +5129,13 @@
       "xp_reward": 40,
       "damage_dice": "1d8",
       "damage_bonus": 18,
-      "damage_type": "poison"
+      "damage_type": "poison",
+      "stealable_items": [
+        {
+          "item_id": "iron_ore",
+          "weight": 100
+        }
+      ]
     },
     "the_unasked": {
       "name": "The Unasked",
@@ -4657,6 +5159,16 @@
       ],
       "vulnerabilities": [
         "radiant"
+      ],
+      "stealable_items": [
+        {
+          "item_id": "greater_spell_tonic",
+          "weight": 90
+        },
+        {
+          "item_id": "longsword",
+          "weight": 5
+        }
       ]
     }
   },

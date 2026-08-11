@@ -140,6 +140,12 @@ THIEVES_GUILD_STEAL_BONUS = 3
 FAITH_CIRCLE_HEAL_BONUS = 3
 FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT = 10
 ADVENTURERS_GUILD_BOARD_QUEST_GOLD_BONUS_PCT = 20
+# 2026-08-11, per Coffee: "do locked treasures need keys... if not
+# let[s] work it in for the thieves guild" -- lockpicking (bot._do_
+# lockpick) already exists (a real DC-13 dexterity check, no keys
+# needed) but had zero guild tie-in, unlike stealing just above. Same
+# real +3 shape, same real trade-secrets flavor.
+THIEVES_GUILD_LOCKPICK_BONUS = 3
 
 # Arcane Circle exclusive spells (2026-07-25, per Coffee: "let them
 # learn new spells not otherwise available unless in the guilds") --

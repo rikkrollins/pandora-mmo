@@ -509,6 +509,16 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN backstab_proficiency_pct REAL NOT NULL DEFAULT 1.0")
         if "throw_proficiency_pct" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN throw_proficiency_pct REAL NOT NULL DEFAULT 1.0")
+        # Steal proficiency (2026-08-11, per Coffee: enemy-stealing
+        # should be "hard to steal but allow a proficiency to level up
+        # for them") -- same flat grindable shape as backstab/throw,
+        # shared by both shop-steal and the new enemy-steal (bot._do_
+        # steal_from_enemy), converted to a small flat ability-check
+        # bonus (round(pct/10), 0-10 range) rather than a % chance-gate,
+        # since steal is resolved by the SAME "1d20 + bonus vs DC" shape
+        # every other skill check in this game already uses.
+        if "steal_proficiency_pct" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN steal_proficiency_pct REAL NOT NULL DEFAULT 1.0")
 
         # Crafting/enchanting mastery (2026-08-11, per Coffee: "grinding
         # for better weapons and RNG allowing us to make better ones" --

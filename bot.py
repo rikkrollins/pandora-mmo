@@ -76,7 +76,7 @@ from ai import tts_piper, stt_groq
 from guilds import (
     GUILDS, eligible_for_guild, GUILD_QUESTS,
     ARCANE_CIRCLE_SPELL_DAMAGE_BONUS_PCT, THIEVES_GUILD_STEAL_BONUS, ARCANE_CIRCLE_EXCLUSIVE_SPELLS,
-    ADVENTURERS_GUILD_BOARD_QUEST_GOLD_BONUS_PCT,
+    ADVENTURERS_GUILD_BOARD_QUEST_GOLD_BONUS_PCT, THIEVES_GUILD_LOCKPICK_BONUS,
 )
 from models import (
     VALID_CLASSES,
@@ -290,6 +290,25 @@ def _roll_backstab_proficiency(character: dict) -> bool:
     chance = min(stored + _equipped_proficiency_bonus(character, "backstab"), PROFICIENCY_MAX_PCT)
     _grind_flat_proficiency(character["telegram_user_id"], character["chat_id"], "backstab_proficiency_pct", stored)
     return roll_percentage_check(chance)
+
+
+def _steal_proficiency_bonus(character: dict) -> int:
+    """
+    Steal proficiency (2026-08-11, per Coffee: "make it hard to steal
+    but allow a proficiency to level up for them"). Unlike backstab/
+    throw (a % chance-gate on a bonus effect), steal is resolved by the
+    same "1d20 + bonus vs DC" shape every other skill check uses, so
+    this converts the stored 0-100% into a small flat ability-check
+    bonus (0-10) instead of a second roll -- real, meaningful, but
+    never enough alone to trivialize a deliberately hard DC.
+    """
+    return round(character.get("steal_proficiency_pct", PROFICIENCY_STARTING_PCT) / 10)
+
+
+def _grind_steal_proficiency(telegram_user_id: int, chat_id: int, character: dict) -> None:
+    """Advances steal_proficiency_pct on a SUCCESSFUL steal (shop or enemy) -- same success-only convention as _grind_profession_mastery."""
+    stored = character.get("steal_proficiency_pct", PROFICIENCY_STARTING_PCT)
+    _grind_flat_proficiency(telegram_user_id, chat_id, "steal_proficiency_pct", stored)
 
 
 def _roll_throw_proficiency(character: dict) -> bool:
@@ -7012,6 +7031,10 @@ async def _do_recruit_npc(update: Update, npc_name: str) -> None:
 # made-up-numbers problem already fixed elsewhere in this build).
 SKILL_CHECK_DC = config.SKILL_CHECK_DC  # moved to config.py 2026-07-14, now .env-configurable
 STEAL_DC = 15  # harder than an ordinary skill check — stealing carries real risk
+# Enemy pickpocketing (2026-08-11, per Coffee: "make it hard to steal")
+# -- deliberately harder than the shop's own DC 15: a shopkeeper is
+# standing still and distracted, a live enemy is actively fighting you.
+STEAL_FROM_ENEMY_DC = 18
 
 
 def _practiced_bonus_for(telegram_user_id: int, chat_id: int, ability: str) -> int:
@@ -7121,6 +7144,11 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
 
     result = roll_ability_check(character, "dexterity", proficient=False, forced_roll=forced_roll)
     bonus = _practiced_bonus_for(update.effective_user.id, update.effective_chat.id, "dexterity")
+    # Thieves' Guild real benefit (2026-08-11, per Coffee): same real +3
+    # shape as the guild's existing steal bonus -- lockpicking is the
+    # guild's own trade secret too, not available outside it.
+    if character.get("guild") == "thieves_guild":
+        bonus += THIEVES_GUILD_LOCKPICK_BONUS
     result["total"] += bonus
     result["practiced_bonus"] = bonus
     success = result["total"] >= SKILL_CHECK_DC
@@ -14934,6 +14962,21 @@ def _format_bestiary_entry(monster_key: str, template: dict) -> str:
             elemental_bits.append(f"strongly resistant to {dtype} ({pct}%)")
     if elemental_bits:
         lines.append(f"  {'; '.join(elemental_bits)}")
+    # Real stealable-item listing (2026-08-11, per Coffee: "post what
+    # can be stolen from them in the bestiary") -- same fog-of-war
+    # boundary as everything else here (only shown once the monster is
+    # actually known), and the SAME real weights bot._do_steal_from_
+    # enemy actually rolls against, never a separate made-up hint list.
+    # Sorted so the common item(s) always list before the rare one.
+    stealable = template.get("stealable_items")
+    if stealable:
+        ranked = sorted(stealable, key=lambda e: -e["weight"])
+        parts = []
+        for entry in ranked:
+            name = items_module.get_item(entry["item_id"])["name"]
+            rarity_tag = "common" if entry["weight"] >= 50 else "rare"
+            parts.append(f"{name} ({rarity_tag})")
+        lines.append(f"  🎒 Can steal: {', '.join(parts)}")
     return "\n".join(lines)
 
 
@@ -17254,6 +17297,16 @@ async def _do_steal(update: Update, text: str, forced_roll: int | None = None) -
         )
         return
 
+    # Enemy pickpocketing (2026-08-11, per Coffee: "give every enemy a
+    # stealable item... make it hard to steal but allow a proficiency to
+    # level up"). Checked BEFORE the shop-only logic below -- a player
+    # mid-fight typing "steal" obviously means the enemy in front of
+    # them, not a shop that may not even be at this location.
+    session = sessions.get_session_for_user(update.effective_chat.id, telegram_user_id)
+    if session is not None and telegram_user_id in session.turn_order:
+        await _do_steal_from_enemy(update, character, session, text, forced_roll)
+        return
+
     location = cl.get_location(CAMPAIGN, character["current_location"])
     shop_id = location.get("shop") if location else None
     if not shop_id:
@@ -17301,12 +17354,14 @@ async def _do_steal(update: Update, text: str, forced_roll: int | None = None) -
     # game stacking rather than overriding.
     if character.get("subclass") == "Thief":
         bonus += THIEF_SUBCLASS_STEAL_BONUS
+    bonus += _steal_proficiency_bonus(character)
     result["total"] += bonus
     result["practiced_bonus"] = bonus
     success = result["total"] >= STEAL_DC
 
     if success:
         db.record_skill_use(telegram_user_id, update.effective_chat.id, "dexterity")
+        _grind_steal_proficiency(telegram_user_id, update.effective_chat.id, character)
         db.add_item(telegram_user_id, update.effective_chat.id, item_id, 1)
         consequence_line = f"\n🤫 You slip away with **{item['name']}** — nobody noticed."
     else:
@@ -17330,6 +17385,110 @@ async def _do_steal(update: Update, text: str, forced_roll: int | None = None) -
     )
     message = _format_skill_check_result(flavor, result, "dexterity", STEAL_DC, success) + consequence_line
     await _safe_send(update, message)
+
+
+async def _do_steal_from_enemy(
+    update: Update, character: dict, session: sessions.Session, text: str, forced_roll: int | None = None,
+) -> None:
+    """
+    Pickpocketing a live enemy mid-fight (2026-08-11, per Coffee: "give
+    every enemy a stealable item... make it hard to steal but allow a
+    proficiency to level up for them... only give each enemy 1-2 items
+    at the most, if its a rare item make the % small to get that item").
+    Real 5E-style action -- a genuine turn-consuming combat action, same
+    "1d20 + bonus vs DC" shape and turn-order/target-resolution as every
+    other combat action (_do_shove is the closest twin). The item
+    itself, if any, comes off the target's own real monster template
+    (campaign.json's "stealable_items", authored per monster tier) --
+    never invented, same grounding discipline as every other real drop
+    in this game. A monster with nothing listed there gives an honest
+    refusal instead of a made-up excuse, and doesn't consume the turn --
+    there was nothing to actually attempt.
+    """
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    if session.current_participant_id() != user_id:
+        await _self_heal_stuck_ai_turn(update, session)
+        session = sessions.get_session_for_user(chat_id, user_id)
+        if session is None:
+            await update.effective_chat.send_message(
+                "Combat had stalled and just resolved itself — nothing active right now.",
+                message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+            )
+            return
+    if session.current_participant_id() != user_id:
+        current_name = session.current_participant()["name"]
+        await update.effective_chat.send_message(
+            f"It's not your turn — it's **{current_name}**'s turn.",
+            message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        )
+        return
+
+    attacker = session.current_participant()
+    if attacker["hp_current"] <= 0:
+        await update.effective_chat.send_message(
+            "You're unconscious (0 HP) and can't act until healed.",
+            message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        )
+        return
+
+    opposing = session.living_on_side(session.opposing_side(user_id))
+    if not opposing:
+        if not await _try_end_stale_combat(update, session):
+            await update.effective_chat.send_message(
+                "No valid targets remain.", message_thread_id=topics.thread_id_for(chat_id, "adventure")
+            )
+        return
+    target = _pick_target(text, opposing)
+
+    template = cl.get_monster_template(CAMPAIGN, target.get("monster_key")) if target.get("monster_key") else None
+    stealable = template.get("stealable_items", []) if template else []
+    if not stealable:
+        await update.effective_chat.send_message(
+            f"**{target['name']}** isn't carrying anything worth stealing.",
+            message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        )
+        return
+
+    if forced_roll is None and attacker.get("manual_dice_enabled") and not attacker.get("is_ai"):
+        forced_roll = _extract_combined_roll(text)
+    if forced_roll is None and attacker.get("manual_dice_enabled") and not attacker.get("is_ai"):
+        _chat_scoped_dict(_PENDING_DICE_ROLLS, chat_id)[user_id] = _new_pending_roll("steal", text, chat_id)
+        await _safe_send(update, f"🎲 **{attacker['name']}**, roll a d20 for your theft attempt and tell me the result (you have 1 minute, or I'll roll for you).")
+        return
+
+    result = roll_ability_check(character, "dexterity", proficient=False, forced_roll=forced_roll)
+    bonus = _practiced_bonus_for(user_id, chat_id, "dexterity")
+    if character.get("guild") == "thieves_guild":
+        bonus += THIEVES_GUILD_STEAL_BONUS
+    if character.get("subclass") == "Thief":
+        bonus += THIEF_SUBCLASS_STEAL_BONUS
+    bonus += _steal_proficiency_bonus(character)
+    result["total"] += bonus
+    result["practiced_bonus"] = bonus
+    success = result["total"] >= STEAL_FROM_ENEMY_DC
+
+    if success:
+        db.record_skill_use(user_id, chat_id, "dexterity")
+        _grind_steal_proficiency(user_id, chat_id, character)
+        item_id = random.choices(
+            [entry["item_id"] for entry in stealable], weights=[entry["weight"] for entry in stealable],
+        )[0]
+        db.add_item(user_id, chat_id, item_id, 1)
+        item = items_module.get_item(item_id)
+        consequence_line = f"\n🤫 You lift **{item['name']}** off {target['name']} without them noticing."
+    else:
+        consequence_line = f"\n👊 {target['name']} feels the attempt and shoves you back — nothing taken."
+
+    flavor = await asyncio.to_thread(
+        narrate_skill_check, character, text, "dexterity",
+        {**result, "ability": "dexterity", "dc": STEAL_FROM_ENEMY_DC, "success": success},
+    )
+    message = _format_skill_check_result(flavor, result, "dexterity", STEAL_FROM_ENEMY_DC, success) + consequence_line
+    await _safe_send(update, message)
+
+    session.advance_turn()
+    await _resolve_ai_turns(update, session)
 
 
 EMPOWERED_SPELL_MAX_USES = 1

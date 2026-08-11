@@ -2,6 +2,39 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.145] — Pickpocket live enemies, Thieves' Guild lockpicking bonus
+
+Per Coffee: "give every enemy a stealable item... post what can be
+stolen from them in the bestiary, make it hard to steal but allow a
+proficiency to level up for them. only give each enemy 1-2 items at
+the most, if its a rare item make the % small." Also: "do locked
+treasures need keys... let[s] work it in for the thieves guild."
+
+- **Enemy pickpocketing**: typing "steal" mid-combat now targets the
+  live enemy instead of falling through to the shop-only logic
+  (`_do_steal_from_enemy`, same turn-order/target-resolution shape as
+  `_do_shove`). A real, genuinely harder DC (18, vs. the shop's 15).
+  Every one of the 56 monster templates now carries 1-2 real
+  `stealable_items` (Potion/Herbs/Ore common, Ether reserved for real
+  bosses specifically, a small-% real weapon roll) — authored by real
+  xp_reward/is_boss tier, weighted so the rare item stays genuinely
+  rare (5-10% of a successful steal).
+- **Steal proficiency** (`steal_proficiency_pct`, new DB column): a
+  real grindable 0-100% stat, same shape as weapon/armor proficiency,
+  converted into a small flat ability-check bonus (0-10) — shared by
+  both shop-steal and enemy-steal, grinds only on success.
+- **Bestiary**: a known monster's real stealable items are now listed
+  (`🎒 Can steal: ...`), same fog-of-war/grounding discipline as every
+  other bestiary fact — pulled from the same real data the steal roll
+  itself uses, never a separate invented hint.
+- **Thieves' Guild lockpicking bonus**: lockpicking (`_do_lockpick`,
+  already fully real — DC 13 dexterity check, no keys needed) had zero
+  guild tie-in despite stealing already having one. Now Thieves' Guild
+  members get the same real +3 (`THIEVES_GUILD_LOCKPICK_BONUS`) their
+  steal bonus already grants.
+
+7 new regression tests.
+
 ## [1.27.144] — Crafting/enchanting mastery, RNG quality, discard, recipe books, Adventurers' Guild rework
 
 Per Coffee: a level 60, rebirth-3 crafter and a level 5 one produced

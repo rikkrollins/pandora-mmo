@@ -4309,6 +4309,110 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_keyword_fallback("enchant my longsword with flame", [])["action"], "enchant_item")
         self.assertEqual(_keyword_fallback("imbue the shield with warding", [])["action"], "enchant_item")
 
+    async def test_steal_from_enemy_success_awards_a_real_stealable_item(self):
+        """
+        Real feature (2026-08-11, per Coffee: "give every enemy a
+        stealable item... make it hard to steal but allow a proficiency
+        to level up"). Typing "steal" mid-combat pickpockets the live
+        enemy target instead of falling through to the shop-only logic,
+        and the awarded item is a real one off the monster's own
+        campaign.json stealable_items -- never invented.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        leader_id = 960001
+        character = make_basic_character(
+            leader_id, "PickpocketTester", char_class="Rogue", current_location="crossroads_tavern",
+            ability_scores={"strength": 10, "dexterity": 20, "constitution": 12,
+                             "intelligence": 10, "wisdom": 10, "charisma": 10},
+        )
+        enemy = {
+            "telegram_user_id": -2_700_001, "name": "Test Goblin", "dexterity": 10,
+            "xp_reward": 50, "monster_key": "goblin", "hp_current": 10, "hp_max": 10,
+        }
+        leader = db.get_character(leader_id, -999)
+        leader["telegram_user_id"] = leader_id
+        session = sessions.start_session(-999, [leader, enemy], {leader_id: "party", -2_700_001: "enemy"})
+        session.turn_order = [leader_id, -2_700_001]
+
+        sink = []
+        update = FakeUpdate(leader_id, "steal from the goblin", sink)
+        with patch("bot.narrate_skill_check", return_value="You lift it clean."), \
+             patch("bot._resolve_ai_turns", new=AsyncMock()):
+            await bot._do_steal(update, "steal from the goblin", forced_roll=20)
+        self.assertTrue(any("lift" in s.lower() for s in sink))
+        updated = db.get_character(leader_id, -999)
+        real_stealable_ids = {e["item_id"] for e in bot.cl.get_monster_template(bot.CAMPAIGN, "goblin")["stealable_items"]}
+        gained = set(updated["inventory"].keys()) & real_stealable_ids
+        self.assertTrue(len(gained) > 0)
+        sessions.end_session(-999)
+
+    async def test_steal_from_enemy_with_nothing_stealable_gives_honest_refusal(self):
+        """A monster with no real stealable_items refuses honestly instead of inventing loot, and doesn't consume the turn."""
+        import sessions
+        sessions.end_session(-999)
+        leader_id = 960002
+        make_basic_character(leader_id, "NoLootTester", current_location="crossroads_tavern")
+        enemy = {
+            "telegram_user_id": -2_700_002, "name": "Bare Enemy", "dexterity": 10,
+            "xp_reward": 50, "monster_key": "no_such_monster_key", "hp_current": 10, "hp_max": 10,
+        }
+        leader = db.get_character(leader_id, -999)
+        leader["telegram_user_id"] = leader_id
+        session = sessions.start_session(-999, [leader, enemy], {leader_id: "party", -2_700_002: "enemy"})
+        session.turn_order = [leader_id, -2_700_002]
+
+        sink = []
+        update = FakeUpdate(leader_id, "steal from the enemy", sink)
+        await bot._do_steal(update, "steal from the enemy", forced_roll=20)
+        self.assertIn("isn't carrying anything", sink[-1])
+        self.assertEqual(session.current_participant_id(), leader_id)  # turn NOT consumed
+        sessions.end_session(-999)
+
+    def test_steal_proficiency_pct_persists_and_scales_bonus(self):
+        character = make_basic_character(960003, "StealProfTester", current_location="crossroads_tavern")
+        self.assertEqual(bot._steal_proficiency_bonus(character), 0)
+        for _ in range(500):
+            bot._grind_steal_proficiency(960003, -999, character)
+            character = db.get_character(960003, -999)
+        self.assertGreater(character["steal_proficiency_pct"], 1.0)
+        self.assertGreaterEqual(bot._steal_proficiency_bonus(character), 0)
+
+    async def test_lockpick_gives_a_thieves_guild_bonus(self):
+        """
+        Real feature (2026-08-11, per Coffee: work lockpicking into the
+        Thieves' Guild) -- end-to-end proof: the SAME forced roll that
+        fails a non-member (10 total vs DC 13) succeeds for a Thieves'
+        Guild member (13 total, the +3 guild bonus tips it over).
+        """
+        from unittest.mock import patch
+        location_id = "hollow_stump_shrine"
+        ability_scores = {"strength": 10, "dexterity": 12, "constitution": 10,
+                           "intelligence": 10, "wisdom": 10, "charisma": 10}
+
+        non_member = make_basic_character(960004, "NonMemberPicker", current_location=location_id, ability_scores=ability_scores)
+        location = bot.cl.get_location(bot.CAMPAIGN, location_id)
+        lockable = location["lockables"][0]
+        with patch("bot.narrate_skill_check", return_value="The pick slips."):
+            await bot._do_lockpick(FakeUpdate(960004, "pick the lock", []), non_member, dict(lockable), "pick the lock", forced_roll=9)
+        self.assertNotIn(lockable["id"], bot._UNLOCKED.get(-999, set()))
+
+        member = make_basic_character(960005, "GuildPicker", current_location=location_id, ability_scores=ability_scores)
+        db.update_character(960005, -999, guild="thieves_guild")
+        member = db.get_character(960005, -999)
+        with patch("bot.narrate_skill_check", return_value="The lock clicks open."):
+            await bot._do_lockpick(FakeUpdate(960005, "pick the lock", []), member, dict(lockable), "pick the lock", forced_roll=9)
+        self.assertIn(lockable["id"], bot._UNLOCKED.get(-999, set()))
+
+    async def test_bestiary_shows_real_stealable_items_for_a_known_monster(self):
+        """Real feature (2026-08-11, per Coffee: "post what can be stolen from them in the bestiary")."""
+        template = bot.cl.get_monster_template(bot.CAMPAIGN, "goblin")
+        entry = bot._format_bestiary_entry("goblin", template)
+        self.assertIn("Can steal", entry)
+        expected_name = items_module.get_item(template["stealable_items"][0]["item_id"])["name"]
+        self.assertIn(expected_name, entry)
+
     async def test_real_forge_handler_advances_a_carried_items_tier(self):
         """
         Real Phase 7 deliverable: bot._do_forge_item, run through the

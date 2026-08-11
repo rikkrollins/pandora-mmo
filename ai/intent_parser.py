@@ -106,8 +106,9 @@ before, skipping the walk. Set "target" to the destination name.
 in the area (not the whole area itself — that's "look"). Set "target" to the object's name.
 - "buy" is for purchasing something from a shop or merchant.
 - "sell" is for selling something they're carrying.
-- "steal" is for stealing, pickpocketing, robbing, or taking something without paying — a real risk of \
-getting caught, with real consequences, not the same as "buy".
+- "steal" is for stealing, pickpocketing, robbing, or taking something without paying — from a shop OR, \
+mid-combat, pickpocketing a live enemy — a real risk of getting caught, with real consequences, not the \
+same as "buy".
 - "cast_spell" is for casting/using a named spell.
 - "use_item" is for drinking/using/consuming/quaffing a carried consumable item (e.g. a potion, antitoxin, \
 rations) — NOT a spell and NOT a shop purchase. Set "item_name" to the item, and "target" to who it's for if named (defaults to self).
