@@ -3049,6 +3049,55 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("MenuGoblinB", target_picker)
         self.assertIn("bm|throwtarget|silvered_dagger|MenuGoblinB", target_picker)
 
+    async def test_battle_menu_steal_button_offers_a_target_picker_and_steals(self):
+        """
+        Real feature (2026-08-11, per Coffee: "put the steal button in
+        the more menu in battle menu") -- same real "more" submenu
+        pattern as Throw, dispatching through the exact real
+        bot._do_steal handler a typed "steal" already uses.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        user_id = 950929
+        make_basic_character(
+            user_id, "MenuStealer", current_location="crossroads_tavern",
+            ability_scores={"strength": 10, "dexterity": 20, "constitution": 12,
+                             "intelligence": 10, "wisdom": 10, "charisma": 10},
+        )
+        enemy_a = {"telegram_user_id": -2_500_065, "name": "StealGoblinA", "hp_current": 20, "hp_max": 20,
+                   "is_ai": 1, "strength": 10, "dexterity": 10, "armor_class": 10, "monster_key": "goblin"}
+        enemy_b = {"telegram_user_id": -2_500_066, "name": "StealGoblinB", "hp_current": 20, "hp_max": 20,
+                   "is_ai": 1, "strength": 10, "dexterity": 10, "armor_class": 10, "monster_key": "goblin"}
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy_a, enemy_b],
+                                          {user_id: "party", -2_500_065: "enemy", -2_500_066: "enemy"})
+        session.turn_order = [user_id, -2_500_065, -2_500_066]
+        session.current_turn_index = 0
+
+        async def tap(data):
+            sink = []
+            await bot.battle_menu_callback(FakeCallbackUpdate(user_id, data, sink), DummyContext())
+            return "\n".join(sink)
+
+        more_menu = await tap("bm|more")
+        self.assertIn("bm|steal", more_menu)
+
+        target_picker = await tap("bm|steal")
+        self.assertIn("StealGoblinA", target_picker)
+        self.assertIn("StealGoblinB", target_picker)
+        self.assertIn("bm|stealtarget|StealGoblinB", target_picker)
+
+        with patch("bot.narrate_skill_check", return_value="You lift it clean."), \
+             patch("bot.roll_ability_check", return_value={"raw_roll": 20, "total": 30, "modifier": 0}), \
+             patch("bot._resolve_ai_turns", new=AsyncMock()):
+            await tap("bm|stealtarget|StealGoblinB")
+        updated = db.get_character(user_id, -999)
+        real_ids = {e["item_id"] for e in bot.cl.get_monster_template(bot.CAMPAIGN, "goblin")["stealable_items"]}
+        self.assertTrue(set(updated["inventory"].keys()) & real_ids)
+        sessions.end_session(-999)
+
     async def test_battle_menu_tap_resets_inactivity_clock(self):
         """
         Real live bug (2026-08-11, dev-topic report): a player who only

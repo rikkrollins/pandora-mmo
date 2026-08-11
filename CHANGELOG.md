@@ -2,6 +2,16 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.147] — Steal button in the battle menu's More submenu
+
+Per Coffee: "put the steal button in the more menu in battle menu."
+The RPG-style battle menu's "More" submenu (Formation/Give/Equip/
+Throw/Run) gets a real "🎯 Steal" button, same shape as Throw's own
+target picker (single enemy steals immediately, multiple enemies show
+a real target list) — dispatches through the exact same `_do_steal`
+real handler a typed "steal" already uses from v1.27.145, no separate
+logic. 1 new regression test.
+
 ## [1.27.146] — Real push-button item actions after crafting
 
 Per Coffee (Development topic screenshot, after crafting a Longsword):

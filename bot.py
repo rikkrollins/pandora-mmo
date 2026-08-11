@@ -2966,6 +2966,12 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             buttons.append([InlineKeyboardButton("⚔️ Equip", callback_data="bm|equip")])
         if character and _throwable_weapon_ids(character):
             buttons.append([InlineKeyboardButton("🔪 Throw", callback_data="bm|throw")])
+        # 2026-08-11, per Coffee: "put the steal button in the more menu
+        # in battle menu" -- same real turn-consuming action Throw
+        # already is (this submenu isn't free-actions-only, despite its
+        # own docstring's framing), dispatches through the exact same
+        # bot._do_steal real handler a typed "steal" already uses.
+        buttons.append([InlineKeyboardButton("🎯 Steal", callback_data="bm|steal")])
         buttons.append([InlineKeyboardButton("🏃 Run", callback_data="bm|run")])
         buttons.append([InlineKeyboardButton("« Back", callback_data="bm|menu")])
         await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
@@ -3012,6 +3018,34 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             return
         await _safe_edit_markup(query)
         await _do_throw_weapon(update, f"throw {weapon_item['name']} at {target_name}")
+        return
+
+    if action == "steal":
+        opposing = session.living_on_side(session.opposing_side(user_id)) if session else []
+        if not opposing:
+            await _safe_edit_markup(query, _battle_menu_keyboard(session))
+            return
+        if len(opposing) == 1:
+            await _safe_edit_markup(query)
+            await _do_steal(update, f"steal from {opposing[0]['name']}")
+            return
+        buttons = [
+            [InlineKeyboardButton(
+                f"{p['name']} ({p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP)",
+                callback_data=f"bm|stealtarget|{p['name']}",
+            )]
+            for p in opposing
+        ]
+        buttons.append([InlineKeyboardButton("« Back", callback_data="bm|more")])
+        await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+        return
+
+    if action == "stealtarget":
+        if value is None:
+            await _safe_edit_markup(query, _battle_menu_keyboard(session))
+            return
+        await _safe_edit_markup(query)
+        await _do_steal(update, f"steal from {value}")
         return
 
     if action == "formation":
