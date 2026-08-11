@@ -674,6 +674,35 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
                         name = text[lowered.index(trigger) + len(trigger):lowered.index(cut)].strip()
                         action = "set_back_row" if row == "back" else "set_front_row"
                         return {**base, "action": action, "target": name or None}
+    # Real live bug (2026-08-11, topic-monitor report): "Move laurienna
+    # back" and "Move Zara and Sarah up" both came back as "move"/
+    # "talk_npc" instead of a formation change -- right after Coffee's
+    # own "Move Sarah to front row" correctly worked. Root cause: the
+    # name-extraction loop above only recognizes "to the back"/"in the
+    # front"/etc. phrasing, never a bare trailing "back"/"up" the way
+    # "pull X back" already does (see _PULL_BACK_TRAILERS below, added
+    # 2026-08-08 for exactly this same shape of bug) -- so a perfectly
+    # natural "move NAME back"/"move NAME up" fell through past the
+    # keyword fallback entirely and hit the model, which (per its
+    # well-documented bias when a known companion name is present)
+    # guessed talk_npc instead. Deliberately does NOT try to handle an
+    # "and"-joined multi-name target ("Zara and Sarah") -- the target
+    # field is a single name, and guessing a combined "Zara and Sarah"
+    # string would just fail character lookup downstream instead of
+    # fixing anything, so that case still falls through unchanged.
+    _MOVE_BARE_TRAILERS = {"back": "set_back_row", "up": "set_front_row"}
+    for trigger in ["move ", "put "]:
+        if trigger not in lowered:
+            continue
+        stripped = lowered.rstrip().rstrip(".!")
+        for bare_word, action in _MOVE_BARE_TRAILERS.items():
+            if stripped.endswith(" " + bare_word):
+                start = lowered.index(trigger) + len(trigger)
+                end = len(stripped) - len(bare_word)
+                name = text[start:end].strip()
+                if name and len(name.split()) <= 3 and not any(c in name for c in ",.") and " and " not in name.lower():
+                    return {**base, "action": action, "target": name}
+                break
     for trigger in ("takes point", "take point"):
         if trigger in lowered:
             name = text[:lowered.index(trigger)].strip()

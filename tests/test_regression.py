@@ -4879,6 +4879,36 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         r = _keyword_fallback("Talk to Vesh about the quest", npc_names)
         self.assertEqual(r["action"], "talk_npc")
 
+    def test_formation_command_with_bare_trailing_back_or_up_names_the_target(self):
+        """
+        Real live bug (2026-08-11, topic-monitor report), same shape as
+        the "Pull vesh back to the back row" fix above but for "move"
+        with no "to the row" phrasing at all: "Move laurienna back" came
+        back as "move" (the LOCATION-travel action) instead of a
+        formation change, right after "Move Sarah to front row" (which
+        DOES have "to ... row" phrasing) correctly worked. Root cause:
+        the name-extraction loop only recognized "to the back"/"in the
+        front"/etc. cut phrases, never a bare trailing "back"/"up" the
+        way "pull X back" already did.
+        """
+        r = _keyword_fallback("Move laurienna back", ["Laurienna"])
+        self.assertEqual(r["action"], "set_back_row")
+        self.assertEqual((r.get("target") or "").lower(), "laurienna")
+
+        r = _keyword_fallback("Move Zara up", ["Zara"])
+        self.assertEqual(r["action"], "set_front_row")
+        self.assertEqual((r.get("target") or "").lower(), "zara")
+
+        # No regression: the existing bare "move up"/"move to back row"
+        # (no name -- assumed to mean the speaker's own character) still
+        # work exactly as before.
+        r = _keyword_fallback("move up", [])
+        self.assertEqual(r["action"], "set_front_row")
+        self.assertIsNone(r.get("target"))
+        r = _keyword_fallback("Move to back row", [])
+        self.assertEqual(r["action"], "set_back_row")
+        self.assertIsNone(r.get("target"))
+
     def test_tactical_phrasing_maps_to_formation_not_flee(self):
         self.assertEqual(_keyword_fallback("pull back", [])["action"], "set_back_row")
         result = _keyword_fallback("pull Zara back", [])

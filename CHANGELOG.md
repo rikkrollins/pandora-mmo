@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.138] — Fix: "move NAME back/up" formation commands misclassified
+
+Real live bug caught via topic-activity monitoring: "Move laurienna
+back" came back as the LOCATION-travel `move` action, and "Move Zara
+and Sarah up" came back as `talk_npc` — right after Coffee's own "Move
+Sarah to front row" (which has explicit "to ... row" phrasing) worked
+correctly moments earlier. Root cause: `ai/intent_parser.py`'s
+formation-command name-extraction only recognized "to the back"/"in
+the front"/etc. cut phrases, never a bare trailing "back"/"up" the way
+"pull X back" already does (fixed for `pull` on 2026-08-08 for this
+exact same shape of bug) — so the message fell through the keyword
+fallback entirely and hit the model, which (per its well-documented
+bias toward `talk_npc` when a known companion name is present) guessed
+wrong.
+
+Fixed by extending the name-extraction logic to also match a bare
+trailing "back"/"up" after "move "/"put ", mirroring the existing
+`pull`-back handling. Deliberately does not attempt to resolve an
+"and"-joined multi-name target ("Zara and Sarah") — the target field
+is a single name, so a combined string would just fail character
+lookup downstream rather than fix anything; that case still falls
+through unchanged, same as before.
+
+New regression tests confirm the fix and that the existing bare "move
+up"/"move to back row" (no name, assumed to mean the speaker's own
+character) still work exactly as before.
+
 ## [1.27.137] — Two more real bugs caught by cron monitoring
 
 **"/ menu" (a stray space after the slash) went totally silent.**
