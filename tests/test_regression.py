@@ -4303,6 +4303,97 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         reloaded = db.get_character(950937, -999)
         self.assertAlmostEqual(reloaded["profession_mastery_pct"]["blacksmithing"], bot.PROFICIENCY_STARTING_PCT + bot.PROFICIENCY_GRIND_INCREMENT)
 
+    async def test_advanced_craft_success_attaches_a_view_item_button(self):
+        """
+        Real feature (2026-08-11, per Coffee, Development topic
+        screenshot: "after a player crafts, can you let them view the
+        weapon with a push button and give them options below with push
+        buttons like give, marketplace, reforge, equip") -- a successful
+        advanced craft now sends a real follow-up "Tap below to inspect"
+        message with a View Item button attached, same as combat loot
+        already gets (_grant_generated_loot).
+        """
+        from unittest.mock import patch
+        user_id = 950950
+        make_basic_character(
+            user_id, "ButtonCraftTester", char_class="Fighter", current_location="crossroads_tavern",
+            ability_scores={"strength": 20, "dexterity": 10, "constitution": 14,
+                             "intelligence": 10, "wisdom": 10, "charisma": 10},
+        )
+        sink = []
+        update = FakeUpdate(user_id, "craft a masterwork longsword", sink)
+        real_safe_send = bot._safe_send
+        captured_markups = []
+
+        async def spying_safe_send(upd, text, **kwargs):
+            if "Tap below to inspect" in text:
+                captured_markups.append(kwargs.get("reply_markup"))
+            return await real_safe_send(upd, text, **kwargs)
+
+        with patch("bot.narrate_skill_check", return_value="You forge it true."), \
+             patch("bot._safe_send", side_effect=spying_safe_send):
+            succeeded = False
+            for _ in range(20):
+                sink.clear()
+                db.add_item(user_id, -999, "iron_ore", 6)
+                db.add_item(user_id, -999, "moonpetal", 1)
+                await bot._do_craft(update, "craft a masterwork longsword")
+                if any("Tap below to inspect" in s for s in sink):
+                    succeeded = True
+                    break
+        self.assertTrue(succeeded)
+        self.assertTrue(len(captured_markups) > 0)
+        self.assertIsInstance(captured_markups[-1], bot.InlineKeyboardMarkup)
+
+    async def test_itemview_reforge_button_upgrades_item_tier(self):
+        """Real feature (2026-08-11): the item-view screen's new "Reforge" button runs the exact same tier-upgrade logic _do_forge_item's free-text path uses."""
+        from unittest.mock import patch
+        from rules.item_generator import generate_weapon
+        user_id = 950951
+        make_basic_character(
+            user_id, "ReforgeButtonTester", char_class="Fighter", current_location="crossroads_tavern",
+            ability_scores={"strength": 20, "dexterity": 10, "constitution": 14,
+                             "intelligence": 10, "wisdom": 10, "charisma": 10},
+            gold=10000,
+        )
+        weapon = generate_weapon(tier="common")
+        affixes = weapon.pop("affixes", [])
+        item_id = db.create_item_instance(
+            item_type=weapon["type"], name=weapon["name"], rarity=weapon["rarity"],
+            price=weapon["price"], base_stats=weapon, affixes=affixes,
+        )
+        db.add_item(user_id, -999, item_id, 1)
+        db.add_item(user_id, -999, "iron_ore", 100)
+
+        advanced = False
+        with patch("bot.narrate_skill_check", return_value="The metal reshapes under real heat."):
+            for _ in range(15):
+                sink = []
+                update = FakeCallbackUpdate(user_id, f"itemview|reforge|{item_id}", sink)
+                await bot.itemview_callback(update, DummyContext())
+                if db.materialize_item_instance(item_id)["rarity"] != "common":
+                    advanced = True
+                    break
+        self.assertTrue(advanced)
+
+    async def test_itemview_reforge_rejects_when_not_owned(self):
+        from rules.item_generator import generate_weapon
+        owner_id, other_id = 950952, 950953
+        make_basic_character(owner_id, "RealOwner", current_location="crossroads_tavern")
+        make_basic_character(other_id, "NotTheOwner", current_location="crossroads_tavern")
+        weapon = generate_weapon(tier="common")
+        affixes = weapon.pop("affixes", [])
+        item_id = db.create_item_instance(
+            item_type=weapon["type"], name=weapon["name"], rarity=weapon["rarity"],
+            price=weapon["price"], base_stats=weapon, affixes=affixes,
+        )
+        db.add_item(owner_id, -999, item_id, 1)
+        sink = []
+        update = FakeCallbackUpdate(other_id, f"itemview|reforge|{item_id}", sink)
+        await bot.itemview_callback(update, DummyContext())
+        self.assertIn("don't have", sink[-1])
+        self.assertEqual(db.materialize_item_instance(item_id)["rarity"], "common")
+
     def test_forge_and_enchant_keyword_fallback_classification(self):
         """Real Phase 7 deliverable: "forge my X" / "enchant my X" / "imbue the X" classify correctly without a model call."""
         self.assertEqual(_keyword_fallback("forge my longsword", [])["action"], "forge_item")

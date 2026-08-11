@@ -2,6 +2,24 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.146] — Real push-button item actions after crafting
+
+Per Coffee (Development topic screenshot, after crafting a Longsword):
+"can you let them view the weapon with a push button and give them
+options below with push buttons like give, marketplace, reforge,
+equip." Combat loot already got this (the "View Item" button system
+shipped 2026-08-03); crafting a magic item never got wired into it.
+
+- A successful advanced (generated-item) craft now sends the same
+  "🔍 Tap below to inspect" follow-up with a View Item button, leading
+  to the same real action screen (Equip/Sell/List on Market/Give).
+- Added a real "🔨 Reforge" button to that action screen, reusing
+  `_do_forge_item`'s exact tier-upgrade logic via a new extracted
+  `_forge_item_core` helper (`_do_forge_item`'s free-text path and the
+  button now share one implementation, not two).
+
+3 new regression tests.
+
 ## [1.27.145] — Pickpocket live enemies, Thieves' Guild lockpicking bonus
 
 Per Coffee: "give every enemy a stealable item... post what can be

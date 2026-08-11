@@ -3942,10 +3942,14 @@ def _item_actions_keyboard(item_id: str) -> InlineKeyboardMarkup:
     exact same underlying logic the equivalent free-text command
     already uses (db.equip_item, shop.sell_item, db.create_market_
     listing, db.add_item/remove_item) -- no separate action logic of
-    its own.
+    its own. "Reforge" (2026-08-11, per Coffee: "options below with
+    push buttons like give, marketplace, reforge, equip") reuses
+    _forge_item_core, the exact same tier-upgrade logic _do_forge_item's
+    free-text path already runs.
     """
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("⚔️ Equip", callback_data=f"itemview|equip|{item_id}")],
+        [InlineKeyboardButton("🔨 Reforge", callback_data=f"itemview|reforge|{item_id}")],
         [InlineKeyboardButton("💰 Sell", callback_data=f"itemview|sell|{item_id}")],
         [InlineKeyboardButton("🏛️ List on Market", callback_data=f"itemview|market|{item_id}")],
         [InlineKeyboardButton("🤝 Give", callback_data=f"itemview|give|{item_id}")],
@@ -12028,6 +12032,21 @@ async def _do_craft(update: Update, text: str) -> None:
         # the existing item-icon convention as the gather fix above.
         image_item_id = generated_item_id if is_advanced else result["result_item"]
         await _maybe_send_item_image(update, image_item_id, result_item)
+        # Real action buttons on a freshly crafted item (2026-08-11, per
+        # Coffee: "after a player crafts, can you let them view the
+        # weapon with a push button and give them options below with
+        # push buttons like give, marketplace, reforge, equip") -- same
+        # "🔍 Tap below to inspect" follow-up combat loot already gets
+        # (see _grant_generated_loot), so crafting a magic item isn't
+        # treated any differently from finding one. Only real generated
+        # items ("gi<n>") have a real item-view screen at all -- a
+        # static-catalog craft (a potion, a scroll) has nothing to
+        # equip/forge/list, so this is advanced-craft only.
+        if is_advanced:
+            await _safe_send(
+                update, f"🔍 Tap below to inspect the {result_item['name']} you just crafted.",
+                reply_markup=_item_view_keyboard(generated_item_id), speak=False,
+            )
 
 
 # Magic item system Phase 7 (2026-08-02): forging bumps a real generated
@@ -12063,6 +12082,19 @@ async def _do_forge_item(update: Update, text: str) -> None:
             "Only a real magic item you've found or crafted (not a plain shop item) can be forged to a higher tier.",
         )
         return
+    await _forge_item_core(update, item_id, item, text)
+
+
+async def _forge_item_core(update: Update, item_id: str, item: dict, text: str) -> None:
+    """
+    The real forge-to-higher-tier logic, factored out of _do_forge_item
+    (2026-08-11, per Coffee: real push-button options -- give, market,
+    reforge, equip -- on a freshly viewed item) so itemview_callback's
+    "reforge" button can run the exact same cost/roll/apply path a
+    free-text "forge my X" already does, instead of a second copy of it.
+    `text` is only used as narrate_skill_check's flavor context.
+    """
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if item["type"] not in ("weapon", "armor", "shield"):
         await _safe_send(update, "Only weapons, armor, and shields can be forged.")
         return
@@ -14552,6 +14584,11 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return
         _ok, msg, _updated = db.equip_item(update.effective_user.id, update.effective_chat.id, item_id)
         await _safe_send(update, msg)
+    elif action == "reforge":
+        if not owns_it:
+            await _safe_send(update, f"You don't have the {item['name']} to reforge.")
+            return
+        await _forge_item_core(update, item_id, item, f"forge my {item['name']}")
     elif action == "sell":
         if not owns_it:
             await _safe_send(update, f"You don't have the {item['name']} to sell.")
