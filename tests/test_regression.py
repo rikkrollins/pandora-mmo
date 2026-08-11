@@ -234,6 +234,27 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id, -999)
         self.assertNotEqual(character["current_location"], "tavern_upstairs")
 
+    async def test_stray_space_slash_menu_still_opens_the_menu(self):
+        """
+        Real live bug (2026-08-11, topic-monitor report): a player typed
+        "/ menu" (a stray space after the slash -- an easy, natural typo)
+        and got total silence. Root cause: Telegram's own bot_command
+        entity parser requires no space between "/" and the command name,
+        so "/ menu" never becomes a real /menu command update at all --
+        it falls all the way through to ordinary intent classification,
+        which has no keyword match for it either, so it's read as
+        unclassifiable chat (silent by design) -- the exact same
+        "chat is silently unhelpful" failure shape as the 2026-07-09
+        NPC-dialogue bug in CLAUDE.md's "Resolved investigations".
+        """
+        user_id = 222223
+        make_basic_character(user_id, current_location="crossroads_tavern")
+        sink = []
+        await bot.adventure_master_handler(FakeUpdate(user_id, "/ menu", sink), DummyContext())
+        self.assertTrue(sink, "player got total silence for a stray-space /menu typo")
+        reply = "\n".join(sink)
+        self.assertIn("what do you want to check", reply)
+
     # -- Examine target-matching (v1.7.5) ------------------------------
     def test_find_interactable_handles_article_and_spacing_mismatch(self):
         location = {"interactables": {
@@ -1759,6 +1780,32 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             result = intent_parser_module.parse_intent(
                 "I'll take a mug, ale!!! how are you doing old buddy?", []
             )
+        self.assertEqual(result["action"], "chat")
+
+    def test_model_guessing_attack_for_a_bare_emoji_is_never_trusted(self):
+        """
+        Real live bug (2026-08-11, live-confirmed by Coffee): sent "\U0001F608"
+        (devil emoji) as banter/heckling aimed at a boss mid-fight, not a
+        real combat command -- the model classified it as "attack" anyway,
+        and the game actually spent a real combat turn attacking. Same
+        defensive pattern as the pass_turn/start_combat guards: a message
+        with no real letters at all has no verb for the model to have
+        genuinely understood, so "attack" -- a stateful action with a
+        real, hard-to-undo consequence when it fires wrongly -- is never
+        trusted from the model alone for emoji/punctuation-only text.
+        """
+        from unittest.mock import patch
+        import ai.intent_parser as intent_parser_module
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": '{"action": "attack"}'}
+
+        with patch("ai.intent_parser.requests.post", return_value=FakeResponse()):
+            result = intent_parser_module.parse_intent("\U0001F608", [])
         self.assertEqual(result["action"], "chat")
 
     # -- Real live bug (2026-07-17): capping num_predict for speed

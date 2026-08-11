@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.137] — Two more real bugs caught by cron monitoring
+
+**"/ menu" (a stray space after the slash) went totally silent.**
+Telegram's own bot_command entity parser requires no space between "/"
+and the command name, so "/ menu" never becomes a real `/menu` update —
+it fell all the way through to ordinary intent classification, which
+has no keyword match for it either, so it was read as unclassifiable
+chat (silent by design). Exactly the same "chat is silently
+unhelpful" failure shape as the 2026-07-09 NPC-dialogue bug in
+CLAUDE.md's "Resolved investigations". Fixed in
+`adventure_master_handler`: a stray-space "/menu" typo now opens the
+menu directly, checked before the universal escape hatch.
+
+**A bare emoji got classified as a real "attack" and spent a real
+combat turn.** Live-confirmed by Coffee: sending 😈 to heckle a boss
+mid-fight (not a combat command) got read by the model as "attack".
+`_keyword_fallback` has no opinion on emoji-only text (nothing to
+match), so the model's own raw guess was trusted directly — and it
+guessed wrong. Fixed in `ai/intent_parser.py` with the same defensive
+pattern already used for the `start_combat`/`pass_turn` model-bias
+guards: `attack` is never trusted from the model alone when the
+message has no real letters in it at all.
+
+New regression tests for both (a real end-to-end `/ menu` message via
+`adventure_master_handler`, and a mocked-model test mirroring the
+existing pass_turn-bias regression test).
+
 ## [1.27.136] — Three real dev-topic bug reports, root-caused and fixed
 
 Caught by the dev-bridge monitor (three screenshotted reports,

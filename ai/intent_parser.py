@@ -2009,6 +2009,21 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
             # would have been returned by the general rule above if so.
             if parsed["action"] == "pass_turn":
                 return fallback
+            # Same defensive pattern again (2026-08-11, live-confirmed by
+            # Coffee): a bare emoji message ("😈", sent as banter/heckling
+            # aimed at a boss, not a real combat command) got classified
+            # as "attack" and actually spent a real combat turn attacking.
+            # A message with no real letters at all has no verb for the
+            # model to have genuinely understood -- "attack" specifically
+            # is a stateful action with a real, hard-to-undo consequence
+            # (a real turn, a real dice roll) when it fires wrongly, so
+            # it's never trusted from the model alone for emoji/
+            # punctuation-only text, same as start_combat/pass_turn above.
+            # _keyword_fallback already returns "chat" for text like this
+            # (no keyword can match a message with no words), so this
+            # falls through to that safe, silent default instead.
+            if parsed["action"] == "attack" and not re.search(r"[a-zA-Z]", text):
+                return fallback
             return parsed
     except (requests.RequestException, ValueError) as e:
         print(f"[intent_parser] model call failed, using keyword fallback: {e}")

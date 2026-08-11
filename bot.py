@@ -18954,6 +18954,23 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     )
     _IDLE_WARNED.discard((update.effective_user.id, update.effective_chat.id))
 
+    # Real live bug (2026-08-11, topic-monitor report): "/ menu" (a stray
+    # space after the slash -- an easy, natural typo) never reaches
+    # Telegram's own bot_command entity parser, which requires no space
+    # between "/" and the command name -- so it falls all the way through
+    # to ordinary intent classification, gets read as unclassifiable
+    # small talk, and the player gets total silence in return, exactly
+    # the same "chat is silently unhelpful" failure shape as the
+    # 2026-07-09 NPC-dialogue bug (see CLAUDE.md's "Resolved
+    # investigations"). Checked before the escape hatch below (cheap,
+    # exact, can never collide with real gameplay text) -- /menu is
+    # dual-topic (Adventure+Support per menu_command's own docstring),
+    # but this handler only ever sees Adventure traffic, so only that
+    # side needs the guard.
+    if re.match(r"^/\s+menu\b", update.message.text.strip(), re.IGNORECASE):
+        await _do_show_menu(update)
+        return
+
     # Universal escape hatch, checked FIRST, before any stateful flow gets
     # a chance to swallow the message. Exact-match only (never a substring
     # check) so ordinary gameplay text like "I stop to look around" or
