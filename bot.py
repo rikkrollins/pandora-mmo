@@ -14457,12 +14457,28 @@ def _plural_forms(word: str) -> list[str]:
     "+s" plural), so the very first live use of this monster-matching
     fix silently failed the exact case it was built for. Covers regular
     "+s"/"+es" and the common f/fe -> ves irregular (wolf -> wolves).
+
+    Real live bug (2026-08-11, dev-topic screenshot, Coffee: "This
+    triggered the wrong battle. It should've been a battle with the
+    goblin shamans"): "Attack the goblin shamens" -- a real, common
+    mispluralization (by false analogy with policeman/policemen,
+    woman/women) -- matched none of "goblin shaman"'s real forms
+    (shaman/shamans/shamanes), so _find_monster_mentioned_in_text fell
+    through past it entirely and matched the shorter, unrelated plain
+    "Goblin" template instead (a real word-boundary substring of the
+    same input). Confirmed live via direct repro against the real
+    Goblin Warrens location data. "-man" nouns also getting a "-men"/
+    "-mens" candidate covers this and any future monster name with the
+    same suffix, not just this one word.
     """
     forms = [word, word + "s", word + "es"]
     if word.endswith("f"):
         forms.append(word[:-1] + "ves")
     elif word.endswith("fe"):
         forms.append(word[:-2] + "ves")
+    if word.endswith("man"):
+        forms.append(word[:-3] + "men")
+        forms.append(word[:-3] + "mens")
     return forms
 
 

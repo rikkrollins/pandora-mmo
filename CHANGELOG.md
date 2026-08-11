@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.149] — Fix: "shaman"/"shamen" mispluralization triggered the wrong battle
+
+Per Coffee (dev-topic screenshot): "This triggered the wrong battle.
+It should've been a battle with the goblin shamans." "Attack the
+goblin shamens" -- a real, common mispluralization (by false analogy
+with policeman/policemen) -- matched none of "goblin shaman"'s
+recognized forms (shaman/shamans/shamanes), so the monster-matching
+fallthrough resolved to the shorter, unrelated plain "Goblin" template
+instead. `_plural_forms` now also tries a "-men"/"-mens" form for any
+"-man"-ending name, confirmed against the real Goblin Warrens location
+data with no regression on the existing goblin/goblin_boss
+disambiguation. 2 new regression tests.
+
 ## [1.27.148] — Fix: switching characters could strand you alone in a stale party
 
 Per Coffee (dev-topic report): "Why have i been dropped from the party

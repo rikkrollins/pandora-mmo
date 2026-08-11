@@ -8442,6 +8442,24 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(found)
         self.assertEqual(found[0], "wolf")
 
+    def test_find_monster_mentioned_in_text_handles_the_shaman_shamen_mispluralization(self):
+        """
+        Real live bug (2026-08-11, dev-topic screenshot, Coffee: "This
+        triggered the wrong battle. It should've been a battle with the
+        goblin shamans") -- "Attack the goblin shamens" (a real, common
+        mispluralization) previously matched none of "goblin shaman"'s
+        real forms and fell through to the shorter, unrelated plain
+        "Goblin" template instead. Also confirms the correct spelling
+        and the pre-existing goblin/goblin_boss disambiguation both
+        still resolve correctly (no regression on the 2026-07-23 fix
+        for that exact case).
+        """
+        location = bot.cl.get_location(bot.CAMPAIGN, "goblin_warrens")
+        self.assertEqual(bot._find_monster_mentioned_in_text(location, "Attack the goblin shamens")[0], "goblin_shaman")
+        self.assertEqual(bot._find_monster_mentioned_in_text(location, "Attack the goblin shamans")[0], "goblin_shaman")
+        self.assertEqual(bot._find_monster_mentioned_in_text(location, "Attack the goblin boss")[0], "goblin_boss")
+        self.assertEqual(bot._find_monster_mentioned_in_text(location, "Attack the goblin")[0], "goblin")
+
     async def test_examine_unknown_monster_acknowledges_threat_without_stats(self):
         user_id = 900943
         make_basic_character(user_id, "Ravenloft", current_location="whispering_wood")
