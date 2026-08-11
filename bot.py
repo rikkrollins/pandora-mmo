@@ -14488,6 +14488,21 @@ def _find_monster_mentioned_in_text(location: dict, text: str) -> tuple[str, dic
     (location["monsters"], a list of monster_keys) against free text --
     same real-substring-match philosophy as _find_interactable, just
     for a different real fact source (task from Coffee, 2026-07-17).
+
+    Real live bug (2026-08-11, Coffee, live: "i jus typed fight a
+    shamen and it didnt work again... says no active combat"): even
+    the CORRECT spelling ("Fight a Shaman", no "goblin" prefix) failed
+    -- every candidate was always built from the monster's FULL name
+    ("goblin shaman"/"goblin_shaman"), so a bare last-word reference
+    never matched at all, regardless of spelling or pluralization (the
+    same day's earlier fix only helped once "goblin" was ALSO present
+    in the text). Second pass below: if the full name doesn't match
+    anything, try just the LAST WORD of each multi-word name (its real
+    distinguishing part -- "shaman", not "goblin", the part shared by
+    every monster here) -- but ONLY when that word is unique among
+    this location's own monsters, so "the boss" can't accidentally
+    guess between two different, differently-typed bosses if this
+    location ever has more than one.
     """
     lowered = text.strip().lower()
     monster_keys = location.get("monsters", [])
@@ -14497,6 +14512,15 @@ def _find_monster_mentioned_in_text(location: dict, text: str) -> tuple[str, dic
     for monster_key, template in templates:
         name = template["name"].lower()
         candidates = _plural_forms(name) + _plural_forms(monster_key.replace("_", " "))
+        if any(re.search(r"\b" + re.escape(c) + r"\b", lowered) for c in candidates):
+            return monster_key, template
+
+    last_words = [t["name"].lower().split()[-1] for _, t in templates]
+    for monster_key, template in templates:
+        last_word = template["name"].lower().split()[-1]
+        if last_words.count(last_word) > 1:
+            continue  # ambiguous among this location's own monsters -- never guess
+        candidates = _plural_forms(last_word)
         if any(re.search(r"\b" + re.escape(c) + r"\b", lowered) for c in candidates):
             return monster_key, template
     return None

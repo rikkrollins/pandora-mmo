@@ -2,6 +2,22 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.150] — Fix: bare "shaman"/"shamen" (no "goblin" prefix) still matched nothing
+
+Per Coffee, live and frustrated: "i jus typed fight a shamen and it
+didnt work again... says no active combat" -- v1.27.149's same-day
+mispluralization fix only helped once "goblin" was ALSO present in
+the text. Every candidate was still built from a monster's FULL name
+("goblin shaman"/"goblin_shaman"), so even the correctly-spelled bare
+"Fight a Shaman" (no "goblin" at all) matched nothing.
+`_find_monster_mentioned_in_text` now tries a second pass on just the
+LAST WORD of each multi-word monster name ("shaman", "boss" -- the
+real distinguishing part at a location where every monster starts
+with "goblin") once the full name fails to match, gated to only fire
+when that word is unique among the location's own monsters so it
+never has to guess between two real candidates. 1 new regression
+test.
+
 ## [1.27.149] — Fix: "shaman"/"shamen" mispluralization triggered the wrong battle
 
 Per Coffee (dev-topic screenshot): "This triggered the wrong battle.

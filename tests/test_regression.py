@@ -8460,6 +8460,27 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bot._find_monster_mentioned_in_text(location, "Attack the goblin boss")[0], "goblin_boss")
         self.assertEqual(bot._find_monster_mentioned_in_text(location, "Attack the goblin")[0], "goblin")
 
+    def test_find_monster_mentioned_in_text_matches_a_bare_last_word_with_no_goblin_prefix(self):
+        """
+        Real live bug (2026-08-11, Coffee, live: "i jus typed fight a
+        shamen and it didnt work again... says no active combat" --
+        "i thought u fixed this"): the SAME-DAY mispluralization fix
+        only helped once "goblin" was ALSO in the text -- even the
+        correctly-spelled bare "Fight a Shaman" (no "goblin" prefix at
+        all) still matched nothing. A monster's last word ("shaman",
+        "boss") is its own real distinguishing part at this location
+        (every monster here starts with "goblin"), so it's now tried on
+        its own once the full name fails to match -- gated to only
+        fire when that last word is unique among this location's own
+        monsters, so it never has to guess between two real candidates.
+        """
+        location = bot.cl.get_location(bot.CAMPAIGN, "goblin_warrens")
+        self.assertEqual(bot._find_monster_mentioned_in_text(location, "Fight a Shaman")[0], "goblin_shaman")
+        self.assertEqual(bot._find_monster_mentioned_in_text(location, "fight a shamen")[0], "goblin_shaman")
+        self.assertEqual(bot._find_monster_mentioned_in_text(location, "Attack the shaman")[0], "goblin_shaman")
+        self.assertEqual(bot._find_monster_mentioned_in_text(location, "Attack the shamans")[0], "goblin_shaman")
+        self.assertEqual(bot._find_monster_mentioned_in_text(location, "fight the boss")[0], "goblin_boss")
+
     async def test_examine_unknown_monster_acknowledges_threat_without_stats(self):
         user_id = 900943
         make_basic_character(user_id, "Ravenloft", current_location="whispering_wood")
