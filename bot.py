@@ -14509,21 +14509,54 @@ def _find_monster_mentioned_in_text(location: dict, text: str) -> tuple[str, dic
     templates = [(key, cl.get_monster_template(CAMPAIGN, key)) for key in monster_keys]
     templates = [(key, t) for key, t in templates if t is not None]
     templates.sort(key=lambda kt: -len(kt[1]["name"]))
+    last_words = [t["name"].lower().split()[-1] for _, t in templates]
+    words = [w for w in re.findall(r"[a-z]+", lowered) if len(w) >= 4]
+
+    # Real live bug (2026-08-11, Coffee, live, multiple rounds: "fight a
+    # shamen" / "Fight a Shaman" / "Fight a goblin shame" all failing or
+    # (worse) matching the wrong, shorter monster) -- checking every
+    # template fully (exact full name -> exact last word -> fuzzy last
+    # word) BEFORE moving to the next was critical: three separate
+    # global passes over every template let a shorter, unrelated exact
+    # match (plain "Goblin", since "goblin" is literally in "goblin
+    # shame") win before a longer template's OWN fuzzy chance was ever
+    # reached, even with templates sorted longest-name-first. Now each
+    # template (still longest-first, so "Goblin Shaman" is always tried
+    # before plain "Goblin") gets its full fair shot -- exact, then
+    # fuzzy -- before falling through to a shorter, less specific one.
     for monster_key, template in templates:
         name = template["name"].lower()
+        last_word = name.split()[-1]
         candidates = _plural_forms(name) + _plural_forms(monster_key.replace("_", " "))
         if any(re.search(r"\b" + re.escape(c) + r"\b", lowered) for c in candidates):
             return monster_key, template
-
-    last_words = [t["name"].lower().split()[-1] for _, t in templates]
-    for monster_key, template in templates:
-        last_word = template["name"].lower().split()[-1]
-        if last_words.count(last_word) > 1:
-            continue  # ambiguous among this location's own monsters -- never guess
-        candidates = _plural_forms(last_word)
-        if any(re.search(r"\b" + re.escape(c) + r"\b", lowered) for c in candidates):
+        if last_words.count(last_word) > 1 or len(last_word) < 4:
+            continue  # ambiguous among this location's own monsters, or too short to fuzzy-match safely
+        if any(re.search(r"\b" + re.escape(c) + r"\b", lowered) for c in _plural_forms(last_word)):
+            return monster_key, template
+        # A real word from the player's own text within real edit
+        # distance of this monster's last word also counts (tolerance
+        # scales with word length -- 1 edit for a short word, 2 for a
+        # longer one, so short common words can't fuzzy-collide with
+        # something unrelated).
+        tolerance = 2 if len(last_word) >= 6 else 1
+        if any(_levenshtein(w, last_word) <= tolerance for w in words):
             return monster_key, template
     return None
+
+
+def _levenshtein(a: str, b: str) -> int:
+    """Standard edit distance (insert/delete/substitute), used only for the small monster-name fuzzy-match pass above -- these strings are always short."""
+    if a == b:
+        return 0
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        curr = [i] + [0] * len(b)
+        for j, cb in enumerate(b, 1):
+            cost = 0 if ca == cb else 1
+            curr[j] = min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
+        prev = curr
+    return prev[-1]
 
 
 def _format_item_stats_line(item: dict) -> str | None:

@@ -8481,6 +8481,27 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bot._find_monster_mentioned_in_text(location, "Attack the shamans")[0], "goblin_shaman")
         self.assertEqual(bot._find_monster_mentioned_in_text(location, "fight the boss")[0], "goblin_boss")
 
+    def test_find_monster_mentioned_in_text_fuzzy_matches_a_genuine_typo_over_a_shorter_exact_match(self):
+        """
+        Real live bug (2026-08-11, same incident, Coffee, live: "Fight
+        a goblin shame" -- a real typo of "shaman" genuinely 2 edits
+        away, s-h-a-m-e vs s-h-a-m-a-n) -- this one exposed a real
+        structural bug in the fix just above: three separate global
+        passes (exact full name / exact last word / fuzzy last word)
+        let the SHORTER, unrelated exact match ("goblin" is literally
+        in "goblin shame") win before the longer "Goblin Shaman"
+        template's own fuzzy pass was ever reached, even with templates
+        sorted longest-name-first. Each template now gets its full fair
+        shot (exact, then fuzzy) before falling through to a shorter,
+        less specific one -- confirms both that this typo now resolves
+        to the RIGHT monster, and that "goblin" alone (genuinely, only
+        that) still resolves to plain Goblin, unchanged.
+        """
+        location = bot.cl.get_location(bot.CAMPAIGN, "goblin_warrens")
+        self.assertEqual(bot._find_monster_mentioned_in_text(location, "Fight a goblin shame")[0], "goblin_shaman")
+        self.assertEqual(bot._find_monster_mentioned_in_text(location, "Attack the goblin")[0], "goblin")
+        self.assertEqual(bot._find_monster_mentioned_in_text(location, "Attack the goblin boss")[0], "goblin_boss")
+
     async def test_examine_unknown_monster_acknowledges_threat_without_stats(self):
         user_id = 900943
         make_basic_character(user_id, "Ravenloft", current_location="whispering_wood")

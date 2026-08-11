@@ -2,6 +2,24 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.151] — Fuzzy monster-name typo matching, and a real structural fix underneath it
+
+Per Coffee, live: "Fight a goblin shame" -- a real typo of "shaman",
+genuinely 2 edits away (s-h-a-m-e vs s-h-a-m-a-n), still matched the
+shorter, unrelated plain "Goblin" instead. Root cause was structural,
+not just missing tolerance: `_find_monster_mentioned_in_text` ran
+three separate GLOBAL passes (exact full name, exact last word, fuzzy
+last word) over every template -- so a shorter exact match ("goblin"
+is literally in "goblin shame") could win before a longer template's
+own fuzzy chance was ever reached, even with templates sorted
+longest-name-first. Rewritten so each template gets its full fair
+shot (exact, then fuzzy) before falling through to a shorter, less
+specific one. Fuzzy tolerance scales with word length (1 edit for a
+short word, 2 for a longer one) so short common words can't
+fuzzy-collide with something unrelated. 1 new regression test,
+confirming both the fix and that "goblin" alone still resolves to
+plain Goblin, unchanged.
+
 ## [1.27.150] — Fix: bare "shaman"/"shamen" (no "goblin" prefix) still matched nothing
 
 Per Coffee, live and frustrated: "i jus typed fight a shamen and it
