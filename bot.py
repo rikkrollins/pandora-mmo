@@ -11467,6 +11467,33 @@ def _missing_tools_for_gathering(character: dict, skill_key: str) -> list[str]:
     ]
 
 
+def _gathering_tool_grounded_fact(character: dict, skill_key: str) -> str | None:
+    """
+    Real live bug (2026-08-11, dev-topic report): "Gather iron ore"
+    narrated Laurienna's "fingers clawed at the rough stone floor"
+    despite her actually carrying (and this same call already having
+    confirmed, via _missing_tools_for_gathering) a real Pickaxe --
+    narrate_skill_check's own grounded_fact parameter exists exactly
+    to prevent this class of invented detail, but _do_gather never
+    passed one at all. Returns a real, already-true fact naming the
+    actual required tool for this skill (e.g. "Laurienna is using her
+    Pickaxe for this."), or None for a tool-free skill like herbalism,
+    where there's genuinely nothing to ground and bare hands ARE
+    correct.
+    """
+    required_items = [
+        item for item in items_module.ITEMS.values()
+        if item.get("required_for") == skill_key
+    ]
+    owned_names = [
+        item["name"] for item in required_items
+        if character["inventory"].get(_item_id_for(item), 0) > 0
+    ]
+    if not owned_names:
+        return None
+    return f"{character['name']} is using {' and '.join(owned_names)} for this, not bare hands."
+
+
 def _item_id_for(item: dict) -> str:
     return next(iid for iid, i in items_module.ITEMS.items() if i is item)
 
@@ -11598,6 +11625,7 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
     flavor = await asyncio.to_thread(
         narrate_skill_check, character, action_text, node["ability"],
         {**result, "ability": node["ability"], "dc": SKILL_CHECK_DC, "success": success},
+        _gathering_tool_grounded_fact(character, skill_key),
     )
     message = _format_skill_check_result(flavor, result, node["ability"], SKILL_CHECK_DC, success)
     if success:

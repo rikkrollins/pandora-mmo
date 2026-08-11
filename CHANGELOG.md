@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.140] — Fix: gathering narration invented "bare hands" over a real tool
+
+Real live bug, dev-topic screenshot: "Gather iron ore" narrated
+Laurienna's "fingers clawed at the rough stone floor" despite her
+actually carrying a real Pickaxe (already confirmed by
+`_missing_tools_for_gathering` before the roll even happens) — a
+classic ungrounded-narration invention, the exact class of bug
+`narrate_skill_check`'s own `grounded_fact` parameter (task #165)
+exists to prevent, but `_do_gather` never passed one at all.
+
+Fixed with a new `_gathering_tool_grounded_fact()`: hands the narrator
+a real fact naming the actual required tool ("Laurienna is using her
+Pickaxe for this, not bare hands.") whenever the skill needs one and
+the character owns it — `None` for a tool-free skill like herbalism,
+where bare hands genuinely are correct, so nothing gets invented there
+either. New regression tests confirm the fact is computed correctly
+per skill/inventory and that `_do_gather` actually passes it through
+to the real narration call end-to-end.
+
 ## [1.27.139] — Fix: model guessing "flee" for ordinary combat banter
 
 Real live bug caught via topic-activity monitoring: "Take that you

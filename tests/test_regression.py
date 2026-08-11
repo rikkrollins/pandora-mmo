@@ -2263,6 +2263,51 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         for _ in range(10):
             self.assertEqual(bot._gather_quantity(character, "mining", practiced_bonus=0), 1)
 
+    def test_gathering_narration_is_grounded_in_the_real_tool_not_bare_hands(self):
+        """
+        Real live bug (2026-08-11, dev-topic report): "Gather iron ore"
+        narrated Laurienna's "fingers clawed at the rough stone floor"
+        despite her actually carrying a real Pickaxe -- _do_gather never
+        passed narrate_skill_check's own grounded_fact parameter at all,
+        so the model had zero real information about what implement was
+        being used and invented bare hands instead. A character with the
+        required tool must get a real fact naming it; a character
+        without one (or a tool-free skill like herbalism) must not have
+        a fact invented for them.
+        """
+        miner = {"name": "Laurienna", "inventory": {"pickaxe": 1}}
+        fact = bot._gathering_tool_grounded_fact(miner, "mining")
+        self.assertIsNotNone(fact)
+        self.assertIn("Pickaxe", fact)
+        self.assertIn("Laurienna", fact)
+
+        no_tool_yet = {"name": "Laurienna", "inventory": {}}
+        self.assertIsNone(bot._gathering_tool_grounded_fact(no_tool_yet, "mining"))
+
+        herbalist = {"name": "Pip", "inventory": {}}
+        self.assertIsNone(bot._gathering_tool_grounded_fact(herbalist, "herbalism"))
+
+    async def test_do_gather_passes_the_real_tool_fact_to_narration(self):
+        """
+        End-to-end version of the fix above: a real "gather sulfur"
+        call, with narrate_skill_check mocked to record its own call
+        args, must be handed the real Pickaxe fact -- not silently
+        drop it the way the pre-fix _do_gather call did.
+        """
+        from unittest.mock import patch
+
+        user_id = 900541
+        make_basic_character(user_id, "ToolCheck", current_location="sunken_root_caverns",
+                              inventory={"pickaxe": 1})
+        sink = []
+        with patch("bot.roll_ability_check", return_value={
+            "raw_roll": 20, "modifier": 0, "proficiency": 0, "total": 20,
+        }), patch("bot.narrate_skill_check", return_value="Digs efficiently.") as mock_narrate:
+            await bot._do_gather(FakeUpdate(user_id, "", sink), "gather sulfur")
+        self.assertTrue(mock_narrate.called)
+        call_args = mock_narrate.call_args.args
+        self.assertIn("Pickaxe", call_args[-1])
+
     def test_gathering_tools_stocked_at_marens_wares(self):
         shop = bot.CAMPAIGN["shops"]["marens_wares"]
         for tool_id in ("fishing_pole", "bait", "woodcutters_axe", "pickaxe", "shears"):
