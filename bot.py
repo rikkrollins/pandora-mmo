@@ -19218,11 +19218,31 @@ def _switch_character_with_party_carryover(telegram_user_id: int, chat_id: int, 
     switch-character entry points share the exact same fix, instead of
     the free-text path being correct while the button path quietly
     wasn't.
+
+    Real live bug (2026-08-11, dev-topic report, Coffee: "Why have i
+    been dropped from the party AGAIN?"): the "never override a real,
+    separate membership" guard was too blunt -- it only checked whether
+    the incoming character had ANY party_id at all, not whether that
+    party still had anyone real in it. Confirmed live: Elduinn (Coffee's
+    own character) carried a STALE party_id from some earlier,
+    long-abandoned party where Elduinn was the only member left, so
+    switching to Elduinn correctly saw "already has a party_id" and
+    skipped the carryover entirely -- silently stranding Coffee alone
+    in a dead party instead of rejoining the real, active one (party_id
+    3, shared with every AI companion and the other real player) their
+    previous character had been in. A character sitting ALONE in their
+    own party_id is functionally identical to having none -- carrying
+    over is safe in both cases, and only a genuinely shared party (someone
+    ELSE still in it) is left untouched.
     """
     previously_active = db.get_character(telegram_user_id, chat_id)
     switched = db.switch_character(telegram_user_id, chat_id, character_id)
+    switched_alone_in_own_party = (
+        switched and switched.get("party_id")
+        and len(db.get_party_members_by_id(switched["party_id"])) <= 1
+    )
     if (previously_active and previously_active.get("party_id")
-            and switched and not switched.get("party_id")
+            and switched and (not switched.get("party_id") or switched_alone_in_own_party)
             and previously_active["character_id"] != switched["character_id"]):
         db.update_character_by_id(switched["character_id"], party_id=previously_active["party_id"])
         db.update_character_by_id(previously_active["character_id"], party_id=None)

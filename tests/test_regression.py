@@ -8799,6 +8799,56 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match["name"], "Elduinn")
 
+    def test_switching_to_a_character_stranded_alone_in_a_stale_party_still_carries_over(self):
+        """
+        Real live bug (2026-08-11, dev-topic report, Coffee: "Why have
+        i been dropped from the party AGAIN?"): confirmed live via the
+        real DB -- Elduinn carried a stale party_id from a long-
+        abandoned party where Elduinn was the only member left, so
+        switching to Elduinn skipped the carryover (it already "had a
+        party") and stranded Coffee alone instead of rejoining the
+        real, active party their previous character had been in. A
+        character alone in their own party_id must be treated the same
+        as having none for carryover purposes.
+        """
+        user_id = 900700
+        # create_character always makes the NEWEST character the user's
+        # active one -- create the stale-party character FIRST so it
+        # gets superseded, leaving the real-party one active going in,
+        # matching the real incident's own direction (Coffee's active
+        # character, in a real shared party, switched TO Elduinn, who
+        # carried the stale solo party_id).
+        stale_char = make_basic_character(user_id, "StaleCharacter", current_location="crossroads_tavern")
+        db.update_character_by_id(stale_char["character_id"], party_id=999)
+
+        real_party_char = make_basic_character(user_id, "PartyMember", current_location="crossroads_tavern")
+        make_basic_character(-2_700_100, "AICompanion", current_location="crossroads_tavern", is_ai=True)
+        db.update_character(user_id, -999, party_id=500)
+        db.update_character(-2_700_100, -999, party_id=500)
+
+        switched = bot._switch_character_with_party_carryover(user_id, -999, stale_char["character_id"])
+        self.assertEqual(switched["party_id"], 500)
+        # The old stale party (999) is now empty -- no one left claiming it.
+        self.assertEqual(db.get_party_members_by_id(999), [])
+        self.assertEqual(len(db.get_party_members_by_id(500)), 2)
+
+    def test_switching_to_a_character_with_a_real_shared_party_is_never_overridden(self):
+        """The other half of the same fix: a character genuinely sharing a party with someone else must NEVER be silently pulled into a different one."""
+        user_id = 900702
+        target_char = make_basic_character(user_id, "TargetChar", current_location="crossroads_tavern")
+        make_basic_character(-2_700_101, "OtherRealCompanion", current_location="crossroads_tavern", is_ai=True)
+        db.update_character(user_id, -999, party_id=111)
+        db.update_character(-2_700_101, -999, party_id=111)
+
+        make_basic_character(-2_700_102, "AnotherCompanion", current_location="crossroads_tavern", is_ai=True)
+        active_char = make_basic_character(user_id, "ActiveChar", current_location="crossroads_tavern")
+        db.update_character(-2_700_102, -999, party_id=222)
+        db.update_character_by_id(active_char["character_id"], party_id=222)
+
+        switched = bot._switch_character_with_party_carryover(user_id, -999, target_char["character_id"])
+        self.assertEqual(switched["party_id"], 111)  # untouched -- a real, separate, shared membership
+        self.assertEqual(len(db.get_party_members_by_id(111)), 2)
+
     # -- Dev-topic feedback (Coffee, 2026-07-19): "Only show level up
     #    when we have points to distribute. Otherwise it serves no
     #    purpose."

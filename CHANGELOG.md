@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.148] — Fix: switching characters could strand you alone in a stale party
+
+Per Coffee (dev-topic report): "Why have i been dropped from the party
+AGAIN?" Confirmed live via the real DB: Elduinn (Coffee's own
+character) carried a stale `party_id` from some earlier, long-
+abandoned party where Elduinn was the only member left. The
+2026-07-26 switch-character carryover fix only checked whether the
+INCOMING character already had *any* `party_id` at all before
+skipping the carryover ("never override a real, separate membership")
+-- it never checked whether that party actually still had anyone else
+in it. Switching to Elduinn correctly saw "already has a party_id"
+and silently stranded Coffee alone in the dead party instead of
+rejoining the real, active one their previous character had been in
+(shared with every AI companion and the other real player).
+
+A character sitting ALONE in their own `party_id` is now treated the
+same as having none for carryover purposes -- only a genuinely shared
+party (someone ELSE still in it) is left untouched. Applied directly
+to the live DB to restore Elduinn's real party membership. 2 new
+regression tests: the stale-solo-party case now correctly carries
+over, and the existing "never override a real shared membership"
+guarantee is confirmed to still hold.
+
 ## [1.27.147] — Steal button in the battle menu's More submenu
 
 Per Coffee: "put the steal button in the more menu in battle menu."
