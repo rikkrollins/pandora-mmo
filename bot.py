@@ -76,7 +76,6 @@ from ai import tts_piper, stt_groq
 from guilds import (
     GUILDS, eligible_for_guild, GUILD_QUESTS,
     ARCANE_CIRCLE_SPELL_DAMAGE_BONUS_PCT, THIEVES_GUILD_STEAL_BONUS, ARCANE_CIRCLE_EXCLUSIVE_SPELLS,
-    ENCHANTMENT_COMMISSION_TIERS,
 )
 from models import (
     VALID_CLASSES,
@@ -94,7 +93,7 @@ from rules.crafting import (
     RECIPES, get_recipe, has_materials, resolve_craft,
     CLASS_PROFESSIONS, CLASS_PROFESSION_AFFINITY_BONUS, class_profession_affinity_bonus,
     ADVANCED_RECIPES, get_advanced_recipe, resolve_advanced_craft,
-    ENCHANT_RECIPES, get_enchant_recipe,
+    ENCHANT_RECIPES, get_enchant_recipe, recipe_requirement_gate,
 )
 from rules.dice import roll, roll_damage, ability_modifier, roll_ability_check, roll_d20, roll_percentage_check
 from rules.item_generator import generate_item
@@ -693,6 +692,15 @@ MAP_LOOT_DROP_CHANCE = 0.08  # task #141 (discoverable half): rare map find on a
 # rarest possible find, not a repeatable farm.
 BOSS_SPELL_TONIC_DROP_CHANCE = 0.35
 BOSS_SPELL_TONIC_DROP_WEIGHTS = {"spell_tonic": 50, "greater_spell_tonic": 35, "supreme_spell_tonic": 15}
+
+# Guild tier-5 capstone material (2026-08-11, per Coffee: cover every
+# guild tier from level 1 to end game). Deliberately far rarer than the
+# spell tonics above -- this feeds the true END of both the Enchanters'
+# and Forge guild ladders (enchant_godsforged_ward / godsforged_blade,
+# rules/crafting.py), themselves already gated behind guild membership
+# AND rebirth >= 3, so the drop chance only needs to matter for players
+# who already climbed the whole ladder.
+GODSHARD_DROP_CHANCE = 0.08
 
 # ---------------------------------------------------------------------
 # Moltbook heartbeat — PandoraMMO_Bot's agent profile on Moltbook (the
@@ -4149,6 +4157,17 @@ async def _award_victory_xp(update: Update, session: sessions.Session) -> tuple[
         finder_name = db.get_character(finder_id, update.effective_chat.id)["name"]
         tonic_note = f"\n✨ **{finder_name}** finds a {tonic_item['name']} among the boss's remains!"
 
+    # Guild tier-5 capstone material (2026-08-11): independent roll from
+    # the tonic drop above -- both can hit the same boss fight, same
+    # "real is_boss fights only" gate.
+    godshard_note = ""
+    if defeated_a_boss and random.random() < GODSHARD_DROP_CHANCE:
+        godshard_item = items_module.get_item("godshard")
+        finder_id = random.choice(real_party_ids)
+        db.add_item(finder_id, update.effective_chat.id, "godshard", 1)
+        finder_name = db.get_character(finder_id, update.effective_chat.id)["name"]
+        godshard_note = f"\n💠 **{finder_name}** finds a {godshard_item['name']} among the boss's remains!"
+
     summary = f"\n✨ Party gains {xp_each} XP each ({enemy_xp_total} total)."
     if absent_bonus_recipients:
         bonus_xp = max(int(xp_each * INACTIVE_PARTY_XP_SHARE), 1)
@@ -4159,6 +4178,7 @@ async def _award_victory_xp(update: Update, session: sessions.Session) -> tuple[
     summary += loot_line
     summary += map_note
     summary += tonic_note
+    summary += godshard_note
     summary += "".join(board_notes)
     if newly_proven_names:
         summary += (
@@ -11784,6 +11804,17 @@ async def _do_craft(update: Update, text: str) -> None:
 
     recipe = get_advanced_recipe(recipe_id) if is_advanced else get_recipe(recipe_id)
 
+    # Guild tier ladder (2026-08-11): checked before any material/roll
+    # work, same as the missing-materials early-return just below --
+    # gated recipes (Forge Guild's journeyman_blade and up) carry
+    # requires_guild/min_rebirth; ungated recipes are unaffected.
+    gate_rejection = recipe_requirement_gate(character, recipe)
+    if gate_rejection:
+        await update.effective_chat.send_message(
+            gate_rejection, message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        )
+        return
+
     # 2026-07-14, per Coffee: crafting is its own named, levelable
     # skill -- tracked separately from whichever ability a given recipe
     # happens to roll with (wisdom for a potion, intelligence for a
@@ -11997,6 +12028,13 @@ async def _do_enchant_item(update: Update, text: str) -> None:
     recipe = get_enchant_recipe(recipe_id)
     if item["type"] not in recipe["applies_to"]:
         await _safe_send(update, f"That enchantment can't be applied to a {item['type']}.")
+        return
+    # Guild tier ladder (2026-08-11): Enchanters' Guild recipes above
+    # the base tier carry requires_guild/min_rebirth; ungated recipes
+    # (enchant_flame, enchant_frost_ward, etc.) are unaffected.
+    gate_rejection = recipe_requirement_gate(character, recipe)
+    if gate_rejection:
+        await _safe_send(update, gate_rejection)
         return
     if not has_materials(character["inventory"], recipe):
         need = ", ".join(f"{qty}x {items_module.get_item(mid)['name']}" for mid, qty in recipe["materials"].items())
@@ -14951,8 +14989,17 @@ async def guild_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     if guild_id == "arcane_circle" and any(w in lowered for w in ["learn", "secret", "teach"]):
         await _do_learn_guild_spell(update, update.message.text)
         return
-    if guild_id == "enchanters_guild" and any(w in lowered for w in ["enchant", "commission", "imbue", "embue"]):
-        await _do_commission_enchantment(update)
+    if guild_id == "enchanters_guild" and any(w in lowered for w in ["enchant", "imbue", "embue", "ladder", "tiers"]):
+        await _safe_send(
+            update,
+            "The Guild doesn't commission enchantments for you anymore — it teaches you to do the work "
+            "yourself. Bring a real magic item and materials, then say what you want enchanted "
+            "(e.g. \"enchant my ring with a greater flame ward\"). The ladder climbs with your own "
+            "guild standing and rebirths: Journeyman wards are open to any member; Master, "
+            "Grandmaster, and the true Godsforged work demand rebirth #1, #2, and #3 respectively — "
+            "the last needs a Godshard, found only in a boss's remains.",
+            thread_id=update.effective_message.message_thread_id,
+        )
 
 
 async def _do_learn_guild_spell(update: Update, text: str) -> None:
@@ -15022,53 +15069,6 @@ async def _do_learn_guild_spell(update: Update, text: str) -> None:
         thread_id=reply_thread_id,
     )
 
-
-async def _do_commission_enchantment(update: Update) -> None:
-    """
-    Per Coffee (2026-07-25): "a guild for enchanting wearable items and
-    making items magic items... use a generator to handle this so it
-    uses the players stats to embue/enchant." A real 1d20 + the
-    caster's own spellcasting ability modifier (spells.py's
-    SPELLCASTING_ABILITY, same real check every spell save DC already
-    uses) against guilds.ENCHANTMENT_COMMISSION_TIERS decides which
-    real, equippable items.py item is granted -- deterministic dice,
-    not an AI-invented outcome, same as everything else in this game.
-    Once per rest (feature_uses, same convention as Second Wind/
-    healing_water), gated on real Enchanters' Guild membership.
-    """
-    character = db.get_character(update.effective_user.id, update.effective_chat.id)
-    reply_thread_id = update.effective_message.message_thread_id
-    if character is None:
-        await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=reply_thread_id
-        )
-        return
-    if character.get("guild") != "enchanters_guild":
-        await update.effective_chat.send_message(
-            "Only Enchanters' Guild members can commission an enchantment — join first.",
-            message_thread_id=reply_thread_id,
-        )
-        return
-    if db.get_feature_uses(update.effective_user.id, update.effective_chat.id, "enchantment_commission") >= 1:
-        await update.effective_chat.send_message(
-            "The Guild's artificers are already working your last commission — rest before asking for another.",
-            message_thread_id=reply_thread_id,
-        )
-        return
-    ability = spells_module.SPELLCASTING_ABILITY.get(character["char_class"].lower(), "intelligence")
-    roll_result = roll_d20()
-    total = roll_result + ability_modifier(character.get(ability, 10))
-    item_id = next(iid for threshold, iid in ENCHANTMENT_COMMISSION_TIERS if total >= threshold)
-    item = items_module.get_item(item_id)
-    db.use_feature(update.effective_user.id, update.effective_chat.id, "enchantment_commission")
-    db.add_item(update.effective_user.id, update.effective_chat.id, item_id, 1)
-    await _safe_send(
-        update,
-        f"✨ **{character['name']}** commissions an enchantment — rolls {roll_result} "
-        f"+ {total - roll_result} ({ability}) = **{total}**. The Guild delivers: **{item['name']}**.",
-        thread_id=reply_thread_id,
-    )
-    await _maybe_send_item_image(update, item_id, item)
 
 
 async def _check_and_award_achievements(update: Update, character: dict | None) -> None:

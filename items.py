@@ -268,13 +268,13 @@ ITEMS = {
         "note": "Cold as riverwater no matter how long it's worn.",
         "description": "Cold as riverwater no matter how long it's worn.",
     },
-    # Enchanters' Guild commissions (2026-07-25, per Coffee: "a guild
-    # for enchanting wearable items and making items magic items"): 3
-    # real, equippable rewards -- never shop-buyable (price 0, same
-    # convention as Amulet of Health/Ring of Protection), only granted
-    # via bot.py's _do_commission_enchantment, a real dice roll (biased
-    # by the caster's own spellcasting ability) deciding which tier is
-    # earned.
+    # Enchanters' Guild commissions (2026-07-25 - 2026-08-11): 3 real,
+    # equippable rewards, never shop-buyable (price 0, same convention
+    # as Amulet of Health/Ring of Protection). Originally granted via a
+    # random-roll "commission" mechanic that Coffee later replaced with
+    # the real guild tier ladder (rules/crafting.py's ENCHANT_RECIPES) --
+    # left in the catalog since existing characters may already own
+    # one, just no longer a live drop source.
     "band_of_ember": {
         "name": "Band of Ember", "type": "ring", "rarity": "uncommon",
         "price": 0, "weight": 0, "regen_bonus": 1,
@@ -574,6 +574,14 @@ ITEMS = {
     # Pool, campaign.json), used only by the advanced spell-tonic
     # recipes in rules/crafting.py.
     "glimmerdeep_moss": {"name": "Glimmerdeep Moss", "type": "material", "rarity": "rare", "price": 60, "weight": 0.05, "description": "A faint, cold light clings to it even out of the water. It never fully dries."},
+    # Guild tier-5 capstone material (2026-08-11, per Coffee: cover every
+    # guild tier from level 1 to end game, "Human Ascends to God"). Boss
+    # drop only -- same GODSHARD_DROP_CHANCE-gated pattern as spell
+    # tonics (see bot.py's _award_victory_xp), never sold in any shop.
+    # Feeds exactly one recipe each in enchant_godsforged_ward and
+    # godsforged_blade (rules/crafting.py), the true end of both guild
+    # ladders.
+    "godshard": {"name": "Godshard", "type": "material", "rarity": "mythic", "price": 0, "weight": 0.1, "description": "A splinter of something that was never meant to be small enough to hold. It doesn't feel like it belongs to this world's weight."},
 
     # --- Cooking (2026-07-15: raw_fish was gatherable but had zero
     # recipe using it -- a real cooking recipe below turns it, plus

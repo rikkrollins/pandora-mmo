@@ -2,6 +2,54 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.143] — Guild tier ladder: Enchanters' & Forge Guild, level 1 to end game
+
+Per Coffee: rework the Enchanters' Guild away from the commissioned-
+item idea ("i dont like the commissioned item idea"), covering "all
+tiers from beginning of the game to end game" using the existing
+rebirth/prestige system as the real gate — the game's own "Human
+Ascends to God" growth spine, not an arbitrary new number.
+
+Removed `_do_commission_enchantment` (a random-roll, once-per-rest
+free item grant) entirely — Coffee's stated objection. Replaced it
+with a real 5-tier progression both the Enchanters' and Forge Guild
+now climb, using nothing but already-implemented mechanics:
+
+- Two new optional recipe fields, `requires_guild`/`min_rebirth`, and
+  one shared `recipe_requirement_gate()` (`rules/crafting.py`), called
+  by both `_do_craft` and `_do_enchant_item` before any material or
+  roll work — a recipe with neither field is unaffected (every recipe
+  that existed before this change).
+- **Enchanters' Guild** (`ENCHANT_RECIPES`): Journeyman (guild only) →
+  Master (guild + rebirth 1, grants a self-reinforcing
+  `profession_bonus` to the wearer's own future enchanting) →
+  Grandmaster (guild + rebirth 2) → Godsforged (guild + rebirth 3 +
+  1 Godshard), the last granting `ignore_resistance` — previously
+  mythic-tier-RNG-loot-exclusive — deterministically for the first
+  time.
+- **Forge Guild** (`ADVANCED_RECIPES`): the same 4-tier ladder,
+  reusing `generate_item`'s existing `very_rare`/`legendary`/`mythic`
+  tiers (zero new plumbing needed for the tier mechanic itself, only
+  the new recipe entries + gate).
+- **Godshard** (new material, `items.py`): the shared tier-5 capstone
+  for both ladders, real boss-drop-only (`GODSHARD_DROP_CHANCE = 0.08`
+  in `bot.py`, same `defeated_a_boss`-gated pattern as
+  `BOSS_SPELL_TONIC_DROP_CHANCE`), never sold in any shop.
+- `ai/support_agent.py`'s enchant grounding text updated to list each
+  recipe's real gate instead of the removed commission mechanic, so
+  Support never promises a recipe the asker can't use yet.
+
+The 3 existing commission-reward items (Band of Ember, Sigil of the
+Deep, Crown of the Unmoored) stay in the catalog — any character who
+already owns one keeps it — just no longer a live drop source.
+
+14 new regression tests: gate rejection (wrong guild, insufficient
+rebirth) via the pure function AND through the real `_do_craft`
+handler end-to-end, successful qualified-character crafts at the
+capstone tier for both ladders, the Godshard's real boss-only drop
+gating, and the guild-topic redirect replacing the old commission
+wording.
+
 ## [1.27.142] — Fix: combat narration (incl. enemy banter) starved by world tick
 
 Root-caused the "enemy battle banter never appears" investigation:

@@ -1763,7 +1763,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("frost", answer.lower())
         self.assertIn("warding", answer.lower())
         self.assertIn("arcana", answer.lower())
-        self.assertIn("commission an enchantment", answer.lower())
+        self.assertIn("5-tier ladder", answer.lower())
         self.assertNotIn("suitable enchantment based on your stats", answer.lower())
 
         # The example phrase this answer gives must actually work against
@@ -3397,6 +3397,63 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("spell_tonic", updated["inventory"])
         sessions.end_session(-999)
 
+    async def test_boss_defeat_can_drop_a_godshard(self):
+        """
+        Real feature (2026-08-11): the guild tier-5 capstone material is
+        gated to real is_boss fights only, same GODSHARD_DROP_CHANCE-
+        gated pattern as spell tonics, independent roll (both can hit
+        the same fight).
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        leader_id = 950907
+        make_basic_character(leader_id, "GodshardFinder", current_location="crossroads_tavern")
+        enemy = {
+            "telegram_user_id": -2_600_306, "name": "Test Boss", "dexterity": 10,
+            "xp_reward": 10, "is_boss": True,
+        }
+        leader = db.get_character(leader_id, -999)
+        leader["telegram_user_id"] = leader_id
+        session = sessions.start_session(-999, [leader, enemy], {leader_id: "party", -2_600_306: "enemy"})
+        session.turn_order = [leader_id, -2_600_306]
+
+        def fake_choice(seq):
+            return leader_id if leader_id in seq else seq[0]
+
+        with patch("bot._grant_generated_loot", new=AsyncMock(return_value="")), \
+             patch("bot.random.random", return_value=0.0), \
+             patch("bot.random.choices", return_value=["spell_tonic"]), \
+             patch("bot.random.choice", side_effect=fake_choice):
+            summary, _ = await bot._award_victory_xp(FakeUpdate(leader_id, "", []), session)
+        self.assertIn("Godshard", summary)
+
+        updated = db.get_character(leader_id, -999)
+        self.assertEqual(updated["inventory"].get("godshard", 0), 1)
+        sessions.end_session(-999)
+
+    async def test_non_boss_defeat_never_drops_a_godshard(self):
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        leader_id = 950908
+        make_basic_character(leader_id, "RegularSlayer2", current_location="crossroads_tavern")
+        enemy = {
+            "telegram_user_id": -2_600_307, "name": "Regular Goblin", "dexterity": 10, "xp_reward": 10,
+        }
+        leader = db.get_character(leader_id, -999)
+        leader["telegram_user_id"] = leader_id
+        session = sessions.start_session(-999, [leader, enemy], {leader_id: "party", -2_600_307: "enemy"})
+        session.turn_order = [leader_id, -2_600_307]
+
+        with patch("bot._grant_generated_loot", new=AsyncMock(return_value="")), \
+             patch("bot.random.random", return_value=0.0):
+            summary, _ = await bot._award_victory_xp(FakeUpdate(leader_id, "", []), session)
+        self.assertNotIn("Godshard", summary)
+        updated = db.get_character(leader_id, -999)
+        self.assertNotIn("godshard", updated["inventory"])
+        sessions.end_session(-999)
+
     def test_spell_tonics_are_not_sold_in_any_shop(self):
         """
         Real feature (2026-08-10): the whole point of "hard to find" is
@@ -3924,6 +3981,91 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(succeeded)
         self.assertEqual(result["generated_item"]["type"], "weapon")
         self.assertEqual(result["generated_item"]["rarity"], "rare")
+
+    def test_recipe_requirement_gate_rejects_wrong_guild_and_insufficient_rebirth(self):
+        """
+        Real feature (2026-08-11): guild-tier ladder recipes carry
+        requires_guild/min_rebirth; recipe_requirement_gate (rules/
+        crafting.py) is the one shared check both _do_craft and
+        _do_enchant_item (bot.py) call before spending any materials.
+        """
+        from rules.crafting import recipe_requirement_gate, ADVANCED_RECIPES, ENCHANT_RECIPES
+        character = make_basic_character(950920, "GateTester", current_location="crossroads_tavern")
+
+        no_guild = recipe_requirement_gate(character, ADVANCED_RECIPES["journeyman_blade"])
+        self.assertIsNotNone(no_guild)
+        self.assertIn("Forge Guild", no_guild)
+
+        db.update_character(950920, -999, guild="forge_guild")
+        character = db.get_character(950920, -999)
+        wrong_rebirth = recipe_requirement_gate(character, ADVANCED_RECIPES["masters_plate"])
+        self.assertIsNotNone(wrong_rebirth)
+        self.assertIn("rebirth", wrong_rebirth.lower())
+
+        # A Forge Guild member with 0 rebirths is still correctly gated
+        # OUT of an Enchanters' Guild recipe, not just an under-leveled one.
+        wrong_guild_enchant = recipe_requirement_gate(character, ENCHANT_RECIPES["enchant_greater_ward"])
+        self.assertIsNotNone(wrong_guild_enchant)
+        self.assertIn("Enchanters' Guild", wrong_guild_enchant)
+
+    def test_recipe_requirement_gate_allows_a_fully_qualified_character(self):
+        from rules.crafting import recipe_requirement_gate, ENCHANT_RECIPES
+        make_basic_character(950921, "GateQualified", current_location="crossroads_tavern")
+        db.update_character(950921, -999, guild="enchanters_guild", rebirth_count=3)
+        character = db.get_character(950921, -999)
+        self.assertIsNone(recipe_requirement_gate(character, ENCHANT_RECIPES["enchant_godsforged_ward"]))
+
+    async def test_forge_guild_journeyman_blade_rejects_a_non_member_via_the_real_handler(self):
+        """
+        End-to-end: bot._do_craft actually enforces the gate (not just
+        the pure function in isolation) and gives a clear, player-facing
+        rejection before ever touching materials or rolling.
+        """
+        make_basic_character(950922, "UngatedCrafter", current_location="crossroads_tavern")
+        db.add_item(950922, -999, "iron_ore", 10)
+        db.add_item(950922, -999, "moonpetal", 2)
+        sink = []
+        update = FakeUpdate(950922, "craft a journeyman's blade", sink)
+        await bot._do_craft(update, "craft a journeyman's blade")
+        self.assertIn("Forge Guild", sink[-1])
+        updated = db.get_character(950922, -999)
+        self.assertEqual(updated["inventory"].get("iron_ore", 0), 10)
+
+    def test_enchant_godsforged_ward_grants_ignore_resistance_to_a_real_weapon(self):
+        """
+        The true guild-ladder capstone: db._apply_affix's existing
+        ignore_resistance kind, previously mythic-RNG-loot-exclusive, is
+        now also reachable deterministically via the Enchanters' Guild's
+        tier-5 recipe.
+        """
+        from rules.item_generator import generate_weapon
+        base_weapon = generate_weapon(tier="rare")
+        affixes = base_weapon.pop("affixes", [])
+        item_id = db.create_item_instance(
+            item_type=base_weapon["type"], name=base_weapon["name"], rarity=base_weapon["rarity"],
+            price=base_weapon["price"], base_stats=base_weapon, affixes=affixes,
+        )
+        db.forge_item_instance(item_id)
+        ok, _msg, enchanted = db.enchant_item_instance(item_id, {"kind": "ignore_resistance"})
+        self.assertTrue(ok)
+        self.assertTrue(enchanted.get("ignores_resistance"))
+
+    async def test_enchanters_guild_topic_redirects_the_old_commission_wording_to_the_real_ladder(self):
+        """
+        The commissioned-item mechanic Coffee explicitly disliked
+        (2026-08-11: "i dont like the commissioned item idea") is gone
+        -- a real guild member typing "commission an enchantment" in the
+        Enchanters' Guild topic now gets pointed at the real ladder
+        instead of a crash or silence.
+        """
+        make_basic_character(950923, "GuildMember", current_location="crossroads_tavern")
+        db.update_character(950923, -999, guild="enchanters_guild")
+        sink = []
+        update = FakeUpdate(950923, "commission an enchantment", sink, thread_id=config.GUILD_TOPIC_IDS["enchanters_guild"])
+        context = DummyContext()
+        await bot.guild_topic_handler(update, context, "enchanters_guild")
+        self.assertIn("ladder", sink[-1].lower())
+        self.assertNotIn("delivers", sink[-1].lower())
 
     def test_forge_and_enchant_keyword_fallback_classification(self):
         """Real Phase 7 deliverable: "forge my X" / "enchant my X" / "imbue the X" classify correctly without a model call."""

@@ -520,19 +520,29 @@ def _deterministic_enchant_item_answer() -> str:
     ungrounded" rule exists to prevent. Coffee's own follow-up asked
     for "a step by step guide... tell the user what to type or
     examples," so this is answered directly and completely from the
-    real mechanics (bot.py's _do_enchant_item/_do_commission_enchantment),
-    not left to a re-grounded but still free-form LLM call: the single
-    easiest way to get this wrong is missing the ONE non-obvious real
-    requirement (a plain shop-bought weapon can't be enchanted at all,
-    only a real found/crafted magic item) -- a fact worth never leaving
-    to chance.
+    real mechanics (bot.py's _do_enchant_item), not left to a
+    re-grounded but still free-form LLM call: the single easiest way to
+    get this wrong is missing the ONE non-obvious real requirement (a
+    plain shop-bought weapon can't be enchanted at all, only a real
+    found/crafted magic item) -- a fact worth never leaving to chance.
+    Guild tier ladder (2026-08-11): recipes past the base tier carry a
+    real requires_guild/min_rebirth gate (rules/crafting.py's
+    recipe_requirement_gate) -- included in each line below so the
+    answer stays grounded instead of promising a recipe the asker can't
+    actually use yet.
     """
     recipe_lines = []
     for recipe_id, recipe in ENCHANT_RECIPES.items():
         label = recipe_id.replace("enchant_", "")
         materials = ", ".join(f"{qty}x {items_module.get_item(mid)['name']}" for mid, qty in recipe["materials"].items())
         applies_to = "/".join(recipe["applies_to"])
-        recipe_lines.append(f"- \"{label}\" (DC {recipe['dc']} {recipe['ability']}): needs {materials}, applies to {applies_to} items")
+        gate = ""
+        if recipe.get("requires_guild"):
+            from guilds import GUILDS
+            gate += f", requires {GUILDS[recipe['requires_guild']]['name']} membership"
+        if recipe.get("min_rebirth"):
+            gate += f", requires rebirth #{recipe['min_rebirth']}+"
+        recipe_lines.append(f"- \"{label}\" (DC {recipe['dc']} {recipe['ability']}): needs {materials}, applies to {applies_to} items{gate}")
     return (
         "Enchanting only works on a REAL found-or-crafted magic item — a plain shop-bought weapon or "
         "armor can never be enchanted, no matter what. If you don't have one yet, craft an advanced "
@@ -541,9 +551,9 @@ def _deterministic_enchant_item_answer() -> str:
         "(or \"imbue\" instead of \"enchant\") — for example: \"enchant my masterwork longsword with flame\". "
         "The real enchantments are:\n" + "\n".join(recipe_lines) + "\n\n"
         "Materials are only consumed on a successful roll — a failed attempt doesn't waste them.\n\n"
-        "Separately, Enchanters' Guild members can say something like \"commission an enchantment\" "
-        "instead — no item or materials needed, the Guild grants a real random magic item for you, "
-        "once per rest."
+        "The Enchanters' Guild runs a real 5-tier ladder from here: Journeyman wards are open to any "
+        "member, Master/Grandmaster demand rebirth #1/#2, and the true Godsforged enchantment demands "
+        "rebirth #3 and a Godshard (found only in a boss's remains)."
     )
 
 

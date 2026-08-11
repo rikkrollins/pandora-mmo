@@ -189,6 +189,26 @@ def class_profession_affinity_bonus(char_class: str, profession: str) -> int:
     return CLASS_PROFESSION_AFFINITY_BONUS if CLASS_PROFESSIONS.get(char_class) == profession else 0
 
 
+# Guild tier ladder (2026-08-11, per Coffee: "make sure all tiers are
+# covered from beginning of the game to end game" + the rebirth system
+# is the intended "growth and breaking the game... Human Ascends to
+# God" spine). Two new OPTIONAL recipe fields, checked by this one
+# shared helper and consumed identically by both _do_enchant_item and
+# _do_craft (bot.py) -- a recipe with neither field set (every recipe
+# above this point) is ungated, exactly as before.
+def recipe_requirement_gate(character: dict, recipe: dict) -> str | None:
+    """Returns a player-facing rejection message, or None if `character` meets `recipe`'s requirements."""
+    requires_guild = recipe.get("requires_guild")
+    if requires_guild and character.get("guild") != requires_guild:
+        from guilds import GUILDS
+        guild_name = GUILDS.get(requires_guild, {}).get("name", requires_guild)
+        return f"That recipe is reserved for members of the {guild_name}."
+    min_rebirth = recipe.get("min_rebirth")
+    if min_rebirth and character.get("rebirth_count", 0) < min_rebirth:
+        return f"That recipe demands the mastery of rebirth #{min_rebirth} or higher — you're not there yet."
+    return None
+
+
 def get_recipe(recipe_id: str) -> dict | None:
     return RECIPES.get(recipe_id)
 
@@ -267,6 +287,41 @@ ADVANCED_RECIPES = {
         "item_type": "shield", "base_id": "wooden_shield", "tier": "rare",
         "ability": "strength", "dc": 16, "profession": "blacksmithing",
         "name": "Wardstone Shield",
+    },
+
+    # Forge Guild ladder (2026-08-11, per Coffee: cover every guild tier
+    # from level 1 to end game, using the rebirth system -- "Human
+    # Ascends to God" -- as the real gate, not an arbitrary new number.
+    # Every tier here reuses generate_item's EXISTING tier strings
+    # (very_rare/legendary/mythic already work today with zero new
+    # plumbing) -- only the recipe entries and the requires_guild/
+    # min_rebirth gate (see recipe_requirement_gate below) are new.
+    # Journeyman: guild membership alone. Master/Grandmaster: guild +
+    # successive rebirths. Godsforged: guild + rebirth 3 + one Godshard,
+    # a real boss-drop-only material (bot.py's GODSHARD_DROP_CHANCE).
+    "journeyman_blade": {
+        "materials": {"iron_ore": 10, "moonpetal": 2},
+        "item_type": "weapon", "base_id": "longsword", "tier": "very_rare",
+        "ability": "strength", "dc": 19, "profession": "blacksmithing",
+        "name": "Journeyman's Blade", "requires_guild": "forge_guild",
+    },
+    "masters_plate": {
+        "materials": {"iron_ore": 14, "silverleaf_herb": 4, "moonpetal": 2},
+        "item_type": "armor", "base_id": "chain_mail", "tier": "legendary",
+        "ability": "strength", "dc": 23, "profession": "blacksmithing",
+        "name": "Master's Plate", "requires_guild": "forge_guild", "min_rebirth": 1,
+    },
+    "grandmasters_greataxe": {
+        "materials": {"iron_ore": 16, "moonpetal": 4},
+        "item_type": "weapon", "base_id": "greataxe", "tier": "legendary",
+        "ability": "strength", "dc": 26, "profession": "blacksmithing",
+        "name": "Grandmaster's Greataxe", "requires_guild": "forge_guild", "min_rebirth": 2,
+    },
+    "godsforged_blade": {
+        "materials": {"iron_ore": 20, "moonpetal": 6, "godshard": 1},
+        "item_type": "weapon", "base_id": "longsword", "tier": "mythic",
+        "ability": "strength", "dc": 29, "profession": "blacksmithing",
+        "name": "Godsforged Blade", "requires_guild": "forge_guild", "min_rebirth": 3,
     },
 }
 
@@ -385,6 +440,51 @@ ENCHANT_RECIPES = {
         "affix": {"kind": "elemental_resistance", "damage_type": "lightning", "value": 50},
         "applies_to": ("armor", "shield", "ring", "amulet", "wondrous"),
         "ability": "intelligence", "dc": 16, "profession": "alchemy",
+    },
+
+    # Enchanters' Guild ladder (2026-08-11, per Coffee: rework the guild
+    # away from the commissioned-item idea -- players now enchant real
+    # items themselves, climbing a real 5-tier ladder gated on guild
+    # membership + rebirth, same "Human Ascends to God" spine as the
+    # Forge Guild ladder above. Every kind here is already implemented
+    # by db._apply_affix -- only the recipes and the new requires_guild/
+    # min_rebirth gate (recipe_requirement_gate below) are new.
+    "enchant_greater_ward": {
+        "materials": {"sulfur_dust": 4, "iron_ore": 2, "glimmerdeep_moss": 1},
+        "affix": {"kind": "elemental_resistance", "damage_type": "fire", "value": 75},
+        "applies_to": ("armor", "shield", "ring", "amulet", "wondrous"),
+        "ability": "intelligence", "dc": 19, "profession": "alchemy",
+        "requires_guild": "enchanters_guild",
+    },
+    # A self-reinforcing mastery loop, not a combat stat -- Master
+    # enchanters craft tools that make the WEARER better at enchanting,
+    # via the already-implemented "profession_bonus" affix kind
+    # (db._apply_affix, live-summed by bot.py's _equipped_profession_
+    # bonus exactly like practiced_bonus).
+    "enchant_masters_focus": {
+        "materials": {"moonpetal": 4, "glimmerdeep_moss": 2},
+        "affix": {"kind": "profession_bonus", "profession": "alchemy", "value": 3},
+        "applies_to": ("ring", "amulet", "wondrous"),
+        "ability": "intelligence", "dc": 22, "profession": "alchemy",
+        "requires_guild": "enchanters_guild", "min_rebirth": 1,
+    },
+    "enchant_grand_ward": {
+        "materials": {"moonpetal": 6, "silverleaf_herb": 4, "glimmerdeep_moss": 2},
+        "affix": {"kind": "elemental_resistance", "damage_type": "cold", "value": 100},
+        "applies_to": ("armor", "shield", "ring", "amulet", "wondrous"),
+        "ability": "intelligence", "dc": 25, "profession": "alchemy",
+        "requires_guild": "enchanters_guild", "min_rebirth": 2,
+    },
+    # The true capstone: db._apply_affix's "ignore_resistance" kind
+    # already exists (previously mythic-tier-RNG-loot-exclusive) -- this
+    # is the first DETERMINISTIC path to it, earned by walking the whole
+    # guild ladder to rebirth 3 and finding a real Godshard.
+    "enchant_godsforged_ward": {
+        "materials": {"glimmerdeep_moss": 4, "moonpetal": 6, "godshard": 1},
+        "affix": {"kind": "ignore_resistance"},
+        "applies_to": ("weapon",),
+        "ability": "intelligence", "dc": 28, "profession": "alchemy",
+        "requires_guild": "enchanters_guild", "min_rebirth": 3,
     },
 }
 
