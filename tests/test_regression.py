@@ -1723,6 +1723,41 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         example = "enchant my masterwork longsword with flame"
         self.assertEqual(_find_enchant_recipe_in_text(example), "enchant_flame")
 
+    def test_support_blacksmith_question_is_answered_deterministically_and_usefully(self):
+        """
+        Real live bug (2026-08-11, topic-monitor report): "How do i
+        blacksmith? And what does it do?" got back "Your STR power aids
+        in shaping metal!" -- grounded in the sense that it's not an
+        invented fact, but useless as an answer: no real command
+        syntax, no materials, no examples, despite _crafting_catalog_text
+        already including every real blacksmithing recipe in the
+        model's own prompt. Same "a real fact handed to the model still
+        isn't trusted over free-form generation" failure shape as
+        _deterministic_spell_slot_restore_answer's own docstring.
+        Answered directly from rules.crafting.RECIPES instead.
+        """
+        import ai.support_agent as support_agent_module
+        from unittest.mock import patch
+
+        with patch("ai.support_agent.requests.post") as mock_post:
+            answer = support_agent_module.answer_support_question("How do i blacksmith? And what does it do?")
+        mock_post.assert_not_called()
+        self.assertIn("craft", answer.lower())
+        self.assertIn("longsword", answer.lower())
+        self.assertIn("chain mail", answer.lower())
+        self.assertIn("strength", answer.lower())
+        self.assertNotIn("your str power aids in shaping metal", answer.lower())
+
+        # The example phrase this answer gives must actually work
+        # against the real handler's own recipe-matching.
+        from rules.crafting import RECIPES
+        import items as items_module
+        example = "craft a longsword"
+        self.assertEqual(
+            items_module.find_item_mentioned_in_text(example, candidate_ids=list(RECIPES.keys())),
+            "longsword",
+        )
+
     def test_support_crafting_catalog_includes_real_enchantments(self):
         from ai.support_agent import _crafting_catalog_text
         catalog = _crafting_catalog_text()

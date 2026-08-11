@@ -547,6 +547,53 @@ def _deterministic_enchant_item_answer() -> str:
     )
 
 
+_BLACKSMITH_QUESTION_WORDS = [
+    "how do i blacksmith", "how to blacksmith", "what does blacksmith", "what does blacksmithing",
+    "how does blacksmithing", "how does blacksmith", "what is blacksmithing", "what's blacksmithing",
+]
+
+
+def _deterministic_blacksmith_answer() -> str:
+    """
+    Real live bug (2026-08-11, topic-monitor report): "How do i
+    blacksmith? And what does it do?" got back "Your STR power aids in
+    shaping metal!" -- grounded in the sense that it's not a fabricated
+    fact, but genuinely useless as an answer: no real command syntax,
+    no materials, no examples, nothing a player could actually act on.
+    _crafting_catalog_text() DOES already ground the model in every
+    real blacksmithing recipe (materials, DC), same as every other
+    profession -- this is a compliance failure (the model choosing
+    flavor over the real facts it was given), not a missing-fact
+    problem, the same shape _deterministic_spell_slot_restore_answer's
+    docstring already documents for "how do I replenish spell slots".
+    Answered directly from RECIPES so this specific question can never
+    come out useless again, same pattern as
+    _deterministic_enchant_item_answer right above.
+    """
+    recipe_lines = []
+    for recipe_id, recipe in RECIPES.items():
+        if recipe.get("profession") != "blacksmithing":
+            continue
+        result = items_module.get_item(recipe["result_item"])
+        materials = ", ".join(
+            f"{qty}x {items_module.get_item(mid)['name'] if items_module.get_item(mid) else mid}"
+            for mid, qty in recipe["materials"].items()
+        )
+        recipe_lines.append(
+            f"- {result['name'] if result else recipe_id}: needs {materials} "
+            f"(DC {recipe['dc']} {recipe['ability']})"
+        )
+    return (
+        "Blacksmithing is a real crafting profession — a Strength-based ability check that forges "
+        "raw materials into a real weapon or piece of armor. Say something like \"craft [item name]\" "
+        "(e.g. \"craft a longsword\") once you have the materials. The real blacksmithing recipes are:\n"
+        + "\n".join(recipe_lines) + "\n\n"
+        "Materials are only consumed on a successful roll — a failed attempt doesn't waste them. "
+        "Fighters and Paladins get a real +2 bonus on blacksmithing checks specifically (class "
+        "profession affinity). Repeated real use also earns a small, capped practiced bonus over time."
+    )
+
+
 _ACTIVE_CHARACTER_QUESTION_WORDS = [
     "active character", "current character", "who am i playing",
     "which character am i", "what character am i", "who is my character",
@@ -926,6 +973,8 @@ def answer_support_question(
         return _deterministic_spell_slot_restore_answer(character)
     if any(w in lowered for w in _ENCHANT_QUESTION_WORDS):
         return _deterministic_enchant_item_answer()
+    if any(w in lowered for w in _BLACKSMITH_QUESTION_WORDS):
+        return _deterministic_blacksmith_answer()
     if character and any(w in lowered for w in _XP_QUESTION_WORDS):
         return _deterministic_xp_answer(character)
     if character and any(w in lowered for w in _ACTIVE_CHARACTER_QUESTION_WORDS):

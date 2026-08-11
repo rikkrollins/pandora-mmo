@@ -2,6 +2,24 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.141] — Fix: Support's blacksmithing answer was useless, not wrong
+
+Real live bug caught via topic-activity monitoring: "How do i
+blacksmith? And what does it do?" got back "Your STR power aids in
+shaping metal!" — not a hallucination (`_crafting_catalog_text`
+already grounds every real blacksmithing recipe in the model's own
+prompt), but useless as an answer: no real command syntax, no
+materials, no examples. Same "a real fact handed to the model still
+isn't trusted over free-form generation" compliance failure already
+documented for the spell-slot-restore question.
+
+Fixed with a new `_deterministic_blacksmith_answer()`, answered
+directly from `rules.crafting.RECIPES` — real command syntax, every
+blacksmithing recipe with its materials and DC, the Fighter/Paladin
+class-affinity bonus, and the practiced-bonus note. New regression
+test confirms the content and that the example phrase it gives
+actually resolves against the real recipe-matching handler.
+
 ## [1.27.140] — Fix: gathering narration invented "bare hands" over a real tool
 
 Real live bug, dev-topic screenshot: "Gather iron ore" narrated
