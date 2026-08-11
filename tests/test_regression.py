@@ -1808,6 +1808,39 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             result = intent_parser_module.parse_intent("\U0001F608", [])
         self.assertEqual(result["action"], "chat")
 
+    def test_model_guessing_flee_for_attack_flavor_text_is_never_trusted(self):
+        """
+        Real live bug (2026-08-11, topic-monitor report): "Take that you
+        wretched" -- clearly aggressive attack-flavor combat banter, not
+        an attempt to retreat -- got classified as "flee" anyway. Same
+        defensive pattern as pass_turn: flee_words is already a
+        deliberately broad, comprehensive list of every real way a
+        player asks to run away, so if the keyword fallback found none
+        of them, the model's own "flee" guess is never trusted alone --
+        flee is a real, risky dice roll (can draw a real opportunity
+        attack per CLAUDE.md), so a false positive derails the player's
+        actual turn, not just a silent non-reply.
+        """
+        from unittest.mock import patch
+        import ai.intent_parser as intent_parser_module
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": '{"action": "flee"}'}
+
+        with patch("ai.intent_parser.requests.post", return_value=FakeResponse()):
+            result = intent_parser_module.parse_intent("Take that you wretched", [])
+        self.assertEqual(result["action"], "chat")
+
+        # No regression: a real flee phrase the keyword fallback already
+        # knows about still works, whatever the model itself says.
+        with patch("ai.intent_parser.requests.post", return_value=FakeResponse()):
+            result = intent_parser_module.parse_intent("I try to flee from the goblin", [])
+        self.assertEqual(result["action"], "flee")
+
     # -- Real live bug (2026-07-17): capping num_predict for speed
     #    (ai/dm_agent.py, ai/support_agent.py, ai/intent_parser.py) can
     #    truncate generation mid-thought, before the model ever emits

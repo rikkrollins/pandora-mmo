@@ -2038,6 +2038,20 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
             # would have been returned by the general rule above if so.
             if parsed["action"] == "pass_turn":
                 return fallback
+            # Same defensive pattern again (2026-08-11, topic-monitor
+            # report): "Take that you wretched" -- clearly aggressive
+            # attack-flavor combat banter, not an attempt to retreat --
+            # got classified as "flee" anyway. flee_words above is
+            # already a deliberately broad, comprehensive list of every
+            # real way a player asks to run away; if the keyword fallback
+            # found none of them, the model's own "flee" guess is never
+            # trusted alone, same reasoning as pass_turn. This matters
+            # more than most other mis-guesses: flee is a real, risky
+            # dice roll (per CLAUDE.md, can draw a real opportunity
+            # attack) that derails whatever the player actually meant to
+            # do, not just a silent non-reply.
+            if parsed["action"] == "flee":
+                return fallback
             # Same defensive pattern again (2026-08-11, live-confirmed by
             # Coffee): a bare emoji message ("😈", sent as banter/heckling
             # aimed at a boss, not a real combat command) got classified

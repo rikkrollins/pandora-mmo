@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.139] — Fix: model guessing "flee" for ordinary combat banter
+
+Real live bug caught via topic-activity monitoring: "Take that you
+wretched" — clearly aggressive attack-flavor combat banter, not an
+attempt to retreat — got classified as `flee` anyway. `flee_words` in
+`ai/intent_parser.py` is already a deliberately broad, comprehensive
+list of every real way a player asks to run away; since none of them
+matched, the keyword fallback had no opinion, and the raw model's own
+guess went through unguarded — exactly the same "small model has a
+documented bias toward this action" shape already fixed for
+`pass_turn` and (2026-08-11, same day) bare-emoji `attack`. This one
+matters more than most: flee is a real, risky dice roll that can draw
+a real opportunity attack, so a false positive derails whatever the
+player actually meant to do, not just a silent non-reply.
+
+Fixed with the exact same defensive pattern as the `pass_turn` guard —
+`flee` is never trusted from the model alone; only from the keyword
+fallback's own comprehensive phrase list. New regression test
+confirms the fix and that a real flee phrase (the keyword fallback's
+own fast path — the model isn't even called) still works.
+
 ## [1.27.138] — Fix: "move NAME back/up" formation commands misclassified
 
 Real live bug caught via topic-activity monitoring: "Move laurienna
