@@ -66,6 +66,7 @@ from ai.dm_agent import (
     narrate_story_so_far, narrate_chapter_climax, narrate_arc_opening, narrate_next_step_hint,
     narrate_boss_intro, narrate_boss_defeat,
     _fallback_hourly_update, _fallback_narration,
+    is_narration_call_active,
 )
 from ai.intent_parser import parse_intents
 from ai.npc_agent import register_npc, talk_to_npc, generate_ambient_line, _NPCS
@@ -22460,9 +22461,22 @@ async def _idle_inactivity_loop(application: Application) -> None:
         # actively in flight, so it gets a real shot at the shared slot
         # instead of losing every race to background chatter. They
         # simply run next tick (60s later) once Support is done.
-        skip_ambient_ai = is_support_call_active()
+        # Real live finding (2026-08-11, dev-topic investigation into
+        # "enemy battle banter never appears"): the mechanism itself is
+        # correctly wired (confirmed live -- a direct narrate_action
+        # call with include_banter=True returned real quoted dialogue),
+        # but a separate call made minutes earlier, under ordinary
+        # daytime load, never completed within its own 200s timeout at
+        # all and silently fell back to the plain banter-less template.
+        # Combat/skill-check narration (ai/dm_agent.py's narrate_action/
+        # narrate_skill_check) blocks a real player's own turn exactly
+        # the same way a Support answer does, but had none of Support's
+        # world-tick-yielding protection -- exactly the gap this
+        # project's own prior notes on this starvation pattern flagged
+        # as untested. Same mechanism, extended to cover it.
+        skip_ambient_ai = is_support_call_active() or is_narration_call_active()
         if skip_ambient_ai:
-            logger.info("[world_tick] skipping this cycle's ambient AI calls -- a Support answer is in flight")
+            logger.info("[world_tick] skipping this cycle's ambient AI calls -- a Support answer or real narration call is in flight")
 
         for chat_id in db.get_all_chat_ids():
             try:

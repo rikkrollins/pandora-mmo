@@ -1597,6 +1597,57 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         mock_dice.assert_called_once()
         mock_moltbook_check.assert_called_once()
 
+    async def test_world_tick_skips_ambient_ai_calls_while_real_narration_is_in_flight(self):
+        """
+        Real live finding (2026-08-11, dev-topic investigation into
+        "enemy battle banter never appears"): combat/skill-check
+        narration blocks a real player's own turn the exact same way a
+        Support answer does, but had none of Support's world-tick-
+        yielding protection above -- exactly the gap this project's own
+        prior notes on the starvation pattern flagged as untested. Same
+        wiring check as the Support test above, but for
+        is_narration_call_active() instead, with Support inactive, to
+        confirm the world tick backs off for THIS trigger too, not just
+        Support's.
+        """
+        from unittest.mock import patch, AsyncMock, Mock
+
+        class _StopLoop(Exception):
+            pass
+
+        sleep_calls = {"n": 0}
+
+        async def fake_sleep(seconds):
+            sleep_calls["n"] += 1
+            if sleep_calls["n"] > 1:
+                raise _StopLoop()
+
+        with patch("bot.asyncio.sleep", side_effect=fake_sleep), \
+             patch("bot.is_support_call_active", return_value=False), \
+             patch("bot.is_narration_call_active", return_value=True), \
+             patch("bot._check_idle_characters", new=AsyncMock()), \
+             patch("bot._check_combat_timeouts", new=AsyncMock()), \
+             patch("bot._apply_passive_party_regen", new=Mock()), \
+             patch("bot._maybe_revive_standalone_ai_companions", new=Mock()), \
+             patch("bot.db.get_all_chat_ids", return_value=[999999]), \
+             patch("bot._wander_npcs", new=Mock()), \
+             patch("bot._maybe_post_world_heartbeat", new=AsyncMock()) as mock_heartbeat, \
+             patch("bot._maybe_post_hourly_status_update", new=AsyncMock()) as mock_hourly, \
+             patch("bot._maybe_spawn_world_boss", new=AsyncMock()), \
+             patch("bot.db.expire_stale_board_quests", new=Mock()), \
+             patch("bot._maybe_auto_roll_pending_dice", new=AsyncMock()), \
+             patch("bot._ai_party_autonomous_tick", new=AsyncMock()) as mock_ai_party, \
+             patch("bot._maybe_check_moltbook_activity", new=AsyncMock()), \
+             patch("bot._maybe_run_moltbook_social_tick", new=AsyncMock()) as mock_moltbook_social:
+            fake_app = SimpleNamespace(bot=object())
+            with self.assertRaises(_StopLoop):
+                await bot._idle_inactivity_loop(fake_app)
+
+        mock_heartbeat.assert_not_called()
+        mock_hourly.assert_not_called()
+        mock_ai_party.assert_not_called()
+        mock_moltbook_social.assert_not_called()
+
     def test_support_retries_and_logs_when_a_real_response_has_no_text_after_stripping_think_tags(self):
         """
         Real live bug (2026-08-10, Coffee: "How do i enchant my weapon?"
@@ -9330,6 +9381,59 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(_BANTER_INSTRUCTION, without_banter)
         default_omits = _build_prompt(character, "attacks Fenwick", result)
         self.assertNotIn(_BANTER_INSTRUCTION, default_omits, "include_banter must default to off")
+
+    def test_narration_call_active_flag_toggles_around_the_real_call(self):
+        """
+        Real live finding (2026-08-11, dev-topic investigation into "enemy
+        battle banter never appears"): the banter mechanism itself works
+        (confirmed live -- a direct call with include_banter=True returned
+        real quoted dialogue), but a separate call made minutes earlier
+        never completed within its own 200s timeout at all under ordinary
+        load, silently falling back to the plain banter-less template.
+        Combat narration had none of Support's existing world-tick-
+        yielding protection (is_support_call_active(), see
+        ai/support_agent.py) even though it blocks a real player's turn
+        the exact same way. is_narration_call_active() must be True for
+        the duration of the real network call (so bot.py's world tick can
+        back off) and False again once it returns -- checked for both
+        narrate_action and narrate_skill_check, and confirmed it resets
+        to False even when the call raises.
+        """
+        from unittest.mock import patch
+        import ai.dm_agent as dm_agent_module
+
+        observed = []
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "A plain result."}
+
+        def fake_post(*a, **k):
+            observed.append(dm_agent_module.is_narration_call_active())
+            return FakeResponse()
+
+        self.assertFalse(dm_agent_module.is_narration_call_active())
+        character = {"name": "Grubnak", "char_class": None, "hp_current": 20, "hp_max": 20}
+        result = {"hit": True, "damage_dealt": 5, "raw_roll": 12}
+        with patch("ai.dm_agent.requests.post", side_effect=fake_post):
+            dm_agent_module.narrate_action(character, "attacks Fenwick", result)
+        self.assertTrue(observed[-1], "flag must be True during the real call")
+        self.assertFalse(dm_agent_module.is_narration_call_active(), "flag must reset to False after")
+
+        observed.clear()
+        with patch("ai.dm_agent.requests.post", side_effect=fake_post):
+            dm_agent_module.narrate_skill_check(character, "sneak past the guard", "dexterity", result)
+        self.assertTrue(observed[-1])
+        self.assertFalse(dm_agent_module.is_narration_call_active())
+
+        # Must reset even when the real call raises, not just on success.
+        import requests
+        with patch("ai.dm_agent.requests.post", side_effect=requests.RequestException("boom")):
+            dm_agent_module.narrate_action(character, "attacks Fenwick", result)
+        self.assertFalse(dm_agent_module.is_narration_call_active())
 
     async def test_enemy_banter_only_rolled_for_enemy_side_attackers(self):
         """

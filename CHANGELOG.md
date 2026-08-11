@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.142] — Fix: combat narration (incl. enemy banter) starved by world tick
+
+Root-caused the "enemy battle banter never appears" investigation:
+the banter mechanism itself is correctly wired and DOES work —
+confirmed live, a direct combat-narration call with the banter flag
+set returned real quoted in-character dialogue. But a separate call
+made minutes earlier, under ordinary daytime load, never completed
+within its own 200s timeout at all, silently falling back to the
+plain, banter-less template.
+
+Combat/skill-check narration (`ai/dm_agent.py`'s `narrate_action`/
+`narrate_skill_check`) blocks a real player's own turn the exact same
+way a Support answer does, but had none of Support's existing
+world-tick-yielding protection (`is_support_call_active()`) — the
+60s world tick (NPC heartbeat, hourly status, AI-party autonomous
+turns) keeps firing its own Ollama calls regardless of whether a real
+player is mid-turn, competing for the single shared inference slot.
+Added an identical `is_narration_call_active()` flag, set for the
+duration of the real network call in both functions, and wired into
+the world tick's existing `skip_ambient_ai` check alongside Support's.
+
+New regression tests confirm the flag toggles correctly around both
+real calls (including on failure, not just success) and that the
+world tick's Ollama-touching sub-calls are actually skipped while a
+real narration call is in flight, mirroring the existing Support
+wiring test.
+
 ## [1.27.141] — Fix: Support's blacksmithing answer was useless, not wrong
 
 Real live bug caught via topic-activity monitoring: "How do i

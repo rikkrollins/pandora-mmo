@@ -143,6 +143,30 @@ def _build_skill_check_prompt(character: dict, action_text: str, ability: str,
     )
 
 
+# Real live finding (2026-08-11, dev-topic investigation into "enemy
+# battle banter never appears"): _BANTER_INSTRUCTION below is correctly
+# wired and DOES work -- confirmed live, a direct narrate_action call
+# with include_banter=True returned real quoted dialogue -- but a
+# SEPARATE direct call made minutes earlier, under ordinary daytime
+# load, never completed within its own 200s timeout at all, silently
+# falling back to the plain banter-less template. bot.py's world tick
+# already has this exact "back off while a real player is waiting on
+# an answer" protection for Support (is_support_call_active(), see
+# ai/support_agent.py's own docstring on the identical starvation
+# bug), but combat/skill-check narration -- the two calls that
+# actually block a real player's turn -- had no equivalent, exactly
+# the gap project_world_tick_ollama_starvation's own notes flagged as
+# untested. Same mechanism, mirrored here: a plain module-level flag,
+# set for the duration of the real network call, checked by the world
+# tick before it fires its own ambient Ollama calls (NPC heartbeat,
+# hourly update, AI-party autonomous turns).
+_narration_call_active = False
+
+
+def is_narration_call_active() -> bool:
+    return _narration_call_active
+
+
 def narrate_skill_check(character: dict, action_text: str, ability: str, mechanical_result: dict,
                          grounded_fact: str | None = None) -> str:
     """
@@ -160,6 +184,8 @@ def narrate_skill_check(character: dict, action_text: str, ability: str, mechani
     """
     prompt = _build_skill_check_prompt(character, action_text, ability, mechanical_result, grounded_fact)
 
+    global _narration_call_active
+    _narration_call_active = True
     try:
         response = requests.post(
             f"{config.OLLAMA_BASE_URL}/api/generate",
@@ -178,6 +204,8 @@ def narrate_skill_check(character: dict, action_text: str, ability: str, mechani
             return text
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] skill check narration call failed, falling back to template: {e}")
+    finally:
+        _narration_call_active = False
 
     return _fallback_skill_check_narration(character, action_text, mechanical_result, grounded_fact)
 
@@ -354,6 +382,8 @@ def narrate_action(character: dict, action_text: str, mechanical_result: dict,
         location_description, include_banter,
     )
 
+    global _narration_call_active
+    _narration_call_active = True
     try:
         response = requests.post(
             f"{config.OLLAMA_BASE_URL}/api/generate",
@@ -372,6 +402,8 @@ def narrate_action(character: dict, action_text: str, mechanical_result: dict,
             return text
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] narration call failed, falling back to template: {e}")
+    finally:
+        _narration_call_active = False
 
     return _fallback_narration(mechanical_result)
 
