@@ -5695,6 +5695,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r["action"], "set_back_row")
         self.assertIsNone(r.get("target"))
 
+    def test_formation_command_with_bare_trailing_forward_names_the_target(self):
+        """
+        Real live bug (2026-08-11, same-day topic-monitor report):
+        "Move zara forward" came back as plain "move" (travel) right
+        next to a correctly-classified "Move elduinn to the backrow" --
+        the exact same bare-trailer gap as "back"/"up" above, just a
+        third natural synonym ("forward" == "to the front") that was
+        never added to _MOVE_BARE_TRAILERS.
+        """
+        r = _keyword_fallback("Move zara forward", ["Zara"])
+        self.assertEqual(r["action"], "set_front_row")
+        self.assertEqual((r.get("target") or "").lower(), "zara")
+
     def test_tactical_phrasing_maps_to_formation_not_flee(self):
         self.assertEqual(_keyword_fallback("pull back", [])["action"], "set_back_row")
         result = _keyword_fallback("pull Zara back", [])

@@ -693,7 +693,13 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # field is a single name, and guessing a combined "Zara and Sarah"
     # string would just fail character lookup downstream instead of
     # fixing anything, so that case still falls through unchanged.
-    _MOVE_BARE_TRAILERS = {"back": "set_back_row", "up": "set_front_row"}
+    #
+    # "forward" (2026-08-11, same-day topic-monitor report): "Move zara
+    # forward" came back as plain "move" (travel) right next to a
+    # correctly-classified "Move elduinn to the backrow" -- the exact
+    # same bare-trailer gap as "back"/"up" above, just a third natural
+    # synonym ("forward" == "to the front") that was never added.
+    _MOVE_BARE_TRAILERS = {"back": "set_back_row", "up": "set_front_row", "forward": "set_front_row"}
     for trigger in ["move ", "put "]:
         if trigger not in lowered:
             continue

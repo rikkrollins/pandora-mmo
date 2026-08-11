@@ -2,6 +2,15 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.152] — Fix: "move X forward" misclassified as travel instead of formation
+
+Real live bug (topic-monitor report): "Move zara forward" came back
+as plain "move" (location travel) right next to a correctly-
+classified "Move elduinn to the backrow" -- the exact same bare-
+trailer gap already fixed for "back"/"up" earlier the same day, just
+a third natural synonym ("forward" == "to the front row") that was
+never added to `_MOVE_BARE_TRAILERS`. 1 new regression test.
+
 ## [1.27.151] — Fuzzy monster-name typo matching, and a real structural fix underneath it
 
 Per Coffee, live: "Fight a goblin shame" -- a real typo of "shaman",
