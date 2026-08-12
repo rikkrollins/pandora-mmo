@@ -5382,6 +5382,53 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(leader_xp_after - leader_xp_before, companion_xp_after - companion_xp_before)
         sessions.end_session(-999)
 
+    async def test_ai_party_action_text_never_keeps_literal_brackets(self):
+        """
+        Real gap found 2026-08-12 (hunting the live log): ai/autonomous_
+        player.py's own prompt tells the model "NEVER copy a bracketed
+        example verbatim" (its few-shot examples use brackets to mark a
+        placeholder, e.g. "I gather [something listed under...]"), but
+        the live log shows this isn't reliably followed: real occurrences
+        of "I gather [Sulfur Dust]", "I head to [The Goblin Warrens]",
+        "I attack [crystal_spider]" all still had literal brackets. That
+        raw text becomes the synthetic update's message.text AND is later
+        quoted straight into the narration model's own prompt (ai/
+        dm_agent.py's narrate_action) as the character's stated action --
+        a leftover bracket there risks leaking into what players actually
+        see narrated. Fixed by stripping [ ] from action_text right where
+        it's produced in _ai_party_act_one_turn, before it's used for
+        anything. No real item/location/monster name in this game ever
+        uses square brackets, so stripping is always safe.
+        """
+        from unittest.mock import patch
+        companion = db.create_ai_companion(
+            -999, "BracketBuddy", "Elf", "Ranger",
+            ability_scores={"strength": 12, "dexterity": 17, "constitution": 13,
+                             "intelligence": 11, "wisdom": 15, "charisma": 10},
+            hp_max=20, armor_class=14, gold=0, inventory={},
+        )
+        db.update_character(companion["telegram_user_id"], -999, current_location="crossroads_tavern")
+        actor = db.get_character(companion["telegram_user_id"], -999)
+        actor["telegram_user_id"] = companion["telegram_user_id"]
+        actor["chat_id"] = -999
+
+        class _FakeBot:
+            def __init__(self):
+                self.sent = []
+
+            async def send_message(self, **kwargs):
+                self.sent.append(kwargs)
+                return None
+
+        with patch("bot.choose_next_action", return_value="I examine [an old rope]"):
+            await bot._ai_party_act_one_turn(_FakeBot(), actor)
+
+        context = bot._chat_scoped_dict(bot._AI_PLAYER_CONTEXTS, -999)[companion["telegram_user_id"]]
+        stored_action = context.user_data["last_autonomous_action"]
+        self.assertNotIn("[", stored_action)
+        self.assertNotIn("]", stored_action)
+        self.assertEqual(stored_action, "I examine an old rope")
+
     async def test_multi_fight_sessions_do_not_cross_contaminate(self):
         """
         The real Phase 1 deliverable (2026-08-01 multi-fight rewrite, per

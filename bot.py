@@ -23464,6 +23464,25 @@ async def _ai_party_act_one_turn(bot, actor: dict) -> None:
     if guidance:
         situation_facts += f"\nA party member just told you directly: \"{guidance}\""
     action_text = await asyncio.to_thread(choose_next_action, actor, personality, situation_facts, last_action)
+    # Real gap found 2026-08-12 (hunting the live log): ai/autonomous_
+    # player.py's own prompt explicitly tells the model "NEVER copy a
+    # bracketed example verbatim" (its few-shot examples are written
+    # like "I gather [something listed under...]", brackets marking a
+    # placeholder to fill in, not literal syntax) -- but the live log
+    # shows this instruction isn't reliably followed: "I gather [Sulfur
+    # Dust]", "I head to [The Goblin Warrens]", "I attack [crystal_
+    # spider]" all appear verbatim, brackets and all. This raw text
+    # becomes update_like.message.text AND is later handed straight to
+    # the narration model as the character's own quoted action (see
+    # ai/dm_agent.py's narrate_action/_build_prompt) -- a literal
+    # leftover bracket risks either confusing that prompt or leaking
+    # into the narrated prose players actually see. Same defense-in-
+    # depth philosophy as the rest of this codebase: never trust the
+    # model alone to follow a formatting instruction perfectly, enforce
+    # it deterministically at the one place this text originates. No
+    # real item/location/monster name in this game ever uses square
+    # brackets, so stripping them is always safe.
+    action_text = action_text.replace("[", "").replace("]", "")
     context_like.user_data["last_autonomous_action"] = action_text
 
     update_like = _AiPlayerUpdate(bot, chat_id, user_id, action_text)

@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.164] — Fix: AI companion actions could leak literal brackets
+
+Found proactively (hunting the live log, not a live report): ai/
+autonomous_player.py's own prompt explicitly tells the model "NEVER
+copy a bracketed example verbatim" (its few-shot examples use brackets
+to mark a placeholder), but the live log showed this instruction isn't
+reliably followed — real occurrences of "I gather [Sulfur Dust]", "I
+head to [The Goblin Warrens]", "I attack [crystal_spider]" all kept
+the literal brackets. This raw text becomes the synthetic update's
+message.text AND is later quoted straight into the narration model's
+own prompt as the character's stated action — a leftover bracket
+risked leaking into what players actually see narrated. Fixed with a
+deterministic strip at the one place this text originates
+(_ai_party_act_one_turn), same defense-in-depth philosophy as the rest
+of this codebase: never trust the model alone to follow a formatting
+instruction perfectly. 1 new regression test.
+
 ## [1.27.163] — Fix: examining a recipe book only gave generic flavor text
 
 Real dev-bridge follow-up (2026-08-12, same player as the "view"
