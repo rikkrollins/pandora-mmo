@@ -2,6 +2,52 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.160] — Fix: pre-v1.27.154 guild members never got their curriculum step posted/pinned
+
+Real live report (Coffee: "im not seeing anything posted/pinned in the
+guild topics. are u sure this was completed ?") — investigated via a
+real, read-only live-DB query rather than reassurance, and confirmed
+correct: the guild curriculum's post+pin only ever fires from a fresh
+join_guild call or a step completion, neither of which retroactively
+runs for a character who joined their guild before v1.27.154 shipped.
+Every real character currently in a guild had
+guild_curriculum_step_unlocked_at IS NULL — they were genuinely never
+told the curriculum exists. Fixed with a one-time live backfill
+(scripts/backfill_guild_curriculum_pins.py, run once against
+production): for every real (chat, guild) pair with an affected member,
+posts+pins step 0's real announcement into that guild's own topic and
+stamps guild_curriculum_step_unlocked_at=now() for each affected
+member, starting their real 6h cooldown the moment they're actually
+told about it — matching what a fresh join already does. Idempotent,
+safe to re-run. Verified against a throwaway DB before running live.
+
+## [1.27.159] — Fix: enemy battle banter almost never actually appeared
+
+Real live report (Coffee: "i am also not seeing banter still in
+battles"), a second, deeper cause beyond the 2026-08-11 Ollama-
+congestion fix. Root-caused via direct reproduction:
+AI_TURN_NARRATION_BUDGET_SECONDS was set to 45.0 back in v1.27.9
+(2026-07-24) — before real per-call Ollama latency was ever measured
+on this hardware. CLAUDE.md's own documented post-migration baseline
+is ~46-73s typical, up to 160s+, so a single real narration call
+almost always exceeded the 45s budget by itself. Since that budget is
+one wall-clock deadline for an ENTIRE AI-turn-resolution sequence
+(every AI turn until a real player is up again), this meant only the
+very first AI-narrated attack of a whole round could ever reach a real
+narration call — and therefore the enemy-banter roll nested inside it
+(task #9) — every subsequent enemy attack in the same round (a 2nd
+enemy, a boss's 2nd Multiattack swing, any turn after a friendly AI
+companion went first) was guaranteed to fall back to the plain
+template, with zero chance of banter, regardless of dice luck.
+Confirmed with a real reproduction (two enemies, a mocked wall clock
+advancing only when narrate_action is actually invoked, matching how
+real elapsed time only jumps once the network call returns) — under
+the old 45s budget only the first enemy ever reached narrate_action.
+Raised the budget to 180.0 — still a firm multiple below the original
+runaway-chain incident this breaker exists to prevent, but enough for
+2-3 typical real calls to land in one round instead of at most one.
+1 new regression test locks in the fix.
+
 ## [1.27.158] — Fix: guild curriculum alignment-choice steps gave no instructions
 
 Found proactively (direct reproduction, not a live report): the

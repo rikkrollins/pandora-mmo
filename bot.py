@@ -914,7 +914,24 @@ OLLAMA_CONGESTION_LOAD_THRESHOLD = 12.0
 # _resolve_ai_turns's docstrings): bounds how long a single player action
 # can ever take waiting on AI-turn narration, regardless of AI turn count
 # or whether load average happens to catch the contention.
-AI_TURN_NARRATION_BUDGET_SECONDS = 45.0
+#
+# Real live report (2026-08-12, Coffee: "i am also not seeing banter
+# still in battles"): this was originally set to 45.0 the day it shipped
+# (v1.27.9), before real per-call Ollama latency on this hardware was
+# ever measured -- CLAUDE.md's own documented post-migration baseline is
+# ~46-73s typical, up to 160s+. A single real narration call almost
+# always exceeded 45s by itself, and since this budget is ONE wall-clock
+# deadline for the entire AI-turn-resolution sequence (every AI turn
+# until a real player is up again), that meant only the very FIRST
+# AI-narrated attack of a whole round could ever reach a real narration
+# call (and therefore the enemy-banter roll inside it, task #9) -- every
+# subsequent enemy attack in the same round was guaranteed to fall back
+# to the plain template, confirmed via direct reproduction. Raised to
+# 180.0: still a firm multiple below the original "HOURS" runaway-chain
+# incident this breaker exists to prevent (an unbounded chain, not a
+# 3-4x headroom over one real call), but enough for 2-3 typical real
+# calls to land inside a single round instead of at most one.
+AI_TURN_NARRATION_BUDGET_SECONDS = 180.0
 
 # Enemy battle banter (2026-08-09, task #9, see _post_narrated): fraction
 # of enemy-side attacks that roll a short in-character taunt/tease/coax

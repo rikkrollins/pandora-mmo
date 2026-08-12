@@ -10293,6 +10293,81 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(captured["include_banter"])
         sessions.end_session(-996)
 
+    async def test_ai_turn_narration_budget_does_not_starve_banter_after_one_real_call(self):
+        """
+        Real live report (2026-08-12, Coffee: "i am also not seeing
+        banter still in battles"). Root cause: AI_TURN_NARRATION_BUDGET_
+        SECONDS was set to 45.0 back in v1.27.9 (2026-07-24), well before
+        real per-call Ollama latency was ever measured on this hardware.
+        CLAUDE.md's own documented post-migration baseline is ~46-73s
+        typical, up to 160s+ -- meaning a SINGLE real narration call
+        almost always exceeds a 45s budget by itself. Since turns_started_
+        at is one wall-clock deadline for the ENTIRE _resolve_ai_turns_
+        inner invocation (every AI-controlled turn until a real player is
+        up again -- see that function's own docstring), this meant only
+        the FIRST AI-narrated attack of a whole round could ever reach
+        the include_banter roll; every subsequent enemy attack in the
+        same round (a 2nd enemy, a boss's 2nd Multiattack swing, any turn
+        after a friendly AI companion went first) was guaranteed
+        skip_narration=True and fell back to the plain template, with
+        zero chance of banter, regardless of dice luck.
+
+        Simulates real narration latency by advancing a fake wall clock
+        only when narrate_action is actually "called" (not merely
+        queried), matching how real elapsed time only advances once the
+        actual network call returns -- confirms two enemies, each taking
+        one real ~60s-latency narration call, both still get a real
+        narrate_action call (and therefore a real shot at banter) within
+        one AI-turn-resolution, which the old 45s budget could not do.
+        """
+        from unittest.mock import patch
+        import sessions
+        sessions.end_session(-995)
+        enemy1_id, enemy2_id, player_id = -2_500_090, -2_500_091, 555095
+        enemy1 = {"telegram_user_id": enemy1_id, "name": "FirstGoblin", "dexterity": 10, "strength": 10,
+                  "hp_current": 20, "hp_max": 20, "armor_class": 10, "is_ai": 1, "monster_key": "goblin"}
+        enemy2 = {"telegram_user_id": enemy2_id, "name": "SecondGoblin", "dexterity": 10, "strength": 10,
+                  "hp_current": 20, "hp_max": 20, "armor_class": 10, "is_ai": 1, "monster_key": "goblin"}
+        player = {"telegram_user_id": player_id, "chat_id": -995, "name": "RealPlayer", "dexterity": 10,
+                  "strength": 10, "hp_current": 20, "hp_max": 20, "armor_class": 15, "is_ai": 0}
+        session = sessions.start_session(
+            -995, [enemy1, enemy2, player],
+            {enemy1_id: "enemy", enemy2_id: "enemy", player_id: "party"},
+        )
+        # Force turn order so both enemies act before control returns to
+        # the real player -- start_session rolls random initiative, and
+        # this test needs a deterministic multi-enemy round to exercise
+        # the budget, not luck of the dice.
+        session.turn_order = [enemy1_id, enemy2_id, player_id]
+        session.current_turn_index = 0
+
+        clock = {"t": 0.0}
+        calls = []
+
+        def fake_monotonic():
+            return clock["t"]
+
+        def fake_narrate_action(character, action_text, mech_result, recent_events=None,
+                                 actor_personality=None, location_description=None, include_banter=False):
+            calls.append({"attacker": character["name"], "include_banter": include_banter})
+            clock["t"] += 60.0  # real documented typical latency, see CLAUDE.md
+            return "The goblin swings."
+
+        sink = []
+        update = FakeUpdate(enemy1_id, "n/a", sink)
+        with patch("bot.time.monotonic", fake_monotonic), \
+             patch("bot.narrate_action", fake_narrate_action), \
+             patch("bot.random.random", return_value=0.0):
+            await bot._resolve_ai_turns(update, session)
+
+        self.assertEqual(
+            [c["attacker"] for c in calls], ["FirstGoblin", "SecondGoblin"],
+            "both enemies in this round must reach a real narrate_action call, not just the first",
+        )
+        self.assertTrue(calls[0]["include_banter"])
+        self.assertTrue(calls[1]["include_banter"], "second enemy's attack must still get a real shot at banter")
+        sessions.end_session(-995)
+
     # -- Battle formation image (2026-08-09, task #9-followup) -----------
     def test_render_battle_formation_produces_a_valid_png_reflecting_real_state(self):
         """
