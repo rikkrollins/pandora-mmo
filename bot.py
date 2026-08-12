@@ -15470,19 +15470,30 @@ def _guild_curriculum_riddle_answer_matches(text: str, accepted_answers: list[st
 
 
 def _format_guild_curriculum_step_objective(step: dict) -> str:
+    """
+    Real live report (2026-08-12, dev-bridge screenshot + "How do we
+    complete the quests?"): reach_location/defeat_monster/gather_material
+    objectives told a member WHAT to do but never WHERE to do it, unlike
+    solve_puzzle/npc_dialogue/dice_challenge/alignment_choice, which all
+    explicitly say "in the Adventure topic" or "right here" -- a real,
+    confirmed gap (this exact player's own guild topic screenshot showed
+    "Travel to Market Row." with no such hint) since these steps are
+    posted in the GUILD topic but must actually be acted on in Adventure,
+    same as any other move/gather/combat action.
+    """
     trigger = step["trigger"]
     ttype = trigger["type"]
     if ttype == "reach_location":
         location = cl.get_location(CAMPAIGN, trigger["location"])
-        return f"Travel to {location['name'] if location else trigger['location']}."
+        return f"Travel to {location['name'] if location else trigger['location']}, in the Adventure topic."
     if ttype == "defeat_monster":
         template = cl.get_monster_template(CAMPAIGN, trigger["monster"])
         name = template["name"] if template else trigger["monster"]
-        return f"Defeat {trigger.get('count', 1)}x {name}."
+        return f"Defeat {trigger.get('count', 1)}x {name}, in the Adventure topic."
     if ttype == "gather_material":
         item = items_module.get_item(trigger["material"])
         name = item["name"] if item else trigger["material"]
-        return f"Gather {trigger.get('count', 1)}x {name}."
+        return f"Gather {trigger.get('count', 1)}x {name}, in the Adventure topic."
     if ttype == "solve_puzzle":
         return "Answer the riddle above, right here in this topic."
     if ttype == "npc_dialogue":

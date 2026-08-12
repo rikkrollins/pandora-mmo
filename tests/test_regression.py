@@ -11827,6 +11827,32 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("XP", text, f"{guild_id}/{step['id']} announcement must not spoil the reward")
                 self.assertNotIn("gold", text, f"{guild_id}/{step['id']} announcement must not spoil the reward")
 
+    def test_guild_curriculum_location_monster_material_objectives_say_where_to_act(self):
+        """
+        Real live report (2026-08-12, dev-bridge screenshot + "How do we
+        complete the quests?"): reach_location/defeat_monster/
+        gather_material objectives told a member WHAT to do ("Travel to
+        Market Row.") but never WHERE, unlike solve_puzzle/npc_dialogue/
+        dice_challenge/alignment_choice, which all explicitly say "in the
+        Adventure topic" or "right here" -- these steps post in the
+        GUILD topic but must be acted on in Adventure, same as any other
+        move/gather/combat action, and a member reading only the guild
+        topic had no way to know that. Confirmed via this exact player's
+        own guild topic screenshot (Adventurers' Guild step 0: "Travel to
+        Market Row."). Fixed by appending ", in the Adventure topic." to
+        all three of these objective branches.
+        """
+        import guild_curriculum as gc
+        for guild_id in gc.GUILD_CURRICULUM:
+            for step in gc.get_curriculum(guild_id):
+                if step["trigger"]["type"] not in ("reach_location", "defeat_monster", "gather_material"):
+                    continue
+                objective = bot._format_guild_curriculum_step_objective(step)
+                self.assertIn(
+                    "Adventure topic", objective,
+                    f"{guild_id}/{step['id']} objective doesn't say where to act: {objective!r}",
+                )
+
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
     """

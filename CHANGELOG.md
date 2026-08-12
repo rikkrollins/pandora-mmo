@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.161] — Fix: guild curriculum objectives never said where to act
+
+Real dev-bridge report (2026-08-12, Coffee's own guild-topic screenshot):
+a member's real reach_location/defeat_monster/gather_material curriculum
+objective ("Travel to Market Row.") gave no indication it had to be
+acted on in the Adventure topic, unlike solve_puzzle/npc_dialogue/
+dice_challenge/alignment_choice, which all already say so explicitly.
+This directly explained the player's own "How do we complete the
+quests?" follow-up. Fixed by appending ", in the Adventure topic." to
+all three of those objective branches. 1 new regression test covers
+every real reach_location/defeat_monster/gather_material step across
+all 7 guilds.
+
 ## [1.27.160] — Fix: pre-v1.27.154 guild members never got their curriculum step posted/pinned
 
 Real live report (Coffee: "im not seeing anything posted/pinned in the
