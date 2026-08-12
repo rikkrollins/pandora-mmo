@@ -5677,6 +5677,33 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # just never exclusively.
         self.assertGreater(picks.count("Bram"), picks.count("Vesh"))
 
+    def test_formation_targeting_survives_an_overhealed_member(self):
+        """
+        Real live crash (2026-08-12, Coffee: "what happened ?? it
+        stopped working ?"). A party member (Laurienna) had been healed
+        to hp_current=671 against hp_max=372 -- some overheal effect
+        pushed her past 100% of max, which is someone else's mechanic to
+        allow or forbid, not this function's concern. The old weight
+        formula, `(1.0 - hp_pct) + 0.1`, assumed hp_pct never exceeds
+        1.0; at hp_pct ~= 1.8 it went negative (~-0.7), and summed
+        against ordinary row-mates the pool's total weight could drop to
+        zero or below, which random.choices rejects with "Total of
+        weights must be greater than zero" -- crashing every single
+        attack against this row and freezing combat entirely. This
+        reproduces her exact real numbers alongside two ordinary
+        near-full-HP row-mates and asserts it no longer raises, with
+        every row member still a real possible pick.
+        """
+        import random
+        random.seed(3)
+        pool = [
+            {"telegram_user_id": 1, "name": "Sarah", "hp_current": 466, "hp_max": 466, "formation_row": "front"},
+            {"telegram_user_id": 2, "name": "Zara", "hp_current": 476, "hp_max": 501, "formation_row": "front"},
+            {"telegram_user_id": 3, "name": "Laurienna", "hp_current": 671, "hp_max": 372, "formation_row": "front"},
+        ]
+        picks = [bot._pick_formation_weighted_target(pool)["name"] for _ in range(500)]
+        self.assertEqual(set(picks), {"Sarah", "Zara", "Laurienna"})
+
     def test_enemy_formation_row_heuristic_grounded_in_real_monster_data(self):
         self.assertEqual(bot._enemy_formation_row("goblin", {"name": "Goblin"}), "front")
         self.assertEqual(bot._enemy_formation_row("goblin_shaman", {"name": "Goblin Shaman"}), "back")

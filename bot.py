@@ -5776,7 +5776,17 @@ def _pick_formation_weighted_target(opposing: list[dict]) -> dict:
     weights = []
     for p in pool:
         hp_max = p.get("hp_max") or p["hp_current"] or 1
-        hp_pct = p["hp_current"] / hp_max
+        # Clamp to [0.0, 1.0]: overheal effects can legitimately push
+        # hp_current above hp_max (2026-08-12 live crash, Coffee's
+        # "what happened ?? it stopped working ?" -- a party member sat
+        # at 671/372 HP after being healed past their cap, and the
+        # unclamped formula below went negative, which random.choices
+        # rejects with "Total of weights must be greater than zero" --
+        # this froze combat on every subsequent attack). Overheal is
+        # someone else's mechanic to allow or disallow; this function's
+        # only job is picking a target, so it never lets HP outside
+        # [0, hp_max] break that.
+        hp_pct = max(0.0, min(1.0, p["hp_current"] / hp_max))
         # Range (0.1, 1.1]: a member at full HP still keeps a real
         # 0.1 floor of weight (never immune), a member near death
         # approaches 1.1 (favored, not guaranteed).

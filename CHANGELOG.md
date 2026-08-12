@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.166] — Fix: overheal above max HP crashed and froze live combat
+
+Live, actively-blocking crash (2026-08-12, Coffee: "what happened ??
+it stopped working ?"). The log showed an unhandled `ValueError: Total
+of weights must be greater than zero` in `_pick_formation_weighted_
+target`, triggered by Coffee's own "Attack" and repeating on every
+subsequent attempt — combat was genuinely stuck. Root cause, confirmed
+via the live sessions snapshot: party member Laurienna had been healed
+to hp_current=671 against hp_max=372 (some overheal effect pushing her
+well past 100% of max — someone else's mechanic to allow or forbid,
+not this function's business). The weight formula, `(1.0 - hp_pct) +
+0.1`, assumed hp_pct never exceeds 1.0; at ~1.8 it went negative, and
+summed against her row-mates' ordinary weights the pool's total could
+drop to zero or below, which `random.choices` refuses to sample from.
+`hp_pct` is now clamped to `[0.0, 1.0]` before the weight is computed,
+so no HP value outside a member's real max-to-zero range can ever push
+a weight negative again. 1 new regression test reproducing her exact
+real numbers.
+
 ## [1.27.165] — Fix: "join the battle" rejection never said where the fight actually was
 
 Real, recurring dev-bridge report (2026-08-12: "This user said this
