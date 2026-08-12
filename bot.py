@@ -15405,28 +15405,51 @@ def _guild_curriculum_time_remaining_note(character: dict) -> str:
     return f"{hours}h {minutes}m" if hours else f"{minutes}m"
 
 
+# A real riddle answer is almost always said plainly, optionally behind
+# one of these short lead-ins -- stripped before the exact-match check in
+# _guild_curriculum_riddle_answer_matches below.
+_RIDDLE_ANSWER_PREFIXES = (
+    "i think it's ", "i think its ", "i think it is ", "the answer is ",
+    "answer is ", "it's ", "its ", "is it ", "maybe it's ", "maybe its ",
+    "could it be ", "i believe it's ", "i believe its ",
+)
+
+
 def _guild_curriculum_riddle_answer_matches(text: str, accepted_answers: list[str]) -> bool:
     """
-    Real live bug (2026-08-12, caught by topic-activity monitoring): a
-    guild topic ALSO carries ordinary member chat -- unlike campaign.json's
-    own puzzle system (bot._do_answer_puzzle), which only ever runs
-    against text the AI/keyword layer already classified as an
+    Real live bug (2026-08-12, caught by topic-activity monitoring, TWICE
+    in the same day -- see both the original fix and this hardening
+    pass): a guild topic ALSO carries ordinary member chat -- unlike
+    campaign.json's own puzzle system (bot._do_answer_puzzle), which only
+    ever runs against text the AI/keyword layer already classified as an
     "answer_puzzle" attempt, this riddle check runs against EVERY message
-    sent in the guild's topic while a solve_puzzle step is current. A
-    plain substring check ("map" in "Does anyone have a map of the outer
-    ward...") therefore auto-completed a riddle step from an ordinary
-    question with no intent to answer anything -- confirmed live,
-    real repro: "Does anyone have a map of the outer ward we could look
-    at later?" instantly finished "The First Riddle" and skipped the
-    member straight to the next lesson. Real riddle answers are short in
-    practice ("a map", "I think it's fire") -- capping the word count
-    keeps those working while rejecting an unrelated, longer sentence
-    that just happens to contain the word.
+    sent in the guild's topic while a solve_puzzle step is current.
+
+    First real repro: a plain substring check let "Does anyone have a
+    map of the outer ward we could look at later?" instantly finish "The
+    First Riddle". Fixed with a 6-word cap -- but that cap alone still let
+    a second real case through: "What are the next steps here?" is
+    exactly 6 words and still contains "steps" (one of the Thieves'
+    Guild riddle's accepted answers) as a whole word, so it would STILL
+    have falsely completed that riddle. A word-count cap can never fully
+    rule out an ordinary short sentence that happens to contain a short,
+    common answer word like "steps" or "map".
+
+    Real fix: require the message, once a short natural lead-in
+    ("I think it's ", "the answer is ", ...) is stripped, to EXACTLY
+    equal one of the accepted answers (punctuation-insensitive) -- this
+    is genuinely how a player states a riddle answer in chat ("map",
+    "a map", "I think it's fire"), and an unrelated sentence built around
+    the word essentially never happens to equal the bare answer exactly.
     """
-    lowered = text.lower()
-    if len(text.split()) > 6:
-        return False
-    return any(re.search(r"\b" + re.escape(a) + r"\b", lowered) for a in accepted_answers)
+    normalized = re.sub(r"[^\w\s']", "", text.lower()).strip()
+    normalized = re.sub(r"\s+", " ", normalized)
+    for prefix in _RIDDLE_ANSWER_PREFIXES:
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix):].strip()
+            break
+    accepted_normalized = {re.sub(r"[^\w\s']", "", a.lower()).strip() for a in accepted_answers}
+    return normalized in accepted_normalized
 
 
 def _format_guild_curriculum_step_objective(step: dict) -> str:

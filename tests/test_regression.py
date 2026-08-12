@@ -11613,9 +11613,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         mentioning the answer word ("Does anyone have a map of the outer
         ward we could look at later?") instantly finished the riddle and
         skipped the member to the next lesson. Fixed via
-        bot._guild_curriculum_riddle_answer_matches (a real word-count
-        cap) -- this test locks in both halves: ordinary chat must NOT
-        complete it, and a real short answer still must.
+        bot._guild_curriculum_riddle_answer_matches (exact match after
+        stripping a short natural lead-in, see its own docstring for why
+        a word-count cap alone wasn't enough) -- this test locks in both
+        halves: ordinary chat must NOT complete it, and a real short
+        answer still must.
         """
         from unittest.mock import patch
         user_id = 700104
@@ -11643,6 +11645,48 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot.guild_topic_handler(update, DummyContext(), "arcane_circle")
         char = db.get_character(user_id, -999)
         self.assertEqual(char["guild_curriculum_step"], 2, "a real short answer attempt must still be credited")
+
+    async def test_guild_curriculum_riddle_word_count_alone_was_not_enough(self):
+        """
+        Real live bug, second half (2026-08-12, same-day hardening pass):
+        the FIRST fix above (a 6-word cap on top of a substring check)
+        genuinely closed the reported repro, but a short, generic answer
+        word like "steps" (one of the Thieves' Guild riddle's accepted
+        answers) can still appear, as a whole word, inside an unrelated
+        sentence that's ALSO 6 words or fewer -- "What are the next
+        steps here?" is exactly 6 words and contains "steps". Confirmed
+        this would have still slipped through the word-count-only fix;
+        the real fix (exact match after stripping a short lead-in) closes
+        it for good since an unrelated sentence essentially never happens
+        to equal the bare answer exactly.
+        """
+        from unittest.mock import patch
+        user_id = 700105
+        make_basic_character(
+            user_id, "CurriculumTester5", char_class="Rogue", current_location="crossroads_tavern",
+        )
+        db.update_character(user_id, -999, level=10, proven_in_combat=True, subclass="Thief")
+        await bot._do_join_guild(FakeUpdate(user_id, "I join the Thieves' Guild", []), "I join the Thieves' Guild")
+        char = db.get_character(user_id, -999)
+        self.assertEqual(char["guild"], "thieves_guild")
+        db.update_character(user_id, -999, guild_curriculum_step=3, guild_curriculum_step_unlocked_at="2020-01-01T00:00:00+00:00")
+
+        sink = []
+        update = FakeUpdate(
+            user_id, "What are the next steps here?", sink, thread_id=config.GUILD_TOPIC_IDS["thieves_guild"],
+        )
+        await bot.guild_topic_handler(update, DummyContext(), "thieves_guild")
+        char = db.get_character(user_id, -999)
+        self.assertEqual(
+            char["guild_curriculum_step"], 3,
+            "a 6-word ordinary question containing the bare answer word must not complete the riddle",
+        )
+
+        sink = []
+        update = FakeUpdate(user_id, "footsteps", sink, thread_id=config.GUILD_TOPIC_IDS["thieves_guild"])
+        await bot.guild_topic_handler(update, DummyContext(), "thieves_guild")
+        char = db.get_character(user_id, -999)
+        self.assertEqual(char["guild_curriculum_step"], 4, "a real bare answer must still be credited")
 
 
 

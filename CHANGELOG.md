@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.156] — Hardening: v1.27.155's guild riddle fix wasn't quite enough
+
+Found proactively while double-checking the previous fix: the 6-word
+cap alone still let a short, generic answer word ("steps," one of the
+Thieves' Guild riddle's accepted answers) slip through inside an
+unrelated 6-word-or-shorter sentence — "What are the next steps here?"
+is exactly 6 words and would have still falsely completed that riddle.
+Replaced the cap with an exact-match check (a short natural lead-in
+like "I think it's " is stripped first, then the rest of the message
+must equal an accepted answer exactly) — real answers still work
+("map", "footsteps", "I think it's fire"), and an unrelated sentence
+essentially never happens to equal the bare answer exactly. 1 new
+regression test locks in the specific case that slipped through
+before.
+
 ## [1.27.155] — Fix: guild riddle steps could be completed by ordinary chat
 
 Real bug caught proactively (topic-activity monitoring, direct
