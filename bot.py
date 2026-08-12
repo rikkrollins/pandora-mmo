@@ -15475,13 +15475,28 @@ def _format_guild_curriculum_step_objective(step: dict) -> str:
     if ttype == "dice_challenge":
         threshold = trigger.get("threshold", guild_curriculum_module.DICE_CHALLENGE_DEFAULT_THRESHOLD)
         return f"Say \"try my luck\" here when you're ready to roll (need {threshold}+ on 2d6)."
+    if ttype == "alignment_choice":
+        return "A real decision awaits — say \"my curriculum\" here to see it."
     return ""
 
 
 def _format_guild_curriculum_step_announcement(step: dict) -> str:
+    """
+    Real bug caught proactively (direct reproduction, not a live
+    report): this used to skip the 🎯 objective line entirely for an
+    alignment_choice step, on the reasoning that its real setup/choices
+    shouldn't be spoiled in the auto-posted announcement -- but
+    _format_guild_curriculum_step_objective already has its own SAFE,
+    separate hint text for that exact case ("A real decision awaits —
+    say \"my curriculum\"...") that reveals nothing. Skipping the whole
+    line meant the announcement posted+pinned for every alignment_choice
+    step (one per guild, 7 total) gave a member NO indication at all
+    that anything was expected of them next -- confirmed via direct
+    reproduction: the real output was just the title and flavor text,
+    with no call to action anywhere in it.
+    """
     lines = [f"📖 **Guild Training: {step['title']}**", step["flavor"]]
-    if step["trigger"]["type"] != "alignment_choice":
-        lines.append(f"🎯 {_format_guild_curriculum_step_objective(step)}")
+    lines.append(f"🎯 {_format_guild_curriculum_step_objective(step)}")
     reward_parts = []
     if step.get("reward_xp"):
         reward_parts.append(f"{step['reward_xp']} XP")

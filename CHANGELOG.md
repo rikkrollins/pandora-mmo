@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.158] — Fix: guild curriculum alignment-choice steps gave no instructions
+
+Found proactively (direct reproduction, not a live report): the
+announcement posted+pinned when one of the 7 alignment_choice steps
+(one per guild) unlocked was just the title and flavor text — no
+indication anywhere that a decision was waiting or how to see it. The
+code deliberately withheld the real setup/choices from the
+auto-posted text (correct, to avoid spoiling it), but also withheld
+the plain, safe "say 'my curriculum' to see it" hint every other step
+type already gets, and the underlying formatter never even had an
+alignment_choice case at all. Fixed: a member now always gets a clear
+call to action, with the actual choice still only revealed on request.
+1 new regression test covers all 7 real alignment_choice steps.
+
 ## [1.27.157] — Fix: guild curriculum mastery rewards were silently inert
 
 Found proactively (code review, not a live report): the Arcane Circle

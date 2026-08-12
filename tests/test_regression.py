@@ -11725,6 +11725,33 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # Same key a real enchant's masterwork roll actually reads.
         self.assertEqual(bot._profession_mastery_pct(char_after, "alchemy"), after_pct["alchemy"])
 
+    def test_guild_curriculum_alignment_choice_announcement_has_a_call_to_action(self):
+        """
+        Real bug caught proactively (direct reproduction, not a live
+        report): bot._format_guild_curriculum_step_announcement used to
+        skip the whole 🎯 objective line for an alignment_choice step, on
+        the reasoning that its real setup/choices shouldn't be spoiled in
+        the auto-posted announcement -- but that also skipped the plain,
+        SAFE hint every other step type gets ("say 'my curriculum' to see
+        it"), and bot._format_guild_curriculum_step_objective never even
+        had an alignment_choice branch to begin with (fell through to a
+        bare ""). Confirmed via direct reproduction: the real posted+
+        pinned text for every alignment_choice step (one per guild, 7
+        total) was just the title and flavor, with literally no
+        indication anywhere that anything was expected of the member
+        next. Fixed by giving _format_guild_curriculum_step_objective a
+        real alignment_choice branch and always including it.
+        """
+        import guild_curriculum as gc
+        for guild_id in gc.GUILD_CURRICULUM:
+            for step in gc.get_curriculum(guild_id):
+                if step["trigger"]["type"] != "alignment_choice":
+                    continue
+                text = bot._format_guild_curriculum_step_announcement(step)
+                self.assertIn("my curriculum", text.lower(), f"{guild_id}/{step['id']} announcement has no call to action")
+                self.assertNotIn("XP", text, f"{guild_id}/{step['id']} announcement must not spoil the reward")
+                self.assertNotIn("gold", text, f"{guild_id}/{step['id']} announcement must not spoil the reward")
+
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
     """
