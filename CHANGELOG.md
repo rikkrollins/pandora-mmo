@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.155] — Fix: guild riddle steps could be completed by ordinary chat
+
+Real bug caught proactively (topic-activity monitoring, direct
+reproduction): a guild's own topic also carries ordinary member chat,
+but the new curriculum riddle check (v1.27.154) ran against EVERY
+message sent there while a solve_puzzle step was current, matching on
+a bare substring — so an unrelated question just mentioning the answer
+word ("Does anyone have a map of the outer ward we could look at
+later?") instantly finished the riddle and skipped straight to the
+next lesson. Real riddle answers are short in practice; a word-count
+cap (bot._guild_curriculum_riddle_answer_matches) now keeps genuine
+short answers ("a map", "I think it's fire") working while rejecting
+an unrelated longer sentence that just happens to contain the word.
+1 new regression test locks in both halves.
+
 ## [1.27.154] — Real per-guild training curriculum
 
 Per Coffee: a real, hand-authored, gated training-quest chain for each

@@ -11602,6 +11602,48 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(char["guild_curriculum_step"], 4)
                 self.assertTrue(gc.is_curriculum_complete("arcane_circle", char["guild_curriculum_step"]))
 
+    async def test_guild_curriculum_riddle_ignores_ordinary_chat_but_credits_a_real_answer(self):
+        """
+        Real live bug (2026-08-12, caught by topic-activity monitoring):
+        a guild topic also carries ordinary member chat, unlike
+        campaign.json's own puzzle system (which only ever runs against
+        text already classified as an "answer_puzzle" attempt) -- a
+        plain substring check against every message sent while a
+        solve_puzzle step is current meant an unrelated question just
+        mentioning the answer word ("Does anyone have a map of the outer
+        ward we could look at later?") instantly finished the riddle and
+        skipped the member to the next lesson. Fixed via
+        bot._guild_curriculum_riddle_answer_matches (a real word-count
+        cap) -- this test locks in both halves: ordinary chat must NOT
+        complete it, and a real short answer still must.
+        """
+        from unittest.mock import patch
+        user_id = 700104
+        make_basic_character(
+            user_id, "CurriculumTester4", char_class="Wizard", current_location="market_row",
+            ability_scores={"strength": 8, "dexterity": 12, "constitution": 14,
+                             "intelligence": 17, "wisdom": 10, "charisma": 10},
+        )
+        db.update_character(user_id, -999, level=10, proven_in_combat=True, subclass="Evocation")
+        with patch("bot.narrate_skill_check", return_value="ok"):
+            await bot._do_join_guild(FakeUpdate(user_id, "I join the Arcane Circle", []), "I join the Arcane Circle")
+        db.update_character(user_id, -999, guild_curriculum_step=1, guild_curriculum_step_unlocked_at="2020-01-01T00:00:00+00:00")
+
+        sink = []
+        update = FakeUpdate(
+            user_id, "Does anyone have a map of the outer ward we could look at later?", sink,
+            thread_id=config.GUILD_TOPIC_IDS["arcane_circle"],
+        )
+        await bot.guild_topic_handler(update, DummyContext(), "arcane_circle")
+        char = db.get_character(user_id, -999)
+        self.assertEqual(char["guild_curriculum_step"], 1, "ordinary chat mentioning the answer word must not complete the riddle")
+
+        sink = []
+        update = FakeUpdate(user_id, "I think it's a map", sink, thread_id=config.GUILD_TOPIC_IDS["arcane_circle"])
+        await bot.guild_topic_handler(update, DummyContext(), "arcane_circle")
+        char = db.get_character(user_id, -999)
+        self.assertEqual(char["guild_curriculum_step"], 2, "a real short answer attempt must still be credited")
+
 
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):

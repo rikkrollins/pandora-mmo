@@ -15405,6 +15405,30 @@ def _guild_curriculum_time_remaining_note(character: dict) -> str:
     return f"{hours}h {minutes}m" if hours else f"{minutes}m"
 
 
+def _guild_curriculum_riddle_answer_matches(text: str, accepted_answers: list[str]) -> bool:
+    """
+    Real live bug (2026-08-12, caught by topic-activity monitoring): a
+    guild topic ALSO carries ordinary member chat -- unlike campaign.json's
+    own puzzle system (bot._do_answer_puzzle), which only ever runs
+    against text the AI/keyword layer already classified as an
+    "answer_puzzle" attempt, this riddle check runs against EVERY message
+    sent in the guild's topic while a solve_puzzle step is current. A
+    plain substring check ("map" in "Does anyone have a map of the outer
+    ward...") therefore auto-completed a riddle step from an ordinary
+    question with no intent to answer anything -- confirmed live,
+    real repro: "Does anyone have a map of the outer ward we could look
+    at later?" instantly finished "The First Riddle" and skipped the
+    member straight to the next lesson. Real riddle answers are short in
+    practice ("a map", "I think it's fire") -- capping the word count
+    keeps those working while rejecting an unrelated, longer sentence
+    that just happens to contain the word.
+    """
+    lowered = text.lower()
+    if len(text.split()) > 6:
+        return False
+    return any(re.search(r"\b" + re.escape(a) + r"\b", lowered) for a in accepted_answers)
+
+
 def _format_guild_curriculum_step_objective(step: dict) -> str:
     trigger = step["trigger"]
     ttype = trigger["type"]
@@ -15732,7 +15756,7 @@ async def guild_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     current_step = guild_curriculum_module.get_step(guild_id, character["guild_curriculum_step"])
     if current_step is not None and character["level"] >= current_step["min_level"]:
         trigger = current_step["trigger"]
-        if trigger["type"] == "solve_puzzle" and any(a in lowered for a in trigger["accepted_answers"]):
+        if trigger["type"] == "solve_puzzle" and _guild_curriculum_riddle_answer_matches(update.message.text, trigger["accepted_answers"]):
             if _guild_curriculum_step_ready(character):
                 await _complete_guild_curriculum_step(update, update.effective_user.id, update.effective_chat.id, current_step)
             else:
