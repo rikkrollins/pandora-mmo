@@ -12627,15 +12627,38 @@ async def _do_join_battle(update: Update) -> None:
         return
 
     matching_session = None
+    other_battle_locations = []
     for candidate in candidate_sessions:
         party_members = [p for p in candidate.participants if candidate.sides.get(p["telegram_user_id"]) == "party"]
         battle_location = next((p.get("current_location") for p in party_members if p.get("current_location")), None)
         if battle_location is not None and character["current_location"] == battle_location:
             matching_session = candidate
             break
+        if battle_location is not None:
+            other_battle_locations.append(battle_location)
     if matching_session is None:
+        # Real, recurring live report (2026-08-12, dev-bridge: "This user
+        # said this twice and for some reason they have not been put
+        # into battle" -- confirmed via the live sessions snapshot: the
+        # real fight was at Glimmerdeep Grotto, but this player had
+        # explicitly traveled to and stayed at the Sunken Root Caverns,
+        # a real but completely different location, before every one of
+        # 7 "join the battle" attempts across 5 real days): this
+        # rejection never said WHERE the actual fight was, leaving the
+        # player to guess. Names the real location(s) of whatever fight
+        # IS active in this chat, deduped, when there's at least one --
+        # never invents a location, only ever reports real session data
+        # already being read just above.
+        location_names = []
+        for loc_id in dict.fromkeys(other_battle_locations):
+            loc = cl.get_location(CAMPAIGN, loc_id)
+            location_names.append(loc["name"] if loc else loc_id)
+        if location_names:
+            hint = f" The real fight right now is at {', '.join(location_names)} — head there first."
+        else:
+            hint = " You'd need to go there first."
         await update.effective_chat.send_message(
-            "There's no fight happening at your current location — you'd need to go there first.",
+            f"There's no fight happening at your current location.{hint}",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return

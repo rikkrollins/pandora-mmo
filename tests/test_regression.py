@@ -11173,6 +11173,40 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(formation_markers), 1, f"battle formation image missing on join: {sink}")
         sessions.end_session(-989)
 
+    async def test_join_battle_rejection_names_the_real_fight_location(self):
+        """
+        Real, recurring live report (2026-08-12, dev-bridge: "This user
+        said this twice and for some reason they have not been put into
+        battle"). Confirmed via the live sessions snapshot: the real
+        fight was at Glimmerdeep Grotto, but this player had explicitly
+        traveled to and stayed at the Sunken Root Caverns -- a real but
+        completely different location -- before every one of 7 "join the
+        battle" attempts across 5 real days. _do_join_battle's rejection
+        never said WHERE the actual fight was, leaving the player to
+        guess. Confirms the real location name now appears in the
+        rejection, using this game's own real location data (not
+        invented), when the player is somewhere a real fight isn't.
+        """
+        import sessions
+        sessions.end_session(-988)
+        starter_id = 900950
+        wrong_place_id = 900951
+        make_basic_character(starter_id, "GrottoFighter", chat_id=-988, current_location="glimmerdeep_grotto")
+        make_basic_character(wrong_place_id, "WrongPlacePlayer", chat_id=-988, current_location="sunken_root_caverns")
+        starter = db.get_character(starter_id, -988)
+        starter["telegram_user_id"] = starter_id
+        enemy = {"telegram_user_id": -2_500_098, "name": "GrottoGoblin", "dexterity": 10, "strength": 10,
+                 "hp_current": 25, "hp_max": 25, "armor_class": 10, "is_ai": 1, "monster_key": "goblin"}
+        sessions.start_session(-988, [starter, enemy], {starter_id: "party", -2_500_098: "enemy"})
+
+        sink = []
+        update = FakeUpdate(wrong_place_id, "join the battle", sink, chat_id=-988)
+        await bot._do_join_battle(update)
+
+        reply = "\n".join(sink)
+        self.assertIn("Glimmerdeep Grotto", reply, f"real fight location missing from rejection: {reply!r}")
+        sessions.end_session(-988)
+
     # -- Task #11, real live request (2026-08-09, Coffee, Development-
     #    topic screenshot): "This does not look like a map. I want an
     #    accurate map... use circles and names with labels" -- the old

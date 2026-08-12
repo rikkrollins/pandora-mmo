@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.165] — Fix: "join the battle" rejection never said where the fight actually was
+
+Real, recurring dev-bridge report (2026-08-12: "This user said this
+twice and for some reason they have not been put into battle").
+Confirmed via the live sessions snapshot: the real fight was at
+Glimmerdeep Grotto, but this player had explicitly traveled to and
+stayed at the Sunken Root Caverns — a real but completely different
+location — before every one of 7 "join the battle" attempts across 5
+real days. `_do_join_battle`'s rejection ("There's no fight happening
+at your current location") never said WHERE the actual fight was,
+leaving the player to guess. Now names the real location(s) of
+whatever fight IS active in the chat, using this game's own real
+location data. 1 new regression test.
+
 ## [1.27.164] — Fix: AI companion actions could leak literal brackets
 
 Found proactively (hunting the live log, not a live report): ai/
