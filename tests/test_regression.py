@@ -123,6 +123,20 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         for text in ("Gaze at the pool of water", "I gazed at the ancient tree"):
             self.assertEqual(_keyword_fallback(text, [])["action"], "examine", text)
 
+    # -- "View X" fell through to the fully silent chat default (no reply
+    #    at all) -- a real owned item (2026-08-12, real player, caught
+    #    via topic-activity monitoring: "View the herbalism guide", a
+    #    real recipe-book item this player actually owned, per
+    #    _do_examine's own inventory-item branch) --
+    def test_view_classified_as_examine(self):
+        for text in ("View the herbalism guide", "I viewed the crafting book", "Viewing the map"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "examine", text)
+
+    def test_view_my_inventory_still_routes_to_check_inventory_not_examine(self):
+        """"View my inventory" is a real, more specific existing phrase (check_inventory) --
+        the new "view" examine trigger must not shadow it."""
+        self.assertEqual(_keyword_fallback("view my inventory", [])["action"], "check_inventory")
+
     # -- "Feel the X" misclassified as silent chat, not examine
     #    (2026-08-06, real player, caught via topic-activity monitoring) --
     def test_feel_the_x_classified_as_examine(self):

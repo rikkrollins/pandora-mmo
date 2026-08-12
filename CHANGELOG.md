@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.162] — Fix: "view" not recognized as a synonym for examine
+
+Real player message ("View the herbalism guide" — asking to look at a
+recipe-book item they actually owned) got silently dropped with zero
+reply, misclassified as the intentionally-silent `chat` default because
+"view" wasn't among the recognized synonyms for "examine"/"look at"
+(touch/peer/glance/gaze/feel/open were each added the same way, one
+real gap at a time). Caught via topic-activity monitoring. Fixed by
+adding `view(ed/ing)?` to the examine-trigger regex in
+ai/intent_parser.py. Confirmed no collision with "view my inventory"
+(still correctly routes to check_inventory) or words like preview/
+interview/review. 2 new regression tests.
+
 ## [1.27.161] — Fix: guild curriculum objectives never said where to act
 
 Real dev-bridge report (2026-08-12, Coffee's own guild-topic screenshot):

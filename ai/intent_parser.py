@@ -1486,8 +1486,17 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # actually named) -- same non-silent-but-wrong shape as the
     # touch/peer/glance gaps already fixed here, just one more common
     # synonym for "look at" a specific thing.
+    #
+    # "view(ed/ing)?" added 2026-08-12 (real player, caught via
+    # topic-activity monitoring): "View the herbalism guide" -- a real
+    # owned recipe-book item, see _do_examine's own inventory-item
+    # branch -- fell all the way through to the fully silent 'chat'
+    # default (no reply at all), the exact same "verb not covered" gap
+    # this file has hit many times before (touch/peer/read/observe/
+    # gaze), just one more common synonym for "look at" a specific
+    # thing. No "at" required, same shape as read/observed/touch(ed)?.
     examine_verb_match = re.search(
-        r"\b(?:read|observed|examined|inspected|searched|checked out|touch(?:ed)?|"
+        r"\b(?:read|observed|examined|inspected|searched|checked out|touch(?:ed)?|view(?:ed|ing)?|"
         r"looked (?:at|closer at)|(?:peer|perr)(?:ed)? (?:at|into|in)|glanced? at|gaze(?:d)? at)\b\s+"
         r"(?:the |a |an )?(.+)",
         lowered,
