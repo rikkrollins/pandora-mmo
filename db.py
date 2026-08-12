@@ -154,7 +154,8 @@ CREATE TABLE IF NOT EXISTS item_instances (
     base_stats TEXT NOT NULL DEFAULT '{}',
     affixes TEXT NOT NULL DEFAULT '[]',
     set_id TEXT,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'loot'
 );
 """
 
@@ -735,6 +736,24 @@ def init_db() -> None:
             conn.execute("DROP TABLE faction_standing")
             conn.execute("ALTER TABLE faction_standing_new RENAME TO faction_standing")
 
+        # Reforge-source gate (2026-08-12, per Coffee via dev-topic
+        # screenshot: "Don't have reforging on the list unless it is a
+        # forged weapon we found this weapon battle, so we shouldn't have
+        # the option to reforge it") -- item_instances previously had no
+        # way to tell a player-crafted magic item apart from one dropped
+        # as combat loot, so _forge_item_core (both the free-text "forge
+        # my X" command and the item-view "Reforge" button) let ANY
+        # generated weapon/armor/shield be forged to a higher tier
+        # regardless of how it was obtained. Existing rows default to
+        # 'loot' (the safer assumption: pre-migration rows can't be
+        # proven to have been crafted, and treating them as loot only
+        # blocks a forge that was never guaranteed to begin with, vs.
+        # defaulting to 'crafted' and letting every old loot drop keep
+        # forging).
+        item_instance_columns = _existing_columns(conn, "item_instances")
+        if "source" not in item_instance_columns:
+            conn.execute("ALTER TABLE item_instances ADD COLUMN source TEXT NOT NULL DEFAULT 'loot'")
+
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)
@@ -967,6 +986,7 @@ GENERATED_ITEM_ID_PREFIX = "gi"
 def create_item_instance(
     item_type: str, name: str, rarity: str, price: int,
     base_stats: dict, affixes: list | None = None, set_id: str | None = None,
+    source: str = "loot",
 ) -> str:
     """
     Persists one real, unique rolled/crafted item and returns its
@@ -974,14 +994,20 @@ def create_item_instance(
     (inventory, equip, market, scrolls-of-a-sort) treats exactly like any
     static items.py catalog key, via items.get_item()'s fallback into
     materialize_item_instance below.
+
+    `source` ("loot" or "crafted", 2026-08-12) records how the item was
+    obtained -- combat/treasure drops default to "loot"; bot.py's advanced
+    crafting path passes "crafted" explicitly. Read by _forge_item_core's
+    reforge gate (per Coffee: only a weapon the player actually forged
+    should be reforgeable, not one found in battle).
     """
     with get_connection() as conn:
         cur = conn.execute(
-            "INSERT INTO item_instances (item_type, name, rarity, price, base_stats, affixes, set_id, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO item_instances (item_type, name, rarity, price, base_stats, affixes, set_id, created_at, source) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 item_type, name, rarity, price, json.dumps(base_stats), json.dumps(affixes or []),
-                set_id, datetime.now(timezone.utc).isoformat(),
+                set_id, datetime.now(timezone.utc).isoformat(), source,
             ),
         )
         instance_id = cur.lastrowid
@@ -1111,7 +1137,7 @@ def materialize_item_instance(item_id: str) -> dict | None:
     item.update({
         "name": row["name"], "type": row["item_type"], "rarity": row["rarity"],
         "price": row["price"], "generated": True, "instance_id": instance_id,
-        "set_id": row["set_id"],
+        "set_id": row["set_id"], "source": row["source"],
     })
     for affix in json.loads(row["affixes"]):
         _apply_affix(item, affix)

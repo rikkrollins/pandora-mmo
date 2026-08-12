@@ -3945,7 +3945,7 @@ async def _share_quest_rewards_with_party(
             db.update_character(member_id, chat_id, gold=fresh["gold"] + bonus_gold)
 
 
-def _persist_generated_item(loot_item: dict) -> str:
+def _persist_generated_item(loot_item: dict, source: str = "loot") -> str:
     """
     Shared persistence step for any freshly-rolled item.py-shaped dict
     from rules/item_generator.py -- pops the two fields that live in
@@ -3954,12 +3954,19 @@ def _persist_generated_item(loot_item: dict) -> str:
     Factored out of _grant_generated_loot (Phase 1) so Phase 7's advanced
     crafting recipes can reuse the exact same persistence step instead of
     duplicating it.
+
+    `source` (2026-08-12, per Coffee: reforging should only be available
+    for a weapon the player actually forged, not one found in battle)
+    defaults to "loot" for this function's original caller
+    (_grant_generated_loot); the advanced-crafting call site below passes
+    "crafted" explicitly. Read by _forge_item_core's reforge gate.
     """
     affixes = loot_item.pop("affixes", [])
     set_id = loot_item.pop("set_id", None)
     return db.create_item_instance(
         item_type=loot_item["type"], name=loot_item["name"], rarity=loot_item["rarity"],
         price=loot_item["price"], base_stats=loot_item, affixes=affixes, set_id=set_id,
+        source=source,
     )
 
 
@@ -3979,15 +3986,29 @@ def _item_actions_keyboard(item_id: str) -> InlineKeyboardMarkup:
     its own. "Reforge" (2026-08-11, per Coffee: "options below with
     push buttons like give, marketplace, reforge, equip") reuses
     _forge_item_core, the exact same tier-upgrade logic _do_forge_item's
-    free-text path already runs.
+    free-text path already runs -- only shown when the item would
+    actually pass _forge_item_core's own checks (2026-08-12, per Coffee:
+    "Don't have reforging on the list unless it is a forged weapon" --
+    a battle-loot legendary was showing the button even though tapping
+    it could never succeed for anything but a player-crafted item), so
+    the button itself never advertises an option that's guaranteed to
+    refuse.
     """
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("⚔️ Equip", callback_data=f"itemview|equip|{item_id}")],
-        [InlineKeyboardButton("🔨 Reforge", callback_data=f"itemview|reforge|{item_id}")],
+    item = items_module.get_item(item_id)
+    can_reforge = (
+        item is not None and item.get("source") == "crafted"
+        and item.get("type") in ("weapon", "armor", "shield")
+        and item.get("rarity") in FORGE_ADVANCE_DC
+    )
+    buttons = [[InlineKeyboardButton("⚔️ Equip", callback_data=f"itemview|equip|{item_id}")]]
+    if can_reforge:
+        buttons.append([InlineKeyboardButton("🔨 Reforge", callback_data=f"itemview|reforge|{item_id}")])
+    buttons.extend([
         [InlineKeyboardButton("💰 Sell", callback_data=f"itemview|sell|{item_id}")],
         [InlineKeyboardButton("🏛️ List on Market", callback_data=f"itemview|market|{item_id}")],
         [InlineKeyboardButton("🤝 Give", callback_data=f"itemview|give|{item_id}")],
     ])
+    return InlineKeyboardMarkup(buttons)
 
 
 async def _grant_generated_loot(update: Update, real_party_ids: list[int]) -> str:
@@ -12030,7 +12051,7 @@ async def _do_craft(update: Update, text: str) -> None:
         _grind_profession_mastery(update.effective_user.id, update.effective_chat.id, character, profession)
         if is_advanced:
             loot_item = result["generated_item"]
-            generated_item_id = _persist_generated_item(loot_item)
+            generated_item_id = _persist_generated_item(loot_item, source="crafted")
             db.add_item(update.effective_user.id, update.effective_chat.id, generated_item_id, 1)
             result_item = loot_item
         else:
@@ -12131,6 +12152,21 @@ async def _forge_item_core(update: Update, item_id: str, item: dict, text: str) 
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if item["type"] not in ("weapon", "armor", "shield"):
         await _safe_send(update, "Only weapons, armor, and shields can be forged.")
+        return
+
+    # Reforge-source gate (2026-08-12, per Coffee via dev-topic
+    # screenshot: "Don't have reforging on the list unless it is a
+    # forged weapon we found this weapon battle, so we shouldn't have the
+    # option to reforge it") -- forging a higher tier is meant to reward
+    # the player's OWN crafting, not let any battle/treasure drop get
+    # upgraded the same way. item.get("source") comes from
+    # db.materialize_item_instance; only "crafted" (set by the advanced
+    # crafting path via _persist_generated_item) passes.
+    if item.get("source") != "crafted":
+        await _safe_send(
+            update,
+            f"The {item['name']} wasn't forged by you — only a weapon, armor piece, or shield you crafted yourself can be reforged to a higher tier.",
+        )
         return
 
     current_tier = item["rarity"]

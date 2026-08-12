@@ -4409,7 +4409,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         affixes = weapon.pop("affixes", [])
         item_id = db.create_item_instance(
             item_type=weapon["type"], name=weapon["name"], rarity=weapon["rarity"],
-            price=weapon["price"], base_stats=weapon, affixes=affixes,
+            price=weapon["price"], base_stats=weapon, affixes=affixes, source="crafted",
         )
         db.add_item(user_id, -999, item_id, 1)
         db.add_item(user_id, -999, "iron_ore", 100)
@@ -4442,6 +4442,45 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot.itemview_callback(update, DummyContext())
         self.assertIn("don't have", sink[-1])
         self.assertEqual(db.materialize_item_instance(item_id)["rarity"], "common")
+
+    async def test_reforge_button_hidden_and_rejected_for_battle_loot(self):
+        """
+        Real live bug (2026-08-12, per Coffee via dev-topic screenshot:
+        "Don't have reforging on the list unless it is a forged weapon we
+        found this weapon battle, so we shouldn't have the option to
+        reforge it"): a battle/treasure loot item and a player-crafted
+        one both went through the same _persist_generated_item with no
+        way to tell them apart, so a found Legendary weapon offered the
+        same "Reforge" button as anything the player actually forged.
+        Now gated on item_instances.source ("loot" vs "crafted") -- the
+        button is hidden for a loot item, AND the free-text "forge my X"
+        path refuses it too (the button being hidden doesn't stop someone
+        from still typing the command directly).
+        """
+        from rules.item_generator import generate_weapon
+        user_id = 950960
+        make_basic_character(
+            user_id, "LootReforgeTester", char_class="Fighter", current_location="crossroads_tavern",
+            gold=10000,
+        )
+        weapon = generate_weapon(tier="common")
+        affixes = weapon.pop("affixes", [])
+        loot_item_id = bot._persist_generated_item({**weapon, "affixes": affixes})
+        db.add_item(user_id, -999, loot_item_id, 1)
+        db.add_item(user_id, -999, "iron_ore", 100)
+
+        loot_item = db.materialize_item_instance(loot_item_id)
+        self.assertEqual(loot_item["source"], "loot")
+
+        keyboard = bot._item_actions_keyboard(loot_item_id)
+        labels = [btn.text for row in keyboard.inline_keyboard for btn in row]
+        self.assertFalse(any("Reforge" in l for l in labels))
+
+        sink = []
+        update = FakeUpdate(user_id, f"forge my {weapon['name']}", sink)
+        await bot._do_forge_item(update, f"forge my {weapon['name']}")
+        self.assertIn("wasn't forged by you", sink[-1])
+        self.assertEqual(db.materialize_item_instance(loot_item_id)["rarity"], "common")
 
     def test_forge_and_enchant_keyword_fallback_classification(self):
         """Real Phase 7 deliverable: "forge my X" / "enchant my X" / "imbue the X" classify correctly without a model call."""
@@ -4572,7 +4611,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         affixes = weapon.pop("affixes", [])
         item_id = db.create_item_instance(
             item_type=weapon["type"], name=weapon["name"], rarity=weapon["rarity"],
-            price=weapon["price"], base_stats=weapon, affixes=affixes,
+            price=weapon["price"], base_stats=weapon, affixes=affixes, source="crafted",
         )
         db.add_item(user_id, -999, item_id, 1)
         db.add_item(user_id, -999, "iron_ore", 100)

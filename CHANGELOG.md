@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.153] — Reforge now requires a player-crafted item, not battle loot
+
+Real dev-topic report (Coffee, screenshot): a battle-looted Legendary
+weapon ("Last-Dawn Greataxe of the World's End") showed the same
+"🔨 Reforge" button as anything the player actually crafted — "Don't
+have reforging on the list unless it is a forged weapon we found this
+weapon battle, so we shouldn't have the option to reforge it." Root
+cause: `item_instances` had no way to tell a combat/treasure drop apart
+from a player-crafted magic item — both went through the same
+persistence path with no origin tracking. New `source` column ("loot"
+default, "crafted" set explicitly by the advanced-crafting path) now
+gates both the Reforge button (hidden entirely for loot) and the
+underlying forge handler (refuses with a clear message even via the
+free-text "forge my X" command). Enchanting is unaffected — it modifies
+an existing item in place and never touches `source`. 1 new regression
+test, 2 existing ones updated to reflect crafted-only reforging.
+
 ## [1.27.152] — Fix: "move X forward" misclassified as travel instead of formation
 
 Real live bug (topic-monitor report): "Move zara forward" came back
