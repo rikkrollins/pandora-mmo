@@ -754,6 +754,27 @@ def init_db() -> None:
         if "source" not in item_instance_columns:
             conn.execute("ALTER TABLE item_instances ADD COLUMN source TEXT NOT NULL DEFAULT 'loot'")
 
+        # Guild curriculum (2026-08-12, per Coffee: "go ahead and start on
+        # it" -- a real, hand-authored, gated training-quest chain per
+        # guild, see guild_curriculum.py). `guild_curriculum_step` is a
+        # single 0-indexed progress counter (guild membership is
+        # permanent and 1-per-character, so no guild_id keying is
+        # needed); `guild_curriculum_step_unlocked_at` stamps when the
+        # CURRENT step became available, enforcing a real time-gate
+        # before it can be credited (GUILD_CURRICULUM_STEP_COOLDOWN_
+        # HOURS) so it can't be rushed through in one sitting;
+        # `guild_curriculum_state` is a JSON scratch dict reserved for a
+        # step type that needs to remember something mid-resolution (an
+        # alignment_choice step's setup narration, so it's shown
+        # identically if re-requested before being resolved).
+        columns = _existing_columns(conn, "characters")
+        if "guild_curriculum_step" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN guild_curriculum_step INTEGER NOT NULL DEFAULT 0")
+        if "guild_curriculum_step_unlocked_at" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN guild_curriculum_step_unlocked_at TEXT")
+        if "guild_curriculum_state" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN guild_curriculum_state TEXT NOT NULL DEFAULT '{}'")
+
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)
@@ -773,6 +794,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     d["weapon_proficiency_pct"] = json.loads(d["weapon_proficiency_pct"])
     d["armor_proficiency_pct"] = json.loads(d["armor_proficiency_pct"])
     d["profession_mastery_pct"] = json.loads(d["profession_mastery_pct"])
+    d["guild_curriculum_state"] = json.loads(d["guild_curriculum_state"])
     return d
 
 
@@ -884,7 +906,7 @@ def update_character(telegram_user_id: int, chat_id: int, **fields) -> dict | No
     if not fields:
         return get_character(telegram_user_id, chat_id)
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -928,7 +950,7 @@ def update_character_by_id(character_id: int, **fields) -> dict | None:
             row = conn.execute("SELECT * FROM characters WHERE character_id = ?", (character_id,)).fetchone()
         return _row_to_dict(row) if row else None
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -1653,7 +1675,35 @@ def accept_quest(telegram_user_id: int, chat_id: int, quest_id: str) -> dict | N
 
 
 def join_guild(telegram_user_id: int, chat_id: int, guild_id: str) -> dict | None:
-    return update_character(telegram_user_id, chat_id, guild=guild_id)
+    # Starts the guild curriculum's first step immediately (2026-08-12) --
+    # guild_curriculum_step defaults to 0 already, but stamping
+    # unlocked_at here (rather than leaving it NULL until some later
+    # write) starts that step's real time-gate the moment membership
+    # begins, not whenever the member first happens to ask about it.
+    return update_character(
+        telegram_user_id, chat_id, guild=guild_id,
+        guild_curriculum_step_unlocked_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+def advance_guild_curriculum_step(telegram_user_id: int, chat_id: int) -> dict | None:
+    """
+    Credits the character's CURRENT guild curriculum step and unlocks
+    the next one -- advances the step counter by 1, re-stamps
+    guild_curriculum_step_unlocked_at to now (starting the next step's
+    own real time-gate fresh), and clears guild_curriculum_state (any
+    scratch data an alignment_choice step's setup narration left behind
+    belongs to the step just finished, not the next one).
+    """
+    character = get_character(telegram_user_id, chat_id)
+    if character is None:
+        return None
+    return update_character(
+        telegram_user_id, chat_id,
+        guild_curriculum_step=character["guild_curriculum_step"] + 1,
+        guild_curriculum_step_unlocked_at=datetime.now(timezone.utc).isoformat(),
+        guild_curriculum_state={},
+    )
 
 
 def get_character(telegram_user_id: int, chat_id: int) -> dict | None:

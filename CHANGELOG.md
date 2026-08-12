@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.154] — Real per-guild training curriculum
+
+Per Coffee: a real, hand-authored, gated training-quest chain for each
+of the 7 guilds (guild_curriculum.py), hand-holding a new member from
+their first real lesson toward mastering their guild's own craft/
+combat identity. Each guild has 4 ordered steps, one at a time, never
+skippable — a real time-gate (6 real hours per step) means it genuinely
+can't be rushed through in one sitting ("make this gated so players
+cant do them too soon, and they must grind it out"). Real variety
+across the system, reusing existing mechanics rather than inventing
+new ones: reach a real location, defeat a real monster, gather a real
+material, answer a real riddle (same shape as the existing puzzle
+system), talk to a real NPC with the right topic, a real 2d6 dice
+trial, and a real two-choice moral decision with a hidden alignment
+nudge (never labeled — "dont tell them what the quest allignment is
+tho"). Each guild's own topic gets the next unlocked step posted and
+pinned automatically (on joining and on completing the previous step);
+"my curriculum" checks progress any time. Some steps also grant a real
+profession-mastery bump, tying training back into the existing
+grindable crafting/enchanting mastery system. 3 new regression tests.
+
 ## [1.27.153] — Reforge now requires a player-crafted item, not battle loot
 
 Real dev-topic report (Coffee, screenshot): a battle-looted Legendary

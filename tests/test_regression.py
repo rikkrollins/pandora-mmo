@@ -11447,6 +11447,163 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[0][2].get("caption"), "A monster!")
 
 
+    # -- Guild curriculum (2026-08-12, per Coffee: "go ahead and start on it") --
+    async def test_guild_curriculum_full_chain_adventurers_guild(self):
+        """
+        Real end-to-end deliverable: joining a guild unlocks+pins the
+        first curriculum step, and each of reach_location/defeat_monster/
+        dice_challenge/alignment_choice correctly advances the step
+        counter, grants the real reward, and posts+pins the next step --
+        exercised via the exact same real handlers a player's actions
+        dispatch through (bot._do_join_guild, bot._do_move,
+        bot._check_quest_completions_defeat_monster, bot.guild_topic_
+        handler, bot.guild_curriculum_callback), covering the full
+        Adventurers' Guild curriculum (guild_curriculum.py) end to end.
+        """
+        from unittest.mock import patch
+        import guild_curriculum as gc
+        import sessions
+        user_id = 700101
+        make_basic_character(
+            user_id, "CurriculumTester1", char_class="Fighter", current_location="crossroads_tavern",
+            gold=100,
+        )
+        db.update_character(user_id, -999, level=10, proven_in_combat=True)
+
+        sink = []
+        await bot._do_join_guild(FakeUpdate(user_id, "I join the Adventurers' Guild", sink), "I join the Adventurers' Guild")
+        char = db.get_character(user_id, -999)
+        self.assertEqual(char["guild"], "adventurers_guild")
+        self.assertEqual(char["guild_curriculum_step"], 0)
+        self.assertTrue(any("Lay of the Land" in s for s in sink))
+        self.assertTrue(any(s.startswith("<pinned:") for s in sink))
+
+        with patch.object(gc, "GUILD_CURRICULUM_STEP_COOLDOWN_HOURS", 0):
+            sink = []
+            await bot._do_move(FakeUpdate(user_id, "Travel to market row", sink), "Travel to market row")
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 1)
+            self.assertTrue(any("Clear the Roads" in s for s in sink))
+
+            session = sessions.Session(
+                chat_id=-999,
+                participants=[
+                    {"telegram_user_id": user_id, "name": "CurriculumTester1"},
+                    {"telegram_user_id": -1, "name": "Goblin", "monster_key": "goblin"},
+                ],
+                turn_order=[user_id, -1], sides={user_id: "party", -1: "enemy"}, session_id=1,
+            )
+            sink = []
+            await bot._check_quest_completions_defeat_monster(FakeUpdate(user_id, "", sink), session)
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 2)
+            self.assertTrue(any("Reading the Odds" in s for s in sink))
+
+            sink = []
+            with patch("bot.roll", return_value=[6, 6]):
+                await bot.guild_topic_handler(
+                    FakeUpdate(user_id, "try my luck", sink, thread_id=config.GUILD_TOPIC_IDS["adventurers_guild"]),
+                    DummyContext(), "adventurers_guild",
+                )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 3)
+            self.assertTrue(any("Quiet Wrinkle" in s for s in sink))
+
+            law_chaos_before = char["alignment_law_chaos"]
+            good_evil_before = char["alignment_good_evil"]
+            sink = []
+            await bot.guild_curriculum_callback(
+                FakeCallbackUpdate(user_id, "gcurr|adventurers_guild|3|turn_it_in", sink), DummyContext(),
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["alignment_law_chaos"], law_chaos_before + 5)
+            self.assertEqual(char["alignment_good_evil"], good_evil_before + 5)
+            self.assertEqual(char["guild_curriculum_step"], 4)
+            self.assertTrue(gc.is_curriculum_complete("adventurers_guild", char["guild_curriculum_step"]))
+            self.assertTrue(any("full training curriculum" in s for s in sink))
+
+    async def test_guild_curriculum_step_not_credited_before_real_cooldown_elapses(self):
+        """
+        Real "must grind it out" pacing gate (per Coffee): satisfying a
+        freshly-unlocked step's objective immediately must NOT advance
+        the step counter -- only a clear "not yet" note, never silence
+        and never a false completion.
+        """
+        user_id = 700102
+        make_basic_character(
+            user_id, "CurriculumTester2", char_class="Fighter", current_location="crossroads_tavern",
+        )
+        db.update_character(user_id, -999, level=10, proven_in_combat=True)
+        await bot._do_join_guild(FakeUpdate(user_id, "I join the Adventurers' Guild", []), "I join the Adventurers' Guild")
+
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "Travel to market row", sink), "Travel to market row")
+        char = db.get_character(user_id, -999)
+        self.assertEqual(char["guild_curriculum_step"], 0, "should still be on step 0 -- real cooldown hasn't elapsed")
+        self.assertTrue(any("won't credit" in s for s in sink))
+        self.assertFalse(any("completes" in s for s in sink))
+
+    async def test_guild_curriculum_gather_material_solve_puzzle_and_npc_dialogue(self):
+        """
+        Real end-to-end deliverable, Arcane Circle curriculum: covers the
+        3 trigger types NOT exercised by the Adventurers' Guild chain test
+        above (gather_material, solve_puzzle, npc_dialogue), each checked
+        at the exact same real checkpoint a player's own gather/riddle-
+        answer/NPC-conversation action already runs through.
+        """
+        from unittest.mock import patch
+        import guild_curriculum as gc
+        user_id = 700103
+        make_basic_character(
+            user_id, "CurriculumTester3", char_class="Wizard", current_location="market_row",
+            ability_scores={"strength": 8, "dexterity": 12, "constitution": 14,
+                             "intelligence": 17, "wisdom": 10, "charisma": 10},
+        )
+        db.update_character(user_id, -999, level=10, proven_in_combat=True, subclass="Evocation")
+
+        with patch("bot.narrate_skill_check", return_value="Real training, quietly done."):
+            await bot._do_join_guild(FakeUpdate(user_id, "I join the Arcane Circle", []), "I join the Arcane Circle")
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild"], "arcane_circle")
+
+            with patch.object(gc, "GUILD_CURRICULUM_STEP_COOLDOWN_HOURS", 0):
+                sink = []
+                await bot._do_move(FakeUpdate(user_id, "Go to the arcane nook", sink), "Go to the arcane nook")
+                char = db.get_character(user_id, -999)
+                self.assertEqual(char["guild_curriculum_step"], 1)
+
+                sink = []
+                await bot.guild_topic_handler(
+                    FakeUpdate(user_id, "a map", sink, thread_id=config.GUILD_TOPIC_IDS["arcane_circle"]),
+                    DummyContext(), "arcane_circle",
+                )
+                char = db.get_character(user_id, -999)
+                self.assertEqual(char["guild_curriculum_step"], 2)
+
+                db.update_character(user_id, -999, current_location="hollow_stump_shrine")
+                for _ in range(3):
+                    sink = []
+                    # forced_roll=20 guarantees a real success each attempt --
+                    # this test verifies the curriculum checkpoint, not the
+                    # underlying ability-check odds (already covered elsewhere).
+                    await bot._do_gather(FakeUpdate(user_id, "I gather moonpetal", sink), "I gather moonpetal", forced_roll=20)
+                    char = db.get_character(user_id, -999)
+                    if char["guild_curriculum_step"] == 3:
+                        break
+                self.assertEqual(char["guild_curriculum_step"], 3, char["inventory"])
+
+                npc_id = bot._find_npc_id_by_name("Vesh Nightglass")
+                sink = []
+                await bot._check_guild_curriculum_progress(
+                    FakeUpdate(user_id, "Ask Vesh Nightglass about power", sink), user_id, -999,
+                    "npc_dialogue", npc_id=npc_id, text="Ask Vesh Nightglass about power",
+                )
+                char = db.get_character(user_id, -999)
+                self.assertEqual(char["guild_curriculum_step"], 4)
+                self.assertTrue(gc.is_curriculum_complete("arcane_circle", char["guild_curriculum_step"]))
+
+
+
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
     """
     Real Ollama-backed narration -- each of these can take 30s-5min+

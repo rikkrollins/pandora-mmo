@@ -76,12 +76,17 @@ class FakeSentMessage:
     """Real enough to stand in for python-telegram-bot's Message where a test needs .delete() or .message_id."""
     def __init__(self, sink, message_id=None):
         self.deleted = False
+        self.pinned = False
         self._sink = sink
         self.message_id = message_id
 
     async def delete(self):
         self.deleted = True
         self._sink.append("<deleted>")
+
+    async def pin(self, disable_notification=False):
+        self.pinned = True
+        self._sink.append(f"<pinned:{self.message_id}>")
 
 
 class FakeChat:
@@ -109,6 +114,9 @@ class FakeChat:
         self._next_message_id += 1
         self.last_sent_message = sent
         return sent
+
+    async def unpin_message(self, message_id=None):
+        self._sink.append(f"<unpinned:{message_id}>")
 
 
 class FakeUser:

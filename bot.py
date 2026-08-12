@@ -18,7 +18,7 @@ import os
 import random
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
 import requests
@@ -41,6 +41,7 @@ from telegram.ext import (
 import battle_render
 import map_render
 import board_quests as board_quests_module
+import guild_curriculum as guild_curriculum_module
 import campaign_loader as cl
 import config
 import version
@@ -9186,6 +9187,7 @@ async def _check_quest_completions_reach_location(update_like, telegram_user_id:
         trigger = quest.get("trigger", {})
         if trigger.get("type") == "reach_location" and trigger.get("location") == location_id:
             await _complete_quest_and_announce(update_like, telegram_user_id, quest_id)
+    await _check_guild_curriculum_progress(update_like, telegram_user_id, update_like.effective_chat.id, "reach_location", location_id=location_id)
     await _check_and_award_achievements(update_like, db.get_character(telegram_user_id, update_like.effective_chat.id))
 
 
@@ -9277,6 +9279,9 @@ async def _check_quest_completions_defeat_monster(update_like, session: sessions
             trigger = quest.get("trigger", {})
             if trigger.get("type") == "defeat_monster" and trigger.get("monster") in defeated_monster_keys:
                 await _complete_quest_and_announce(update_like, telegram_user_id, quest_id)
+        await _check_guild_curriculum_progress(
+            update_like, telegram_user_id, session.chat_id, "defeat_monster", monster_keys=defeated_monster_keys,
+        )
 
 
 async def _do_accept_quest(update: Update, text: str = "") -> None:
@@ -11861,6 +11866,9 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
     # genuinely are fought/gathered somewhere else first.
     if success:
         await _check_board_quest_turnin(update, update.effective_user.id, character["current_location"])
+        await _check_guild_curriculum_progress(
+            update, update.effective_user.id, update.effective_chat.id, "gather_material", material_id=node["material"],
+        )
 
 
 PROFESSION_RANK_TITLES = {0: "Novice", 1: "Apprentice", 2: "Adept", 3: "Master"}
@@ -15365,6 +15373,330 @@ async def _do_check_guild_quest(update: Update, guild_id: str) -> None:
     )
 
 
+GUILD_CURRICULUM_DICE_KEYWORDS = ["try my luck", "attempt the trial", "roll for it", "take the trial"]
+GUILD_CURRICULUM_STATUS_KEYWORDS = ["my curriculum", "guild training", "next lesson", "curriculum"]
+
+
+def _guild_curriculum_step_ready(character: dict) -> bool:
+    """
+    True once GUILD_CURRICULUM_STEP_COOLDOWN_HOURS have really passed
+    since the character's CURRENT step unlocked -- the real "must grind
+    it out" pacing gate (per Coffee), enforced on CREDITING a step, not
+    on attempting it (a member can work toward it immediately, they just
+    can't be recognized for it until real time has actually passed).
+    """
+    unlocked_at = character.get("guild_curriculum_step_unlocked_at")
+    if not unlocked_at:
+        return True
+    elapsed = datetime.now(timezone.utc) - datetime.fromisoformat(unlocked_at)
+    return elapsed >= timedelta(hours=guild_curriculum_module.GUILD_CURRICULUM_STEP_COOLDOWN_HOURS)
+
+
+def _guild_curriculum_time_remaining_note(character: dict) -> str:
+    unlocked_at = character.get("guild_curriculum_step_unlocked_at")
+    if not unlocked_at:
+        return "a while"
+    elapsed = datetime.now(timezone.utc) - datetime.fromisoformat(unlocked_at)
+    remaining = timedelta(hours=guild_curriculum_module.GUILD_CURRICULUM_STEP_COOLDOWN_HOURS) - elapsed
+    if remaining <= timedelta(0):
+        return "a moment"
+    hours = int(remaining.total_seconds() // 3600)
+    minutes = max(int((remaining.total_seconds() % 3600) // 60), 1)
+    return f"{hours}h {minutes}m" if hours else f"{minutes}m"
+
+
+def _format_guild_curriculum_step_objective(step: dict) -> str:
+    trigger = step["trigger"]
+    ttype = trigger["type"]
+    if ttype == "reach_location":
+        location = cl.get_location(CAMPAIGN, trigger["location"])
+        return f"Travel to {location['name'] if location else trigger['location']}."
+    if ttype == "defeat_monster":
+        template = cl.get_monster_template(CAMPAIGN, trigger["monster"])
+        name = template["name"] if template else trigger["monster"]
+        return f"Defeat {trigger.get('count', 1)}x {name}."
+    if ttype == "gather_material":
+        item = items_module.get_item(trigger["material"])
+        name = item["name"] if item else trigger["material"]
+        return f"Gather {trigger.get('count', 1)}x {name}."
+    if ttype == "solve_puzzle":
+        return "Answer the riddle above, right here in this topic."
+    if ttype == "npc_dialogue":
+        npc = CAMPAIGN["npcs"].get(trigger["npc"])
+        name = npc["name"] if npc else trigger["npc"]
+        return f"Speak with {name} about it, in the Adventure topic."
+    if ttype == "dice_challenge":
+        threshold = trigger.get("threshold", guild_curriculum_module.DICE_CHALLENGE_DEFAULT_THRESHOLD)
+        return f"Say \"try my luck\" here when you're ready to roll (need {threshold}+ on 2d6)."
+    return ""
+
+
+def _format_guild_curriculum_step_announcement(step: dict) -> str:
+    lines = [f"📖 **Guild Training: {step['title']}**", step["flavor"]]
+    if step["trigger"]["type"] != "alignment_choice":
+        lines.append(f"🎯 {_format_guild_curriculum_step_objective(step)}")
+    reward_parts = []
+    if step.get("reward_xp"):
+        reward_parts.append(f"{step['reward_xp']} XP")
+    if step.get("reward_gold"):
+        reward_parts.append(f"{step['reward_gold']} gold")
+    if reward_parts:
+        lines.append(f"💰 Reward: {', '.join(reward_parts)}.")
+    return "\n".join(lines)
+
+
+def _guild_curriculum_choice_keyboard(guild_id: str, step_index: int, step: dict) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(choice["label"], callback_data=f"gcurr|{guild_id}|{step_index}|{choice_id}")]
+        for choice_id, choice in step["trigger"]["choices"].items()
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+async def _post_and_pin_guild_curriculum_step(update: Update, chat_id: int, guild_id: str, text: str) -> None:
+    """
+    Posts the next unlocked step into the guild's own real Telegram
+    topic and pins it (per Coffee: "daily pinned per-guild quest
+    chains... posted to each guild's own Telegram topic"), unpinning
+    whichever step this same mechanism pinned last (tracked via
+    db.get_setting/set_setting, same pattern scripts/announce_deploy.py's
+    pin_update already uses for its own single global pin) -- scoped per
+    (chat_id, guild_id) since curriculum steps are per-character and a
+    guild can have many members each at a different step; the pin
+    surfaces whichever member's step was most recently unlocked, keeping
+    "the next thing to do" visible without pretending one pin can
+    represent every member's own progress at once.
+    """
+    topic_id = config.GUILD_TOPIC_IDS.get(guild_id)
+    reply_thread_id = topic_id if topic_id is not None else update.effective_message.message_thread_id
+    clean_text = _truncate_for_telegram_limit(text)
+    clean_text, entities = _build_message_entities(clean_text, db.list_all_active_real_players(chat_id))
+    try:
+        sent = await update.effective_chat.send_message(clean_text, message_thread_id=reply_thread_id, entities=entities or None)
+    except Exception:
+        logger.warning("[guild_curriculum] failed to post next step for guild %s", guild_id, exc_info=True)
+        return
+    if topic_id is None:
+        return
+    pin_key = f"guild_curriculum_pin_{chat_id}_{guild_id}"
+    old_message_id = db.get_setting(pin_key)
+    if old_message_id:
+        try:
+            await update.effective_chat.unpin_message(message_id=int(old_message_id))
+        except Exception:
+            pass
+    try:
+        await sent.pin(disable_notification=True)
+        db.set_setting(pin_key, str(sent.message_id))
+    except Exception:
+        pass
+
+
+async def _complete_guild_curriculum_step(
+    update_like, telegram_user_id: int, chat_id: int, step: dict, extra_note: str = "",
+) -> None:
+    """
+    Grants one guild curriculum step's real reward (XP/gold, and an
+    optional profession-mastery bump tying it back into the real
+    grindable mastery system, [[project_crafting_mastery_v1_27_144]]),
+    advances the character's step counter, and posts+pins the next step
+    (or a completion banner if the curriculum's exhausted) into the
+    guild's own topic. `step` may be a step dict as authored, OR (for an
+    alignment_choice) the step merged with the CHOSEN branch's own
+    reward fields overriding the top-level ones, since a branching
+    step's real reward depends on which option was picked.
+    """
+    character = db.get_character(telegram_user_id, chat_id)
+    if character is None:
+        return
+    reward_xp = step.get("reward_xp", 0)
+    reward_gold = step.get("reward_gold", 0)
+    if reward_xp:
+        await _award_xp_and_announce_level_up(update_like, telegram_user_id, chat_id, reward_xp)
+    if reward_gold:
+        fresh = db.get_character(telegram_user_id, chat_id)
+        db.update_character(telegram_user_id, chat_id, gold=fresh["gold"] + reward_gold)
+    mastery_profession = step.get("reward_mastery_profession")
+    mastery_pct = step.get("reward_mastery_pct")
+    if mastery_profession and mastery_pct:
+        fresh = db.get_character(telegram_user_id, chat_id)
+        current = fresh["profession_mastery_pct"].get(mastery_profession, PROFICIENCY_STARTING_PCT)
+        updated_pct = {**fresh["profession_mastery_pct"], mastery_profession: min(current + mastery_pct, PROFICIENCY_MAX_PCT)}
+        db.update_character(telegram_user_id, chat_id, profession_mastery_pct=updated_pct)
+
+    updated_character = db.advance_guild_curriculum_step(telegram_user_id, chat_id)
+    guild_id = updated_character["guild"]
+    topic_id = config.GUILD_TOPIC_IDS.get(guild_id)
+    reply_thread_id = topic_id if topic_id is not None else update_like.effective_message.message_thread_id
+
+    reward_parts = []
+    if reward_xp:
+        reward_parts.append(f"{reward_xp} XP")
+    if reward_gold:
+        reward_parts.append(f"{reward_gold} gold")
+    reward_text = ", ".join(reward_parts) or "real progress"
+    await _safe_send(
+        update_like, f"✅ **{updated_character['name']}** completes \"{step['title']}\" — {reward_text}.{extra_note}",
+        thread_id=reply_thread_id,
+    )
+
+    next_step = guild_curriculum_module.get_step(guild_id, updated_character["guild_curriculum_step"])
+    if next_step is None:
+        await _safe_send(
+            update_like,
+            f"🏅 **{updated_character['name']}** has completed {GUILDS[guild_id]['name']}'s full training curriculum!",
+            thread_id=reply_thread_id,
+        )
+        return
+    announcement = _format_guild_curriculum_step_announcement(next_step)
+    await _post_and_pin_guild_curriculum_step(update_like, chat_id, guild_id, announcement)
+
+
+async def _check_guild_curriculum_progress(update_like, telegram_user_id: int, chat_id: int, event_type: str, **event_data) -> None:
+    """
+    Shared checkpoint for reach_location/defeat_monster/gather_material/
+    npc_dialogue curriculum steps -- called from the SAME real event
+    checkpoints campaign quests and board quests already use (arrival,
+    combat victory, a successful gather, a successful NPC conversation),
+    never a new polling loop. solve_puzzle and dice_challenge are
+    resolved directly in guild_topic_handler instead (they're genuinely
+    driven by what's typed IN the guild's own topic, not an Adventure-
+    side action); alignment_choice is resolved via guild_curriculum_callback.
+    """
+    character = db.get_character(telegram_user_id, chat_id)
+    if character is None or not character.get("guild"):
+        return
+    guild_id = character["guild"]
+    step = guild_curriculum_module.get_step(guild_id, character["guild_curriculum_step"])
+    if step is None or character["level"] < step["min_level"]:
+        return
+    trigger = step["trigger"]
+    if trigger["type"] != event_type:
+        return
+
+    matched = False
+    if event_type == "reach_location":
+        matched = trigger["location"] == event_data.get("location_id")
+    elif event_type == "defeat_monster":
+        matched = trigger["monster"] in event_data.get("monster_keys", set())
+    elif event_type == "gather_material":
+        matched = (
+            trigger["material"] == event_data.get("material_id")
+            and character["inventory"].get(trigger["material"], 0) >= trigger.get("count", 1)
+        )
+    elif event_type == "npc_dialogue":
+        text_lower = (event_data.get("text") or "").lower()
+        matched = trigger["npc"] == event_data.get("npc_id") and any(kw in text_lower for kw in trigger.get("keywords", []))
+    if not matched:
+        return
+
+    if not _guild_curriculum_step_ready(character):
+        remaining = _guild_curriculum_time_remaining_note(character)
+        await _safe_send(
+            update_like,
+            f"📖 That satisfies **{step['title']}** — but the guild won't credit it for another {remaining}. "
+            f"Real training takes real time.",
+        )
+        return
+    await _complete_guild_curriculum_step(update_like, telegram_user_id, chat_id, step)
+
+
+async def _do_guild_curriculum_dice_challenge(update: Update, step: dict) -> None:
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    dice_roll = roll(2, 6)
+    total = sum(dice_roll)
+    threshold = step["trigger"].get("threshold", guild_curriculum_module.DICE_CHALLENGE_DEFAULT_THRESHOLD)
+    won = total >= threshold
+    roll_line = f"🎲 **{character['name']}** rolls {dice_roll[0]} + {dice_roll[1]} = **{total}** (needed {threshold}+)"
+    if not won:
+        await _safe_send(update, f"{roll_line}. No credit this time — try again whenever you're ready.")
+        return
+    if not _guild_curriculum_step_ready(character):
+        remaining = _guild_curriculum_time_remaining_note(character)
+        await _safe_send(update, f"{roll_line} — a real win! But the guild won't credit it for another {remaining}.")
+        return
+    await _safe_send(update, f"{roll_line} — a real win!")
+    await _complete_guild_curriculum_step(update, update.effective_user.id, update.effective_chat.id, step)
+
+
+async def _do_check_guild_curriculum(update: Update) -> None:
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    reply_thread_id = update.effective_message.message_thread_id
+    if character is None or not character.get("guild"):
+        return
+    guild_id = character["guild"]
+    step_index = character["guild_curriculum_step"]
+    step = guild_curriculum_module.get_step(guild_id, step_index)
+    if step is None:
+        await update.effective_chat.send_message(
+            f"🏅 You've completed {GUILDS[guild_id]['name']}'s full training curriculum. Nothing left to teach you here.",
+            message_thread_id=reply_thread_id,
+        )
+        return
+    if character["level"] < step["min_level"]:
+        await update.effective_chat.send_message(
+            f"📖 **{step['title']}** is next, but you need to be level {step['min_level']} first.",
+            message_thread_id=reply_thread_id,
+        )
+        return
+    if step["trigger"]["type"] == "alignment_choice":
+        keyboard = _guild_curriculum_choice_keyboard(guild_id, step_index, step)
+        await _safe_send(
+            update, f"📖 **{step['title']}**\n{step['flavor']}\n\n{step['trigger']['setup']}",
+            reply_markup=keyboard, thread_id=reply_thread_id,
+        )
+        return
+    text = _format_guild_curriculum_step_announcement(step)
+    if not _guild_curriculum_step_ready(character):
+        remaining = _guild_curriculum_time_remaining_note(character)
+        text += f"\n⏳ Not creditable for another {remaining}, even once done."
+    await _safe_send(update, text, thread_id=reply_thread_id)
+
+
+async def guild_curriculum_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Resolves an alignment_choice curriculum step's 2-button decision
+    (per Coffee: real consequences, but "dont tell them what the quest
+    allignment is tho" -- the buttons only ever show the two labeled
+    options themselves, never which alignment axis or direction either
+    one nudges).
+    """
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    guild_id = parts[1] if len(parts) > 1 else ""
+    step_index = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else -1
+    choice_id = parts[3] if len(parts) > 3 else ""
+    await _safe_answer(query)
+
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None or character.get("guild") != guild_id or character["guild_curriculum_step"] != step_index:
+        await _safe_send(update, "That decision isn't yours to make anymore.")
+        return
+    step = guild_curriculum_module.get_step(guild_id, step_index)
+    if step is None or step["trigger"]["type"] != "alignment_choice":
+        return
+    choice = step["trigger"]["choices"].get(choice_id)
+    if choice is None:
+        return
+    if not _guild_curriculum_step_ready(character):
+        remaining = _guild_curriculum_time_remaining_note(character)
+        await _safe_send(update, f"Not yet — the guild won't recognize this decision for another {remaining}.")
+        return
+
+    db.update_character(
+        update.effective_user.id, update.effective_chat.id,
+        alignment_law_chaos=max(-100, min(100, character["alignment_law_chaos"] + choice.get("alignment_law_chaos_delta", 0))),
+        alignment_good_evil=max(-100, min(100, character["alignment_good_evil"] + choice.get("alignment_good_evil_delta", 0))),
+    )
+    resolved_step = {
+        **step, "reward_xp": choice.get("reward_xp", 0), "reward_gold": choice.get("reward_gold", 0),
+        "reward_mastery_profession": choice.get("reward_mastery_profession"), "reward_mastery_pct": choice.get("reward_mastery_pct"),
+    }
+    await _complete_guild_curriculum_step(
+        update, update.effective_user.id, update.effective_chat.id, resolved_step, extra_note=f"\n{choice['outcome']}",
+    )
+
+
 async def guild_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, guild_id: str) -> None:
     """
     Task #77's real guild-only channel: this topic exists in the group
@@ -15373,7 +15705,8 @@ async def guild_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     clear, honest redirect instead of the bot pretending the topic is
     open to everyone. Ordinary chat between real members needs no
     processing at all (Telegram already delivers it); "check guild
-    quest" is the one real command surfaced here.
+    quest" and the real guild curriculum (2026-08-12, "my curriculum" /
+    riddle answers / "try my luck") are the real commands surfaced here.
     """
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     guild = GUILDS.get(guild_id)
@@ -15389,6 +15722,26 @@ async def guild_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     if any(w in lowered for w in ["guild quest", "check quest", "today's quest", "todays quest"]):
         await _do_check_guild_quest(update, guild_id)
         return
+    if any(w in lowered for w in GUILD_CURRICULUM_STATUS_KEYWORDS):
+        await _do_check_guild_curriculum(update)
+        return
+    # Riddle answers and "try my luck" only ever apply to the character's
+    # CURRENT curriculum step, checked here (not as a generic keyword
+    # dispatch below) so a riddle's own free-text answer never has to
+    # collide with anything else this topic already listens for.
+    current_step = guild_curriculum_module.get_step(guild_id, character["guild_curriculum_step"])
+    if current_step is not None and character["level"] >= current_step["min_level"]:
+        trigger = current_step["trigger"]
+        if trigger["type"] == "solve_puzzle" and any(a in lowered for a in trigger["accepted_answers"]):
+            if _guild_curriculum_step_ready(character):
+                await _complete_guild_curriculum_step(update, update.effective_user.id, update.effective_chat.id, current_step)
+            else:
+                remaining = _guild_curriculum_time_remaining_note(character)
+                await _safe_send(update, f"That's the right answer — but the guild won't credit it for another {remaining}.")
+            return
+        if trigger["type"] == "dice_challenge" and any(w in lowered for w in GUILD_CURRICULUM_DICE_KEYWORDS):
+            await _do_guild_curriculum_dice_challenge(update, current_step)
+            return
     if guild_id == "arcane_circle" and any(w in lowered for w in ["learn", "secret", "teach"]):
         await _do_learn_guild_spell(update, update.message.text)
         return
@@ -19104,6 +19457,15 @@ async def _do_join_guild(update: Update, text: str) -> None:
     await _safe_send(update, f"🏛️ You've joined {GUILDS[guild_id]['name']}!{join_note}{topic_note}")
     await _notify_main_topic(update, f"🏛️ **{character['name']}** joined {GUILDS[guild_id]['name']}!")
     await _check_and_award_achievements(update, db.get_character(update.effective_user.id, update.effective_chat.id))
+    # Real guild curriculum (2026-08-12): the first step is already
+    # unlocked (db.join_guild stamps guild_curriculum_step_unlocked_at),
+    # so announce+pin it right away rather than making a brand-new
+    # member ask "my curriculum" just to discover it exists.
+    first_step = guild_curriculum_module.get_step(guild_id, 0)
+    if first_step is not None:
+        await _post_and_pin_guild_curriculum_step(
+            update, update.effective_chat.id, guild_id, _format_guild_curriculum_step_announcement(first_step),
+        )
 
 
 # ---------------------------------------------------------------------
@@ -20041,6 +20403,9 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
                 _adjust_faction_standing(
                     update.effective_user.id, update.effective_chat.id, faction_id, 1, _faction_starting_standing(faction_id)
                 )
+            await _check_guild_curriculum_progress(
+                update, update.effective_user.id, update.effective_chat.id, "npc_dialogue", npc_id=npc_id, text=text,
+            )
     elif action == "talk_party":
         await _do_talk_party(update, text)
     elif action == "use_environment":
@@ -23352,6 +23717,7 @@ def build_application() -> Application:
     application.add_handler(MessageHandler(filters.VIDEO, dev_topic_video_handler))
     application.add_handler(CallbackQueryHandler(battle_menu_callback, pattern=r"^bm\|"))
     application.add_handler(CallbackQueryHandler(itemview_callback, pattern=r"^itemview\|"))
+    application.add_handler(CallbackQueryHandler(guild_curriculum_callback, pattern=r"^gcurr\|"))
     # Task #176: out-of-combat browsing buttons (shop/spells/quest board),
     # own callback-data namespaces so none of these can ever collide with
     # the combat battle menu above or each other.
