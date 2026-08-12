@@ -11688,6 +11688,42 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         char = db.get_character(user_id, -999)
         self.assertEqual(char["guild_curriculum_step"], 4, "a real bare answer must still be credited")
 
+    async def test_guild_curriculum_mastery_reward_lands_on_the_real_profession_key(self):
+        """
+        Real bug caught proactively (code review, not a live report): the
+        Arcane Circle/Enchanters' Guild curriculum steps that grant a
+        profession-mastery bump used "enchanting" as the profession key
+        -- but this game has no "enchanting" profession at all. Every
+        real ENCHANT_RECIPES entry (rules/crafting.py) declares
+        "profession": "alchemy", the same key bot._roll_masterwork_
+        quality/_profession_mastery_pct read for a real enchant's
+        masterwork-quality odds. Rewarding an "enchanting" key was
+        therefore silent and completely inert -- it created an orphaned
+        dict entry nothing ever reads, never actually improving a
+        member's real enchanting odds despite the reward text saying so.
+        Fixed by rewarding "alchemy" instead, the real key.
+        """
+        import guild_curriculum as gc
+        user_id = 700106
+        make_basic_character(
+            user_id, "CurriculumTester6", char_class="Wizard", current_location="market_row",
+        )
+        db.update_character(user_id, -999, guild="arcane_circle")
+        step = gc.get_step("arcane_circle", 3)
+        self.assertEqual(step["reward_mastery_profession"], "alchemy")
+
+        char_before = db.get_character(user_id, -999)
+        before_alchemy = char_before["profession_mastery_pct"].get("alchemy", bot.PROFICIENCY_STARTING_PCT)
+
+        sink = []
+        await bot._complete_guild_curriculum_step(FakeUpdate(user_id, "", sink), user_id, -999, step)
+
+        char_after = db.get_character(user_id, -999)
+        after_pct = char_after["profession_mastery_pct"]
+        self.assertNotIn("enchanting", after_pct, "must never write an orphaned 'enchanting' key")
+        self.assertEqual(after_pct.get("alchemy"), before_alchemy + step["reward_mastery_pct"])
+        # Same key a real enchant's masterwork roll actually reads.
+        self.assertEqual(bot._profession_mastery_pct(char_after, "alchemy"), after_pct["alchemy"])
 
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):

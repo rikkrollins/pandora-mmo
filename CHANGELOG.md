@@ -2,6 +2,18 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.157] — Fix: guild curriculum mastery rewards were silently inert
+
+Found proactively (code review, not a live report): the Arcane Circle
+and Enchanters' Guild curriculum steps that grant a profession-mastery
+bump rewarded a profession called "enchanting" — but this game has no
+such profession. Every real enchant recipe (rules/crafting.py's
+ENCHANT_RECIPES) is actually keyed under "alchemy", the same string
+the real masterwork-quality roll reads. The reward text always claimed
+real progress, but silently wrote to an orphaned dict key nothing ever
+read — a member's real enchanting odds never actually improved. Fixed
+by rewarding "alchemy" instead, the real key. 1 new regression test.
+
 ## [1.27.156] — Hardening: v1.27.155's guild riddle fix wasn't quite enough
 
 Found proactively while double-checking the previous fix: the 6-word
