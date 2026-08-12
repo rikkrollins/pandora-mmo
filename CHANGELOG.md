@@ -2,6 +2,22 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.163] — Fix: examining a recipe book only gave generic flavor text
+
+Real dev-bridge follow-up (2026-08-12, same player as the "view"
+misclassification fix): "Looking at the herbalism guide didn't work we
+need to be able to read it so we can see the contents of the book the
+recipes." Examining a recipe book (Cook Book/Herbalism Guide/Crafting
+Book, 2026-08-11) only ever gave generic flavor narration from the
+item's own description field, never its real recipe contents — those
+already existed real and grounded (_do_read_recipe_book, built from
+rules.crafting.RECIPES), but were only ever reachable via "use the X",
+not the far more natural "examine"/"view"/"look at"/"read" phrasing.
+Fixed by routing book-type items to _do_read_recipe_book from
+_do_examine's own inventory-item branch. 1 new regression test
+confirms a real alchemy recipe name actually appears, not just the
+generic description.
+
 ## [1.27.162] — Fix: "view" not recognized as a synonym for examine
 
 Real player message ("View the herbalism guide" — asking to look at a

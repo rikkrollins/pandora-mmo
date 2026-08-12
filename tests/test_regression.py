@@ -5081,6 +5081,43 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(len(transcript) > 0)
         self.assertIn("Stats:", transcript)
 
+    async def test_examine_an_owned_recipe_book_shows_its_real_recipes(self):
+        """
+        Real live report (2026-08-12, dev-bridge screenshot, same player
+        who hit the "view" misclassification gap): "Looking at the
+        herbalism guide didn't work we need to be able to read it so we
+        can see the contents of the book the recipes" -- examining a
+        recipe book (Cook Book/Herbalism Guide/Crafting Book, 2026-08-11)
+        only ever gave generic flavor narration from the item's own
+        description field, never its real recipe contents, even though
+        those already exist real and grounded (_do_read_recipe_book,
+        built from rules.crafting.RECIPES) -- they were only ever
+        reachable via "use the X", not the far more natural "examine"/
+        "view"/"look at" phrasing. Fixed by routing book-type items to
+        _do_read_recipe_book from _do_examine's own inventory-item
+        branch. Confirms a real level-1 alchemy recipe (the Herbalism
+        Guide's real teaches_profession) actually appears, not just
+        generic flavor text.
+        """
+        user_id = 993002
+        make_basic_character(user_id, "BookTester", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "herbalism_guide_basic", 1)
+
+        sink = []
+        await bot._do_examine(FakeUpdate(user_id, "the herbalism guide", sink), "the herbalism guide")
+        transcript = "\n".join(sink)
+        self.assertIn("Herbalism Guide", transcript)
+        alchemy_recipe_names = {
+            items_module.get_item(r["result_item"])["name"]
+            for r in RECIPES.values() if r.get("profession", "crafting") == "alchemy"
+        }
+        self.assertTrue(alchemy_recipe_names, "test setup sanity: there should be real alchemy recipes to check against")
+        self.assertTrue(
+            any(name in transcript for name in alchemy_recipe_names),
+            f"expected a real alchemy recipe name in the reply, got: {transcript!r}",
+        )
+        self.assertNotIn("Pressed leaves still mark", transcript, "must not fall back to the generic flavor description")
+
     async def test_generated_items_can_be_sold_and_market_shows_real_stats(self):
         """
         Real live bugs (2026-08-02, Development topic): (1)

@@ -14911,6 +14911,24 @@ async def _do_examine(update: Update, target_text: str) -> None:
         item_match = items_module.find_item_mentioned_in_text(target_text, candidate_ids=owned_item_ids)
         if item_match:
             item_data = items_module.get_item(item_match)
+            # Real live report (2026-08-12, dev-bridge screenshot,
+            # same player who hit the "view" misclassification gap):
+            # "Looking at the herbalism guide didn't work we need to be
+            # able to read it so we can see the contents of the book
+            # the recipes" -- examining a recipe book (Cook Book/
+            # Herbalism Guide/Crafting Book, 2026-08-11) only ever gave
+            # generic flavor narration from the item's own description
+            # field, never its real recipe contents -- those already
+            # exist, real and grounded (_do_read_recipe_book, built
+            # from rules.crafting.RECIPES), but were only ever reachable
+            # via "use the X", not the far more natural "examine"/
+            # "view"/"look at"/"read" phrasing a player actually reaches
+            # for when they want to see what's written in a book they
+            # own. Routes book-type items here instead of falling
+            # through to the generic description path below.
+            if item_data.get("type") == "book":
+                await _do_read_recipe_book(update, item_data)
+                return
             # Real live crash (2026-08-02, caught via a Development-topic
             # report): a generated magic item (rules/item_generator.py,
             # e.g. "Runed Dagger of Embers") has no "description" field
