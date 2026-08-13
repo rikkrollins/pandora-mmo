@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.172] — Fix: bare/typo'd spell invocation ("Eldricth blast") misclassified as use_environment
+
+Real live bug, found via topic-activity monitoring — a live repro of a
+previously-unresolved investigation ("Eldritch Blast misclassification")
+whose actual trigger message had never appeared in the logs before now.
+A player mid-combat typed just "Eldricth blast" (a typo of the real
+cantrip "Eldritch Blast"), which none of `_keyword_fallback`'s existing
+cast_spell checks recognized (all require "cast "/"with"/"using"), so it
+fell through to "chat", the model was asked, and it guessed
+`use_environment` instead — with nothing to catch and override that
+wrong guess, unlike the existing defensive overrides for
+start_combat/pass_turn/flee.
+
+Two real fixes, both needed for this to work end-to-end:
+- `ai/intent_parser.py`'s `_keyword_fallback` now recognizes a bare
+  (optionally typo'd) spell invocation — the whole remaining clause,
+  squashed, is fuzzy-matched (`difflib.SequenceMatcher`, same pattern
+  already used elsewhere in this codebase) against every real spell's
+  squashed name, splitting off a trailing "at/on/against <target>"
+  first. Checked deliberately last (lowest-confidence check in the
+  function) so it can't preempt any higher-precision match, and the
+  whole-clause comparison (not a substring search) keeps it safe from
+  false-positiving on an unrelated full sentence.
+- `bot.py`'s `_text_mentions_spell` needed the identical typo tolerance
+  — even once correctly classified as cast_spell, `_do_cast_spell`'s own
+  spell-name resolution against the caster's known spells still required
+  an exact (or squashed-exact) match, so a typo'd cast would have landed
+  as "you don't know a spell by that name" anyway.
+
 ## [1.27.171] — Fix: Support item comparison recognized a real owned generated item as fake
 
 Real live bug, found while investigating a dev-bridge screenshot report

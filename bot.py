@@ -18881,12 +18881,34 @@ def _text_mentions_spell(spell_id: str, spell_name: str, lowered_text: str) -> b
     the natural two-word "fire ball" for the real spell "Fireball" would
     get reclassified correctly but then land here as "you don't know a
     spell by that name" anyway, a strictly worse outcome than before.
+
+    Real live bug (2026-08-13, topic-activity monitoring): a player
+    typed "Eldricth blast", a typo of the real cantrip "Eldritch Blast"
+    -- ai/intent_parser.py's own matching new bare-spell-invocation
+    fallback was taught to tolerate this typo and correctly classifies
+    it as cast_spell, but this function still required an EXACT (or
+    squashed-exact) substring match, so even a correctly-classified cast
+    would still land here as "you don't know a spell by that name."
+    Falls back to the same difflib.SequenceMatcher ratio-over-the-whole-
+    squashed-string comparison already used elsewhere in this codebase
+    for typo tolerance (ai/intent_parser.py's _normalize_common_typos,
+    this function's own new sibling check, bot.py's guild-name fuzzy
+    match) -- only when lowered_text is short enough to plausibly BE
+    just the spell name (not a long sentence containing an unrelated
+    word that happens to be similar), so this can't false-positive on
+    an ordinary combat sentence that never named this spell at all.
     """
-    return (
+    if (
         spell_id.replace("_", " ") in lowered_text
         or spell_name.lower() in lowered_text
         or spell_name.lower().replace(" ", "") in lowered_text.replace(" ", "")
-    )
+    ):
+        return True
+    squashed_text = lowered_text.replace(" ", "").strip()
+    squashed_name = spell_name.lower().replace(" ", "")
+    if abs(len(squashed_text) - len(squashed_name)) > 2:
+        return False
+    return difflib.SequenceMatcher(None, squashed_text, squashed_name).ratio() >= 0.82
 
 
 async def _do_cast_spell(update: Update, text: str) -> None:

@@ -1924,6 +1924,47 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
         if any(v in lowered for v in verbs):
             return {**base, "action": "skill_check", "ability": ability}
 
+    # Bare (possibly typo'd) spell invocation (2026-08-13, real live bug
+    # found via topic-activity monitoring, matches a previously-unresolved
+    # note: a player in single-target combat typed just "Eldricth blast"
+    # -- a typo of the real cantrip "Eldritch Blast" -- with none of the
+    # trigger words the checks above require ("cast ", "with", "using"),
+    # so _keyword_fallback had no opinion (fell through to "chat"), the
+    # model was called, and it guessed "use_environment" instead, with
+    # nothing here to catch and override that wrong guess (unlike
+    # start_combat/pass_turn/flee, which already have this kind of
+    # defensive override). This is exactly the "trigger message never
+    # appears in logs" gap noted in an earlier investigation of this same
+    # symptom -- now it does, and it's a plain typo, not a button tap.
+    # Checked deliberately LAST (bare/fuzzy, so lowest-confidence of every
+    # check in this function): compares the WHOLE remaining clause,
+    # squashed, against every real spell's squashed name via the same
+    # difflib.SequenceMatcher pattern _normalize_common_typos already
+    # uses above (and bot.py's guild-name matching) -- a ratio this high
+    # over the ENTIRE clause (not a substring search) is safe from false
+    # positives against an unrelated full sentence, since one stray
+    # matching word can't drag a long, mostly-different clause up near
+    # the same ratio a near-exact short spell name gets. Splits off a
+    # trailing "at/on/against <target>" first so "eldritch blast at the
+    # golem" still resolves the target.
+    _target_split = re.search(r"\s+(?:at|on|against)\s+", lowered)
+    if _target_split:
+        spell_clause, target_clause = lowered[:_target_split.start()], lowered[_target_split.end():]
+    else:
+        spell_clause, target_clause = lowered, None
+    squashed_clause = spell_clause.replace(" ", "").strip()
+    if squashed_clause:
+        best_spell, best_ratio = None, 0.0
+        for spell in spells_module.SPELLS.values():
+            squashed_name = spell["name"].lower().replace(" ", "")
+            if abs(len(squashed_clause) - len(squashed_name)) > 2:
+                continue
+            ratio = difflib.SequenceMatcher(None, squashed_clause, squashed_name).ratio()
+            if ratio >= 0.82 and ratio > best_ratio:
+                best_spell, best_ratio = spell["name"], ratio
+        if best_spell:
+            return {**base, "action": "cast_spell", "spell_name": best_spell, "target": target_clause.strip() if target_clause else None}
+
     # Party companion dialogue (2026-07-26, per Coffee: "when we say
     # 'talk' 'speak' 'say' 'tell' 'yell' 'shout' 'scream' in a location,
     # prompt dialog from the party members"). Deliberately checked LAST,

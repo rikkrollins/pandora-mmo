@@ -10324,6 +10324,88 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("Fireball" in m for m in sink))
         sessions.end_session(-999)
 
+    def test_bare_typo_spell_invocation_classifies_as_cast_spell(self):
+        """
+        Real live bug (2026-08-13, topic-activity monitoring): a player
+        typed just "Eldricth blast" (a typo of the real cantrip
+        "Eldritch Blast") mid-combat with none of the trigger words the
+        keyword fallback required ("cast ", "with", "using"), so it fell
+        through to "chat", the model was called, and it misclassified
+        this as use_environment instead -- this is the live repro of a
+        previously-unresolved investigation ("trigger message never
+        appears in logs"). Confirms the new bare/fuzzy spell-invocation
+        check now catches this directly from the keyword fallback
+        (never even needs to reach the model).
+        """
+        from ai.intent_parser import _keyword_fallback
+        intent = _keyword_fallback("Eldricth blast", [])
+        self.assertEqual(intent["action"], "cast_spell")
+        self.assertEqual(intent["spell_name"], "Eldritch Blast")
+
+    def test_bare_spell_invocation_with_target_splits_off_the_target(self):
+        from ai.intent_parser import _keyword_fallback
+        intent = _keyword_fallback("eldritch blast at the golem", [])
+        self.assertEqual(intent["action"], "cast_spell")
+        self.assertEqual(intent["spell_name"], "Eldritch Blast")
+        self.assertEqual(intent["target"], "the golem")
+
+    def test_bare_spell_fuzzy_match_does_not_false_positive_on_an_ordinary_sentence(self):
+        """A long, ordinary sentence that just happens to share a couple
+        of letters with some real spell name must never fuzzy-match --
+        the whole clause has to be CLOSE to the whole spell name."""
+        from ai.intent_parser import _keyword_fallback
+        intent = _keyword_fallback("I carefully look around the dusty old library for clues", [])
+        self.assertNotEqual(intent["action"], "cast_spell")
+
+    async def test_do_cast_spell_resolves_a_typo_of_a_bare_spell_name(self):
+        """
+        Companion fix to the intent-classification test above:
+        _text_mentions_spell also needed typo tolerance, or a correctly
+        -classified cast_spell intent would still land in _do_cast_spell
+        as "you don't know a spell by that name" even though the
+        character genuinely knows Eldritch Blast. Verified end-to-end: a
+        real cast through _do_cast_spell with the exact typo'd live text
+        actually deals real damage (Eldritch Blast is a cantrip, so no
+        spell slot is spent -- 5E cantrips are free/unlimited), confirming
+        the spell was truly recognized and cast, not silently no-op'd.
+        Every real cast goes through _post_narrated, which makes a real
+        Ollama call (genuinely tens of seconds to minutes on this CPU-only
+        box, per CLAUDE.md) -- mocked here the same established way this
+        file's own narration-priority tests already do (patch
+        ai.dm_agent.requests.post), both so the test stays fast and so it
+        can't contend with the live bot's own single Ollama slot.
+        """
+        from unittest.mock import patch
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "The blast lances out and strikes true."}
+
+        import sessions
+        sessions.end_session(-999)
+        caster_id = 950901
+        make_basic_character(
+            caster_id, "EldritchCaster", char_class="Warlock",
+            known_spells=["eldritch_blast"], spell_slots_max=3, current_location="crossroads_tavern",
+        )
+        db.update_character(caster_id, -999, spell_slots_current=3)
+        goblin = {"telegram_user_id": -5200901, "name": "TypoGoblin", "dexterity": 10, "strength": 10,
+                  "armor_class": 5, "hp_current": 1, "hp_max": 20, "conditions": [],
+                  "is_ai": 1, "monster_key": "goblin"}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        session = sessions.start_session(-999, [caster, goblin], {caster_id: "party", -5200901: "enemy"})
+        session.turn_order = [caster_id, -5200901]
+
+        sink = []
+        with patch("ai.dm_agent.requests.post", return_value=FakeResponse()):
+            await bot._do_cast_spell(FakeUpdate(caster_id, "Eldricth blast", sink), "Eldricth blast")
+        self.assertTrue(any("Eldritch Blast" in m for m in sink))
+        sessions.end_session(-999)
+
     def test_build_application_raises_telegram_api_timeouts_above_library_defaults(self):
         """
         Real live bug (2026-08-06, Coffee via dev-topic screenshot: "It
