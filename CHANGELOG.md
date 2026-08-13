@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.181] — Add: Echo Trials react to the challenger's own build (Synergy Phase 4)
+
+Fourth and final step of the class/subclass/guild "break the game"
+synergy pass:
+
+- **Fix (same bug class as Phase 1)**: `_do_start_echo_trial`'s guild
+  gate checked `character["guild"]` (primary only), so a genuine
+  Silver Wardens member via a Promotion-earned SECONDARY guild was
+  rejected exactly like a true non-member. Now checks `guilds.held_
+  guild_ids(requester)`, matching every other guild-gated site fixed
+  in Phase 1.
+- **New reactivity**: from `ECHO_TRIAL_RESISTANCE_TIER` on, an echo's
+  learned damage resistance used to be picked from a fixed hash of
+  `(monster_key, tier)` alone — completely independent of who was
+  actually fighting it, despite the module's own stated intent of
+  "forcing real build adaptation." A new `_challenger_signature_
+  damage_type(character)` now reads the challenger's own real known-
+  spell damage types (spells.py) first, falling back to their
+  equipped weapon's real `damage_type` (items.py) for a non-caster —
+  never invented, never guessed. When a signature type is found, the
+  echo specifically learns to resist THAT type: a Fire-Sorcerer's own
+  echoes learn fire resistance, a plain Fighter's echoes learn
+  resistance to their own weapon's damage type, forcing genuine
+  tactical variety instead of a coin flip unrelated to the
+  challenger. `ECHO_TRIAL_RESISTANT_TYPES` also expanded from 7 to 9
+  entries to include `force`/`psychic`, so a Warlock's Eldritch Blast
+  or a Bard's psychic damage can be a real signature too.
+
 ## [1.27.180] — Add: guild-tagged side quests (Synergy Phase 3)
 
 Third step of the class/subclass/guild "break the game" synergy pass

@@ -6154,10 +6154,44 @@ ECHO_TRIAL_TIER_STAT_BONUS_PCT = 10
 ECHO_TRIAL_TIER_XP_BONUS_PCT = 15
 ECHO_TRIAL_MAX_TIER = 10
 ECHO_TRIAL_RESISTANCE_TIER = 3
-ECHO_TRIAL_RESISTANT_TYPES = ["physical", "fire", "cold", "lightning", "poison", "necrotic", "radiant"]
+ECHO_TRIAL_RESISTANT_TYPES = [
+    "physical", "fire", "cold", "lightning", "poison", "necrotic", "radiant", "force", "psychic",
+]
 
 
-def _build_echo_enemy(monster_key: str, tier: int, index: int, total: int) -> dict | None:
+def _challenger_signature_damage_type(character: dict) -> str | None:
+    """
+    Synergy Phase 4 (2026-08-13, per Coffee: "make sure classes, sub-
+    classes, and guilds all work in synergy" -- Echo Trials should
+    react to the challenger's own identity, not just scale numbers):
+    the one real damage type this challenger's own build actually
+    leans on, so an echo can learn to specifically resist IT rather
+    than a type picked independent of who's fighting. Counted from
+    known_spells' real damage types (spells.py) first (a caster's
+    build is their spell list), falling back to the equipped weapon's
+    real damage_type (items.py) for a non-caster or a caster with no
+    known damage spells yet. Only ever returns a type Echo Trials can
+    actually assign as a resistance (ECHO_TRIAL_RESISTANT_TYPES) --
+    "silver" (a real weapon damage_type, anti-undead flavor) isn't a
+    combat resistance type in this game, so it's never returned here;
+    None means "no discernible signature", and the caller falls back
+    to the original deterministic per-(monster,tier) pick.
+    """
+    type_counts: dict[str, int] = {}
+    for spell_id in character.get("known_spells") or []:
+        spell = spells_module.SPELLS.get(spell_id)
+        if spell and spell.get("effect") == "damage" and spell.get("damage_type") in ECHO_TRIAL_RESISTANT_TYPES:
+            spell_damage_type = spell["damage_type"]
+            type_counts[spell_damage_type] = type_counts.get(spell_damage_type, 0) + 1
+    if type_counts:
+        return max(type_counts, key=type_counts.get)
+    weapon = items_module.get_item(character.get("equipped_weapon") or "")
+    if weapon and weapon.get("damage_type") in ECHO_TRIAL_RESISTANT_TYPES:
+        return weapon["damage_type"]
+    return None
+
+
+def _build_echo_enemy(monster_key: str, tier: int, index: int, total: int, challenger: dict | None = None) -> dict | None:
     """
     A magical mirror-copy of a real monster template, scaled by the
     challenger's own echo_trial_tier -- same base stats, reflavored as
@@ -6165,7 +6199,11 @@ def _build_echo_enemy(monster_key: str, tier: int, index: int, total: int) -> di
     ECHO_TRIAL_RESISTANCE_TIER on, the echo has learned to resist ONE
     real damage type (rules/combat.py's existing resistance system),
     forcing real build adaptation exactly like Coffee's original plan
-    called for, instead of just bigger numbers forever.
+    called for, instead of just bigger numbers forever -- and (Synergy
+    Phase 4) that learned resistance now specifically targets the
+    challenger's own signature damage type when one is discernible
+    (_challenger_signature_damage_type), falling back to the original
+    deterministic per-(monster,tier) pick otherwise.
     """
     template = cl.get_monster_template(CAMPAIGN, monster_key)
     if template is None:
@@ -6173,10 +6211,13 @@ def _build_echo_enemy(monster_key: str, tier: int, index: int, total: int) -> di
     stat_mult = 1 + tier * ECHO_TRIAL_TIER_STAT_BONUS_PCT / 100
     resistances = []
     if tier >= ECHO_TRIAL_RESISTANCE_TIER:
-        # Deterministic per (monster_key, tier), not re-rolled per
-        # fight -- an echo's learned resistance is a real, memorizable
-        # fact about it, not a coin flip each attempt.
-        resistances = [ECHO_TRIAL_RESISTANT_TYPES[hash((monster_key, tier)) % len(ECHO_TRIAL_RESISTANT_TYPES)]]
+        signature_type = _challenger_signature_damage_type(challenger) if challenger else None
+        if signature_type is None:
+            # Deterministic per (monster_key, tier), not re-rolled per
+            # fight -- an echo's learned resistance is a real, memorizable
+            # fact about it, not a coin flip each attempt.
+            signature_type = ECHO_TRIAL_RESISTANT_TYPES[hash((monster_key, tier)) % len(ECHO_TRIAL_RESISTANT_TYPES)]
+        resistances = [signature_type]
     enemy_id = -3_000_000 - (abs(hash((monster_key, tier))) % 100_000) - index
     name = f"Echo of {template['name']} {index + 1}" if total > 1 else f"Echo of {template['name']}"
     return {
@@ -6229,7 +6270,7 @@ async def _do_start_echo_trial(update: Update, text: str) -> None:
                 "Echo trials only happen at The Colosseum.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
             )
             return
-        if requester.get("guild") != "silver_wardens":
+        if "silver_wardens" not in held_guild_ids(requester):
             await update.effective_chat.send_message(
                 "Only Silver Wardens members can challenge an echo trial — join first.",
                 message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
@@ -6256,7 +6297,7 @@ async def _do_start_echo_trial(update: Update, text: str) -> None:
         tier = requester.get("echo_trial_tier", 0)
         base_template = cl.get_monster_template(CAMPAIGN, monster_key)
         count = scaled_enemy_count([p.get("level", 1) for p in party], base_template.get("xp_reward", 0)) if base_template else 1
-        enemies = [e for i in range(count) if (e := _build_echo_enemy(monster_key, tier, i, count)) is not None]
+        enemies = [e for i in range(count) if (e := _build_echo_enemy(monster_key, tier, i, count, requester)) is not None]
         if not enemies:
             await update.effective_chat.send_message(
                 "That echo can't be conjured.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")

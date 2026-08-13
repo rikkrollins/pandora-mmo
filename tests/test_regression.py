@@ -11844,6 +11844,86 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(formation_markers), 1, f"battle formation image missing on echo-trial start: {sink}")
         sessions.end_session(-991)
 
+    # -- Synergy Phase 4 (2026-08-13): Echo Trials react to the
+    #    challenger's own class/subclass/guild identity ------------------
+    def test_challenger_signature_damage_type_from_known_spells(self):
+        character = {"known_spells": ["burning_hands"], "equipped_weapon": None}
+        self.assertEqual(bot._challenger_signature_damage_type(character), "fire")
+
+    def test_challenger_signature_damage_type_falls_back_to_equipped_weapon(self):
+        character = {"known_spells": [], "equipped_weapon": "flametongue_shortsword"}
+        self.assertEqual(bot._challenger_signature_damage_type(character), "fire")
+
+    def test_challenger_signature_damage_type_prefers_spells_over_weapon(self):
+        character = {"known_spells": ["ray_of_frost"], "equipped_weapon": "flametongue_shortsword"}
+        self.assertEqual(bot._challenger_signature_damage_type(character), "cold")
+
+    def test_challenger_signature_damage_type_none_for_a_plain_martial_build(self):
+        """A default physical weapon IS a real, valid signature type (see the physical-weapon test below) --
+        this covers a character with no signal at all: no spells, no equipped weapon."""
+        character = {"known_spells": [], "equipped_weapon": None}
+        self.assertIsNone(bot._challenger_signature_damage_type(character))
+
+    def test_challenger_signature_damage_type_none_for_a_silver_weapon(self):
+        """'silver' is a real items.py damage_type but not a real combat resistance type -- must not leak through."""
+        character = {"known_spells": [], "equipped_weapon": "silvered_dagger"}
+        self.assertIsNone(bot._challenger_signature_damage_type(character))
+
+    def test_challenger_signature_damage_type_physical_from_a_plain_weapon(self):
+        character = {"known_spells": [], "equipped_weapon": "shortsword"}
+        self.assertEqual(bot._challenger_signature_damage_type(character), "physical")
+
+    def test_build_echo_enemy_resistance_matches_challenger_signature_at_tier(self):
+        challenger = {"known_spells": ["burning_hands"], "equipped_weapon": None}
+        enemy = bot._build_echo_enemy("goblin", bot.ECHO_TRIAL_RESISTANCE_TIER, 0, 1, challenger)
+        self.assertEqual(enemy["resistances"], ["fire"])
+
+    def test_build_echo_enemy_falls_back_to_deterministic_pick_without_a_challenger(self):
+        enemy = bot._build_echo_enemy("goblin", bot.ECHO_TRIAL_RESISTANCE_TIER, 0, 1)
+        self.assertEqual(len(enemy["resistances"]), 1)
+        self.assertIn(enemy["resistances"][0], bot.ECHO_TRIAL_RESISTANT_TYPES)
+
+    def test_build_echo_enemy_no_resistance_below_the_resistance_tier(self):
+        challenger = {"known_spells": ["burning_hands"], "equipped_weapon": None}
+        enemy = bot._build_echo_enemy("goblin", bot.ECHO_TRIAL_RESISTANCE_TIER - 1, 0, 1, challenger)
+        self.assertEqual(enemy["resistances"], [])
+
+    async def test_echo_trial_accepts_a_secondary_promotion_guild_member(self):
+        """
+        Same bug class as the Phase 1 combat-bonus tests: _do_start_echo_
+        trial's guild gate checked character["guild"] (primary only), so
+        a genuine Silver Wardens member via a Promotion-earned SECONDARY
+        guild got the same rejection as a true non-member. Also confirms
+        the echo's resistance reacts to this challenger's own real
+        signature damage type (a known fire spell).
+        """
+        from unittest.mock import patch
+        import sessions
+        sessions.end_session(-993)
+        user_id = 900950
+        make_basic_character(user_id, "PromotedWarden", chat_id=-993, current_location="the_colosseum")
+        db.update_character(
+            user_id, -993, guild="forge_guild", secondary_guilds=["silver_wardens"],
+            known_monsters=["goblin"], echo_trial_tier=bot.ECHO_TRIAL_RESISTANCE_TIER,
+            known_spells=["burning_hands"],
+        )
+
+        def fake_get(url, timeout=None):
+            return SimpleNamespace(status_code=200, headers={"content-type": "image/jpeg"})
+
+        sink = []
+        with patch("bot.requests.get", side_effect=fake_get), \
+             patch("bot.narrate_action", return_value="The echo lashes out."):
+            await bot._do_start_echo_trial(FakeUpdate(user_id, "start an echo trial", sink, chat_id=-993), "start an echo trial")
+
+        self.assertFalse(any("Only Silver Wardens members" in line for line in sink), sink)
+        session = sessions.get_session(-993)
+        self.assertIsNotNone(session)
+        echo_enemies = [p for p in session.participants if p.get("is_echo_trial")]
+        self.assertTrue(echo_enemies)
+        self.assertEqual(echo_enemies[0]["resistances"], ["fire"])
+        sessions.end_session(-993)
+
     async def test_battle_formation_image_sent_when_hostile_npc_ambush_starts(self):
         """
         Task #10, second gap: the ambush combat-start block (the
