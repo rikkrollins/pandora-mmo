@@ -10344,6 +10344,49 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             dm_agent_module.narrate_action(character, "attacks Fenwick", result)
         self.assertFalse(dm_agent_module.is_narration_call_active())
 
+    async def test_narration_token_cap_gives_real_headroom_over_thinking_overhead(self):
+        """
+        Real live bug (2026-08-13, dev-bridge screenshot, Coffee: "The
+        narration cut off can you investigate this? This might be why
+        the banter isn't working also."). _NARRATION_OPTIONS'
+        num_predict caps thinking + visible-answer tokens TOGETHER for
+        this "thinking" model (lfm2.5-thinking) -- confirmed live, real
+        narration truncated mid-word ("...the weight of unsp") at
+        STORY_MODE=7, well under the STORY_MODE 10 case the old 1200
+        value was originally sized for (2026-07-17). Since the model's
+        own reasoning length varies run-to-run independent of the
+        eventual narration's length, 1200 was measurably not enough
+        headroom. Confirms the real Ollama request payload actually
+        carries the new, higher cap, not just that the module constant
+        changed.
+        """
+        from unittest.mock import patch
+        import ai.dm_agent as dm_agent_module
+
+        self.assertGreaterEqual(
+            dm_agent_module._NARRATION_OPTIONS["num_predict"], 2000,
+            "num_predict needs real headroom over a thinking model's reasoning tokens, not just the old 1200",
+        )
+
+        captured = {}
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "A plain result."}
+
+        def fake_post(*a, **k):
+            captured["options"] = k.get("json", {}).get("options")
+            return FakeResponse()
+
+        character = {"name": "Grubnak", "char_class": None, "hp_current": 20, "hp_max": 20}
+        result = {"hit": True, "damage_dealt": 5, "raw_roll": 12}
+        with patch("ai.dm_agent.requests.post", side_effect=fake_post):
+            dm_agent_module.narrate_action(character, "attacks Fenwick", result)
+        self.assertEqual(captured["options"]["num_predict"], dm_agent_module._NARRATION_OPTIONS["num_predict"])
+
     async def test_enemy_banter_only_rolled_for_enemy_side_attackers(self):
         """
         _post_narrated must only ever ask narrate_action for banter when

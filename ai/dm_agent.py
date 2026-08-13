@@ -28,7 +28,24 @@ from ai.text_cleanup import strip_think_tags
 # sized to comfortably fit even STORY_MODE 10's longest requested
 # narration (up to ~19 sentences, see ai/story_mode.py's _FACTORS) plus
 # real thinking overhead, not tuned down toward the typical case.
-_NARRATION_OPTIONS = {"num_predict": 1200}
+#
+# Real live bug (2026-08-13, dev-bridge screenshot, Coffee: "The
+# narration cut off can you investigate this? This might be why the
+# banter isn't working also."): 1200 was measurably NOT enough headroom
+# -- confirmed live, narration truncated mid-word ("...the weight of
+# unsp") at STORY_MODE=7 (factor 1.7 of _FACTORS' max 3.2), well below
+# the STORY_MODE 10 case this cap was originally sized for. Since
+# num_predict caps thinking + answer tokens TOGETHER and the model's own
+# reasoning length varies run-to-run independent of how long the
+# eventual narration turns out to be, a heavier thinking pass on any
+# given call can still eat past 1200 before the visible answer is even
+# finished -- exactly the mechanism ai/text_cleanup.py's strip_think_
+# tags docstring already documents for a truncated <think> block, just
+# manifesting here as truncated narration instead. Doubled for real
+# headroom against this, still bounded (not unlimited) per Coffee's
+# original "execute like lightning" intent -- this is a floor increase,
+# not a removal of the runaway-generation guard.
+_NARRATION_OPTIONS = {"num_predict": 2400}
 
 # Real live feedback (2026-07-16, Coffee, via Development-topic
 # screenshot): "please say who is doing the action -- for example if it

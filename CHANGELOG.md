@@ -2,6 +2,28 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.167] — Fix: narration cutting off mid-word (token cap too low)
+
+Real dev-bridge screenshot report (2026-08-13, Coffee: "The narration
+cut off can you investigate this? This might be why the banter isn't
+working also."). Confirmed live: narration truncated mid-word
+("...against the weight of unsp"). Root cause: `ai/dm_agent.py`'s
+`_NARRATION_OPTIONS['num_predict']` caps thinking + visible-answer
+tokens TOGETHER for the "thinking" model (lfm2.5-thinking) — the same
+mechanism `ai/text_cleanup.py`'s `strip_think_tags` docstring already
+documented for truncated `<think>` blocks, just showing up here as
+truncated narration instead once a heavier reasoning pass eats into
+the budget. The old cap (1200, set 2026-07-17) was measurably not
+enough even at STORY_MODE=7 — well under the STORY_MODE 10 case it was
+originally sized for, since the model's own reasoning length varies
+run-to-run independent of the eventual narration length. Doubled to
+2400 for real headroom, still bounded (not unlimited) per the original
+"execute like lightning" intent — a floor increase, not a removal of
+the runaway-generation guard. Since every narrate_* call in dm_agent.py
+shares this same cap, this plausibly explains the bundled "banter
+isn't working" complaint too. 1 new regression test confirming the
+real Ollama request payload actually carries the new cap.
+
 ## [1.27.166] — Fix: overheal above max HP crashed and froze live combat
 
 Live, actively-blocking crash (2026-08-12, Coffee: "what happened ??
