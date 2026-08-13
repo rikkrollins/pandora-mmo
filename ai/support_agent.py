@@ -764,6 +764,68 @@ def _deterministic_location_connections_answer(character: dict, question: str) -
     return f"{loc['name']} connects to: {', '.join(connection_names)}."
 
 
+_ITEM_COMPARISON_RE = re.compile(
+    r"(?:which(?:'s| is) better,?\s+(.+?)\s+or\s+(.+?)\??$)"
+    r"|(?:(.+?)\s+or\s+(.+?),?\s+which(?:'s| is) better\??$)"
+    r"|(?:is\s+(.+?)\s+or\s+(.+?)\s+better\??$)"
+    r"|(?:(.+?)\s+(?:vs\.?|versus)\s+(.+?)\??$)",
+    re.IGNORECASE,
+)
+_ITEM_PHRASE_STOPWORDS = {"a", "an", "the", "my", "your", "our"}
+
+
+def _strip_item_phrase(phrase: str) -> str:
+    words = [w for w in phrase.strip().split() if w.lower() not in _ITEM_PHRASE_STOPWORDS]
+    return " ".join(words)
+
+
+def _deterministic_item_comparison_answer(question: str) -> str | None:
+    """
+    Real live bug (2026-08-13, topic-activity monitoring): "Which is
+    better serviceable dagger or silvered dagger?" got a hallucinated
+    answer inventing a "serviceable dagger" that doesn't exist anywhere
+    in items.ITEMS (the player only ever owned a real Silvered Dagger)
+    -- CRITICAL_GROUNDING_RULE already tells the model never to do
+    this, but a comparison question naming a nonexistent item alongside
+    a real one is exactly the shape that got past it live, the same
+    class of failure prompt-only grounding has already proven
+    insufficient for elsewhere in this file (see the mage_hand cantrip
+    override above). Detects a "which is better X or Y"/"X or Y, which
+    is better"/"is X or Y better"/"X vs Y" comparison, resolves each
+    side against the REAL item catalog (items.find_item_mentioned_in_
+    text, no candidate restriction), and short-circuits with a
+    grounded correction the moment either side doesn't match a real
+    item -- never reaching the model at all for exactly the question
+    shape that hallucinated live. Returns None (falls through to the
+    LLM, which can compare two names it already confirmed are both
+    real using the grounded item catalog already in its prompt) when
+    the question isn't this shape, or when both sides resolve to real
+    items.
+    """
+    match = _ITEM_COMPARISON_RE.search(question.strip())
+    if not match:
+        return None
+    groups = [g for g in match.groups() if g is not None]
+    if len(groups) != 2:
+        return None
+    phrase_a, phrase_b = (_strip_item_phrase(g) for g in groups)
+    if not phrase_a or not phrase_b:
+        return None
+    item_a = items_module.find_item_mentioned_in_text(phrase_a)
+    item_b = items_module.find_item_mentioned_in_text(phrase_b)
+    if item_a and item_b:
+        return None
+    real_names = [items_module.get_item(i)["name"] for i in (item_a, item_b) if i]
+    missing = [p for p, i in ((phrase_a, item_a), (phrase_b, item_b)) if not i]
+    missing_text = " or ".join(f'"{m}"' for m in missing)
+    if real_names:
+        return (
+            f"There's no {missing_text} in this game — only {' and '.join(real_names)} is real. "
+            f"Nothing to compare it against."
+        )
+    return f"Neither {missing_text} exists in this game — not real items here."
+
+
 _QUEST_TASK_QUESTION_WORDS = [
     "next quest", "quest task", "what's my quest", "whats my quest",
     "current quest", "my objective", "what am i supposed to do", "what do i need to do",
@@ -999,6 +1061,9 @@ def answer_support_question(
         location_answer = _deterministic_location_connections_answer(character, question)
         if location_answer is not None:
             return location_answer
+    comparison_answer = _deterministic_item_comparison_answer(question)
+    if comparison_answer is not None:
+        return comparison_answer
     if character and any(w in lowered for w in _QUEST_TASK_QUESTION_WORDS):
         quest_answer = _deterministic_quest_task_answer(character)
         if quest_answer is not None:

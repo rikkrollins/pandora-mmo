@@ -16865,6 +16865,29 @@ async def _do_use_item(update: Update, text: str) -> None:
     ]
     item_id = items_module.find_item_mentioned_in_text(text, candidate_ids=consumable_ids)
     if item_id is None:
+        # Real live bug (2026-08-13, topic-activity monitoring): "Use
+        # sneak attack on colosseum champion 4" was retried 3 times in
+        # a row (once even adding "with my great axe" in a genuine
+        # attempt to make it match), each time hitting this exact
+        # generic fallback -- Sneak Attack is an AUTOMATIC bonus
+        # rules/combat.py's resolve_attack applies to a Rogue's own
+        # attack roll when it has advantage (see sneak_attack_die
+        # there), never a separate "use"-able ability with its own
+        # command, so no amount of rephrasing "use X" could ever match
+        # it. A player's natural instinct to try "use" for a named
+        # class feature is reasonable (that's exactly how activated
+        # abilities like Second Wind/Rage/Action Surge DO work in this
+        # game), so the honest fix is telling them it's automatic
+        # instead of leaving them to keep guessing at phrasing.
+        if character["char_class"].lower() == "rogue" and "sneak attack" in text.lower():
+            await _safe_send(
+                update,
+                f"🗡️ Sneak Attack isn't something **{character['name']}** activates separately — it's automatic "
+                f"bonus damage on a normal attack roll whenever you have advantage (e.g. an ally next to your "
+                f"target, or the target can't see you). Just say \"Attack\" when you have advantage and it "
+                f"applies on its own.",
+            )
+            return
         await update.effective_chat.send_message(
             "Use what, exactly? Name a consumable you're actually carrying.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),

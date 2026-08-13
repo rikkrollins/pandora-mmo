@@ -890,6 +890,39 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(character["hp_current"], 5)
         self.assertEqual(character["inventory"].get("healing_potion", 0), 1)  # consumed exactly 1
 
+    async def test_use_item_sneak_attack_explains_its_automatic_instead_of_generic_fallback(self):
+        """
+        Real live bug (2026-08-13, topic-activity monitoring): "Use
+        sneak attack on colosseum champion 4" was retried 3 times in a
+        row, each hitting the generic "Use what, exactly?" fallback --
+        Sneak Attack is automatic on an attack roll made with
+        advantage (rules/combat.py's resolve_attack), never a
+        separate "use"-able command, so no rephrasing could ever have
+        worked. Confirms a Rogue asking to "use sneak attack" now gets
+        a real explanation instead of the unhelpful generic message.
+        """
+        use_test_db("tests/tmp/use_item_sneak_attack_test.db")
+        user_id = 900102
+        make_basic_character(user_id, "SneakyTester", char_class="Rogue", current_location="crossroads_tavern")
+
+        sink = []
+        await bot._do_use_item(
+            FakeUpdate(user_id, "Use sneak attack on colosseum champion 4", sink),
+            "Use sneak attack on colosseum champion 4",
+        )
+        combined = " ".join(sink).lower()
+        self.assertIn("automatic", combined)
+        self.assertIn("advantage", combined)
+        self.assertNotIn("use what, exactly", combined)
+
+    async def test_use_item_generic_fallback_still_applies_for_a_non_rogue_or_unrelated_text(self):
+        use_test_db("tests/tmp/use_item_generic_fallback_test.db")
+        user_id = 900103
+        make_basic_character(user_id, "GenericFallbackTester", char_class="Fighter", current_location="crossroads_tavern")
+        sink = []
+        await bot._do_use_item(FakeUpdate(user_id, "use my lucky charm", sink), "use my lucky charm")
+        self.assertTrue(any("use what, exactly" in s.lower() for s in sink))
+
     async def test_use_item_cures_poison_mid_combat(self):
         import sessions
         sessions.end_session(-999)
@@ -1468,6 +1501,36 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("overloaded", answer.lower())
         self.assertIn("ask again", answer.lower())
         self.assertNotIn("pinned message", answer.lower())
+
+    def test_support_item_comparison_corrects_a_nonexistent_item_instead_of_asking_the_model(self):
+        """
+        Real live bug (2026-08-13, topic-activity monitoring): "Which is
+        better serviceable dagger or silvered dagger?" got a
+        hallucinated answer inventing a "serviceable dagger" that
+        doesn't exist anywhere in items.ITEMS (grounded reality: the
+        player only ever owned a real Silvered Dagger) -- a real
+        CLAUDE.md grounding-rule violation despite CRITICAL_GROUNDING_
+        RULE already telling the model never to do this. Confirms the
+        exact real failing question is now caught and corrected WITHOUT
+        ever reaching the model (no mock needed -- this must resolve
+        purely from the deterministic pre-check).
+        """
+        import ai.support_agent as support_agent_module
+        answer = support_agent_module.answer_support_question("Which is better serviceable dagger or silvered dagger?")
+        self.assertIn("serviceable dagger", answer.lower())
+        self.assertIn("silvered dagger", answer.lower())
+        self.assertIn("no", answer.lower())
+
+    def test_support_item_comparison_lets_two_real_items_through_to_the_model(self):
+        """Both sides real (grounded) -- must fall through to the normal LLM path, not short-circuit."""
+        from ai.support_agent import _deterministic_item_comparison_answer
+        answer = _deterministic_item_comparison_answer("Which is better a healing potion or a greater healing potion?")
+        self.assertIsNone(answer)
+
+    def test_support_item_comparison_does_not_false_positive_on_ordinary_questions(self):
+        from ai.support_agent import _deterministic_item_comparison_answer
+        self.assertIsNone(_deterministic_item_comparison_answer("How do I check my inventory or my quests?"))
+        self.assertIsNone(_deterministic_item_comparison_answer("How do I attack?"))
 
     def test_support_prompt_shrinks_for_a_topic_specific_question(self):
         """

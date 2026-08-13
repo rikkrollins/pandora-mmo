@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.169] — Fix: Support hallucinated a fake item; "use sneak attack" looped forever
+
+Two real bugs found via topic-activity monitoring (2026-08-13):
+
+- **Support grounding violation**: "Which is better serviceable dagger
+  or silvered dagger?" got a hallucinated answer inventing a
+  "serviceable dagger" that doesn't exist anywhere in items.ITEMS
+  (grounded reality: the player only ever owned a real Silvered
+  Dagger), plus a nonsensical "CHA 14... precise tasks" justification.
+  CRITICAL_GROUNDING_RULE already tells the model never to do this,
+  but prompt-only grounding has already proven insufficient once
+  before (the mage_hand cantrip incident) — same class of failure.
+  New `ai/support_agent.py::_deterministic_item_comparison_answer`
+  detects a "which is better X or Y"/"X or Y, which is better"/"is X
+  or Y better"/"X vs Y" comparison and resolves each side against the
+  real item catalog BEFORE ever reaching the model, short-circuiting
+  with a grounded correction the instant either side isn't real.
+- **"use sneak attack" looped on a generic fallback**: Sneak Attack is
+  an automatic bonus on a Rogue's own attack roll when it has
+  advantage (rules/combat.py's resolve_attack) — never a separate
+  "use"-able ability, so no rephrasing could ever have worked. A real
+  player retried 3 times, once even adding "with my great axe" trying
+  to make it match. `_do_use_item`'s no-match fallback now recognizes
+  this and explains it's automatic instead of "Use what, exactly?".
+
+5 new regression tests, 14 pre-existing Support tests + 15 pre-existing
+use_item tests all still pass (zero regressions).
+
 ## [1.27.168] — Add: leave-guild, permanent guild growth, evolution-gated Promotions, prestige ranks
 
 Real feature (2026-08-13, per Coffee, built live across many
