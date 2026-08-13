@@ -219,6 +219,36 @@ def elemental_overflow_heal(raw_damage: int, damage_type: str | None, defender: 
     return int(round(raw_damage * (effective_pct - 100) / 100))
 
 
+# Synergy Phase 6 (2026-08-13, per Coffee: "signature mechanics for the
+# bosses", extending the Phase 4/5b reactivity theme): a boss's
+# "adapts_to_damage" flag (campaign.json, currently only set on
+# the_unasked -- the true final boss -- but generic so any future boss
+# could opt in the same way on_hit_condition/life_drain already do)
+# means it genuinely learns from what's hitting it mid-fight, real and
+# permanent for the rest of that combat, not a fixed pre-authored
+# resistance. Reuses elemental_resistance_pct -- the EXACT same
+# stacking layer already built for enchanted armor ("if enemies are
+# strong in an element, it shud nullify the damage") -- rather than
+# inventing a second resistance system, so a high-rebirth party's own
+# earned magic_penetration_pct still counters it exactly like any
+# other elemental resistance. Capped well below 100% (never fully
+# immune to any one element) so hammering one damage type just makes
+# that element progressively weaker, forcing real diversification
+# instead of a hard wall.
+ADAPTIVE_RESISTANCE_GROWTH_PCT_PER_HIT = 5
+ADAPTIVE_RESISTANCE_MAX_PCT = 60
+
+
+def _maybe_grow_adaptive_resistance(defender: dict, damage_type: str | None, damage_dealt: int) -> None:
+    """Grows `defender`'s elemental_resistance_pct for `damage_type` on a real, damage-dealing hit -- see the constants' own docstring above."""
+    if not defender.get("adapts_to_damage") or damage_dealt <= 0 or not damage_type:
+        return
+    profile = defender.setdefault("elemental_resistance_pct", {})
+    profile[damage_type] = min(
+        float(profile.get(damage_type, 0)) + ADAPTIVE_RESISTANCE_GROWTH_PCT_PER_HIT, ADAPTIVE_RESISTANCE_MAX_PCT,
+    )
+
+
 def start_combat(participants: list[dict]) -> list[dict]:
     """
     Roll initiative (d20 + DEX modifier) for each participant.
@@ -492,6 +522,7 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         elemental_heal_gained = elemental_overflow_heal(
             pre_elemental_damage, weapon.get("damage_type", "physical"), defender, attacker
         )
+        _maybe_grow_adaptive_resistance(defender, weapon.get("damage_type", "physical"), damage_dealt)
         # Real subclass choice, non-Wizard classes (2026-07-25): a
         # character whose chosen subclass is one of the "combat" picks
         # (rules/leveling.CLASS_SUBCLASSES) deals more weapon damage.
@@ -756,6 +787,7 @@ def resolve_thrown_attack(attacker: dict, defender: dict, weapon: dict, forced_h
         elemental_heal_gained = elemental_overflow_heal(
             pre_elemental_damage, weapon.get("damage_type", "physical"), defender, attacker
         )
+        _maybe_grow_adaptive_resistance(defender, weapon.get("damage_type", "physical"), damage_dealt)
 
         temp_hp = defender.get("temp_hp", 0)
         if temp_hp > 0:

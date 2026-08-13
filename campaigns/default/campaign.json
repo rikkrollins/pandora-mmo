@@ -4731,7 +4731,8 @@
           "item_id": "greataxe",
           "weight": 5
         }
-      ]
+      ],
+      "extra_attack_when_enraged": true
     },
     "elder_bone_legionnaire": {
       "name": "Elder Bone Legionnaire",
@@ -5531,7 +5532,8 @@
           "item_id": "longsword",
           "weight": 5
         }
-      ]
+      ],
+      "adapts_to_damage": true
     },
     "the_unopened": {
       "name": "The Unopened",

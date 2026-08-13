@@ -3821,6 +3821,117 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(result["elemental_heal_gained"], 0)
         self.assertGreater(defender["hp_current"], 50)
 
+    # -- Synergy Phase 6 (2026-08-13): The Unasked's adaptive resistance,
+    #    The Unbegun's furious 3rd attack --------------------------------
+    def test_adaptive_resistance_grows_on_a_real_hit(self):
+        from rules.combat import _maybe_grow_adaptive_resistance, ADAPTIVE_RESISTANCE_GROWTH_PCT_PER_HIT
+        defender = {"adapts_to_damage": True}
+        _maybe_grow_adaptive_resistance(defender, "fire", 20)
+        self.assertEqual(defender["elemental_resistance_pct"]["fire"], ADAPTIVE_RESISTANCE_GROWTH_PCT_PER_HIT)
+        _maybe_grow_adaptive_resistance(defender, "fire", 20)
+        self.assertEqual(defender["elemental_resistance_pct"]["fire"], ADAPTIVE_RESISTANCE_GROWTH_PCT_PER_HIT * 2)
+        # A different damage type builds its own separate track.
+        _maybe_grow_adaptive_resistance(defender, "cold", 20)
+        self.assertEqual(defender["elemental_resistance_pct"]["cold"], ADAPTIVE_RESISTANCE_GROWTH_PCT_PER_HIT)
+
+    def test_adaptive_resistance_caps_and_never_fully_nullifies(self):
+        from rules.combat import _maybe_grow_adaptive_resistance, ADAPTIVE_RESISTANCE_MAX_PCT
+        defender = {"adapts_to_damage": True}
+        for _ in range(50):
+            _maybe_grow_adaptive_resistance(defender, "fire", 20)
+        self.assertEqual(defender["elemental_resistance_pct"]["fire"], ADAPTIVE_RESISTANCE_MAX_PCT)
+        self.assertLess(ADAPTIVE_RESISTANCE_MAX_PCT, 100, "must never reach full immunity")
+
+    def test_adaptive_resistance_is_a_no_op_without_the_flag(self):
+        from rules.combat import _maybe_grow_adaptive_resistance
+        defender = {}
+        _maybe_grow_adaptive_resistance(defender, "fire", 20)
+        self.assertNotIn("elemental_resistance_pct", defender)
+
+    def test_adaptive_resistance_is_a_no_op_on_a_miss_or_zero_damage(self):
+        from rules.combat import _maybe_grow_adaptive_resistance
+        defender = {"adapts_to_damage": True}
+        _maybe_grow_adaptive_resistance(defender, "fire", 0)
+        _maybe_grow_adaptive_resistance(defender, None, 20)
+        self.assertNotIn("elemental_resistance_pct", defender)
+
+    def test_the_unasked_genuinely_grows_harder_to_hurt_with_one_element_over_a_real_fight(self):
+        """
+        End-to-end: real resolve_attack calls against The Unasked's own
+        real template flag (adapts_to_damage), hammering it with fire
+        every time -- confirms damage against that SAME type genuinely
+        drops hit over hit, purely from real repeated combat, not a
+        pre-authored fixed resistance.
+        """
+        from rules.combat import resolve_attack
+        attacker = make_basic_character(950921, "AdaptiveTester", current_location="crossroads_tavern")
+        weapon = {"name": "Firebrand", "damage_dice": "1d1", "damage_bonus": 100, "ability": "strength", "damage_type": "fire"}
+        template = bot.cl.get_monster_template(bot.CAMPAIGN, "the_unasked")
+        self.assertTrue(template.get("adapts_to_damage"))
+        defender = {
+            "name": "The Unasked", "telegram_user_id": -777002, "hp_current": 10_000_000, "hp_max": 10_000_000,
+            "armor_class": 1, "dexterity": 10, "adapts_to_damage": True,
+        }
+        first_hit = resolve_attack(attacker, defender, weapon, forced_roll=20, forced_damage_roll=1)
+        self.assertTrue(first_hit["hit"])
+        first_damage = first_hit["damage_dealt"]
+        for _ in range(20):
+            resolve_attack(attacker, defender, weapon, forced_roll=20, forced_damage_roll=1)
+        later_hit = resolve_attack(attacker, defender, weapon, forced_roll=20, forced_damage_roll=1)
+        self.assertLess(later_hit["damage_dealt"], first_damage)
+
+    async def test_the_unbegun_gets_a_real_third_attack_once_enraged(self):
+        """
+        End-to-end through the real bot._resolve_ai_turns loop (same
+        pattern as the existing Multiattack-announcement regression
+        tests): an enraged the_unbegun-flagged boss actually resolves 3
+        real attacks in its turn, not the generic boss baseline of 2.
+        """
+        from unittest.mock import patch
+        import sessions
+        template = bot.cl.get_monster_template(bot.CAMPAIGN, "the_unbegun")
+        self.assertTrue(template.get("extra_attack_when_enraged"))
+        sessions.end_session(-998)
+        boss = {
+            "telegram_user_id": -700601, "name": "The Unbegun", "is_ai": True,
+            "hp_current": 500, "hp_max": 500, "armor_class": 1,
+            "strength": 20, "dexterity": 10, "proficiency_bonus": 5,
+            "monster_key": "the_unbegun", "is_boss": True, "extra_attack_when_enraged": True,
+            "enraged": True, "xp_reward": 5000, "conditions": [],
+        }
+        human_id = 900903
+        make_basic_character(human_id, "RealPlayer3", current_location="crossroads_tavern", hp_max=500)
+        db.update_character(human_id, -999, hp_current=500)
+        human = db.get_character(human_id, -999)
+        session = sessions.start_session(-998, [boss, human], {-700601: "enemy", human_id: "party"})
+        session.turn_order = [-700601, human_id]
+        session.current_turn_index = 0
+
+        sink = []
+        update = FakeUpdate(-700601, "irrelevant", sink)
+
+        attack_calls = {"n": 0}
+
+        async def counting_post_narrated(update, character, action_text, result, session, **kwargs):
+            attack_calls["n"] += 1
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "The Unbegun sizes up its target."}
+
+        # A boss's pre-roll "sizing up its target" line is a real,
+        # separate Ollama call (ai.dm_agent) -- mocked so this test
+        # doesn't block on/contend with a real 200s narration call.
+        with patch("bot._post_narrated", side_effect=counting_post_narrated), \
+             patch("ai.dm_agent.requests.post", return_value=FakeResponse()):
+            await bot._resolve_ai_turns(update, session)
+
+        self.assertEqual(attack_calls["n"], 3, f"expected 3 real attacks from an enraged The Unbegun, got {attack_calls['n']}")
+        sessions.end_session(-998)
+
     async def test_equipped_elemental_resistance_wards_stack_across_two_items(self):
         """
         Real feature (2026-08-10): the whole point is STACKING -- two

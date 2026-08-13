@@ -5365,7 +5365,15 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
         # resolution below either once or several times; breaks early if a
         # mid-turn kill leaves no target for the next attack, or if combat
         # itself ends mid-sequence.
-        attack_count = 2 if current.get("is_boss") else _attacks_per_turn(current)
+        # Synergy Phase 6 (2026-08-13): The Unbegun's real signature
+        # mechanic -- extra_attack_when_enraged (campaign.json flag,
+        # currently only set on the_unbegun) grants a real 3rd attack
+        # once it's crossed its own enrage threshold, on top of every
+        # boss's baseline 2.
+        if current.get("is_boss") and current.get("extra_attack_when_enraged") and current.get("enraged"):
+            attack_count = 3
+        else:
+            attack_count = 2 if current.get("is_boss") else _attacks_per_turn(current)
         # Per Coffee (2026-07-21): same clear preface as the human attack
         # path above -- skipped for bosses specifically, since those
         # already get their own "sizing up its target" flavor line each
@@ -6027,6 +6035,15 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 "monster_key": monster_key,
                 "is_boss": template.get("is_boss", False),
                 "life_drain": template.get("life_drain", False),
+                # Synergy Phase 6 boss signature mechanics (2026-08-13):
+                # same real-flag-on-the-template convention as on_hit_
+                # condition/life_drain above -- adapts_to_damage (The
+                # Unasked) grows elemental_resistance_pct for whatever
+                # damage type keeps hitting it (rules.combat._maybe_grow_
+                # adaptive_resistance); extra_attack_when_enraged (The
+                # Unbegun) grants a real 3rd attack per turn once enraged.
+                "adapts_to_damage": template.get("adapts_to_damage", False),
+                "extra_attack_when_enraged": template.get("extra_attack_when_enraged", False),
                 # Real bug found live (2026-07-25, while building the
                 # rebirth dungeons): campaign.json monster templates
                 # have always supported real resistances/vulnerabilities/
@@ -6261,6 +6278,8 @@ def _build_echo_enemy(monster_key: str, tier: int, index: int, total: int, chall
         "on_hit_condition": template.get("on_hit_condition"),
         "monster_key": monster_key, "is_boss": template.get("is_boss", False),
         "life_drain": template.get("life_drain", False),
+        "adapts_to_damage": template.get("adapts_to_damage", False),
+        "extra_attack_when_enraged": template.get("extra_attack_when_enraged", False),
         "resistances": resistances,
         "is_echo_trial": True,
         # Real tier-scaled damage (2026-07-26 monster/area rebalance) --

@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.184] — Add: signature mechanics for two major story bosses (Synergy Phase 6)
+
+Audited every real `is_boss` branch in the combat code and found all
+22 bosses shared identical generic mechanics (Multiattack, enrage-
+below-HP-threshold, Phase 5b's spellcaster-targeting) with zero
+per-boss differentiation at the CODE level (campaign.json's own on_
+hit_condition/life_drain fields already gave some data-level variety,
+but no boss had a genuinely new mechanic). Gives the two most
+narratively significant bosses — the true final boss and the next
+tier down — one real, distinct signature mechanic each, both flag-
+driven off campaign.json (same convention as on_hit_condition/
+life_drain) so future bosses can opt in the same way:
+
+- **The Unasked (`adapts_to_damage`)** — the final boss now genuinely
+  learns from what's hitting it mid-fight: every real hit against it
+  grows `elemental_resistance_pct` for that damage type (the exact
+  same stacking layer already built for enchanted armor), capped at
+  60% so it's never fully immune to anything. Hammering it with one
+  element makes that element progressively weaker, forcing real
+  build diversification — and a high-rebirth party's own earned
+  `magic_penetration_pct` still counters it exactly like any other
+  elemental resistance, same as the existing "evolutions counter
+  magic resistance" design.
+- **The Unbegun (`extra_attack_when_enraged`)** — gains a real 3rd
+  attack per turn once it crosses its enrage threshold, on top of
+  every boss's baseline 2.
+
+The other 20 bosses are unchanged; this is an initial slice, not a
+claim that "bosses are complete."
+
 ## [1.27.183] — Add: boss AI targets a real spellcaster threat (Synergy Phase 5b)
 
 Extends the Echo Trial (Phase 4) reactivity theme beyond the Colosseum
