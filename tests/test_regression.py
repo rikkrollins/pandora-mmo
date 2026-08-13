@@ -8477,6 +8477,88 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("HP", combined)
         self.assertIn("XP", combined)
 
+    # -- Mixed encounter composition (2026-08-13, per Coffee: "why not
+    #    have 2 goblins and 2 shamans... be creative") -----------------
+    async def test_wandering_encounter_mixes_real_location_monster_types(self):
+        """
+        goblin_warrens genuinely lists goblin/goblin_shaman/goblin_boss --
+        a real, unspecified wandering encounter there used to always
+        spawn only goblins (the first-listed type), no matter how many.
+        A big enough sample size (count=20, seeded) should now include
+        BOTH real non-boss types, and NEVER the hand-placed story boss.
+        """
+        import random
+        from unittest.mock import patch
+        import sessions
+        random.seed(4)
+        user_id = 900521
+        character = make_basic_character(user_id, "MixTester", current_location="goblin_warrens", hp_max=5000)
+        db.update_character(user_id, -999, hp_current=5000, armor_class=30)
+        character = db.get_character(user_id, -999)
+        sessions.end_session(-999)
+        sink = []
+        with patch("bot._get_combat_eligible_party_members", return_value=[character]), \
+             patch("bot.narrate_action", return_value="The goblins attack."):
+            await bot._do_start_combat(FakeUpdate(user_id, "look for a fight", sink), count=20)
+        session = sessions.get_session(-999)
+        monster_keys = {p["monster_key"] for p in session.participants if p.get("is_ai") and p.get("monster_key")}
+        self.assertIn("goblin", monster_keys)
+        self.assertIn("goblin_shaman", monster_keys)
+        self.assertNotIn(
+            "goblin_boss", monster_keys,
+            "a hand-placed story boss must never appear in a random wandering encounter",
+        )
+        sessions.end_session(-999)
+
+    async def test_explicitly_named_monster_stays_single_type_even_at_a_mixed_location(self):
+        """"Attack a shaman" (a real, explicit monster_key) must always stay exactly what was asked for, never diluted with goblins."""
+        from unittest.mock import patch
+        import sessions
+        user_id = 900522
+        character = make_basic_character(user_id, "ExplicitTester", current_location="goblin_warrens")
+        sessions.end_session(-999)
+        sink = []
+        with patch("bot._get_combat_eligible_party_members", return_value=[character]), \
+             patch("bot.narrate_action", return_value="The goblins attack."):
+            await bot._do_start_combat(FakeUpdate(user_id, "attack a shaman", sink), monster_key="goblin_shaman", count=5)
+        session = sessions.get_session(-999)
+        monster_keys = {p["monster_key"] for p in session.participants if p.get("is_ai") and p.get("monster_key")}
+        self.assertEqual(monster_keys, {"goblin_shaman"})
+        sessions.end_session(-999)
+
+    async def test_single_monster_location_is_unaffected(self):
+        """crossroads_tavern has no real monster list at all (falls back to the plain 'goblin' default) -- must behave exactly as before."""
+        from unittest.mock import patch
+        import sessions
+        user_id = 900523
+        character = make_basic_character(user_id, "SingleTypeTester", current_location="crossroads_tavern")
+        sessions.end_session(-999)
+        sink = []
+        with patch("bot._get_combat_eligible_party_members", return_value=[character]), \
+             patch("bot.narrate_action", return_value="The goblins attack."):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight", sink), count=4)
+        session = sessions.get_session(-999)
+        monster_keys = {p["monster_key"] for p in session.participants if p.get("is_ai") and p.get("monster_key")}
+        self.assertEqual(monster_keys, {"goblin"})
+        sessions.end_session(-999)
+
+    async def test_mixed_encounter_description_lists_a_real_itemized_breakdown(self):
+        import random
+        from unittest.mock import patch
+        import sessions
+        random.seed(4)
+        user_id = 900524
+        character = make_basic_character(user_id, "DescriptionTester", current_location="goblin_warrens")
+        sessions.end_session(-999)
+        sink = []
+        with patch("bot._get_combat_eligible_party_members", return_value=[character]), \
+             patch("bot.narrate_action", return_value="The goblins attack."):
+            await bot._do_start_combat(FakeUpdate(user_id, "look for a fight", sink), count=20)
+        combined = " ".join(sink)
+        self.assertIn("Goblin", combined)
+        self.assertIn("Goblin Shaman", combined)
+        sessions.end_session(-999)
+
     async def test_monster_image_not_duplicated_when_enemy_attacks_first(self):
         # Real live bug (2026-08-05, Coffee, Development topic screenshot:
         # "I noticed every now and then it posts two images. Is this a

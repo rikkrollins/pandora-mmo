@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.188] — Add: mixed encounter composition for wandering fights
+
+Real live feedback (Coffee: "do all the battles have the same 4
+enemies?! ... why not have 2 goblins and 2 shamans, or 3 goblin and 1
+shaman ... be creative"). A real, unspecified wandering encounter
+(no monster explicitly named) used to always spawn `count` copies of
+only the location's FIRST-listed monster, even at locations that
+genuinely list several real types (e.g. `goblin_warrens`: goblin,
+goblin_shaman, goblin_boss). Each of the `count` slots now
+independently rolls a real key from the location's own roster
+(never invented, and hand-placed story bosses are excluded from the
+random roll — a boss stays a deliberate, named encounter, never an
+accidental wandering one), producing genuinely varied splits (2/2,
+3/1, sometimes all one type) across different fights. An explicitly-
+named monster (e.g. "attack a shaman", a board quest's own
+`objective_target`) is completely unaffected — always exactly what
+was asked for. The encounter-start message and bestiary discovery
+both now reflect the real mix, not just the primary type.
+
 ## [1.27.187] — Fix: auto-equip falls back to the best gear you can actually use
 
 Real live bug (dev-bridge, real pasted log from Coffee: "make sure

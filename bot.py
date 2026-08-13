@@ -5964,7 +5964,16 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             return
 
         # Default to a monster native to the player's current location, if not specified.
-        if monster_key is None or cl.get_monster_template(CAMPAIGN, monster_key) is None:
+        # `explicit_monster` (mixed-encounter variety, 2026-08-13, per
+        # Coffee: "why not have 2 goblins and 2 shamans... be creative")
+        # tracks whether the CALLER named a specific monster (e.g. "attack
+        # a shaman", a board quest's own objective_target) -- that real
+        # request always stays exactly what was asked for; only a bare,
+        # unspecified wandering encounter gets to mix in the location's
+        # other real monster types below.
+        explicit_monster = monster_key is not None and cl.get_monster_template(CAMPAIGN, monster_key) is not None
+        local_monsters = []
+        if not explicit_monster:
             player = next((p for p in party if not p.get("is_ai")), party[0])
             location = cl.get_location(CAMPAIGN, player["current_location"])
             local_monsters = location.get("monsters", []) if location else []
@@ -6019,22 +6028,54 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 [p.get("level", 1) for p in party], template.get("xp_reward", 0)
             )
 
+        # Mixed encounter composition (2026-08-13, per Coffee: "why not
+        # have 2 goblins and 2 shamans, or 3 goblin and 1 shaman... be
+        # creative"): a real, unspecified wandering encounter used to
+        # always spawn `count` copies of only the location's FIRST-
+        # listed monster, even when the same location genuinely lists
+        # several real monster types (e.g. goblin_warrens: goblin,
+        # goblin_shaman, goblin_boss). Each of the `count` slots now
+        # independently rolls a real key from the location's own
+        # roster (never invented, bosses excluded from the random
+        # roll -- a hand-placed story boss stays a deliberate, named
+        # encounter, never an accidental wandering one) -- naturally
+        # produces varied splits (2/2, 3/1, sometimes all one type)
+        # across different fights, real randomness rather than a fixed
+        # rule. An explicitly-named monster (e.g. "attack a shaman", a
+        # board quest's own objective_target) is completely unaffected
+        # -- always exactly what was asked for.
+        enemy_monster_keys = [monster_key] * count
+        if not explicit_monster and len(local_monsters) > 1:
+            eligible = [
+                mk for mk in local_monsters
+                if mk != monster_key
+                and cl.get_monster_template(CAMPAIGN, mk) is not None
+                and not cl.get_monster_template(CAMPAIGN, mk).get("is_boss", False)
+            ]
+            if eligible:
+                pool = [monster_key] + eligible
+                enemy_monster_keys = [random.choice(pool) for _ in range(count)]
+
+        enemy_templates = {mk: cl.get_monster_template(CAMPAIGN, mk) for mk in set(enemy_monster_keys)}
         enemies = []
-        for i in range(count):
-            enemy_id = -2_000_000 - (abs(hash(monster_key)) % 100_000) - i
-            enemy_name = f"{template['name']} {i + 1}" if count > 1 else template["name"]
-            scaled_hp = max(1, round(template["hp_max"] * stat_mult))
+        for i, slot_key in enumerate(enemy_monster_keys):
+            slot_template = enemy_templates[slot_key]
+            enemy_id = -2_000_000 - (abs(hash(slot_key)) % 100_000) - i
+            same_type_total = enemy_monster_keys.count(slot_key)
+            same_type_index = enemy_monster_keys[:i].count(slot_key)
+            enemy_name = f"{slot_template['name']} {same_type_index + 1}" if same_type_total > 1 else slot_template["name"]
+            scaled_hp = max(1, round(slot_template["hp_max"] * stat_mult))
             enemies.append({
-                "formation_row": _enemy_formation_row(monster_key, template),
+                "formation_row": _enemy_formation_row(slot_key, slot_template),
                 "telegram_user_id": enemy_id, "name": enemy_name,
-                "dexterity": template["dexterity"], "strength": template["strength"],
-                "armor_class": template["armor_class"], "hp_current": scaled_hp,
-                "hp_max": scaled_hp, "proficiency_bonus": template["proficiency_bonus"],
-                "is_ai": 1, "xp_reward": round(template.get("xp_reward", 0) * stat_mult),
-                "on_hit_condition": template.get("on_hit_condition"),
-                "monster_key": monster_key,
-                "is_boss": template.get("is_boss", False),
-                "life_drain": template.get("life_drain", False),
+                "dexterity": slot_template["dexterity"], "strength": slot_template["strength"],
+                "armor_class": slot_template["armor_class"], "hp_current": scaled_hp,
+                "hp_max": scaled_hp, "proficiency_bonus": slot_template["proficiency_bonus"],
+                "is_ai": 1, "xp_reward": round(slot_template.get("xp_reward", 0) * stat_mult),
+                "on_hit_condition": slot_template.get("on_hit_condition"),
+                "monster_key": slot_key,
+                "is_boss": slot_template.get("is_boss", False),
+                "life_drain": slot_template.get("life_drain", False),
                 # Synergy Phase 6 boss signature mechanics (2026-08-13):
                 # same real-flag-on-the-template convention as on_hit_
                 # condition/life_drain above -- adapts_to_damage (The
@@ -6042,12 +6083,12 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 # damage type keeps hitting it (rules.combat._maybe_grow_
                 # adaptive_resistance); extra_attack_when_enraged (The
                 # Unbegun) grants a real 3rd attack per turn once enraged.
-                "adapts_to_damage": template.get("adapts_to_damage", False),
-                "extra_attack_when_enraged": template.get("extra_attack_when_enraged", False),
+                "adapts_to_damage": slot_template.get("adapts_to_damage", False),
+                "extra_attack_when_enraged": slot_template.get("extra_attack_when_enraged", False),
                 # Synergy Phase 7 (2026-08-13): The Verge Warden's real
                 # signature mechanic -- counters_sneak_attack, read by
                 # rules.combat.resolve_attack's own sneak_attack_die logic.
-                "counters_sneak_attack": template.get("counters_sneak_attack", False),
+                "counters_sneak_attack": slot_template.get("counters_sneak_attack", False),
                 # Real bug found live (2026-07-25, while building the
                 # rebirth dungeons): campaign.json monster templates
                 # have always supported real resistances/vulnerabilities/
@@ -6059,9 +6100,9 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 # monster in the campaign happened to set them yet, so
                 # this silently did nothing so far -- but it would have
                 # quietly no-op'd the very first monster that ever did.
-                "resistances": template.get("resistances", []),
-                "vulnerabilities": template.get("vulnerabilities", []),
-                "immunities": template.get("immunities", []),
+                "resistances": slot_template.get("resistances", []),
+                "vulnerabilities": slot_template.get("vulnerabilities", []),
+                "immunities": slot_template.get("immunities", []),
                 # Elemental resistance stacking (2026-08-10, per Coffee:
                 # "if enemies are strong in an element... nullify... or
                 # heal") -- same real-data-not-invented convention as the
@@ -6069,24 +6110,24 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 # a hand-set "strong in an element" monster (e.g. The
                 # Waking Ember's real fire elemental_resistance_pct)
                 # actually reaches the live combat participant dict.
-                "elemental_resistance_pct": dict(template.get("elemental_resistance_pct", {})),
+                "elemental_resistance_pct": dict(slot_template.get("elemental_resistance_pct", {})),
                 # Real, tier-scaled natural attack (2026-07-26 monster/
                 # area rebalance) -- see _weapon_for_attacker's matching
                 # comment. Only set for monsters the rebalance actually
                 # touched; a monster with neither field (the_unasked,
                 # deliberately untouched) safely falls back to
                 # DEFAULT_WEAPON's flat 1d8, same as always.
-                "damage_dice": template.get("damage_dice"),
+                "damage_dice": slot_template.get("damage_dice"),
                 # damage_bonus scales with stat_mult (dice string itself
                 # doesn't -- same "scale the flat bonus, not the dice"
                 # convention _build_echo_enemy already established, no
                 # string-parsing needed).
-                "damage_bonus": round(template.get("damage_bonus", 0) * stat_mult),
+                "damage_bonus": round(slot_template.get("damage_bonus", 0) * stat_mult),
                 # Real elemental flavor per monster (2026-07-26 damage-
                 # type pass) -- read by _weapon_for_attacker's natural-
                 # attack branch, then apply_damage_type_modifier against
                 # the DEFENDER's own resistances/vulnerabilities/immunities.
-                "damage_type": template.get("damage_type", "physical"),
+                "damage_type": slot_template.get("damage_type", "physical"),
             })
         sides = {p["telegram_user_id"]: "party" for p in party}
         for enemy in enemies:
@@ -6109,11 +6150,21 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
         # every monster in the campaign.
         for p in party:
             if not p.get("is_ai"):
-                db.mark_known_monster(p["telegram_user_id"], update.effective_chat.id, monster_key)
+                for mk in set(enemy_monster_keys):
+                    db.mark_known_monster(p["telegram_user_id"], update.effective_chat.id, mk)
         initiative_line = ", ".join(
             f"{p['name']} ({p['initiative']})" for p in session.participants
         )
-        enemy_description = f"{count}x **{template['name']}**" if count > 1 else f"**{template['name']}**"
+        # Real, itemized breakdown for a mixed encounter (e.g. "2x
+        # **Goblin**, 2x **Goblin Shaman**") instead of always describing
+        # it as `count` copies of the primary/first-listed type alone.
+        distinct_types = list(dict.fromkeys(enemy_monster_keys))
+        if len(distinct_types) > 1:
+            enemy_description = ", ".join(
+                f"{enemy_monster_keys.count(mk)}x **{enemy_templates[mk]['name']}**" for mk in distinct_types
+            )
+        else:
+            enemy_description = f"{count}x **{template['name']}**" if count > 1 else f"**{template['name']}**"
         formation_lines = []
         party_formation_line = _format_formation_line(party)
         if party_formation_line:
