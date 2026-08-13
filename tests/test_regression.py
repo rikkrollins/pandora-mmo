@@ -8003,6 +8003,35 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result_low["damage_dealt"], expected_low)
         self.assertEqual(result_high["damage_dealt"], expected_high)
 
+    # -- Synergy Phase 7 (2026-08-13): The Verge Warden's real signature
+    #    mechanic -- can't be caught off guard by a Sneak Attack twice --
+    def test_boss_with_counters_sneak_attack_negates_the_second_hit_in_a_fight(self):
+        from unittest.mock import patch
+        attacker = {"name": "Shadowblade", "char_class": "Rogue", "level": 1, "strength": 10, "dexterity": 14}
+        weapon = {"ability": "dexterity", "damage_dice": "1d8", "damage_bonus": 0}
+        defender = {"name": "The Verge Warden", "armor_class": 1, "hp_current": 1000, "counters_sneak_attack": True}
+        with patch("rules.dice.random.randint", return_value=4):
+            first = resolve_attack(attacker, defender, weapon, advantage=True, forced_roll=20)
+            second = resolve_attack(attacker, defender, weapon, advantage=True, forced_roll=20)
+            third = resolve_attack(attacker, defender, weapon, advantage=True, forced_roll=20)
+        self.assertTrue(first["hit"] and second["hit"] and third["hit"])
+        self.assertGreater(first["damage_dealt"], second["damage_dealt"], "the FIRST sneak attack must still land in full")
+        self.assertEqual(second["damage_dealt"], third["damage_dealt"], "negated for the rest of the fight, not just once")
+
+    def test_boss_without_the_flag_never_counters_sneak_attack(self):
+        from unittest.mock import patch
+        attacker = {"name": "Shadowblade", "char_class": "Rogue", "level": 1, "strength": 10, "dexterity": 14}
+        weapon = {"ability": "dexterity", "damage_dice": "1d8", "damage_bonus": 0}
+        defender = {"name": "Plain Goblin", "armor_class": 1, "hp_current": 1000}
+        with patch("rules.dice.random.randint", return_value=4):
+            first = resolve_attack(attacker, defender, weapon, advantage=True, forced_roll=20)
+            second = resolve_attack(attacker, defender, weapon, advantage=True, forced_roll=20)
+        self.assertEqual(first["damage_dealt"], second["damage_dealt"], "no flag, no counter -- every hit keeps its full sneak die")
+
+    def test_the_verge_wardens_real_template_carries_the_counter_flag(self):
+        template = bot.cl.get_monster_template(bot.CAMPAIGN, "the_verge_warden")
+        self.assertTrue(template.get("counters_sneak_attack"))
+
     # -- Board quest completion bugs (2026-07-16, task #93) -------------
     def test_completed_board_quest_frees_a_slot_for_a_fresh_one(self):
         import board_quests as board_quests_module

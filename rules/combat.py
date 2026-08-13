@@ -447,7 +447,21 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     elemental_heal_gained = 0
     if attack_result["hit"]:
         savage_attacks_die = 1 if (attacker.get("race") == "Half-Orc" and attack_result["critical_hit"]) else 0
-        sneak_attack_die = 1 if (attacker.get("char_class") == "Rogue" and advantage) else 0
+        # Synergy Phase 7 (2026-08-13, per Coffee: "subclass-specific boss
+        # counters", naming Sneak Attack specifically): a boss's real
+        # "counters_sneak_attack" flag (campaign.json, currently only set
+        # on the_verge_warden -- a Warden's whole point is vigilance)
+        # means it can't be caught off guard the same way twice in one
+        # fight. The FIRST advantage-based Rogue hit still lands its full
+        # Sneak Attack die (it hasn't learned the pattern yet); this also
+        # flags the defender so every hit AFTER that one has it negated,
+        # for the rest of THIS fight only (a plain runtime dict key, never
+        # copied from the template, so it can't leak into the next fight).
+        sneak_attack_die = 1 if (
+            attacker.get("char_class") == "Rogue" and advantage and not defender.get("_sneak_attack_countered")
+        ) else 0
+        if attacker.get("char_class") == "Rogue" and advantage and defender.get("counters_sneak_attack"):
+            defender["_sneak_attack_countered"] = True
         rage_bonus = rage_damage_bonus(attacker.get("level", 1)) if attacker.get("raging") else 0
         wild_shape_bonus = (
             wild_shape_damage_bonus(attacker.get("level", 1)) if attacker.get("wild_shaped") else 0

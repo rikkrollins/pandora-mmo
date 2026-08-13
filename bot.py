@@ -6044,6 +6044,10 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 # Unbegun) grants a real 3rd attack per turn once enraged.
                 "adapts_to_damage": template.get("adapts_to_damage", False),
                 "extra_attack_when_enraged": template.get("extra_attack_when_enraged", False),
+                # Synergy Phase 7 (2026-08-13): The Verge Warden's real
+                # signature mechanic -- counters_sneak_attack, read by
+                # rules.combat.resolve_attack's own sneak_attack_die logic.
+                "counters_sneak_attack": template.get("counters_sneak_attack", False),
                 # Real bug found live (2026-07-25, while building the
                 # rebirth dungeons): campaign.json monster templates
                 # have always supported real resistances/vulnerabilities/
@@ -6280,6 +6284,7 @@ def _build_echo_enemy(monster_key: str, tier: int, index: int, total: int, chall
         "life_drain": template.get("life_drain", False),
         "adapts_to_damage": template.get("adapts_to_damage", False),
         "extra_attack_when_enraged": template.get("extra_attack_when_enraged", False),
+        "counters_sneak_attack": template.get("counters_sneak_attack", False),
         "resistances": resistances,
         "is_echo_trial": True,
         # Real tier-scaled damage (2026-07-26 monster/area rebalance) --

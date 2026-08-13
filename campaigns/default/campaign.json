@@ -4494,7 +4494,8 @@
           "item_id": "longsword",
           "weight": 5
         }
-      ]
+      ],
+      "counters_sneak_attack": true
     },
     "choir_remnant": {
       "name": "Choir Remnant",

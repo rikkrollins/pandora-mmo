@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.185] — Add: The Verge Warden counters Sneak Attack (Synergy Phase 7)
+
+First real "subclass-specific boss counter" (Coffee explicitly named
+punishing a Rogue's Sneak Attack as the example): a boss with the new
+`counters_sneak_attack` flag (currently only The Verge Warden — a
+Warden's whole point is vigilance) still takes the FULL Sneak Attack
+bonus the first time a Rogue lands an advantage-based hit, but reads
+the pattern and negates the bonus die on every hit after that, for the
+rest of that fight only (a plain runtime flag, never copied from the
+template, so it can't leak into the next encounter). Lives entirely in
+`rules.combat.resolve_attack`'s existing `sneak_attack_die` check — no
+new resistance system, no change to `resolve_thrown_attack` (which
+already deliberately excludes Sneak Attack). An initial slice of
+Phase 7, not a claim every subclass has a real boss counter yet.
+
 ## [1.27.184] — Add: signature mechanics for two major story bosses (Synergy Phase 6)
 
 Audited every real `is_boss` branch in the combat code and found all
