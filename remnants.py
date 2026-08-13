@@ -25,6 +25,20 @@ monster, "The Remnant's Echo" quest, and the Echo-Bound Signet item
 ("Whatever it echoes back was never quite what you said") already
 established this exact "echo/remnant/bound" vocabulary before this
 system existed.
+
+`story_tied` (2026-08-13, per Coffee: "make it so 60% of the summons
+[Remnants] are tied to the storyline... the others (really good ones)
+shud be findable... make some secrets" -- every Remnant originally
+launched pure-secret, exploration-only). 7 of 12 (~60%) are now
+story_tied=True: once a player has genuinely VISITED that Remnant's
+real location (character["visited_locations"], the same real fact the
+map/bestiary fog-of-war already uses) but hasn't bound it yet, its
+real lore surfaces as a "Whispers" rumor on the Story So Far screen
+(bot._do_show_story_so_far/_remnant_rumors_for_character) -- a real
+nudge back toward content they've already walked past, not a spoiler
+of one they haven't. The 5 strongest by real average summon damage
+(story_tied=False) stay exactly as originally designed: pure secrets,
+never hinted at, found only by genuine off-the-beaten-path exploration.
 """
 
 # Every element used below is one of this game's own real, already-
@@ -51,6 +65,7 @@ REMNANTS = {
         "summon_damage_dice": "3d10", "summon_damage_bonus": 18,
         "name": "The Unopened",
         "monster_key": "the_unopened",
+        "story_tied": False,
         "location_id": "greymoor_downs_the_unopened_seal",
         "element": "force",
         "summon_secondary": "none",
@@ -63,6 +78,7 @@ REMNANTS = {
         "summon_damage_dice": "3d8", "summon_damage_bonus": 16,
         "name": "The Wrathflame Unbound",
         "monster_key": "the_wrathflame_unbound",
+        "story_tied": False,
         "location_id": "hollow_stump_shrine",
         "element": "fire",
         "summon_secondary": "none",
@@ -72,6 +88,7 @@ REMNANTS = {
         "summon_damage_dice": "2d8", "summon_damage_bonus": 12,
         "name": "The Drowned Choir",
         "monster_key": "the_drowned_choir",
+        "story_tied": True,
         "location_id": "the_weeping_well",
         "element": "poison",
         "summon_secondary": "dot",
@@ -81,6 +98,7 @@ REMNANTS = {
         "summon_damage_dice": "2d8", "summon_damage_bonus": 12,
         "name": "The Root That Remembers",
         "monster_key": "the_root_that_remembers",
+        "story_tied": True,
         "location_id": "whispering_wood_deep_glade",
         "element": "poison",
         "summon_secondary": "dot",
@@ -90,6 +108,7 @@ REMNANTS = {
         "summon_damage_dice": "3d8", "summon_damage_bonus": 16,
         "name": "The Hollow Bell",
         "monster_key": "the_hollow_bell",
+        "story_tied": False,
         "location_id": "whispering_wood_root_hollow",
         "element": "psychic",
         "summon_secondary": "none",
@@ -99,6 +118,7 @@ REMNANTS = {
         "summon_damage_dice": "2d10", "summon_damage_bonus": 13,
         "name": "The Cairnbound",
         "monster_key": "the_cairnbound",
+        "story_tied": True,
         "location_id": "greymoor_downs_lonely_cairn",
         "element": "necrotic",
         "summon_secondary": "self_heal",
@@ -108,6 +128,7 @@ REMNANTS = {
         "summon_damage_dice": "2d10", "summon_damage_bonus": 13,
         "name": "The Waiting Dark",
         "monster_key": "the_waiting_dark",
+        "story_tied": True,
         "location_id": "greymoor_downs_below_the_cairn",
         "element": "necrotic",
         "summon_secondary": "self_heal",
@@ -117,6 +138,7 @@ REMNANTS = {
         "summon_damage_dice": "3d8", "summon_damage_bonus": 17,
         "name": "The Farthest Span",
         "monster_key": "the_farthest_span",
+        "story_tied": False,
         "location_id": "stonearch_bridge_far_end",
         "element": "lightning",
         "summon_secondary": "none",
@@ -126,6 +148,7 @@ REMNANTS = {
         "summon_damage_dice": "2d8", "summon_damage_bonus": 12,
         "name": "The Buried Current",
         "monster_key": "the_buried_current",
+        "story_tied": True,
         "location_id": "sunken_root_caverns_forgotten_cistern",
         "element": "cold",
         "summon_secondary": "dot",
@@ -135,6 +158,7 @@ REMNANTS = {
         "summon_damage_dice": "2d8", "summon_damage_bonus": 11,
         "name": "The Spire's Grace",
         "monster_key": "the_spires_grace",
+        "story_tied": True,
         "location_id": "the_first_city_spire_reaches",
         "element": "radiant",
         "summon_secondary": "party_heal",
@@ -144,6 +168,7 @@ REMNANTS = {
         "summon_damage_dice": "2d10", "summon_damage_bonus": 13,
         "name": "The Archive's Keeper",
         "monster_key": "the_archives_keeper",
+        "story_tied": True,
         "location_id": "the_first_city_sunken_archive",
         "element": "psychic",
         "summon_secondary": "self_heal",
@@ -153,6 +178,7 @@ REMNANTS = {
         "summon_damage_dice": "2d10", "summon_damage_bonus": 14,
         "name": "The Deepest Record",
         "monster_key": "the_deepest_record",
+        "story_tied": False,
         "location_id": "the_first_city_deepest_record",
         "element": "force",
         "summon_secondary": "party_heal",
@@ -163,6 +189,22 @@ REMNANTS = {
 
 def get_remnant(remnant_id: str) -> dict | None:
     return REMNANTS.get(remnant_id)
+
+
+def rumors_for_character(character: dict) -> list[tuple[str, dict]]:
+    """
+    Real, grounded "Whispers" for the Story So Far screen (2026-08-13,
+    per Coffee): every story_tied Remnant whose real location this
+    character has actually VISITED (visited_locations) but hasn't bound
+    yet (bound_remnants) -- never a story_tied=False (pure secret)
+    entry, and never a location the character hasn't genuinely been to.
+    """
+    visited = set(character.get("visited_locations") or [])
+    bound = set(character.get("bound_remnants") or [])
+    return [
+        (remnant_id, data) for remnant_id, data in REMNANTS.items()
+        if data.get("story_tied") and data["location_id"] in visited and remnant_id not in bound
+    ]
 
 
 def remnant_for_monster_key(monster_key: str) -> tuple[str, dict] | None:

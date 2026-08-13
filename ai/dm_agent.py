@@ -462,17 +462,23 @@ def _boss_decision_preamble() -> str:
     )
 
 
-def _build_boss_decision_prompt(boss: dict, target: dict) -> str:
+def _build_boss_decision_prompt(boss: dict, target: dict, spell_name: str | None = None) -> str:
+    casting_line = (
+        f"Real fact, already decided: this turn the boss is channeling a real spell -- {spell_name} -- "
+        f"instead of a mundane weapon strike. Let the narration reflect real magic being cast, not a sword swing.\n"
+        if spell_name else ""
+    )
     return (
         f"{_boss_decision_preamble()}\n\n"
         f"Boss (the one deciding): {boss.get('name')}\n"
         f"Chosen target (already decided, do not change): {target.get('name')} "
-        f"({target.get('hp_current')}/{target.get('hp_max', target.get('hp_current'))} HP)\n\n"
+        f"({target.get('hp_current')}/{target.get('hp_max', target.get('hp_current'))} HP)\n"
+        f"{casting_line}\n"
         f"Narrate the boss's decision now (no dice rolled yet):"
     )
 
 
-def narrate_boss_decision(boss: dict, target: dict) -> str:
+def narrate_boss_decision(boss: dict, target: dict, spell_name: str | None = None) -> str:
     """
     Task #167 (per Coffee, scoped to boss-tier enemies only after he
     flagged the latency tradeoff of doing this for every regular
@@ -483,9 +489,15 @@ def narrate_boss_decision(boss: dict, target: dict) -> str:
     never invents a target, it just gives voice to a choice the rules
     layer already made. Separate Ollama call from the post-roll
     narrate_action, its own fallback so a network hiccup here never
-    blocks the actual attack resolution that follows.
+    blocks the actual attack resolution that follows. `spell_name`
+    (2026-08-13, per Coffee: "bosses shud def have spells and
+    abilities, narrations shud work this in") -- bot.py now decides
+    BEFORE this call whether the boss casts a real known spell this
+    turn (_decide_monster_spell), so this pre-roll beat can genuinely
+    foreshadow real magic rather than staying silent about it and only
+    revealing "casts X" after the fact.
     """
-    prompt = _build_boss_decision_prompt(boss, target)
+    prompt = _build_boss_decision_prompt(boss, target, spell_name)
 
     try:
         response = requests.post(
@@ -1034,27 +1046,34 @@ def _boss_intro_preamble() -> str:
         "You are the Dungeon Master narrating the dramatic ENTRANCE of a "
         "real boss monster the party is about to fight -- a genuinely "
         "epic, tense moment, not a routine encounter. You are given the "
-        "boss's real name, the real place this is happening, and that "
-        "place's own real description; narrate ONLY these facts "
-        f"({scaled_sentences(3, 5, boost=3)}), building real dread and "
-        "stakes without resolving the fight or inventing a new plot "
+        "boss's real name, the real place this is happening, that "
+        "place's own real description, and (when given) a real fact "
+        "about this boss's own established powers; narrate ONLY these "
+        f"facts ({scaled_sentences(3, 5, boost=3)}), building real dread "
+        "and stakes without resolving the fight or inventing a new plot "
         f"detail, character, or twist beyond what's given. {_NAMING_INSTRUCTION} "
         f"{style_directive(boost=3)}"
     )
 
 
-def _build_boss_intro_prompt(monster_name: str, location_name: str, location_description: str) -> str:
+def _build_boss_intro_prompt(
+    monster_name: str, location_name: str, location_description: str, ability_facts: str | None = None,
+) -> str:
+    ability_line = f"What this boss is known to do: {ability_facts}\n" if ability_facts else ""
     return (
         f"{_boss_intro_preamble()}\n\n"
         f"Real facts (narrate ONLY these, faithfully):\n"
         f"The boss: {monster_name}\n"
         f"Where this is happening: {location_name}\n"
-        f"What this place is really like: {location_description}\n\n"
+        f"What this place is really like: {location_description}\n"
+        f"{ability_line}\n"
         f"Write the entrance now:"
     )
 
 
-def narrate_boss_intro(monster_name: str, location_name: str, location_description: str) -> str:
+def narrate_boss_intro(
+    monster_name: str, location_name: str, location_description: str, ability_facts: str | None = None,
+) -> str:
     """
     A real, distinct cinematic beat the moment a fight against an
     is_boss monster actually begins (2026-07-27, per Coffee: "make
@@ -1062,9 +1081,14 @@ def narrate_boss_intro(monster_name: str, location_name: str, location_descripti
     Separate from the plain "Combat Begins!" header every fight
     already gets -- grounded only in the boss's own real name and the
     real location's own already-written description, never inventing
-    new lore for the moment.
+    new lore for the moment. `ability_facts` (2026-08-13, per Coffee:
+    "bosses shud def have spells and abilities, narrations shud work
+    this in") -- a real, pre-built fact string (bot.py's
+    _boss_ability_facts) naming this boss's own actual known spells/
+    signature mechanics, when it has any; the model weaves it in as
+    real foreshadowing rather than generic "epic boss" filler.
     """
-    prompt = _build_boss_intro_prompt(monster_name, location_name, location_description)
+    prompt = _build_boss_intro_prompt(monster_name, location_name, location_description, ability_facts)
     try:
         response = requests.post(
             f"{config.OLLAMA_BASE_URL}/api/generate",
@@ -1086,31 +1110,37 @@ def _boss_defeat_preamble() -> str:
         "You are the Dungeon Master narrating the dramatic DEFEAT of a "
         "real boss monster the party just won a real fight against -- a "
         "genuinely epic, satisfying moment, not a routine kill. You are "
-        "given the boss's real name and the real place this happened; "
-        f"narrate ONLY these facts ({scaled_sentences(3, 5, boost=3)}), "
+        "given the boss's real name, the real place this happened, and "
+        "(when given) a real fact about the powers this boss actually "
+        f"wielded in the fight; narrate ONLY these facts ({scaled_sentences(3, 5, boost=3)}), "
         "giving this victory real weight without inventing a new plot "
         f"detail, character, or twist beyond what's given. {_NAMING_INSTRUCTION} "
         f"{style_directive(boost=3)}"
     )
 
 
-def _build_boss_defeat_prompt(monster_name: str, location_name: str) -> str:
+def _build_boss_defeat_prompt(monster_name: str, location_name: str, ability_facts: str | None = None) -> str:
+    ability_line = f"What this boss wielded in the fight: {ability_facts}\n" if ability_facts else ""
     return (
         f"{_boss_defeat_preamble()}\n\n"
         f"Real facts (narrate ONLY these, faithfully):\n"
         f"The boss just defeated: {monster_name}\n"
-        f"Where this happened: {location_name}\n\n"
+        f"Where this happened: {location_name}\n"
+        f"{ability_line}\n"
         f"Write the defeat now:"
     )
 
 
-def narrate_boss_defeat(monster_name: str, location_name: str) -> str:
+def narrate_boss_defeat(monster_name: str, location_name: str, ability_facts: str | None = None) -> str:
     """
     The epic counterpart to narrate_boss_intro -- fires the moment an
     is_boss monster is actually defeated, distinct from the plain
-    "X has been defeated!" line every other monster gets.
+    "X has been defeated!" line every other monster gets. `ability_facts`
+    (2026-08-13, per Coffee): same real, pre-built fact string as
+    narrate_boss_intro, letting the defeat narration reference what the
+    party actually overcame instead of a generic win.
     """
-    prompt = _build_boss_defeat_prompt(monster_name, location_name)
+    prompt = _build_boss_defeat_prompt(monster_name, location_name, ability_facts)
     try:
         response = requests.post(
             f"{config.OLLAMA_BASE_URL}/api/generate",
@@ -1125,6 +1155,59 @@ def narrate_boss_defeat(monster_name: str, location_name: str) -> str:
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] boss defeat narration failed, falling back to template: {e}")
     return f"**{monster_name}** falls. A real, hard-won victory."
+
+
+def _boss_summon_preamble() -> str:
+    return (
+        "You are the Dungeon Master narrating a badly wounded boss "
+        "monster calling for reinforcements mid-fight -- a real, tense "
+        "escalation, not routine. You are given the boss's real name and "
+        "the real names of the reinforcements that actually arrive; "
+        f"narrate ONLY these facts ({scaled_sentences(2, 3)}), making the "
+        "call for backup feel desperate and real without resolving any "
+        "future attack or inventing a new plot detail, character, or "
+        f"twist beyond what's given. {_NAMING_INSTRUCTION} {style_directive()}"
+    )
+
+
+def _build_boss_summon_prompt(boss_name: str, minion_names: str) -> str:
+    return (
+        f"{_boss_summon_preamble()}\n\n"
+        f"Real facts (narrate ONLY these, faithfully):\n"
+        f"The boss calling for backup: {boss_name}\n"
+        f"Reinforcements that answer the call: {minion_names}\n\n"
+        f"Write the moment now:"
+    )
+
+
+def narrate_boss_summon(boss_name: str, minion_names: str) -> str:
+    """
+    Real boss summons woven into the story (2026-08-13, per Coffee:
+    "are the summons worked into the story line?" -- confirmed live they
+    weren't: _maybe_summon_minions only ever sent a plain deterministic
+    line, unlike every other boss-tier moment (intro/defeat/decision),
+    which all get a real AI-narrated beat. Same epic-moment pattern as
+    narrate_boss_defeat -- the plain "calls for reinforcements" line
+    bot.py already sends stays (reliable, always-present information),
+    this ADDS a real narrated flourish alongside it, grounded only in
+    the boss's real name and the real reinforcements that actually
+    joined (never inventing a new monster or plot beat).
+    """
+    prompt = _build_boss_summon_prompt(boss_name, minion_names)
+    try:
+        response = requests.post(
+            f"{config.OLLAMA_BASE_URL}/api/generate",
+            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False, "options": _NARRATION_OPTIONS},
+            timeout=200,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = strip_think_tags(data.get("response", ""))
+        if text:
+            return text
+    except (requests.RequestException, ValueError) as e:
+        print(f"[dm_agent] boss summon narration failed, falling back to template: {e}")
+    return f"**{boss_name}**, badly wounded, calls for reinforcements!"
 
 
 def _arc_opening_preamble() -> str:

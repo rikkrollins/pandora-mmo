@@ -27,6 +27,7 @@ import config
 import db
 import guilds
 import items as items_module
+import remnants as remnants_module
 import spells
 import topics
 from ai.intent_parser import _keyword_fallback, parse_intents
@@ -6035,6 +6036,254 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("longsword", character["inventory"])
         self.assertEqual(character["inventory"].get("iron_ore", 0), 3)
 
+    # -- Monster spellcasting (2026-08-13, per Coffee, dev-bridge: "Certain
+    #    enemies definitely need to have magic.. lets get this working" --
+    #    reported right after hitting Counterspell's own documented "no
+    #    monster casts spells yet" limitation) ---------------------------
+    async def test_monster_with_no_known_spells_never_casts(self):
+        from unittest.mock import patch
+        import sessions
+        goblin = {"telegram_user_id": -700910, "name": "Plain Goblin", "hp_current": 20, "hp_max": 20, "known_spells": [], "dexterity": 10, "strength": 10}
+        player = make_basic_character(996090, "SpellTargetA", current_location="crossroads_tavern")
+        player["telegram_user_id"] = 996090
+        session = sessions.start_session(-999, [player, goblin], {996090: "party", -700910: "enemy"})
+        sink = []
+        update = FakeUpdate(996090, "look", sink)
+        with patch("random.random", return_value=0.0):
+            result = await bot._maybe_monster_cast_spell(update, session, goblin, player)
+        self.assertIsNone(result)
+        sessions.end_session(-999)
+
+    async def test_monster_casts_a_real_spell_and_damages_the_target(self):
+        from unittest.mock import patch
+        import sessions
+        shaman = {
+            "telegram_user_id": -700911, "name": "Goblin Shaman", "hp_current": 57, "hp_max": 57,
+            "known_spells": ["produce_flame"], "resistances": [], "vulnerabilities": [], "immunities": [],
+            "dexterity": 13, "strength": 8,
+        }
+        player = make_basic_character(996091, "SpellTargetB", current_location="crossroads_tavern")
+        db.update_character(996091, -999, hp_current=30)
+        player = db.get_character(996091, -999)
+        player["telegram_user_id"] = 996091
+        session = sessions.start_session(-999, [player, shaman], {996091: "party", -700911: "enemy"})
+        sink = []
+        update = FakeUpdate(996091, "look", sink)
+        with patch("random.random", return_value=0.0), patch("rules.dice.random.randint", return_value=6):
+            result = await bot._maybe_monster_cast_spell(update, session, shaman, player)
+        self.assertIsNotNone(result)
+        self.assertTrue(result["is_spell_cast"])
+        self.assertEqual(result["spell_name"], "Produce Flame")
+        self.assertGreater(result["damage_dealt"], 0)
+        self.assertEqual(player["hp_current"], 30 - result["damage_dealt"])
+        sessions.end_session(-999)
+
+    async def test_counterspell_negates_a_monster_spell_and_spends_a_slot(self):
+        from unittest.mock import patch
+        import sessions
+        shaman = {
+            "telegram_user_id": -700912, "name": "Goblin Shaman", "hp_current": 57, "hp_max": 57,
+            "known_spells": ["produce_flame"], "resistances": [], "vulnerabilities": [], "immunities": [],
+            "dexterity": 13, "strength": 8,
+        }
+        target = make_basic_character(996092, "SpellTargetC", current_location="crossroads_tavern")
+        db.update_character(996092, -999, hp_current=30)
+        target = db.get_character(996092, -999)
+        target["telegram_user_id"] = 996092
+        counterspeller = make_basic_character(
+            996093, "Counterspeller", char_class="Wizard", current_location="crossroads_tavern",
+        )
+        db.update_character(996093, -999, known_spells=["counterspell"], spell_slots_current=3, spell_slots_max=3)
+        counterspeller = db.get_character(996093, -999)
+        counterspeller["telegram_user_id"] = 996093
+        session = sessions.start_session(
+            -999, [target, counterspeller, shaman],
+            {996092: "party", 996093: "party", -700912: "enemy"},
+        )
+        session.round_number = 1
+        sink = []
+        update = FakeUpdate(996092, "look", sink)
+        with patch("random.random", return_value=0.0):
+            result = await bot._maybe_monster_cast_spell(update, session, shaman, target)
+        self.assertIsNotNone(result)
+        self.assertTrue(result["counterspelled"])
+        self.assertEqual(result["damage_dealt"], 0)
+        self.assertEqual(target["hp_current"], 30)  # untouched
+        after = db.get_character(996093, -999)
+        self.assertEqual(after["spell_slots_current"], 2)  # one spell slot spent
+        self.assertTrue(any("counters it" in msg for msg in sink), sink)
+        sessions.end_session(-999)
+
+    async def test_ai_party_companion_can_cast_their_own_real_known_spell(self):
+        """
+        Real live question (Coffee: "can ai players use thier magic and
+        abilities ?"). Confirmed: this same monster-spellcasting
+        mechanism is side-agnostic (checked only by known_spells, not
+        is_boss/side), so a real AI-controlled party companion with a
+        real class-based known_spells entry (e.g. a Sorcerer companion
+        knowing Fire Bolt) casts it against an enemy the exact same way
+        a monster does.
+        """
+        from unittest.mock import patch
+        import sessions
+        companion = {
+            "telegram_user_id": -1500, "name": "AI Sorcerer Companion", "hp_current": 30, "hp_max": 30,
+            "known_spells": ["fire_bolt"], "resistances": [], "vulnerabilities": [], "immunities": [],
+            "dexterity": 12, "strength": 8, "char_class": "Sorcerer",
+        }
+        goblin = {
+            "telegram_user_id": -700930, "name": "Goblin", "hp_current": 20, "hp_max": 20,
+            "dexterity": 10, "strength": 10, "resistances": [], "vulnerabilities": [], "immunities": [],
+        }
+        session = sessions.start_session(-999, [companion, goblin], {-1500: "party", -700930: "enemy"})
+        sink = []
+        update = FakeUpdate(996097, "look", sink)
+        with patch("random.random", return_value=0.0), patch("rules.dice.random.randint", return_value=6):
+            result = await bot._maybe_monster_cast_spell(update, session, companion, goblin)
+        self.assertIsNotNone(result)
+        self.assertTrue(result["is_spell_cast"])
+        self.assertEqual(result["spell_name"], "Fire Bolt")
+        self.assertGreater(result["damage_dealt"], 0)
+        self.assertEqual(goblin["hp_current"], 20 - result["damage_dealt"])
+        sessions.end_session(-999)
+
+    async def test_counterspell_never_negates_an_allys_own_spell(self):
+        """
+        Real correctness fix, caught while confirming AI party members
+        can cast their own spells: Counterspell must only ever trigger
+        against the OPPOSING side, never a teammate's own cast -- a
+        hardcoded "party" side-check would have wrongly let a party
+        member with Counterspell negate their own ally's spell the
+        moment party-side casting became real.
+        """
+        from unittest.mock import patch
+        import sessions
+        caster = {
+            "telegram_user_id": -1501, "name": "AI Sorcerer Ally", "hp_current": 30, "hp_max": 30,
+            "known_spells": ["fire_bolt"], "resistances": [], "vulnerabilities": [], "immunities": [],
+            "dexterity": 12, "strength": 8,
+        }
+        ally_counterspeller = make_basic_character(
+            996098, "AllyCounterspeller", char_class="Wizard", current_location="crossroads_tavern",
+        )
+        db.update_character(996098, -999, known_spells=["counterspell"], spell_slots_current=3, spell_slots_max=3)
+        ally_counterspeller = db.get_character(996098, -999)
+        ally_counterspeller["telegram_user_id"] = 996098
+        goblin = {
+            "telegram_user_id": -700931, "name": "Goblin", "hp_current": 20, "hp_max": 20,
+            "dexterity": 10, "strength": 10, "resistances": [], "vulnerabilities": [], "immunities": [],
+        }
+        session = sessions.start_session(
+            -999, [caster, ally_counterspeller, goblin],
+            {-1501: "party", 996098: "party", -700931: "enemy"},
+        )
+        session.round_number = 1
+        sink = []
+        update = FakeUpdate(996098, "look", sink)
+        with patch("random.random", return_value=0.0), patch("rules.dice.random.randint", return_value=6):
+            result = await bot._maybe_monster_cast_spell(update, session, caster, goblin)
+        self.assertIsNotNone(result)
+        self.assertFalse(result.get("counterspelled", False))
+        self.assertGreater(result["damage_dealt"], 0)
+        after = db.get_character(996098, -999)
+        self.assertEqual(after["spell_slots_current"], 3)  # untouched -- never spent on an ally's cast
+        sessions.end_session(-999)
+
+    async def test_goblin_shaman_casting_never_also_applies_its_on_hit_condition(self):
+        """
+        Real correctness check: goblin_shaman's own on_hit_condition
+        ("silenced") is a real weapon/touch effect -- a shaman casting
+        Produce Flame instead of attacking must never ALSO silence the
+        target for free just because current.get("on_hit_condition")
+        still reads "silenced" on the participant dict.
+        """
+        from unittest.mock import patch
+        make_basic_character(996094, "ShamanCastLeader", current_location="crossroads_tavern")
+        db.update_character(996094, -999, hp_current=50, level=1)
+        player = db.get_character(996094, -999)
+        player["telegram_user_id"] = 996094
+        enemy = {
+            "telegram_user_id": -700913, "name": "Goblin Shaman", "dexterity": 13, "strength": 8,
+            "armor_class": 12, "hp_current": 57, "hp_max": 57, "proficiency_bonus": 2,
+            "is_ai": 1, "monster_key": "goblin_shaman", "on_hit_condition": "silenced",
+            "known_spells": ["produce_flame"], "resistances": [], "vulnerabilities": [], "immunities": [],
+        }
+        import sessions
+        session = sessions.start_session(-999, [player, enemy], {996094: "party", -700913: "enemy"})
+        session.turn_order = [-700913, 996094]
+        session.current_turn_index = 0
+        sink = []
+        with patch("random.random", return_value=0.0), patch("rules.dice.random.randint", return_value=4), \
+             patch("bot.narrate_action", return_value="The shaman conjures fire."):
+            await bot._resolve_ai_turns(FakeUpdate(996094, "combat", sink), session)
+        self.assertFalse(any("SILENCED" in msg for msg in sink), sink)
+        sessions.end_session(-999)
+
+    # -- Boss spells/abilities woven into narration (2026-08-13, per
+    #    Coffee: "bosses shud def have spells and abilities, narrations
+    #    shud work this in and so shud the story") ---------------------
+    def test_boss_ability_facts_names_real_spells_and_signature_mechanics(self):
+        boss = {
+            "name": "The Waking Ember", "known_spells": ["fireball"],
+            "life_drain": True, "extra_attack_when_enraged": True,
+        }
+        facts = bot._boss_ability_facts(boss)
+        self.assertIn("Fireball", facts)
+        self.assertIn("drains life", facts)
+        self.assertIn("extra attack", facts)
+
+    def test_boss_ability_facts_none_for_a_pure_martial_boss(self):
+        boss = {"name": "Goblin Boss", "damage_type": "physical"}
+        self.assertIsNone(bot._boss_ability_facts(boss))
+
+    async def test_boss_decision_narration_receives_the_predecided_spell_name(self):
+        """
+        Real correctness check: the boss's own "sizing up its target"
+        pre-roll narration must be told BEFORE it's called whether this
+        turn resolves to a real spell cast, so it can genuinely
+        foreshadow magic instead of staying silent about it.
+        """
+        from unittest.mock import patch
+        make_basic_character(996095, "BossSpellLeader", current_location="crossroads_tavern")
+        db.update_character(996095, -999, hp_current=200, level=10)
+        player = db.get_character(996095, -999)
+        player["telegram_user_id"] = 996095
+        boss = {
+            "telegram_user_id": -700920, "name": "The Waking Ember", "dexterity": 14, "strength": 16,
+            "armor_class": 16, "hp_current": 150, "hp_max": 150, "proficiency_bonus": 4,
+            "is_ai": 1, "is_boss": True, "monster_key": "the_waking_ember",
+            "known_spells": ["fireball"], "resistances": [], "vulnerabilities": [], "immunities": [],
+        }
+        import sessions
+        session = sessions.start_session(-999, [player, boss], {996095: "party", -700920: "enemy"})
+        session.turn_order = [-700920, 996095]
+        session.current_turn_index = 0
+        sink = []
+        with patch("random.random", return_value=0.0), patch("rules.dice.random.randint", return_value=4), \
+             patch("bot.narrate_action", return_value="Fire roars."), \
+             patch("bot.narrate_boss_decision", return_value="It readies a spell.") as mock_decision:
+            await bot._resolve_ai_turns(FakeUpdate(996095, "combat", sink), session)
+        self.assertEqual(mock_decision.call_args.args[2], "Fireball")
+        sessions.end_session(-999)
+
+    async def test_boss_intro_and_defeat_pass_real_ability_facts(self):
+        """End-to-end: a real boss fight's intro AND defeat narration calls both receive this boss's real ability_facts, not None."""
+        from unittest.mock import patch
+        make_basic_character(996096, "BossIntroLeader", current_location="whispering_wood")
+        db.update_character(996096, -999, hp_current=500, level=15)
+        sink = []
+        with patch("bot.narrate_boss_intro", return_value="It arrives.") as mock_intro, \
+             patch("bot.narrate_boss_decision", return_value="It decides."), \
+             patch("bot.narrate_boss_defeat", return_value="It falls.") as mock_defeat, \
+             patch("bot.narrate_action", return_value="A blow lands."), \
+             patch("rules.dice.random.randint", return_value=999):
+            await bot._do_start_combat(FakeUpdate(996096, "fight the waking ember", sink), "the_waking_ember")
+        self.assertIsNotNone(mock_intro.call_args.args[3])
+        self.assertIn("Fireball", mock_intro.call_args.args[3])
+        if mock_defeat.called:
+            self.assertIsNotNone(mock_defeat.call_args.args[2])
+            self.assertIn("Fireball", mock_defeat.call_args.args[2])
+
     def test_equipable_worth_shown_in_stats_line(self):
         """Real live request (2026-08-03): "in the description of the items can u show what it is worth? do this for equipables"."""
         from rules.item_generator import generate_weapon
@@ -8259,6 +8508,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     # -- Boss Summons Minions (2026-08-13, per Coffee: "even bosses, you
     #    can have 1 boss, that summons minions... be creative") --------
     async def test_maybe_summon_minions_triggers_once_below_the_threshold(self):
+        from unittest.mock import patch
         import sessions
         sessions.end_session(-997)
         boss = {
@@ -8269,7 +8519,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session = sessions.start_session(-997, [boss, human], {-700800: "enemy", 900800: "party"})
         sink = []
         update = FakeUpdate(900800, "irrelevant", sink, chat_id=-997)
-        await bot._maybe_summon_minions(update, session, boss)
+        with patch("bot.narrate_boss_summon", return_value="They arrive."):
+            await bot._maybe_summon_minions(update, session, boss)
         goblin_minions = [p for p in session.participants if p.get("monster_key") == "goblin" and p is not boss]
         self.assertEqual(len(goblin_minions), 2)
         for m in goblin_minions:
@@ -8293,6 +8544,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sessions.end_session(-997)
 
     async def test_maybe_summon_minions_only_fires_once_per_fight(self):
+        from unittest.mock import patch
         import sessions
         sessions.end_session(-997)
         boss = {
@@ -8302,8 +8554,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         human = {"telegram_user_id": 900802, "name": "Summoner3", "dexterity": 10, "hp_current": 100, "hp_max": 100}
         session = sessions.start_session(-997, [boss, human], {-700802: "enemy", 900802: "party"})
         update = FakeUpdate(900802, "irrelevant", [], chat_id=-997)
-        await bot._maybe_summon_minions(update, session, boss)
-        await bot._maybe_summon_minions(update, session, boss)  # still wounded -- must NOT summon a second wave
+        with patch("bot.narrate_boss_summon", return_value="They arrive."):
+            await bot._maybe_summon_minions(update, session, boss)
+            await bot._maybe_summon_minions(update, session, boss)  # still wounded -- must NOT summon a second wave
         goblin_minions = [p for p in session.participants if p.get("monster_key") == "goblin" and p is not boss]
         self.assertEqual(len(goblin_minions), 2)
         sessions.end_session(-997)
@@ -8346,7 +8599,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         random.seed(2)
         sink = []
         with patch("rules.dice.random.randint", return_value=4), \
-             patch("bot.narrate_action", return_value="The blow lands."):
+             patch("bot.narrate_action", return_value="The blow lands."), \
+             patch("bot.narrate_boss_summon", return_value="They arrive."):
             await bot._do_attack(FakeUpdate(user_id, "I attack the goblin boss", sink), "I attack the goblin boss", forced_roll=20)
         goblin_minions = [p for p in session.participants if p.get("monster_key") == "goblin" and p["telegram_user_id"] != -700805]
         self.assertEqual(len(goblin_minions), 2, sink)
@@ -13922,6 +14176,52 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         from ai.intent_parser import _keyword_fallback
         parsed = _keyword_fallback("assign Sarah as summoner", known_npc_names=[])
         self.assertEqual(parsed["action"], "assign_summoner")
+
+    # -- Remnant story/secret split (2026-08-13, per Coffee: "make it so
+    #    60% of the summons [Remnants] are tied to the storyline...
+    #    the others (really good ones) shud be findable... make some
+    #    secrets") -----------------------------------------------------
+    def test_remnant_story_tied_split_is_seven_story_five_secret(self):
+        story_tied = [rid for rid, r in remnants_module.REMNANTS.items() if r["story_tied"]]
+        secret = [rid for rid, r in remnants_module.REMNANTS.items() if not r["story_tied"]]
+        self.assertEqual(len(story_tied), 7)
+        self.assertEqual(len(secret), 5)
+
+    def test_rumors_for_character_needs_a_real_visit_and_no_bind_yet(self):
+        story_tied_id, story_tied_data = next(
+            (rid, r) for rid, r in remnants_module.REMNANTS.items() if r["story_tied"]
+        )
+        secret_id, secret_data = next(
+            (rid, r) for rid, r in remnants_module.REMNANTS.items() if not r["story_tied"]
+        )
+        # Never visited -- no rumor at all.
+        character = {"visited_locations": [], "bound_remnants": []}
+        self.assertEqual(remnants_module.rumors_for_character(character), [])
+        # Visited the story-tied one, not yet bound -- a real rumor.
+        character = {"visited_locations": [story_tied_data["location_id"]], "bound_remnants": []}
+        rumor_ids = [rid for rid, _data in remnants_module.rumors_for_character(character)]
+        self.assertIn(story_tied_id, rumor_ids)
+        # Already bound -- no longer a rumor (they've already found it).
+        character = {"visited_locations": [story_tied_data["location_id"]], "bound_remnants": [story_tied_id]}
+        self.assertEqual(remnants_module.rumors_for_character(character), [])
+        # Visited a SECRET one -- never surfaced as a rumor, no matter what.
+        character = {"visited_locations": [secret_data["location_id"]], "bound_remnants": []}
+        rumor_ids = [rid for rid, _data in remnants_module.rumors_for_character(character)]
+        self.assertNotIn(secret_id, rumor_ids)
+
+    async def test_story_so_far_shows_a_real_whisper_for_a_visited_unbound_remnant(self):
+        from unittest.mock import patch
+        story_tied_id, story_tied_data = next(
+            (rid, r) for rid, r in remnants_module.REMNANTS.items() if r["story_tied"]
+        )
+        make_basic_character(996099, "WhisperSeeker", current_location=story_tied_data["location_id"])
+        db.update_character(996099, -999, visited_locations=[story_tied_data["location_id"]])
+        sink = []
+        with patch("bot.narrate_story_so_far", return_value="Their tale so far."), \
+             patch("bot.narrate_next_step_hint", return_value="Onward."), \
+             patch("bot._send_generated_image", return_value=None):
+            await bot._do_show_story_so_far(FakeUpdate(996099, "story so far", sink))
+        self.assertTrue(any("Whispers" in msg and story_tied_data["name"] in msg for msg in sink), sink)
 
     async def test_guild_curriculum_step_not_credited_before_real_cooldown_elapses(self):
         """

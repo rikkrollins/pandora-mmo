@@ -67,7 +67,7 @@ from ai.dm_agent import (
     narrate_action, narrate_welcome, narrate_skill_check, narrate_hourly_update,
     narrate_examine, narrate_branching_choice_outcome, narrate_boss_decision,
     narrate_story_so_far, narrate_chapter_climax, narrate_arc_opening, narrate_next_step_hint,
-    narrate_boss_intro, narrate_boss_defeat,
+    narrate_boss_intro, narrate_boss_defeat, narrate_boss_summon,
     _fallback_hourly_update, _fallback_narration,
     is_narration_call_active,
 )
@@ -3271,7 +3271,7 @@ async def _announce_defeats(update: Update, session: sessions.Session, removed: 
             battle_location_id = next((p.get("current_location") for p in party_members if p.get("current_location")), None)
             battle_location = cl.get_location(CAMPAIGN, battle_location_id) if battle_location_id else None
             location_name = battle_location["name"] if battle_location else "this place"
-            defeat_line = await asyncio.to_thread(narrate_boss_defeat, entry["name"], location_name)
+            defeat_line = await asyncio.to_thread(narrate_boss_defeat, entry["name"], location_name, _boss_ability_facts(entry))
             await _safe_send(update, f"🎬 {defeat_line}")
         await _maybe_send_defeat_image(update, entry)
 
@@ -5562,6 +5562,18 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
                         f"🔥 **{current['name']} flies into a desperate rage — its attacks hit "
                         f"even harder for the rest of this fight!**",
                     )
+            # Real monster spellcasting (2026-08-13, per Coffee: "bosses
+            # shud def have spells and abilities, narrations shud work
+            # this in") -- decided HERE, before the "sizing up its
+            # target" narration below, so that beat can genuinely
+            # foreshadow real magic (a real, already-decided fact)
+            # instead of staying silent about it and only revealing
+            # "casts X" after the fact. None for a non-boss/non-first-
+            # swing, in which case _maybe_monster_cast_spell below rolls
+            # its own fresh decision, unchanged from before.
+            pre_decided_spell_id = (
+                _decide_monster_spell(current) if current.get("is_boss") and attack_num == 0 else None
+            )
             # Real live bug (2026-08-05, same family as the multiattack/
             # turn-prompt duplicates fixed this session): a retry of
             # this same still-current, un-advanced boss turn would
@@ -5570,7 +5582,10 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
             if (current.get("is_boss") and attack_num == 0 and not narration_budget_spent
                     and not _ollama_congested() and not current.get("_boss_decision_announced")):
                 current["_boss_decision_announced"] = True
-                decision_flavor = await asyncio.to_thread(narrate_boss_decision, current, target)
+                pre_decided_spell_name = (
+                    spells_module.get_spell(pre_decided_spell_id)["name"] if pre_decided_spell_id else None
+                )
+                decision_flavor = await asyncio.to_thread(narrate_boss_decision, current, target, pre_decided_spell_name)
                 await _safe_send(update, f"👁️ {decision_flavor}")
             # Per Coffee (2026-07-26): "same with enemy/boss attacks and
             # actions" -- show the same real monster art already used at
@@ -5589,13 +5604,15 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
                 if monster_template:
                     session.shown_monster_keys.add(current["monster_key"])
                     await _maybe_send_monster_image(update, current["monster_key"], monster_template)
-            adv, disadv = _attack_advantage_disadvantage(current, target)
             _refresh_real_player_spell_slots(target)
-            result = resolve_attack(
-                current, target, _weapon_for_attacker(current), advantage=adv, disadvantage=disadv,
-                defender_relentless_endurance_available=_relentless_endurance_available(target),
-                round_number=session.round_number,
-            )
+            result = await _maybe_monster_cast_spell(update, session, current, target, spell_id=pre_decided_spell_id)
+            if result is None:
+                adv, disadv = _attack_advantage_disadvantage(current, target)
+                result = resolve_attack(
+                    current, target, _weapon_for_attacker(current), advantage=adv, disadvantage=disadv,
+                    defender_relentless_endurance_available=_relentless_endurance_available(target),
+                    round_number=session.round_number,
+                )
             if result["relentless_endurance_triggered"]:
                 db.use_feature(target["telegram_user_id"], update.effective_chat.id, "relentless_endurance")
             _sync_player_to_db(target)
@@ -5607,7 +5624,13 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
 
             applied_condition = None
             resisted_condition = None
-            if result["hit"] and current.get("on_hit_condition"):
+            # on_hit_condition is a real 5E touch/weapon effect (e.g.
+            # goblin_shaman's own "silenced" on-hit) -- never meant to
+            # also fire off a spell cast, which already has its own real
+            # effect (the spell's damage). Excluded here (2026-08-13, same
+            # change that added monster spellcasting) so a shaman casting
+            # Produce Flame doesn't ALSO silence its target for free.
+            if result["hit"] and current.get("on_hit_condition") and not result.get("is_spell_cast"):
                 condition = current["on_hit_condition"]
                 if _racially_immune_to_condition(target, condition):
                     resisted_condition = condition
@@ -5629,10 +5652,13 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
                     hp_max = current.get("hp_max", current["hp_current"])
                     current["hp_current"] = min(hp_max, current["hp_current"] + drain_amount)
 
-            attack_label = (
-                f"{current['name']} attacks {target['name']}" if attack_count == 1
-                else f"{current['name']} attacks {target['name']} ({attack_num + 1}/{attack_count})"
-            )
+            if result.get("is_spell_cast"):
+                attack_label = f"{current['name']} casts {result['spell_name']} at {target['name']}"
+            else:
+                attack_label = (
+                    f"{current['name']} attacks {target['name']}" if attack_count == 1
+                    else f"{current['name']} attacks {target['name']} ({attack_num + 1}/{attack_count})"
+                )
             await _post_narrated(
                 update, current, attack_label, result, session,
                 skip_narration=time.monotonic() - turns_started_at > AI_TURN_NARRATION_BUDGET_SECONDS,
@@ -6263,6 +6289,17 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 # Waking Ember's real fire elemental_resistance_pct)
                 # actually reaches the live combat participant dict.
                 "elemental_resistance_pct": dict(slot_template.get("elemental_resistance_pct", {})),
+                # Real monster spellcasting (2026-08-13, per Coffee,
+                # dev-bridge: "Certain enemies definitely need to have
+                # magic.. lets get this working" -- reported right
+                # after hitting Counterspell's own documented "no
+                # monster casts spells yet" limitation). Same real-
+                # data-not-invented convention as every other flag
+                # above, copied from the template so a real caster
+                # monster (currently the 3 shaman variants) actually
+                # reaches the live combat participant -- read by
+                # bot._maybe_monster_cast_spell.
+                "known_spells": list(slot_template.get("known_spells", [])),
                 # Real, tier-scaled natural attack (2026-07-26 monster/
                 # area rebalance) -- see _weapon_for_attacker's matching
                 # comment. Only set for monsters the rebalance actually
@@ -6334,7 +6371,8 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
         fight_location = cl.get_location(CAMPAIGN, requester["current_location"])
         if template.get("is_boss"):
             intro = await asyncio.to_thread(
-                narrate_boss_intro, template["name"], fight_location["name"], fight_location["description"]
+                narrate_boss_intro, template["name"], fight_location["name"], fight_location["description"],
+                _boss_ability_facts(template),
             )
             await _safe_send(update, f"🎬 {intro}")
         header = (
@@ -6855,6 +6893,172 @@ async def _maybe_summon_minions(update: Update, session: sessions.Session, boss:
     await _safe_send(
         update, f"📯 **{boss['name']}**, badly wounded, calls for reinforcements — **{names}** answer the call!",
     )
+    # Real narration woven into the story (2026-08-13, per Coffee: "are
+    # the summons worked into the story line?" -- confirmed live they
+    # weren't, this closes that gap). Plain line above stays (reliable,
+    # always-present), this ADDS a real AI-narrated flourish alongside
+    # it, same "epic moment" pattern boss intro/defeat already use.
+    summon_flavor = await asyncio.to_thread(narrate_boss_summon, boss["name"], names)
+    await _safe_send(update, f"🎬 {summon_flavor}")
+
+
+MONSTER_SPELLCAST_CHANCE = 0.4
+
+
+def _decide_monster_spell(caster: dict) -> str | None:
+    """
+    Pure, no-side-effect decision: does this monster cast a real known
+    damage spell this turn? Split out (2026-08-13, per Coffee: "bosses
+    shud def have spells and abilities, narrations shud work this in")
+    so a boss's own pre-roll "sizing up its target" narration
+    (narrate_boss_decision) can be told the real outcome BEFORE it's
+    narrated, instead of staying silent about magic until after the
+    fact -- matches this game's "AI narrates what's already decided"
+    rule exactly, just moving the decision point earlier for bosses.
+    """
+    known_spells = [
+        sid for sid in (caster.get("known_spells") or [])
+        if spells_module.get_spell(sid) and spells_module.get_spell(sid)["effect"] == "damage"
+    ]
+    if not known_spells or random.random() > MONSTER_SPELLCAST_CHANCE:
+        return None
+    return random.choice(known_spells)
+
+
+async def _maybe_monster_cast_spell(
+    update: Update, session: sessions.Session, caster: dict, target: dict, spell_id: str | None = None,
+) -> dict | None:
+    """
+    Real monster spellcasting (2026-08-13, per Coffee, dev-bridge: "Certain
+    enemies definitely need to have magic.. i didnt realize you had missed
+    this - lets get this working" -- reported right after hitting
+    Counterspell's own documented limitation, "No monster or hostile NPC
+    in this game casts spells yet, so there's nothing for it to react
+    to"). A monster with a real known_spells entry (campaign.json, the 3
+    shaman variants plus 18 thematically-fitting real bosses) has a real
+    chance each turn to cast a real damage spell instead of a normal
+    weapon attack, through the EXACT SAME rules-layer pipeline a
+    player's own cast already uses (spells_module.resolve_damage_spell +
+    apply_damage_type_modifier + elemental_overflow_heal) -- narration
+    never invents the outcome, same as everywhere else in this game.
+    Returns a resolve_attack-shaped result dict (so the caller's existing
+    narration/defeat-detection code after this handles it unchanged) if
+    a spell was cast, or None if this monster doesn't cast this turn (no
+    known_spells, or the chance roll missed) -- the caller falls back to
+    a normal resolve_attack in that case.
+
+    `spell_id`: when given (a boss's turn, already decided earlier via
+    _decide_monster_spell so narrate_boss_decision could foreshadow it),
+    skips the random roll and resolves exactly that spell -- keeps the
+    mechanical outcome consistent with what was already narrated. Left
+    None (the default) for a regular monster's turn, which still rolls
+    its own fresh decision here.
+
+    Real Counterspell: checked here, not in rules/combat.py, since it's
+    not a per-defender reaction like Shield/Uncanny Dodge -- ANY real
+    living party member who knows Counterspell, has a real spell slot,
+    and hasn't used their reaction this round can negate ANY enemy spell
+    cast, not just the one aimed at them, matching real 5E. Consumes
+    their spell slot and reaction the same way Shield/Uncanny Dodge
+    already do (reaction_used_round on the participant dict), and the
+    enemy's spell simply fails -- no damage, no effect, real 5E's own
+    wording for a countered spell.
+    """
+    if spell_id is None:
+        spell_id = _decide_monster_spell(caster)
+    if spell_id is None:
+        return None
+    spell = spells_module.get_spell(spell_id)
+
+    # Real correctness fix (2026-08-13, caught while confirming AI party
+    # members can cast their own real spells through this same
+    # mechanism -- Coffee: "can ai players use thier magic and
+    # abilities?"): this must check the OPPOSING side from whoever's
+    # actually casting, not a hardcoded "party" -- a hardcoded "party"
+    # meant an ally with Counterspell could wrongly negate a teammate's
+    # own spell the moment party-side casting became real, which it now
+    # is (any combatant with real known_spells can cast here, not just
+    # enemy monsters).
+    counterspeller = next(
+        (p for p in session.living_on_side(session.opposing_side(caster["telegram_user_id"]))
+         if "counterspell" in (p.get("known_spells") or [])
+         and p.get("spell_slots_current", 0) > 0
+         and p.get("reaction_used_round") != session.round_number),
+        None,
+    )
+    if counterspeller:
+        counterspeller["spell_slots_current"] -= 1
+        counterspeller["reaction_used_round"] = session.round_number
+        _sync_player_to_db(counterspeller)
+        await _safe_send(
+            update,
+            f"🔵 **{counterspeller['name']}** counters it! **{caster['name']}**'s {spell['name']} fizzles with no effect.",
+        )
+        return {
+            "attacker": caster["name"], "defender": target["name"], "hit": False,
+            "critical_hit": False, "critical_fail": False, "raw_roll": None, "attack_roll": None,
+            "target_ac": None, "damage_dealt": 0, "relentless_endurance_triggered": False,
+            "death_ward_triggered": False, "dark_ones_blessing_gained": 0,
+            "shield_reaction_triggered": False, "uncanny_dodge_triggered": False,
+            "hybrid_bonus_damage": 0, "hybrid_temp_hp_gained": 0, "hybrid_self_heal_gained": 0,
+            "defender_hp_remaining": target["hp_current"], "defender_hp_max": target.get("hp_max", target["hp_current"]),
+            "damage_type": None, "enrage_triggered": False, "bloodied_triggered": False,
+            "elemental_heal_gained": 0, "is_spell_cast": True, "spell_name": spell["name"], "counterspelled": True,
+        }
+
+    result = spells_module.resolve_damage_spell(spell_id, caster, target)
+    pre_elemental_dmg = apply_damage_type_modifier(result["damage_dealt"], spell.get("damage_type", "physical"), target, caster)
+    elemental_heal_gained = elemental_overflow_heal(pre_elemental_dmg, spell.get("damage_type", "physical"), target, caster)
+    if elemental_heal_gained:
+        caster_hp_max = caster.get("hp_max", caster["hp_current"])
+        caster["hp_current"] = min(caster["hp_current"] + elemental_heal_gained, caster_hp_max)
+    target["hp_current"] = max(target["hp_current"] - pre_elemental_dmg, 0)
+
+    return {
+        "attacker": caster["name"], "defender": target["name"], "hit": True,
+        "critical_hit": False, "critical_fail": False, "raw_roll": None, "attack_roll": None,
+        "target_ac": None, "damage_dealt": pre_elemental_dmg, "relentless_endurance_triggered": False,
+        "death_ward_triggered": False, "dark_ones_blessing_gained": 0,
+        "shield_reaction_triggered": False, "uncanny_dodge_triggered": False,
+        "hybrid_bonus_damage": 0, "hybrid_temp_hp_gained": 0, "hybrid_self_heal_gained": 0,
+        "defender_hp_remaining": target["hp_current"], "defender_hp_max": target.get("hp_max", target["hp_current"]),
+        "damage_type": spell.get("damage_type", "physical"), "enrage_triggered": False, "bloodied_triggered": False,
+        "elemental_heal_gained": elemental_heal_gained, "is_spell_cast": True, "spell_name": spell["name"], "counterspelled": False,
+    }
+
+
+def _boss_ability_facts(boss: dict) -> str | None:
+    """
+    Real, grounded facts about a boss's own established powers -- never
+    invented, built only from flags/known_spells this exact boss dict
+    actually carries (2026-08-13, per Coffee: "bosses shud def have
+    spells and abilities, narrations shud work this in and so shud the
+    story"). Fed to narrate_boss_intro/narrate_boss_defeat/narrate_boss_
+    decision as real ground truth so those beats can reference a boss's
+    actual nature instead of generic "epic boss" filler. Returns None
+    for a boss with no real signature mechanic at all (a handful are
+    deliberately pure-martial, e.g. goblin_boss/colosseum_champion).
+    """
+    facts = []
+    spell_names = [
+        spells_module.get_spell(sid)["name"] for sid in (boss.get("known_spells") or [])
+        if spells_module.get_spell(sid)
+    ]
+    if spell_names:
+        facts.append(f"wields real magic ({', '.join(spell_names)})")
+    if boss.get("adapts_to_damage"):
+        facts.append("adapts its own resistance to whatever type of damage keeps hurting it")
+    if boss.get("extra_attack_when_enraged"):
+        facts.append("gains a devastating extra attack once enraged")
+    if boss.get("counters_sneak_attack"):
+        facts.append("has learned to counter a Rogue's Sneak Attack")
+    if boss.get("summons"):
+        facts.append("can summon reinforcements when badly wounded")
+    if boss.get("life_drain"):
+        facts.append("drains life from its victims to heal itself")
+    if not facts:
+        return None
+    return f"{boss.get('name')} " + "; also ".join(facts) + "."
 
 
 async def _do_attack(update: Update, action_text: str, forced_roll: int | None = None) -> None:
@@ -19059,6 +19263,20 @@ async def _do_show_story_so_far(update: Update) -> None:
         header = "🔮 **What's Next**" if not next_step["is_puzzle"] else "🌀 **What's Next... A Riddle**"
         next_step_block = f"\n\n━━━━━━━━━━━━━━\n{header}\n{hint}"
 
+    # Whispers (2026-08-13, per Coffee: "make it so 60% of the summons
+    # [Remnants] are tied to the storyline... the others (really good
+    # ones) shud be findable... make some secrets"). Real, already-
+    # written lore text (remnants.py), deterministic -- no extra Ollama
+    # call, since this screen already makes two real narration calls.
+    # Only ever a story_tied Remnant whose real location this character
+    # has genuinely visited but hasn't bound yet -- never a spoiler of
+    # one they haven't found, never the 5 pure-secret ones at all.
+    rumors = remnants_module.rumors_for_character(character)
+    whispers_block = ""
+    if rumors:
+        rumor_lines = "\n".join(f"— *{data['name']}*: {data['lore']}" for _rid, data in rumors)
+        whispers_block = f"\n\n━━━━━━━━━━━━━━\n🕯️ **Whispers**\n{rumor_lines}"
+
     # A real, chapter-themed image alongside the recap (2026-07-25, per
     # Coffee: "include images too please for all that"), grounded only
     # in the CURRENT chapter's own title/description -- same
@@ -19078,7 +19296,7 @@ async def _do_show_story_so_far(update: Update) -> None:
         )
 
     await _safe_send(
-        update, f"📖 **Story So Far**\n\n{recap}{next_step_block}\n\n" + "\n".join(chapter_lines),
+        update, f"📖 **Story So Far**\n\n{recap}{next_step_block}{whispers_block}\n\n" + "\n".join(chapter_lines),
         reply_markup=_with_menu_button(_story_chapter_keyboard(character)),
     )
 

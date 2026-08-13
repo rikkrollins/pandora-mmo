@@ -4097,6 +4097,7 @@
       "damage_dice": "1d8",
       "damage_bonus": 4,
       "damage_type": "poison",
+      "known_spells": ["produce_flame"],
       "stealable_items": [
         {
           "item_id": "healing_potion",
@@ -4258,6 +4259,7 @@
       "damage_dice": "1d8",
       "damage_bonus": 17,
       "damage_type": "psychic",
+      "known_spells": ["vicious_mockery"],
       "stealable_items": [
         {
           "item_id": "greater_spell_tonic",
@@ -4283,6 +4285,7 @@
       "damage_dice": "1d8",
       "damage_bonus": 17,
       "damage_type": "fire",
+      "known_spells": ["fireball"],
       "vulnerabilities": [
         "cold"
       ],
@@ -4320,6 +4323,7 @@
       "damage_dice": "1d8",
       "damage_bonus": 18,
       "damage_type": "necrotic",
+      "known_spells": ["voidcall"],
       "stealable_items": [
         {
           "item_id": "greater_spell_tonic",
@@ -4351,6 +4355,7 @@
       "damage_dice": "1d8",
       "damage_bonus": 17,
       "damage_type": "force",
+      "known_spells": ["magic_missile"],
       "stealable_items": [
         {
           "item_id": "spell_tonic",
@@ -4489,6 +4494,7 @@
       "damage_dice": "1d8",
       "damage_bonus": 18,
       "damage_type": "necrotic",
+      "known_spells": ["voidcall"],
       "stealable_items": [
         {
           "item_id": "greater_spell_tonic",
@@ -4608,6 +4614,7 @@
       "damage_dice": "1d8",
       "damage_bonus": 18,
       "damage_type": "psychic",
+      "known_spells": ["vicious_mockery"],
       "stealable_items": [
         {
           "item_id": "spell_tonic",
@@ -5030,6 +5037,7 @@
       "damage_dice": "1d8",
       "damage_bonus": 18,
       "damage_type": "poison",
+      "known_spells": ["produce_flame"],
       "stealable_items": [
         {
           "item_id": "iron_ore",
@@ -5110,6 +5118,7 @@
       "damage_dice": "1d8",
       "damage_bonus": 18,
       "damage_type": "poison",
+      "known_spells": ["produce_flame"],
       "stealable_items": [
         {
           "item_id": "iron_ore",
@@ -5552,6 +5561,7 @@
       "damage_dice": "2d10",
       "damage_bonus": 22,
       "damage_type": "force",
+      "known_spells": ["magic_missile"],
       "resistances": [
         "force"
       ],
@@ -5571,6 +5581,7 @@
       "damage_dice": "2d8",
       "damage_bonus": 20,
       "damage_type": "fire",
+      "known_spells": ["fireball"],
       "resistances": [
         "fire"
       ],
@@ -5590,6 +5601,7 @@
       "damage_dice": "2d8",
       "damage_bonus": 19,
       "damage_type": "poison",
+      "known_spells": ["insect_plague"],
       "on_hit_condition": "poisoned",
       "resistances": [
         "poison"
@@ -5610,6 +5622,7 @@
       "damage_dice": "2d8",
       "damage_bonus": 19,
       "damage_type": "poison",
+      "known_spells": ["insect_plague"],
       "on_hit_condition": "poisoned",
       "resistances": [
         "poison"
@@ -5630,6 +5643,7 @@
       "damage_dice": "2d8",
       "damage_bonus": 20,
       "damage_type": "psychic",
+      "known_spells": ["vicious_mockery"],
       "on_hit_condition": "silenced",
       "resistances": [
         "psychic"
@@ -5650,6 +5664,7 @@
       "damage_dice": "2d10",
       "damage_bonus": 20,
       "damage_type": "necrotic",
+      "known_spells": ["voidcall"],
       "on_hit_condition": "frightened",
       "resistances": [
         "necrotic"
@@ -5670,6 +5685,7 @@
       "damage_dice": "2d10",
       "damage_bonus": 21,
       "damage_type": "necrotic",
+      "known_spells": ["voidcall"],
       "on_hit_condition": "paralyzed",
       "resistances": [
         "necrotic"
@@ -5690,6 +5706,7 @@
       "damage_dice": "2d8",
       "damage_bonus": 19,
       "damage_type": "lightning",
+      "known_spells": ["lightning_bolt"],
       "resistances": [
         "lightning"
       ],
@@ -5709,6 +5726,7 @@
       "damage_dice": "2d8",
       "damage_bonus": 19,
       "damage_type": "cold",
+      "known_spells": ["ice_storm"],
       "on_hit_condition": "prone",
       "resistances": [
         "cold"
@@ -5729,6 +5747,7 @@
       "damage_dice": "2d8",
       "damage_bonus": 20,
       "damage_type": "radiant",
+      "known_spells": ["starfall_lance"],
       "resistances": [
         "radiant"
       ],
@@ -5748,6 +5767,7 @@
       "damage_dice": "2d10",
       "damage_bonus": 20,
       "damage_type": "psychic",
+      "known_spells": ["vicious_mockery"],
       "on_hit_condition": "blinded",
       "resistances": [
         "psychic"
@@ -5768,6 +5788,7 @@
       "damage_dice": "2d10",
       "damage_bonus": 23,
       "damage_type": "force",
+      "known_spells": ["magic_missile"],
       "on_hit_condition": "frightened",
       "resistances": [
         "force"

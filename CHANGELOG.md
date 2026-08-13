@@ -2,6 +2,52 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.194] — Add: real monster/boss spellcasting, woven into narration and story
+
+Real live thread (Coffee, dev-bridge): tried Counterspell, hit this
+game's own documented "no monster casts spells yet" limitation, then:
+"Certain enemies definitely need to have magic.. lets get this
+working," followed by "bosses shud def have spells and abilities,
+narrations shud work this in and so shud the story," "glue everything
+we did recently all together with this and work it into the story,"
+"can ai players use thier magic and abilities?", "are the summons
+worked into the story line?", and "make it so 60% of the summons
+[Remnants] are tied to the storyline... the others (really good ones)
+shud be findable... make some secrets."
+
+- The 3 real shaman monsters (goblin_shaman, goblin_shaman_elder,
+  elder_root_shaman) plus 18 thematically-matched real bosses (by
+  their own established damage_type — fire→Fireball,
+  necrotic→Voidcall, force→Magic Missile, psychic→Vicious Mockery,
+  poison→Insect Plague, lightning→Lightning Bolt, cold→Ice Storm,
+  radiant→Starfall Lance) now carry a real `known_spells` list and a
+  real 40% chance to cast a known damage spell instead of attacking,
+  through the exact same rules-layer pipeline a player's own cast
+  already uses. This mechanism is side-agnostic — real AI party
+  companions with class-based known_spells cast their own spells the
+  same way, confirmed and tested.
+- Real Counterspell: any living combatant on the OPPOSING side with
+  Counterspell known, a spell slot, and an unused reaction negates it
+  — fixed a real bug caught while confirming AI companion casting: the
+  check originally hardcoded "party," which would have let an ally
+  wrongly counter a teammate's own spell.
+- A boss's "sizing up its target" pre-roll beat now knows in advance
+  whether it's about to cast a real spell, so it can genuinely
+  foreshadow magic. Boss intro/defeat narration reference a new
+  `_boss_ability_facts` (real spells + signature mechanics: adapts to
+  damage, extra attack when enraged, counters Sneak Attack, summons
+  reinforcements, drains life) as real ground truth.
+- Boss summons (previously a plain deterministic line only) now also
+  get a real, narrated flourish, same "epic moment" pattern as boss
+  intro/defeat.
+- Of the 12 real Remnants (Unbound superbosses), 7 (~60%) are now
+  story_tied: once a player has genuinely visited that Remnant's real
+  location but hasn't bound it yet, its real lore surfaces as a new
+  "Whispers" section on the Story So Far screen — deterministic, no
+  extra Ollama call. The 5 strongest by real average summon damage
+  stay exactly as originally designed: pure secrets, found only by
+  real exploration, never hinted at.
+
 ## [1.27.193] — Add: narration reuse cache for routine combat lines
 
 Real live request (Coffee: "make this run as fast as it can so

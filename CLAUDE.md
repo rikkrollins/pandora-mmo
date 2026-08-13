@@ -213,10 +213,22 @@ same as any other `*_tmp.py`.
   on the participant dict. Opportunity attacks were already
   implemented (2026-07-13, `_do_flee`'s "opportunity attacks as you
   break away" block) before this doc was updated to say so. Counterspell
-  is NOT implemented and can't meaningfully be yet: no monster or
-  hostile NPC in this game ever casts a spell, so there is currently no
-  real trigger for it — would need monster/NPC spellcasting to exist
-  first.
+  IS now implemented (2026-08-13, per Coffee, dev-bridge: "Certain
+  enemies definitely need to have magic.. lets get this working" —
+  reported right after hitting this exact limitation live): the 3 real
+  shaman-flavored monsters (`goblin_shaman`, `goblin_shaman_elder`,
+  `elder_root_shaman`) carry a real `known_spells` list
+  (`campaigns/default/campaign.json`) and have a real
+  `MONSTER_SPELLCAST_CHANCE` (40%) chance each turn to cast a real
+  damage spell instead of attacking, via `bot._maybe_monster_cast_spell`
+  — through the exact same rules-layer pipeline
+  (`spells_module.resolve_damage_spell` + `apply_damage_type_modifier`
+  + `elemental_overflow_heal`) a player's own cast already uses. Any
+  real party member who knows Counterspell, has a spell slot, and
+  hasn't used their reaction this round auto-negates it (same
+  `reaction_used_round` economy as Shield/Uncanny Dodge). No other
+  monster casts spells yet — this is a first slice, not every monster
+  in the bestiary.
 - Skill checks use one fixed DC (13) for every situation — deliberate,
   to avoid the AI inventing difficulty numbers.
 - Resting ("I rest"/"heal up" and "take a rest"/going inactive) is NOT
