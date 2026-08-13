@@ -197,13 +197,25 @@ def _spells_catalog_text() -> str:
 
 
 def _guilds_catalog_text() -> str:
+    # Real live bug (2026-08-13, Coffee, Support topic): asked "How do i
+    # join the forge guild?" and got back "No additional steps required
+    # beyond meeting these criteria" -- confirmed live this was flatly
+    # wrong. This catalog only ever listed level+class, so Support had
+    # no way to know guilds.py's eligible_for_guild() ALSO requires
+    # choosing a real subclass first (for any class-gated guild) and
+    # having won at least one real fight (proven_in_combat, for every
+    # guild) -- the exact two gates that were actually blocking the
+    # player, left entirely out of its own grounding. Naming them here
+    # is what CLAUDE.md's grounding rule requires: answer from what's
+    # ACTUALLY implemented, not a partial read of it.
     lines = ["\nREAL GUILDS IN THIS GAME:"]
     for guild_id, guild in GUILDS.items():
-        lines.append(
-            f"- {guild['name']}: requires level {guild['join_requirement_level']}"
-            + (f", classes: {', '.join(guild['join_requirement_classes'])}"
-               if guild.get("join_requirement_classes") else "")
-        )
+        extra = []
+        if guild.get("join_requirement_classes"):
+            extra.append(f"classes: {', '.join(guild['join_requirement_classes'])}")
+            extra.append("must have chosen a real subclass first (say \"choose the path of...\")")
+        extra.append("must have won at least one real fight (proving yourself in combat)")
+        lines.append(f"- {guild['name']}: requires level {guild['join_requirement_level']}, {', '.join(extra)}")
     return "\n".join(lines)
 
 

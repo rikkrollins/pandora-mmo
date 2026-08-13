@@ -6284,6 +6284,196 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(mock_defeat.call_args.args[2])
             self.assertIn("Fireball", mock_defeat.call_args.args[2])
 
+    # -- Dev-bridge investigation (2026-08-13): real live bugs reported
+    #    via screenshot in the Development topic -----------------------
+    def test_forge_guild_join_rejection_names_real_subclass_options(self):
+        """
+        Real live bug (Coffee: "It is not letting me join the Forge
+        guild and it is not being clear on how I can join the Forge
+        guild" -- confirmed live via screenshots: a level-16 Fighter
+        stuck in an infinite retry loop on "join the forge guild"/"join
+        the path of the forge guild"). Root cause: the old rejection
+        message said 'say "choose the path of..."' without ever naming
+        what goes after "of" -- the real options only ever appeared in
+        a DIFFERENT command's own no-match message the player had no
+        reason to invoke. Confirms the fix names them right here.
+        """
+        character = make_basic_character(
+            996050, "ForgeHopeful", char_class="Fighter", current_location="crossroads_tavern",
+        )
+        db.update_character(996050, -999, level=5, proven_in_combat=True)
+        character = db.get_character(996050, -999)
+        eligible, reason = guilds.eligible_for_guild(character, "forge_guild")
+        self.assertFalse(eligible)
+        self.assertIn("Champion", reason)
+        self.assertIn("Battle Master", reason)
+
+    def test_promotion_slot_rejection_names_the_guild_already_held(self):
+        """
+        Real live bug (Coffee, dev-bridge screenshot: "This is not true.
+        I'm currently eligible and I'm not in any other guild" -- in
+        reply to "You've earned every Promotion your evolutions allow so
+        far... rebirth again"). Confirmed live against the real
+        production database: Coffee's CURRENTLY ACTIVE character at that
+        moment really did already hold The Adventurers' Guild (0
+        rebirths -> 1 slot unlocked, 1 slot used) -- mathematically
+        correct, but the rejection never named WHICH guild, so there was
+        no way to tell "you're mistaken about your own state" from "this
+        is broken." The fix names the held guild right in the message.
+        """
+        character = make_basic_character(
+            996055, "PromotionHopeful", char_class="Warlock", current_location="crossroads_tavern",
+        )
+        db.update_character(996055, -999, guild="adventurers_guild", rebirth_count=0)
+        character = db.get_character(996055, -999)
+        eligible, reason = guilds.eligible_for_guild(character, "enchanters_guild")
+        self.assertFalse(eligible)
+        self.assertIn("Adventurers' Guild", reason)
+
+    async def test_invite_already_benched_member_points_at_unbench_not_a_dead_end(self):
+        """
+        Real live bug (2026-08-13, dev-bridge screenshot, Coffee: "I only
+        have three characters in my battle party and it's not letting me
+        invite other members"). Confirmed live against the real
+        production database: the party (11/12 total members) was
+        nowhere near full, and every real/AI character in the whole chat
+        was ALREADY a member of it -- "invite" correctly refuses a
+        target who's already in the party, but for a BENCHED member
+        (exactly what "only three in my battle party" describes -- most
+        of the roster was benched, not gone), the old flat "already in
+        your party" message never pointed at the real command
+        (unbench/"bring back") to add them to active combat.
+        """
+        make_basic_character(996080, "InviteLeader", current_location="crossroads_tavern")
+        party_id = db.create_party(996080, -999)
+        benched = make_basic_character(996081, "BenchedRecruit", current_location="crossroads_tavern")
+        db.update_character_by_id(benched["character_id"], party_id=party_id, is_benched=1)
+
+        sink = []
+        update = FakeUpdate(996080, "invite BenchedRecruit to my party", sink)
+        await bot._do_invite_to_party(update, "BenchedRecruit")
+        self.assertTrue(any("bring BenchedRecruit back" in msg for msg in sink), sink)
+
+    async def test_party_combat_cap_counts_one_slot_per_human_not_per_character(self):
+        """
+        Real live bug (Coffee, with a screenshot: "two of the players
+        Chavana and Lorianna are controlled by one player and they are
+        not currently active... human players can only use one
+        character at a time, therefore only taking up one party slot" --
+        confirmed live against the real production database: Laurienna/
+        Charvenna (one real owner) AND Ravenloft/Pan (Coffee's own two
+        characters) were BOTH non-benched in the same real party,
+        eating 4 of its 6 active combat slots between just 2 humans).
+        A human can only ever pilot the character db.active_characters
+        actually points at -- a dormant alt sitting in the same party
+        must never also count as a second combatant.
+        """
+        make_basic_character(996060, "CapLeader", current_location="crossroads_tavern")
+        party_id = db.create_party(996060, -999)
+
+        alt_a = make_basic_character(996061, "AltA", current_location="crossroads_tavern")
+        db.update_character_by_id(alt_a["character_id"], party_id=party_id, is_benched=0)
+        alt_b = db.create_character(
+            telegram_user_id=996061, chat_id=-999, name="AltB", race="Human", char_class="Wizard",
+            ability_scores={"strength": 10, "dexterity": 10, "constitution": 10, "intelligence": 15, "wisdom": 10, "charisma": 10},
+            hp_max=8, armor_class=11, gold=0, inventory={}, known_spells=[], current_location="crossroads_tavern",
+        )  # db.create_character makes the new one 996061's active character
+        db.update_character_by_id(alt_b["character_id"], party_id=party_id, is_benched=0)
+
+        leader = db.get_character(996060, -999)
+        combatants = bot._get_real_party_combatants(leader)
+        combatant_ids = {c["character_id"] for c in combatants}
+        self.assertIn(alt_b["character_id"], combatant_ids)  # the real, currently-piloted character fights
+        self.assertNotIn(alt_a["character_id"], combatant_ids)  # the dormant alt never does
+
+    async def test_unbench_cap_check_ignores_a_dormant_alt_occupying_a_slot(self):
+        """Same dedup as _get_real_party_combatants, but for the exact screenshot symptom: "Your active party is already full (6/6) -- bench someone else first" firing even though a real slot was free once dormant alts are correctly excluded."""
+        leader = make_basic_character(996070, "UnbenchLeader", current_location="crossroads_tavern")
+        party_id = db.create_party(996070, -999)
+
+        alt_a = make_basic_character(996071, "UnbenchAltA", current_location="crossroads_tavern")
+        db.update_character_by_id(alt_a["character_id"], party_id=party_id, is_benched=0)
+        alt_b = db.create_character(
+            telegram_user_id=996071, chat_id=-999, name="UnbenchAltB", race="Human", char_class="Wizard",
+            ability_scores={"strength": 10, "dexterity": 10, "constitution": 10, "intelligence": 15, "wisdom": 10, "charisma": 10},
+            hp_max=8, armor_class=11, gold=0, inventory={}, known_spells=[], current_location="crossroads_tavern",
+        )
+        db.update_character_by_id(alt_b["character_id"], party_id=party_id, is_benched=0)
+
+        # Fill 3 more real, distinct AI slots: the OLD buggy count sees
+        # 6 non-benched members (leader + alt_a + alt_b + 3 AI) and
+        # wrongly rejects the unbench at "already full" -- the
+        # corrected count sees only 5 real combat slots (leader +
+        # alt_b's owner counted once + 3 AI), genuinely under the cap.
+        for i in range(3):
+            companion = db.create_ai_companion(
+                -999, f"UnbenchAI{i}", "Human", "Fighter",
+                ability_scores={"strength": 12, "dexterity": 12, "constitution": 12, "intelligence": 10, "wisdom": 10, "charisma": 10},
+                hp_max=10, armor_class=12, gold=0, inventory={},
+            )
+            db.update_character_by_id(companion["character_id"], party_id=party_id, is_benched=0)
+
+        benched = make_basic_character(996072, "UnbenchBenched", current_location="crossroads_tavern")
+        db.update_character_by_id(benched["character_id"], party_id=party_id, is_benched=1)
+
+        sink = []
+        update = FakeUpdate(996070, "bring UnbenchBenched back", sink)
+        await bot._do_unbench_member(update, "UnbenchBenched")
+        self.assertFalse(any("already full" in msg for msg in sink), sink)
+        self.assertEqual(db.get_character_by_id(benched["character_id"])["is_benched"], 0)
+
+    async def test_unbench_cap_check_ignores_a_resting_inactive_member(self):
+        """
+        Real live bug (Coffee: "inactive players shudnt be included in
+        the active party rooster"). _get_real_party_combatants (who
+        actually fights) already excludes is_inactive (resting/AFK)
+        members -- this cap check was the one asymmetric place still
+        missing that same exclusion, letting a resting member wrongly
+        occupy a "full" slot they'd never actually fill in a real fight.
+        """
+        make_basic_character(996073, "InactiveCapLeader", current_location="crossroads_tavern")
+        party_id = db.create_party(996073, -999)
+
+        resting = make_basic_character(996074, "RestingMember", current_location="crossroads_tavern")
+        db.update_character_by_id(resting["character_id"], party_id=party_id, is_benched=0, is_inactive=1)
+
+        # Fill 4 more real, distinct AI slots: the OLD buggy count sees
+        # 6 non-benched members (leader + resting + 4 AI) and wrongly
+        # rejects the unbench -- the corrected count sees only 5 real
+        # combat slots (leader + 4 AI), genuinely under the cap.
+        for i in range(4):
+            companion = db.create_ai_companion(
+                -999, f"InactiveCapAI{i}", "Human", "Fighter",
+                ability_scores={"strength": 12, "dexterity": 12, "constitution": 12, "intelligence": 10, "wisdom": 10, "charisma": 10},
+                hp_max=10, armor_class=12, gold=0, inventory={},
+            )
+            db.update_character_by_id(companion["character_id"], party_id=party_id, is_benched=0)
+
+        benched = make_basic_character(996075, "InactiveCapBenched", current_location="crossroads_tavern")
+        db.update_character_by_id(benched["character_id"], party_id=party_id, is_benched=1)
+
+        sink = []
+        update = FakeUpdate(996073, "bring InactiveCapBenched back", sink)
+        await bot._do_unbench_member(update, "InactiveCapBenched")
+        self.assertFalse(any("already full" in msg for msg in sink), sink)
+        self.assertEqual(db.get_character_by_id(benched["character_id"])["is_benched"], 0)
+
+    def test_support_guild_catalog_names_subclass_and_combat_proof_requirements(self):
+        """
+        Real live bug (Coffee, Support topic: "How do i join the forge
+        guild?" got back "No additional steps required beyond meeting
+        these criteria" -- flatly wrong, confirmed live against
+        guilds.eligible_for_guild, which also requires a chosen subclass
+        (for class-gated guilds) and having proven yourself in combat
+        (for every guild). Support's own grounding catalog was missing
+        both, which is what let it hallucinate "no additional steps".
+        """
+        from ai.support_agent import _guilds_catalog_text
+        catalog = _guilds_catalog_text()
+        self.assertIn("Forge Guild", catalog)
+        self.assertIn("subclass", catalog)
+        self.assertIn("proving yourself in combat", catalog)
+
     def test_equipable_worth_shown_in_stats_line(self):
         """Real live request (2026-08-03): "in the description of the items can u show what it is worth? do this for equipables"."""
         from rules.item_generator import generate_weapon

@@ -316,15 +316,28 @@ def eligible_for_guild(character: dict, guild_id: str) -> tuple[bool, str]:
     if guild_id in held:
         return False, "You're already a member."
     if held:
+        held_names = ", ".join(GUILDS[gid]["name"] for gid in held if gid in GUILDS)
         if len(held) >= guild_slots_unlocked(character):
+            # Real live bug (2026-08-13, Coffee, dev-bridge screenshot:
+            # "This is not true. I'm currently eligible and I'm not in
+            # any other guild" -- confirmed live against the real
+            # database: Coffee's CURRENTLY ACTIVE character at that
+            # moment (Ravenloft, not the character they were actually
+            # thinking of) really does already hold The Adventurers'
+            # Guild with 0 rebirths -- 1 slot unlocked, 1 slot used,
+            # mathematically correct -- but the rejection never named
+            # WHICH guild, so there was no way to tell "you're mistaken
+            # about your own state" from "this is broken." Same class of
+            # fix as the Forge Guild subclass hint just above: name the
+            # concrete fact instead of a bare generic rejection.
             return False, (
-                "You've earned every Promotion your evolutions allow so far -- "
-                "rebirth again to become eligible for another."
+                f"You're already in {held_names} — you've earned every Promotion your "
+                "evolutions allow so far. Rebirth again to become eligible for another."
             )
         if not has_mastered_all_held_guilds(character):
             return False, (
-                "Not eligible for a Promotion yet -- true mastery of your current guild's "
-                "full training curriculum comes first."
+                f"You're in {held_names}, but not eligible for a Promotion yet -- true mastery "
+                "of your current guild's full training curriculum comes first."
             )
     if character["level"] < guild["join_requirement_level"]:
         return False, f"Requires level {guild['join_requirement_level']}."
@@ -335,6 +348,25 @@ def eligible_for_guild(character: dict, guild_id: str) -> tuple[bool, str]:
         if char_class not in required_classes and hybrid_class not in required_classes:
             return False, f"Only open to: {', '.join(c.capitalize() for c in required_classes)}."
         if not character.get("subclass"):
+            # Real live bug (2026-08-13, Coffee: "It is not letting me
+            # join the Forge guild and it is not being clear on how I
+            # can join" -- confirmed live, a Fighter stuck retrying
+            # "join the forge guild"/"join the path of the forge guild"
+            # forever). The old generic hint here told the player to
+            # say "choose the path of..." without ever naming what goes
+            # after "of" -- the real options only ever appeared in a
+            # DIFFERENT command's own no-match message
+            # (_do_choose_subclass in bot.py), which the player had no
+            # reason to invoke separately. Naming the real options for
+            # their own class right here, in the message that actually
+            # gets shown, closes that loop.
+            from rules.leveling import CLASS_SUBCLASSES
+            options = CLASS_SUBCLASSES.get(character["char_class"])
+            if options:
+                return False, (
+                    "Requires choosing a subclass first — say \"choose the path of "
+                    f"{options[0]}\" or \"choose the path of {options[1]}\"."
+                )
             return False, "Requires choosing a subclass first (say \"choose the path of...\")."
     # Task #170, per Coffee: guild membership should require vetting, not
     # be an instant join. Reuses the exact same real proof every guild

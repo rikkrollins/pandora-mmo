@@ -871,6 +871,26 @@ def _active_character_id(telegram_user_id: int, chat_id: int, conn=None) -> int 
         return _lookup(c)
 
 
+def get_active_character_id(telegram_user_id: int, chat_id: int) -> int | None:
+    """
+    Public wrapper around _active_character_id -- which of this human's
+    characters they're CURRENTLY piloting in this chat (2026-08-13, per
+    Coffee: "human players can only use one character at a time,
+    therefore only taking up one party slot"). get_party_members_by_id
+    deliberately does NOT filter by this anymore (see that function's
+    own 2026-08-06 docstring -- a dormant alt character, e.g. Laurienna
+    while her owner is playing Charvenna, must still show up in party
+    listings for revival/XP-sharing/death handling), which is correct
+    there but means anything that counts REAL SIMULTANEOUS COMBATANTS
+    (bot.py's _get_real_party_combatants, the active-roster cap check in
+    _do_unbench_member) needs its own explicit way to tell "this is the
+    one character of theirs actually in play right now" from "this is
+    an owned-but-dormant alt sitting in the same party" -- a human can't
+    dual-pilot two characters into the same fight.
+    """
+    return _active_character_id(telegram_user_id, chat_id)
+
+
 def _set_active_character(telegram_user_id: int, chat_id: int, character_id: int, conn) -> None:
     # active_characters' real PK became (telegram_user_id, chat_id) in the
     # Phase 4a schema migration (2026-08-03); Phase 4b (2026-08-04) threads

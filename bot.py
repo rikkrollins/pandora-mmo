@@ -1764,6 +1764,18 @@ def _get_real_party_combatants(requester: dict) -> list[dict]:
         for m in db.get_party_members_by_id(party_id):
             if m.get("is_benched") or m.get("is_inactive"):
                 continue
+            # A human can only ever pilot one character at a time
+            # (2026-08-13, real live bug, Coffee: two real players --
+            # Laurienna/Charvenna and Ravenloft/Pan -- each had BOTH of
+            # their own characters counted as separate combatants,
+            # eating 4 of the party's 6 active combat slots between just
+            # 2 humans). get_party_members_by_id deliberately still
+            # lists a dormant alt character (see db.get_active_character_
+            # id's own docstring -- needed for revival/XP-sharing/death
+            # handling), but it never actually fights: only the
+            # character this owner is CURRENTLY piloting can.
+            if m["telegram_user_id"] > 0 and m["character_id"] != db.get_active_character_id(m["telegram_user_id"], m["chat_id"]):
+                continue
             if m.get("is_ai"):
                 if m["current_location"] != location_id:
                     db.update_character_by_id(m["character_id"], current_location=location_id)
@@ -11556,9 +11568,29 @@ async def _do_invite_to_party(update: Update, target_name: str) -> None:
         return
 
     if target.get("party_id") == party_id:
-        await update.effective_chat.send_message(
-            f"{target['name']} is already in your party.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-        )
+        # Real live bug (2026-08-13, dev-bridge screenshot, Coffee: "I
+        # only have three characters in my battle party and it's not
+        # letting me invite other members"). Confirmed live against the
+        # real production database: the party (11/12 total members) was
+        # nowhere near full, and every real/AI character in the whole
+        # chat was ALREADY a member -- "invite" is for bringing in a
+        # NEW member, so it correctly refused, but for anyone trying to
+        # bring an already-a-member-but-BENCHED character back into
+        # active combat (exactly what "I only have three in my battle
+        # party" describes), the old flat "already in your party"
+        # message was a dead end that never pointed at the real command
+        # for that (unbench) -- same "name the concrete fact, point to
+        # the real lever" gap as the guild rejection fixes above.
+        if target.get("is_benched"):
+            await update.effective_chat.send_message(
+                f"{target['name']} is already in your party, just benched — say "
+                f"\"bring {target['name']} back\" to add them to the active battle roster.",
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+            )
+        else:
+            await update.effective_chat.send_message(
+                f"{target['name']} is already in your party.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+            )
         return
 
     if target.get("is_ai"):
@@ -11640,10 +11672,31 @@ async def _do_unbench_member(update: Update, target_name: str) -> None:
     if not target.get("is_benched"):
         await _safe_send(update, f"{target['name']} isn't benched.")
         return
-    active_count = sum(
-        1 for m in db.get_party_members_by_id(party_id)
-        if not m.get("is_benched") and m["telegram_user_id"] != target["telegram_user_id"]
-    )
+    # Same real-combat-slot dedup as _get_real_party_combatants
+    # (2026-08-13, per Coffee): a human's dormant alt character never
+    # actually occupies a combat slot, so it shouldn't count against
+    # this cap either -- only counted once per real human owner (their
+    # CURRENT active character), plus every AI companion individually.
+    # is_inactive (2026-08-13, per Coffee: "inactive players shudnt be
+    # included in the active party rooster") -- _get_real_party_
+    # combatants already excludes is_inactive members from who
+    # actually fights (`if m.get("is_benched") or m.get("is_inactive"):
+    # continue`); this cap check was the one asymmetric place still
+    # missing that same exclusion, letting a resting/AFK member wrongly
+    # occupy a "full" slot they'd never actually fill in a real fight.
+    counted_owners = set()
+    active_count = 0
+    for m in db.get_party_members_by_id(party_id):
+        if m.get("is_benched") or m.get("is_inactive") or m["telegram_user_id"] == target["telegram_user_id"]:
+            continue
+        owner_id = m["telegram_user_id"]
+        if owner_id > 0:
+            if owner_id in counted_owners:
+                continue
+            if m["character_id"] != db.get_active_character_id(owner_id, m["chat_id"]):
+                continue
+            counted_owners.add(owner_id)
+        active_count += 1
     if active_count >= config.PARTY_ACTIVE_COMBAT_CAP:
         await _safe_send(
             update,
