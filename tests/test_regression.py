@@ -4375,6 +4375,119 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any("fire spell" in s.lower() for s in sink2))
         self.assertEqual(db.materialize_item_instance(item_id)["damage_type"], "fire")
 
+    async def test_enchant_force_lets_a_warlock_use_their_only_real_damage_spell(self):
+        """
+        Real live gap (2026-08-13, per Coffee: "i want to be able to
+        enchant with spells from warlock, sorcerer, bard and other
+        magic type users"): before this fix, enchant_flame/enchant_frost
+        were the ONLY weapon-retype recipes that existed at all (fire
+        and cold) -- a Warlock's entire real spell list (spells.py) has
+        exactly one damage-dealing spell, Eldritch Blast (force), so
+        there was no "enchant force" recipe to even name, regardless of
+        what the Warlock knew. Confirms the new enchant_force recipe
+        lets a real Warlock retype a weapon using their real cantrip.
+        """
+        from unittest.mock import patch
+        from rules.item_generator import generate_weapon
+        make_basic_character(
+            950940, "ForceWarlock", char_class="Warlock", known_spells=["eldritch_blast"],
+            current_location="crossroads_tavern",
+        )
+        db.add_item(950940, -999, "moonpetal", 4)
+        db.add_item(950940, -999, "iron_ore", 4)
+        base_weapon = generate_weapon(tier="common")
+        item_id = db.create_item_instance(
+            item_type=base_weapon["type"], name=base_weapon["name"], rarity=base_weapon["rarity"],
+            price=base_weapon["price"], base_stats={k: v for k, v in base_weapon.items() if k != "affixes"},
+            affixes=[],
+        )
+        db.add_item(950940, -999, item_id, 1)
+
+        sink = []
+        update = FakeUpdate(950940, f"enchant my {base_weapon['name']} with force", sink)
+        with patch("bot.narrate_skill_check", return_value="Raw force gathers along the edge."):
+            for _ in range(20):
+                sink.clear()
+                db.add_item(950940, -999, "moonpetal", 4)
+                db.add_item(950940, -999, "iron_ore", 4)
+                await bot._do_enchant_item(update, f"enchant my {base_weapon['name']} with force")
+                if not any("fizzles" in s.lower() for s in sink):
+                    break
+        self.assertFalse(any("force spell" in s.lower() for s in sink))
+        self.assertEqual(db.materialize_item_instance(item_id)["damage_type"], "force")
+
+    async def test_enchant_psychic_lets_a_bard_use_their_only_real_damage_spell(self):
+        """Companion case: Bard's only real damage spell is Vicious
+        Mockery (psychic) -- confirms the new enchant_psychic recipe."""
+        from unittest.mock import patch
+        from rules.item_generator import generate_weapon
+        make_basic_character(
+            950941, "PsychicBard", char_class="Bard", known_spells=["vicious_mockery"],
+            current_location="crossroads_tavern",
+        )
+        db.add_item(950941, -999, "moonpetal", 4)
+        db.add_item(950941, -999, "silverleaf_herb", 4)
+        base_weapon = generate_weapon(tier="common")
+        item_id = db.create_item_instance(
+            item_type=base_weapon["type"], name=base_weapon["name"], rarity=base_weapon["rarity"],
+            price=base_weapon["price"], base_stats={k: v for k, v in base_weapon.items() if k != "affixes"},
+            affixes=[],
+        )
+        db.add_item(950941, -999, item_id, 1)
+
+        sink = []
+        update = FakeUpdate(950941, f"enchant my {base_weapon['name']} with psychic", sink)
+        with patch("bot.narrate_skill_check", return_value="A cruel word is bound into the steel."):
+            for _ in range(20):
+                sink.clear()
+                db.add_item(950941, -999, "moonpetal", 4)
+                db.add_item(950941, -999, "silverleaf_herb", 4)
+                await bot._do_enchant_item(update, f"enchant my {base_weapon['name']} with psychic")
+                if not any("fizzles" in s.lower() for s in sink):
+                    break
+        self.assertFalse(any("psychic spell" in s.lower() for s in sink))
+        self.assertEqual(db.materialize_item_instance(item_id)["damage_type"], "psychic")
+
+    def test_enchant_still_requires_a_matching_spell_for_the_new_damage_types(self):
+        """Regression guard: the new recipes are NOT a free pass -- a
+        character with no necrotic spell known still can't enchant one."""
+        from rules.crafting import get_enchant_recipe
+        character = {"known_spells": ["fire_bolt"]}
+        recipe = get_enchant_recipe("enchant_necrotic")
+        affix_damage_type = recipe["affix"]["damage_type"]
+        known_matches = any(
+            spells.get_spell(sid) and spells.get_spell(sid).get("damage_type") == affix_damage_type
+            for sid in character["known_spells"]
+        )
+        self.assertFalse(known_matches)
+
+    def test_recipe_requirement_gate_accepts_a_secondary_promotion_guild(self):
+        """
+        Real live bug (2026-08-13, same Coffee request): recipe_
+        requirement_gate only ever checked character["guild"] (the
+        PRIMARY guild), never the secondary/Promotion guilds the
+        v1.27.168 guild-doubling system introduced. Every non-Wizard/
+        Rogue class has its own class-profession home guild (see
+        CLASS_PROFESSIONS) that isn't alchemy, so the realistic path
+        into the Enchanters' Guild ladder for those classes is a
+        SECOND (Promotion) guild, not primary -- which this gate
+        wrongly rejected before the fix. A character holding
+        enchanters_guild only as a secondary guild must now pass.
+        """
+        from rules.crafting import recipe_requirement_gate, get_enchant_recipe
+        character = {"guild": "forge_guild", "secondary_guilds": ["enchanters_guild"], "rebirth_count": 0}
+        recipe = get_enchant_recipe("enchant_greater_ward")
+        self.assertIsNone(recipe_requirement_gate(character, recipe))
+
+    def test_recipe_requirement_gate_still_rejects_a_true_non_member(self):
+        """Regression guard: someone holding neither the primary nor any secondary matching guild is still rejected."""
+        from rules.crafting import recipe_requirement_gate, get_enchant_recipe
+        character = {"guild": "forge_guild", "secondary_guilds": [], "rebirth_count": 0}
+        recipe = get_enchant_recipe("enchant_greater_ward")
+        rejection = recipe_requirement_gate(character, recipe)
+        self.assertIsNotNone(rejection)
+        self.assertIn("Enchanters", rejection)
+
     async def test_masterwork_enchant_scales_a_numeric_affix_value(self):
         """Real feature (2026-08-11): a masterwork roll on a value-bearing enchant (enchant_sharpen) scales the affix value up 1.5x."""
         from unittest.mock import patch

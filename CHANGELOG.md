@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.174] — Add: enchanting now works for Warlock/Sorcerer/Bard/all real damage types
+
+Real feature, per Coffee: "i want to be able to enchant with spells
+from warlock, sorcerer, bard and other magic type users." Investigated
+`_do_enchant_item`'s own spell-gate (bot.py) -- it already accepted ANY
+class's known spell for a matching damage type, no class restriction
+at all -- so the real bug was elsewhere:
+
+- `enchant_flame`/`enchant_frost` (fire/cold) were the ONLY weapon-
+  retype recipes that ever existed. A Warlock's entire real spell list
+  has exactly one damage-dealing spell (Eldritch Blast, force); a
+  Bard's has exactly one (Vicious Mockery, psychic) -- with no "enchant
+  force"/"enchant psychic" recipe to even name, those classes could
+  never pass regardless of what they knew. Added `enchant_force`,
+  `enchant_psychic`, `enchant_necrotic`, `enchant_radiant`, and
+  `enchant_poison` at the same base tier as the existing two (no guild
+  gate) -- every real damage type this game has now has a matching
+  weapon-retype recipe.
+- `recipe_requirement_gate` (rules/crafting.py, shared by enchant and
+  forge recipes) only ever checked `character["guild"]` (the PRIMARY
+  guild), never the secondary/Promotion guilds the v1.27.168 guild-
+  doubling system introduced. Every non-Wizard/Rogue class has its own
+  class-profession home guild that isn't alchemy, so the realistic path
+  into the Enchanters' Guild ladder for those classes is a SECOND
+  (Promotion) guild -- which this gate silently rejected even for a
+  genuine member. Now checks every held guild via `guilds.held_guild_ids`.
+
 ## [1.27.173] — Fix: "use <spell>" phrasing misclassified as use_item or silently dropped
 
 Real live bug, found via topic-activity monitoring in the same window

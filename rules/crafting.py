@@ -197,12 +197,30 @@ def class_profession_affinity_bonus(char_class: str, profession: str) -> int:
 # _do_craft (bot.py) -- a recipe with neither field set (every recipe
 # above this point) is ungated, exactly as before.
 def recipe_requirement_gate(character: dict, recipe: dict) -> str | None:
-    """Returns a player-facing rejection message, or None if `character` meets `recipe`'s requirements."""
+    """
+    Returns a player-facing rejection message, or None if `character`
+    meets `recipe`'s requirements.
+
+    Real live bug (2026-08-13, per Coffee: "i want to be able to
+    enchant with spells from warlock, sorcerer, bard and other magic
+    type users"): the guild check here only ever looked at
+    character["guild"] (the PRIMARY guild), never the secondary/
+    Promotion guilds the v1.27.168 guild-doubling system introduced
+    (guilds.held_guild_ids) -- a player whose CLASS home profession
+    isn't alchemy (every non-Wizard/Rogue class, see
+    CLASS_PROFESSIONS above) has no natural path to making Enchanters'
+    Guild their PRIMARY guild without abandoning their class's own
+    guild, so the realistic way any of them ever reach the guild-gated
+    enchant tiers is by earning Enchanters' Guild as a SECOND
+    (Promotion) guild after evolving -- which this check silently
+    rejected anyway, even for a genuine member.
+    """
     requires_guild = recipe.get("requires_guild")
-    if requires_guild and character.get("guild") != requires_guild:
-        from guilds import GUILDS
-        guild_name = GUILDS.get(requires_guild, {}).get("name", requires_guild)
-        return f"That recipe is reserved for members of the {guild_name}."
+    if requires_guild:
+        from guilds import GUILDS, held_guild_ids
+        if requires_guild not in held_guild_ids(character):
+            guild_name = GUILDS.get(requires_guild, {}).get("name", requires_guild)
+            return f"That recipe is reserved for members of the {guild_name}."
     min_rebirth = recipe.get("min_rebirth")
     if min_rebirth and character.get("rebirth_count", 0) < min_rebirth:
         return f"That recipe demands the mastery of rebirth #{min_rebirth} or higher — you're not there yet."
@@ -422,6 +440,51 @@ ENCHANT_RECIPES = {
     "enchant_frost": {
         "materials": {"sulfur_dust": 1, "moonpetal": 2},
         "affix": {"kind": "elemental_damage", "damage_type": "cold"},
+        "applies_to": ("weapon",),
+        "ability": "intelligence", "dc": 15, "profession": "alchemy",
+    },
+    # Real live gap (2026-08-13, per Coffee: "i want to be able to
+    # enchant with spells from warlock, sorcerer, bard and other magic
+    # type users") -- _do_enchant_item's own spell-gate (bot.py) already
+    # accepts ANY class's known spell for a matching damage_type, no
+    # class check at all, but enchant_flame/enchant_frost above were the
+    # ONLY weapon-retype recipes that ever existed -- fire and cold.
+    # Warlock's entire real spell list (spells.py CLASS_SPELL_LISTS) has
+    # exactly one damage-dealing spell (Eldritch Blast, force) and Bard
+    # has exactly one (Vicious Mockery, psychic) -- with no "enchant
+    # force"/"enchant psychic" recipe to even name, those two classes
+    # could never pass _find_enchant_recipe_in_text at all, regardless
+    # of what they know. Same base tier as flame/frost (no guild gate)
+    # -- this is about covering every real damage type this game
+    # actually has (see rules/combat.py's apply_damage_type_modifier),
+    # not a new mechanic.
+    "enchant_force": {
+        "materials": {"moonpetal": 1, "iron_ore": 2},
+        "affix": {"kind": "elemental_damage", "damage_type": "force"},
+        "applies_to": ("weapon",),
+        "ability": "intelligence", "dc": 15, "profession": "alchemy",
+    },
+    "enchant_psychic": {
+        "materials": {"moonpetal": 2, "silverleaf_herb": 1},
+        "affix": {"kind": "elemental_damage", "damage_type": "psychic"},
+        "applies_to": ("weapon",),
+        "ability": "intelligence", "dc": 15, "profession": "alchemy",
+    },
+    "enchant_necrotic": {
+        "materials": {"sulfur_dust": 2, "glimmerdeep_moss": 1},
+        "affix": {"kind": "elemental_damage", "damage_type": "necrotic"},
+        "applies_to": ("weapon",),
+        "ability": "intelligence", "dc": 15, "profession": "alchemy",
+    },
+    "enchant_radiant": {
+        "materials": {"silverleaf_herb": 2, "moonpetal": 1},
+        "affix": {"kind": "elemental_damage", "damage_type": "radiant"},
+        "applies_to": ("weapon",),
+        "ability": "intelligence", "dc": 15, "profession": "alchemy",
+    },
+    "enchant_poison": {
+        "materials": {"sulfur_dust": 1, "silverleaf_herb": 2},
+        "affix": {"kind": "elemental_damage", "damage_type": "poison"},
         "applies_to": ("weapon",),
         "ability": "intelligence", "dc": 15, "profession": "alchemy",
     },
