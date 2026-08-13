@@ -3994,6 +3994,9 @@
       "proficiency_bonus": 2,
       "xp_reward": 100,
       "on_hit_condition": "silenced",
+      "resistances": [
+        "poison"
+      ],
       "damage_dice": "1d8",
       "damage_bonus": 4,
       "damage_type": "poison",
@@ -4060,6 +4063,9 @@
       "proficiency_bonus": 3,
       "xp_reward": 200,
       "on_hit_condition": "poisoned",
+      "resistances": [
+        "poison"
+      ],
       "damage_dice": "1d8",
       "damage_bonus": 14,
       "damage_type": "poison",
@@ -4083,6 +4089,12 @@
       "proficiency_bonus": 2,
       "xp_reward": 200,
       "on_hit_condition": "poisoned",
+      "resistances": [
+        "poison"
+      ],
+      "vulnerabilities": [
+        "lightning"
+      ],
       "damage_dice": "1d8",
       "damage_bonus": 15,
       "damage_type": "poison",
@@ -4106,6 +4118,12 @@
       "proficiency_bonus": 3,
       "xp_reward": 150,
       "on_hit_condition": "blinded",
+      "resistances": [
+        "necrotic"
+      ],
+      "vulnerabilities": [
+        "radiant"
+      ],
       "damage_dice": "1d8",
       "damage_bonus": 16,
       "damage_type": "necrotic",
@@ -4130,6 +4148,12 @@
       "xp_reward": 350,
       "is_boss": true,
       "on_hit_condition": "silenced",
+      "resistances": [
+        "psychic"
+      ],
+      "vulnerabilities": [
+        "radiant"
+      ],
       "damage_dice": "1d8",
       "damage_bonus": 17,
       "damage_type": "psychic",
@@ -4186,6 +4210,12 @@
       "is_boss": true,
       "on_hit_condition": "frightened",
       "life_drain": true,
+      "resistances": [
+        "necrotic"
+      ],
+      "vulnerabilities": [
+        "radiant"
+      ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
       "damage_type": "necrotic",
@@ -4211,6 +4241,12 @@
       "is_boss": true,
       "on_hit_condition": "frightened",
       "life_drain": true,
+      "resistances": [
+        "force"
+      ],
+      "vulnerabilities": [
+        "psychic"
+      ],
       "damage_dice": "1d8",
       "damage_bonus": 17,
       "damage_type": "force",
@@ -4885,6 +4921,9 @@
       "proficiency_bonus": 3,
       "xp_reward": 180,
       "on_hit_condition": "silenced",
+      "resistances": [
+        "poison"
+      ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
       "damage_type": "poison",
@@ -4962,6 +5001,9 @@
       "proficiency_bonus": 3,
       "xp_reward": 160,
       "on_hit_condition": "poisoned",
+      "resistances": [
+        "poison"
+      ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
       "damage_type": "poison",
@@ -4984,6 +5026,9 @@
       "hp_max": 20,
       "proficiency_bonus": 1,
       "xp_reward": 25,
+      "vulnerabilities": [
+        "poison"
+      ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
       "damage_type": "physical",
@@ -5003,6 +5048,9 @@
       "proficiency_bonus": 2,
       "xp_reward": 140,
       "on_hit_condition": "poisoned",
+      "resistances": [
+        "poison"
+      ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
       "damage_type": "poison",
@@ -5026,6 +5074,12 @@
       "proficiency_bonus": 3,
       "xp_reward": 220,
       "on_hit_condition": "poisoned",
+      "resistances": [
+        "poison"
+      ],
+      "vulnerabilities": [
+        "fire"
+      ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
       "damage_type": "poison",
@@ -5049,6 +5103,9 @@
       "proficiency_bonus": 4,
       "xp_reward": 350,
       "on_hit_condition": "poisoned",
+      "resistances": [
+        "poison"
+      ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
       "damage_type": "poison",
@@ -5071,6 +5128,9 @@
       "hp_max": 39,
       "proficiency_bonus": 1,
       "xp_reward": 40,
+      "resistances": [
+        "poison"
+      ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
       "damage_type": "poison",
@@ -5150,6 +5210,9 @@
       "proficiency_bonus": 3,
       "xp_reward": 140,
       "on_hit_condition": "frightened",
+      "resistances": [
+        "necrotic"
+      ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
       "damage_type": "physical",
@@ -5266,6 +5329,12 @@
       "proficiency_bonus": 3,
       "xp_reward": 220,
       "on_hit_condition": "poisoned",
+      "resistances": [
+        "poison"
+      ],
+      "vulnerabilities": [
+        "lightning"
+      ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
       "damage_type": "poison",
@@ -5289,6 +5358,12 @@
       "proficiency_bonus": 3,
       "xp_reward": 320,
       "on_hit_condition": "poisoned",
+      "resistances": [
+        "poison"
+      ],
+      "vulnerabilities": [
+        "lightning"
+      ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
       "damage_type": "poison",
@@ -5311,6 +5386,12 @@
       "hp_max": 39,
       "proficiency_bonus": 1,
       "xp_reward": 40,
+      "resistances": [
+        "poison"
+      ],
+      "vulnerabilities": [
+        "lightning"
+      ],
       "damage_dice": "1d8",
       "damage_bonus": 18,
       "damage_type": "poison",

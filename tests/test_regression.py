@@ -3841,6 +3841,43 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("heals from fire damage", entry)
         self.assertIn("vulnerable to cold", entry)
 
+    def test_monster_resistances_and_vulnerabilities_use_only_real_damage_types(self):
+        """
+        Synergy Phase 2 (2026-08-13): every monster in campaign.json that
+        carries a resistances/vulnerabilities list -- both the pre-existing
+        Remnant/construct bosses (v1.27.170) and the newly-added early/mid
+        roster entries (goblin shamans, spider families, wolves, Hush
+        Below/cairn bosses) -- must only ever use a real damage_type this
+        game's rules layer actually understands. A guard against future
+        typos/invented types, not a test of any specific monster's
+        individual assignment.
+
+        "physical" is a real, pre-existing exception: it's the unmarked
+        default damage_type every weapon already has (items.py,
+        rules/combat.py's apply_damage_type_modifier), and several
+        construct-flavored monsters (e.g. verge_wraith, the_verge_warden)
+        already resist it -- that predates this pass and is intentionally
+        still allowed here, it's just never used for any NEW assignment in
+        this pass (none of those are elemental/energy-themed creatures).
+        """
+        real_damage_types = {
+            "cold", "fire", "force", "lightning", "necrotic", "poison", "psychic", "radiant",
+        }
+        allowed = real_damage_types | {"physical"}
+        monsters = bot.CAMPAIGN["monsters"]
+        self.assertGreater(len(monsters), 0)
+        bad = []
+        for monster_id, template in monsters.items():
+            for field in ("resistances", "vulnerabilities"):
+                for damage_type in template.get(field, []) or []:
+                    if damage_type not in allowed:
+                        bad.append((monster_id, field, damage_type))
+        self.assertEqual(bad, [], f"invalid damage type(s) found: {bad}")
+        # Sanity: confirm at least one newly-touched monster from this pass
+        # actually has real data (not just an empty-list false pass).
+        self.assertIn("poison", monsters["giant_spider"].get("resistances", []))
+        self.assertIn("radiant", monsters["shadow_wisp"].get("vulnerabilities", []))
+
     async def test_equipped_item_can_grant_a_spell_gated_by_feature_uses(self):
         """
         Real Phase 3 deliverable of the magic item system (2026-08-02):

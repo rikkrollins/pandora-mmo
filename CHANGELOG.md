@@ -2,6 +2,44 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.176] — Add: real resistances/vulnerabilities across the early/mid monster roster (Synergy Phase 2)
+
+Real feature, "break the game" synergy pass Phase 2, per Coffee: only
+the endgame Remnant bosses had any resistance/vulnerability data
+before this, so an elemental class/subclass/guild choice never mattered
+in combat until very late-game. 18 monsters given real, thematically-
+grounded assignments (each justified from the monster's own name/
+flavor/quest text, never random or templated):
+
+- Goblin shamans (`goblin_shaman`, `goblin_shaman_elder`,
+  `elder_root_shaman`) resist poison — they work the venom themselves.
+- The full venomous-spider family (`giant_spider`, `brood_spider`,
+  `elder_web_spider`, `spiderling`, `current_bound_spider`,
+  `crystal_spider`, `elder_crystal_spider`, `crystal_spiderling`,
+  `pool_wrought_spider`) resists poison (immune to their own venom);
+  the crystal-cave variants are additionally lightning-vulnerable
+  (brittle crystalline bodies), the water-bound one fire-vulnerable.
+- `root_goblin_pup`, the fragile low-HP variant living among the Sunken
+  Root Caverns' toxins, is poison-*vulnerable* instead.
+- `barrow_bound_wolf` (an ancient grave-mound dweller) resists
+  necrotic, matching this game's existing cairn/barrow pattern.
+- `shadow_wisp`, `the_unspoken`, `the_waiting_shape`, `the_unrepeating`
+  (Hush Below / Below the Cairn bosses) each mirror the exact
+  resist/vulnerable pattern their own damage_type and location family
+  already establish elsewhere in this game (necrotic/psychic/force
+  resist, radiant/psychic vulnerable).
+
+New regression guard (`test_monster_resistances_and_vulnerabilities_
+use_only_real_damage_types`) confirms every monster's resistance/
+vulnerability data — old and new — only ever uses a real damage type
+this game's rules layer understands (also documents a real, pre-
+existing legacy exception: several construct monsters already use
+"physical" as a resistance, which the guard correctly allows without
+permitting it for any new entry).
+
+Phases 3-4 of the synergy pass (guild-tagged side-quest pool, Echo
+Trials reacting to build identity) remain scoped, not yet started.
+
 ## [1.27.175] — Fix: guild combat/economy bonuses only checked primary guild (Synergy Phase 1)
 
 Real fix, "break the game" synergy pass Phase 1, per Coffee: "make
