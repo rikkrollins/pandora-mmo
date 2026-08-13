@@ -4037,36 +4037,159 @@ def _item_actions_keyboard(item_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
+# Loot Voting (2026-08-13, per Coffee: "when items are looted or
+# dropped lets have a voting system that the AI characters and the
+# players can vote on, asking if they Want it or not. Grab a tally of
+# who wants it then use RNG to decide who get it... if no one wants
+# the item, sell it and give the players the value in gold"). Real
+# module-level pending-vote state, resolved by a periodic checker
+# (same architecture _check_combat_timeouts already uses) rather than
+# blocking the handler that started it -- LOOT_VOTE_WINDOW_SECONDS
+# matches IDLE_CHECK_INTERVAL_SECONDS's own 60s cadence, so a vote
+# resolves on the very next tick after its window closes.
+LOOT_VOTE_WINDOW_SECONDS = 60
+_PENDING_LOOT_VOTES: dict[str, dict] = {}
+
+
+def _loot_vote_keyboard(vote_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("🙋 I want it", callback_data=f"lootvote|{vote_id}|yes"),
+        InlineKeyboardButton("🙅 Pass", callback_data=f"lootvote|{vote_id}|no"),
+    ]])
+
+
+def _ai_wants_item(pid: int, chat_id: int, loot_item: dict) -> bool:
+    """
+    A recruited AI companion's real "want" decision for a loot vote --
+    never an invented personality/preference, just whether the item is
+    a genuine mechanical upgrade over whatever they already have
+    equipped in that slot (same average_damage/ac_base comparison the
+    rest of this game already uses for gear quality).
+    """
+    character = db.get_character(pid, chat_id)
+    if character is None:
+        return False
+    if loot_item["type"] == "weapon":
+        equipped = items_module.get_item(character.get("equipped_weapon") or "")
+        if equipped is None:
+            return True
+        return average_damage(loot_item["damage_dice"], loot_item.get("damage_bonus", 0)) > average_damage(
+            equipped["damage_dice"], equipped.get("damage_bonus", 0)
+        )
+    if loot_item["type"] == "armor":
+        equipped = items_module.get_item(character.get("equipped_armor") or "")
+        return equipped is None or loot_item["ac_base"] > equipped["ac_base"]
+    return False
+
+
 async def _grant_generated_loot(update: Update, real_party_ids: list[int]) -> str:
     """
     Rolls a real, keepable, equippable magic item (2026-08-02 magic item
     system, Phase 1) via rules/item_generator.py, persists it as a real
     per-instance item (db.create_item_instance -- a synthetic "gi<n>"
     item_id, resolved later by items.get_item()'s fallback into
-    db.materialize_item_instance), and awards it to one random real party
-    member. A single physical object isn't meaningfully split like
-    gold/XP -- same reasoning already used for the map-loot drop right
-    after this call site.
-
-    Also sends a real, separate follow-up message with a "View Item"
-    button (2026-08-03, per Coffee) -- can't be a button on the victory
-    summary text itself, since that's one shared message covering XP/
-    quest/loot/level-up all at once and Telegram buttons apply to a
-    whole message, not one line of it.
+    db.materialize_item_instance), and opens a real Loot Vote instead of
+    handing it straight to a random winner (2026-08-13, per Coffee) --
+    every real human in the party gets a button to say whether they
+    want it, shown alongside its real stats; every AI companion decides
+    instantly via _ai_wants_item. RNG among everyone who said yes
+    resolves it once the vote window closes (_check_pending_loot_votes);
+    real Telegram user ids are always positive and AI companions'
+    synthetic ids always negative (db.create_ai_companion's own
+    documented convention), so splitting real_party_ids on sign is
+    reliable, not a guess.
     """
     loot_item = generate_item(item_type=random.choice(["weapon", "armor"]))
     item_id = _persist_generated_item(loot_item)
-    winner_id = random.choice(real_party_ids)
-    db.add_item(winner_id, update.effective_chat.id, item_id, 1)
-    winner_name = db.get_character(winner_id, update.effective_chat.id)["name"]
+    chat_id = update.effective_chat.id
+
+    human_ids = [pid for pid in real_party_ids if pid > 0]
+    ai_ids = [pid for pid in real_party_ids if pid <= 0]
+    ai_wants = {pid: _ai_wants_item(pid, chat_id, loot_item) for pid in ai_ids}
+
+    vote_id = f"loot{item_id}"
+    _PENDING_LOOT_VOTES[vote_id] = {
+        "chat_id": chat_id, "item_id": item_id, "item_name": loot_item["name"],
+        "human_ids": human_ids, "ai_wants": ai_wants, "votes": {}, "started_at": time.time(),
+    }
+    stats_line = _format_item_stats_line(loot_item)
+    stats_block = f"\n{stats_line}" if stats_line else ""
     await _safe_send(
-        update, f"🔍 Tap below to inspect the {loot_item['name']} {winner_name} just found.",
-        reply_markup=_item_view_keyboard(item_id), speak=False,
+        update,
+        f"🎲 **Loot found: {loot_item['name']}** ({loot_item['rarity'].replace('_', ' ')}){stats_block}\n"
+        f"Anyone who wants it, tap below within the next minute — if more than one hand goes up, it's random who gets it.",
+        reply_markup=_loot_vote_keyboard(vote_id), speak=False,
     )
-    return (
-        f"\n💰 **{winner_name}** loots a **{loot_item['name']}** from the fallen — "
-        f"a real {loot_item['rarity'].replace('_', ' ')} find, added straight to their inventory!"
-    )
+    return ""
+
+
+async def loot_vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Records one real human's yes/no vote on a pending loot drop; actual resolution happens later, in _check_pending_loot_votes."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    vote_id = parts[1] if len(parts) > 1 else ""
+    choice = parts[2] if len(parts) > 2 else ""
+    await _safe_answer(query)
+    record = _PENDING_LOOT_VOTES.get(vote_id)
+    if record is None:
+        await _safe_send(update, "That loot's already been decided.")
+        return
+    user_id = update.effective_user.id
+    if user_id not in record["human_ids"]:
+        return
+    record["votes"][user_id] = (choice == "yes")
+    await _safe_send(update, f"Vote recorded: {'you want it!' if choice == 'yes' else 'you pass.'}")
+
+
+async def _check_pending_loot_votes(bot) -> None:
+    """
+    Periodic resolver (same architecture as _check_combat_timeouts,
+    run from the same background loop) -- once a loot vote's window has
+    closed, tally every real human's explicit "yes" vote plus every AI
+    companion's pre-decided want, RNG-pick a winner among them, and
+    award the item. A non-response from a human counts as "no" (never
+    assumed to want it). Nobody wanting it sells the item for its own
+    real price and splits the gold evenly across the real party
+    (Coffee: "give the players the value in gold").
+    """
+    now = time.time()
+    for vote_id in list(_PENDING_LOOT_VOTES.keys()):
+        record = _PENDING_LOOT_VOTES[vote_id]
+        if now - record["started_at"] < LOOT_VOTE_WINDOW_SECONDS:
+            continue
+        del _PENDING_LOOT_VOTES[vote_id]
+        chat_id = record["chat_id"]
+        item_id = record["item_id"]
+        human_party = record["human_ids"]
+        wanters = [pid for pid in human_party if record["votes"].get(pid) is True]
+        wanters += [pid for pid, wants in record["ai_wants"].items() if wants]
+        anchor_pid = human_party[0] if human_party else 0
+        update_like = _AiPlayerUpdate(bot, chat_id, anchor_pid, "")
+        if wanters:
+            winner_id = random.choice(wanters)
+            db.add_item(winner_id, chat_id, item_id, 1)
+            winner_character = db.get_character(winner_id, chat_id)
+            winner_name = winner_character["name"] if winner_character else "Someone"
+            await _safe_send(
+                update_like, f"🎲 **{winner_name}** wins the roll for the **{record['item_name']}**!",
+                reply_markup=_item_view_keyboard(item_id), speak=False,
+            )
+        else:
+            item = items_module.get_item(item_id)
+            sale_price = item.get("price", 0) if item else 0
+            if human_party and sale_price > 0:
+                share = sale_price // len(human_party)
+                for pid in human_party:
+                    character = db.get_character(pid, chat_id)
+                    if character:
+                        db.update_character(pid, chat_id, gold=character["gold"] + share)
+                await _safe_send(
+                    update_like,
+                    f"💰 No one wanted the **{record['item_name']}** — sold for {sale_price} gold, "
+                    f"split across the party ({share} each).",
+                )
+            else:
+                await _safe_send(update_like, f"No one wanted the **{record['item_name']}** — it's left behind.")
 
 
 async def _award_victory_xp(update: Update, session: sessions.Session) -> tuple[str, list[str]]:
@@ -24286,6 +24409,10 @@ async def _idle_inactivity_loop(application: Application) -> None:
         except Exception as e:
             logger.error(f"[combat_timeout] background loop failed this cycle: {e!r}")
         try:
+            await _check_pending_loot_votes(application.bot)
+        except Exception as e:
+            logger.error(f"[loot_vote] background loop failed this cycle: {e!r}")
+        try:
             _apply_passive_party_regen()
         except Exception as e:
             logger.error(f"[world_tick] passive party regen failed this cycle: {e!r}")
@@ -24619,6 +24746,7 @@ def build_application() -> Application:
     application.add_handler(MessageHandler(filters.VIDEO, dev_topic_video_handler))
     application.add_handler(CallbackQueryHandler(battle_menu_callback, pattern=r"^bm\|"))
     application.add_handler(CallbackQueryHandler(itemview_callback, pattern=r"^itemview\|"))
+    application.add_handler(CallbackQueryHandler(loot_vote_callback, pattern=r"^lootvote\|"))
     application.add_handler(CallbackQueryHandler(guild_curriculum_callback, pattern=r"^gcurr\|"))
     # Task #176: out-of-combat browsing buttons (shop/spells/quest board),
     # own callback-data namespaces so none of these can ever collide with

@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.191] — Add: real loot voting for combat drops
+
+Real live request (Coffee: "when items are looted or dropped lets have
+a voting system that the AI characters and the players can vote on,
+asking if they Want it or not. Grab a tally of who wants it then use
+RNG to decide who get it, during voting let them see the item and show
+the stats so the players know what they are betting on. if no one
+wants the item, sell it and give the players the value in gold").
+Generated loot from combat victory no longer goes straight to a random
+party member — it now opens a real 60-second vote. Every real human in
+the party gets a message with the item's real stats and a Yes/No
+button; every AI companion decides instantly via a new grounded
+`_ai_wants_item` heuristic (upgrade check against their currently
+equipped weapon/armor — no equipped item in that slot is an automatic
+want). A new periodic check (`_check_pending_loot_votes`, reusing the
+same background-loop architecture as combat-timeout checks) resolves
+each vote once its window closes: RNG (`random.choice`) picks a winner
+among only the real "wanters," or if nobody wants it, the item is sold
+for its real price and the gold is split evenly across the human
+party members.
+
 ## [1.27.190] — Fix: bare "training" now checks guild curriculum status
 
 Real live gap (Coffee: "how do I continue training?" got no real

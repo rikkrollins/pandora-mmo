@@ -3589,12 +3589,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result, item_id)
 
-    async def test_generated_loot_is_kept_not_auto_sold_on_combat_victory(self):
+    async def test_generated_loot_opens_a_real_vote_and_resolves_to_the_only_real_candidate(self):
         """
-        Full-stack version of the test above -- proves the REAL combat-
-        victory call site (_award_victory_xp's loot section, via the new
-        _grant_generated_loot helper) actually keeps the roll instead of
-        the old "convert to gold" behavior.
+        Full-stack version -- proves the REAL combat-victory call site
+        (_award_victory_xp's loot section, via _grant_generated_loot)
+        opens a real Loot Vote (2026-08-13, per Coffee) instead of
+        instantly awarding it, and _check_pending_loot_votes correctly
+        resolves it once the window closes, keeping the roll (not
+        converting it to gold) when someone actually wants it.
         """
         import sessions
         sessions.end_session(-999)
@@ -3609,8 +3611,20 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [leader_id, -2_600_301]
 
         summary, _level_up_notes = await bot._award_victory_xp(FakeUpdate(leader_id, "", []), session)
-        self.assertIn("loots a", summary)
-        self.assertIn("real", summary)
+        self.assertNotIn("loots a", summary)  # no longer awarded synchronously -- it's up for a vote
+
+        self.assertEqual(len(bot._PENDING_LOOT_VOTES), 1)
+        record = next(iter(bot._PENDING_LOOT_VOTES.values()))
+        self.assertEqual(record["human_ids"], [leader_id])
+        record["started_at"] -= bot.LOOT_VOTE_WINDOW_SECONDS + 1
+        record["votes"][leader_id] = True
+
+        class _FakeBot:
+            async def send_message(self, *a, **k):
+                return None
+
+        await bot._check_pending_loot_votes(_FakeBot())
+        self.assertEqual(len(bot._PENDING_LOOT_VOTES), 0)
 
         updated_character = db.get_character(leader_id, -999)
         generated_ids = [iid for iid in updated_character["inventory"] if iid.startswith("gi")]
@@ -5828,9 +5842,18 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink = []
         loot_update = FakeUpdate(996001, "combat victory", sink)
         loot_line = await bot._grant_generated_loot(loot_update, [996001])
-        self.assertIn("loots a", loot_line)
-        self.assertTrue(len(loot_update.effective_chat.sent_photos) == 0)  # the loot line has no photo of its own
-        self.assertTrue(len(loot_update.effective_chat._sink) > 0)
+        self.assertEqual(loot_line, "")  # deferred to the real vote, not awarded synchronously
+        self.assertTrue(len(loot_update.effective_chat._sink) > 0)  # the vote prompt itself was sent
+
+        record = next(iter(bot._PENDING_LOOT_VOTES.values()))
+        record["started_at"] -= bot.LOOT_VOTE_WINDOW_SECONDS + 1
+        record["votes"][996001] = True
+
+        class _FakeBot:
+            async def send_message(self, *a, **k):
+                return None
+
+        await bot._check_pending_loot_votes(_FakeBot())
 
         winner_char = db.get_character(996001, -999)
         generated_ids = [k for k in winner_char["inventory"] if k.startswith("gi")]
@@ -5848,6 +5871,89 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot.itemview_callback(equip_update, DummyContext())
         after_equip = db.get_character(996001, -999)
         self.assertTrue(after_equip.get("equipped_weapon") == item_id or after_equip.get("equipped_armor") == item_id)
+
+    # -- Loot Voting (2026-08-13, per Coffee: real humans AND AI
+    #    companions vote on who wants a drop; RNG among wanters;
+    #    nobody wanting it sells for gold split across the party) -----
+    def test_ai_wants_a_weapon_upgrade_but_not_a_downgrade(self):
+        make_basic_character(996010, "AiWeaponTester", current_location="crossroads_tavern")
+        db.update_character(996010, -999, equipped_weapon="shortsword")  # 1d6
+        greataxe = items_module.get_item("greataxe")  # 1d12 -- a real upgrade
+        rusty_dagger = items_module.get_item("rusty_dagger")  # 1d4 -- a real downgrade
+        self.assertTrue(bot._ai_wants_item(996010, -999, greataxe))
+        self.assertFalse(bot._ai_wants_item(996010, -999, rusty_dagger))
+
+    def test_ai_wants_any_weapon_with_nothing_equipped(self):
+        make_basic_character(996011, "AiNoWeaponTester", current_location="crossroads_tavern")
+        db.update_character(996011, -999, equipped_weapon=None)
+        rusty_dagger = items_module.get_item("rusty_dagger")
+        self.assertTrue(bot._ai_wants_item(996011, -999, rusty_dagger))
+
+    def test_ai_wants_an_armor_upgrade_but_not_a_downgrade(self):
+        make_basic_character(996012, "AiArmorTester", current_location="crossroads_tavern")
+        db.update_character(996012, -999, equipped_armor="leather_armor")  # ac_base 11
+        chain_mail = items_module.get_item("chain_mail")  # ac_base 16
+        self.assertTrue(bot._ai_wants_item(996012, -999, chain_mail))
+        self.assertFalse(bot._ai_wants_item(996012, -999, items_module.get_item("leather_armor")))
+
+    async def test_loot_vote_picks_randomly_among_real_wanters_only(self):
+        """Two humans vote yes, one votes no -- RNG must only ever pick from the real wanters, never the passer."""
+        import random
+        make_basic_character(996020, "Wanter1", current_location="crossroads_tavern")
+        make_basic_character(996021, "Wanter2", current_location="crossroads_tavern")
+        make_basic_character(996022, "Passer", current_location="crossroads_tavern")
+        loot_item = bot.generate_item(item_type="weapon")
+        item_id = bot._persist_generated_item(loot_item)
+
+        class _FakeBot:
+            async def send_message(self, *a, **k):
+                return None
+
+        winners_seen = set()
+        for seed in range(20):
+            random.seed(seed)
+            bot._PENDING_LOOT_VOTES["loottestitem1"] = {
+                "chat_id": -999, "item_id": item_id, "item_name": loot_item["name"],
+                "human_ids": [996020, 996021, 996022], "ai_wants": {},
+                "votes": {996020: True, 996021: True, 996022: False},
+                "started_at": time.time() - bot.LOOT_VOTE_WINDOW_SECONDS - 1,
+            }
+            await bot._check_pending_loot_votes(_FakeBot())
+            for pid in (996020, 996021, 996022):
+                character = db.get_character(pid, -999)
+                if character and item_id in character.get("inventory", {}):
+                    winners_seen.add(pid)
+                    db.remove_item(pid, -999, item_id, 1)
+
+        self.assertEqual(winners_seen, {996020, 996021}, winners_seen)
+
+    async def test_loot_sold_and_gold_split_when_nobody_wants_it(self):
+        make_basic_character(996030, "Passer1", current_location="crossroads_tavern")
+        make_basic_character(996031, "Passer2", current_location="crossroads_tavern")
+        gold_before_1 = db.get_character(996030, -999)["gold"]
+        gold_before_2 = db.get_character(996031, -999)["gold"]
+
+        loot_item = bot.generate_item(item_type="weapon")
+        item_id = bot._persist_generated_item(loot_item)
+        item = items_module.get_item(item_id)
+        vote_id = "loottestitem2"
+        bot._PENDING_LOOT_VOTES[vote_id] = {
+            "chat_id": -999, "item_id": item_id, "item_name": loot_item["name"],
+            "human_ids": [996030, 996031], "ai_wants": {},
+            "votes": {996030: False, 996031: False},
+            "started_at": time.time() - bot.LOOT_VOTE_WINDOW_SECONDS - 1,
+        }
+
+        class _FakeBot:
+            async def send_message(self, *a, **k):
+                return None
+
+        await bot._check_pending_loot_votes(_FakeBot())
+        share = item["price"] // 2
+        self.assertEqual(db.get_character(996030, -999)["gold"], gold_before_1 + share)
+        self.assertEqual(db.get_character(996031, -999)["gold"], gold_before_2 + share)
+        self.assertNotIn(item_id, db.get_character(996030, -999)["inventory"])
+        self.assertNotIn(item_id, db.get_character(996031, -999)["inventory"])
 
     def test_equipable_worth_shown_in_stats_line(self):
         """Real live request (2026-08-03): "in the description of the items can u show what it is worth? do this for equipables"."""
