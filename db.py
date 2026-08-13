@@ -1595,6 +1595,31 @@ def equip_item(telegram_user_id: int, chat_id: int, item_id: str) -> tuple[bool,
     return True, " ".join(note_parts), updated
 
 
+def _best_equippable_candidate(telegram_user_id: int, chat_id: int, candidate_ids: list[str], sort_key) -> tuple[str | None, dict | None]:
+    """
+    Tries `candidate_ids` (already-carried items of one slot type) in
+    descending `sort_key` order via equip_item, stopping at the FIRST
+    one that actually succeeds. Real bug (2026-08-13, Coffee dev-
+    bridge, real pasted log): auto_equip_best_gear used to pick only
+    the single highest-stat item and equip it ONCE -- once v1.27.179's
+    real proficiency gate started correctly rejecting an unearned pick
+    (e.g. heavy armor a Wizard isn't trained for), the slot was just
+    left empty, with the character's own genuinely-wearable gear never
+    even attempted. Now falls through to the next-best real candidate
+    until one actually equips, so "the best thing they can hold for
+    what they're able to hold" (Coffee's own framing) is genuine.
+    Returns (message, character) for whichever equip succeeded, or
+    (None, character) if every real candidate was rejected -- `character`
+    is always the current, unmutated character row either way.
+    """
+    character = get_character(telegram_user_id, chat_id)
+    for item_id in sorted(candidate_ids, key=sort_key, reverse=True):
+        success, msg, character = equip_item(telegram_user_id, chat_id, item_id)
+        if success:
+            return msg, character
+    return None, character
+
+
 def auto_equip_best_gear(telegram_user_id: int, chat_id: int) -> tuple[str, dict | None]:
     """
     Picks the real best weapon (highest average damage -- see
@@ -1604,7 +1629,10 @@ def auto_equip_best_gear(telegram_user_id: int, chat_id: int) -> tuple[str, dict
     itself, per Coffee: a player shouldn't have to know every weapon's
     exact damage die to get sensible gear on -- this picks for them.
     Always returns a real, honest summary, even if there was nothing
-    to equip in one or both slots (never silently no-ops).
+    to equip in one or both slots (never silently no-ops). Falls back
+    through progressively-lesser real candidates via _best_equippable_
+    candidate (2026-08-13) when the single best pick isn't one this
+    character is actually proficient with yet.
     """
     character = get_character(telegram_user_id, chat_id)
     if character is None:
@@ -1621,20 +1649,20 @@ def auto_equip_best_gear(telegram_user_id: int, chat_id: int) -> tuple[str, dict
 
     messages = []
     if weapon_ids:
-        best_weapon = max(
-            weapon_ids,
-            key=lambda i: average_damage(items_module.get_item(i)["damage_dice"],
-                                          items_module.get_item(i).get("damage_bonus", 0)),
+        msg, character = _best_equippable_candidate(
+            telegram_user_id, chat_id, weapon_ids,
+            lambda i: average_damage(items_module.get_item(i)["damage_dice"],
+                                      items_module.get_item(i).get("damage_bonus", 0)),
         )
-        _, msg, character = equip_item(telegram_user_id, chat_id, best_weapon)
-        messages.append(msg)
+        messages.append(msg or "Nothing you're carrying can be wielded yet.")
     else:
         messages.append("No weapon carried to equip.")
 
     if armor_ids:
-        best_armor = max(armor_ids, key=lambda i: items_module.get_item(i)["ac_base"])
-        _, msg, character = equip_item(telegram_user_id, chat_id, best_armor)
-        messages.append(msg)
+        msg, character = _best_equippable_candidate(
+            telegram_user_id, chat_id, armor_ids, lambda i: items_module.get_item(i)["ac_base"],
+        )
+        messages.append(msg or "Nothing you're carrying can be worn yet.")
     else:
         messages.append("No armor carried to equip.")
 
@@ -1643,9 +1671,11 @@ def auto_equip_best_gear(telegram_user_id: int, chat_id: int) -> tuple[str, dict
         if qty > 0 and (items_module.get_item(item_id) or {}).get("type") == "shield"
     ]
     if shield_ids:
-        best_shield = max(shield_ids, key=lambda i: items_module.get_item(i)["ac_bonus"])
-        _, msg, character = equip_item(telegram_user_id, chat_id, best_shield)
-        messages.append(msg)
+        msg, character = _best_equippable_candidate(
+            telegram_user_id, chat_id, shield_ids, lambda i: items_module.get_item(i)["ac_bonus"],
+        )
+        if msg:
+            messages.append(msg)
 
     # Rings/amulets/wondrous items (2026-07-15): unlike weapon/armor/
     # shield, these aren't "pick the single best one" -- real 5E lets a

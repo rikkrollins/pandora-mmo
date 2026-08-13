@@ -1492,6 +1492,44 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(character["equipped_weapon"], "greataxe")
         self.assertEqual(character["equipped_armor"], "chain_mail")
 
+    def test_auto_equip_falls_back_to_the_best_weapon_actually_usable(self):
+        """
+        Real live bug (2026-08-13, Coffee dev-bridge, real pasted log):
+        the single "best" weapon (greataxe, martial) being rejected by
+        the real proficiency gate used to leave the slot completely
+        empty -- a Wizard (simple weapons only) carrying both a greataxe
+        and a shortsword should end up wielding the shortsword, not
+        nothing.
+        """
+        use_test_db("tests/tmp/auto_equip_fallback_test.db")
+        user_id = 900305
+        make_basic_character(user_id, "Fallback", char_class="Wizard", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "greataxe", 1)    # martial -- a Wizard can't wield this
+        db.add_item(user_id, -999, "shortsword", 1)  # simple -- a Wizard CAN wield this
+        summary, character = db.auto_equip_best_gear(user_id, -999)
+        self.assertEqual(character["equipped_weapon"], "shortsword")
+        self.assertIn("shortsword", summary.lower())
+
+    def test_auto_equip_falls_back_to_the_best_armor_actually_usable(self):
+        """Same bug, armor slot: a Rogue (light armor only) carrying both chain_mail (heavy) and leather_armor (light)."""
+        use_test_db("tests/tmp/auto_equip_fallback_test2.db")
+        user_id = 900306
+        make_basic_character(user_id, "Fallback2", char_class="Rogue", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "chain_mail", 1)     # heavy -- a Rogue can't wear this
+        db.add_item(user_id, -999, "leather_armor", 1)  # light -- a Rogue CAN wear this
+        summary, character = db.auto_equip_best_gear(user_id, -999)
+        self.assertEqual(character["equipped_armor"], "leather_armor")
+
+    def test_auto_equip_gives_a_real_honest_message_when_nothing_carried_is_usable(self):
+        """No silent no-op, and no crash, when every real candidate in a slot is rejected."""
+        use_test_db("tests/tmp/auto_equip_fallback_test3.db")
+        user_id = 900307
+        make_basic_character(user_id, "Fallback3", char_class="Wizard", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "greataxe", 1)  # martial -- the ONLY weapon carried, and unusable
+        summary, character = db.auto_equip_best_gear(user_id, -999)
+        self.assertIsNone(character.get("equipped_weapon"))
+        self.assertIn("wielded", summary.lower())
+
     async def test_auto_equip_handler_end_to_end(self):
         use_test_db("tests/tmp/auto_equip_test2.db")
         user_id = 900304

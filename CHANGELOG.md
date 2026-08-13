@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.187] — Fix: auto-equip falls back to the best gear you can actually use
+
+Real live bug (dev-bridge, real pasted log from Coffee: "make sure
+it's the best thing that they can hold for what they are able to
+hold"). v1.27.179's real proficiency gate correctly started rejecting
+`auto_equip_best_gear`'s single "best" pick whenever a character
+wasn't trained for it (e.g. a Wizard's carried greataxe, a Rogue's
+carried chain mail) — but nothing ever tried a second-best real
+alternative, so the slot was just left empty even when the character
+was carrying perfectly usable gear one tier down. New `db._best_
+equippable_candidate` tries every real candidate in descending
+quality order (highest damage/AC first) and stops at the first one
+that actually equips, so "the best thing they can hold for what
+they're able to hold" is now genuinely true — a total rejection (no
+usable candidate at all) still gives an honest message, never a
+silent no-op.
+
 ## [1.27.186] — Add: NPCs know your class/subclass/guild (Synergy Phase 8)
 
 NPCs previously never knew anything about who they were actually
