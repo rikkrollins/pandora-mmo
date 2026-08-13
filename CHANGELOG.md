@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.175] — Fix: guild combat/economy bonuses only checked primary guild (Synergy Phase 1)
+
+Real fix, "break the game" synergy pass Phase 1, per Coffee: "make
+sure classes, sub-classes, and guilds all work in synergy with
+eachother." Every guild-granted COMBAT or ECONOMY bonus in the game
+checked `character.get("guild")` (the primary guild) only -- the same
+bug class already fixed once in `recipe_requirement_gate` (v1.27.174).
+A Promotion-earned SECONDARY guild (the v1.27.168 guild-doubling
+system's whole point) granted zero real benefit anywhere combat or
+gold touched it. Fixed all 7 real sites found by grep across the
+codebase, now checking `guilds.held_guild_ids` (every held guild,
+primary first):
+
+- Silver Wardens' +2 damage vs. undead (`rules/combat.py`)
+- Forge Guild's +10% weapon damage (`rules/combat.py`)
+- Arcane Circle's +15% spell damage (`bot.py`)
+- Thieves' Guild's +3 lockpick bonus (`bot.py`)
+- Thieves' Guild's +3 steal bonus, both the player-theft and live-enemy
+  pickpocket sites (`bot.py`, 2 sites)
+- Adventurers' Guild's bonus gold on board-quest turn-in (`bot.py`)
+
+`db.py`'s own primary-vs-secondary branch in `leave_guild` was checked
+and correctly left untouched -- that one's intentionally primary-only
+(it's choosing which held guild's slot to clear, not granting a bonus).
+
+Phases 2-4 of the synergy pass (real resistances on early/mid monsters,
+a guild-tagged side-quest pool, Echo Trials reacting to build identity)
+remain scoped, not yet started.
+
 ## [1.27.174] — Add: enchanting now works for Warlock/Sorcerer/Bard/all real damage types
 
 Real feature, per Coffee: "i want to be able to enchant with spells

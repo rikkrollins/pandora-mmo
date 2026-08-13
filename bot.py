@@ -7241,8 +7241,10 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
     bonus = _practiced_bonus_for(update.effective_user.id, update.effective_chat.id, "dexterity")
     # Thieves' Guild real benefit (2026-08-11, per Coffee): same real +3
     # shape as the guild's existing steal bonus -- lockpicking is the
-    # guild's own trade secret too, not available outside it.
-    if character.get("guild") == "thieves_guild":
+    # guild's own trade secret too, not available outside it. Real live
+    # bug (2026-08-13, synergy pass): checked primary guild only --
+    # held_guild_ids also covers a Promotion-earned secondary guild.
+    if "thieves_guild" in held_guild_ids(character):
         bonus += THIEVES_GUILD_LOCKPICK_BONUS
     bonus += _lockpick_proficiency_bonus(character)
     result["total"] += bonus
@@ -9259,10 +9261,12 @@ async def _check_board_quest_turnin(update_like, telegram_user_id: int, location
         # other guild had one, this one didn't) -- real bonus gold on
         # top of the quest's own listed reward, for real board-quest
         # work specifically, matching the guild's own "paid work" theme.
+        # Real live bug (2026-08-13, synergy pass): checked primary guild
+        # only -- held_guild_ids also covers a Promotion-earned secondary.
         reward_gold = board_quest["reward_gold"]
         guild_bonus_gold = (
             round(reward_gold * ADVENTURERS_GUILD_BOARD_QUEST_GOLD_BONUS_PCT / 100)
-            if character.get("guild") == "adventurers_guild" else 0
+            if "adventurers_guild" in held_guild_ids(character) else 0
         )
         total_gold = reward_gold + guild_bonus_gold
         db.update_character(telegram_user_id, update_like.effective_chat.id, gold=character["gold"] + total_gold)
@@ -18096,8 +18100,10 @@ async def _do_steal(update: Update, text: str, forced_roll: int | None = None) -
     bonus = _practiced_bonus_for(telegram_user_id, update.effective_chat.id, "dexterity")
     # Thieves' Guild membership benefit (2026-07-25, per Coffee): a real
     # +3 on top of the usual practiced bonus -- the Ledger's own trade
-    # secrets, not available outside it.
-    if character.get("guild") == "thieves_guild":
+    # secrets, not available outside it. Real live bug (2026-08-13,
+    # synergy pass): checked primary guild only -- held_guild_ids also
+    # covers a Promotion-earned secondary guild.
+    if "thieves_guild" in held_guild_ids(character):
         bonus += THIEVES_GUILD_STEAL_BONUS
     # Rogue's Thief subclass hook (2026-07-25): the same real +3, this
     # time for actually having chosen the archetype named for exactly
@@ -18211,7 +18217,9 @@ async def _do_steal_from_enemy(
 
     result = roll_ability_check(character, "dexterity", proficient=False, forced_roll=forced_roll)
     bonus = _practiced_bonus_for(user_id, chat_id, "dexterity")
-    if character.get("guild") == "thieves_guild":
+    # Real live bug (2026-08-13, synergy pass): checked primary guild
+    # only -- held_guild_ids also covers a Promotion-earned secondary.
+    if "thieves_guild" in held_guild_ids(character):
         bonus += THIEVES_GUILD_STEAL_BONUS
     if character.get("subclass") == "Thief":
         bonus += THIEF_SUBCLASS_STEAL_BONUS
@@ -19082,8 +19090,10 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             # a real, flat +15% on top of any subclass bonus above --
             # stacks additively-then-multiplicatively the same way the
             # subclass bonus itself stacks on the base roll, not a
-            # separate independent multiplier.
-            if character.get("guild") == "arcane_circle":
+            # separate independent multiplier. Real live bug (2026-08-13,
+            # synergy pass): checked primary guild only -- held_guild_ids
+            # also covers a Promotion-earned secondary guild.
+            if "arcane_circle" in held_guild_ids(character):
                 result["damage_dealt"] = int(result["damage_dealt"] * (1 + ARCANE_CIRCLE_SPELL_DAMAGE_BONUS_PCT / 100))
             # Damage-type system (2026-07-24): resolve_damage_spell never
             # calls resolve_attack (its own, separate pipeline -- see

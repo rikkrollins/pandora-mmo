@@ -670,6 +670,53 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 return
         self.fail("no plain (non-crit) hit landed in 20 tries at AC 1 -- suspiciously unlucky or broken")
 
+    def test_warden_bonus_applies_via_a_secondary_promotion_guild(self):
+        """
+        Real live bug (2026-08-13, synergy pass, per Coffee: "make sure
+        classes, sub-classes, and guilds all work in synergy"): resolve_
+        attack checked attacker["guild"] (primary only), so a Promotion-
+        earned SECONDARY silver_wardens membership granted zero combat
+        bonus even for a genuine member. Same forced-hit setup as the
+        primary-guild test above, but silver_wardens is held only as a
+        secondary guild here (primary is an unrelated guild).
+        """
+        attacker = {
+            "name": "PromotedWarden", "dexterity": 14, "strength": 16, "armor_class": 15,
+            "hp_current": 20, "hp_max": 20, "char_class": "Fighter",
+            "guild": "forge_guild", "secondary_guilds": ["silver_wardens"],
+        }
+        weapon = {"ability": "strength", "damage_dice": "1d1", "damage_bonus": 0}
+        for _ in range(20):
+            defender = {
+                "name": "Shadow Wisp", "dexterity": 18, "armor_class": 1,
+                "hp_current": 100, "hp_max": 100, "monster_key": "shadow_wisp",
+            }
+            result = resolve_attack(attacker, defender, weapon)
+            if result["hit"] and not result["critical_hit"]:
+                self.assertEqual(result["damage_dealt"], 3)  # 1 (die) + 2 (warden bonus)
+                return
+        self.fail("no plain (non-crit) hit landed in 20 tries at AC 1 -- suspiciously unlucky or broken")
+
+    def test_forge_guild_weapon_damage_bonus_applies_via_a_secondary_promotion_guild(self):
+        """Same bug class as the warden test above, for FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT."""
+        from rules.combat import FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT
+        attacker = {
+            "name": "PromotedSmith", "dexterity": 10, "strength": 16, "armor_class": 15,
+            "hp_current": 20, "hp_max": 20, "char_class": "Fighter",
+            "guild": "silver_wardens", "secondary_guilds": ["forge_guild"],
+        }
+        weapon = {"ability": "strength", "damage_dice": "1d1", "damage_bonus": 0}
+        for _ in range(20):
+            defender = {
+                "name": "Goblin", "dexterity": 14, "armor_class": 1,
+                "hp_current": 100, "hp_max": 100, "monster_key": "goblin",
+            }
+            result = resolve_attack(attacker, defender, weapon)
+            if result["hit"] and not result["critical_hit"]:
+                self.assertEqual(result["damage_dealt"], int(1 * (1 + FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT / 100)))
+                return
+        self.fail("no plain (non-crit) hit landed in 20 tries at AC 1 -- suspiciously unlucky or broken")
+
     async def test_arcane_circle_join_grants_a_real_scroll(self):
         use_test_db("tests/tmp/guild_benefit_test.db")
         user_id = 777777
@@ -4797,6 +4844,31 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         member = db.get_character(960005, -999)
         with patch("bot.narrate_skill_check", return_value="The lock clicks open."):
             await bot._do_lockpick(FakeUpdate(960005, "pick the lock", []), member, dict(lockable), "pick the lock", forced_roll=9)
+        self.assertIn(lockable["id"], bot._UNLOCKED.get(-999, set()))
+
+    async def test_lockpick_thieves_guild_bonus_applies_via_a_secondary_promotion_guild(self):
+        """
+        Real live bug (2026-08-13, synergy pass): same +3 bonus as the
+        test above, but earned via a Promotion (secondary) guild instead
+        of primary -- checked character["guild"] only before the fix, so
+        a genuine secondary-guild member got no bonus at all. Uses a
+        DIFFERENT location's lockable than the primary-guild test above
+        (same chat_id -999, and bot._UNLOCKED is a module-level dict that
+        persists across tests in this same run) so this test can't
+        trivially pass off the earlier test's already-unlocked chest.
+        """
+        from unittest.mock import patch
+        location_id = "the_weeping_well"
+        ability_scores = {"strength": 10, "dexterity": 12, "constitution": 10,
+                           "intelligence": 10, "wisdom": 10, "charisma": 10}
+        location = bot.cl.get_location(bot.CAMPAIGN, location_id)
+        lockable = location["lockables"][0]
+
+        member = make_basic_character(960006, "PromotedPicker", current_location=location_id, ability_scores=ability_scores)
+        db.update_character(960006, -999, guild="forge_guild", secondary_guilds=["thieves_guild"])
+        member = db.get_character(960006, -999)
+        with patch("bot.narrate_skill_check", return_value="The lock clicks open."):
+            await bot._do_lockpick(FakeUpdate(960006, "pick the lock", []), member, dict(lockable), "pick the lock", forced_roll=9)
         self.assertIn(lockable["id"], bot._UNLOCKED.get(-999, set()))
 
     async def test_bestiary_shows_real_stealable_items_for_a_known_monster(self):

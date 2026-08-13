@@ -11,7 +11,7 @@ from rules.leveling import (
     COMBAT_SUBCLASS_NAMES, COMBAT_SUBCLASS_DAMAGE_BONUS_PCT, power_scale_ratio,
 )
 from class_features import is_weapon_proficient
-from guilds import FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT
+from guilds import FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT, held_guild_ids
 import config
 import hybrid_features
 import races
@@ -424,8 +424,16 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         )
         # Silver Wardens guild benefit (bonus_damage_vs_undead, guilds.py):
         # +2 damage against this campaign's undead-flavored monsters.
+        # Real live bug (2026-08-13, synergy pass, per Coffee: "make sure
+        # classes, sub-classes, and guilds all work in synergy"): this
+        # checked attacker["guild"] (the PRIMARY guild) only, so a
+        # Promotion-earned SECONDARY guild membership granted zero
+        # combat benefit -- the exact same bug class already fixed in
+        # recipe_requirement_gate (v1.27.174). held_guild_ids (primary
+        # first, then every secondary) is the real fix used everywhere
+        # else this session touched guild membership checks.
         warden_bonus = (
-            2 if (attacker.get("guild") == "silver_wardens"
+            2 if ("silver_wardens" in held_guild_ids(attacker)
                   and defender.get("monster_key") in UNDEAD_MONSTER_KEYS)
             else 0
         )
@@ -493,8 +501,9 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         # guild for forging (with % enhancements stats"): a real +10%
         # weapon damage bonus -- a smith trusts their own hammer and
         # steel more than any spell, same multiplicative stacking as
-        # the subclass bonus just above.
-        if attacker.get("guild") == "forge_guild":
+        # the subclass bonus just above. held_guild_ids, not primary-
+        # only -- see warden_bonus's comment above for why.
+        if "forge_guild" in held_guild_ids(attacker):
             damage_dealt = int(damage_dealt * (1 + FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT / 100))
         # Real player-power rebalance (2026-07-26, per Coffee: "rebalance
         # everything... all skills and abilities and magic and spells and
