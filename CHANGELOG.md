@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.171] — Fix: Support item comparison recognized a real owned generated item as fake
+
+Real live bug, found while investigating a dev-bridge screenshot report
+("This weapon was not equipped and I was supposed to use my
+serviceable dagger in the attack"). Root cause: the v1.27.169 fix for
+Support hallucinating a fake "serviceable dagger" comparison resolved
+both sides of the question with `find_item_mentioned_in_text` called
+with NO `candidate_ids`, so its search space defaulted to `items.ITEMS`
+only — which can never contain a per-instance generated item's id
+("gi<n>"). The reporting player (Laurienna) genuinely owned a real
+generated **Serviceable Dagger** (a common-tier roll of
+`rules/item_generator.py`'s real "Serviceable" prefix), so the exact
+fix meant to stop Support inventing fake items was itself telling this
+player their own real item didn't exist.
+
+`_deterministic_item_comparison_answer` now accepts the asking
+player's real `character` (every live call site already has one) and
+adds their real inventory item ids as extra match candidates alongside
+the full static catalog — an unowned real item can still be named and
+compared exactly as before, and a real owned generated item now
+resolves correctly too instead of getting falsely flagged as
+nonexistent.
+
+(The `_do_attack` weapon-auto-switch itself, checked as part of this
+investigation, already correctly recognizes generated items via
+`items_module.get_item()`'s "gi<n>" fallback — not the bug here.)
+
 ## [1.27.170] — Add: The Remnants — real, hard boss fights that become callable summons
 
 Real feature (2026-08-13, per Coffee, built live). Grounded in this

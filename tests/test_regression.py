@@ -1521,6 +1521,31 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("silvered dagger", answer.lower())
         self.assertIn("no", answer.lower())
 
+    def test_support_item_comparison_recognizes_a_real_owned_generated_item(self):
+        """
+        Real live bug (2026-08-13, dev-bridge screenshot): the fix above
+        this test wrongly told character_id 22 (Laurienna) that her own
+        real generated "Serviceable Dagger" (a common-tier roll of
+        rules/item_generator.py's real "Serviceable" prefix, instance id
+        gi3) didn't exist, because it resolved item names with NO
+        candidate_ids and a generated item's id is never a key in
+        items.ITEMS. Confirms that once the asking player's `character`
+        (real inventory, containing a real generated dagger) is passed
+        in, the same comparison question now falls through to the model
+        (returns None) instead of hallucinating a false "doesn't exist"
+        correction against the player's own real item.
+        """
+        import ai.support_agent as support_agent_module
+        gi_id = db.create_item_instance(
+            item_type="weapon", name="Serviceable Dagger", rarity="common", price=2,
+            base_stats={"type": "weapon", "damage_dice": "1d4", "ability": "dexterity", "weapon_category": "simple"},
+        )
+        character = {"inventory": {gi_id: 1, "silvered_dagger": 1}}
+        answer = support_agent_module._deterministic_item_comparison_answer(
+            "Which is better serviceable dagger or silvered dagger?", character,
+        )
+        self.assertIsNone(answer)
+
     def test_support_item_comparison_lets_two_real_items_through_to_the_model(self):
         """Both sides real (grounded) -- must fall through to the normal LLM path, not short-circuit."""
         from ai.support_agent import _deterministic_item_comparison_answer

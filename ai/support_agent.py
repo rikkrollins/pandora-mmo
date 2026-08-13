@@ -779,28 +779,44 @@ def _strip_item_phrase(phrase: str) -> str:
     return " ".join(words)
 
 
-def _deterministic_item_comparison_answer(question: str) -> str | None:
+def _deterministic_item_comparison_answer(question: str, character: dict | None = None) -> str | None:
     """
     Real live bug (2026-08-13, topic-activity monitoring): "Which is
     better serviceable dagger or silvered dagger?" got a hallucinated
     answer inventing a "serviceable dagger" that doesn't exist anywhere
-    in items.ITEMS (the player only ever owned a real Silvered Dagger)
-    -- CRITICAL_GROUNDING_RULE already tells the model never to do
-    this, but a comparison question naming a nonexistent item alongside
-    a real one is exactly the shape that got past it live, the same
-    class of failure prompt-only grounding has already proven
-    insufficient for elsewhere in this file (see the mage_hand cantrip
-    override above). Detects a "which is better X or Y"/"X or Y, which
-    is better"/"is X or Y better"/"X vs Y" comparison, resolves each
-    side against the REAL item catalog (items.find_item_mentioned_in_
-    text, no candidate restriction), and short-circuits with a
-    grounded correction the moment either side doesn't match a real
-    item -- never reaching the model at all for exactly the question
-    shape that hallucinated live. Returns None (falls through to the
-    LLM, which can compare two names it already confirmed are both
-    real using the grounded item catalog already in its prompt) when
-    the question isn't this shape, or when both sides resolve to real
-    items.
+    in items.ITEMS -- CRITICAL_GROUNDING_RULE already tells the model
+    never to do this, but a comparison question naming a nonexistent
+    item alongside a real one is exactly the shape that got past it
+    live, the same class of failure prompt-only grounding has already
+    proven insufficient for elsewhere in this file (see the mage_hand
+    cantrip override above). Detects a "which is better X or Y"/"X or
+    Y, which is better"/"is X or Y better"/"X vs Y" comparison,
+    resolves each side against the REAL item catalog, and
+    short-circuits with a grounded correction the moment either side
+    doesn't match a real item -- never reaching the model at all for
+    exactly the question shape that hallucinated live. Returns None
+    (falls through to the LLM, which can compare two names it already
+    confirmed are both real using the grounded item catalog already in
+    its prompt) when the question isn't this shape, or when both sides
+    resolve to real items.
+
+    Real live bug, found investigating the ABOVE fix's own accuracy
+    (2026-08-13, dev-bridge screenshot: "This weapon was not equipped
+    and I was supposed to use my serviceable dagger in the attack"):
+    the asking player (character_id 22, Laurienna) genuinely owned a
+    real generated "Serviceable Dagger" (instance id gi3, a common-tier
+    roll of rules/item_generator.py's real "Serviceable" prefix) --
+    this function's first version called find_item_mentioned_in_text
+    with NO candidate_ids, so its search_space defaulted to
+    items.ITEMS's keys only, which can never contain a per-instance
+    generated item's id ("gi<n>"). The exact grounding fix meant to
+    stop Support inventing FAKE items was therefore itself telling this
+    player their own REAL item didn't exist. Passing `character` (every
+    real call site already has one -- see bot.py's 3 call sites) lets a
+    real owned generated item resolve too, by adding the character's
+    own inventory ids as extra candidates alongside every static item
+    (so an unowned real item can still be named and compared, exactly
+    as before).
     """
     match = _ITEM_COMPARISON_RE.search(question.strip())
     if not match:
@@ -811,8 +827,10 @@ def _deterministic_item_comparison_answer(question: str) -> str | None:
     phrase_a, phrase_b = (_strip_item_phrase(g) for g in groups)
     if not phrase_a or not phrase_b:
         return None
-    item_a = items_module.find_item_mentioned_in_text(phrase_a)
-    item_b = items_module.find_item_mentioned_in_text(phrase_b)
+    owned_ids = list(character.get("inventory", {}).keys()) if character else []
+    candidate_ids = list(items_module.ITEMS.keys()) + [i for i in owned_ids if i not in items_module.ITEMS]
+    item_a = items_module.find_item_mentioned_in_text(phrase_a, candidate_ids=candidate_ids)
+    item_b = items_module.find_item_mentioned_in_text(phrase_b, candidate_ids=candidate_ids)
     if item_a and item_b:
         return None
     real_names = [items_module.get_item(i)["name"] for i in (item_a, item_b) if i]
@@ -1061,7 +1079,7 @@ def answer_support_question(
         location_answer = _deterministic_location_connections_answer(character, question)
         if location_answer is not None:
             return location_answer
-    comparison_answer = _deterministic_item_comparison_answer(question)
+    comparison_answer = _deterministic_item_comparison_answer(question, character)
     if comparison_answer is not None:
         return comparison_answer
     if character and any(w in lowered for w in _QUEST_TASK_QUESTION_WORDS):
