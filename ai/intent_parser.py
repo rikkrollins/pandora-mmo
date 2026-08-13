@@ -1280,7 +1280,27 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # returned move -- only the "the market row" phrasing tripped this).
     # Excluded here rather than reordered, so every other genuine
     # marketplace phrase (check/cancel) below is completely unaffected.
-    if "market row" not in lowered and any(w in lowered for w in ["the market", "marketplace", "market listings"]):
+    #
+    # Real live bug, same root cause (2026-08-13, found via topic-activity
+    # monitoring): "Go to the market" (no "row" at all) hit this exact
+    # same collision -- Market Row is the only real market-flavored
+    # location in this game, and _do_move's own word-level fallback
+    # (bot.py) already resolves the bare word "market" to it uniquely, so
+    # this phrasing was always a genuine travel command, never a request
+    # to see marketplace listings. The "market row" substring exclusion
+    # above doesn't help here since the player never said "row" at all.
+    # Generalized: any explicit travel verb immediately preceding
+    # "market" (with an optional "the"/"a" and, e.g., "back", in between)
+    # is excluded from the marketplace check the same way "market row"
+    # already is, so move_words gets its turn instead.
+    _market_travel_phrase = re.search(
+        r"\b(?:go|goes|going|head|heads|heading|walk|walks|walking|"
+        r"travel|travels|traveling|move|moves|moving|return|returns|returning|"
+        r"back)\s+(?:back\s+)?to\s+(?:the\s+|a\s+)?market\b", lowered,
+    )
+    if "market row" not in lowered and not _market_travel_phrase and any(
+        w in lowered for w in ["the market", "marketplace", "market listings"]
+    ):
         # Real live gap (2026-08-03, Coffee): "Cancel my listing in the
         # market" got swallowed by the plain "the market" check below
         # and showed him the market instead of cancelling anything --
@@ -1490,11 +1510,23 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
                                     "go to bed", "going to bed", "goto rest", "goto sleep", "goto bed"]):
         return {**base, "action": "rest"}
 
-    move_words = ["go to", "goto", "head to", "walk to", "travel to", "move to", "enter the", "descend", "ascend",
+    # Real live bug (2026-08-13, found via topic-activity monitoring
+    # while investigating "go to the market"): none of these travel
+    # verbs had a progressive-tense ("-ing") form -- "heading to the
+    # market" matched neither this list ("head to" is not a substring
+    # of "heading to", the "ing" breaks it) nor the market-travel-phrase
+    # exclusion just above this function's marketplace check, and fell
+    # all the way through to the silent "chat" default. Added the
+    # natural "-ing" form of each existing verb here; every other entry
+    # (enter/descend/leave/etc., already covering their own forms or not
+    # naturally used in progressive tense for this purpose) is untouched.
+    move_words = ["go to", "goto", "head to", "heading to", "walk to", "walking to",
+                  "travel to", "traveling to", "travelling to", "move to", "moving to",
+                  "enter the", "descend", "ascend",
                   "climb down", "climb up", "leave the ", "leave this", "leave here", "go back",
                   "go downstairs", "go upstairs", "head downstairs", "head upstairs",
                   "downstairs", "upstairs", "exit this", "exit the", "step out", "walk out",
-                  "return to", "head back to", "back to the"]
+                  "return to", "returning to", "head back to", "heading back to", "back to the"]
     if any(w in lowered for w in move_words):
         return {**base, "action": "move"}
 

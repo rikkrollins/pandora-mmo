@@ -7306,6 +7306,23 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # A bare direction word with no movement verb, or the word
         # appearing as part of something else, must NOT false-positive.
         self.assertNotEqual(_keyword_fallback("west of here is dangerous", [])["action"], "move")
+
+    def test_progressive_tense_travel_verbs_classify_as_move(self):
+        """
+        Real live bug (2026-08-13, found investigating "go to the
+        market"): move_words had no "-ing" form of any travel verb --
+        "heading to the market" matched neither "head to" (the "ing"
+        breaks the substring) nor any other entry, and fell all the way
+        through to the silent "chat" default. Added the natural
+        progressive-tense form of every existing named-destination
+        travel verb.
+        """
+        for text in [
+            "heading to the tavern", "walking to the market", "traveling to market row",
+            "travelling to market row", "moving to the cellar", "returning to the tavern",
+            "heading back to the tavern",
+        ]:
+            self.assertEqual(_keyword_fallback(text, [])["action"], "move", text)
         self.assertNotEqual(_keyword_fallback("talk to Westley", [])["action"], "move")
 
     def test_break_open_routes_to_a_real_strength_check_not_passive_examine(self):
@@ -9815,6 +9832,32 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_keyword_fallback("the marketplace", [])["action"], "check_market")
         self.assertEqual(_keyword_fallback("show me the market listings", [])["action"], "check_market")
         self.assertEqual(_keyword_fallback("Cancel my listing in the market", [])["action"], "cancel_market")
+
+    def test_go_to_the_market_no_row_moves_instead_of_opening_the_market(self):
+        """
+        Real live bug, same root cause as the "market row" fix above
+        (2026-08-13, found via topic-activity monitoring): "Go to the
+        market" -- no "row" at all -- hit the exact same collision.
+        Market Row is the only real market-flavored location in this
+        game, and _do_move's own word-level fallback (bot.py) already
+        resolves the bare word "market" to it uniquely, so this phrasing
+        was always a genuine travel command. The "market row" substring
+        exclusion doesn't catch this since the player never says "row" --
+        fixed via a broader explicit-travel-verb-before-"market" check
+        instead, covering go/head/walk/travel/move/return(ing) to (back
+        to) (the/a) market.
+        """
+        for text in (
+            "Go to the market", "go to the market", "head to the market",
+            "walk to the market", "travel to the market", "move to the market",
+            "return to the market", "go back to the market", "heading to the market",
+        ):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "move", text)
+        # Genuine marketplace phrasing (no travel verb) must still work exactly as before.
+        self.assertEqual(_keyword_fallback("check the market", [])["action"], "check_market")
+        self.assertEqual(_keyword_fallback("show me the market", [])["action"], "check_market")
+        self.assertEqual(_keyword_fallback("what is on the marketplace", [])["action"], "check_market")
+        self.assertEqual(_keyword_fallback("cancel my listing in the market", [])["action"], "cancel_market")
 
     def test_move_with_accept_quest_purpose_clause_classified_as_move(self):
         """

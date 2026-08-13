@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.177] — Fix: "go to the market" misclassified as opening the marketplace, plus progressive-tense travel verbs
+
+Real live bug, found via topic-activity monitoring: "Go to the market"
+(no "row") came back `check_market` instead of `move`. Same root cause
+as the earlier "go to the market row" fix (2026-08-09) -- Market Row
+is the only real market-flavored location in this game, and
+`_do_move`'s own word-level fallback already resolves the bare word
+"market" to it uniquely -- but the existing exclusion only matched the
+literal substring "market row", never the equally natural "the
+market" alone. Generalized to a real regex: any explicit travel verb
+(go/head/walk/travel/move/return, optionally "-ing") immediately
+before "market" now falls through to move classification instead,
+while ordinary marketplace-listing phrasing ("check the market",
+"cancel my listing in the market") is unaffected.
+
+Investigating this surfaced a second, related gap: `move_words` had no
+progressive-tense ("-ing") form of any travel verb at all -- "heading
+to the market" (and "walking to"/"traveling to"/"moving to"/"returning
+to") matched nothing and silently fell through to `chat`. Added the
+natural "-ing" form of every existing named-destination travel verb.
+
 ## [1.27.176] — Add: real resistances/vulnerabilities across the early/mid monster roster (Synergy Phase 2)
 
 Real feature, "break the game" synergy pass Phase 2, per Coffee: only
