@@ -22,7 +22,7 @@ import items as items_module
 from rules.dice import ability_modifier, average_damage
 from rules.leveling import (
     level_for_xp, proficiency_bonus_for_level,
-    hp_gain_for_level, ASI_LEVELS, xp_gain_multiplier, EVOLUTION_HP_MULTIPLIER,
+    hp_gain_for_level, ASI_LEVELS, xp_gain_multiplier, EVOLUTION_HP_MULTIPLIER, ability_score_cap,
 )
 from rules.item_sets import active_set_bonus_affixes
 from rules.item_generator import TIERS, TIER_BONUS, TIER_PRICE_MULT
@@ -521,6 +521,13 @@ def init_db() -> None:
         if "steal_proficiency_pct" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN steal_proficiency_pct REAL NOT NULL DEFAULT 1.0")
 
+        # Lockpick proficiency (2026-08-13, per Coffee, same shape as
+        # steal_proficiency_pct just above -- Thieves' Guild's permanent
+        # growth needed a real, grindable lockpicking field to point at,
+        # not just the existing flat THIEVES_GUILD_LOCKPICK_BONUS.
+        if "lockpick_proficiency_pct" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN lockpick_proficiency_pct REAL NOT NULL DEFAULT 1.0")
+
         # Crafting/enchanting mastery (2026-08-11, per Coffee: "grinding
         # for better weapons and RNG allowing us to make better ones" --
         # same real per-profession 0-100% grind as weapon_proficiency_pct
@@ -775,6 +782,32 @@ def init_db() -> None:
         if "guild_curriculum_state" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN guild_curriculum_state TEXT NOT NULL DEFAULT '{}'")
 
+        # Leave-guild + evolution-gated multi-guild ("doubled up") system
+        # (2026-08-13, per Coffee -- see guilds.py's GUILD_STAT_BONUS_
+        # LEVELS/eligible_for_guild docstrings for the full design).
+        # `guild_join_level` is the PRIMARY guild's level-at-join, needed
+        # to compute how many GUILD_STAT_BONUS_LEVELS thresholds have
+        # been crossed while a member (see add_xp) -- nullable, since a
+        # character with no guild has none. The four `secondary_guild_*`
+        # dicts are guild_id-keyed mirrors of the single-guild fields
+        # above (join level / curriculum step / that step's unlock
+        # timestamp / that step's scratch state) for every guild beyond
+        # the first an evolved character has earned -- a dict rather
+        # than a second scalar set, since more than one secondary guild
+        # is the entire point of "doubled up."
+        if "guild_join_level" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN guild_join_level INTEGER")
+        if "secondary_guilds" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN secondary_guilds TEXT NOT NULL DEFAULT '[]'")
+        if "secondary_guild_join_levels" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN secondary_guild_join_levels TEXT NOT NULL DEFAULT '{}'")
+        if "secondary_guild_curriculum_steps" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN secondary_guild_curriculum_steps TEXT NOT NULL DEFAULT '{}'")
+        if "secondary_guild_curriculum_unlocked_at" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN secondary_guild_curriculum_unlocked_at TEXT NOT NULL DEFAULT '{}'")
+        if "secondary_guild_curriculum_state" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN secondary_guild_curriculum_state TEXT NOT NULL DEFAULT '{}'")
+
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)
@@ -795,6 +828,11 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     d["armor_proficiency_pct"] = json.loads(d["armor_proficiency_pct"])
     d["profession_mastery_pct"] = json.loads(d["profession_mastery_pct"])
     d["guild_curriculum_state"] = json.loads(d["guild_curriculum_state"])
+    d["secondary_guilds"] = json.loads(d["secondary_guilds"])
+    d["secondary_guild_join_levels"] = json.loads(d["secondary_guild_join_levels"])
+    d["secondary_guild_curriculum_steps"] = json.loads(d["secondary_guild_curriculum_steps"])
+    d["secondary_guild_curriculum_unlocked_at"] = json.loads(d["secondary_guild_curriculum_unlocked_at"])
+    d["secondary_guild_curriculum_state"] = json.loads(d["secondary_guild_curriculum_state"])
     return d
 
 
@@ -906,7 +944,7 @@ def update_character(telegram_user_id: int, chat_id: int, **fields) -> dict | No
     if not fields:
         return get_character(telegram_user_id, chat_id)
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -950,7 +988,7 @@ def update_character_by_id(character_id: int, **fields) -> dict | None:
             row = conn.execute("SELECT * FROM characters WHERE character_id = ?", (character_id,)).fetchone()
         return _row_to_dict(row) if row else None
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -1675,34 +1713,137 @@ def accept_quest(telegram_user_id: int, chat_id: int, quest_id: str) -> dict | N
 
 
 def join_guild(telegram_user_id: int, chat_id: int, guild_id: str) -> dict | None:
-    # Starts the guild curriculum's first step immediately (2026-08-12) --
-    # guild_curriculum_step defaults to 0 already, but stamping
-    # unlocked_at here (rather than leaving it NULL until some later
-    # write) starts that step's real time-gate the moment membership
-    # begins, not whenever the member first happens to ask about it.
-    return update_character(
-        telegram_user_id, chat_id, guild=guild_id,
-        guild_curriculum_step_unlocked_at=datetime.now(timezone.utc).isoformat(),
-    )
-
-
-def advance_guild_curriculum_step(telegram_user_id: int, chat_id: int) -> dict | None:
     """
-    Credits the character's CURRENT guild curriculum step and unlocks
-    the next one -- advances the step counter by 1, re-stamps
-    guild_curriculum_step_unlocked_at to now (starting the next step's
-    own real time-gate fresh), and clears guild_curriculum_state (any
-    scratch data an alignment_choice step's setup narration left behind
-    belongs to the step just finished, not the next one).
+    First guild ever joined becomes the PRIMARY guild (character.guild,
+    full benefits + shop discount + guild quest). Every guild after
+    that (only reachable once guilds.eligible_for_guild's evolution +
+    mastery gate has already passed -- a real "Promotion", per Coffee)
+    is a SECONDARY guild instead -- real curriculum progress, real
+    permanent stat/profession/proficiency growth (see add_xp), AND an
+    immediate one-time GUILD_PROMOTION_PCT_BONUS % bump the moment the
+    Promotion happens, same as the primary's growth but never the
+    primary's other mechanical benefits (a Promotion is a real, earned
+    prestige/growth system, not a second full membership stacking
+    every bonus).
     """
     character = get_character(telegram_user_id, chat_id)
     if character is None:
         return None
+    now = datetime.now(timezone.utc).isoformat()
+    if not character.get("guild"):
+        # Starts the guild curriculum's first step immediately
+        # (2026-08-12) -- guild_curriculum_step defaults to 0 already,
+        # but stamping unlocked_at here (rather than leaving it NULL
+        # until some later write) starts that step's real time-gate the
+        # moment membership begins, not whenever the member first
+        # happens to ask about it.
+        return update_character(
+            telegram_user_id, chat_id, guild=guild_id,
+            guild_curriculum_step_unlocked_at=now, guild_join_level=character["level"],
+        )
+    secondary_guilds = character["secondary_guilds"] + [guild_id]
+    join_levels = character["secondary_guild_join_levels"]
+    join_levels[guild_id] = character["level"]
+    unlocked_at = character["secondary_guild_curriculum_unlocked_at"]
+    unlocked_at[guild_id] = now
+    updates = {
+        "secondary_guilds": secondary_guilds, "secondary_guild_join_levels": join_levels,
+        "secondary_guild_curriculum_unlocked_at": unlocked_at,
+    }
+    # Real Promotion bonus (2026-08-13, per Coffee: "promotions shud
+    # increase % so players can eventually work on maxing out %") -- a
+    # genuine evolution+mastery-earned Promotion into another guild
+    # grants an immediate, one-time real bump to that guild's own
+    # profession/scalar proficiency %s, on top of (not instead of) the
+    # gradual per-level growth add_xp keeps applying afterward -- gives
+    # a real, felt payoff the moment a Promotion actually happens, with
+    # the same 100%-capped "eventually maxing out" ceiling as everything
+    # else in this %-based system.
+    import guilds as guilds_module
+    promotion_professions = guilds_module.GUILD_PERMANENT_PROFESSION.get(guild_id) or []
+    if promotion_professions:
+        mastery = dict(character["profession_mastery_pct"])
+        for profession in promotion_professions:
+            mastery[profession] = min(mastery.get(profession, 1.0) + guilds_module.GUILD_PROMOTION_PCT_BONUS, 100.0)
+        updates["profession_mastery_pct"] = mastery
+    for scalar_field in guilds_module.GUILD_PERMANENT_SCALAR_PROFICIENCY.get(guild_id) or []:
+        current = character.get(scalar_field, 1.0)
+        updates[scalar_field] = min(current + guilds_module.GUILD_PROMOTION_PCT_BONUS, 100.0)
+    return update_character(telegram_user_id, chat_id, **updates)
+
+
+def leave_guild(telegram_user_id: int, chat_id: int, guild_id: str) -> dict | None:
+    """
+    Drops membership in exactly one currently-held guild (primary or
+    secondary) -- clears that guild's own curriculum/benefit state and
+    frees its slot back up, but never touches ability scores: any
+    permanent stat points add_xp already granted while a member stay
+    exactly where they are, real and permanent, per Coffee's explicit
+    "when they leave they keep that bonus... but do not keep the other
+    bonuses" design. Leaving the PRIMARY guild while a secondary is
+    still held does NOT promote a secondary to primary -- the primary
+    slot simply becomes empty again, re-fillable by any future join
+    (first-guild rules) the same as a character who'd never joined one.
+    """
+    character = get_character(telegram_user_id, chat_id)
+    if character is None:
+        return None
+    if character.get("guild") == guild_id:
+        return update_character(
+            telegram_user_id, chat_id, guild=None, guild_curriculum_step=0,
+            guild_curriculum_step_unlocked_at=None, guild_curriculum_state={}, guild_join_level=None,
+        )
+    if guild_id in character["secondary_guilds"]:
+        secondary_guilds = [g for g in character["secondary_guilds"] if g != guild_id]
+        join_levels = character["secondary_guild_join_levels"]
+        join_levels.pop(guild_id, None)
+        steps = character["secondary_guild_curriculum_steps"]
+        steps.pop(guild_id, None)
+        unlocked_at = character["secondary_guild_curriculum_unlocked_at"]
+        unlocked_at.pop(guild_id, None)
+        state = character["secondary_guild_curriculum_state"]
+        state.pop(guild_id, None)
+        return update_character(
+            telegram_user_id, chat_id, secondary_guilds=secondary_guilds,
+            secondary_guild_join_levels=join_levels, secondary_guild_curriculum_steps=steps,
+            secondary_guild_curriculum_unlocked_at=unlocked_at, secondary_guild_curriculum_state=state,
+        )
+    return None
+
+
+def advance_guild_curriculum_step(telegram_user_id: int, chat_id: int, guild_id: str | None = None) -> dict | None:
+    """
+    Credits the character's CURRENT guild curriculum step for `guild_id`
+    (default: the primary guild, preserving every existing call site's
+    exact prior behavior) and unlocks the next one -- advances that
+    guild's own step counter by 1, re-stamps its unlocked-at to now
+    (starting the next step's own real time-gate fresh), and clears its
+    scratch state (any data an alignment_choice step's setup narration
+    left behind belongs to the step just finished, not the next one).
+    `guild_id` may also name a SECONDARY guild (2026-08-13, "doubled
+    up" evolution guilds) -- reads/writes the guild_id-keyed secondary_
+    guild_* dicts instead of the singular primary fields in that case.
+    """
+    character = get_character(telegram_user_id, chat_id)
+    if character is None:
+        return None
+    now = datetime.now(timezone.utc).isoformat()
+    if guild_id is None or guild_id == character.get("guild"):
+        return update_character(
+            telegram_user_id, chat_id,
+            guild_curriculum_step=character["guild_curriculum_step"] + 1,
+            guild_curriculum_step_unlocked_at=now,
+            guild_curriculum_state={},
+        )
+    steps = character["secondary_guild_curriculum_steps"]
+    steps[guild_id] = steps.get(guild_id, 0) + 1
+    unlocked_at = character["secondary_guild_curriculum_unlocked_at"]
+    unlocked_at[guild_id] = now
+    state = character["secondary_guild_curriculum_state"]
+    state.pop(guild_id, None)
     return update_character(
-        telegram_user_id, chat_id,
-        guild_curriculum_step=character["guild_curriculum_step"] + 1,
-        guild_curriculum_step_unlocked_at=datetime.now(timezone.utc).isoformat(),
-        guild_curriculum_state={},
+        telegram_user_id, chat_id, secondary_guild_curriculum_steps=steps,
+        secondary_guild_curriculum_unlocked_at=unlocked_at, secondary_guild_curriculum_state=state,
     )
 
 
@@ -1962,6 +2103,71 @@ def add_xp(telegram_user_id: int, chat_id: int, amount: int) -> dict | None:
         newly_learned = [s for s in newly_unlocked if s not in character["known_spells"]]
         if newly_learned:
             updates["known_spells"] = character["known_spells"] + newly_learned
+
+        # Real, permanent guild stat + profession growth (2026-08-13, per
+        # Coffee: "you add a + to stat that levels up the players stat
+        # directly... you can decide how many points they get per
+        # levels for that" -- then "add a stat to the proficiencies too
+        # that level up when the player levels up that is also
+        # permanant, each guild shud have one, make sure all
+        # proficiencies are covered by this system and all stats are
+        # also"). For every guilds.GUILD_STAT_BONUS_LEVELS levels gained
+        # WHILE a member of a given guild (computed from bonus-tier
+        # thresholds crossed between old_level and new_level, not just
+        # "did we cross ANY threshold", so a big multi-level XP award
+        # still grants every point it should in one pass): +1 to that
+        # guild's own guilds.GUILDS[...]['permanent_stat'] (ability
+        # score, capped at ability_score_cap) AND +1% to that guild's
+        # own guilds.GUILD_PERMANENT_PROFESSION[...] profession's
+        # profession_mastery_pct (capped at PROFICIENCY_MAX_PCT via
+        # bot.py's own constant -- inlined as 100.0 here rather than
+        # importing bot.py, which itself imports db.py). Once applied
+        # both are ordinary, permanent character values like any other
+        # -- leaving a guild (db.leave_guild) never reverts either,
+        # which is the entire point of this system.
+        import guilds as guilds_module
+        cap = ability_score_cap(character.get("rebirth_count", 0))
+        PROFICIENCY_MAX_PCT = 100.0
+
+        def _bonus_tiers(join_level: int | None, at_level: int) -> int:
+            if join_level is None or at_level <= join_level:
+                return 0
+            return (at_level - join_level) // guilds_module.GUILD_STAT_BONUS_LEVELS
+
+        def _apply_guild_growth(guild_id: str, join_level: int | None) -> None:
+            if join_level is None:
+                return
+            gained = _bonus_tiers(join_level, new_level) - _bonus_tiers(join_level, old_level)
+            if not gained:
+                return
+            stat = guilds_module.GUILDS.get(guild_id, {}).get("permanent_stat")
+            if stat:
+                current_value = updates.get(stat, character[stat])
+                updates[stat] = min(current_value + gained, cap)
+            professions = guilds_module.GUILD_PERMANENT_PROFESSION.get(guild_id) or []
+            if professions:
+                mastery = dict(updates.get("profession_mastery_pct", character["profession_mastery_pct"]))
+                for profession in professions:
+                    current_pct = mastery.get(profession, 1.0)
+                    mastery[profession] = min(current_pct + gained, PROFICIENCY_MAX_PCT)
+                updates["profession_mastery_pct"] = mastery
+            scalar_fields = list(guilds_module.GUILD_PERMANENT_SCALAR_PROFICIENCY.get(guild_id) or [])
+            # backstab_proficiency_pct only ever matters for a real
+            # Assassin (bot.py's own rule -- see guilds.py's
+            # GUILD_PERMANENT_SCALAR_PROFICIENCY docstring), so it's
+            # added conditionally here rather than listed unconditionally
+            # above; per Coffee: "if the player has it, otherwise dont
+            # show that one".
+            if guild_id == "thieves_guild" and character.get("subclass") == "Assassin":
+                scalar_fields.append("backstab_proficiency_pct")
+            for scalar_field in scalar_fields:
+                current_scalar = updates.get(scalar_field, character.get(scalar_field, 1.0))
+                updates[scalar_field] = min(current_scalar + gained, PROFICIENCY_MAX_PCT)
+
+        if character.get("guild"):
+            _apply_guild_growth(character["guild"], character.get("guild_join_level"))
+        for gid in character.get("secondary_guilds") or []:
+            _apply_guild_growth(gid, (character.get("secondary_guild_join_levels") or {}).get(gid))
 
     return update_character(telegram_user_id, chat_id, **updates)
 

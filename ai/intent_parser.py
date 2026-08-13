@@ -130,6 +130,7 @@ Set "item_name" to the item.
 - "discard_item" is for permanently scrapping/throwing away an item from inventory, no refund \
 (e.g. "discard my rusty dagger", "scrap the longsword"). Set "item_name" to the item.
 - "join_guild" is for joining/asking to join a specific guild or order.
+- "leave_guild" is for leaving/quitting a guild the player is already a member of.
 - "pass_turn" is for skipping, waiting, or passing.
 - "resolve_choice" is for declaring a decision on a moral choice/quest resolution (e.g. "I choose to...", "I'll go with...").
 - "invite_to_party" is for inviting another player's or AI companion's character into their own formed party. Set "target" to the invitee's name.
@@ -832,6 +833,20 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
 
     if any(w in lowered for w in ["leave the party", "leave my party", "quit the party", "i quit my party"]):
         return {**base, "action": "leave_party"}
+
+    # leave_guild (2026-08-13, per Coffee: "add a leave guild feature").
+    # Checked here, BEFORE move_words' own "leave the "/"leave this"/
+    # "leave here" phrases further down would otherwise claim "leave the
+    # Silver Wardens" as ordinary travel first. Grounded the same way
+    # join_guild is (the literal word "guild" or a real guild's own
+    # name/id must be present) so this can never fire on an unrelated
+    # "leave the tavern"/"leave this room". "quit" alone is deliberately
+    # not enough on its own without that same real-guild grounding --
+    # too easy to collide with "quit fighting"/"I quit" otherwise.
+    if re.search(r"\b(?:leave|quit|resign from|resign my)\b", lowered) and (
+        "guild" in lowered or any(gid.replace("_", " ") in lowered or g["name"].lower() in lowered for gid, g in GUILDS.items())
+    ):
+        return {**base, "action": "leave_guild"}
 
     # Bench/un-bench (2026-07-31, per Coffee: battle-planning roster
     # picker) -- checked before "unbench" would ever risk matching a
@@ -1998,7 +2013,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
             valid_actions = (
                 "attack", "pass_turn", "start_combat", "create_character",
                 "check_sheet", "check_inventory", "check_party", "talk_npc", "move", "look",
-                "buy", "sell", "steal", "cast_spell", "join_guild", "recruit_npc", "rest",
+                "buy", "sell", "steal", "cast_spell", "join_guild", "leave_guild", "recruit_npc", "rest",
                 "go_inactive", "skill_check", "shove", "show_map", "gather", "craft",
                 "list_characters", "switch_character", "delete_character",
                 "fast_travel", "accept_quest", "check_quests", "ask_clue",

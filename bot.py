@@ -78,6 +78,8 @@ from guilds import (
     GUILDS, eligible_for_guild, GUILD_QUESTS,
     ARCANE_CIRCLE_SPELL_DAMAGE_BONUS_PCT, THIEVES_GUILD_STEAL_BONUS, ARCANE_CIRCLE_EXCLUSIVE_SPELLS,
     ADVENTURERS_GUILD_BOARD_QUEST_GOLD_BONUS_PCT, THIEVES_GUILD_LOCKPICK_BONUS,
+    held_guild_ids, guild_title, GUILD_STAT_BONUS_LEVELS,
+    GUILD_PERMANENT_PROFESSION, GUILD_PERMANENT_SCALAR_PROFICIENCY, GUILD_PROMOTION_PCT_BONUS,
 )
 from models import (
     VALID_CLASSES,
@@ -291,6 +293,11 @@ def _roll_backstab_proficiency(character: dict) -> bool:
     chance = min(stored + _equipped_proficiency_bonus(character, "backstab"), PROFICIENCY_MAX_PCT)
     _grind_flat_proficiency(character["telegram_user_id"], character["chat_id"], "backstab_proficiency_pct", stored)
     return roll_percentage_check(chance)
+
+
+def _lockpick_proficiency_bonus(character: dict) -> int:
+    """Same shape/reasoning as _steal_proficiency_bonus, for lockpick_proficiency_pct."""
+    return round(character.get("lockpick_proficiency_pct", PROFICIENCY_STARTING_PCT) / 10)
 
 
 def _steal_proficiency_bonus(character: dict) -> int:
@@ -7236,6 +7243,7 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
     # guild's own trade secret too, not available outside it.
     if character.get("guild") == "thieves_guild":
         bonus += THIEVES_GUILD_LOCKPICK_BONUS
+    bonus += _lockpick_proficiency_bonus(character)
     result["total"] += bonus
     result["practiced_bonus"] = bonus
     success = result["total"] >= SKILL_CHECK_DC
@@ -15445,23 +15453,39 @@ GUILD_CURRICULUM_DICE_KEYWORDS = ["try my luck", "attempt the trial", "roll for 
 GUILD_CURRICULUM_STATUS_KEYWORDS = ["my curriculum", "guild training", "next lesson", "curriculum"]
 
 
-def _guild_curriculum_step_ready(character: dict) -> bool:
+def _guild_curriculum_step_index(character: dict, guild_id: str) -> int:
+    """Current curriculum step for `guild_id`, whether it's the primary or a secondary ("doubled up") guild."""
+    if guild_id == character.get("guild"):
+        return character["guild_curriculum_step"]
+    return (character.get("secondary_guild_curriculum_steps") or {}).get(guild_id, 0)
+
+
+def _guild_curriculum_unlocked_at(character: dict, guild_id: str) -> str | None:
+    if guild_id == character.get("guild"):
+        return character.get("guild_curriculum_step_unlocked_at")
+    return (character.get("secondary_guild_curriculum_unlocked_at") or {}).get(guild_id)
+
+
+def _guild_curriculum_step_ready(character: dict, guild_id: str | None = None) -> bool:
     """
     True once GUILD_CURRICULUM_STEP_COOLDOWN_HOURS have really passed
     since the character's CURRENT step unlocked -- the real "must grind
     it out" pacing gate (per Coffee), enforced on CREDITING a step, not
     on attempting it (a member can work toward it immediately, they just
     can't be recognized for it until real time has actually passed).
+    `guild_id` defaults to the primary guild, matching every pre-existing
+    call site's behavior exactly; pass a secondary ("doubled up") guild's
+    id to check that guild's own step instead.
     """
-    unlocked_at = character.get("guild_curriculum_step_unlocked_at")
+    unlocked_at = _guild_curriculum_unlocked_at(character, guild_id or character.get("guild"))
     if not unlocked_at:
         return True
     elapsed = datetime.now(timezone.utc) - datetime.fromisoformat(unlocked_at)
     return elapsed >= timedelta(hours=guild_curriculum_module.GUILD_CURRICULUM_STEP_COOLDOWN_HOURS)
 
 
-def _guild_curriculum_time_remaining_note(character: dict) -> str:
-    unlocked_at = character.get("guild_curriculum_step_unlocked_at")
+def _guild_curriculum_time_remaining_note(character: dict, guild_id: str | None = None) -> str:
+    unlocked_at = _guild_curriculum_unlocked_at(character, guild_id or character.get("guild"))
     if not unlocked_at:
         return "a while"
     elapsed = datetime.now(timezone.utc) - datetime.fromisoformat(unlocked_at)
@@ -15634,7 +15658,7 @@ async def _post_and_pin_guild_curriculum_step(update: Update, chat_id: int, guil
 
 
 async def _complete_guild_curriculum_step(
-    update_like, telegram_user_id: int, chat_id: int, step: dict, extra_note: str = "",
+    update_like, telegram_user_id: int, chat_id: int, step: dict, extra_note: str = "", guild_id: str | None = None,
 ) -> None:
     """
     Grants one guild curriculum step's real reward (XP/gold, and an
@@ -15646,10 +15670,14 @@ async def _complete_guild_curriculum_step(
     alignment_choice) the step merged with the CHOSEN branch's own
     reward fields overriding the top-level ones, since a branching
     step's real reward depends on which option was picked.
+    `guild_id` defaults to the primary guild (every pre-existing call
+    site's exact prior behavior); pass a secondary ("doubled up") guild
+    id to credit that guild's own curriculum instead.
     """
     character = db.get_character(telegram_user_id, chat_id)
     if character is None:
         return
+    guild_id = guild_id or character["guild"]
     reward_xp = step.get("reward_xp", 0)
     reward_gold = step.get("reward_gold", 0)
     if reward_xp:
@@ -15665,8 +15693,7 @@ async def _complete_guild_curriculum_step(
         updated_pct = {**fresh["profession_mastery_pct"], mastery_profession: min(current + mastery_pct, PROFICIENCY_MAX_PCT)}
         db.update_character(telegram_user_id, chat_id, profession_mastery_pct=updated_pct)
 
-    updated_character = db.advance_guild_curriculum_step(telegram_user_id, chat_id)
-    guild_id = updated_character["guild"]
+    updated_character = db.advance_guild_curriculum_step(telegram_user_id, chat_id, guild_id)
     topic_id = config.GUILD_TOPIC_IDS.get(guild_id)
     reply_thread_id = topic_id if topic_id is not None else update_like.effective_message.message_thread_id
 
@@ -15681,7 +15708,7 @@ async def _complete_guild_curriculum_step(
         thread_id=reply_thread_id,
     )
 
-    next_step = guild_curriculum_module.get_step(guild_id, updated_character["guild_curriculum_step"])
+    next_step = guild_curriculum_module.get_step(guild_id, _guild_curriculum_step_index(updated_character, guild_id))
     if next_step is None:
         await _safe_send(
             update_like,
@@ -15703,43 +15730,51 @@ async def _check_guild_curriculum_progress(update_like, telegram_user_id: int, c
     resolved directly in guild_topic_handler instead (they're genuinely
     driven by what's typed IN the guild's own topic, not an Adventure-
     side action); alignment_choice is resolved via guild_curriculum_callback.
+
+    Checks EVERY guild currently held (2026-08-13: primary AND any
+    "doubled up" secondary guilds, see guilds.held_guild_ids) rather
+    than just the primary -- an evolved character training toward a
+    second guild's own curriculum needs the exact same real-event
+    checkpoints to be able to progress it at all.
     """
     character = db.get_character(telegram_user_id, chat_id)
-    if character is None or not character.get("guild"):
+    if character is None:
         return
-    guild_id = character["guild"]
-    step = guild_curriculum_module.get_step(guild_id, character["guild_curriculum_step"])
-    if step is None or character["level"] < step["min_level"]:
-        return
-    trigger = step["trigger"]
-    if trigger["type"] != event_type:
-        return
+    for guild_id in held_guild_ids(character):
+        step_index = _guild_curriculum_step_index(character, guild_id)
+        step = guild_curriculum_module.get_step(guild_id, step_index)
+        if step is None or character["level"] < step["min_level"]:
+            continue
+        trigger = step["trigger"]
+        if trigger["type"] != event_type:
+            continue
 
-    matched = False
-    if event_type == "reach_location":
-        matched = trigger["location"] == event_data.get("location_id")
-    elif event_type == "defeat_monster":
-        matched = trigger["monster"] in event_data.get("monster_keys", set())
-    elif event_type == "gather_material":
-        matched = (
-            trigger["material"] == event_data.get("material_id")
-            and character["inventory"].get(trigger["material"], 0) >= trigger.get("count", 1)
-        )
-    elif event_type == "npc_dialogue":
-        text_lower = (event_data.get("text") or "").lower()
-        matched = trigger["npc"] == event_data.get("npc_id") and any(kw in text_lower for kw in trigger.get("keywords", []))
-    if not matched:
-        return
+        matched = False
+        if event_type == "reach_location":
+            matched = trigger["location"] == event_data.get("location_id")
+        elif event_type == "defeat_monster":
+            matched = trigger["monster"] in event_data.get("monster_keys", set())
+        elif event_type == "gather_material":
+            matched = (
+                trigger["material"] == event_data.get("material_id")
+                and character["inventory"].get(trigger["material"], 0) >= trigger.get("count", 1)
+            )
+        elif event_type == "npc_dialogue":
+            text_lower = (event_data.get("text") or "").lower()
+            matched = trigger["npc"] == event_data.get("npc_id") and any(kw in text_lower for kw in trigger.get("keywords", []))
+        if not matched:
+            continue
 
-    if not _guild_curriculum_step_ready(character):
-        remaining = _guild_curriculum_time_remaining_note(character)
-        await _safe_send(
-            update_like,
-            f"📖 That satisfies **{step['title']}** — but the guild won't credit it for another {remaining}. "
-            f"Real training takes real time.",
-        )
+        if not _guild_curriculum_step_ready(character, guild_id):
+            remaining = _guild_curriculum_time_remaining_note(character, guild_id)
+            await _safe_send(
+                update_like,
+                f"📖 That satisfies **{step['title']}** — but the guild won't credit it for another {remaining}. "
+                f"Real training takes real time.",
+            )
+            return
+        await _complete_guild_curriculum_step(update_like, telegram_user_id, chat_id, step, guild_id=guild_id)
         return
-    await _complete_guild_curriculum_step(update_like, telegram_user_id, chat_id, step)
 
 
 async def _do_guild_curriculum_dice_challenge(update: Update, step: dict) -> None:
@@ -19521,6 +19556,31 @@ async def _cast_utility_spell(
         )
 
 
+_PROFICIENCY_FIELD_LABELS = {
+    "steal_proficiency_pct": "Stealing",
+    "lockpick_proficiency_pct": "Lockpicking",
+    "backstab_proficiency_pct": "Backstabbing",
+}
+
+
+def _proficiency_field_label(field_name: str) -> str:
+    return _PROFICIENCY_FIELD_LABELS.get(field_name, field_name.replace("_proficiency_pct", "").capitalize())
+
+
+def _guild_scalar_proficiency_fields(guild_id: str, character: dict) -> list[str]:
+    """
+    Real scalar proficiency fields (guilds.GUILD_PERMANENT_SCALAR_
+    PROFICIENCY) a member of `guild_id` actually grows -- includes
+    backstab_proficiency_pct only for a real Assassin (see db.add_xp's
+    matching conditional; kept in sync here so join/leave messaging
+    never promises a bonus a non-Assassin member won't actually get).
+    """
+    fields = list(GUILD_PERMANENT_SCALAR_PROFICIENCY.get(guild_id) or [])
+    if guild_id == "thieves_guild" and character.get("subclass") == "Assassin":
+        fields.append("backstab_proficiency_pct")
+    return fields
+
+
 async def _do_join_guild(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -19584,19 +19644,63 @@ async def _do_join_guild(update: Update, text: str) -> None:
         )
         return
 
+    # Whether this becomes the PRIMARY guild (full benefits) or a
+    # "doubled up" SECONDARY one (2026-08-13, evolution-gated -- see
+    # eligible_for_guild) depends only on whether a guild is already
+    # held; db.join_guild itself branches on the exact same check.
+    is_secondary = bool(character.get("guild"))
     db.join_guild(update.effective_user.id, update.effective_chat.id, guild_id)
+    character_for_growth_note = db.get_character(update.effective_user.id, update.effective_chat.id)
+    stat_name = GUILDS[guild_id].get("permanent_stat")
+    growth_bits = []
+    if stat_name:
+        growth_bits.append(f"your {stat_name.capitalize()} by 1")
+    for profession in GUILD_PERMANENT_PROFESSION.get(guild_id) or []:
+        growth_bits.append(f"your {profession.capitalize()} mastery by 1%")
+    for scalar_field in _guild_scalar_proficiency_fields(guild_id, character_for_growth_note):
+        growth_bits.append(f"your {_proficiency_field_label(scalar_field)} by 1%")
+    stat_note = (
+        f" Every {GUILD_STAT_BONUS_LEVELS} levels you gain as a member permanently raises "
+        f"{' and '.join(growth_bits)} — real, permanent, yours to keep even if you ever leave."
+        if growth_bits else ""
+    )
     join_note = ""
     # Arcane Circle's bonus_spell_scroll benefit (guilds.py) was flavor
     # text with nothing checking it -- a real, immediate welcome gift is
     # the simplest honest reading of "bonus spell scroll" for a
     # membership benefit, same spirit as Silver Wardens' combat bonus
     # and Cleric's Disciple of Life being real rather than described.
-    if "bonus_spell_scroll" in GUILDS[guild_id]["benefits"]:
+    # Secondary ("doubled up") guilds deliberately skip this and every
+    # other primary-only benefit -- see guilds.py's eligible_for_guild
+    # docstring: a second guild is real curriculum + real permanent
+    # stat growth, not a second full membership stacking every bonus.
+    if not is_secondary and "bonus_spell_scroll" in GUILDS[guild_id]["benefits"]:
         db.add_item(update.effective_user.id, update.effective_chat.id, "scroll_magic_missile", 1)
         join_note = " They welcome you with a free Scroll of Magic Missile."
     topic_note = " Check the guild's own topic for member-only chat and today's guild quest." if config.GUILD_TOPIC_IDS.get(guild_id) else ""
-    await _safe_send(update, f"🏛️ You've joined {GUILDS[guild_id]['name']}!{join_note}{topic_note}")
-    await _notify_main_topic(update, f"🏛️ **{character['name']}** joined {GUILDS[guild_id]['name']}!")
+    updated = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if is_secondary:
+        title = guild_title(updated)
+        promoted_targets = (
+            [f"{profession.capitalize()} mastery" for profession in GUILD_PERMANENT_PROFESSION.get(guild_id) or []]
+            + [_proficiency_field_label(f) for f in _guild_scalar_proficiency_fields(guild_id, character_for_growth_note)]
+        )
+        promotion_note = (
+            f" The Promotion itself immediately raises your {' and '.join(promoted_targets)} by "
+            f"{GUILD_PROMOTION_PCT_BONUS:g}%."
+            if promoted_targets else ""
+        )
+        await _safe_send(
+            update,
+            f"🏛️ **Promotion!** {GUILDS[guild_id]['name']} takes you on as well.{promotion_note}{stat_note} "
+            f"You're known now as **the {title}**.{topic_note}",
+        )
+        await _notify_main_topic(
+            update, f"🏛️ **{character['name']}** has been Promoted, joining {GUILDS[guild_id]['name']} — now known as the {title}!",
+        )
+    else:
+        await _safe_send(update, f"🏛️ You've joined {GUILDS[guild_id]['name']}!{join_note}{stat_note}{topic_note}")
+        await _notify_main_topic(update, f"🏛️ **{character['name']}** joined {GUILDS[guild_id]['name']}!")
     await _check_and_award_achievements(update, db.get_character(update.effective_user.id, update.effective_chat.id))
     # Real guild curriculum (2026-08-12): the first step is already
     # unlocked (db.join_guild stamps guild_curriculum_step_unlocked_at),
@@ -19607,6 +19711,72 @@ async def _do_join_guild(update: Update, text: str) -> None:
         await _post_and_pin_guild_curriculum_step(
             update, update.effective_chat.id, guild_id, _format_guild_curriculum_step_announcement(first_step),
         )
+
+
+async def _do_leave_guild(update: Update, text: str) -> None:
+    """
+    Leaves exactly one currently-held guild -- primary or a "doubled
+    up" secondary (2026-08-13, per Coffee: "add a leave guild
+    feature"). Any permanent stat points that guild's membership
+    already granted (see db.add_xp) are never touched; every OTHER
+    benefit of that specific guild (shop discount, guild quest/topic,
+    its own curriculum progress) is gone the moment membership ends,
+    per Coffee's own framing: "they keep that bonus because it is now
+    permanently on the player but they do not keep the other bonuses."
+    Leaving always frees that guild's slot back up for a future join,
+    regardless of evolution/mastery gating (that gating only governs
+    ACCEPTING an additional guild, never leaving one).
+    """
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+
+    held = held_guild_ids(character)
+    if not held:
+        await _safe_send(update, "You're not a member of any guild.")
+        return
+
+    lowered = text.lower().replace("’", "'")
+    guild_id = None
+    for gid in held:
+        guild = GUILDS[gid]
+        candidates = {gid.replace("_", " "), guild["name"].lower()}
+        candidates = {c.replace("'", "") for c in candidates} | candidates
+        if any(c in lowered or c in lowered.replace("'", "") for c in candidates):
+            guild_id = gid
+            break
+    if guild_id is None and len(held) == 1:
+        guild_id = held[0]
+    if guild_id is None:
+        names = ", ".join(GUILDS[gid]["name"] for gid in held)
+        await _safe_send(update, f"Leave which guild? You're a member of: {names}.")
+        return
+
+    stat_name = GUILDS[guild_id].get("permanent_stat")
+    join_level = (
+        character.get("guild_join_level")
+        if guild_id == character.get("guild")
+        else (character.get("secondary_guild_join_levels") or {}).get(guild_id)
+    )
+    earned_points = 0
+    if join_level is not None and character["level"] > join_level:
+        earned_points = (character["level"] - join_level) // GUILD_STAT_BONUS_LEVELS
+    kept_bits = []
+    if earned_points and stat_name:
+        kept_bits.append(f"+{earned_points} {stat_name.capitalize()}")
+    if earned_points:
+        for profession in GUILD_PERMANENT_PROFESSION.get(guild_id) or []:
+            kept_bits.append(f"+{earned_points}% {profession.capitalize()} mastery")
+        for scalar_field in _guild_scalar_proficiency_fields(guild_id, character):
+            kept_bits.append(f"+{earned_points}% {_proficiency_field_label(scalar_field)}")
+    stat_note = f" The {' and '.join(kept_bits)} you already earned as a member stays with you, permanently." if kept_bits else ""
+
+    db.leave_guild(update.effective_user.id, update.effective_chat.id, guild_id)
+    await _safe_send(update, f"🏛️ You've left {GUILDS[guild_id]['name']}.{stat_note}")
+    await _notify_main_topic(update, f"🏛️ **{character['name']}** has left {GUILDS[guild_id]['name']}.")
 
 
 # ---------------------------------------------------------------------
@@ -20507,6 +20677,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_cast_spell(update, text)
     elif action == "join_guild":
         await _do_join_guild(update, text)
+    elif action == "leave_guild":
+        await _do_leave_guild(update, text)
     elif action == "pass_turn":
         await _do_pass_turn(update)
     elif action == "check_sheet":

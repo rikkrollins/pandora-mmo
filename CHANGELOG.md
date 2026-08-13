@@ -2,6 +2,60 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.168] — Add: leave-guild, permanent guild growth, evolution-gated Promotions, prestige ranks
+
+Real feature (2026-08-13, per Coffee, built live across many
+messages). Guild membership is no longer a strict one-guild-forever
+commitment:
+
+- **Leave a guild** (say "leave the [guild]"/"quit the [guild]"): drops
+  every OTHER benefit of that guild (shop discount, guild quest/topic,
+  its own curriculum progress) but never reverts any permanent growth
+  already earned — that's the entire point below.
+- **Real, permanent per-level growth while a member**: every 5 levels
+  gained as a member of a guild permanently grants +1 to that guild's
+  own ability score (Adventurers'→Constitution, Arcane Circle→
+  Intelligence, Silver Wardens→Strength, Thieves'→Dexterity, Faith
+  Circle→Wisdom, Forge→Strength, Enchanters'→Charisma — every stat
+  covered), +1% to a real profession's mastery (all 7 professions
+  covered across the 7 guilds — Adventurers' covers both Fishing and
+  Cooking), and for Thieves' Guild specifically, +1% Steal and
+  Lockpick proficiency directly (a new `lockpick_proficiency_pct`
+  field, wired into `_do_lockpick` the same way Steal already works),
+  plus Backstab proficiency too if the member is actually a real
+  Assassin. Applied incrementally through the real level-up path
+  (`db.add_xp`), the same one ASI/HP growth already goes through —
+  never all at once on join or leave.
+- **Promotions**: each real evolution (rebirth) unlocks one more guild
+  slot — but only once every currently-held guild's real curriculum is
+  fully mastered first, capped at 7 (this game's real guild count, so
+  no evolution ever unlocks a slot with nothing real to fill it). A
+  Promotion is earned, not free, and stacks (a character can genuinely
+  hold multiple guilds at once, real membership in each) rather than
+  replacing the first, and grants an immediate one-time +10% bump to
+  the new guild's own profession/proficiency on top of the gradual
+  per-level growth above. A multi-guild character gets a real combined
+  title (e.g. "the Ironbound-Warden") instead of a flat "member of X
+  and Y" list.
+- **10-tier prestige rank**, purely cosmetic, prefixed onto that same
+  title (e.g. "Legend Ironbound-Warden"): Wanderer through Ascendant,
+  one rank per real evolution, escalating past the 7-guild cap for a
+  genuine "godly at max level" payoff without spoiling any of this
+  game's own real story content underneath it.
+- Guild curriculum progress tracking was generalized to work for
+  secondary (Promotion-earned) guilds too, for the same real automatic
+  triggers (reach a location, defeat a monster, gather a material, an
+  NPC conversation) already used for the primary guild — guild-topic-
+  driven step types (a riddle, a dice challenge, a moral choice) are a
+  known, deliberate gap for a secondary guild for now, left for a
+  follow-up rather than risking the primary guild's already-live
+  curriculum system this same session.
+
+15 new regression tests. Deliberately did NOT touch the primary
+guild's own existing combat/utility benefits (bonus damage vs. undead,
+bonus spell damage, bonus healing, etc.) — those remain primary-guild
+exclusive by design, not something a Promotion stacks.
+
 ## [1.27.167] — Fix: narration cutting off mid-word (token cap too low)
 
 Real dev-bridge screenshot report (2026-08-13, Coffee: "The narration

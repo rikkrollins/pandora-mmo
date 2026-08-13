@@ -11799,6 +11799,251 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(gc.is_curriculum_complete("adventurers_guild", char["guild_curriculum_step"]))
             self.assertTrue(any("full training curriculum" in s for s in sink))
 
+    def test_permanent_guild_stat_growth_on_level_up(self):
+        """
+        Real live feature (2026-08-13, per Coffee: "you add a + to stat
+        that levels up the players stat directly... you can decide how
+        many points they get per levels for that"). Joining a guild
+        grants +1 to that guild's guilds.GUILDS[...]['permanent_stat']
+        for every guilds.GUILD_STAT_BONUS_LEVELS levels gained WHILE a
+        member -- exercised via the real db.add_xp path (the same one
+        every other level-up mechanic, ASI included, already goes
+        through), not a synthetic direct write.
+        """
+        import guilds as guilds_module
+        user_id = 700201
+        char = make_basic_character(user_id, "StatGrowthTester", char_class="Fighter")
+        db.join_guild(user_id, -999, "silver_wardens")  # permanent_stat: strength
+        before_str = db.get_character(user_id, -999)["strength"]
+
+        # 50,000 XP is comfortably enough to cross guilds.GUILD_STAT_BONUS_
+        # LEVELS (5) real level thresholds from level 1 at this game's own
+        # real XP curve (rules.leveling.level_for_xp).
+        db.add_xp(user_id, -999, 50_000)
+        after = db.get_character(user_id, -999)
+        self.assertGreater(after["level"], 1 + guilds_module.GUILD_STAT_BONUS_LEVELS - 1)
+        expected_gain = (after["level"] - 1) // guilds_module.GUILD_STAT_BONUS_LEVELS
+        self.assertGreater(expected_gain, 0)
+        self.assertEqual(after["strength"], before_str + expected_gain)
+
+    def test_permanent_guild_profession_mastery_growth_on_level_up(self):
+        """
+        Real live feature (2026-08-13, per Coffee: "add a stat to the
+        proficiencies too that level up when the player levels up that
+        is also permanant, each guild shud have one"). Faith Circle's
+        real guilds.GUILD_PERMANENT_PROFESSION entry is herbalism.
+        """
+        import guilds as guilds_module
+        user_id = 700205
+        make_basic_character(user_id, "ProfessionGrowthTester", char_class="Cleric")
+        db.join_guild(user_id, -999, "faith_circle")
+        before = db.get_character(user_id, -999)["profession_mastery_pct"].get("herbalism", 1.0)
+        db.add_xp(user_id, -999, 50_000)
+        after = db.get_character(user_id, -999)
+        expected_gain = (after["level"] - 1) // guilds_module.GUILD_STAT_BONUS_LEVELS
+        self.assertGreater(expected_gain, 0)
+        self.assertAlmostEqual(after["profession_mastery_pct"]["herbalism"], before + expected_gain)
+
+    def test_thieves_guild_grows_steal_and_lockpick_proficiency_not_cooking(self):
+        """
+        Real live correction (2026-08-13, per Coffee: "i dont think
+        thieves guild shud be cooking - it shud lock picking, and or
+        stealing"). Thieves' Guild grows steal_proficiency_pct AND the
+        new lockpick_proficiency_pct directly (guilds.GUILD_PERMANENT_
+        SCALAR_PROFICIENCY), never a profession -- Cooking moved to
+        Adventurers' Guild instead (see the next test) to keep full
+        7-profession coverage across the 7 guilds.
+        """
+        user_id = 700206
+        make_basic_character(user_id, "ThiefGrowthTester", char_class="Rogue")
+        db.join_guild(user_id, -999, "thieves_guild")
+        before = db.get_character(user_id, -999)
+        before_steal, before_lockpick = before["steal_proficiency_pct"], before["lockpick_proficiency_pct"]
+        db.add_xp(user_id, -999, 50_000)
+        after = db.get_character(user_id, -999)
+        self.assertGreater(after["steal_proficiency_pct"], before_steal)
+        self.assertGreater(after["lockpick_proficiency_pct"], before_lockpick)
+        self.assertNotIn("cooking", after["profession_mastery_pct"])
+
+    def test_thieves_guild_assassin_also_grows_backstab_proficiency(self):
+        """Per Coffee: "also for backstacking (if the player has it, otherwise dont show that one)"."""
+        user_id = 700207
+        make_basic_character(user_id, "AssassinGrowthTester", char_class="Rogue")
+        db.update_character(user_id, -999, subclass="Assassin")
+        db.join_guild(user_id, -999, "thieves_guild")
+        before = db.get_character(user_id, -999)["backstab_proficiency_pct"]
+        db.add_xp(user_id, -999, 50_000)
+        after = db.get_character(user_id, -999)["backstab_proficiency_pct"]
+        self.assertGreater(after, before)
+
+    def test_thieves_guild_non_assassin_does_not_grow_backstab_proficiency(self):
+        user_id = 700208
+        make_basic_character(user_id, "NonAssassinThief", char_class="Rogue")
+        db.update_character(user_id, -999, subclass="Thief")
+        db.join_guild(user_id, -999, "thieves_guild")
+        before = db.get_character(user_id, -999)["backstab_proficiency_pct"]
+        db.add_xp(user_id, -999, 50_000)
+        after = db.get_character(user_id, -999)["backstab_proficiency_pct"]
+        self.assertEqual(after, before)
+
+    def test_adventurers_guild_covers_both_fishing_and_cooking(self):
+        user_id = 700209
+        make_basic_character(user_id, "DoubleProfessionTester", char_class="Fighter")
+        db.join_guild(user_id, -999, "adventurers_guild")
+        before = db.get_character(user_id, -999)["profession_mastery_pct"]
+        before_fishing, before_cooking = before.get("fishing", 1.0), before.get("cooking", 1.0)
+        db.add_xp(user_id, -999, 50_000)
+        after = db.get_character(user_id, -999)["profession_mastery_pct"]
+        self.assertGreater(after["fishing"], before_fishing)
+        self.assertGreater(after["cooking"], before_cooking)
+
+    def test_all_seven_professions_and_all_six_stats_are_covered_across_guilds(self):
+        """Per Coffee: "make sure all proficiencies are covered by this system and all stats are also"."""
+        import guilds as guilds_module
+        covered_professions = {p for plist in guilds_module.GUILD_PERMANENT_PROFESSION.values() for p in plist}
+        self.assertEqual(covered_professions, set(bot.ALL_PROFESSIONS))
+        covered_stats = {g.get("permanent_stat") for g in guilds_module.GUILDS.values() if g.get("permanent_stat")}
+        self.assertEqual(covered_stats, {"strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"})
+
+    def test_permanent_guild_stat_growth_respects_ability_score_cap(self):
+        import guilds as guilds_module
+        from rules.leveling import ability_score_cap
+        user_id = 700202
+        make_basic_character(user_id, "StatCapTester", char_class="Fighter")
+        db.update_character(user_id, -999, strength=ability_score_cap(0) - 1, level=1)
+        db.join_guild(user_id, -999, "silver_wardens")
+        db.add_xp(user_id, -999, 100_000)  # far more than enough to cross several bonus tiers
+        after = db.get_character(user_id, -999)
+        self.assertLessEqual(after["strength"], ability_score_cap(0))
+        self.assertEqual(after["strength"], ability_score_cap(0))
+
+    async def test_leave_guild_keeps_permanent_stat_but_clears_everything_else(self):
+        """
+        Real live feature (2026-08-13, per Coffee: "when they leave they
+        keep that bonus because it is now permanently on the player but
+        they do not keep the other bonuses"). Exercised through the real
+        bot._do_leave_guild handler, not a direct db call.
+        """
+        import guilds as guilds_module
+        user_id = 700203
+        make_basic_character(user_id, "LeaveTester", char_class="Fighter")
+        db.join_guild(user_id, -999, "silver_wardens")
+        db.add_xp(user_id, -999, 50_000)  # earns a real permanent Strength point or two
+        before_leave = db.get_character(user_id, -999)
+        earned_strength = before_leave["strength"]
+        self.assertGreater(before_leave["level"], guilds_module.GUILD_STAT_BONUS_LEVELS)
+
+        sink = []
+        await bot._do_leave_guild(FakeUpdate(user_id, "leave the silver wardens", sink), "leave the silver wardens")
+        after = db.get_character(user_id, -999)
+        self.assertIsNone(after["guild"])
+        self.assertEqual(after["guild_curriculum_step"], 0)
+        self.assertIsNone(after["guild_join_level"])
+        self.assertEqual(after["strength"], earned_strength, "permanent stat points must survive leaving")
+        self.assertTrue(any("left" in s.lower() and "Silver Wardens" in s for s in sink))
+
+    async def test_secondary_guild_requires_evolution_and_mastery_of_current_guild(self):
+        """
+        Real live feature (2026-08-13, per Coffee: "if the players have
+        evolved they can accept another guild but they must have
+        mastered the previous guilds mastery tree... each evolution
+        grants them another guild, guilds CAN be doubled up"). Exercised
+        through the real bot._do_join_guild handler and guilds.
+        eligible_for_guild, not a direct db write.
+        """
+        import guild_curriculum as gc
+        user_id = 700204
+        make_basic_character(user_id, "DoubleUpTester", char_class="Fighter", gold=100)
+        db.update_character(user_id, -999, level=20, proven_in_combat=True, subclass="Champion")
+        db.join_guild(user_id, -999, "silver_wardens")
+
+        # Not evolved yet (rebirth_count == 0) -- blocked even though eligible otherwise.
+        sink = []
+        await bot._do_join_guild(FakeUpdate(user_id, "I join the Forge Guild", sink), "I join the Forge Guild")
+        self.assertEqual(db.get_character(user_id, -999)["secondary_guilds"], [])
+        self.assertTrue(any("evolutions" in s.lower() for s in sink))
+
+        # Evolved, but hasn't mastered Silver Wardens' curriculum yet -- still blocked.
+        db.update_character(user_id, -999, rebirth_count=1)
+        sink = []
+        await bot._do_join_guild(FakeUpdate(user_id, "I join the Forge Guild", sink), "I join the Forge Guild")
+        self.assertEqual(db.get_character(user_id, -999)["secondary_guilds"], [])
+        self.assertTrue(any("mastery" in s.lower() for s in sink))
+
+        # Fast-forward straight to a fully mastered curriculum, then it works.
+        steps = len(gc.get_curriculum("silver_wardens"))
+        db.update_character(user_id, -999, guild_curriculum_step=steps)
+        sink = []
+        await bot._do_join_guild(FakeUpdate(user_id, "I join the Forge Guild", sink), "I join the Forge Guild")
+        after = db.get_character(user_id, -999)
+        self.assertEqual(after["secondary_guilds"], ["forge_guild"])
+        self.assertTrue(any("promotion" in s.lower() for s in sink))
+
+    async def test_promotion_grants_an_immediate_one_time_pct_bump(self):
+        """
+        Real live feature (2026-08-13, per Coffee: "promotions shud
+        increase % so players can eventually work on maxing out %").
+        Getting Promoted into a second guild grants an immediate,
+        one-time guilds.GUILD_PROMOTION_PCT_BONUS bump to that guild's
+        own profession mastery, on top of (not instead of) the gradual
+        per-level growth from db.add_xp.
+        """
+        import guild_curriculum as gc
+        import guilds as guilds_module
+        user_id = 700210
+        make_basic_character(user_id, "PromotionBumpTester", char_class="Fighter", gold=100)
+        db.update_character(user_id, -999, level=20, proven_in_combat=True, subclass="Champion", rebirth_count=1)
+        db.join_guild(user_id, -999, "silver_wardens")
+        steps = len(gc.get_curriculum("silver_wardens"))
+        db.update_character(user_id, -999, guild_curriculum_step=steps)
+        before = db.get_character(user_id, -999)["profession_mastery_pct"].get("lumberjacking", 1.0)
+
+        sink = []
+        await bot._do_join_guild(FakeUpdate(user_id, "I join the Forge Guild", sink), "I join the Forge Guild")
+        after = db.get_character(user_id, -999)
+        self.assertEqual(after["secondary_guilds"], ["forge_guild"])
+        self.assertAlmostEqual(
+            after["profession_mastery_pct"]["blacksmithing"], 1.0 + guilds_module.GUILD_PROMOTION_PCT_BONUS,
+        )
+        # The FIRST guild's own mastery must be untouched by a later Promotion.
+        self.assertAlmostEqual(db.get_character(user_id, -999)["profession_mastery_pct"].get("lumberjacking", 1.0), before)
+        self.assertTrue(any("Promotion" in s for s in sink))
+
+    def test_promotion_rank_titles_escalate_and_cap_at_ten(self):
+        """Per Coffee: "make a rank for 10 (something epic matching story ascending to god) dont spoil"."""
+        import guilds as guilds_module
+        self.assertIsNone(guilds_module.promotion_rank_title({"rebirth_count": 0}))
+        self.assertEqual(guilds_module.promotion_rank({"rebirth_count": 0}), 1)
+        self.assertEqual(guilds_module.promotion_rank_title({"rebirth_count": 1}), "Initiate")
+        self.assertEqual(guilds_module.promotion_rank({"rebirth_count": 20}), 10)
+        self.assertEqual(guilds_module.promotion_rank_title({"rebirth_count": 20}), "Ascendant")
+        self.assertEqual(len(guilds_module.PROMOTION_RANK_TITLES), 10)
+
+    def test_guild_slots_unlocked_caps_at_real_guild_count(self):
+        """Per Coffee: "what shud be the max?" -- capped at len(GUILDS), never a hollow unfillable slot."""
+        import guilds as guilds_module
+        self.assertEqual(guilds_module.guild_slots_unlocked({"rebirth_count": 0}), 1)
+        self.assertEqual(guilds_module.guild_slots_unlocked({"rebirth_count": 6}), len(guilds_module.GUILDS))
+        self.assertEqual(guilds_module.guild_slots_unlocked({"rebirth_count": 50}), len(guilds_module.GUILDS))
+
+    def test_combined_guild_title_after_doubling_up(self):
+        import guilds as guilds_module
+        character = {
+            "guild": "silver_wardens", "secondary_guilds": ["forge_guild"], "rebirth_count": 1,
+        }
+        title = guilds_module.guild_title(character)
+        self.assertIn("Ironbound", title)
+        self.assertIn("Warden", title)
+        self.assertEqual(guilds_module.guild_title({"guild": None, "secondary_guilds": []}), None)
+        self.assertEqual(guilds_module.guild_title({"guild": "silver_wardens", "secondary_guilds": []}), "The Silver Wardens")
+
+    def test_leave_guild_intent_classified_correctly(self):
+        from ai.intent_parser import _keyword_fallback
+        parsed = _keyword_fallback("leave the silver wardens", known_npc_names=[])
+        self.assertEqual(parsed["action"], "leave_guild")
+        parsed2 = _keyword_fallback("I quit the thieves guild", known_npc_names=[])
+        self.assertEqual(parsed2["action"], "leave_guild")
+
     async def test_guild_curriculum_step_not_credited_before_real_cooldown_elapses(self):
         """
         Real "must grind it out" pacing gate (per Coffee): satisfying a
