@@ -5955,6 +5955,86 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(item_id, db.get_character(996030, -999)["inventory"])
         self.assertNotIn(item_id, db.get_character(996031, -999)["inventory"])
 
+    # -- Dismantling (2026-08-13, per Coffee: unwanted gear breaks down
+    #    into the real materials its own recipe would have used, tiered
+    #    by a real forging/blacksmithing ability check) -----------------
+    def test_dismantle_materials_for_item_uses_the_real_catalog_recipe(self):
+        from rules.crafting import dismantle_materials_for_item
+        longsword = items_module.get_item("longsword")
+        self.assertEqual(dismantle_materials_for_item("longsword", longsword), {"iron_ore": 3})
+
+    def test_dismantle_materials_for_item_falls_back_to_price_scaled_salvage_for_a_ring(self):
+        from rules.crafting import dismantle_materials_for_item, DISMANTLE_FALLBACK_MATERIAL
+        ring = items_module.get_item("ring_of_protection")
+        materials = dismantle_materials_for_item("ring_of_protection", ring)
+        self.assertEqual(list(materials.keys()), [DISMANTLE_FALLBACK_MATERIAL])
+        self.assertGreaterEqual(materials[DISMANTLE_FALLBACK_MATERIAL], 1)
+
+    def test_resolve_dismantle_three_tiers(self):
+        from rules.crafting import resolve_dismantle
+        from unittest.mock import patch
+        character = make_basic_character(996040, "Dismantler", current_location="crossroads_tavern")
+        longsword = items_module.get_item("longsword")
+
+        with patch("rules.dice.roll_d20", return_value=20):
+            result = resolve_dismantle(character, "longsword", longsword)
+        self.assertEqual(result["outcome"], "very_successful")
+        self.assertEqual(result["materials"], {"iron_ore": 3})
+
+        with patch("rules.dice.roll_d20", return_value=10):  # +2 str mod = 12, below DC 13
+            result = resolve_dismantle(character, "longsword", longsword)
+        self.assertEqual(result["outcome"], "not_successful")
+        self.assertEqual(result["materials"], {"iron_ore": 1})
+
+        with patch("rules.dice.roll_d20", return_value=11):  # +2 str mod = 13, meets DC, below DC+10
+            result = resolve_dismantle(character, "longsword", longsword)
+        self.assertEqual(result["outcome"], "successful")
+        self.assertEqual(result["materials"], {"iron_ore": 2})  # ceil(3/2)
+
+    async def test_do_dismantle_item_removes_item_and_awards_materials(self):
+        from unittest.mock import patch
+        make_basic_character(996041, "TextDismantler", current_location="crossroads_tavern")
+        db.add_item(996041, -999, "longsword", 1)
+        sink = []
+        update = FakeUpdate(996041, "dismantle my longsword", sink)
+        with patch("rules.dice.roll_d20", return_value=20):
+            await bot._do_dismantle_item(update, "dismantle my longsword")
+        character = db.get_character(996041, -999)
+        self.assertNotIn("longsword", character["inventory"])
+        self.assertEqual(character["inventory"].get("iron_ore", 0), 3)
+
+    async def test_do_dismantle_item_rejects_non_eligible_type(self):
+        make_basic_character(996042, "PotionDismantler", current_location="crossroads_tavern")
+        db.add_item(996042, -999, "healing_potion", 1)
+        sink = []
+        update = FakeUpdate(996042, "dismantle my healing potion", sink)
+        await bot._do_dismantle_item(update, "dismantle my healing potion")
+        character = db.get_character(996042, -999)
+        self.assertEqual(character["inventory"].get("healing_potion", 0), 1)  # untouched
+        self.assertTrue(any("can't be dismantled" in msg for msg in sink))
+
+    def test_item_actions_keyboard_shows_dismantle_for_eligible_hides_for_ineligible(self):
+        longsword_id = "longsword"
+        keyboard = bot._item_actions_keyboard(longsword_id)
+        labels = [btn.text for row in keyboard.inline_keyboard for btn in row]
+        self.assertTrue(any("Dismantle" in label for label in labels))
+
+        potion_keyboard = bot._item_actions_keyboard("healing_potion")
+        potion_labels = [btn.text for row in potion_keyboard.inline_keyboard for btn in row]
+        self.assertFalse(any("Dismantle" in label for label in potion_labels))
+
+    async def test_itemview_callback_dismantle_action_works(self):
+        from unittest.mock import patch
+        make_basic_character(996043, "ButtonDismantler", current_location="crossroads_tavern")
+        db.add_item(996043, -999, "longsword", 1)
+        sink = []
+        update = FakeCallbackUpdate(996043, "itemview|dismantle|longsword", sink)
+        with patch("rules.dice.roll_d20", return_value=20):
+            await bot.itemview_callback(update, DummyContext())
+        character = db.get_character(996043, -999)
+        self.assertNotIn("longsword", character["inventory"])
+        self.assertEqual(character["inventory"].get("iron_ore", 0), 3)
+
     def test_equipable_worth_shown_in_stats_line(self):
         """Real live request (2026-08-03): "in the description of the items can u show what it is worth? do this for equipables"."""
         from rules.item_generator import generate_weapon

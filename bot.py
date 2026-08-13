@@ -99,6 +99,7 @@ from rules.crafting import (
     CLASS_PROFESSIONS, CLASS_PROFESSION_AFFINITY_BONUS, class_profession_affinity_bonus,
     ADVANCED_RECIPES, get_advanced_recipe, resolve_advanced_craft,
     ENCHANT_RECIPES, get_enchant_recipe, recipe_requirement_gate,
+    resolve_dismantle,
 )
 from rules.dice import roll, roll_damage, ability_modifier, roll_ability_check, roll_d20, roll_percentage_check, average_damage
 from rules.item_generator import generate_item
@@ -4026,6 +4027,12 @@ def _item_actions_keyboard(item_id: str) -> InlineKeyboardMarkup:
         and item.get("type") in ("weapon", "armor", "shield")
         and item.get("rarity") in FORGE_ADVANCE_DC
     )
+    # Dismantle button (2026-08-13, per Coffee: "offer a button where
+    # acceptable") -- same eligibility as the free-text path
+    # (DISMANTLE_ELIGIBLE_TYPES), so the button never advertises an
+    # option that's guaranteed to refuse, matching Reforge's own
+    # can_reforge convention just above.
+    can_dismantle = item is not None and item.get("type") in DISMANTLE_ELIGIBLE_TYPES
     buttons = [[InlineKeyboardButton("⚔️ Equip", callback_data=f"itemview|equip|{item_id}")]]
     if can_reforge:
         buttons.append([InlineKeyboardButton("🔨 Reforge", callback_data=f"itemview|reforge|{item_id}")])
@@ -4034,6 +4041,8 @@ def _item_actions_keyboard(item_id: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🏛️ List on Market", callback_data=f"itemview|market|{item_id}")],
         [InlineKeyboardButton("🤝 Give", callback_data=f"itemview|give|{item_id}")],
     ])
+    if can_dismantle:
+        buttons.append([InlineKeyboardButton("🔧 Dismantle", callback_data=f"itemview|dismantle|{item_id}")])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -12696,6 +12705,63 @@ async def _do_discard_item(update: Update, text: str) -> None:
     )
 
 
+DISMANTLE_ELIGIBLE_TYPES = ("weapon", "armor", "shield", "ring", "amulet")
+
+
+async def _apply_dismantle(update: Update, character: dict, item_id: str, item: dict) -> None:
+    """
+    Shared by _do_dismantle_item's free-text path and itemview_callback's
+    "dismantle" button tap -- both already have a resolved item_id/item
+    by the time they call this, so this is pure resolve-and-apply, no
+    text parsing. See rules/crafting.py's resolve_dismantle for the real
+    three-tier (very_successful/successful/not_successful) outcome logic.
+    """
+    profession = "blacksmithing"
+    bonus = _practiced_bonus_for(update.effective_user.id, update.effective_chat.id, profession)
+    bonus += class_profession_affinity_bonus(character["char_class"], profession)
+    bonus += _equipped_profession_bonus(character, profession)
+    bonus += _skill_points(character, f"prof_{profession}")
+
+    result = resolve_dismantle(character, item_id, item, practiced_bonus=bonus)
+    db.remove_item(update.effective_user.id, update.effective_chat.id, item_id, 1)
+    for mat_id, qty in result["materials"].items():
+        db.add_item(update.effective_user.id, update.effective_chat.id, mat_id, qty)
+
+    materials_line = ", ".join(
+        f"{qty}x {items_module.get_item(mat_id)['name'] if items_module.get_item(mat_id) else mat_id}"
+        for mat_id, qty in result["materials"].items()
+    )
+    outcome = result["outcome"]
+    if outcome == "very_successful":
+        headline = f"🔧 **{character['name']}** expertly dismantles the {item['name']} — every scrap of material recovered!"
+    elif outcome == "successful":
+        headline = f"🔧 **{character['name']}** dismantles the {item['name']}, salvaging some of its materials."
+    else:
+        headline = f"🔧 **{character['name']}**'s attempt to dismantle the {item['name']} goes rough — only scraps survive."
+    await _safe_send(update, f"{headline}\nRecovered: {materials_line}")
+
+
+async def _do_dismantle_item(update: Update, text: str) -> None:
+    """Free-text "dismantle the X" path -- see _apply_dismantle for the real resolution logic, shared with the item-view button."""
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+
+    item_id = items_module.find_item_mentioned_in_text(text, candidate_ids=list(character["inventory"].keys()))
+    item = items_module.get_item(item_id) if item_id else None
+    if item_id is None or item is None or character["inventory"].get(item_id, 0) < 1:
+        await _safe_send(update, "You're not carrying that.")
+        return
+    if item.get("type") not in DISMANTLE_ELIGIBLE_TYPES:
+        await _safe_send(update, f"The {item['name']} can't be dismantled — only weapons, armor, shields, rings, and amulets can.")
+        return
+
+    await _apply_dismantle(update, character, item_id, item)
+
+
 def _find_advanced_recipe_in_text(text: str) -> str | None:
     """Matches an ADVANCED_RECIPES entry by its own "name" field -- see _do_craft's docstring comment for why this can't reuse items_module.find_item_mentioned_in_text."""
     lowered = text.lower()
@@ -15225,6 +15291,14 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return
         _ok, msg = shop_module.sell_item(update.effective_user.id, update.effective_chat.id, item_id, 1)
         await _safe_send(update, msg)
+    elif action == "dismantle":
+        if not owns_it:
+            await _safe_send(update, f"You don't have the {item['name']} to dismantle.")
+            return
+        if item.get("type") not in DISMANTLE_ELIGIBLE_TYPES:
+            await _safe_send(update, f"The {item['name']} can't be dismantled.")
+            return
+        await _apply_dismantle(update, character, item_id, item)
     elif action == "market":
         if not owns_it:
             await _safe_send(update, f"You don't have the {item['name']} to list.")
@@ -21516,6 +21590,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_enchant_item(update, intent.get("raw_text", text))
     elif action == "discard_item":
         await _do_discard_item(update, intent.get("raw_text", text))
+    elif action == "dismantle_item":
+        await _do_dismantle_item(update, intent.get("raw_text", text))
     elif action == "make_campfire":
         await _do_make_campfire(update)
     elif action == "second_wind":

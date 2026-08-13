@@ -130,6 +130,9 @@ without naming a specific item (e.g. "auto equip my character", "put on my gear 
 Set "item_name" to the item.
 - "discard_item" is for permanently scrapping/throwing away an item from inventory, no refund \
 (e.g. "discard my rusty dagger", "scrap the longsword"). Set "item_name" to the item.
+- "dismantle_item" is for breaking down a weapon/armor/shield/ring/amulet the player no longer wants to \
+recover real crafting materials from it (e.g. "dismantle my old sword", "salvage the chain mail"). \
+Set "item_name" to the item.
 - "join_guild" is for joining/asking to join a specific guild or order.
 - "leave_guild" is for leaving/quitting a guild the player is already a member of.
 - "assign_summoner" is for naming a party member as the party's Summoner (e.g. "assign Sarah as summoner", "make me the summoner").
@@ -1706,6 +1709,13 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if any(w in lowered for w in ["discard my", "discard the", "scrap my", "scrap the", "i discard", "i scrap"]):
         return {**base, "action": "discard_item"}
 
+    # Dismantling (2026-08-13, per Coffee: "let the player say 'dismantle'
+    # the (item)") -- checked right alongside discard above since it's
+    # the same "my inventory item" phrasing family, but a distinct
+    # outcome (real materials back, not just gone).
+    if any(w in lowered for w in ["dismantle my", "dismantle the", "i dismantle", "salvage my", "salvage the"]):
+        return {**base, "action": "dismantle_item"}
+
     # "eat" needs a real word-boundary check (not the bare substring style
     # used above) -- confirmed live 2026-07-18: a naive "eat " substring
     # check false-positives on any word ending in those letters followed
@@ -2157,7 +2167,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "unbench_party_member", "set_front_row", "set_back_row", "find_merchant",
                 "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "arcane_recovery",
                 "make_campfire", "give_item", "use_item", "equip_item", "unequip_item", "auto_equip", "breath_weapon",
-                "forge_item", "enchant_item", "discard_item",
+                "forge_item", "enchant_item", "discard_item", "dismantle_item",
                 "channel_divinity", "action_surge", "reckless_attack", "divine_smite",
                 "flurry_of_blows", "wild_shape", "toggle_manual_dice", "level_up", "auto_level_up_party",
                 "set_description", "set_pronouns",

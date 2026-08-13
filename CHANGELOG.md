@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.192] — Add: dismantle unwanted gear for real crafting materials
+
+Real live request (Coffee: "if the players do not want the items/
+equipables/weapons/armor/Rings/Amuluts lets them 'Dismantle' using
+thier forging skill to gather maters that would have been used to
+craft/forge/enchant that exact weapon... if not successful give them
+the bare minimum, and if very successful give them the full materials
+for it" + "let the player say 'dismantle' the (item) and offer a
+button where acceptable"). Weapons, armor, shields, rings, and amulets
+can now be dismantled — via free text ("dismantle my longsword") or a
+new 🔧 Dismantle button on the item-view screen (shown only when the
+item type is actually eligible, same convention Reforge's own button
+already uses). A real strength/blacksmithing ability check
+(`rules.crafting.resolve_dismantle`) decides the payout in three
+tiers: a natural 20 or beating DC+10 ("very successful") returns every
+material the item's own real recipe would have used
+(`ADVANCED_RECIPES`/`RECIPES`, matched by the item's real
+generated_base+rarity or catalog id); an ordinary success returns half
+(rounded up); failure returns only the bare minimum, 1 unit of a
+single material. Items with no real recipe at all (rings/amulets are
+catalog-only in this game) fall back to a price-scaled iron_ore
+salvage yield rather than inventing a resource no recipe calls for.
+
 ## [1.27.191] — Add: real loot voting for combat drops
 
 Real live request (Coffee: "when items are looted or dropped lets have

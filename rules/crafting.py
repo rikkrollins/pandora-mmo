@@ -408,6 +408,77 @@ def resolve_advanced_craft(character: dict, recipe_id: str, practiced_bonus: int
     }
 
 
+# Dismantling (2026-08-13, per Coffee: "if the players do not want the
+# items/equipables/weapons/armor/Rings/Amuluts lets them Dismantle
+# using thier forging skill to gather maters that would have been used
+# to craft/forge/enchant that exact weapon ... if not successful give
+# them the bare minimum, and if very successful give them the full
+# materials for it"). Real materials come from the item's own real
+# recipe when one exists -- ADVANCED_RECIPES for a procedurally-
+# generated rare+ piece (matched by its real generated_base+rarity,
+# the same two fields rules/item_generator.py always stamps onto a
+# generated item), RECIPES for a plain catalog base (a longsword found
+# rather than rolled, or a common/uncommon generated piece with no
+# ADVANCED_RECIPES entry of its own). Items with no real recipe at all
+# (rings/amulets -- catalog-only in this game, never player-forged --
+# plus any boss-only/store-only drop) fall back to a price-scaled
+# iron_ore salvage yield, the same "generic scrap metal" material
+# blacksmithing already uses everywhere else in this file, rather than
+# inventing a resource no recipe actually calls for.
+DISMANTLE_FALLBACK_MATERIAL = "iron_ore"
+DISMANTLE_FALLBACK_PRICE_PER_UNIT = 40
+
+
+def dismantle_materials_for_item(item_id: str, item: dict) -> dict[str, int]:
+    """Full (100%) material yield for dismantling `item` -- see the module comment above for the real-recipe-first, price-fallback-second resolution order."""
+    generated_base = item.get("generated_base")
+    if generated_base:
+        tier = item.get("rarity")
+        for recipe in ADVANCED_RECIPES.values():
+            if recipe.get("base_id") == generated_base and recipe.get("tier") == tier:
+                return dict(recipe["materials"])
+        base_recipe = RECIPES.get(generated_base)
+        if base_recipe:
+            return dict(base_recipe["materials"])
+    else:
+        recipe = RECIPES.get(item_id)
+        if recipe:
+            return dict(recipe["materials"])
+    price = item.get("price", 0)
+    return {DISMANTLE_FALLBACK_MATERIAL: max(1, round(price / DISMANTLE_FALLBACK_PRICE_PER_UNIT))}
+
+
+DISMANTLE_DC = 13
+
+
+def resolve_dismantle(character: dict, item_id: str, item: dict, practiced_bonus: int = 0) -> dict:
+    """
+    Real "forging skill" (strength, blacksmithing) ability check decides
+    how much of dismantle_materials_for_item's full yield the player
+    actually recovers, per Coffee's own three-tier spec: a natural 20 or
+    a check beating DC+10 ("very successful") returns the FULL yield; an
+    ordinary success returns half (rounded up, at least 1 of each
+    material); failure ("not successful") returns only the bare minimum
+    -- 1 unit of a single material from the yield.
+    """
+    full_yield = dismantle_materials_for_item(item_id, item)
+    check = roll_ability_check(character, "strength", proficient=False)
+    check["total"] += practiced_bonus
+    check["practiced_bonus"] = practiced_bonus
+
+    if check["raw_roll"] == 20 or check["total"] >= DISMANTLE_DC + 10:
+        outcome = "very_successful"
+        materials = dict(full_yield)
+    elif check["total"] >= DISMANTLE_DC:
+        outcome = "successful"
+        materials = {mat: max(1, -(-qty // 2)) for mat, qty in full_yield.items()}
+    else:
+        outcome = "not_successful"
+        materials = {next(iter(full_yield)): 1}
+
+    return {"outcome": outcome, "materials": materials, "check": check, "dc": DISMANTLE_DC}
+
+
 # Enchanting & imbuing (Phase 7): deliberately the SAME operation --
 # append one new affix, from the exact same shared vocabulary
 # db._apply_affix already understands, to an existing generated item's
