@@ -11637,6 +11637,151 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             dm_agent_module.narrate_action(character, "attacks Fenwick", result)
         self.assertFalse(dm_agent_module.is_narration_call_active())
 
+    # -- Narration reuse cache (2026-08-13, per Coffee: "make this run
+    #    as fast as it can... save pregenerated narrations for common
+    #    actions or scenarios") ------------------------------------
+    def test_narration_cache_key_none_for_banter_boss_and_reaction_triggers(self):
+        from ai import narration_cache
+        fighter = {"char_class": "Fighter"}
+        boss = {"char_class": "Fighter", "is_boss": True}
+        routine = {"hit": True, "damage_dealt": 5, "raw_roll": 12}
+        self.assertIsNone(narration_cache.cache_key(fighter, routine, include_banter=True))
+        self.assertIsNone(narration_cache.cache_key(boss, routine, include_banter=False))
+        for flag in (
+            "relentless_endurance_triggered", "death_ward_triggered", "dark_ones_blessing_gained",
+            "shield_reaction_triggered", "uncanny_dodge_triggered", "hybrid_bonus_damage",
+        ):
+            special = dict(routine)
+            special[flag] = True
+            self.assertIsNone(narration_cache.cache_key(fighter, special, include_banter=False), flag)
+        self.assertIsNotNone(narration_cache.cache_key(fighter, routine, include_banter=False))
+
+    def test_narration_cache_key_buckets_by_outcome_and_damage_tier(self):
+        from ai import narration_cache
+        fighter = {"char_class": "Fighter"}
+        self.assertEqual(
+            narration_cache.cache_key(fighter, {"hit": True, "damage_dealt": 3, "raw_roll": 10}, False),
+            "Fighter:hit:low",
+        )
+        self.assertEqual(
+            narration_cache.cache_key(fighter, {"hit": False, "raw_roll": 8}, False),
+            "Fighter:miss:0",
+        )
+        self.assertEqual(
+            narration_cache.cache_key(fighter, {"hit": True, "critical_hit": True, "damage_dealt": 40, "raw_roll": 20}, False),
+            "Fighter:crit:massive",
+        )
+        self.assertEqual(
+            narration_cache.cache_key(fighter, {"hit": True, "critical_fail": True, "damage_dealt": 0, "raw_roll": 1}, False),
+            "Fighter:fumble:0",
+        )
+
+    def test_narration_cache_lookup_and_remember_round_trip(self):
+        import tempfile
+        from ai import narration_cache
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("ai.narration_cache.CACHE_DIR", tmp), \
+                 patch("ai.narration_cache.CACHE_DB_PATH", f"{tmp}/n.db"):
+                key = "Fighter:hit:low"
+                # Below MIN_VARIANTS_BEFORE_REUSE: never reused yet, even with a guaranteed-hit roll.
+                narration_cache.remember(key, "Variant one.")
+                narration_cache.remember(key, "Variant two.")
+                with patch("ai.narration_cache.random.random", return_value=0.0):
+                    self.assertIsNone(narration_cache.lookup(key))
+                # Warmed up to MIN_VARIANTS_BEFORE_REUSE: a guaranteed-hit roll now reuses a real stored variant.
+                narration_cache.remember(key, "Variant three.")
+                with patch("ai.narration_cache.random.random", return_value=0.0):
+                    reused = narration_cache.lookup(key)
+                self.assertIn(reused, ("Variant one.", "Variant two.", "Variant three."))
+                # A guaranteed-miss roll still falls through to None even once warm.
+                with patch("ai.narration_cache.random.random", return_value=1.0):
+                    self.assertIsNone(narration_cache.lookup(key))
+                # Caps at MAX_VARIANTS_PER_KEY -- doesn't grow past it.
+                for i in range(20):
+                    narration_cache.remember(key, f"Extra {i}.")
+                with narration_cache._connect() as conn:
+                    count = conn.execute("SELECT COUNT(*) FROM variants WHERE key = ?", (key,)).fetchone()[0]
+                self.assertEqual(count, narration_cache.MAX_VARIANTS_PER_KEY)
+
+    async def test_post_narrated_cache_miss_calls_ollama_and_stores_result(self):
+        """First-ever routine outcome for a bucket: no stored variants yet, so this must call the real (mocked) narration model and store its result for reuse."""
+        import tempfile
+        import sessions
+        from ai import narration_cache
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("ai.narration_cache.CACHE_DIR", tmp), patch("ai.narration_cache.CACHE_DB_PATH", f"{tmp}/n.db"):
+                user_id = 995001
+                make_basic_character(
+                    user_id, "CacheMissAttacker", char_class="Fighter", current_location="crossroads_tavern",
+                    hp_max=50, ability_scores={"strength": 16, "dexterity": 10, "constitution": 14,
+                                                 "intelligence": 10, "wisdom": 10, "charisma": 10},
+                )
+                db.update_character(user_id, -999, hp_current=50, level=3)
+                player = db.get_character(user_id, -999)
+                player["telegram_user_id"] = user_id
+                enemy = {
+                    "telegram_user_id": -700900, "name": "Goblin", "dexterity": 8, "strength": 10,
+                    "armor_class": 10, "hp_current": 20, "hp_max": 20, "proficiency_bonus": 2,
+                    "is_ai": 1, "monster_key": "goblin",
+                }
+                session = sessions.start_session(-999, [player, enemy], {user_id: "party", -700900: "enemy"})
+                session.turn_order = [user_id, -700900]
+                session.current_turn_index = 0
+                sink = []
+                with patch("rules.dice.random.randint", return_value=15), \
+                     patch("bot.narrate_action", return_value="A freshly narrated hit.") as mock_narrate:
+                    await bot._do_attack(FakeUpdate(user_id, "I attack the goblin", sink), "I attack the goblin")
+                self.assertGreaterEqual(mock_narrate.call_count, 1)
+                self.assertTrue(any("freshly narrated" in line for line in sink), sink)
+                sessions.end_session(-999)
+
+    async def test_post_narrated_warmed_cache_skips_ollama_entirely(self):
+        """Once a bucket has real stored variants (MIN_VARIANTS_BEFORE_REUSE+), a guaranteed cache hit must never call the narration model at all."""
+        import tempfile
+        import sessions
+        from ai import narration_cache
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("ai.narration_cache.CACHE_DIR", tmp), patch("ai.narration_cache.CACHE_DB_PATH", f"{tmp}/n.db"):
+                user_id = 995002
+                make_basic_character(
+                    user_id, "CacheHitAttacker", char_class="Fighter", current_location="crossroads_tavern",
+                    hp_max=50, ability_scores={"strength": 16, "dexterity": 10, "constitution": 14,
+                                                 "intelligence": 10, "wisdom": 10, "charisma": 10},
+                )
+                db.update_character(user_id, -999, hp_current=50, level=3)
+                player = db.get_character(user_id, -999)
+                player["telegram_user_id"] = user_id
+                enemy = {
+                    "telegram_user_id": -700901, "name": "Goblin", "dexterity": 8, "strength": 10,
+                    "armor_class": 10, "hp_current": 20, "hp_max": 20, "proficiency_bonus": 2,
+                    "is_ai": 1, "monster_key": "goblin",
+                }
+                session = sessions.start_session(-999, [player, enemy], {user_id: "party", -700901: "enemy"})
+                session.turn_order = [user_id, -700901]
+                session.current_turn_index = 0
+
+                # Pre-warm the exact bucket this attack will land in: a
+                # Fighter landing a real hit, forced (via the mocked d20
+                # roll below, which also drives the damage die since
+                # both go through rules.dice.random.randint) to a
+                # one-shot kill -> "massive" damage tier, confirmed via
+                # a real diagnostic run of this exact setup.
+                key = "Fighter:hit:massive"
+                for i in range(narration_cache.MIN_VARIANTS_BEFORE_REUSE):
+                    narration_cache.remember(key, f"Pre-warmed variant {i}.")
+
+                sink = []
+                with patch("rules.dice.random.randint", return_value=15), \
+                     patch("ai.narration_cache.random.random", return_value=0.0), \
+                     patch("bot.narrate_action", return_value="SHOULD NEVER BE SEEN") as mock_narrate:
+                    await bot._do_attack(FakeUpdate(user_id, "I attack the goblin", sink), "I attack the goblin")
+                self.assertEqual(mock_narrate.call_count, 0, sink)
+                self.assertTrue(any("Pre-warmed variant" in line for line in sink), sink)
+                sessions.end_session(-999)
+
     async def test_narration_token_cap_gives_real_headroom_over_thinking_overhead(self):
         """
         Real live bug (2026-08-13, dev-bridge screenshot, Coffee: "The

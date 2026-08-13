@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.193] — Add: narration reuse cache for routine combat lines
+
+Real live request (Coffee: "make this run as fast as it can so
+prompts execute very fast... save pregenerated narrations or text for
+common actions or scenarios and it will make it fast do so, keep all
+this in a obfuscated folder so people cannot see the storyline,
+images, narrations, quests, or anything of that matter"). A routine
+"attacker hits/misses/crits defender for N damage" combat line is the
+single highest-frequency real Ollama call in the game — every attack,
+every turn, at the documented ~46-73s real latency. New
+`ai/narration_cache.py` reuses PREVIOUSLY REAL, Ollama-generated
+narration text for the same rough outcome shape (attacker class,
+hit/miss/crit/fumble, a coarse damage tier), rotating among up to 8
+stored variants per bucket so repeats don't read as robotic, and only
+reusing once a bucket has built up real variety (3+ variants) — even
+then, 15% of calls still go to Ollama fresh so a bucket keeps growing.
+Deliberately narrow so the "long and entertaining storyline" (Coffee's
+own earlier, still-standing direction) is never shortchanged: enemy
+banter, a boss's own turn, and any real reaction trigger (Shield,
+Uncanny Dodge, Relentless Endurance, Death Ward, Dark One's Blessing,
+a hybrid proc) always call Ollama fresh, never reuse a cached line.
+Storage lives in a new gitignored, unlabeled directory (`.pdrx8k2f/`)
+so the actual generated narration text never reaches the public repo.
+
 ## [1.27.192] — Add: dismantle unwanted gear for real crafting materials
 
 Real live request (Coffee: "if the players do not want the items/

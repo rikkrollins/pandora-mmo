@@ -62,6 +62,7 @@ import topics
 from ai.autonomous_player import choose_next_action
 from ai.moltbook_agent import decide_social_action
 from ai.dev_agent import answer_dev_question
+from ai import narration_cache
 from ai.dm_agent import (
     narrate_action, narrate_welcome, narrate_skill_check, narrate_hourly_update,
     narrate_examine, narrate_branching_choice_outcome, narrate_boss_decision,
@@ -3819,10 +3820,24 @@ async def _post_narrated(update: Update, character: dict, action_text: str,
             session.sides.get(character.get("telegram_user_id")) == "enemy"
             and random.random() < ENEMY_BANTER_CHANCE
         )
-        flavor = await asyncio.to_thread(
-            narrate_action, character, action_text, mechanical_result, session.recent_events(),
-            actor_personality, location_description, include_banter,
-        )
+        # Real live speed request (2026-08-13, per Coffee: "make this
+        # run as fast as it can so prompts execute very fast... save
+        # pregenerated narrations or text for common actions or
+        # scenarios"). A routine "hit/miss/crit for N damage" combat
+        # line is the single highest-frequency real Ollama call in the
+        # game (every attack, every turn) -- narration_cache.cache_key
+        # deliberately returns None (never cached) for anything
+        # narratively special: banter, a boss's own turn, or any real
+        # reaction trigger, so this only ever shortcuts the routine
+        # case, never the "long and entertaining" moments.
+        narration_key = narration_cache.cache_key(character, mechanical_result, include_banter)
+        flavor = narration_cache.lookup(narration_key)
+        if flavor is None:
+            flavor = await asyncio.to_thread(
+                narrate_action, character, action_text, mechanical_result, session.recent_events(),
+                actor_personality, location_description, include_banter,
+            )
+            narration_cache.remember(narration_key, flavor)
     message = _format_combat_result(
         flavor, mechanical_result,
         actor_label=mechanical_result.get("attacker", character.get("name", "?")),
