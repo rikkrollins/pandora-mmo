@@ -3807,6 +3807,103 @@
         "monster": "the_deepest_record"
       },
       "clue": "This one didn't scatter with the rest of what escaped -- it's still whole, somewhere quiet, waiting to be found."
+    },
+    "wayfarers_circuit": {
+      "title": "The Wayfarer's Circuit",
+      "description": "The Adventurers' Guild board wants a real circuit walked, not just paid work taken -- someone who's actually seen the ground the board's postings only describe secondhand.",
+      "location": "whispering_wood",
+      "objective_location": "whispering_wood_sunken_den",
+      "reward_xp": 150,
+      "reward_gold": 75,
+      "trigger": {
+        "type": "reach_location",
+        "location": "whispering_wood_sunken_den"
+      },
+      "clue": "The board work only ever describes places secondhand -- the Guild wants someone who's actually walked as far as the den at the roots' end.",
+      "requires_guild": "adventurers_guild"
+    },
+    "a_working_worth_watching": {
+      "title": "A Working Worth Watching",
+      "description": "The Arcane Circle trades knowledge for loyalty, and there's a real working out past the Nook worth watching closely -- whatever's kept that bramble wall standing this long didn't grow there on its own.",
+      "location": "the_arcane_nook",
+      "objective_location": "whispering_wood_bramble_thicket",
+      "reward_xp": 175,
+      "reward_gold": 75,
+      "trigger": {
+        "type": "reach_location",
+        "location": "whispering_wood_bramble_thicket"
+      },
+      "clue": "Something is holding that bramble wall together on purpose -- the Circle wants a real look at whatever it is.",
+      "requires_guild": "arcane_circle"
+    },
+    "a_wardens_vigil": {
+      "title": "A Warden's Vigil",
+      "description": "The Silver Wardens noticed the world's darkening edges and organized against it -- a young cairn watcher stirring is exactly the kind of edge they mean.",
+      "location": "greymoor_downs_sunken_barrow",
+      "reward_xp": 200,
+      "reward_gold": 90,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "young_cairn_watcher"
+      },
+      "clue": "The Wardens keep a real watch on anything undead stirring -- a young cairn watcher's restlessness is worth answering before it settles into something worse.",
+      "requires_guild": "silver_wardens"
+    },
+    "the_quiet_climb": {
+      "title": "The Quiet Climb",
+      "description": "The Thieves' Guild asks too few questions and expects the same discretion in return -- get from the cellar to the upper rooms without anyone downstairs noticing you were ever in either.",
+      "location": "tavern_cellar",
+      "objective_location": "tavern_upstairs",
+      "reward_xp": 150,
+      "reward_gold": 100,
+      "trigger": {
+        "type": "reach_location",
+        "location": "tavern_upstairs"
+      },
+      "clue": "The Ledger doesn't care how you get from the cellar to the rooms above -- only that nobody downstairs ever notices you made the climb.",
+      "requires_guild": "thieves_guild"
+    },
+    "a_blessing_for_the_downs": {
+      "title": "A Blessing for the Downs",
+      "description": "The Faith Circle mends what the world keeps breaking -- the grey, dim light over the Downs is exactly the kind of quiet wrongness they'd want carried a real blessing.",
+      "location": "whispering_wood_mossy_creek",
+      "objective_location": "greymoor_downs",
+      "reward_xp": 175,
+      "reward_gold": 75,
+      "trigger": {
+        "type": "reach_location",
+        "location": "greymoor_downs"
+      },
+      "clue": "Carry the creek's own quiet out to the Downs -- the Circle says even a small blessing is worth more there than anywhere it's needed less.",
+      "requires_guild": "faith_circle"
+    },
+    "the_deeper_seam": {
+      "title": "The Deeper Seam",
+      "description": "The Forge Guild trusts its own hammer and steel more than any spell -- prove it by following the root caverns' ore seam as far as it actually goes.",
+      "location": "sunken_root_caverns",
+      "objective_location": "sunken_root_caverns_deep_tunnels",
+      "reward_xp": 175,
+      "reward_gold": 90,
+      "trigger": {
+        "type": "reach_location",
+        "location": "sunken_root_caverns_deep_tunnels"
+      },
+      "clue": "A smith who trusts steel over spells follows the seam all the way down, not just as far as the easy ore.",
+      "requires_guild": "forge_guild"
+    },
+    "an_old_working_still_warm": {
+      "title": "An Old Working, Still Warm",
+      "description": "The Enchanters' Guild binds real magic into ring and blade rather than casting it themselves -- the walls of the Outer Ward stand at angles no living architect chose, and something in the gorge beneath the bridge is still, impossibly, warm with old work.",
+      "location": "the_first_city_outer_ward",
+      "objective_location": "stonearch_bridge_gorge_depths",
+      "reward_xp": 200,
+      "reward_gold": 90,
+      "trigger": {
+        "type": "reach_location",
+        "location": "stonearch_bridge_gorge_depths"
+      },
+      "clue": "Whatever was enchanted into the gorge's depths is still working, generations later -- the Guild wants to know by whose hand, and how.",
+      "requires_guild": "enchanters_guild"
     }
   },
   "story_arcs": {

@@ -2,6 +2,37 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.180] — Add: guild-tagged side quests (Synergy Phase 3)
+
+Third step of the class/subclass/guild "break the game" synergy pass
+(per Coffee, 2026-08-13: "make sure classes, sub-classes, and guilds
+all work in synergy"; Phase 3 scope explicitly chosen as a NEW quest
+pool rather than retrofitting the existing 85 quests). Every real
+guild — Adventurers', Arcane Circle, Silver Wardens, Thieves', Faith
+Circle, Forge, Enchanters' — now has exactly one real, findable side
+quest gated on real guild membership, at a real previously quest-free
+location, with a real reward:
+
+- `wayfarers_circuit` (Adventurers' Guild, `whispering_wood`)
+- `a_working_worth_watching` (Arcane Circle, `the_arcane_nook`)
+- `a_wardens_vigil` (Silver Wardens, `greymoor_downs_sunken_barrow` —
+  defeat a real `young_cairn_watcher`, using the same `UNDEAD_MONSTER_
+  KEYS` set the Wardens' existing combat bonus already checks)
+- `the_quiet_climb` (Thieves' Guild, `tavern_cellar`)
+- `a_blessing_for_the_downs` (Faith Circle, `whispering_wood_mossy_creek`)
+- `the_deeper_seam` (Forge Guild, `sunken_root_caverns`)
+- `an_old_working_still_warm` (Enchanters' Guild, `the_first_city_outer_ward`)
+
+New optional `requires_guild` quest field, checked by a new `bot.
+_meets_quest_guild_requirement(character, quest)` against `guilds.
+held_guild_ids(character)` — same primary-OR-secondary/Promotion-guild
+check already fixed everywhere else in Phase 1, so a Promotion-earned
+secondary guild unlocks its quest exactly like a primary one. Wired
+into both `_offerable_quest_at_location` and `_offerable_companion_
+quest` (a non-member simply never sees the quest offered, no error,
+no hint it exists — consistent with how every other guild-gated
+feature in this game already behaves).
+
 ## [1.27.179] — Add: equipping a weapon/armor you're not proficient with is now blocked
 
 Real feature, per Coffee (dev-topic): "If weapons can't be used by

@@ -578,6 +578,53 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         missing = previously_orphaned - acquirable
         self.assertEqual(missing, set(), f"still orphaned: {missing}")
 
+    # -- Synergy Phase 3 (2026-08-13): guild-tagged side-quest pool ------
+    def test_all_new_guild_quests_reference_real_locations_and_monsters(self):
+        new_quest_ids = {
+            "wayfarers_circuit", "a_working_worth_watching", "a_wardens_vigil",
+            "the_quiet_climb", "a_blessing_for_the_downs", "the_deeper_seam",
+            "an_old_working_still_warm",
+        }
+        all_location_ids = set(cl.get_all_location_ids(bot.CAMPAIGN))
+        for quest_id in new_quest_ids:
+            quest = bot.CAMPAIGN["quests"][quest_id]
+            self.assertIn(quest.get("requires_guild"), guilds.GUILDS, quest_id)
+            self.assertIn(quest["location"], all_location_ids, quest_id)
+            trigger = quest["trigger"]
+            if trigger["type"] == "reach_location":
+                self.assertIn(trigger["location"], all_location_ids, quest_id)
+            elif trigger["type"] == "defeat_monster":
+                self.assertIn(trigger["monster"], bot.CAMPAIGN["monsters"], quest_id)
+
+    def test_guild_quest_offered_to_a_real_primary_member_at_the_right_location(self):
+        make_basic_character(960100, "GuildedWayfarer", current_location="whispering_wood")
+        db.update_character(960100, -999, guild="adventurers_guild")
+        character = db.get_character(960100, -999)
+        offer = bot._offerable_quest_at_location(character, "whispering_wood")
+        self.assertIsNotNone(offer)
+        self.assertEqual(offer[0], "wayfarers_circuit")
+
+    def test_guild_quest_not_offered_to_a_non_member(self):
+        make_basic_character(960101, "Outsider", current_location="whispering_wood")
+        db.update_character(960101, -999, guild="forge_guild")
+        character = db.get_character(960101, -999)
+        offer = bot._offerable_quest_at_location(character, "whispering_wood")
+        self.assertIsNone(offer)
+
+    def test_guild_quest_offered_via_a_secondary_promotion_guild(self):
+        """
+        Same bug class as the Phase 1 combat-bonus tests: a Promotion-
+        earned SECONDARY guild membership must unlock its quest too, not
+        just a primary one -- covered by _meets_quest_guild_requirement
+        using held_guild_ids(character), not character["guild"] alone.
+        """
+        make_basic_character(960102, "PromotedWarden", current_location="greymoor_downs_sunken_barrow")
+        db.update_character(960102, -999, guild="forge_guild", secondary_guilds=["silver_wardens"])
+        character = db.get_character(960102, -999)
+        offer = bot._offerable_quest_at_location(character, "greymoor_downs_sunken_barrow")
+        self.assertIsNotNone(offer)
+        self.assertEqual(offer[0], "a_wardens_vigil")
+
     # -- Spell progression actually reaches every level the unlock table
     #    promises, up to character level 9 (v1.10.3) ---------------------
     def test_every_class_has_real_spells_at_every_promised_tier(self):

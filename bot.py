@@ -8626,12 +8626,30 @@ async def _check_combat_timeouts(bot) -> None:
 # convention as every other outcome in this game.
 # ---------------------------------------------------------------------
 
+def _meets_quest_guild_requirement(character: dict, quest: dict) -> bool:
+    """
+    Real feature ("break the game" synergy pass Phase 3, per Coffee):
+    a new OPTIONAL "requires_guild" quest field -- a quest with none
+    (every quest before this pass) is completely unaffected. Checks
+    guilds.held_guild_ids (primary AND any secondary/Promotion guild),
+    same reasoning and same real bug class already fixed once in
+    rules/crafting.py's recipe_requirement_gate (v1.27.174/175): a
+    Promotion-earned secondary guild must count too, not just primary.
+    """
+    requires_guild = quest.get("requires_guild")
+    if not requires_guild:
+        return True
+    return requires_guild in held_guild_ids(character)
+
+
 def _offerable_quest_at_location(character: dict, location_id: str) -> tuple[str, dict] | None:
-    """The first not-yet-completed, not-yet-active quest whose 'location' matches, if any."""
+    """The first not-yet-completed, not-yet-active, guild-eligible quest whose 'location' matches, if any."""
     for quest_id, quest in CAMPAIGN.get("quests", {}).items():
         if quest.get("location") != location_id:
             continue
         if quest_id in character["completed_quests"] or quest_id in character["active_quests"]:
+            continue
+        if not _meets_quest_guild_requirement(character, quest):
             continue
         return quest_id, quest
     return None
@@ -8672,6 +8690,8 @@ def _offerable_companion_quest(character: dict) -> tuple[str, dict] | None:
         if not giver or giver not in party_npc_ids:
             continue
         if quest_id in character["completed_quests"] or quest_id in character["active_quests"]:
+            continue
+        if not _meets_quest_guild_requirement(character, quest):
             continue
         return quest_id, quest
     return None
