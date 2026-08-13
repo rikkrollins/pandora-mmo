@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.178] — Fix: fast-travel said generic "You", recruited companions double-listed in "People here"
+
+Two real live bugs, both from the same dev-topic screenshot (Coffee:
+"Instead of saying, you fast travel, can you include the player's
+name?"):
+
+- The waypoint-warp fast-travel message said "🌀 You fast-travel to X"
+  -- the generic second person, inconsistent with every other arrival/
+  action message in this game, including the on-foot travel message
+  right next to it ("**{name}** travels to X"). Now says "**{name}**
+  fast-travels to X".
+- The same screenshot's "People here:" line showed "Grask Emberscale"
+  twice. A recruited companion (`db.create_ai_companion` always names
+  them identically to their real source NPC) never gets removed from
+  their origin location's static campaign.json roster, so once
+  recruited they were counted TWICE whenever the party happened to be
+  back at that NPC's own home location: once as the static "fixture
+  NPC", once as a real, present party member. `_location_extra_detail`
+  now deduplicates by name (`dict.fromkeys`, preserving first-seen
+  order) before building the line.
+
 ## [1.27.177] — Fix: "go to the market" misclassified as opening the marketplace, plus progressive-tense travel verbs
 
 Real live bug, found via topic-activity monitoring: "Go to the market"

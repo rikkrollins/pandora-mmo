@@ -14307,7 +14307,19 @@ def _location_extra_detail(character: dict, location: dict, location_id: str, ch
         p["name"] for p in _get_combat_eligible_party_members(location_id, chat_id)
         if p.get("telegram_user_id") != character.get("telegram_user_id")
     ]
-    people_names = npc_names + other_people_here
+    # Real live bug (2026-08-13, dev-topic screenshot): "People here:
+    # Grask Emberscale, ..., Grask Emberscale, ..." -- a recruited
+    # companion (db.create_ai_companion always names them identically
+    # to their source NPC, see _do_recruit_npc) never gets removed from
+    # their origin location's static campaign.json npcs list, so once
+    # recruited they're counted TWICE here: once as the static "fixture
+    # NPC" (npc_names, above) and again as a real, present party member
+    # (other_people_here, just above) whenever the party happens to be
+    # back at that NPC's own home location. dict.fromkeys preserves
+    # first-seen order (the static flavor name wins the position) while
+    # dropping the later duplicate -- the same real person should only
+    # ever be listed once.
+    people_names = list(dict.fromkeys(npc_names + other_people_here))
     if people_names:
         lines.append(f"People here: {', '.join(people_names)}")
     monsters_here = location.get("monsters", [])
@@ -16707,7 +16719,14 @@ async def _do_fast_travel(update: Update, text: str) -> None:
         for member in db.get_party_members_by_id(character["party_id"]):
             if member.get("is_ai") and not member.get("is_dead") and member["telegram_user_id"] != telegram_user_id:
                 db.move_character(member["telegram_user_id"], update.effective_chat.id, destination_id)
-    await _safe_send(update, f"🌀 You fast-travel to **{destination['name']}**.\n{destination['description']}")
+    # Real live bug (2026-08-13, dev-topic screenshot, Coffee: "Instead
+    # of saying, you fast travel, can you include the player's name?"):
+    # the on-foot travel message (_do_move, just below) already names
+    # the real character ("**{character['name']}** travels to...");
+    # this waypoint-warp path was the one place left still saying the
+    # generic "You" instead, inconsistent with every other arrival/
+    # action message in this game.
+    await _safe_send(update, f"🌀 **{character['name']}** fast-travels to **{destination['name']}**.\n{destination['description']}")
 
     updated_character = db.get_character(telegram_user_id, update.effective_chat.id)
     # Auto "look around" on arrival (2026-08-07, per Coffee: "prompt

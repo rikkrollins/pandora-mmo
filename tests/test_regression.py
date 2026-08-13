@@ -9343,8 +9343,79 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_fast_travel(FakeUpdate(user_id, "", sink), "fast travel to market row")
         text_messages = [s for s in sink if not s.startswith("<photo:")]
         self.assertEqual(len(text_messages), 2)
-        self.assertIn("fast-travel to", text_messages[0])
+        self.assertIn("fast-travels to", text_messages[0])
         self.assertIn("You can travel to:", text_messages[1])
+
+    async def test_fast_travel_message_names_the_real_player_not_generic_you(self):
+        """
+        Real live bug (2026-08-13, dev-topic screenshot, Coffee:
+        "Instead of saying, you fast travel, can you include the
+        player's name?"): the waypoint-warp message said the generic
+        "You fast-travel to X" -- every other arrival/action message in
+        this game (including _do_move's own on-foot "**{name}** travels
+        to X" right above) names the real character instead.
+        """
+        user_id = 900563
+        character = make_basic_character(user_id, "NamedFastTraveler", current_location="crossroads_tavern")
+        db.update_character_by_id(
+            character["character_id"],
+            visited_locations=list(set((character.get("visited_locations") or []) + ["market_row"])),
+        )
+        sink = []
+        await bot._do_fast_travel(FakeUpdate(user_id, "", sink), "fast travel to market row")
+        text_messages = [s for s in sink if not s.startswith("<photo:")]
+        self.assertIn("NamedFastTraveler", text_messages[0])
+        self.assertNotIn("You fast-travel", text_messages[0])
+
+    async def test_people_here_does_not_double_list_a_recruited_companion(self):
+        """
+        Real live bug (2026-08-13, same dev-topic screenshot): "People
+        here: Grask Emberscale, ..., Grask Emberscale, ...". A recruited
+        companion (db.create_ai_companion always names them identically
+        to their real source NPC) never gets removed from their origin
+        location's static campaign.json npcs list, so once recruited
+        they were counted TWICE whenever the party was back at that
+        NPC's own home location: once as the static "fixture NPC", once
+        as a real, present party member. Reproduces the exact real case
+        -- goblin_warrens' real recruitable NPC is grask_emberscale.
+        """
+        viewer_id = 900564
+        # Goblin Warrens is underground and dark -- a torch is needed to
+        # see anything there at all (_has_light_source), unrelated to
+        # the actual bug this test targets.
+        make_basic_character(viewer_id, "GoblinWarrensVisitor", current_location="goblin_warrens",
+                              inventory={"torch": 1})
+        # A real recruited AI companion, named identically to the static
+        # NPC on purpose (matches db.create_ai_companion's real behavior
+        # in _do_recruit_npc), standing at the NPC's own home location.
+        make_basic_character(900565, "Grask Emberscale", current_location="goblin_warrens", is_ai=True)
+        sink = []
+        from unittest.mock import patch
+
+        async def no_real_image_call(*args, **kwargs):
+            return False
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "A goblin barters over stolen goods."}
+
+        # goblin_warrens has a quest board with no cached quests yet in
+        # a fresh test DB -- _location_extra_detail's board-quest lookup
+        # lazily generates one via a REAL Ollama narration call
+        # (ai/dm_agent.py's narrate_branching_quest_setup) completely
+        # unrelated to the actual bug this test targets. Mocked the same
+        # way this file's own narration-priority tests already do, both
+        # so the test stays fast and so it can't contend with the live
+        # bot's own single Ollama slot.
+        with patch("bot._send_generated_image", side_effect=no_real_image_call), \
+             patch("ai.dm_agent.requests.post", return_value=FakeResponse()):
+            await bot._do_look(FakeUpdate(viewer_id, "", sink))
+        reply = next(s for s in reversed(sink) if not s.startswith("<photo:"))
+        people_here_line = next(line for line in reply.splitlines() if line.startswith("People here:"))
+        self.assertEqual(people_here_line.count("Grask Emberscale"), 1, people_here_line)
 
     # -- Real live bug (2026-07-19, Coffee): "Switch to my character
     #    Elduinn" extracted "my character elduinn" as the target name
