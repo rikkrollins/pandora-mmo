@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.179] — Add: equipping a weapon/armor you're not proficient with is now blocked
+
+Real feature, per Coffee (dev-topic): "If weapons can't be used by
+characters, don't let them equip them until they are able." Weapon/
+armor proficiency (class_features.py) already existed and was already
+used at real attack-resolution time (no proficiency bonus on a non-
+proficient weapon; disadvantage while wearing non-proficient armor --
+both real 5E-accurate "you CAN still use it, just badly," left
+completely untouched as the fallback for gear already equipped before
+this shipped, or for monsters/NPCs with no char_class at all) -- but
+nothing ever stopped equipping it in the first place, so a Wizard
+could freely equip a Greataxe. `db.equip_item` now blocks the swap
+itself with a clear message, respecting the exact same purchased
+"Weapon/Armor Mastery" widening (skill_tree.py's `prof_<category>_
+weapons`/`prof_<category>_armor`) already used at those real combat
+call sites -- a paid-for mastery purchase still lets you equip what it
+unlocks. Confirmed every recruitable companion's real starting gear
+(campaign.json) is already proficiency-legal for their own class, and
+a real end-to-end recruit-all-6 test still passes -- auto-equip on
+recruitment is unaffected.
+
 ## [1.27.178] — Fix: fast-travel said generic "You", recruited companions double-listed in "People here"
 
 Two real live bugs, both from the same dev-topic screenshot (Coffee:

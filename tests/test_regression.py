@@ -4115,6 +4115,88 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(success_after)
         self.assertEqual(db.get_character(user_id, -999).get("equipped_weapon"), item_id)
 
+    def test_equip_blocks_a_non_proficient_weapon(self):
+        """
+        Real feature (2026-08-13, per Coffee, dev-topic: "If weapons
+        can't be used by characters, don't let them equip them until
+        they are able"). Proficiency already existed and was already
+        used at attack-resolution time (no proficiency bonus on a non-
+        proficient weapon, real 5E-accurate "can swing it, just badly")
+        -- this is the new equip-time half: a Wizard (simple weapons
+        only) can no longer equip a real martial weapon (a Greataxe) at
+        all, not just suffer a worse roll.
+        """
+        user_id = 950970
+        make_basic_character(user_id, "ProfWizard", char_class="Wizard", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "greataxe", 1)
+        success, message, _ = db.equip_item(user_id, -999, "greataxe")
+        self.assertFalse(success)
+        self.assertIn("isn't trained", message)
+        self.assertNotEqual(db.get_character(user_id, -999).get("equipped_weapon"), "greataxe")
+
+    def test_equip_allows_a_proficient_weapon(self):
+        """Regression guard: a class actually proficient with the weapon's category still equips normally."""
+        user_id = 950971
+        make_basic_character(user_id, "ProfFighter", char_class="Fighter", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "greataxe", 1)
+        success, message, _ = db.equip_item(user_id, -999, "greataxe")
+        self.assertTrue(success, message)
+        self.assertEqual(db.get_character(user_id, -999).get("equipped_weapon"), "greataxe")
+
+    def test_equip_blocks_non_proficient_armor(self):
+        """Same real feature, armor side: a Wizard (no armor proficiency at all) can't equip Chain Mail."""
+        user_id = 950972
+        make_basic_character(user_id, "ProfWizardArmor", char_class="Wizard", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "chain_mail", 1)
+        success, message, _ = db.equip_item(user_id, -999, "chain_mail")
+        self.assertFalse(success)
+        self.assertIn("isn't trained", message)
+        self.assertIsNone(db.get_character(user_id, -999).get("equipped_armor"))
+
+    def test_purchased_weapon_mastery_widens_the_equip_gate_too(self):
+        """
+        Real live consistency check: skill_tree.py's "Weapon Mastery"
+        purchase (prof_<category>_weapons) already widens proficiency
+        at attack-resolution time (rules/combat.py) -- this new equip-
+        time gate must respect that same purchased widening, not just
+        the class-based default, or a player who paid real skill points
+        for martial weapon mastery would still be blocked from ever
+        equipping one.
+        """
+        user_id = 950973
+        make_basic_character(user_id, "MasteryWizard", char_class="Wizard", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "greataxe", 1)
+        db.update_character(user_id, -999, skill_tree_upgrades=["prof_martial_weapons"])
+        success, message, _ = db.equip_item(user_id, -999, "greataxe")
+        self.assertTrue(success, message)
+        self.assertEqual(db.get_character(user_id, -999).get("equipped_weapon"), "greataxe")
+
+    def test_all_recruitable_companions_starting_gear_passes_the_new_proficiency_gate(self):
+        """
+        Regression guard against the new equip gate silently breaking
+        recruitment: bot.py's _do_recruit_npc auto-equips a fresh
+        companion's real starting inventory (campaign.json's npcs.*
+        .stats.inventory) right after creation. Every recruitable NPC's
+        starting weapon/armor is confirmed here to actually be
+        proficiency-legal for their own class -- if a future campaign.json
+        edit ever adds a mismatched starting item, this catches it
+        immediately instead of silently leaving a freshly-recruited
+        companion unable to equip their own starting gear.
+        """
+        for npc_id, npc in bot.CAMPAIGN["npcs"].items():
+            if not npc.get("recruitable"):
+                continue
+            stats = npc["stats"]
+            fake_character = {"char_class": stats["char_class"], "skill_tree_upgrades": []}
+            for item_id in stats["inventory"]:
+                item = items_module.get_item(item_id)
+                if item is None or item.get("type") not in ("weapon", "armor", "shield"):
+                    continue
+                self.assertTrue(
+                    db._meets_proficiency_requirement(fake_character, item),
+                    f"{npc_id} ({stats['char_class']}) starts with a {item['name']} they wouldn't be able to equip",
+                )
+
     def test_free_extra_attack_adds_exactly_one_attack_regardless_of_class(self):
         """Real Phase 6 deliverable: the free_extra_attack mythic affix is a flat +1, checked unconditionally."""
         character = make_basic_character(950908, "ExtraAttackTester", char_class="Wizard", current_location="crossroads_tavern")

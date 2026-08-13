@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 
 import config
 import items as items_module
+import class_features as class_features_module
 from rules.dice import ability_modifier, average_damage
 from rules.leveling import (
     level_for_xp, proficiency_bonus_for_level,
@@ -1420,6 +1421,44 @@ def _meets_equip_requirement(character: dict, item: dict) -> bool:
     return False
 
 
+def _meets_proficiency_requirement(character: dict, item: dict) -> bool:
+    """
+    Real feature (2026-08-13, per Coffee, dev-topic: "If weapons can't
+    be used by characters, don't let them equip them until they are
+    able") -- weapon/armor proficiency (class_features.py's
+    is_weapon_proficient/is_armor_proficient) already existed and was
+    already used at real combat-resolution time (rules/combat.py's
+    resolve_attack drops the proficiency bonus on a non-proficient
+    weapon; bot.py's attack-disadvantage check does the same for
+    non-proficient armor -- both deliberately kept as-is, a real 5E-
+    accurate "you CAN still use it, just badly" simplification, and
+    still the right fallback for gear a character already had equipped
+    before this gate existed, or for a monster/NPC with no char_class
+    at all), but nothing ever stopped equipping the item in the first
+    place -- a Wizard could freely equip a Greataxe. This is the equip-
+    time half Coffee asked for: blocks the SWAP, not the swing. Reuses
+    the exact same "purchased bonus proficiency widens the class-based
+    check" pattern already established at both real call sites above
+    (rules/combat.py's weapon_proficient, bot.py's is_proficient) --
+    the skill_tree_upgrades key format ("prof_<category>_weapons" /
+    "prof_<category>_armor") must match those exactly or a real
+    purchased widening would silently stop working here.
+    """
+    if item.get("type") == "weapon":
+        category = item.get("weapon_category", "simple")
+        return (
+            class_features_module.is_weapon_proficient(character.get("char_class"), category)
+            or f"prof_{category}_weapons" in (character.get("skill_tree_upgrades") or [])
+        )
+    if item.get("type") in ("armor", "shield"):
+        category = item.get("armor_category", "light")
+        return (
+            class_features_module.is_armor_proficient(character.get("char_class"), category)
+            or f"prof_{category}_armor" in (character.get("skill_tree_upgrades") or [])
+        )
+    return True
+
+
 def equip_item(telegram_user_id: int, chat_id: int, item_id: str) -> tuple[bool, str, dict | None]:
     """
     Equip a weapon, armor, shield, ring, amulet, or wondrous item the
@@ -1462,6 +1501,15 @@ def equip_item(telegram_user_id: int, chat_id: int, item_id: str) -> tuple[bool,
         return (
             False,
             f"The {item['name']} resists your grasp — you haven't proven yourself enough yet to wield it.",
+            character,
+        )
+
+    if not _meets_proficiency_requirement(character, item):
+        category = item.get("weapon_category" if item["type"] == "weapon" else "armor_category", "")
+        kind_word = "weapon" if item["type"] == "weapon" else item["type"]
+        return (
+            False,
+            f"{character['name']} isn't trained to use a {category} {kind_word} like the {item['name']} yet.",
             character,
         )
 
