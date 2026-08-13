@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.195] — Fix: party-slot dedup + guild-hint dead ends + inactive-member cap
+
+Root-caused during a real dev-bridge investigation (a level-16 Fighter
+stuck trying to join The Forge Guild), extended live once Coffee
+followed up asking to add more party members and pointing out that
+inactive members shouldn't count toward the active roster.
+
+- Forge Guild's "requires choosing a subclass" rejection now names the
+  real options for the player's own class instead of a dead end.
+- The "you've earned every Promotion" rejection now names the guild
+  already held, instead of leaving the player thinking it's a bug.
+- Support's guild catalog now mentions the real subclass + combat-
+  proof requirements it was silently omitting (root cause of a
+  confidently wrong "no additional steps required" answer).
+- A human's dormant alt character (switched away from, but still
+  sitting in the party) no longer occupies a real combat slot —
+  neither in who actually fights nor in the active-roster cap check.
+- "invite" on an already-benched party member now points at "bring
+  them back" instead of a flat "already in your party" dead end.
+- Inactive (resting/AFK) party members no longer count against the
+  active-roster cap either — the one place still missing the same
+  exclusion `_get_real_party_combatants` already had, confirmed live
+  after Coffee reported only seeing 3 of an 11-member party active.
+
 ## [1.27.194] — Add: real monster/boss spellcasting, woven into narration and story
 
 Real live thread (Coffee, dev-bridge): tried Counterspell, hit this
