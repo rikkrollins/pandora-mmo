@@ -5378,7 +5378,7 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
             opposing = session.living_on_side(session.opposing_side(current["telegram_user_id"]))
             if not opposing:
                 break
-            target = _pick_formation_weighted_target(opposing)
+            target = _pick_formation_weighted_target(opposing, attacker_is_boss=current.get("is_boss", False))
             # Task #167 (per Coffee, 2026-07-18, scoped to boss-tier enemies
             # only after he flagged the latency cost of doing this for every
             # regular monster too): a pre-roll "sizing up its target" beat,
@@ -5736,7 +5736,28 @@ def _enemy_formation_row(monster_key: str, template: dict) -> str:
     return "back" if any(kw in haystack for kw in _ENEMY_BACK_ROW_KEYWORDS) else "front"
 
 
-def _pick_formation_weighted_target(opposing: list[dict]) -> dict:
+# Synergy Phase 5b (2026-08-13, per Coffee: subclass-reactive enemy AI
+# in regular combat, extending the Echo Trial Phase 4 reactivity theme
+# beyond the Colosseum). A boss (is_boss=True) preferentially targets a
+# real spellcaster threat -- a real, deliberately modest weight bump
+# (not a guarantee), on the trope that a smart boss singles out the
+# mage first. Scoped to bosses only (not every regular monster) to keep
+# blast radius small: this shifts WHO an already-existing boss fight
+# targets, never a numeric buff/nerf, so it carries none of Phase 2's
+# monster-retrofit balance risk.
+BOSS_SPELLCASTER_TARGET_WEIGHT_MULTIPLIER = 2.0
+
+
+def _has_known_damage_spell(character: dict) -> bool:
+    """True if `character` (a party-side combatant) knows at least one real damage-dealing spell."""
+    for spell_id in character.get("known_spells") or []:
+        spell = spells_module.SPELLS.get(spell_id)
+        if spell and spell.get("effect") == "damage":
+            return True
+    return False
+
+
+def _pick_formation_weighted_target(opposing: list[dict], attacker_is_boss: bool = False) -> dict:
     """
     Formation-aware target selection (2026-08-01, per Coffee: "front
     row get targeted... back row have a higher evade%... all players
@@ -5770,6 +5791,12 @@ def _pick_formation_weighted_target(opposing: list[dict]) -> dict:
     have), but every row member keeps a real, non-zero chance
     regardless of current HP, matching "all players can still be
     targeted" as an actual guarantee, not just a docstring claim.
+
+    `attacker_is_boss` (Synergy Phase 5b): when True, a real spellcaster
+    in the pool (_has_known_damage_spell) gets its weight multiplied by
+    BOSS_SPELLCASTER_TARGET_WEIGHT_MULTIPLIER -- irrelevant when the pool
+    is a monster's own side (monsters never carry known_spells), so this
+    only ever affects an enemy picking among the PARTY.
     """
     front = [p for p in opposing if p.get("formation_row", "front") != "back"]
     back = [p for p in opposing if p.get("formation_row") == "back"]
@@ -5798,7 +5825,10 @@ def _pick_formation_weighted_target(opposing: list[dict]) -> dict:
         # Range (0.1, 1.1]: a member at full HP still keeps a real
         # 0.1 floor of weight (never immune), a member near death
         # approaches 1.1 (favored, not guaranteed).
-        weights.append((1.0 - hp_pct) + 0.1)
+        weight = (1.0 - hp_pct) + 0.1
+        if attacker_is_boss and _has_known_damage_spell(p):
+            weight *= BOSS_SPELLCASTER_TARGET_WEIGHT_MULTIPLIER
+        weights.append(weight)
     return random.choices(pool, weights=weights, k=1)[0]
 
 

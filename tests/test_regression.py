@@ -6143,6 +6143,70 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         picks = [bot._pick_formation_weighted_target(pool)["name"] for _ in range(500)]
         self.assertEqual(set(picks), {"Sarah", "Zara", "Laurienna"})
 
+    # -- Synergy Phase 5b (2026-08-13): boss AI reacts to a real
+    #    spellcaster threat in the party --------------------------------
+    def test_has_known_damage_spell_true_for_a_real_damage_spell(self):
+        self.assertTrue(bot._has_known_damage_spell({"known_spells": ["burning_hands"]}))
+
+    def test_has_known_damage_spell_false_for_a_non_damage_spell(self):
+        self.assertFalse(bot._has_known_damage_spell({"known_spells": ["shield", "cure_wounds"]}))
+
+    def test_has_known_damage_spell_false_with_no_known_spells(self):
+        self.assertFalse(bot._has_known_damage_spell({"known_spells": []}))
+        self.assertFalse(bot._has_known_damage_spell({}))
+
+    def test_boss_attacker_preferentially_targets_a_known_spellcaster(self):
+        """
+        Same trope as a smart boss singling out the mage first -- at
+        EQUAL HP (so the existing HP-based weighting alone can't explain
+        a skew), a real spellcaster should still be picked noticeably
+        more often than an equally-healthy non-caster once the attacker
+        is a boss, and every member must still keep a real, non-zero
+        chance (never guaranteed/immune, same spirit as the formation
+        weighting above).
+        """
+        import random
+        random.seed(7)
+        pool = [
+            {"telegram_user_id": 1, "name": "Wren", "hp_current": 100, "hp_max": 100,
+             "formation_row": "front", "known_spells": ["burning_hands"]},
+            {"telegram_user_id": 2, "name": "Bram", "hp_current": 100, "hp_max": 100,
+             "formation_row": "front", "known_spells": []},
+        ]
+        picks = [
+            bot._pick_formation_weighted_target(pool, attacker_is_boss=True)["name"] for _ in range(2000)
+        ]
+        self.assertEqual(set(picks), {"Wren", "Bram"}, "the non-caster must still keep a real chance")
+        self.assertGreater(picks.count("Wren"), picks.count("Bram") * 1.5)
+
+    def test_non_boss_attacker_does_not_favor_a_spellcaster(self):
+        """A regular (non-boss) monster's targeting must be totally unaffected by this -- same equal-HP pool as above."""
+        import random
+        random.seed(7)
+        pool = [
+            {"telegram_user_id": 1, "name": "Wren", "hp_current": 100, "hp_max": 100,
+             "formation_row": "front", "known_spells": ["burning_hands"]},
+            {"telegram_user_id": 2, "name": "Bram", "hp_current": 100, "hp_max": 100,
+             "formation_row": "front", "known_spells": []},
+        ]
+        picks = [bot._pick_formation_weighted_target(pool)["name"] for _ in range(2000)]
+        wren_count, bram_count = picks.count("Wren"), picks.count("Bram")
+        self.assertLess(abs(wren_count - bram_count) / len(picks), 0.1, f"Wren={wren_count} Bram={bram_count}")
+
+    def test_boss_attacker_targeting_enemies_is_unaffected(self):
+        """Monsters never carry known_spells, so attacker_is_boss must never skew a companion/human picking among enemies."""
+        import random
+        random.seed(7)
+        pool = [
+            {"telegram_user_id": -1, "name": "Goblin A", "hp_current": 10, "hp_max": 10, "formation_row": "front"},
+            {"telegram_user_id": -2, "name": "Goblin B", "hp_current": 10, "hp_max": 10, "formation_row": "front"},
+        ]
+        picks = [
+            bot._pick_formation_weighted_target(pool, attacker_is_boss=True)["name"] for _ in range(2000)
+        ]
+        a_count, b_count = picks.count("Goblin A"), picks.count("Goblin B")
+        self.assertLess(abs(a_count - b_count) / len(picks), 0.1, f"A={a_count} B={b_count}")
+
     def test_enemy_formation_row_heuristic_grounded_in_real_monster_data(self):
         self.assertEqual(bot._enemy_formation_row("goblin", {"name": "Goblin"}), "front")
         self.assertEqual(bot._enemy_formation_row("goblin_shaman", {"name": "Goblin Shaman"}), "back")

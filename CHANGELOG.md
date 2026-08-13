@@ -2,6 +2,24 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.183] — Add: boss AI targets a real spellcaster threat (Synergy Phase 5b)
+
+Extends the Echo Trial (Phase 4) reactivity theme beyond the Colosseum
+into ordinary combat: a boss monster (`is_boss=True`) now preferentially
+targets a real spellcaster in the party — a member with at least one
+known real damage-dealing spell (`_has_known_damage_spell`, checked
+against `spells.py`, never invented) gets a
+`BOSS_SPELLCASTER_TARGET_WEIGHT_MULTIPLIER` (2x) weight bump in
+`_pick_formation_weighted_target`, the single real choke point both
+enemy-vs-party and companion-vs-enemy AI targeting already goes
+through. Deliberately scoped to bosses only (not every regular
+monster) and to WHO gets targeted, never a numeric buff/nerf — carries
+none of Phase 2's monster-retrofit balance risk, and a non-caster
+still keeps a real, non-zero chance to be picked (never immune, same
+spirit as the existing HP-weighted targeting). A regular monster's
+targeting, and any AI-side pick among enemies (which never carry
+known_spells), are both completely unaffected.
+
 ## [1.27.182] — Fix: secondary-guild curriculum topic-driven steps (Synergy Phase 5a)
 
 A known, deliberately-deferred gap from the Guild Promotions system
