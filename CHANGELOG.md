@@ -2,6 +2,32 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.173] — Fix: "use <spell>" phrasing misclassified as use_item or silently dropped
+
+Real live bug, found via topic-activity monitoring in the same window
+as v1.27.172. The same player who typo'd "Eldricth blast" also tried
+the correctly-spelled "Use eldritch blast" moments later and got
+silence again -- a different shape of the same underlying gap. A
+spell, unlike an item, has no natural "the/my/a" article before it
+("use eldritch blast", never "use THE eldritch blast"), so it matched
+none of `use_item`'s own "use (the|my|a|an)"/"use X on Y" patterns and
+fell all the way through to the silent "chat" default. Worse, "use
+eldritch blast on the goblin" (the version WITH a target) was actively
+intercepted by `use_item`'s own "on"-based pattern, which runs earlier
+in `_keyword_fallback` than the bare-invocation fallback v1.27.172
+added.
+
+Extracted the fuzzy spell-name matcher into a shared
+`_fuzzy_match_spell_name`/`_split_target_clause` pair (also used by
+v1.27.172's bare-invocation check) and added a new "use/cast <spell>"
+check at the same priority tier as the existing scroll->cast_spell
+override -- ahead of `use_item`'s own patterns, so a real (possibly
+typo'd) spell name after "use"/"cast" always wins over a generic item
+guess. Both "use eldritch blast" and "use eldritch blast on the
+goblin" now correctly resolve to cast_spell; ordinary real-item "use X
+on Y" phrasing, "use the environment", "use my breath weapon", and
+"use my own dice" are all confirmed unaffected.
+
 ## [1.27.172] — Fix: bare/typo'd spell invocation ("Eldricth blast") misclassified as use_environment
 
 Real live bug, found via topic-activity monitoring — a live repro of a

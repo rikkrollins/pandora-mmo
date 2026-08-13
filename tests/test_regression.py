@@ -10357,6 +10357,57 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         intent = _keyword_fallback("I carefully look around the dusty old library for clues", [])
         self.assertNotEqual(intent["action"], "cast_spell")
 
+    def test_use_spell_name_with_no_article_classifies_as_cast_spell(self):
+        """
+        Real live bug (2026-08-13, topic-activity monitoring): the SAME
+        player who typo'd "Eldricth blast" also tried the correctly-
+        spelled "Use eldritch blast" moments later and got silence again
+        -- a different shape of the same gap. A spell, unlike an item,
+        has no natural "the/my/a" article before it, so it matched none
+        of use_item's own "use (the|my|a|an)"/"use X on Y" patterns and
+        fell all the way through to the silent "chat" default.
+        """
+        from ai.intent_parser import _keyword_fallback
+        intent = _keyword_fallback("Use eldritch blast", [])
+        self.assertEqual(intent["action"], "cast_spell")
+        self.assertEqual(intent["spell_name"], "Eldritch Blast")
+
+    def test_use_spell_name_with_a_target_still_classifies_as_cast_spell_not_use_item(self):
+        """
+        Companion case to the one above: "use eldritch blast on the
+        goblin" DOES match use_item's own "use X on Y" pattern (an
+        earlier, higher-priority check in _keyword_fallback than the
+        bare-invocation fallback), so the plain fix above wasn't enough
+        on its own -- the "use/cast <spell>" check had to be moved up
+        to the SAME priority tier as the existing scroll->cast_spell
+        override, ahead of use_item's "on"-based check, or this exact
+        phrasing would still lose to a generic item-use guess.
+        """
+        from ai.intent_parser import _keyword_fallback
+        intent = _keyword_fallback("use eldritch blast on the goblin", [])
+        self.assertEqual(intent["action"], "cast_spell")
+        self.assertEqual(intent["spell_name"], "Eldritch Blast")
+        self.assertEqual(intent["target"], "the goblin")
+
+    def test_use_real_item_with_on_clause_still_classifies_as_use_item(self):
+        """Guards the fix above against the obvious regression: an
+        ordinary real-item "use X on Y" must still resolve to use_item,
+        not get swept up by the new spell-name check."""
+        from ai.intent_parser import _keyword_fallback
+        for text in ("use the healing potion on pan", "use health potion on pan", "use my healing potion"):
+            intent = _keyword_fallback(text, [])
+            self.assertEqual(intent["action"], "use_item", text)
+
+    def test_use_environment_and_breath_weapon_and_manual_dice_unaffected_by_use_cast_spell_check(self):
+        """More regression guards for the same fix: other "use ..."
+        phrasings that were already correctly classified elsewhere in
+        this function must be untouched by the new, higher-priority
+        "use/cast <spell>" check."""
+        from ai.intent_parser import _keyword_fallback
+        self.assertEqual(_keyword_fallback("Use the environment", [])["action"], "use_environment")
+        self.assertEqual(_keyword_fallback("I use my breath weapon", [])["action"], "breath_weapon")
+        self.assertEqual(_keyword_fallback("use my own dice", [])["action"], "toggle_manual_dice")
+
     async def test_do_cast_spell_resolves_a_typo_of_a_bare_spell_name(self):
         """
         Companion fix to the intent-classification test above:

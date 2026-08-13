@@ -238,6 +238,39 @@ def _normalize_common_typos(lowered: str) -> str:
     return " ".join(words)
 
 
+def _fuzzy_match_spell_name(clause: str) -> str | None:
+    """
+    Whether `clause`, squashed (spaces removed), closely matches a real
+    spell's squashed name -- shared by _keyword_fallback's "use/cast
+    <spell>" check and its later bare-invocation fallback (2026-08-13),
+    so a small typo survives either phrasing. Comparing the ratio over
+    the WHOLE clause (never a substring search) is what keeps this safe
+    from false-positiving against an unrelated sentence that merely
+    shares a couple of letters with some real spell name -- see each
+    call site for why it's checked exactly where it is.
+    """
+    squashed_clause = clause.replace(" ", "").strip()
+    if not squashed_clause:
+        return None
+    best_spell, best_ratio = None, 0.0
+    for spell in spells_module.SPELLS.values():
+        squashed_name = spell["name"].lower().replace(" ", "")
+        if abs(len(squashed_clause) - len(squashed_name)) > 2:
+            continue
+        ratio = difflib.SequenceMatcher(None, squashed_clause, squashed_name).ratio()
+        if ratio >= 0.82 and ratio > best_ratio:
+            best_spell, best_ratio = spell["name"], ratio
+    return best_spell
+
+
+def _split_target_clause(text: str) -> tuple[str, str | None]:
+    """Splits off a trailing "at/on/against <target>" clause, if present."""
+    match = re.search(r"\s+(?:at|on|against)\s+", text)
+    if match:
+        return text[:match.start()], text[match.end():].strip()
+    return text, None
+
+
 def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: str | None = None) -> dict:
     """
     Plain keyword-based classification used when the model is unreachable
@@ -621,6 +654,29 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # target no longer defeats it.
     if any(w in lowered for w in ["cast ", "i cast"]) or ("scroll" in lowered and re.search(r"\buse\b", lowered)):
         return {**base, "action": "cast_spell"}
+
+    # "Use <spell>"/"cast <spell>" (2026-08-13, real live bug found via
+    # topic-activity monitoring): the SAME player who typo'd "Eldricth
+    # blast" (fixed by the bare-invocation check further down this
+    # function) also tried the correctly-spelled "Use eldritch blast on
+    # the goblin" moments later and STILL lost -- a spell, unlike an
+    # item, has no natural "the/my/a" article before it, but it landed
+    # in the "on"-based use_item check just below anyway ("use ... on"
+    # matches regardless of what's actually named), which runs BEFORE
+    # the later bare-invocation check ever gets a chance. Checked here,
+    # immediately after the scroll->cast_spell check above (same
+    # priority tier, same reasoning: a real spell name after "use"/
+    # "cast" must win before any generic item-use guess), so both "use
+    # eldritch blast" (no target) and "use eldritch blast on the
+    # goblin" (with one) resolve correctly. Reuses
+    # _fuzzy_match_spell_name, the same typo-tolerant matcher the
+    # bare-invocation check further down uses.
+    _use_cast_match = re.search(r"\b(?:use|cast)\b\s+(.+)", lowered)
+    if _use_cast_match:
+        _use_cast_clause, _use_cast_target = _split_target_clause(_use_cast_match.group(1))
+        _use_cast_spell = _fuzzy_match_spell_name(_use_cast_clause)
+        if _use_cast_spell:
+            return {**base, "action": "cast_spell", "spell_name": _use_cast_spell, "target": _use_cast_target}
 
     # Real live bug (2026-08-08, confirmed live twice -- a real dev-
     # topic screenshot AND independently via topic-activity
@@ -1938,32 +1994,19 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # symptom -- now it does, and it's a plain typo, not a button tap.
     # Checked deliberately LAST (bare/fuzzy, so lowest-confidence of every
     # check in this function): compares the WHOLE remaining clause,
-    # squashed, against every real spell's squashed name via the same
-    # difflib.SequenceMatcher pattern _normalize_common_typos already
-    # uses above (and bot.py's guild-name matching) -- a ratio this high
-    # over the ENTIRE clause (not a substring search) is safe from false
-    # positives against an unrelated full sentence, since one stray
-    # matching word can't drag a long, mostly-different clause up near
-    # the same ratio a near-exact short spell name gets. Splits off a
-    # trailing "at/on/against <target>" first so "eldritch blast at the
-    # golem" still resolves the target.
-    _target_split = re.search(r"\s+(?:at|on|against)\s+", lowered)
-    if _target_split:
-        spell_clause, target_clause = lowered[:_target_split.start()], lowered[_target_split.end():]
-    else:
-        spell_clause, target_clause = lowered, None
-    squashed_clause = spell_clause.replace(" ", "").strip()
-    if squashed_clause:
-        best_spell, best_ratio = None, 0.0
-        for spell in spells_module.SPELLS.values():
-            squashed_name = spell["name"].lower().replace(" ", "")
-            if abs(len(squashed_clause) - len(squashed_name)) > 2:
-                continue
-            ratio = difflib.SequenceMatcher(None, squashed_clause, squashed_name).ratio()
-            if ratio >= 0.82 and ratio > best_ratio:
-                best_spell, best_ratio = spell["name"], ratio
-        if best_spell:
-            return {**base, "action": "cast_spell", "spell_name": best_spell, "target": target_clause.strip() if target_clause else None}
+    # squashed, against every real spell's squashed name via
+    # _fuzzy_match_spell_name (same difflib.SequenceMatcher pattern
+    # _normalize_common_typos already uses above, and bot.py's guild-name
+    # matching) -- a ratio this high over the ENTIRE clause (not a
+    # substring search) is safe from false positives against an unrelated
+    # full sentence, since one stray matching word can't drag a long,
+    # mostly-different clause up near the same ratio a near-exact short
+    # spell name gets. Splits off a trailing "at/on/against <target>"
+    # first so "eldritch blast at the golem" still resolves the target.
+    spell_clause, target_clause = _split_target_clause(lowered)
+    matched_spell = _fuzzy_match_spell_name(spell_clause)
+    if matched_spell:
+        return {**base, "action": "cast_spell", "spell_name": matched_spell, "target": target_clause}
 
     # Party companion dialogue (2026-07-26, per Coffee: "when we say
     # 'talk' 'speak' 'say' 'tell' 'yell' 'shout' 'scream' in a location,
