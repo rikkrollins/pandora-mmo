@@ -808,6 +808,25 @@ def init_db() -> None:
         if "secondary_guild_curriculum_state" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN secondary_guild_curriculum_state TEXT NOT NULL DEFAULT '{}'")
 
+        # The Remnants (2026-08-13, per Coffee -- see remnants.py's own
+        # docstring for the full design). `bound_remnants` is a JSON
+        # list of remnant_ids this character has personally helped
+        # defeat (every real party member present when an Unbound falls
+        # gets it, same "shared credit" shape as known_monsters).
+        # `is_designated_summoner` is a real, single-holder-at-a-time
+        # role the party assigns (bot._do_assign_summoner clears it on
+        # every other same-party member first) -- only the holder may
+        # actually cast a Remnant. `summoning_mastery_pct` is the same
+        # real 0-100 grindable proficiency shape as steal/lockpick/
+        # profession mastery elsewhere in this game, grown only on a
+        # successful summon cast.
+        if "bound_remnants" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN bound_remnants TEXT NOT NULL DEFAULT '[]'")
+        if "is_designated_summoner" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN is_designated_summoner INTEGER NOT NULL DEFAULT 0")
+        if "summoning_mastery_pct" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN summoning_mastery_pct REAL NOT NULL DEFAULT 1.0")
+
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)
@@ -833,6 +852,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     d["secondary_guild_curriculum_steps"] = json.loads(d["secondary_guild_curriculum_steps"])
     d["secondary_guild_curriculum_unlocked_at"] = json.loads(d["secondary_guild_curriculum_unlocked_at"])
     d["secondary_guild_curriculum_state"] = json.loads(d["secondary_guild_curriculum_state"])
+    d["bound_remnants"] = json.loads(d["bound_remnants"])
     return d
 
 
@@ -944,7 +964,7 @@ def update_character(telegram_user_id: int, chat_id: int, **fields) -> dict | No
     if not fields:
         return get_character(telegram_user_id, chat_id)
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -988,7 +1008,7 @@ def update_character_by_id(character_id: int, **fields) -> dict | None:
             row = conn.execute("SELECT * FROM characters WHERE character_id = ?", (character_id,)).fetchone()
         return _row_to_dict(row) if row else None
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -1809,6 +1829,27 @@ def leave_guild(telegram_user_id: int, chat_id: int, guild_id: str) -> dict | No
             secondary_guild_curriculum_unlocked_at=unlocked_at, secondary_guild_curriculum_state=state,
         )
     return None
+
+
+def bind_remnant(telegram_user_id: int, chat_id: int, remnant_id: str) -> dict | None:
+    """
+    Real, permanent credit (2026-08-13, per Coffee's Remnants system --
+    see remnants.py's own docstring) for having helped defeat a real
+    Unbound boss -- every real party member present when it falls gets
+    this called for them individually (bot.py's defeat_monster event
+    hook), same "shared credit" shape as db.record_bestiary_monster's
+    known_monsters. A no-op if already bound (never duplicates an
+    entry, and never re-triggers whatever one-time effect binding it
+    might someday carry).
+    """
+    character = get_character(telegram_user_id, chat_id)
+    if character is None:
+        return None
+    if remnant_id in character["bound_remnants"]:
+        return character
+    return update_character(
+        telegram_user_id, chat_id, bound_remnants=character["bound_remnants"] + [remnant_id],
+    )
 
 
 def advance_guild_curriculum_step(telegram_user_id: int, chat_id: int, guild_id: str | None = None) -> dict | None:

@@ -42,6 +42,7 @@ import battle_render
 import map_render
 import board_quests as board_quests_module
 import guild_curriculum as guild_curriculum_module
+import remnants as remnants_module
 import campaign_loader as cl
 import config
 import version
@@ -9317,6 +9318,25 @@ async def _check_quest_completions_defeat_monster(update_like, session: sessions
         await _check_guild_curriculum_progress(
             update_like, telegram_user_id, session.chat_id, "defeat_monster", monster_keys=defeated_monster_keys,
         )
+        # The Remnants (2026-08-13, per Coffee): every real party
+        # member present when a real Unbound falls gets it bound to
+        # them, same "shared credit" shape as the guild curriculum
+        # check just above and known_monsters elsewhere in this game --
+        # never a single-player-only reward for a fight the whole party
+        # helped win.
+        for monster_key in defeated_monster_keys:
+            match = remnants_module.remnant_for_monster_key(monster_key)
+            if match is None:
+                continue
+            remnant_id, remnant_data = match
+            already_bound = remnant_id in character["bound_remnants"]
+            db.bind_remnant(telegram_user_id, session.chat_id, remnant_id)
+            if not already_bound:
+                await _safe_send(
+                    update_like,
+                    f"✨ **{character['name']}** binds a fragment of **{remnant_data['name']}** — "
+                    f"once the party assigns a Summoner, they can call it into a later battle.",
+                )
 
 
 async def _do_accept_quest(update: Update, text: str = "") -> None:
@@ -19803,6 +19823,206 @@ async def _do_leave_guild(update: Update, text: str) -> None:
 
 
 # ---------------------------------------------------------------------
+# The Remnants (2026-08-13, per Coffee -- see remnants.py's own module
+# docstring for the full real design and lore). A party's Summoner
+# calls a bound Remnant into a real fight as a themed attack, following
+# the SAME real damage-type pipeline (rules.combat.apply_damage_type_
+# modifier) every other attack in this game already uses.
+# ---------------------------------------------------------------------
+
+SUMMONING_MASTERY_PCT = 100.0  # the real, single threshold "Mastery" per Coffee's own word for it
+
+
+def _summons_per_battle(character: dict) -> int | None:
+    """
+    None means unlimited (Mastery). Below Mastery: 1 free use per
+    battle, +1 more for every real 20% of summoning_mastery_pct banked
+    -- capped at 5 (just under Mastery's own 100%), so the jump from
+    "capped, free" to "uncapped, costs a spell slot" is a real,
+    noticeable threshold crossing, never a smooth ramp that quietly
+    turns into the same thing.
+    """
+    pct = character.get("summoning_mastery_pct", 1.0)
+    if pct >= SUMMONING_MASTERY_PCT:
+        return None
+    return min(1 + int(pct // 20), 5)
+
+
+async def _do_assign_summoner(update: Update, text: str) -> None:
+    """
+    The party's one real, single-holder-at-a-time Summoner role (per
+    Coffee: "the party can assign a summoner and they can cast that
+    Summon") -- only this character may ever cast a bound Remnant.
+    Reassigning simply moves the flag; it was never a permanent choice.
+    """
+    requester = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if requester is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    if requester.get("party_id"):
+        members = [p for p in _get_party_members(update.effective_chat.id) if p.get("party_id") == requester["party_id"]]
+    else:
+        members = [requester]
+
+    target = _match_member_by_name_or_username(text, members)
+    if target is None:
+        if len(members) == 1:
+            target = members[0]
+        else:
+            names = ", ".join(m["name"] for m in members)
+            await _safe_send(update, f"Assign who as Summoner? Party: {names}.")
+            return
+
+    for member in members:
+        if member["character_id"] != target["character_id"] and member.get("is_designated_summoner"):
+            db.update_character_by_id(member["character_id"], is_designated_summoner=0)
+    db.update_character_by_id(target["character_id"], is_designated_summoner=1)
+    await _safe_send(update, f"🔮 **{target['name']}** is now the party's Summoner.")
+
+
+async def _do_summon_remnant(update: Update, text: str, forced_roll: int | None = None) -> None:
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    if not character.get("is_designated_summoner"):
+        await _safe_send(update, "You're not the party's designated Summoner — say \"assign [name] as summoner\" first.")
+        return
+
+    remnant_id = remnants_module.find_remnant_mentioned_in_text(text, candidate_ids=character["bound_remnants"])
+    if remnant_id is None:
+        if not character["bound_remnants"]:
+            await _safe_send(update, "You haven't bound any Remnants yet — defeat a real Unbound to earn one.")
+        else:
+            bound_names = ", ".join(remnants_module.get_remnant(r)["name"] for r in character["bound_remnants"])
+            await _safe_send(update, f"Summon which Remnant? You've bound: {bound_names}.")
+        return
+    remnant = remnants_module.get_remnant(remnant_id)
+
+    chat_id = update.effective_chat.id
+    async with _held_session(chat_id, update.effective_user.id) as session:
+        if session is None:
+            await update.effective_chat.send_message(
+                "There's nothing to summon into right now — this only works in combat.",
+                message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+            )
+            return
+        if session.current_participant_id() != update.effective_user.id:
+            await _self_heal_stuck_ai_turn(update, session)
+            session = sessions.get_session_by_id(session.session_id)
+            if session is None:
+                await update.effective_chat.send_message(
+                    "Combat had stalled and just resolved itself — nothing active right now.",
+                    message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+                )
+                return
+        if session.current_participant_id() != update.effective_user.id:
+            current_name = session.current_participant()["name"]
+            await update.effective_chat.send_message(
+                f"It's not your turn — it's **{current_name}**'s turn.",
+                message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+            )
+            return
+        caster = session.current_participant()
+        if caster["hp_current"] <= 0:
+            await update.effective_chat.send_message(
+                "You're unconscious (0 HP) and can't act until healed.",
+                message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+            )
+            return
+        opposing = session.living_on_side(session.opposing_side(update.effective_user.id))
+        if not opposing:
+            if not await _try_end_stale_combat(update, session):
+                await update.effective_chat.send_message(
+                    "No valid targets remain.", message_thread_id=topics.thread_id_for(chat_id, "adventure")
+                )
+            return
+
+        cap = _summons_per_battle(character)
+        used = caster.get("summons_used_this_battle", 0)
+        mastery = cap is None
+        if mastery:
+            if character["spell_slots_current"] < 1:
+                await update.effective_chat.send_message(
+                    f"At Mastery, calling {remnant['name']} still costs a real spell slot — you have none left to spend.",
+                    message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+                )
+                return
+        elif used >= cap:
+            await update.effective_chat.send_message(
+                f"You've already called a Remnant {cap}x this battle — that's every use your current "
+                f"Summoning mastery allows. Real Mastery (100%) lifts the cap, at the cost of a spell slot per cast.",
+                message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+            )
+            return
+
+        target = _pick_target(text, opposing)
+        roll = roll_damage(remnant["summon_damage_dice"], remnant["summon_damage_bonus"], forced_roll=forced_roll)
+        damage = apply_damage_type_modifier(roll["total"], remnant["element"], target, caster)
+        target["hp_current"] = max(target["hp_current"] - damage, 0)
+        caster["summons_used_this_battle"] = used + 1
+        if mastery:
+            db.update_character(
+                update.effective_user.id, chat_id, spell_slots_current=character["spell_slots_current"] - 1,
+            )
+        secondary_note = ""
+        secondary = remnant["summon_secondary"]
+        if secondary == "dot":
+            target.setdefault("conditions", [])
+            if "poisoned" not in target["conditions"]:
+                target["conditions"].append("poisoned")
+            secondary_note = f" {target['name']} is left poisoned."
+        elif secondary == "self_heal":
+            heal = damage // 4
+            caster["hp_current"] = min(caster["hp_current"] + heal, caster["hp_max"])
+            secondary_note = f" **{caster['name']}** is healed for {heal}."
+        elif secondary == "party_heal":
+            heal = damage // 6
+            for p in session.living_on_side(session.sides.get(update.effective_user.id)):
+                p["hp_current"] = min(p["hp_current"] + heal, p.get("hp_max", p["hp_current"]))
+            secondary_note = f" The party is healed for {heal} each."
+
+        # Real, permanent growth on a successful summon (2026-08-13,
+        # same grindable 0-100% shape as steal/lockpick/profession
+        # mastery elsewhere in this game) -- never on a failed/blocked
+        # attempt, same "success-only" convention _grind_steal_
+        # proficiency and friends already use.
+        new_pct = min(character["summoning_mastery_pct"] + 1.0, SUMMONING_MASTERY_PCT)
+        db.update_character(update.effective_user.id, chat_id, summoning_mastery_pct=new_pct)
+
+        await _safe_send(
+            update,
+            f"🔮 **{caster['name']}** calls forth **{remnant['name']}**! It strikes **{target['name']}** for "
+            f"{damage} {remnant['element']} damage.{secondary_note}",
+        )
+
+        removed = session.remove_defeated()
+        await _announce_defeats(update, session, removed)
+
+        if session.is_combat_over():
+            winner = _determine_winner(session)
+            xp_summary, level_up_notes = await _award_victory_xp(update, session) if winner == "party" else ("", [])
+            if winner == "party":
+                await _check_quest_completions_defeat_monster(update, session)
+                await _mark_location_cleared_for_party(update, session)
+                await _check_achievements_for_combat_party(update, session)
+                await _check_guild_quest_completion(update, session)
+                await _check_echo_trial_progress(update, session)
+            await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
+            for note in level_up_notes:
+                await _notify_main_topic(update, note)
+            sessions.end_session(chat_id, session)
+            return
+
+        session.advance_turn()
+        await _resolve_ai_turns(update, session)
+
+
+# ---------------------------------------------------------------------
 # Waypoints — tap-to-travel buttons over the exact same fast-travel
 # destinations _do_fast_travel already accepts as free text (any
 # location in character['visited_locations']). Per Coffee (2026-07-20):
@@ -20702,6 +20922,10 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_join_guild(update, text)
     elif action == "leave_guild":
         await _do_leave_guild(update, text)
+    elif action == "assign_summoner":
+        await _do_assign_summoner(update, text)
+    elif action == "summon_remnant":
+        await _do_summon_remnant(update, text)
     elif action == "pass_turn":
         await _do_pass_turn(update)
     elif action == "check_sheet":

@@ -21,6 +21,7 @@ import rules.leveling as leveling
 import spells as spells_module
 from ai.text_cleanup import strip_think_tags
 from guilds import GUILDS
+from remnants import REMNANTS
 
 # Confirmed live, twice, on unrelated inputs ("my characters", "I'm
 # back"): this small model has a real bias toward guessing
@@ -131,6 +132,8 @@ Set "item_name" to the item.
 (e.g. "discard my rusty dagger", "scrap the longsword"). Set "item_name" to the item.
 - "join_guild" is for joining/asking to join a specific guild or order.
 - "leave_guild" is for leaving/quitting a guild the player is already a member of.
+- "assign_summoner" is for naming a party member as the party's Summoner (e.g. "assign Sarah as summoner", "make me the summoner").
+- "summon_remnant" is for calling forth a bound Remnant in combat (e.g. "summon The Wrathflame Unbound", "call forth my Remnant on the goblin").
 - "pass_turn" is for skipping, waiting, or passing.
 - "resolve_choice" is for declaring a decision on a moral choice/quest resolution (e.g. "I choose to...", "I'll go with...").
 - "invite_to_party" is for inviting another player's or AI companion's character into their own formed party. Set "target" to the invitee's name.
@@ -847,6 +850,21 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
         "guild" in lowered or any(gid.replace("_", " ") in lowered or g["name"].lower() in lowered for gid, g in GUILDS.items())
     ):
         return {**base, "action": "leave_guild"}
+
+    # The Remnants (2026-08-13, per Coffee -- see remnants.py's own
+    # module docstring). "summon"/"call forth" naming a real bound
+    # Remnant by name is checked BEFORE the generic "summon"/cast_spell
+    # collision further down (this game's real "Summon Lesser Spirit"
+    # spell also uses the word "summon") -- grounded in a real
+    # Remnant's own name/id being present, the same "never fire on an
+    # unrelated word alone" shape join_guild/leave_guild already use.
+    mentions_a_real_remnant = any(
+        r["name"].lower() in lowered or rid.replace("_", " ") in lowered for rid, r in REMNANTS.items()
+    )
+    if mentions_a_real_remnant and re.search(r"\b(?:summon|call forth|invoke)\b", lowered):
+        return {**base, "action": "summon_remnant"}
+    if re.search(r"\bassign\b.+\bsummoner\b", lowered) or re.search(r"\bmake\b.+\bsummoner\b", lowered):
+        return {**base, "action": "assign_summoner"}
 
     # Bench/un-bench (2026-07-31, per Coffee: battle-planning roster
     # picker) -- checked before "unbench" would ever risk matching a
@@ -2013,7 +2031,8 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
             valid_actions = (
                 "attack", "pass_turn", "start_combat", "create_character",
                 "check_sheet", "check_inventory", "check_party", "talk_npc", "move", "look",
-                "buy", "sell", "steal", "cast_spell", "join_guild", "leave_guild", "recruit_npc", "rest",
+                "buy", "sell", "steal", "cast_spell", "join_guild", "leave_guild",
+                "assign_summoner", "summon_remnant", "recruit_npc", "rest",
                 "go_inactive", "skill_check", "shove", "show_map", "gather", "craft",
                 "list_characters", "switch_character", "delete_character",
                 "fast_travel", "accept_quest", "check_quests", "ask_clue",

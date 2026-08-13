@@ -2,6 +2,44 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.170] — Add: The Remnants — real, hard boss fights that become callable summons
+
+Real feature (2026-08-13, per Coffee, built live). Grounded in this
+game's OWN real, already-existing lore rather than any outside IP:
+long before anyone alive remembers, Pandora's Box was opened and
+everything inside scattered across the world. Most of it weakened into
+the ordinary monsters players fight every day — but a rare few endured
+whole. Those are the Unbound: 12 real, single, boss-tier fights (700-
+950 HP, well above this game's existing top-tier bosses, deliberately
+Colosseum/Labyrinth-difficulty), each hidden at a real, previously-
+empty location, found only by genuine exploration.
+
+- Defeating an Unbound (real `defeat_monster` quest triggers, one per
+  Remnant, `remnants.py`) binds a fragment of it to every real party
+  member present — shared credit, same shape as this game's bestiary.
+- The party assigns one member as Summoner ("assign X as summoner") —
+  only that character may call a bound Remnant into a later fight.
+- Casting ("summon [Remnant] on [target]") is a real attack through the
+  SAME damage-type pipeline every other attack in this game already
+  uses (rules.combat.apply_damage_type_modifier) — each Remnant has its
+  own real element (only this game's 9 already-implemented damage
+  types) and an optional secondary effect (a poison DoT, healing the
+  caster, or healing the whole party).
+- 1 free summon per battle at base; every real 20% of a new, grindable
+  `summoning_mastery_pct` (0-100%, same shape as steal/lockpick/
+  profession mastery elsewhere) raises that, up to 5. At true Mastery
+  (100%) the per-battle cap lifts entirely — but every cast then costs
+  a real spell slot.
+- Every Unbound is a real campaign.json monster (`is_boss: true`, so
+  the existing image-generation system renders it with the correct
+  dramatic "boss" framing automatically) and shows up in the bestiary
+  the same way any other monster already does — no new display code
+  needed.
+
+12 new regression tests covering binding, Summoner assignment, damage
+resolution, the per-battle cap, Mastery's spell-slot cost, and all
+three secondary effect types.
+
 ## [1.27.169] — Fix: Support hallucinated a fake item; "use sneak attack" looped forever
 
 Two real bugs found via topic-activity monitoring (2026-08-13):

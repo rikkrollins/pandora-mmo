@@ -12107,6 +12107,238 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         parsed2 = _keyword_fallback("I quit the thieves guild", known_npc_names=[])
         self.assertEqual(parsed2["action"], "leave_guild")
 
+    # -- The Remnants (2026-08-13, per Coffee) ---------------------------
+    def test_remnant_catalog_uses_only_real_damage_types_and_conditions(self):
+        import remnants as remnants_module
+        real_types = {"cold", "fire", "force", "lightning", "necrotic", "physical", "poison", "psychic", "radiant"}
+        real_secondaries = {"none", "dot", "self_heal", "party_heal"}
+        for remnant_id, data in remnants_module.REMNANTS.items():
+            self.assertIn(data["element"], real_types, remnant_id)
+            self.assertIn(data["summon_secondary"], real_secondaries, remnant_id)
+            monster = cl.get_monster_template(bot.CAMPAIGN, data["monster_key"])
+            self.assertIsNotNone(monster, f"{remnant_id} has no real campaign.json monster entry")
+            self.assertTrue(monster.get("is_boss"), remnant_id)
+            self.assertGreater(monster["hp_max"], 700, remnant_id)
+            loc = cl.get_location(bot.CAMPAIGN, data["location_id"])
+            self.assertIsNotNone(loc, f"{remnant_id}'s location_id doesn't exist")
+            self.assertIn(data["monster_key"], loc.get("monsters", []), remnant_id)
+
+    async def test_defeating_an_unbound_binds_it_to_every_real_party_member_present(self):
+        import sessions
+        sessions.end_session(-996)
+        leader_id, member_id = 800201, 800202
+        make_basic_character(leader_id, "SummonLeader", current_location="crossroads_tavern", chat_id=-996)
+        make_basic_character(member_id, "SummonMember", current_location="crossroads_tavern", chat_id=-996)
+        party_id = db.create_party(leader_id, -996)
+        db.update_character(member_id, -996, party_id=party_id)
+
+        session = sessions.Session(
+            chat_id=-996,
+            participants=[
+                {"telegram_user_id": leader_id, "name": "SummonLeader"},
+                {"telegram_user_id": member_id, "name": "SummonMember"},
+                {"telegram_user_id": -1, "name": "The Unopened", "monster_key": "the_unopened"},
+            ],
+            turn_order=[leader_id, member_id, -1], sides={leader_id: "party", member_id: "party", -1: "enemy"},
+            session_id=1,
+        )
+        sink = []
+        await bot._check_quest_completions_defeat_monster(FakeUpdate(leader_id, "", sink, chat_id=-996), session)
+        self.assertIn("the_unopened", db.get_character(leader_id, -996)["bound_remnants"])
+        self.assertIn("the_unopened", db.get_character(member_id, -996)["bound_remnants"])
+        self.assertTrue(any("binds a fragment" in s and "The Unopened" in s for s in sink))
+        sessions.end_session(-996)
+
+    async def test_assign_summoner_sets_flag_and_clears_previous_holder(self):
+        leader_id, member_id = 800203, 800204
+        make_basic_character(leader_id, "AssignLeader", current_location="crossroads_tavern", chat_id=-995)
+        make_basic_character(member_id, "AssignMember", current_location="crossroads_tavern", chat_id=-995)
+        party_id = db.create_party(leader_id, -995)
+        db.update_character(member_id, -995, party_id=party_id)
+        db.update_character(leader_id, -995, is_designated_summoner=1)
+
+        sink = []
+        await bot._do_assign_summoner(
+            FakeUpdate(leader_id, "assign AssignMember as summoner", sink, chat_id=-995),
+            "assign AssignMember as summoner",
+        )
+        self.assertEqual(db.get_character(leader_id, -995)["is_designated_summoner"], 0)
+        self.assertEqual(db.get_character(member_id, -995)["is_designated_summoner"], 1)
+        self.assertTrue(any("AssignMember" in s and "Summoner" in s for s in sink))
+
+    async def test_summon_remnant_rejects_a_non_summoner(self):
+        user_id = 800205
+        make_basic_character(user_id, "NotASummoner", current_location="crossroads_tavern", chat_id=-994)
+        db.update_character(user_id, -994, bound_remnants=["the_unopened"])
+        sink = []
+        await bot._do_summon_remnant(FakeUpdate(user_id, "summon The Unopened", sink, chat_id=-994), "summon The Unopened")
+        self.assertTrue(any("not the party's designated Summoner" in s for s in sink))
+
+    async def test_summon_remnant_rejects_an_unbound_remnant(self):
+        user_id = 800206
+        make_basic_character(user_id, "NoRemnantsBound", current_location="crossroads_tavern", chat_id=-993)
+        db.update_character(user_id, -993, is_designated_summoner=1)
+        sink = []
+        await bot._do_summon_remnant(FakeUpdate(user_id, "summon The Unopened", sink, chat_id=-993), "summon The Unopened")
+        self.assertTrue(any("haven't bound any Remnants" in s for s in sink))
+
+    async def test_summon_remnant_deals_real_elemental_damage_and_advances_turn(self):
+        import sessions
+        sessions.end_session(-992)
+        user_id = 800207
+        make_basic_character(user_id, "RealSummoner", current_location="crossroads_tavern", chat_id=-992, hp_max=50)
+        db.update_character(user_id, -992, is_designated_summoner=1, bound_remnants=["the_wrathflame_unbound"])
+        enemy_id = -2
+        player = db.get_character(user_id, -992)
+        player["telegram_user_id"] = user_id
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "hp_current": 500, "hp_max": 500,
+                 "armor_class": 10, "dexterity": 10, "resistances": [], "vulnerabilities": []}
+        session = sessions.start_session(-992, [player, enemy], {user_id: "party", enemy_id: "enemy"})
+        session.turn_order = [user_id, enemy_id]
+        session.current_turn_index = 0
+        sink = []
+        await bot._do_summon_remnant(
+            FakeUpdate(user_id, "summon The Wrathflame Unbound on the goblin", sink, chat_id=-992),
+            "summon The Wrathflame Unbound on the goblin",
+        )
+        combined = " ".join(sink)
+        self.assertIn("Wrathflame", combined)
+        self.assertIn("fire damage", combined)
+        goblin = next(p for p in session.participants if p["telegram_user_id"] == enemy_id)
+        self.assertLess(goblin["hp_current"], 500)
+        self.assertEqual(session.current_turn_index, 1)  # turn advanced to the enemy
+        self.assertGreater(db.get_character(user_id, -992)["summoning_mastery_pct"], 1.0)
+        sessions.end_session(-992)
+
+    async def test_summon_remnant_respects_the_per_battle_cap_before_mastery(self):
+        import sessions
+        sessions.end_session(-991)
+        user_id = 800208
+        make_basic_character(user_id, "CappedSummoner", current_location="crossroads_tavern", chat_id=-991, hp_max=50)
+        db.update_character(
+            user_id, -991, is_designated_summoner=1, bound_remnants=["the_wrathflame_unbound"],
+            summoning_mastery_pct=1.0,  # base tier -- exactly 1 free use per battle
+        )
+        enemy_id = -3
+        player = db.get_character(user_id, -991)
+        player["telegram_user_id"] = user_id
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "hp_current": 5000, "hp_max": 5000,
+                 "armor_class": 10, "dexterity": 10}
+        session = sessions.start_session(-991, [player, enemy], {user_id: "party", enemy_id: "enemy"})
+        session.turn_order = [user_id, enemy_id]
+        session.current_turn_index = 0
+
+        sink1 = []
+        await bot._do_summon_remnant(
+            FakeUpdate(user_id, "summon The Wrathflame Unbound on the goblin", sink1, chat_id=-991),
+            "summon The Wrathflame Unbound on the goblin",
+        )
+        self.assertTrue(any("calls forth" in s for s in sink1))
+
+        # Enemy's turn resolves automatically (AI), so it's the player's turn again by now.
+        session.current_turn_index = 0
+
+        sink2 = []
+        await bot._do_summon_remnant(
+            FakeUpdate(user_id, "summon The Wrathflame Unbound on the goblin", sink2, chat_id=-991),
+            "summon The Wrathflame Unbound on the goblin",
+        )
+        self.assertTrue(any("already called a Remnant" in s for s in sink2))
+        sessions.end_session(-991)
+
+    async def test_summon_remnant_at_mastery_ignores_cap_but_spends_a_spell_slot(self):
+        import sessions
+        sessions.end_session(-990)
+        user_id = 800209
+        make_basic_character(user_id, "MasterSummoner", current_location="crossroads_tavern", chat_id=-990, hp_max=50)
+        db.update_character(
+            user_id, -990, is_designated_summoner=1, bound_remnants=["the_wrathflame_unbound"],
+            summoning_mastery_pct=100.0, spell_slots_current=2, spell_slots_max=2,
+        )
+        enemy_id = -4
+        player = db.get_character(user_id, -990)
+        player["telegram_user_id"] = user_id
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "hp_current": 5000, "hp_max": 5000,
+                 "armor_class": 10, "dexterity": 10}
+        session = sessions.start_session(-990, [player, enemy], {user_id: "party", enemy_id: "enemy"})
+        session.turn_order = [user_id, enemy_id]
+        session.current_turn_index = 0
+
+        for _ in range(2):
+            session.current_turn_index = 0
+            sink = []
+            await bot._do_summon_remnant(
+                FakeUpdate(user_id, "summon The Wrathflame Unbound on the goblin", sink, chat_id=-990),
+                "summon The Wrathflame Unbound on the goblin",
+            )
+            self.assertTrue(any("calls forth" in s for s in sink))
+        self.assertEqual(db.get_character(user_id, -990)["spell_slots_current"], 0)
+
+        session.current_turn_index = 0
+        sink3 = []
+        await bot._do_summon_remnant(
+            FakeUpdate(user_id, "summon The Wrathflame Unbound on the goblin", sink3, chat_id=-990),
+            "summon The Wrathflame Unbound on the goblin",
+        )
+        self.assertTrue(any("none left to spend" in s.lower() for s in sink3))
+        sessions.end_session(-990)
+
+    async def test_summon_remnant_dot_secondary_applies_poisoned_condition(self):
+        import sessions
+        sessions.end_session(-989)
+        user_id = 800210
+        make_basic_character(user_id, "DotSummoner", current_location="crossroads_tavern", chat_id=-989, hp_max=50)
+        db.update_character(user_id, -989, is_designated_summoner=1, bound_remnants=["the_root_that_remembers"])
+        enemy_id = -5
+        player = db.get_character(user_id, -989)
+        player["telegram_user_id"] = user_id
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "hp_current": 500, "hp_max": 500,
+                 "armor_class": 10, "dexterity": 10}
+        session = sessions.start_session(-989, [player, enemy], {user_id: "party", enemy_id: "enemy"})
+        session.turn_order = [user_id, enemy_id]
+        session.current_turn_index = 0
+        sink = []
+        await bot._do_summon_remnant(
+            FakeUpdate(user_id, "summon The Root That Remembers on the goblin", sink, chat_id=-989),
+            "summon The Root That Remembers on the goblin",
+        )
+        goblin = next(p for p in session.participants if p["telegram_user_id"] == enemy_id)
+        self.assertIn("poisoned", goblin.get("conditions", []))
+        sessions.end_session(-989)
+
+    async def test_summon_remnant_self_heal_secondary_heals_the_caster(self):
+        import sessions
+        sessions.end_session(-988)
+        user_id = 800211
+        make_basic_character(user_id, "HealSummoner", current_location="crossroads_tavern", chat_id=-988, hp_max=200)
+        db.update_character(user_id, -988, is_designated_summoner=1, bound_remnants=["the_cairnbound"], hp_current=50)
+        enemy_id = -6
+        player = db.get_character(user_id, -988)
+        player["telegram_user_id"] = user_id
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "hp_current": 500, "hp_max": 500,
+                 "armor_class": 10, "dexterity": 10}
+        session = sessions.start_session(-988, [player, enemy], {user_id: "party", enemy_id: "enemy"})
+        session.turn_order = [user_id, enemy_id]
+        session.current_turn_index = 0
+        sink = []
+        await bot._do_summon_remnant(
+            FakeUpdate(user_id, "summon The Cairnbound on the goblin", sink, chat_id=-988),
+            "summon The Cairnbound on the goblin",
+        )
+        caster = next(p for p in session.participants if p["telegram_user_id"] == user_id)
+        self.assertGreater(caster["hp_current"], 50)
+        sessions.end_session(-988)
+
+    def test_summon_remnant_intent_classified_correctly(self):
+        from ai.intent_parser import _keyword_fallback
+        parsed = _keyword_fallback("summon The Wrathflame Unbound on the goblin", known_npc_names=[])
+        self.assertEqual(parsed["action"], "summon_remnant")
+
+    def test_assign_summoner_intent_classified_correctly(self):
+        from ai.intent_parser import _keyword_fallback
+        parsed = _keyword_fallback("assign Sarah as summoner", known_npc_names=[])
+        self.assertEqual(parsed["action"], "assign_summoner")
+
     async def test_guild_curriculum_step_not_credited_before_real_cooldown_elapses(self):
         """
         Real "must grind it out" pacing gate (per Coffee): satisfying a
