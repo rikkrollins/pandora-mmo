@@ -12565,6 +12565,118 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(gc.is_curriculum_complete("adventurers_guild", char["guild_curriculum_step"]))
             self.assertTrue(any("full training curriculum" in s for s in sink))
 
+    # -- Synergy Phase 5a (2026-08-13): secondary-guild curriculum's
+    #    topic-driven steps (solve_puzzle/dice_challenge/alignment_choice)
+    #    were still hardcoded to the PRIMARY guild only -----------------
+    async def test_secondary_guild_member_is_not_rejected_from_the_topic(self):
+        user_id = 700301
+        make_basic_character(user_id, "SecondaryTopicTester", char_class="Fighter")
+        db.update_character(user_id, -999, guild="forge_guild", secondary_guilds=["adventurers_guild"])
+        sink = []
+        await bot.guild_topic_handler(
+            FakeUpdate(user_id, "hello", sink, thread_id=config.GUILD_TOPIC_IDS["adventurers_guild"]),
+            DummyContext(), "adventurers_guild",
+        )
+        self.assertFalse(any("members only" in s for s in sink), sink)
+
+    async def test_a_true_non_member_is_still_rejected_from_the_topic(self):
+        user_id = 700302
+        make_basic_character(user_id, "TrueOutsiderTester", char_class="Fighter")
+        db.update_character(user_id, -999, guild="forge_guild")
+        sink = []
+        await bot.guild_topic_handler(
+            FakeUpdate(user_id, "hello", sink, thread_id=config.GUILD_TOPIC_IDS["adventurers_guild"]),
+            DummyContext(), "adventurers_guild",
+        )
+        self.assertTrue(any("members only" in s for s in sink), sink)
+
+    async def test_secondary_guild_dice_challenge_and_alignment_choice_credit_correctly(self):
+        """
+        Same bug class as Phase 1's combat-bonus fixes: guild_topic_
+        handler/_complete_guild_curriculum_step/guild_curriculum_callback
+        all read/wrote character["guild_curriculum_step"] (primary only)
+        regardless of which guild's topic the message was actually in --
+        a genuine SECONDARY ("doubled up") Adventurers' Guild member's
+        dice_challenge and alignment_choice steps could never be credited,
+        even though db.advance_guild_curriculum_step and the automatic-
+        trigger checkpoints (_check_guild_curriculum_progress) already
+        supported secondary guilds correctly.
+        """
+        from unittest.mock import patch
+        import guild_curriculum as gc
+        user_id = 700303
+        make_basic_character(user_id, "SecondaryDiceTester", char_class="Fighter")
+        db.update_character(
+            user_id, -999, guild="forge_guild", level=10,
+            secondary_guilds=["adventurers_guild"], secondary_guild_curriculum_steps={"adventurers_guild": 2},
+        )
+        with patch.object(gc, "GUILD_CURRICULUM_STEP_COOLDOWN_HOURS", 0):
+            sink = []
+            with patch("bot.roll", return_value=[6, 6]):
+                await bot.guild_topic_handler(
+                    FakeUpdate(user_id, "try my luck", sink, thread_id=config.GUILD_TOPIC_IDS["adventurers_guild"]),
+                    DummyContext(), "adventurers_guild",
+                )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["secondary_guild_curriculum_steps"]["adventurers_guild"], 3)
+            self.assertEqual(char["guild_curriculum_step"], 0, "the PRIMARY guild's own curriculum must stay untouched")
+            self.assertTrue(any("Quiet Wrinkle" in s for s in sink), sink)
+
+            law_chaos_before = char["alignment_law_chaos"]
+            good_evil_before = char["alignment_good_evil"]
+            sink = []
+            await bot.guild_curriculum_callback(
+                FakeCallbackUpdate(user_id, "gcurr|adventurers_guild|3|turn_it_in", sink), DummyContext(),
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["secondary_guild_curriculum_steps"]["adventurers_guild"], 4)
+            self.assertEqual(char["alignment_law_chaos"], law_chaos_before + 5)
+            self.assertEqual(char["alignment_good_evil"], good_evil_before + 5)
+
+    async def test_secondary_guild_solve_puzzle_step_credits_correctly(self):
+        user_id = 700304
+        make_basic_character(user_id, "SecondaryRiddleTester", char_class="Fighter")
+        db.update_character(
+            user_id, -999, guild="forge_guild", level=10,
+            secondary_guilds=["arcane_circle"], secondary_guild_curriculum_steps={"arcane_circle": 1},
+        )
+        sink = []
+        await bot.guild_topic_handler(
+            FakeUpdate(user_id, "a map", sink, thread_id=config.GUILD_TOPIC_IDS["arcane_circle"]),
+            DummyContext(), "arcane_circle",
+        )
+        char = db.get_character(user_id, -999)
+        self.assertEqual(char["secondary_guild_curriculum_steps"]["arcane_circle"], 2)
+        self.assertTrue(any("Reagents" in s for s in sink), sink)
+
+    async def test_my_curriculum_status_check_works_for_a_secondary_guild(self):
+        user_id = 700305
+        make_basic_character(user_id, "SecondaryStatusTester", char_class="Fighter")
+        db.update_character(
+            user_id, -999, guild="forge_guild", level=10,
+            secondary_guilds=["adventurers_guild"], secondary_guild_curriculum_steps={"adventurers_guild": 2},
+        )
+        sink = []
+        await bot.guild_topic_handler(
+            FakeUpdate(user_id, "my curriculum", sink, thread_id=config.GUILD_TOPIC_IDS["adventurers_guild"]),
+            DummyContext(), "adventurers_guild",
+        )
+        self.assertTrue(any("Reading the Odds" in s for s in sink), sink)
+
+    async def test_secondary_arcane_circle_member_can_learn_a_guild_spell(self):
+        """_do_learn_guild_spell had the same primary-only bug, reachable only from guild_topic_handler."""
+        user_id = 700306
+        make_basic_character(user_id, "SecondarySpellTester", char_class="Wizard")
+        db.update_character(
+            user_id, -999, guild="forge_guild", level=10, secondary_guilds=["arcane_circle"],
+        )
+        sink = []
+        await bot.guild_topic_handler(
+            FakeUpdate(user_id, "teach me a secret", sink, thread_id=config.GUILD_TOPIC_IDS["arcane_circle"]),
+            DummyContext(), "arcane_circle",
+        )
+        self.assertFalse(any("Only Arcane Circle members" in s for s in sink), sink)
+
     def test_permanent_guild_stat_growth_on_level_up(self):
         """
         Real live feature (2026-08-13, per Coffee: "you add a + to stat

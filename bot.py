@@ -15874,7 +15874,8 @@ async def _check_guild_curriculum_progress(update_like, telegram_user_id: int, c
         return
 
 
-async def _do_guild_curriculum_dice_challenge(update: Update, step: dict) -> None:
+async def _do_guild_curriculum_dice_challenge(update: Update, step: dict, guild_id: str | None = None) -> None:
+    """`guild_id` defaults to the primary guild; pass a secondary ("doubled up") guild id to credit that one instead."""
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     dice_roll = roll(2, 6)
     total = sum(dice_roll)
@@ -15884,21 +15885,21 @@ async def _do_guild_curriculum_dice_challenge(update: Update, step: dict) -> Non
     if not won:
         await _safe_send(update, f"{roll_line}. No credit this time — try again whenever you're ready.")
         return
-    if not _guild_curriculum_step_ready(character):
-        remaining = _guild_curriculum_time_remaining_note(character)
+    if not _guild_curriculum_step_ready(character, guild_id):
+        remaining = _guild_curriculum_time_remaining_note(character, guild_id)
         await _safe_send(update, f"{roll_line} — a real win! But the guild won't credit it for another {remaining}.")
         return
     await _safe_send(update, f"{roll_line} — a real win!")
-    await _complete_guild_curriculum_step(update, update.effective_user.id, update.effective_chat.id, step)
+    await _complete_guild_curriculum_step(update, update.effective_user.id, update.effective_chat.id, step, guild_id=guild_id)
 
 
-async def _do_check_guild_curriculum(update: Update) -> None:
+async def _do_check_guild_curriculum(update: Update, guild_id: str) -> None:
+    """`guild_id` is the guild whose topic this was asked in -- may be the primary or a secondary ("doubled up") guild."""
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     reply_thread_id = update.effective_message.message_thread_id
-    if character is None or not character.get("guild"):
+    if character is None or guild_id not in held_guild_ids(character):
         return
-    guild_id = character["guild"]
-    step_index = character["guild_curriculum_step"]
+    step_index = _guild_curriculum_step_index(character, guild_id)
     step = guild_curriculum_module.get_step(guild_id, step_index)
     if step is None:
         await update.effective_chat.send_message(
@@ -15920,8 +15921,8 @@ async def _do_check_guild_curriculum(update: Update) -> None:
         )
         return
     text = _format_guild_curriculum_step_announcement(step)
-    if not _guild_curriculum_step_ready(character):
-        remaining = _guild_curriculum_time_remaining_note(character)
+    if not _guild_curriculum_step_ready(character, guild_id):
+        remaining = _guild_curriculum_time_remaining_note(character, guild_id)
         text += f"\n⏳ Not creditable for another {remaining}, even once done."
     await _safe_send(update, text, thread_id=reply_thread_id)
 
@@ -15942,7 +15943,11 @@ async def guild_curriculum_callback(update: Update, context: ContextTypes.DEFAUL
     await _safe_answer(query)
 
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
-    if character is None or character.get("guild") != guild_id or character["guild_curriculum_step"] != step_index:
+    if (
+        character is None
+        or guild_id not in held_guild_ids(character)
+        or _guild_curriculum_step_index(character, guild_id) != step_index
+    ):
         await _safe_send(update, "That decision isn't yours to make anymore.")
         return
     step = guild_curriculum_module.get_step(guild_id, step_index)
@@ -15951,8 +15956,8 @@ async def guild_curriculum_callback(update: Update, context: ContextTypes.DEFAUL
     choice = step["trigger"]["choices"].get(choice_id)
     if choice is None:
         return
-    if not _guild_curriculum_step_ready(character):
-        remaining = _guild_curriculum_time_remaining_note(character)
+    if not _guild_curriculum_step_ready(character, guild_id):
+        remaining = _guild_curriculum_time_remaining_note(character, guild_id)
         await _safe_send(update, f"Not yet — the guild won't recognize this decision for another {remaining}.")
         return
 
@@ -15966,7 +15971,8 @@ async def guild_curriculum_callback(update: Update, context: ContextTypes.DEFAUL
         "reward_mastery_profession": choice.get("reward_mastery_profession"), "reward_mastery_pct": choice.get("reward_mastery_pct"),
     }
     await _complete_guild_curriculum_step(
-        update, update.effective_user.id, update.effective_chat.id, resolved_step, extra_note=f"\n{choice['outcome']}",
+        update, update.effective_user.id, update.effective_chat.id, resolved_step,
+        extra_note=f"\n{choice['outcome']}", guild_id=guild_id,
     )
 
 
@@ -15983,7 +15989,7 @@ async def guild_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     """
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     guild = GUILDS.get(guild_id)
-    if character is None or character.get("guild") != guild_id:
+    if character is None or guild_id not in held_guild_ids(character):
         await update.effective_chat.send_message(
             f"This topic is for real {guild['name']} members only — join in Adventure first "
             f"(\"join {guild['name']}\") if you're eligible.",
@@ -15996,24 +16002,27 @@ async def guild_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await _do_check_guild_quest(update, guild_id)
         return
     if any(w in lowered for w in GUILD_CURRICULUM_STATUS_KEYWORDS):
-        await _do_check_guild_curriculum(update)
+        await _do_check_guild_curriculum(update, guild_id)
         return
     # Riddle answers and "try my luck" only ever apply to the character's
     # CURRENT curriculum step, checked here (not as a generic keyword
     # dispatch below) so a riddle's own free-text answer never has to
     # collide with anything else this topic already listens for.
-    current_step = guild_curriculum_module.get_step(guild_id, character["guild_curriculum_step"])
+    # _guild_curriculum_step_index (not the bare character["guild_
+    # curriculum_step"] field) so this also works for a SECONDARY
+    # ("doubled up") guild's own curriculum, not just the primary.
+    current_step = guild_curriculum_module.get_step(guild_id, _guild_curriculum_step_index(character, guild_id))
     if current_step is not None and character["level"] >= current_step["min_level"]:
         trigger = current_step["trigger"]
         if trigger["type"] == "solve_puzzle" and _guild_curriculum_riddle_answer_matches(update.message.text, trigger["accepted_answers"]):
-            if _guild_curriculum_step_ready(character):
-                await _complete_guild_curriculum_step(update, update.effective_user.id, update.effective_chat.id, current_step)
+            if _guild_curriculum_step_ready(character, guild_id):
+                await _complete_guild_curriculum_step(update, update.effective_user.id, update.effective_chat.id, current_step, guild_id=guild_id)
             else:
-                remaining = _guild_curriculum_time_remaining_note(character)
+                remaining = _guild_curriculum_time_remaining_note(character, guild_id)
                 await _safe_send(update, f"That's the right answer — but the guild won't credit it for another {remaining}.")
             return
         if trigger["type"] == "dice_challenge" and any(w in lowered for w in GUILD_CURRICULUM_DICE_KEYWORDS):
-            await _do_guild_curriculum_dice_challenge(update, current_step)
+            await _do_guild_curriculum_dice_challenge(update, current_step, guild_id)
             return
     if guild_id == "arcane_circle" and any(w in lowered for w in ["learn", "secret", "teach"]):
         await _do_learn_guild_spell(update, update.message.text)
@@ -16091,7 +16100,7 @@ async def _do_learn_guild_spell(update: Update, text: str) -> None:
             "You don't have a character yet!", message_thread_id=reply_thread_id
         )
         return
-    if character.get("guild") != "arcane_circle":
+    if "arcane_circle" not in held_guild_ids(character):
         await update.effective_chat.send_message(
             "Only Arcane Circle members can learn the Circle's secret spells — join first.",
             message_thread_id=reply_thread_id,

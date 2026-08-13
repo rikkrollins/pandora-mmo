@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.182] — Fix: secondary-guild curriculum topic-driven steps (Synergy Phase 5a)
+
+A known, deliberately-deferred gap from the Guild Promotions system
+(v1.27.168): guild curriculum progress was generalized for SECONDARY
+("doubled up" Promotion) guilds for the automatic-trigger step types
+(reach_location/defeat_monster/gather_material/npc_dialogue), but the
+TOPIC-DRIVEN types (solve_puzzle, dice_challenge, alignment_choice)
+still hardcoded the primary guild only — `guild_topic_handler`'s own
+membership gate, `_do_check_guild_curriculum`, `_do_guild_curriculum_
+dice_challenge`, `guild_curriculum_callback`, and `_do_learn_guild_
+spell` all read/wrote `character["guild"]`/`character["guild_
+curriculum_step"]` directly instead of the already-generalized `held_
+guild_ids`/`_guild_curriculum_step_index` helpers `db.advance_guild_
+curriculum_step` and `_check_guild_curriculum_progress` already used.
+A genuine secondary-guild member's curriculum would silently stall
+forever the moment it reached one of these step types — even though
+they could correctly access the guild's own topic in the first place.
+Fixed by routing all five functions through the real guild_id actually
+in play, matching the pattern from Phase 1's combat-bonus fixes.
+
 ## [1.27.181] — Add: Echo Trials react to the challenger's own build (Synergy Phase 4)
 
 Fourth and final step of the class/subclass/guild "break the game"
