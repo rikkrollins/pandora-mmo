@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.189] — Add: boss summons minions (Goblin Boss)
+
+Real live feedback (Coffee: "even bosses, you can have 1 boss, that
+summons minions ( not sure if u built that) be creative"). Confirmed
+it didn't exist — every real "summon" mechanic in this game was
+player-side only (a cast spell, a summoned remnant). A boss's new real
+`summons` flag (campaign.json, e.g. `{"monster_key": "goblin",
+"count": 2}` on `goblin_boss`) fires ONCE per fight, at the same
+wounded threshold Boss Enrage already uses — "badly wounded, calls for
+backup" is the same real trope both mechanics share, so no second
+tunable constant was needed. New `bot._maybe_summon_minions` reuses
+the EXACT append-only injection shape `spells.py`'s player-cast
+"summon" spell effect already proved safe in production
+(`session.participants.append` + `session.turn_order.append`, never a
+mid-sequence insert that could desync `current_turn_index`), wired
+into both the human attack path (`_do_attack`) and the AI-companion
+attack path (`_resolve_ai_turns_inner`) so it fires regardless of who
+lands the wounding blow. Scoped to the ordinary weapon-attack path for
+now (not spell damage or AoE) — the same honest-slice boundary every
+other Phase 6/7 boss mechanic this session shipped with.
+
 ## [1.27.188] — Add: mixed encounter composition for wandering fights
 
 Real live feedback (Coffee: "do all the battles have the same 4

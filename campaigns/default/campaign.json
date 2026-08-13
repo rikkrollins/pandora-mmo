@@ -4130,7 +4130,11 @@
           "item_id": "shortsword",
           "weight": 10
         }
-      ]
+      ],
+      "summons": {
+        "monster_key": "goblin",
+        "count": 2
+      }
     },
     "wolf": {
       "name": "Wolf",

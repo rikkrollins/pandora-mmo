@@ -5456,6 +5456,7 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
                 await _announce_reaction(update, target, result)
             if result.get("bloodied_triggered"):
                 await _safe_send(update, f"🩸 **{target['name']} is bloodied!**")
+            await _maybe_summon_minions(update, session, target)
 
             applied_condition = None
             resisted_condition = None
@@ -6089,6 +6090,10 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 # signature mechanic -- counters_sneak_attack, read by
                 # rules.combat.resolve_attack's own sneak_attack_die logic.
                 "counters_sneak_attack": slot_template.get("counters_sneak_attack", False),
+                # Boss Summons Minions (2026-08-13, per Coffee: "even
+                # bosses, you can have 1 boss, that summons minions...
+                # be creative") -- read by bot._maybe_summon_minions.
+                "summons": slot_template.get("summons"),
                 # Real bug found live (2026-07-25, while building the
                 # rebirth dungeons): campaign.json monster templates
                 # have always supported real resistances/vulnerabilities/
@@ -6336,6 +6341,7 @@ def _build_echo_enemy(monster_key: str, tier: int, index: int, total: int, chall
         "adapts_to_damage": template.get("adapts_to_damage", False),
         "extra_attack_when_enraged": template.get("extra_attack_when_enraged", False),
         "counters_sneak_attack": template.get("counters_sneak_attack", False),
+        "summons": template.get("summons"),
         "resistances": resistances,
         "is_echo_trial": True,
         # Real tier-scaled damage (2026-07-26 monster/area rebalance) --
@@ -6638,6 +6644,72 @@ async def _held_session(chat_id: int, telegram_user_id: int):
         yield sessions.get_session_by_id(session.session_id)
 
 
+def _build_summoned_minion(monster_key: str, template: dict, index: int, chat_id: int, boss_name: str, round_number: int) -> dict:
+    """
+    Real, minimal combat participant for a boss-summoned minion. Synthetic
+    id in the -6_000_000 range -- distinct from every other range already
+    in use in this same session (_do_start_combat's real monsters: -2M,
+    _npc_combatant_from_stats's hostile NPCs: -3M, Echo Trials: -3M-offset,
+    a player's own cast "summon" spell: -4M).
+    """
+    synthetic_id = -6_000_000 - (abs(hash((chat_id, boss_name, round_number, index))) % 100_000) - index
+    return {
+        "telegram_user_id": synthetic_id, "name": f"{template['name']} (summoned)",
+        "dexterity": template["dexterity"], "strength": template["strength"],
+        "armor_class": template["armor_class"], "hp_current": template["hp_max"],
+        "hp_max": template["hp_max"], "proficiency_bonus": template["proficiency_bonus"],
+        "is_ai": 1, "xp_reward": template.get("xp_reward", 0),
+        "monster_key": monster_key,
+        "damage_dice": template.get("damage_dice"), "damage_bonus": template.get("damage_bonus", 0),
+        "damage_type": template.get("damage_type", "physical"),
+        "on_hit_condition": template.get("on_hit_condition"),
+        "resistances": template.get("resistances", []),
+        "vulnerabilities": template.get("vulnerabilities", []),
+        "immunities": template.get("immunities", []),
+    }
+
+
+async def _maybe_summon_minions(update: Update, session: sessions.Session, boss: dict) -> None:
+    """
+    Boss Summons Minions (2026-08-13, per Coffee: "even bosses, you can
+    have 1 boss, that summons minions... be creative"). A boss's real
+    "summons" flag (campaign.json, e.g. {"monster_key": "goblin",
+    "count": 2} on goblin_boss) fires ONCE per fight, at the same
+    wounded threshold Boss Enrage already uses (ENRAGE_HP_THRESHOLD) --
+    "badly wounded, calls for backup" is the same real trope both
+    mechanics share, and reusing the threshold avoids a second tunable
+    constant for the same underlying idea. Reuses the EXACT append-only
+    injection shape spells.py's player-cast "summon" spell effect
+    already proved safe in production (session.participants.append +
+    session.turn_order.append, never a mid-sequence insert that could
+    desync current_turn_index) -- called from wherever a boss might
+    actually take damage down to its own real HP threshold (a human's
+    _do_attack, an AI companion's turn in _resolve_ai_turns_inner).
+    """
+    spec = boss.get("summons")
+    if not spec or boss.get("_summoned_minions") or boss.get("hp_current", 0) <= 0:
+        return
+    if boss["hp_current"] > boss.get("hp_max", boss["hp_current"]) * ENRAGE_HP_THRESHOLD:
+        return
+    boss["_summoned_minions"] = True
+    template = cl.get_monster_template(CAMPAIGN, spec["monster_key"])
+    if template is None:
+        return
+    chat_id = update.effective_chat.id
+    minions = []
+    for i in range(spec.get("count", 1)):
+        minion = _build_summoned_minion(spec["monster_key"], template, i, chat_id, boss["name"], session.round_number)
+        minion["initiative"] = roll_d20() + ability_modifier(template["dexterity"])
+        session.participants.append(minion)
+        session.turn_order.append(minion["telegram_user_id"])
+        session.sides[minion["telegram_user_id"]] = "enemy"
+        minions.append(minion)
+    names = ", ".join(m["name"] for m in minions)
+    await _safe_send(
+        update, f"📯 **{boss['name']}**, badly wounded, calls for reinforcements — **{names}** answer the call!",
+    )
+
+
 async def _do_attack(update: Update, action_text: str, forced_roll: int | None = None) -> None:
     chat_id = update.effective_chat.id
 
@@ -6890,6 +6962,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                 )
             if result.get("bloodied_triggered"):
                 await _safe_send(update, f"🩸 **{target['name']} is bloodied!**")
+            await _maybe_summon_minions(update, session, target)
             if mastery_strike_dmg:
                 await _safe_send(update, f"🗡️ **Weapon mastery!** {attacker['name']}'s practice pays off — **+{mastery_strike_dmg} bonus damage!**")
             if armor_mastery_reduction:

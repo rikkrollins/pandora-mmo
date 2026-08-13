@@ -8070,6 +8070,103 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         template = bot.cl.get_monster_template(bot.CAMPAIGN, "the_verge_warden")
         self.assertTrue(template.get("counters_sneak_attack"))
 
+    # -- Boss Summons Minions (2026-08-13, per Coffee: "even bosses, you
+    #    can have 1 boss, that summons minions... be creative") --------
+    async def test_maybe_summon_minions_triggers_once_below_the_threshold(self):
+        import sessions
+        sessions.end_session(-997)
+        boss = {
+            "telegram_user_id": -700800, "name": "Goblin Boss", "dexterity": 10, "hp_current": 20, "hp_max": 93,
+            "summons": {"monster_key": "goblin", "count": 2}, "monster_key": "goblin_boss",
+        }
+        human = {"telegram_user_id": 900800, "name": "Summoner", "dexterity": 10, "hp_current": 100, "hp_max": 100}
+        session = sessions.start_session(-997, [boss, human], {-700800: "enemy", 900800: "party"})
+        sink = []
+        update = FakeUpdate(900800, "irrelevant", sink, chat_id=-997)
+        await bot._maybe_summon_minions(update, session, boss)
+        goblin_minions = [p for p in session.participants if p.get("monster_key") == "goblin" and p is not boss]
+        self.assertEqual(len(goblin_minions), 2)
+        for m in goblin_minions:
+            self.assertIn(m["telegram_user_id"], session.turn_order)
+            self.assertEqual(session.sides[m["telegram_user_id"]], "enemy")
+        self.assertTrue(any("reinforcements" in line for line in sink), sink)
+        sessions.end_session(-997)
+
+    async def test_maybe_summon_minions_does_not_trigger_above_the_threshold(self):
+        import sessions
+        sessions.end_session(-997)
+        boss = {
+            "telegram_user_id": -700801, "name": "Goblin Boss", "dexterity": 10, "hp_current": 80, "hp_max": 93,
+            "summons": {"monster_key": "goblin", "count": 2}, "monster_key": "goblin_boss",
+        }
+        human = {"telegram_user_id": 900801, "name": "Summoner2", "dexterity": 10, "hp_current": 100, "hp_max": 100}
+        session = sessions.start_session(-997, [boss, human], {-700801: "enemy", 900801: "party"})
+        update = FakeUpdate(900801, "irrelevant", [], chat_id=-997)
+        await bot._maybe_summon_minions(update, session, boss)
+        self.assertEqual(len(session.participants), 2, "no minions should have been added yet -- still above threshold")
+        sessions.end_session(-997)
+
+    async def test_maybe_summon_minions_only_fires_once_per_fight(self):
+        import sessions
+        sessions.end_session(-997)
+        boss = {
+            "telegram_user_id": -700802, "name": "Goblin Boss", "dexterity": 10, "hp_current": 20, "hp_max": 93,
+            "summons": {"monster_key": "goblin", "count": 2}, "monster_key": "goblin_boss",
+        }
+        human = {"telegram_user_id": 900802, "name": "Summoner3", "dexterity": 10, "hp_current": 100, "hp_max": 100}
+        session = sessions.start_session(-997, [boss, human], {-700802: "enemy", 900802: "party"})
+        update = FakeUpdate(900802, "irrelevant", [], chat_id=-997)
+        await bot._maybe_summon_minions(update, session, boss)
+        await bot._maybe_summon_minions(update, session, boss)  # still wounded -- must NOT summon a second wave
+        goblin_minions = [p for p in session.participants if p.get("monster_key") == "goblin" and p is not boss]
+        self.assertEqual(len(goblin_minions), 2)
+        sessions.end_session(-997)
+
+    async def test_maybe_summon_minions_is_a_noop_without_the_flag(self):
+        import sessions
+        sessions.end_session(-997)
+        boss = {"telegram_user_id": -700803, "name": "Plain Goblin", "dexterity": 10, "hp_current": 1, "hp_max": 10}
+        human = {"telegram_user_id": 900803, "name": "Summoner4", "dexterity": 10, "hp_current": 100, "hp_max": 100}
+        session = sessions.start_session(-997, [boss, human], {-700803: "enemy", 900803: "party"})
+        update = FakeUpdate(900803, "irrelevant", [], chat_id=-997)
+        await bot._maybe_summon_minions(update, session, boss)
+        self.assertEqual(len(session.participants), 2)
+        sessions.end_session(-997)
+
+    async def test_a_human_attack_that_drops_a_boss_below_threshold_triggers_real_summons(self):
+        """End-to-end through the real bot._do_attack path, not just the isolated helper above."""
+        import random
+        from unittest.mock import patch
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900804
+        make_basic_character(
+            user_id, "RealAttacker", char_class="Fighter", current_location="crossroads_tavern",
+            hp_max=100, ability_scores={"strength": 20, "dexterity": 10, "constitution": 14,
+                                         "intelligence": 10, "wisdom": 10, "charisma": 10},
+        )
+        db.update_character(user_id, -999, hp_current=100, level=10)
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        boss = {
+            "telegram_user_id": -700805, "name": "Goblin Boss", "dexterity": 8, "strength": 12,
+            "armor_class": 1, "hp_current": 25, "hp_max": 93, "proficiency_bonus": 2,
+            "is_ai": 1, "monster_key": "goblin_boss", "is_boss": True,
+            "summons": {"monster_key": "goblin", "count": 2},
+        }
+        session = sessions.start_session(-999, [player, boss], {user_id: "party", -700805: "enemy"})
+        session.turn_order = [user_id, -700805]
+        session.current_turn_index = 0
+        random.seed(2)
+        sink = []
+        with patch("rules.dice.random.randint", return_value=4), \
+             patch("bot.narrate_action", return_value="The blow lands."):
+            await bot._do_attack(FakeUpdate(user_id, "I attack the goblin boss", sink), "I attack the goblin boss", forced_roll=20)
+        goblin_minions = [p for p in session.participants if p.get("monster_key") == "goblin" and p["telegram_user_id"] != -700805]
+        self.assertEqual(len(goblin_minions), 2, sink)
+        self.assertTrue(any("reinforcements" in line for line in sink), sink)
+        sessions.end_session(-999)
+
     # -- Board quest completion bugs (2026-07-16, task #93) -------------
     def test_completed_board_quest_frees_a_slot_for_a_fresh_one(self):
         import board_quests as board_quests_module
