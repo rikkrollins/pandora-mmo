@@ -15748,7 +15748,7 @@ async def _do_check_guild_quest(update: Update, guild_id: str) -> None:
 
 
 GUILD_CURRICULUM_DICE_KEYWORDS = ["try my luck", "attempt the trial", "roll for it", "take the trial"]
-GUILD_CURRICULUM_STATUS_KEYWORDS = ["my curriculum", "guild training", "next lesson", "curriculum"]
+GUILD_CURRICULUM_STATUS_KEYWORDS = ["my curriculum", "guild training", "next lesson", "curriculum", "training"]
 
 
 def _guild_curriculum_step_index(character: dict, guild_id: str) -> int:

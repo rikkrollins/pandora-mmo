@@ -2,6 +2,15 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.190] — Fix: bare "training" now checks guild curriculum status
+
+Real live gap (Coffee: "how do I continue training?" got no real
+answer). `GUILD_CURRICULUM_STATUS_KEYWORDS` only matched the exact
+phrase "guild training", "my curriculum", "next lesson", or
+"curriculum" — a natural "how do I continue training?" contains none
+of those. Bare "training" is now its own real trigger inside a real
+guild's own topic.
+
 ## [1.27.189] — Add: boss summons minions (Goblin Boss)
 
 Real live feedback (Coffee: "even bosses, you can have 1 boss, that

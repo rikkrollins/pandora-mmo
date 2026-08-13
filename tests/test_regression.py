@@ -13084,6 +13084,23 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(any("Reading the Odds" in s for s in sink), sink)
 
+    async def test_plain_training_phrasing_checks_curriculum_status(self):
+        """
+        Real live gap (2026-08-13, Coffee): "how do I continue training?"
+        contains neither "curriculum" nor the exact phrase "guild
+        training", so it fell through to no real handling at all. Bare
+        "training" is now its own real trigger.
+        """
+        user_id = 700310
+        make_basic_character(user_id, "TrainingPhraseTester", char_class="Fighter")
+        db.update_character(user_id, -999, guild="adventurers_guild", level=1)
+        sink = []
+        await bot.guild_topic_handler(
+            FakeUpdate(user_id, "how do I continue training?", sink, thread_id=config.GUILD_TOPIC_IDS["adventurers_guild"]),
+            DummyContext(), "adventurers_guild",
+        )
+        self.assertTrue(any("Lay of the Land" in s for s in sink), sink)
+
     async def test_secondary_arcane_circle_member_can_learn_a_guild_spell(self):
         """_do_learn_guild_spell had the same primary-only bug, reachable only from guild_topic_handler."""
         user_id = 700306
