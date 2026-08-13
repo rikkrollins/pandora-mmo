@@ -8850,6 +8850,28 @@ def _npc_quest_facts(character: dict, npc_id: str) -> str | None:
     )
 
 
+def _npc_identity_facts(character: dict | None) -> str | None:
+    """
+    Synergy Phase 8 (2026-08-13, per Coffee: NPCs should react to WHO
+    they're actually talking to): real, grounded class/subclass/guild
+    facts about the player, handed to ai.npc_agent.talk_to_npc's real
+    `identity_facts` block -- same "compute the fact here, hand it to
+    narration as ground truth" convention _npc_quest_facts already
+    uses just above, never a rule dictating how the NPC should react,
+    just what's true. held_guild_ids (not character["guild"] alone) so
+    a secondary/Promotion guild is real to an NPC too.
+    """
+    if character is None:
+        return None
+    fact = f"{character['name']} is a level {character.get('level', 1)} {character.get('char_class', 'adventurer')}"
+    if character.get("subclass"):
+        fact += f" ({character['subclass']})"
+    guild_names = [GUILDS[gid]["name"] for gid in held_guild_ids(character) if gid in GUILDS]
+    if guild_names:
+        fact += f", a member of the {', '.join(guild_names)}"
+    return f"Who you're talking to: {fact}."
+
+
 def _current_story_arc(character: dict) -> tuple[str, dict] | None:
     """
     The earliest story arc (in campaign.json's own narrative order --
@@ -8985,7 +9007,8 @@ async def _do_talk_party(update: Update, action_text: str) -> None:
     context_facts = _party_companion_context_facts(character, location)
     relationship = db.get_relationship(update.effective_user.id, update.effective_chat.id, npc_id)
     reply = await asyncio.to_thread(
-        talk_to_npc, npc_id, action_text, character["name"], relationship["memory_events"], context_facts
+        talk_to_npc, npc_id, action_text, character["name"], relationship["memory_events"], context_facts,
+        _npc_identity_facts(character),
     )
     npc_data = CAMPAIGN["npcs"].get(npc_id, {})
     npc_display_name = npc_data.get("name", companion["name"])
@@ -21123,7 +21146,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
             relationship = db.get_relationship(update.effective_user.id, update.effective_chat.id, npc_id)
             quest_facts = _npc_quest_facts(character, npc_id) if character else None
             reply = await asyncio.to_thread(
-                talk_to_npc, npc_id, text, character_name, relationship["memory_events"], quest_facts
+                talk_to_npc, npc_id, text, character_name, relationship["memory_events"], quest_facts,
+                _npc_identity_facts(character),
             )
             npc_data = CAMPAIGN["npcs"].get(npc_id, {})
             npc_display_name = npc_data.get("name", intent["npc_name"])

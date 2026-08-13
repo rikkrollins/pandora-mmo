@@ -13614,6 +13614,85 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                     f"{guild_id}/{step['id']} objective doesn't say where to act: {objective!r}",
                 )
 
+    # -- Synergy Phase 8 (2026-08-13): NPCs react to WHO they're
+    #    actually talking to (class/subclass/guild), not just quest/
+    #    memory facts --------------------------------------------------
+    def test_npc_identity_facts_includes_class_subclass_and_guild(self):
+        character = {
+            "name": "Wren", "level": 12, "char_class": "Rogue", "subclass": "Assassin",
+            "guild": "thieves_guild", "secondary_guilds": [],
+        }
+        fact = bot._npc_identity_facts(character)
+        self.assertIn("Wren is a level 12 Rogue (Assassin)", fact)
+        self.assertIn("Thieves", fact)
+
+    def test_npc_identity_facts_omits_subclass_and_guild_when_absent(self):
+        character = {"name": "Fenwick", "level": 1, "char_class": "Fighter", "guild": None, "secondary_guilds": []}
+        fact = bot._npc_identity_facts(character)
+        self.assertEqual(fact, "Who you're talking to: Fenwick is a level 1 Fighter.")
+
+    def test_npc_identity_facts_includes_a_secondary_promotion_guild(self):
+        """Same bug class as the rest of this synergy pass: a secondary/Promotion guild is still real to an NPC."""
+        character = {
+            "name": "Bram", "level": 20, "char_class": "Cleric", "guild": "forge_guild",
+            "secondary_guilds": ["faith_circle"],
+        }
+        fact = bot._npc_identity_facts(character)
+        self.assertIn("Forge Guild", fact)
+        self.assertIn("Faith Circle", fact)
+
+    def test_npc_identity_facts_none_for_no_character(self):
+        self.assertIsNone(bot._npc_identity_facts(None))
+
+    def test_npc_agent_prompt_includes_the_identity_block(self):
+        import ai.npc_agent as npc_agent_module
+        npc_agent_module.register_npc("phase8_test_npc", "Test NPC", "A test persona.")
+        prompt = npc_agent_module._build_prompt(
+            "phase8_test_npc", "Hello there", "Wren", identity_facts="Who you're talking to: Wren is a level 12 Rogue (Assassin).",
+        )
+        self.assertIn("Who you're talking to: Wren is a level 12 Rogue (Assassin).", prompt)
+
+    def test_npc_agent_prompt_omits_the_identity_block_when_absent(self):
+        import ai.npc_agent as npc_agent_module
+        npc_agent_module.register_npc("phase8_test_npc2", "Test NPC 2", "A test persona.")
+        prompt = npc_agent_module._build_prompt("phase8_test_npc2", "Hello there", "Wren")
+        self.assertNotIn("Who you're talking to:", prompt)
+
+    async def test_talk_npc_real_call_site_passes_real_identity_facts(self):
+        """
+        End-to-end through the real talk_npc dispatch (not just the pure
+        prompt-builder above): confirms the actual Ollama call this game
+        makes is grounded with the real player's class/subclass/guild,
+        not silently omitted.
+        """
+        from unittest.mock import patch
+        bot.setup_default_npcs()
+        user_id = 950940
+        make_basic_character(user_id, "IdentityTester", char_class="Wizard", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, subclass="evocation", guild="arcane_circle", level=5)
+        npc_id = next(iter(bot._NPCS))
+
+        captured = {}
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "A real reply."}
+
+        def fake_post(url, json=None, timeout=None):
+            captured["prompt"] = json["prompt"]
+            return FakeResponse()
+
+        with patch("ai.npc_agent.requests.post", side_effect=fake_post), \
+             patch("bot._find_npc_id_by_name", return_value=npc_id):
+            intent = {"action": "talk_npc", "npc_name": "whoever", "raw_text": "hello"}
+            await bot._dispatch_intent(FakeUpdate(user_id, "hello", []), DummyContext(), intent, "hello")
+
+        self.assertIn("IdentityTester is a level 5 Wizard (evocation)", captured.get("prompt", ""))
+        self.assertIn("Arcane Circle", captured.get("prompt", ""))
+
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
     """

@@ -99,7 +99,8 @@ def _memory_facts_block(memory_facts: list[str] | None, character_name: str) -> 
 
 
 def _build_prompt(npc_id: str, player_message: str, character_name: str = "the player",
-                   memory_facts: list[str] | None = None, quest_facts: str | None = None) -> str:
+                   memory_facts: list[str] | None = None, quest_facts: str | None = None,
+                   identity_facts: str | None = None) -> str:
     npc = _NPCS[npc_id]
     history_lines = []
     for role, text in npc["memory"][-MAX_MEMORY_TURNS:]:
@@ -108,9 +109,17 @@ def _build_prompt(npc_id: str, player_message: str, character_name: str = "the p
     memory_block = _memory_facts_block(memory_facts, character_name)
     shop_block = _shop_grounding_block(npc_id)
     quest_block = f"\n\n{quest_facts}" if quest_facts else ""
+    # Synergy Phase 8 (2026-08-13, per Coffee: NPCs should react to WHO
+    # they're actually talking to, not just what quest/history is on
+    # file) -- real, grounded class/subclass/guild facts, built fresh
+    # per call from the character row (bot.py's _npc_identity_facts),
+    # same "compute the fact, hand it to narration as ground truth"
+    # convention quest_facts/memory_facts already use. Never a rule
+    # dictating HOW the NPC reacts -- just what's true, same as those.
+    identity_block = f"\n\n{identity_facts}" if identity_facts else ""
 
     return (
-        f"{npc['persona']}{shop_block}{quest_block}\n\n"
+        f"{npc['persona']}{shop_block}{quest_block}{identity_block}\n\n"
         f"{memory_block}\n\n"
         f"Conversation so far this session:\n{history}\n\n"
         f"Player: {player_message}\n"
@@ -119,7 +128,8 @@ def _build_prompt(npc_id: str, player_message: str, character_name: str = "the p
 
 
 def talk_to_npc(npc_id: str, player_message: str, character_name: str = "the player",
-                memory_facts: list[str] | None = None, quest_facts: str | None = None) -> str:
+                memory_facts: list[str] | None = None, quest_facts: str | None = None,
+                identity_facts: str | None = None) -> str:
     """
     Send a player message to a registered NPC and return its in-character
     reply. Falls back to a neutral line if the model is unreachable.
@@ -131,12 +141,14 @@ def talk_to_npc(npc_id: str, player_message: str, character_name: str = "the pla
     live 2026-07-11: asking Grimsby about his own quest got a vague
     non-answer, since nothing here ever told the model what quest, if
     any, this NPC is actually connected to, same failure mode already
-    fixed for shop inventory.
+    fixed for shop inventory. `identity_facts` (Synergy Phase 8,
+    2026-08-13) grounds WHO is actually talking -- real class/subclass/
+    guild facts, same "compute then hand to narration" convention.
     """
     if npc_id not in _NPCS:
         raise ValueError(f"Unknown NPC id: {npc_id!r}. Call register_npc() first.")
 
-    prompt = _build_prompt(npc_id, player_message, character_name, memory_facts, quest_facts)
+    prompt = _build_prompt(npc_id, player_message, character_name, memory_facts, quest_facts, identity_facts)
 
     try:
         response = requests.post(

@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.186] — Add: NPCs know your class/subclass/guild (Synergy Phase 8)
+
+NPCs previously never knew anything about who they were actually
+talking to besides a name — no reference to class, subclass, or guild
+anywhere in the AI narration prompt. New `bot._npc_identity_facts(
+character)` builds a real, grounded one-line fact ("Wren is a level 12
+Rogue (Assassin), a member of the Thieves' Guild") from the character
+row (never invented; `held_guild_ids`, so a secondary/Promotion guild
+counts too) and threads it through as a new `identity_facts` parameter
+on `ai.npc_agent.talk_to_npc`/`_build_prompt` — same "compute the
+fact, hand it to narration as ground truth" convention `quest_facts`/
+`memory_facts` already use, wired into both real talk_npc call sites
+(the primary human "talk to X" path and the party-companion "message
+AI" path). Never a rule dictating HOW an NPC should react to a given
+class — purely grounding, same boundary as every other AI-facing fact
+in this game.
+
 ## [1.27.185] — Add: The Verge Warden counters Sneak Attack (Synergy Phase 7)
 
 First real "subclass-specific boss counter" (Coffee explicitly named
