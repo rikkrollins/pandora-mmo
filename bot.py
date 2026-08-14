@@ -16727,6 +16727,39 @@ def _guild_curriculum_unlocked_at(character: dict, guild_id: str) -> str | None:
     return (character.get("secondary_guild_curriculum_unlocked_at") or {}).get(guild_id)
 
 
+def _guild_curriculum_waiting_reminder_shown(character: dict, guild_id: str) -> bool:
+    """Whether _check_guild_curriculum_progress already told this character its CURRENT step is satisfied but still on cooldown."""
+    if guild_id == character.get("guild"):
+        return bool((character.get("guild_curriculum_state") or {}).get("waiting_reminder_shown"))
+    return bool((character.get("secondary_guild_curriculum_state") or {}).get(guild_id, {}).get("waiting_reminder_shown"))
+
+
+def _mark_guild_curriculum_waiting_reminder_shown(telegram_user_id: int, chat_id: int, character: dict, guild_id: str) -> None:
+    """
+    Real live bug (2026-08-14, dev-bridge: "You don't have to keep
+    telling the user this you only have to mention it once"): a
+    satisfied-but-still-cooling-down step's real objective (reach a
+    location, gather a material, ...) can naturally keep re-firing
+    during ordinary play -- farming iron ore for "First Ore" gathers it
+    over and over, and _check_guild_curriculum_progress used to repeat
+    the SAME "won't credit for Xh Ym" reminder every single time. Stamps
+    a one-time flag into the same real guild_curriculum_state/secondary_
+    guild_curriculum_state scratch dict already reserved for per-step
+    state (cleared automatically once the step actually advances --
+    _compute_guild_curriculum_advance resets it to {} -- so the
+    reminder naturally re-arms fresh for the NEXT step).
+    """
+    if guild_id == character.get("guild"):
+        db.update_character(
+            telegram_user_id, chat_id,
+            guild_curriculum_state={**(character.get("guild_curriculum_state") or {}), "waiting_reminder_shown": True},
+        )
+        return
+    all_secondary_state = dict(character.get("secondary_guild_curriculum_state") or {})
+    all_secondary_state[guild_id] = {**all_secondary_state.get(guild_id, {}), "waiting_reminder_shown": True}
+    db.update_character(telegram_user_id, chat_id, secondary_guild_curriculum_state=all_secondary_state)
+
+
 def _guild_curriculum_step_ready(character: dict, guild_id: str | None = None) -> bool:
     """
     True once GUILD_CURRICULUM_STEP_COOLDOWN_HOURS have really passed
@@ -17136,12 +17169,14 @@ async def _check_guild_curriculum_progress(update_like, telegram_user_id: int, c
             continue
 
         if not _guild_curriculum_step_ready(character, guild_id):
-            remaining = _guild_curriculum_time_remaining_note(character, guild_id)
-            await _safe_send(
-                update_like,
-                f"📖 That satisfies **{step['title']}** — but the guild won't credit it for another {remaining}. "
-                f"Real training takes real time.",
-            )
+            if not _guild_curriculum_waiting_reminder_shown(character, guild_id):
+                remaining = _guild_curriculum_time_remaining_note(character, guild_id)
+                await _safe_send(
+                    update_like,
+                    f"📖 That satisfies **{step['title']}** — but the guild won't credit it for another {remaining}. "
+                    f"Real training takes real time.",
+                )
+                _mark_guild_curriculum_waiting_reminder_shown(telegram_user_id, chat_id, character, guild_id)
             return
         await _complete_guild_curriculum_step(update_like, telegram_user_id, chat_id, step, guild_id=guild_id)
         return

@@ -2,6 +2,32 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.215] — Fix: guild curriculum "won't credit yet" reminder repeated every time
+
+Real report (Coffee, dev-bridge, right after v1.27.214 shipped): "You
+don't have to keep telling the user this you only have to mention it
+once." Confirmed via a real screenshot -- farming Iron Ore for the
+Silver Wardens' "First Ore" step re-triggered the exact same "That
+satisfies X — but the guild won't credit it for another 4h 25m" message
+on every single gather, since `_check_guild_curriculum_progress` fires
+at the same real event checkpoint (arrival/gather/kill/dialogue) every
+time, with nothing remembering it already told the player once.
+
+Now stamps a one-time `waiting_reminder_shown` flag into the same real
+`guild_curriculum_state`/`secondary_guild_curriculum_state` scratch dict
+already reserved for per-step state -- cleared automatically once the
+step actually advances (`_compute_guild_curriculum_advance` already
+resets it to `{}`), so the reminder naturally re-arms fresh for the
+NEXT step rather than needing a separate expiry mechanism. Only affects
+this ONE passive checkpoint -- the dice-challenge and riddle-answer
+"won't credit yet" messages are unchanged, since those only ever repeat
+when a player deliberately retries ("try my luck" / re-typing an
+answer), not from ordinary incidental gameplay.
+
+Confirmed live (throwaway DB, real character): the first matching
+gather sends the reminder; two more matching gathers of the same
+already-satisfied step send nothing further.
+
 ## [1.27.214] — Synergy Pass Phase 9: full class/subclass/guild/boss audit + a live ASI bug
 
 Per Coffee's request following v1.27.212/213's own audit: "cross
