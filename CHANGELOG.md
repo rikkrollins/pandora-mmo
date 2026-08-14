@@ -2,6 +2,46 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.207] — Fix: guild curriculum background sweep only ever saw a player's ACTIVE character slot
+
+The real bug behind Coffee's live reports (dev-bridge, proof screenshot:
+Pan satisfied "Find the Nook" and was standing right there, still
+uncredited hours after the cooldown cleared): a player who owns
+multiple characters in this game (a real, supported feature) can only
+have ONE marked "active" at a time per chat. `_check_guild_curriculum_
+cooldowns` (both the original v1.27.205 version and this same day's
+v1.27.206 follow-up) pulled its character list from `_get_party_
+members`, which is joined against `active_characters` -- so it only
+ever saw whichever ONE of a player's characters was currently selected.
+Any OTHER character that player owns -- each with its own real,
+standing curriculum progress -- was completely invisible to this
+background sweep for as long as it wasn't the active slot, no matter
+how many hours passed, only ever catching up once the player switched
+back to it and did something that re-fired the live checkpoint
+directly. Pan sat at The Arcane Nook, cooldown long cleared, simply
+never being checked because Ravenloft or Elduinn was the active
+character instead.
+
+Fix: the sweep now pulls from a new `db.get_all_characters_in_chat`
+(every non-deleted character in the chat, active or not) instead of
+`_get_party_members`. This alone would have created a worse bug --
+`_complete_guild_curriculum_step` credited rewards through the plain
+telegram_user_id/chat_id path, which always writes to whichever
+character IS currently active, so crediting a dormant character that
+way would have silently handed its reward to a different character the
+same player happens to be playing right now (the exact same class of
+bug already hit and fixed once before for shrine revival). Added
+`character_id`-targeted variants throughout the whole credit path --
+`db.add_xp_by_id`, `db.advance_guild_curriculum_step_by_id`,
+`bot._award_xp_and_announce_level_up_by_id` -- and the sweep now always
+passes the specific character_id it found, so the reward lands on the
+character that actually earned it, not whichever one is on-screen.
+
+3 new tests (dormant-but-satisfied character gets credited; a
+DIFFERENT active character owned by the same player is provably
+untouched -- gold/step verified unchanged) confirmed clean against a
+throwaway DB.
+
 ## [1.27.206] — Fix: guild curriculum reach_location auto-credit missed members who'd moved on
 
 Follow-up to v1.27.205's own fix, same day (dev-bridge screenshot,

@@ -1966,24 +1966,44 @@ def advance_guild_curriculum_step(telegram_user_id: int, chat_id: int, guild_id:
     character = get_character(telegram_user_id, chat_id)
     if character is None:
         return None
+    updates = _compute_guild_curriculum_advance(character, guild_id)
+    return update_character(telegram_user_id, chat_id, **updates)
+
+
+def advance_guild_curriculum_step_by_id(character_id: int, guild_id: str | None = None) -> dict | None:
+    """
+    Same real advance-and-unlock logic as advance_guild_curriculum_step,
+    but targets one exact character directly rather than "whichever slot
+    this telegram_user_id has active right now" -- see add_xp_by_id's
+    docstring for why this matters (bot._check_guild_curriculum_cooldowns
+    crediting a dormant alt).
+    """
+    character = get_character_by_id(character_id)
+    if character is None:
+        return None
+    updates = _compute_guild_curriculum_advance(character, guild_id)
+    return update_character_by_id(character_id, **updates)
+
+
+def _compute_guild_curriculum_advance(character: dict, guild_id: str | None) -> dict:
     now = datetime.now(timezone.utc).isoformat()
     if guild_id is None or guild_id == character.get("guild"):
-        return update_character(
-            telegram_user_id, chat_id,
-            guild_curriculum_step=character["guild_curriculum_step"] + 1,
-            guild_curriculum_step_unlocked_at=now,
-            guild_curriculum_state={},
-        )
+        return {
+            "guild_curriculum_step": character["guild_curriculum_step"] + 1,
+            "guild_curriculum_step_unlocked_at": now,
+            "guild_curriculum_state": {},
+        }
     steps = character["secondary_guild_curriculum_steps"]
     steps[guild_id] = steps.get(guild_id, 0) + 1
     unlocked_at = character["secondary_guild_curriculum_unlocked_at"]
     unlocked_at[guild_id] = now
     state = character["secondary_guild_curriculum_state"]
     state.pop(guild_id, None)
-    return update_character(
-        telegram_user_id, chat_id, secondary_guild_curriculum_steps=steps,
-        secondary_guild_curriculum_unlocked_at=unlocked_at, secondary_guild_curriculum_state=state,
-    )
+    return {
+        "secondary_guild_curriculum_steps": steps,
+        "secondary_guild_curriculum_unlocked_at": unlocked_at,
+        "secondary_guild_curriculum_state": state,
+    }
 
 
 def get_character(telegram_user_id: int, chat_id: int) -> dict | None:
@@ -2023,6 +2043,36 @@ def list_characters(telegram_user_id: int, chat_id: int) -> list[dict]:
         rows = conn.execute(
             "SELECT * FROM characters WHERE telegram_user_id = ? AND chat_id = ? AND is_deleted = 0 ORDER BY character_id",
             (telegram_user_id, chat_id),
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def get_all_characters_in_chat(chat_id: int) -> list[dict]:
+    """
+    Every non-deleted character slot IN THIS CHAT -- real players' every
+    slot (active or not) plus AI companions -- unlike
+    _get_party_members/get_idle_real_characters, deliberately NOT joined
+    against active_characters. Real live bug (2026-08-14, dev-bridge
+    screenshots + proof of a satisfied-but-uncredited step):
+    bot._check_guild_curriculum_cooldowns used _get_party_members, whose
+    active_characters join means it only ever sees whichever ONE
+    character slot a multi-character player currently has selected
+    (active_characters' real PK is (telegram_user_id, chat_id) -- only
+    one slot per player per chat can be active at a time). A player's
+    OTHER character slots -- each with their own real, standing guild
+    curriculum progress -- were completely invisible to this background
+    sweep the entire time they weren't the selected slot, no matter how
+    long real time passed, only ever catching up once the player
+    happened to switch back and take some action that re-triggered the
+    live checkpoint directly. Guild curriculum progress belongs to the
+    character, not to "whichever slot is active right now" -- this
+    sweep needs every real character, same as list_characters but
+    across every player in the chat rather than just one.
+    """
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM characters WHERE chat_id = ? AND is_deleted = 0",
+            (chat_id,),
         ).fetchall()
     return [_row_to_dict(r) for r in rows]
 
@@ -2186,6 +2236,28 @@ def add_xp(telegram_user_id: int, chat_id: int, amount: int) -> dict | None:
     character = get_character(telegram_user_id, chat_id)
     if character is None:
         return None
+    updates = _compute_xp_updates(character, amount)
+    return update_character(telegram_user_id, chat_id, **updates)
+
+
+def add_xp_by_id(character_id: int, amount: int) -> dict | None:
+    """
+    Same real leveling logic as add_xp, but targets one exact character
+    directly rather than "whichever slot this telegram_user_id has
+    active right now" -- needed anywhere a background process must
+    credit a SPECIFIC character that may not be the active one (e.g.
+    bot._check_guild_curriculum_cooldowns crediting a dormant alt's own
+    real, standing curriculum progress; see db.get_all_characters_in_chat's
+    docstring for the real bug this closes).
+    """
+    character = get_character_by_id(character_id)
+    if character is None:
+        return None
+    updates = _compute_xp_updates(character, amount)
+    return update_character_by_id(character_id, **updates)
+
+
+def _compute_xp_updates(character: dict, amount: int) -> dict:
 
     old_level = character["level"]
     # Rebirth (2026-07-22, per Coffee): a permanent, stacking XP-gain
@@ -2308,7 +2380,7 @@ def add_xp(telegram_user_id: int, chat_id: int, amount: int) -> dict | None:
         for gid in character.get("secondary_guilds") or []:
             _apply_guild_growth(gid, (character.get("secondary_guild_join_levels") or {}).get(gid))
 
-    return update_character(telegram_user_id, chat_id, **updates)
+    return updates
 
 
 # ---------------------------------------------------------------------

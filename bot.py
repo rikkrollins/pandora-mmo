@@ -3969,6 +3969,17 @@ async def _award_xp_and_announce_level_up(update_like, telegram_user_id: int, ch
     return after
 
 
+async def _award_xp_and_announce_level_up_by_id(update_like, character_id: int, chat_id: int, amount: int) -> dict | None:
+    """Same level-up-announce logic as _award_xp_and_announce_level_up, but targets one exact character_id directly (see db.add_xp_by_id's docstring)."""
+    before = db.get_character_by_id(character_id)
+    if before is None:
+        return None
+    after = db.add_xp_by_id(character_id, amount)
+    if after is not None and after["level"] > before["level"]:
+        await _notify_main_topic(update_like, _level_up_note(before, after))
+    return after
+
+
 async def _share_quest_rewards_with_party(
     update_like, character: dict, telegram_user_id: int, reward_xp: int, reward_gold: int = 0,
 ) -> None:
@@ -16624,7 +16635,13 @@ async def _check_guild_curriculum_cooldowns(bot) -> None:
     puzzle/choice are typed directly in the guild's own topic anyway).
     """
     for chat_id in db.get_all_chat_ids():
-        for character in _get_party_members(chat_id):
+        # get_all_characters_in_chat, NOT _get_party_members -- see that
+        # function's own docstring (2026-08-14): _get_party_members only
+        # ever returns whichever ONE character slot each player currently
+        # has active, so a multi-character player's other real characters
+        # (each with their own real, standing curriculum progress) were
+        # completely invisible to this sweep until switched back to.
+        for character in db.get_all_characters_in_chat(chat_id):
             for guild_id in held_guild_ids(character):
                 step_index = _guild_curriculum_step_index(character, guild_id)
                 step = guild_curriculum_module.get_step(guild_id, step_index)
@@ -16658,7 +16675,16 @@ async def _check_guild_curriculum_cooldowns(bot) -> None:
                 if not matched:
                     continue
                 update_like = _AiPlayerUpdate(bot, chat_id, character["telegram_user_id"], "")
-                await _complete_guild_curriculum_step(update_like, character["telegram_user_id"], chat_id, step, guild_id=guild_id)
+                # character_id=character["character_id"] is required here, NOT
+                # optional -- this character may not be the one its owner
+                # currently has active (that's the whole point of this sweep
+                # now using get_all_characters_in_chat), so crediting through
+                # the plain telegram_user_id/chat_id path would silently land
+                # on whichever OTHER character that same player has active.
+                await _complete_guild_curriculum_step(
+                    update_like, character["telegram_user_id"], chat_id, step, guild_id=guild_id,
+                    character_id=character["character_id"],
+                )
 
 
 # A real riddle answer is almost always said plainly, optionally behind
@@ -16823,6 +16849,7 @@ async def _post_and_pin_guild_curriculum_step(update: Update, chat_id: int, guil
 
 async def _complete_guild_curriculum_step(
     update_like, telegram_user_id: int, chat_id: int, step: dict, extra_note: str = "", guild_id: str | None = None,
+    character_id: int | None = None,
 ) -> None:
     """
     Grants one guild curriculum step's real reward (XP/gold, and an
@@ -16837,27 +16864,54 @@ async def _complete_guild_curriculum_step(
     `guild_id` defaults to the primary guild (every pre-existing call
     site's exact prior behavior); pass a secondary ("doubled up") guild
     id to credit that guild's own curriculum instead.
+
+    `character_id`, when given, targets that EXACT character row
+    directly instead of "whichever slot telegram_user_id has active
+    right now" -- real live bug (2026-08-14, dev-bridge screenshots:
+    Coffee proved a step was satisfied and its cooldown long cleared,
+    yet never credited): bot._check_guild_curriculum_cooldowns sweeps
+    EVERY character in a chat now (db.get_all_characters_in_chat), not
+    just each player's currently-active slot, specifically so a
+    satisfied-but-dormant alt still gets credited in the background --
+    but crediting it through the plain telegram_user_id/chat_id path
+    would silently write the reward onto whichever OTHER character that
+    same player currently has active instead (same class of bug already
+    fixed once for shrine revival, see db.update_character_by_id's own
+    docstring). Every pre-existing call site omits this and keeps its
+    exact prior active-character-only behavior.
     """
-    character = db.get_character(telegram_user_id, chat_id)
+    character = db.get_character_by_id(character_id) if character_id is not None else db.get_character(telegram_user_id, chat_id)
     if character is None:
         return
     guild_id = guild_id or character["guild"]
     reward_xp = step.get("reward_xp", 0)
     reward_gold = step.get("reward_gold", 0)
     if reward_xp:
-        await _award_xp_and_announce_level_up(update_like, telegram_user_id, chat_id, reward_xp)
+        if character_id is not None:
+            await _award_xp_and_announce_level_up_by_id(update_like, character_id, chat_id, reward_xp)
+        else:
+            await _award_xp_and_announce_level_up(update_like, telegram_user_id, chat_id, reward_xp)
     if reward_gold:
-        fresh = db.get_character(telegram_user_id, chat_id)
-        db.update_character(telegram_user_id, chat_id, gold=fresh["gold"] + reward_gold)
+        fresh = db.get_character_by_id(character_id) if character_id is not None else db.get_character(telegram_user_id, chat_id)
+        if character_id is not None:
+            db.update_character_by_id(character_id, gold=fresh["gold"] + reward_gold)
+        else:
+            db.update_character(telegram_user_id, chat_id, gold=fresh["gold"] + reward_gold)
     mastery_profession = step.get("reward_mastery_profession")
     mastery_pct = step.get("reward_mastery_pct")
     if mastery_profession and mastery_pct:
-        fresh = db.get_character(telegram_user_id, chat_id)
+        fresh = db.get_character_by_id(character_id) if character_id is not None else db.get_character(telegram_user_id, chat_id)
         current = fresh["profession_mastery_pct"].get(mastery_profession, PROFICIENCY_STARTING_PCT)
         updated_pct = {**fresh["profession_mastery_pct"], mastery_profession: min(current + mastery_pct, PROFICIENCY_MAX_PCT)}
-        db.update_character(telegram_user_id, chat_id, profession_mastery_pct=updated_pct)
+        if character_id is not None:
+            db.update_character_by_id(character_id, profession_mastery_pct=updated_pct)
+        else:
+            db.update_character(telegram_user_id, chat_id, profession_mastery_pct=updated_pct)
 
-    updated_character = db.advance_guild_curriculum_step(telegram_user_id, chat_id, guild_id)
+    if character_id is not None:
+        updated_character = db.advance_guild_curriculum_step_by_id(character_id, guild_id)
+    else:
+        updated_character = db.advance_guild_curriculum_step(telegram_user_id, chat_id, guild_id)
     topic_id = config.GUILD_TOPIC_IDS.get(guild_id)
     reply_thread_id = topic_id if topic_id is not None else update_like.effective_message.message_thread_id
 
