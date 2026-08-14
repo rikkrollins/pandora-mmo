@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.206] — Fix: guild curriculum reach_location auto-credit missed members who'd moved on
+
+Follow-up to v1.27.205's own fix, same day (dev-bridge screenshot,
+Coffee: "I have already done this training for some reason it's not
+showing me a new one"). v1.27.205's periodic sweep only auto-credited
+a reach_location step if the character was standing at the required
+spot AT THE EXACT MOMENT the cooldown cleared -- a member who visited
+early (a totally reasonable thing to do; nothing stops working toward
+a step before the cooldown lifts) and then got on with their day was
+never credited, since by the time the sweep found them ready they'd
+already moved elsewhere and the sweep would just skip them forever.
+Now checks the character's real, permanent `visited_locations` history
+instead of only `current_location` -- "you were there at some point
+since it unlocked" is what a player actually means by "I already did
+this." gather_material is unchanged (still checks current inventory
+count, correctly, since materials can be spent/traded away).
+
+2 new tests (ever-visited-but-moved-on now credits once cooldown
+clears; still correctly gated when cooldown hasn't cleared yet)
+confirmed clean against a throwaway DB.
+
 ## [1.27.205] — Fix: guild curriculum steps stuck waiting past their own cooldown
 
 Real report (2026-08-14, dev-bridge screenshot): "The guilds havent

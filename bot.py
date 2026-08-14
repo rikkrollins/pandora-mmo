@@ -16636,7 +16636,23 @@ async def _check_guild_curriculum_cooldowns(bot) -> None:
                 if not _guild_curriculum_step_ready(character, guild_id):
                     continue
                 if trigger["type"] == "reach_location":
-                    matched = character["current_location"] == trigger["location"]
+                    # Real live bug (2026-08-14, dev-bridge: "I have already
+                    # done this training for some reason it's not showing me
+                    # a new one" -- follow-up to the exact report that led to
+                    # this whole sweep existing): checking ONLY current_
+                    # location meant a member who visited the required spot
+                    # DURING the cooldown window (a totally reasonable thing
+                    # to do -- nothing stops working toward a step early) but
+                    # then moved on with their day never got auto-credited,
+                    # since by the time the cooldown cleared they were
+                    # somewhere else and this sweep would just skip them
+                    # forever. visited_locations is this character's real,
+                    # permanent visit history (bot._do_move already appends
+                    # to it on arrival) -- "you were there at some point
+                    # since it unlocked" is what a player actually means by
+                    # "I already did this," not "you are standing there at
+                    # this exact tick."
+                    matched = trigger["location"] in character["visited_locations"]
                 else:
                     matched = character["inventory"].get(trigger["material"], 0) >= trigger.get("count", 1)
                 if not matched:
