@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.219] — Extend: "The World Evolves" now reaches Echo Trials
+
+Follow-up to v1.27.218's own "explicitly out of scope for this pass"
+list. Checked both remaining items:
+
+- `resolve_thrown_attack` needed NO changes -- it's a player-only code
+  path (any class can throw a carried weapon; monsters never throw
+  weapons in this engine at all), so `world_damage_multiplier` (which
+  only ever applies when the ATTACKER is a monster) was never reachable
+  there. Separately, thrown-weapon damage already correctly respects
+  `world_resistance_pct` for free, since a thrown attack's target's
+  `elemental_resistance_pct` is the same live dict already stamped with
+  the world-resistance baseline at encounter-build time -- nothing new
+  needed.
+- `_build_echo_enemy` (Silver Wardens' Echo Trials) DID have a real gap:
+  it's a separate monster-construction path from `_do_start_combat`'s
+  main loop, and never carried any `elemental_resistance_pct` at all
+  (only its own existing tier-based single learned-resistance-type
+  mechanic). Now also carries the same world-resistance baseline,
+  scaled to the CHALLENGER's own `rebirth_count` (this function's
+  existing single-challenger design, same source `_challenger_
+  signature_damage_type` already reads) -- a never-reborn challenger
+  sees zero change (the original single-weak-point mechanic is
+  untouched), a reborn one now also faces a broader, world-scaled
+  toughness on top of that one signature type. The damage-output half
+  needed no change here either -- `resolve_attack`'s `world_damage_
+  multiplier` check is generic (any attacker with no `char_class`),
+  so it already applied to echo enemies automatically.
+
+Confirmed live: a rebirth-0 challenger's echo shows 0% resistance
+across all 9 damage types (unchanged); a rebirth-5 challenger's echo
+shows 75% uniformly, matching the same real numbers v1.27.218's own
+tests already confirmed for regular encounters.
+
 ## [1.27.218] — Add: "The World Evolves" — rebirth-scaled monster resistance & damage
 
 Real report (Coffee, dev-bridge): an AI party member one-shot Goblin

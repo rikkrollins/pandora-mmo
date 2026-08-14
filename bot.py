@@ -6800,6 +6800,22 @@ def _build_echo_enemy(monster_key: str, tier: int, index: int, total: int, chall
         "empowered_by_crits": template.get("empowered_by_crits", False),
         "counters_empowered_spell": template.get("counters_empowered_spell", False),
         "resistances": resistances,
+        # "The World Evolves" (2026-08-14, extending v1.27.218 to Echo
+        # Trials, per Coffee's own explicit "played multiple times... make
+        # the evolutions make sense" framing): same real world_resistance_
+        # pct baseline the main _do_start_combat encounter-build loop
+        # already applies, scaled to the CHALLENGER's own rebirth_count
+        # (this function's existing single-challenger design, same source
+        # _challenger_signature_damage_type already reads). A never-reborn
+        # challenger sees elemental_resistance_pct as all-zero, so the
+        # original tier-based single learned `resistances` type above is
+        # completely unaffected -- only once a challenger has actually
+        # rebirthed does the echo also carry a broader, world-scaled
+        # toughness on top of its one signature weak point.
+        "elemental_resistance_pct": {
+            dtype: world_resistance_pct(challenger.get("rebirth_count", 0) if challenger else 0)
+            for dtype in ECHO_TRIAL_RESISTANT_TYPES
+        },
         "is_echo_trial": True,
         # Real tier-scaled damage (2026-07-26 monster/area rebalance) --
         # same stat_mult already applied to armor_class/hp_max above, so
