@@ -2,6 +2,37 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.221] — Add: AI-controlled players can throw un-needed weapons
+
+Real ask: "Make is so AI players can throw un-needed weapons." New
+`bot._maybe_ai_throw_weapon`, mirroring `_maybe_use_breath_weapon`'s
+exact shape (same real `resolve_thrown_attack`-shaped return dict, so
+the caller's existing narration/defeat-detection handles it unchanged)
+-- reuses the SAME real math and definitions a human player's own
+"throw" already uses, nothing invented for AI specifically: `_throwable_
+weapon_ids`' own real "un-needed" definition (any carried weapon that
+isn't the one currently equipped), `resolve_thrown_attack`'s damage
+math, `_roll_throw_proficiency`'s mastery bonus, and the weapon is
+genuinely consumed from inventory on use, same as a human's throw.
+
+Decided at the same real per-turn choice point spell-casting/Breath
+Weapon already use (`_resolve_ai_turns`), so it can genuinely replace a
+normal attack for that swing, not just happen alongside one. Gated to
+real AI-controlled characters only (`is_ai` + a real `char_class` --
+monsters, which never carry a throwable inventory the same way, are
+excluded) -- a human player is never auto-triggered into throwing
+something they didn't choose to. New `AI_THROW_WEAPON_CHANCE = 0.15`,
+deliberately lower than monster spellcasting's 40% -- meant to read as
+occasional tactical flavor, not compete with a real signature ability
+for how often it shows up.
+
+4 new tests (real session, real throwaway-DB character with a spare
+Rusty Dagger alongside an equipped Longsword) confirmed: the throw
+fires and returns a real thrown-attack result; the equipped weapon is
+never thrown; a real human player is never auto-triggered; a bare
+monster never throws. Separately confirmed the thrown weapon is
+actually removed from inventory afterward.
+
 ## [1.27.220] — Bestiary redesign + player resistance sheet, per Coffee's direct request
 
 Two real asks, same session: "when the enemies evolve and the players

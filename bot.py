@@ -5770,6 +5770,8 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
             if result is None:
                 result = await _maybe_use_breath_weapon(update, session, current, target)
             if result is None:
+                result = await _maybe_ai_throw_weapon(update, session, current, target)
+            if result is None:
                 adv, disadv = _attack_advantage_disadvantage(current, target)
                 result = resolve_attack(
                     current, target, _weapon_for_attacker(current), advantage=adv, disadvantage=disadv,
@@ -5831,6 +5833,8 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
 
             if result.get("is_spell_cast"):
                 attack_label = f"{current['name']} casts {result['spell_name']} at {target['name']}"
+            elif result.get("is_thrown_weapon"):
+                attack_label = f"{current['name']} throws {result['thrown_weapon_name']} at {target['name']}"
             else:
                 attack_label = (
                     f"{current['name']} attacks {target['name']}" if attack_count == 1
@@ -7541,6 +7545,64 @@ async def _maybe_use_breath_weapon(
         "damage_type": "fire", "enrage_triggered": False, "bloodied_triggered": False,
         "elemental_heal_gained": 0, "is_spell_cast": True, "spell_name": "Breath Weapon", "counterspelled": False,
     }
+
+
+# How often an AI-controlled real character throws a spare weapon
+# instead of a normal attack (2026-08-14, per Coffee: "Make is so AI
+# players can throw un-needed weapons") -- deliberately lower than
+# MONSTER_SPELLCAST_CHANCE (40%): a thrown dagger is meant to read as
+# occasional tactical flavor, not compete with a real signature ability
+# like a spell or Breath Weapon for how often it shows up.
+AI_THROW_WEAPON_CHANCE = 0.15
+
+
+async def _maybe_ai_throw_weapon(update: Update, session: sessions.Session, attacker: dict, target: dict) -> dict | None:
+    """
+    Real AI throw usage (2026-08-14, per Coffee: "Make is so AI players
+    can throw un-needed weapons"). Mirrors _maybe_use_breath_weapon's
+    exact shape (same resolve_attack-shaped return dict so the caller's
+    existing narration/defeat-detection code handles it unchanged,
+    decided at this same call site so it can genuinely replace a normal
+    attack rather than just happen alongside one) -- and reuses the
+    SAME real math a human player's own throw already uses
+    (rules.combat.resolve_thrown_attack, _roll_throw_proficiency's
+    mastery bonus, _throwable_weapon_ids' own real definition of
+    "un-needed": any carried weapon that isn't the one currently
+    equipped), never a separate invented rule for AI specifically.
+    Gated on attacker.get("char_class") (a real character, never a bare
+    monster -- monsters don't carry a throwable inventory the same way)
+    and attacker.get("is_ai") (a human player still throws by typing it
+    themselves, same convention _maybe_use_class_ability/_maybe_use_
+    breath_weapon already follow).
+    """
+    if not attacker.get("is_ai") or not attacker.get("char_class"):
+        return None
+    throwable_ids = _throwable_weapon_ids(attacker)
+    if not throwable_ids:
+        return None
+    if random.random() > AI_THROW_WEAPON_CHANCE:
+        return None
+
+    weapon_id = random.choice(throwable_ids)
+    weapon_item = items_module.get_item(weapon_id)
+    telegram_user_id = attacker["telegram_user_id"]
+    chat_id = session.chat_id
+    is_assassin = _is_assassin(attacker)
+    result = resolve_thrown_attack(
+        attacker, target, weapon_item, forced_hit=is_assassin,
+        defender_relentless_endurance_available=_relentless_endurance_available(target),
+        round_number=session.round_number,
+    )
+    if result["hit"] and _roll_throw_proficiency(attacker):
+        mastery_throw_dmg = roll_damage(weapon_item["damage_dice"], modifier=weapon_item.get("damage_bonus", 0))["total"]
+        mastery_throw_dmg = apply_damage_type_modifier(mastery_throw_dmg, weapon_item.get("damage_type", "physical"), target, attacker)
+        result["damage_dealt"] += mastery_throw_dmg
+        target["hp_current"], _warded = _apply_damage_with_death_ward(target, mastery_throw_dmg)
+        result["defender_hp_remaining"] = target["hp_current"]
+    db.remove_item(telegram_user_id, chat_id, weapon_id, 1)
+    result["is_thrown_weapon"] = True
+    result["thrown_weapon_name"] = weapon_item["name"]
+    return result
 
 
 def _boss_ability_facts(boss: dict) -> str | None:
