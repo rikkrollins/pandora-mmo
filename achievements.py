@@ -12,7 +12,10 @@ min_completed_quests, min_board_quests_completed, has_guild,
 well_equipped (needs a weapon AND either armor or a shield equipped),
 master_of_any_profession (Master rank in any of the 7 real professions),
 completed_specific_quest (a single named quest_id, for one-off finale
-achievements rather than a reusable threshold).
+achievements rather than a reusable threshold), min_bound_remnants (real
+count of character["bound_remnants"]), has_secondary_guild (a real
+"doubled up" Promotion guild beyond the primary -- character["secondary_
+guilds"] non-empty).
 See bot.py's _achievement_condition_met for how each is evaluated.
 """
 
@@ -150,6 +153,29 @@ ACHIEVEMENTS = {
         "description": "Defeat The Unasked -- the thing Pandora's box was always going to hold, sealed by a question nobody before you was willing to finish asking.",
         "title": "the Answered",
         "check": {"type": "completed_specific_quest", "quest_id": "the_unaskeds_reckoning"},
+    },
+    # Real coverage gap found in a 2026-08-14 full synergy audit: the
+    # Remnants system (2026-08-13) and guild Promotions (secondary/
+    # "doubled up" guilds, also 2026-08-13) both postdate this list's own
+    # last addition (2026-07-25) and had zero achievement coverage despite
+    # being full, real systems with their own persistent character state.
+    "remnant_keeper": {
+        "name": "Remnant Keeper",
+        "description": "Bind your first Unbound Remnant of Pandora's Box.",
+        "title": "the Remnant Keeper",
+        "check": {"type": "min_bound_remnants", "value": 1},
+    },
+    "remnant_master": {
+        "name": "Remnant Master",
+        "description": "Bind all 12 Unbound Remnants of Pandora's Box.",
+        "title": "the Remnant Master",
+        "check": {"type": "min_bound_remnants", "value": 12},
+    },
+    "promoted": {
+        "name": "Promoted",
+        "description": "Hold a second, \"doubled up\" guild alongside your primary one.",
+        "title": "the Promoted",
+        "check": {"type": "has_secondary_guild"},
     },
 }
 

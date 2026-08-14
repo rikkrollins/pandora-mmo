@@ -215,20 +215,43 @@ same as any other `*_tmp.py`.
   break away" block) before this doc was updated to say so. Counterspell
   IS now implemented (2026-08-13, per Coffee, dev-bridge: "Certain
   enemies definitely need to have magic.. lets get this working" —
-  reported right after hitting this exact limitation live): the 3 real
-  shaman-flavored monsters (`goblin_shaman`, `goblin_shaman_elder`,
-  `elder_root_shaman`) carry a real `known_spells` list
-  (`campaigns/default/campaign.json`) and have a real
-  `MONSTER_SPELLCAST_CHANCE` (40%) chance each turn to cast a real
-  damage spell instead of attacking, via `bot._maybe_monster_cast_spell`
-  — through the exact same rules-layer pipeline
-  (`spells_module.resolve_damage_spell` + `apply_damage_type_modifier`
-  + `elemental_overflow_heal`) a player's own cast already uses. Any
-  real party member who knows Counterspell, has a spell slot, and
-  hasn't used their reaction this round auto-negates it (same
-  `reaction_used_round` economy as Shield/Uncanny Dodge). No other
-  monster casts spells yet — this is a first slice, not every monster
-  in the bestiary.
+  reported right after hitting this exact limitation live): any monster
+  or boss with a real `known_spells` list in `campaigns/default/
+  campaign.json` gets a real `MONSTER_SPELLCAST_CHANCE` (40%) chance
+  each turn to cast a real damage spell instead of attacking, via
+  `bot._maybe_monster_cast_spell` — through the exact same rules-layer
+  pipeline (`spells_module.resolve_damage_spell` +
+  `apply_damage_type_modifier` + `elemental_overflow_heal`) a player's
+  own cast already uses. Fully data-driven, not hardcoded to specific
+  monster names — as of a 2026-08-14 audit, 21 monsters actually carry
+  `known_spells` (the original 3 shaman variants, plus 18 of the 22
+  real bosses); this doc previously undersold that as "a first slice,
+  3 shaman-flavored monsters," which was already stale by the time
+  most bosses got spells added. The 4 bosses without `known_spells`
+  (`goblin_boss`, `colosseum_champion`, `the_unbegun`, `the_unasked`)
+  are pure-melee by design, not a gap — each has its own other real
+  signature mechanic instead (see the next bullet). Any real party
+  member who knows Counterspell, has a spell slot, and hasn't used
+  their reaction this round auto-negates a monster's cast (same
+  `reaction_used_round` economy as Shield/Uncanny Dodge).
+- Boss signature mechanics (flag-driven, `campaigns/default/
+  campaign.json` → copied onto the live combat participant dict in
+  `bot.py` → checked at a real `rules/combat.py`/`bot.py` checkpoint —
+  see `bot._boss_ability_facts` for the full current list fed to
+  narration): as of Synergy Phase 9 (2026-08-14), every one of the 22
+  real bosses has at least one real flag or `known_spells`, not just
+  the two originals (`adapts_to_damage` on The Unasked,
+  `extra_attack_when_enraged` on The Unbegun). Also now real:
+  `counters_sneak_attack`/`counters_rage`/`counters_backstab` (a boss
+  that's "learned" to blunt one specific class mechanic after the first
+  hit lands, same shape each time), `resists_dot_stacking` (halves the
+  Hex/Hunter's Mark bonus die), `echoes_damage_type` (a free backlash to
+  the attacker on the 3rd hit of the same damage type), and
+  `resists_forge_guild` (negates half of the Forge Guild's own +10%
+  weapon bonus specifically, checked right after that bonus is applied
+  — not folded into resistance math, which runs before the bonus even
+  exists). This is still not exhaustive — most bosses still share
+  generic mechanics; this is which ones have a real, individual one.
 - Skill checks use one fixed DC (13) for every situation — deliberate,
   to avoid the AI inventing difficulty numbers.
 - Resting ("I rest"/"heal up" and "take a rest"/going inactive) is NOT

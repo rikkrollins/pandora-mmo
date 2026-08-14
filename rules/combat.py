@@ -440,6 +440,12 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     dark_ones_blessing_gained = 0
     uncanny_dodge_triggered = False
     hybrid_bonus_gained = 0
+    # Synergy Phase 9 (2026-08-14): The Undertone's echoes_damage_type
+    # signature mechanic -- see the hit-count tracking and trigger check
+    # further down this function for the real logic. Initialized here so
+    # a miss (which skips the whole `if attack_result["hit"]:` block
+    # below) still returns a real 0, never an undefined value.
+    echo_backlash_damage = 0
     hybrid_temp_hp_gained = 0
     hybrid_self_heal_gained = 0
     enrage_triggered = False
@@ -463,6 +469,15 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         if attacker.get("char_class") == "Rogue" and advantage and defender.get("counters_sneak_attack"):
             defender["_sneak_attack_countered"] = True
         rage_bonus = rage_damage_bonus(attacker.get("level", 1)) if attacker.get("raging") else 0
+        # Synergy Phase 9 counters_rage (2026-08-14, The Waking Ember --
+        # a boss that "burns through" a Barbarian's fury): same real
+        # "first hit still lands it, every hit after doesn't" shape as
+        # counters_sneak_attack just above.
+        if rage_bonus and defender.get("counters_rage"):
+            if defender.get("_rage_countered"):
+                rage_bonus = 0
+            else:
+                defender["_rage_countered"] = True
         wild_shape_bonus = (
             wild_shape_damage_bonus(attacker.get("level", 1)) if attacker.get("wild_shaped") else 0
         )
@@ -528,15 +543,36 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         marked_target_id = attacker.get("marked_target_id")
         if marked_target_id is not None and marked_target_id == defender.get("telegram_user_id"):
             mark_dmg = roll_damage("1d6", critical=attack_result["critical_hit"])
-            damage_dealt += mark_dmg["total"]
+            mark_bonus = mark_dmg["total"]
+            # Synergy Phase 9 resists_dot_stacking (2026-08-14, The
+            # Drowned Choir -- "it doesn't sing so much as it keeps
+            # singing": a wound that's already marked doesn't cut deeper
+            # for a second mark). Halves the Hex/Hunter's Mark bonus die
+            # specifically, every hit, not just after the first -- this
+            # boss is simply resistant to the mark itself, not "learning"
+            # a pattern the way counters_rage/counters_sneak_attack do.
+            if defender.get("resists_dot_stacking"):
+                mark_bonus = mark_bonus // 2
+            damage_dealt += mark_bonus
         pre_elemental_damage = damage_dealt
+        weapon_damage_type = weapon.get("damage_type", "physical")
         damage_dealt = apply_damage_type_modifier(
-            damage_dealt, weapon.get("damage_type", "physical"), defender, attacker
+            damage_dealt, weapon_damage_type, defender, attacker
         )
         elemental_heal_gained = elemental_overflow_heal(
-            pre_elemental_damage, weapon.get("damage_type", "physical"), defender, attacker
+            pre_elemental_damage, weapon_damage_type, defender, attacker
         )
-        _maybe_grow_adaptive_resistance(defender, weapon.get("damage_type", "physical"), damage_dealt)
+        _maybe_grow_adaptive_resistance(defender, weapon_damage_type, damage_dealt)
+        # Synergy Phase 9 echoes_damage_type (2026-08-14, The Undertone --
+        # "something is still, impossibly, humming"): tracks real hits by
+        # damage type across the fight; the 3rd hit of any one type
+        # triggers a one-time echo, computed once the final damage_dealt
+        # is known (see the trigger check further down, after every other
+        # bonus/multiplier has been applied) -- themed as the location
+        # itself echoing that exact wound back at whoever caused it.
+        if defender.get("echoes_damage_type"):
+            hit_counts = defender.setdefault("_damage_type_hit_counts", {})
+            hit_counts[weapon_damage_type] = hit_counts.get(weapon_damage_type, 0) + 1
         # Real subclass choice, non-Wizard classes (2026-07-25): a
         # character whose chosen subclass is one of the "combat" picks
         # (rules/leveling.CLASS_SUBCLASSES) deals more weapon damage.
@@ -549,7 +585,24 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         # the subclass bonus just above. held_guild_ids, not primary-
         # only -- see warden_bonus's comment above for why.
         if "forge_guild" in held_guild_ids(attacker):
+            pre_forge_bonus_damage = damage_dealt
             damage_dealt = int(damage_dealt * (1 + FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT / 100))
+            # Synergy Phase 9 resists_forge_guild (2026-08-14, The
+            # Unbegun -- old enough to predate any guild-taught
+            # technique): negates half of the FORGE GUILD BONUS
+            # SPECIFICALLY (not the base hit) on every hit after the
+            # first -- deliberately checked here, right after the bonus
+            # is added, not folded into apply_damage_type_modifier above
+            # (which runs BEFORE this bonus even exists yet -- checking
+            # there would resist damage that doesn't have the Forge Guild
+            # bonus in it, a real ordering trap a full stacking-order
+            # audit this same day flagged).
+            if defender.get("resists_forge_guild"):
+                forge_bonus_amount = damage_dealt - pre_forge_bonus_damage
+                if defender.get("_forge_guild_resisted"):
+                    damage_dealt -= forge_bonus_amount // 2
+                else:
+                    defender["_forge_guild_resisted"] = True
         # Real player-power rebalance (2026-07-26, per Coffee: "rebalance
         # everything... all skills and abilities and magic and spells and
         # cantrips"): monster HP/damage were already rescaled to match
@@ -609,7 +662,31 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         # in-memory-only convention as `raging`/`conditions` (reset when
         # combat ends, never persisted to the DB).
         if damage_multiplier != 1:
-            damage_dealt = int(damage_dealt * damage_multiplier)
+            effective_multiplier = damage_multiplier
+            # Synergy Phase 9 counters_backstab (2026-08-14, The
+            # Cairnbound -- an ambush-flavored Remnant boss countering an
+            # Assassin's own ambush trick): same "first hit still lands
+            # it, every hit after is halved" shape as counters_rage --
+            # halves the MULTIPLIER itself (not the base damage), so a
+            # x10 late-game Backstab still lands x5, a real reduction
+            # without trivializing the mechanic outright.
+            if defender.get("counters_backstab"):
+                if defender.get("_backstab_countered"):
+                    effective_multiplier = damage_multiplier / 2
+                else:
+                    defender["_backstab_countered"] = True
+            damage_dealt = int(damage_dealt * effective_multiplier)
+
+        # Synergy Phase 9 echoes_damage_type trigger (2026-08-14): fires
+        # exactly once per fight, the moment a 3rd real hit of the same
+        # damage type lands -- damage_dealt here already reflects every
+        # bonus/multiplier above (subclass %, guild %, power-scale,
+        # enrage, backstab, ...), so the echo mirrors the REAL final
+        # damage just dealt, not some earlier intermediate value.
+        if (defender.get("echoes_damage_type") and not defender.get("_echo_triggered")
+                and defender.get("_damage_type_hit_counts", {}).get(weapon_damage_type, 0) >= 3):
+            defender["_echo_triggered"] = True
+            echo_backlash_damage = damage_dealt
 
         temp_hp = defender.get("temp_hp", 0)
         if temp_hp > 0:
@@ -714,6 +791,13 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         "enrage_triggered": enrage_triggered,
         "bloodied_triggered": bloodied_triggered,
         "elemental_heal_gained": elemental_heal_gained,
+        # Synergy Phase 9 echoes_damage_type (2026-08-14): non-zero exactly
+        # once per fight, the hit that triggers The Undertone's echo. The
+        # CALLER applies this to the ATTACKER's own hp_current (resolve_
+        # attack never mutates the attacker's real HP itself elsewhere),
+        # same "compute here, apply outside" convention mastery_strike_
+        # dmg/armor_mastery_reduction already use in bot.py's _do_attack.
+        "echo_backlash_damage": echo_backlash_damage,
     }
 
 

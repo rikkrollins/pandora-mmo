@@ -4282,6 +4282,7 @@
       "is_boss": true,
       "on_hit_condition": "paralyzed",
       "life_drain": true,
+      "counters_rage": true,
       "damage_dice": "1d8",
       "damage_bonus": 17,
       "damage_type": "fire",
@@ -4377,6 +4378,7 @@
       "xp_reward": 250,
       "is_boss": true,
       "on_hit_condition": "frightened",
+      "counters_extra_attack": true,
       "damage_dice": "1d8",
       "damage_bonus": 17,
       "damage_type": "physical",
@@ -4604,6 +4606,7 @@
       "is_boss": true,
       "on_hit_condition": "silenced",
       "life_drain": true,
+      "echoes_damage_type": true,
       "resistances": [
         "physical",
         "psychic"
@@ -4744,7 +4747,8 @@
           "weight": 5
         }
       ],
-      "extra_attack_when_enraged": true
+      "extra_attack_when_enraged": true,
+      "resists_forge_guild": true
     },
     "elder_bone_legionnaire": {
       "name": "Elder Bone Legionnaire",
@@ -5598,6 +5602,7 @@
       "proficiency_bonus": 5,
       "xp_reward": 1550,
       "is_boss": true,
+      "resists_dot_stacking": true,
       "damage_dice": "2d8",
       "damage_bonus": 19,
       "damage_type": "poison",
@@ -5661,6 +5666,7 @@
       "proficiency_bonus": 5,
       "xp_reward": 1700,
       "is_boss": true,
+      "counters_backstab": true,
       "damage_dice": "2d10",
       "damage_bonus": 20,
       "damage_type": "necrotic",

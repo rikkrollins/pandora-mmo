@@ -4619,11 +4619,27 @@ def _apply_asi_choice(character: dict, text: str) -> str | None:
     # never-reborn character keeps the exact same 20 cap as before.
     before_value = character[ability]
     cap = ability_score_cap(character.get("rebirth_count", 0))
+    # Real live bug (2026-08-14, dev-bridge screenshot: "Strength
+    # increased from 20 to 20" -- confirmed against the real character,
+    # a level-18, never-reborn Fighter whose Strength was already at its
+    # un-rebirthed cap of 20): a stat already at its cap silently
+    # consumed the full ASI spend for a genuine ZERO real increase, both
+    # for a named ability ("put it into constitution" on an already-
+    # capped stat) and the auto path (which always targets the class's
+    # fixed primary ability with no cap check at all). Reject up front
+    # instead -- the point stays banked, spendable on a real ability.
+    if before_value >= cap:
+        return f"❌ {ability.capitalize()} is already at its cap of {cap} — choose a different ability to raise instead."
     after_value = min(before_value + spend, cap)
+    # Real fix, same incident: only ever deduct the ability score's ACTUAL
+    # increase, not the flat requested `spend` -- a stat 1 point below its
+    # cap with a 2-point spend requested would otherwise still burn both
+    # points for only 1 real point of increase.
+    actual_spend = after_value - before_value
     updated = db.update_character(
         character["telegram_user_id"], character["chat_id"],
         **{ability: after_value},
-        pending_asi_points=pending - spend,
+        pending_asi_points=pending - actual_spend,
     )
     note = f"📈 {ability.capitalize()} increased from {before_value} to {after_value}."
     if updated["pending_asi_points"] > 0:
@@ -4840,11 +4856,17 @@ async def _do_choose_hybrid(update: Update, text: str) -> None:
 # Real subclass system (2026-07-24 pilot: Wizard's Arcane Tradition,
 # grounded in spells.py's already-real "school" field. Extended
 # 2026-07-25 to the other 11 classes via rules/leveling.CLASS_SUBCLASSES
-# -- two genuine 5E archetypes per class, the first granting a real
-# +20% weapon-damage bonus (rules/combat.py's resolve_attack), the
-# second a genuine, valid, sheet-showing pick with no mechanical bonus
-# wired up yet -- honest about the gap rather than inventing one, same
-# convention as every other documented "not built yet" feature here).
+# -- two genuine 5E archetypes per class. This comment used to claim the
+# second (utility) pick had "no mechanical bonus wired up yet" -- stale
+# even the same day it was written (rules/leveling.UTILITY_SUBCLASS_
+# ABILITY_CHECK_BONUS/describe_subclass_effect cover it, plus Thief/
+# Life/Totem Warrior's own bespoke hooks); corrected in a 2026-08-14
+# full synergy audit. The first (combat) pick's own real +20% bonus
+# (rules/leveling.COMBAT_SUBCLASS_DAMAGE_BONUS_PCT) also grew that same
+# audit -- it now applies to spell damage too (spells.resolve_damage_
+# spell), not just weapon attacks (rules/combat.py's resolve_attack),
+# since several combat picks (Draconic/Fiend/War/Moon/Valor) belong to
+# classes that deal most of their real damage through spells.
 WIZARD_SCHOOLS = (
     "evocation", "abjuration", "conjuration", "divination",
     "enchantment", "illusion", "necromancy", "transmutation",
@@ -5635,6 +5657,12 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
             if not opposing:
                 break
             target = _pick_formation_weighted_target(opposing, attacker_is_boss=current.get("is_boss", False))
+            if _extra_attack_countered(target, attack_num):
+                await _safe_send(
+                    update,
+                    f"🛡️ **{target['name']}** reads {current['name']}'s combo and slips the follow-up attack entirely!",
+                )
+                continue
             # Task #167 (per Coffee, 2026-07-18, scoped to boss-tier enemies
             # only after he flagged the latency cost of doing this for every
             # regular monster too): a pre-roll "sizing up its target" beat,
@@ -5737,6 +5765,20 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
                 await _announce_reaction(update, target, result)
             if result.get("bloodied_triggered"):
                 await _safe_send(update, f"🩸 **{target['name']} is bloodied!**")
+            # Synergy Phase 9 echoes_damage_type (2026-08-14, The
+            # Undertone) -- same real backlash-to-attacker convention as
+            # bot._do_attack's own handling of this field; only ever set
+            # by resolve_attack, so a spell-cast/breath-weapon result
+            # (which never populate it) safely no-ops here via .get().
+            # Floored at 1 for the same "a flavor backlash shouldn't kill
+            # outright" reason _do_attack's copy of this check documents.
+            if result.get("echo_backlash_damage"):
+                current["hp_current"] = max(current["hp_current"] - result["echo_backlash_damage"], 1)
+                await _safe_send(
+                    update,
+                    f"🔊 **{target['name']}** echoes the damage right back — **{current['name']}** takes "
+                    f"**{result['echo_backlash_damage']}** damage!",
+                )
             await _maybe_summon_minions(update, session, target)
 
             applied_condition = None
@@ -6402,6 +6444,28 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 # bosses, you can have 1 boss, that summons minions...
                 # be creative") -- read by bot._maybe_summon_minions.
                 "summons": slot_template.get("summons"),
+                # Synergy Phase 9 (2026-08-14, full class/subclass/guild/
+                # boss audit): same real-flag-on-the-template convention as
+                # every mechanic above. echoes_damage_type (The Undertone)
+                # and counters_extra_attack (Colosseum Champion) are new
+                # boss-signature mechanics, read in bot._resolve_ai_turns'
+                # own turn loop right alongside life_drain/extra_attack_
+                # when_enraged above. resists_dot_stacking (The Drowned
+                # Choir), counters_rage (The Waking Ember), and counters_
+                # backstab (The Cairnbound) are read by rules.combat.
+                # resolve_attack, same real checkpoint counters_sneak_attack
+                # already uses. resists_forge_guild (The Unbegun) is read
+                # immediately after rules.combat.resolve_attack's own real
+                # Forge Guild weapon-damage-bonus step, deliberately NOT
+                # folded into apply_damage_type_modifier (that runs BEFORE
+                # the Forge Guild bonus is even added -- would resist
+                # damage that doesn't have the bonus in it yet).
+                "echoes_damage_type": slot_template.get("echoes_damage_type", False),
+                "counters_extra_attack": slot_template.get("counters_extra_attack", False),
+                "resists_dot_stacking": slot_template.get("resists_dot_stacking", False),
+                "counters_rage": slot_template.get("counters_rage", False),
+                "counters_backstab": slot_template.get("counters_backstab", False),
+                "resists_forge_guild": slot_template.get("resists_forge_guild", False),
                 # Real bug found live (2026-07-25, while building the
                 # rebirth dungeons): campaign.json monster templates
                 # have always supported real resistances/vulnerabilities/
@@ -6662,6 +6726,16 @@ def _build_echo_enemy(monster_key: str, tier: int, index: int, total: int, chall
         "extra_attack_when_enraged": template.get("extra_attack_when_enraged", False),
         "counters_sneak_attack": template.get("counters_sneak_attack", False),
         "summons": template.get("summons"),
+        # Synergy Phase 9 (2026-08-14) -- same real flags copied at
+        # _do_start_combat's own encounter-building loop above, mirrored
+        # here so an Echo Trial rematch fights like a real echo of the
+        # boss's own signature style, not a stripped-down copy.
+        "echoes_damage_type": template.get("echoes_damage_type", False),
+        "counters_extra_attack": template.get("counters_extra_attack", False),
+        "resists_dot_stacking": template.get("resists_dot_stacking", False),
+        "counters_rage": template.get("counters_rage", False),
+        "counters_backstab": template.get("counters_backstab", False),
+        "resists_forge_guild": template.get("resists_forge_guild", False),
         "resistances": resistances,
         "is_echo_trial": True,
         # Real tier-scaled damage (2026-07-26 monster/area rebalance) --
@@ -6987,6 +7061,26 @@ def _build_summoned_minion(monster_key: str, template: dict, index: int, chat_id
         "vulnerabilities": template.get("vulnerabilities", []),
         "immunities": template.get("immunities", []),
     }
+
+
+def _extra_attack_countered(defender: dict, attack_num: int) -> bool:
+    """
+    Synergy Phase 9 counters_extra_attack (2026-08-14, Colosseum
+    Champion): negates the SECOND attack (attack_num == 1, 0-indexed) of
+    any multi-attack turn against it -- Extra Attack, Action Surge,
+    Flurry of Blows, or a boss's own Multiattack/enrage 3rd swing -- the
+    FIRST time this happens in the fight, themed as the Champion "reading"
+    a practiced combo. Every attack after the one negated hit goes through
+    normally; this only ever fires once per fight, same "read it once"
+    shape as counters_sneak_attack/counters_rage/counters_backstab in
+    rules/combat.py. Called from both bot._do_attack's and bot._resolve_
+    ai_turns' own attack-sequence loops, the two real places a multi-
+    attack turn is resolved.
+    """
+    if attack_num != 1 or not defender.get("counters_extra_attack") or defender.get("_extra_attack_countered"):
+        return False
+    defender["_extra_attack_countered"] = True
+    return True
 
 
 async def _maybe_summon_minions(update: Update, session: sessions.Session, boss: dict) -> None:
@@ -7362,8 +7456,10 @@ def _boss_ability_facts(boss: dict) -> str | None:
     story"). Fed to narrate_boss_intro/narrate_boss_defeat/narrate_boss_
     decision as real ground truth so those beats can reference a boss's
     actual nature instead of generic "epic boss" filler. Returns None
-    for a boss with no real signature mechanic at all (a handful are
-    deliberately pure-martial, e.g. goblin_boss/colosseum_champion).
+    for a boss with no real signature mechanic at all -- as of Synergy
+    Phase 9 (2026-08-14) every one of the 22 real bosses has at least one
+    (known_spells or a flag below), so this is now a defensive fallback
+    rather than a case any current boss actually hits.
     """
     facts = []
     spell_names = [
@@ -7382,6 +7478,18 @@ def _boss_ability_facts(boss: dict) -> str | None:
         facts.append("can summon reinforcements when badly wounded")
     if boss.get("life_drain"):
         facts.append("drains life from its victims to heal itself")
+    if boss.get("echoes_damage_type"):
+        facts.append("echoes a repeated wound right back at whoever keeps dealing it")
+    if boss.get("counters_extra_attack"):
+        facts.append("reads a practiced combo and slips one follow-up strike per fight")
+    if boss.get("resists_dot_stacking"):
+        facts.append("shrugs off a lingering mark or curse that would otherwise deepen a wound")
+    if boss.get("counters_rage"):
+        facts.append("burns through a raging warrior's fury after the first blow")
+    if boss.get("counters_backstab"):
+        facts.append("has learned to blunt an ambush strike after the first one lands")
+    if boss.get("resists_forge_guild"):
+        facts.append("resists a smith's guild-taught edge on their weapon")
     if not facts:
         return None
     return f"{boss.get('name')} " + "; also ".join(facts) + "."
@@ -7555,6 +7663,13 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                 break
             target = _pick_target(action_text, opposing)
 
+            if _extra_attack_countered(target, attack_num):
+                await _safe_send(
+                    update,
+                    f"🛡️ **{target['name']}** reads {attacker['name']}'s combo and slips the follow-up attack entirely!",
+                )
+                continue
+
             adv, disadv = _attack_advantage_disadvantage(attacker, target)
             _refresh_real_player_spell_slots(target)
             # Backstab's own landing chance (2026-08-08, per Coffee: "if
@@ -7575,6 +7690,22 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
             )
             if result["relentless_endurance_triggered"]:
                 db.use_feature(target["telegram_user_id"], update.effective_chat.id, "relentless_endurance")
+            # Synergy Phase 9 echoes_damage_type (2026-08-14, The
+            # Undertone): a real backlash straight to the ATTACKER's own
+            # hp_current -- resolve_attack never mutates the attacker's HP
+            # itself, this is the one real "apply it outside" site for
+            # that field, same convention as mastery_strike_dmg/armor_
+            # mastery_reduction just below. Deliberately floored at 1, not
+            # 0 -- a flavorful secondary backlash shouldn't be able to
+            # kill outright and trigger the full death/stabilize flow;
+            # that's the primary attack's job, not an echo's.
+            if result.get("echo_backlash_damage"):
+                attacker["hp_current"] = max(attacker["hp_current"] - result["echo_backlash_damage"], 1)
+                await _safe_send(
+                    update,
+                    f"🔊 **{target['name']}** echoes the damage right back — **{attacker['name']}** takes "
+                    f"**{result['echo_backlash_damage']}** damage!",
+                )
 
             # General weapon mastery (2026-08-08, per Coffee: "make
             # proficiencies for all weapons and armors also for
@@ -9667,6 +9798,14 @@ def _npc_identity_facts(character: dict | None) -> str | None:
     fact = f"{character['name']} is a level {character.get('level', 1)} {character.get('char_class', 'adventurer')}"
     if character.get("subclass"):
         fact += f" ({character['subclass']})"
+    # Real gap found in a 2026-08-14 full synergy audit: every other real
+    # identity fact here (guild) was explicitly wired to use held_guild_ids
+    # in this same "Synergy Phase 8" pass, but hybrid_class -- a real,
+    # rebirth-earned SECOND class (see hybrid_features.py) -- was never
+    # surfaced to NPC dialogue at all, even though it's a genuine, chosen
+    # fact about the character, same as their guild membership.
+    if character.get("hybrid_class"):
+        fact += f", hybridized with {character['hybrid_class']}"
     guild_names = [GUILDS[gid]["name"] for gid in held_guild_ids(character) if gid in GUILDS]
     if guild_names:
         fact += f", a member of the {', '.join(guild_names)}"
@@ -10279,6 +10418,9 @@ async def _check_quest_completions_defeat_monster(update_like, session: sessions
                     update_like,
                     f"✨ **{character['name']}** binds a fragment of **{remnant_data['name']}** — "
                     f"once the party assigns a Summoner, they can call it into a later battle.",
+                )
+                await _check_and_award_achievements(
+                    update_like, db.get_character(telegram_user_id, session.chat_id),
                 )
 
 
@@ -16451,6 +16593,10 @@ def _achievement_condition_met(character: dict, check: dict) -> bool:
         if check["variant"] == "damned":
             return good_evil <= -60 and has_upgrade and is_legendary
         return False
+    if check_type == "min_bound_remnants":
+        return len(character.get("bound_remnants") or []) >= check["value"]
+    if check_type == "has_secondary_guild":
+        return bool(character.get("secondary_guilds"))
     return False
 
 

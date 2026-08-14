@@ -2,6 +2,99 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.214] — Synergy Pass Phase 9: full class/subclass/guild/boss audit + a live ASI bug
+
+Per Coffee's request following v1.27.212/213's own audit: "cross
+reference ur subclass system and audit if the mechanics match the
+flavour of the guild... add all of them to the list... finding
+anything that needs to be done and implemented as well." Researched via
+three parallel deep-dive passes over the whole codebase (boss/combat
+mechanics, hybrid-class/secondary-guild coverage, world-content
+completeness), then implemented every concrete gap found.
+
+**Bug fixes:**
+- Faith Circle's heal bonus (`spells.py`) checked only the PRIMARY
+  guild -- the one guild-benefit site missed by the 2026-08-13 sweep
+  that fixed every other one (Silver Wardens/Forge Guild/Thieves'
+  Guild/Arcane Circle/Adventurers' Guild/Enchanters' Guild all already
+  used `held_guild_ids`). A character holding Faith Circle as a
+  secondary (Promotion) guild got zero bonus despite genuinely holding
+  it.
+- `bot._npc_identity_facts` (NPC dialogue grounding) never mentioned a
+  character's `hybrid_class` -- every other real identity fact here
+  (guild) was explicitly wired to use `held_guild_ids` in the same
+  2026-08-13 pass; a real, rebirth-earned second class was invisible to
+  NPCs the whole time.
+- **Real live bug, found via dev-bridge report during this same
+  session**: Coffee's own character got "📈 Strength increased from 20
+  to 20" from "auto level up my character" -- a real Ability Score
+  Improvement point silently spent for zero actual increase, because
+  Strength was already at its (un-rebirthed) cap of 20 and
+  `_apply_asi_choice` never checked that before spending. Now rejects
+  up front ("already at its cap -- choose a different ability instead")
+  and, separately, only ever deducts the ACTUAL increase applied (not
+  the flat requested spend), so a stat 1 point below its cap no longer
+  burns a full 2-point spend for 1 real point of gain either. Manually
+  restored the 2 wasted ASI points to the affected character so they
+  can spend them on a real, useful ability now that the bug is fixed.
+
+**Content additions:**
+- Remnants: the 5 remaining "pure secret" Remnants (The Unopened, The
+  Wrathflame Unbound, The Hollow Bell, The Farthest Span, The Deepest
+  Record) are now `story_tied` -- all 12 now surface as a real "🕯️
+  Whispers" rumor on the Story So Far screen once a player's visited
+  their location, same as the original 7. Pure data flip; the lore text
+  for all 5 was already written and ready.
+- 3 new achievements filling a real coverage gap (Remnants and guild
+  Promotions both postdate this list's last addition and had zero
+  coverage): `remnant_keeper` (bind your first Unbound Remnant),
+  `remnant_master` (bind all 12), and `promoted` (hold a second,
+  "doubled up" guild alongside your primary).
+- 3 new boss signature mechanics (20 of 22 bosses had none before this):
+  The Undertone now **echoes a damage type back** at whoever deals it 3
+  times in one fight; the Colosseum Champion now **reads a practiced
+  combo** and negates the 2nd attack of any multi-attack turn, once per
+  fight; The Drowned Choir now **resists a lingering mark/curse**
+  (halves the Hex/Hunter's Mark bonus die).
+- 2 new subclass-specific boss counters (only 1 existed before, Verge
+  Warden vs. Sneak Attack): The Waking Ember now **counters a raging
+  Barbarian's fury** after the first hit; The Cairnbound now **blunts
+  an Assassin's Backstab** (halves the multiplier) after the first
+  landed one.
+- 1 new guild-flavored boss reaction (none existed before): The Unbegun
+  now **resists a Forge Guild member's own weapon bonus specifically**
+  (negates half of just that bonus, not the base hit) after the first
+  hit -- deliberately checked right after the Forge Guild bonus is
+  applied in `rules/combat.py`, not folded into resistance math (which
+  runs BEFORE that bonus even exists yet -- a real ordering trap the
+  audit's own damage-stacking research flagged).
+
+**Explicitly confirmed correct, not touched:** the full damage-bonus
+stacking order (weapon and spell pipelines both audited in full --
+every multiplicative bonus compounds on the running total by design,
+consistently); `hybrid_class` deliberately not granting spells/
+subclass/proficiencies (by `hybrid_features.py`'s own design, "a taste,
+not the genuine full feature"); boss AI targeting deliberately not
+factoring guild membership (HP%/spellcaster-detection only, by design).
+
+**Doc-only corrections:** two stale comments (`bot.py`, `rules/
+leveling.py`) claiming the utility subclass pick has "no mechanical
+bonus wired up yet" -- false since the same day it was written,
+corrected now. CLAUDE.md's monster-spellcasting note corrected from "a
+first slice, 3 shaman-flavored monsters" to the real current count (21
+monsters, fully data-driven, not hardcoded).
+
+12 new/updated real tests (throwaway DB + seeded-RNG combat simulation,
+per this project's testing convention) confirmed every fix and every
+new mechanic in isolation before shipping: Faith Circle secondary-guild
+credit, hybrid_class in NPC dialogue, all 5 Remnants surfacing as
+rumors, all 3 new achievements end-to-end through their real
+checkpoints, the ASI-cap fix (reject-then-real-spend), and all 6 new
+combat mechanics (counters_rage, resists_dot_stacking,
+resists_forge_guild, counters_backstab, counters_extra_attack,
+echoes_damage_type) individually verified to fire under the right
+condition and not otherwise.
+
 ## [1.27.213] — Fix: 3 multi-class guilds grew the wrong permanent stat for half their members
 
 Follow-up to v1.27.212, per Coffee's own request to "cross reference ur

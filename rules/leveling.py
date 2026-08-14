@@ -126,13 +126,17 @@ def magic_penetration_pct(rebirth_count: int) -> float:
 # following Wizard's Arcane Tradition pilot -- see bot.py's
 # _do_choose_subclass/CLASS_SUBCLASSES). Two genuine 5E archetypes per
 # class. The FIRST name in each pair is that class's "combat" pick and
-# grants the one universal mechanical hook this pass ships --
-# COMBAT_SUBCLASS_DAMAGE_BONUS_PCT more weapon damage (rules/combat.py's
-# resolve_attack, same real hook point the damage-type system uses).
-# The SECOND name is a genuine, valid, sheet-showing pick with no
-# mechanical bonus wired up yet -- honest about the gap rather than
-# inventing one, same convention as every other documented "not built
-# yet" feature in this codebase.
+# grants COMBAT_SUBCLASS_DAMAGE_BONUS_PCT more damage -- originally
+# weapon-only (rules/combat.py's resolve_attack), extended in a
+# 2026-08-14 full synergy audit to spell damage too (spells.
+# resolve_damage_spell), since Draconic/Fiend/War/Moon/Valor belong to
+# classes that deal most of their real damage through spells, not
+# weapon swings. The SECOND name is the "utility" pick -- every one of
+# them resolves to a real mechanic via describe_subclass_effect below
+# (UTILITY_SUBCLASS_ABILITY_CHECK_BONUS's flat ability-check bonus for
+# most, or Thief/Life/Totem Warrior's own bespoke hooks) -- this used to
+# say "no mechanical bonus wired up yet," which was already stale the
+# same day it was written; corrected in that same 2026-08-14 audit.
 CLASS_SUBCLASSES = {
     "Barbarian": ("Berserker", "Totem Warrior"),
     "Fighter": ("Champion", "Battle Master"),

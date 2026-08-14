@@ -9,7 +9,7 @@ from rules.leveling import (
     is_proficient_in_save, LIFE_SUBCLASS_HEAL_BONUS, power_scale_ratio,
     COMBAT_SUBCLASS_NAMES, COMBAT_SUBCLASS_DAMAGE_BONUS_PCT,
 )
-from guilds import FAITH_CIRCLE_HEAL_BONUS
+from guilds import FAITH_CIRCLE_HEAL_BONUS, held_guild_ids
 import hybrid_features
 
 # Which ability a class casts spells with — needed to calculate a real
@@ -548,7 +548,13 @@ def resolve_heal_spell(spell_id: str, caster: dict, target: dict) -> dict:
     # Faith Circle membership benefit (2026-07-25, per Coffee): a real
     # flat bonus on every heal cast, same additive convention as
     # Disciple of Life above -- stacks with it rather than replacing it.
-    if caster.get("guild") == "faith_circle":
+    # Real gap found in a 2026-08-14 full synergy audit: this checked only
+    # the PRIMARY guild, missed by the 2026-08-13 sweep that fixed every
+    # other guild-benefit site (Silver Wardens/Forge Guild/Thieves' Guild/
+    # Arcane Circle/Adventurers' Guild/Enchanters' Guild all already use
+    # held_guild_ids) -- a character holding Faith Circle as a SECONDARY
+    # (Promotion) guild got zero bonus despite genuinely holding it.
+    if "faith_circle" in held_guild_ids(caster):
         total_healed += FAITH_CIRCLE_HEAL_BONUS
     # Cleric's Life subclass hook (2026-07-25): actually CHOOSING Life
     # (rather than War) over the unconditional Disciple of Life above
