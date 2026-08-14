@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.209] — Fix: "switch my player to X" silently misclassified as chat
+
+Found while investigating today's guild curriculum reports: the same
+account typed "Switch my player to ravenloft" and "switch my player ro
+Pan" and BOTH silently landed as action='chat' (no reply, no switch) --
+same silent-failure shape CLAUDE.md's own "Resolved investigations"
+section already documents for the earlier talk_npc bug. Root cause:
+every switch_character keyword trigger in ai/intent_parser.py's
+_keyword_fallback said "character" ("switch to my character X",
+"switch character to X", ...), never "player", even though players
+clearly say both interchangeably for their own character. Added the
+same phrase shapes with "player" substituted in ("switch to my player
+", "switch player to ", "switch my player to "), ordered before the
+bare "switch to "/"play as " catch-alls for the same reason the
+existing "my character " variants already are.
+
+Confirmed live against the real _keyword_fallback: "Switch my player to
+ravenloft" / "switch player to Pan" / "switch to my player Elduinn" all
+now correctly resolve to switch_character with the right target name;
+every pre-existing "character"-worded phrasing still matches unchanged.
+
 ## [1.27.208] — Fix: Arcane Circle's first riddle spoiled, swapped for a new one
 
 Real report (Coffee, dev topic): the Arcane Circle's "First Riddle"

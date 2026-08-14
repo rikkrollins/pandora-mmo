@@ -1410,7 +1410,18 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # first so "my character "/"character " is stripped along with the
     # generic "switch to " prefix, same fix shape "delete my character "
     # already gets below.
+    # Real live bug (2026-08-14, dev-bridge: "Switch my player to
+    # ravenloft" silently misclassified as action='chat' TWICE in a row,
+    # same silent-failure shape CLAUDE.md's own "Resolved investigations"
+    # already documents for the earlier talk_npc bug) -- every trigger
+    # here said "character", never "player", even though players clearly
+    # use both words interchangeably for their own character. Added the
+    # same phrase shapes with "player" substituted in, ordered before
+    # the bare "switch to "/"play as " catch-alls for the same reason
+    # the "my character " variants already are (a more specific match
+    # must win before a shorter one swallows extra words into the name).
     for trigger in ["switch to my character ", "switch character to ", "switch my character to ",
+                     "switch to my player ", "switch player to ", "switch my player to ",
                      "switch to ", "play as "]:
         if trigger in lowered:
             name = text[lowered.index(trigger) + len(trigger):].strip()
