@@ -5,7 +5,10 @@ spell damage/healing numbers are rolled through rules/dice.py — the AI
 narrates what a spell looked like, but never decides its numeric effect.
 """
 from rules.dice import roll_damage, roll_d20, ability_modifier
-from rules.leveling import is_proficient_in_save, LIFE_SUBCLASS_HEAL_BONUS, power_scale_ratio
+from rules.leveling import (
+    is_proficient_in_save, LIFE_SUBCLASS_HEAL_BONUS, power_scale_ratio,
+    COMBAT_SUBCLASS_NAMES, COMBAT_SUBCLASS_DAMAGE_BONUS_PCT,
+)
 from guilds import FAITH_CIRCLE_HEAL_BONUS
 import hybrid_features
 
@@ -468,6 +471,23 @@ def resolve_damage_spell(spell_id: str, caster: dict, target: dict | None = None
         total = int(total * power_scale_ratio(caster.get("level", 1), caster.get("rebirth_count", 0)))
     else:
         total += caster.get("damage_bonus", 0)
+
+    # Real live gap (2026-08-14, Coffee: "Draconic shud be 20% more
+    # damage on magic based attacks... shudnt the magic user have a
+    # stat that influences there magic ability" -- correctly spotted
+    # while asking about Sorcerer's Draconic/Wild Magic split): the
+    # exact same "combat pick" subclass bonus rules/combat.py's
+    # resolve_attack already grants weapon attacks (rules.leveling.
+    # COMBAT_SUBCLASS_NAMES/COMBAT_SUBCLASS_DAMAGE_BONUS_PCT) never
+    # applied here at all -- so Draconic (Sorcerer), Fiend (Warlock),
+    # War (Cleric), Moon (Druid), and Valor (Bard) -- five real
+    # "combat" subclass picks belonging to classes that deal most or
+    # all of their real damage through SPELLS, not weapon swings --
+    # granted a bonus their own class could rarely if ever actually
+    # use. Applied here too, same flat multiplier, so the bonus
+    # actually reaches the damage type these classes deal.
+    if caster.get("subclass") in COMBAT_SUBCLASS_NAMES:
+        total = int(total * (1 + COMBAT_SUBCLASS_DAMAGE_BONUS_PCT / 100))
 
     result = {
         "spell": spell["name"], "caster": caster.get("name", "Unknown"),

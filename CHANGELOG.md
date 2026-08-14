@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.212] — Fix: "combat" subclass damage bonus never reached spell damage
+
+Real report (Coffee, correctly spotted while asking about Sorcerer's
+Draconic vs Wild Magic split): "Draconic shud be 20% more damage on
+magic based attacks... shudnt the magic user have a stat that
+influences there magic ability." The Charisma-check half was already
+correct (Sorcerer's own real spellcasting ability IS Charisma in this
+game, same as real 5E) -- but the damage half was a genuine gap:
+rules.leveling.COMBAT_SUBCLASS_DAMAGE_BONUS_PCT (+20%) has only ever
+applied to WEAPON attacks (rules/combat.py's resolve_attack) since the
+2026-07-25 subclass pass, never to spell damage
+(spells.resolve_damage_spell) -- so Draconic (Sorcerer), Fiend
+(Warlock), War (Cleric), Moon (Druid), and Valor (Bard), five real
+"combat pick" subclasses belonging to classes that deal most or all of
+their real damage through SPELLS, granted a bonus their own class could
+rarely if ever actually use.
+
+resolve_damage_spell now applies the exact same flat +20% when
+caster.subclass is a COMBAT_SUBCLASS_NAMES pick, right alongside the
+existing power_scale_ratio/damage_bonus scaling, before any saving-throw
+halving (so a save still legitimately halves the boosted total, same
+as 5E's own "halve the spell's real damage" rule). Wild Magic (and
+every other utility pick) is unaffected, as intended.
+
+Confirmed live (seeded RNG, same roll both runs): a Draconic Sorcerer's
+Fireball dealt 110 damage vs. 92 for no subclass and 92 for Wild Magic
+-- the intended +20%/no-change split, respectively.
+
 ## [1.27.211] — Fix: "I choose the path of X" swallowed by resolve_choice, never reached choose_subclass
 
 Real report (Coffee, dev-bridge screenshot, twice in a row): "I choose
