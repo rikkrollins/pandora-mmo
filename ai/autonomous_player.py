@@ -50,6 +50,21 @@ a place/person/item that isn't actually listed there):"""
 # this generalizes that fix to EVERY example, not just names within an
 # always-shown line: an example whose entire premise isn't true right now
 # is now omitted from the prompt entirely, not just its placeholder name.
+#
+# Live bug found 2026-08-14 (log monitoring): the accept_quest and
+# choose-a-branch-decision examples used to be `(None, ...)` (always
+# shown) with their real gating condition written as free English text
+# INSIDE the example itself, e.g. "I accept the quest (if the facts
+# below say something's posted or on offer)". The model isn't told to
+# scrub a plain parenthetical the way it's told to scrub a [bracketed]
+# placeholder, and copied that hedge verbatim into a live player
+# message: "I accept the quest (if the facts say you have it)" --
+# breaking the "looks like an ordinary player typed this" illusion
+# CLAUDE.md's design philosophy depends on. Fixed by using this same
+# (required, example) mechanism every other conditional example
+# already uses, instead of hand-writing the condition into the
+# sentence: the example is now omitted entirely unless it's actually
+# true, so there's no hedge text left to copy.
 _EXAMPLE_LINES = [
     ("needs you to travel to", "I head to [the exact place named after 'needs you to travel to', if it's also listed under Places reachable from here]"),
     ("is on offer back at", "I head to [the exact place named after 'is on offer back at', if it's also listed under Places reachable from here]"),
@@ -60,8 +75,9 @@ _EXAMPLE_LINES = [
     (None, "Let's start a fight"),
     ("Things worth a closer look", "I examine [something listed under Things worth a closer look]"),
     (None, "I check the quest board"),
-    (None, "I accept the quest (if the facts below say something's posted or on offer)"),
-    (None, "I choose [the exact label of one of your options] (if the facts below say you have a decision to make)"),
+    ("is on offer here", "I accept the quest"),
+    ("has something posted", "I accept the quest"),
+    ("You have a decision to make", "I choose [the exact label of one of your options]"),
     ("reached the maximum level", "I rebirth"),
     ("trying to solve a riddle", "I say [your own real best guess at the answer to the riddle in the facts below]"),
     ("aren't carrying any healing items", "I want to buy [the exact item named in the healing-supplies fact below]"),

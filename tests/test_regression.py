@@ -30,6 +30,7 @@ import items as items_module
 import remnants as remnants_module
 import spells
 import topics
+from ai.autonomous_player import _action_style_prompt
 from ai.intent_parser import _keyword_fallback, parse_intents
 from ai.support_agent import (
     _deterministic_inventory_answer, _deterministic_location_connections_answer, _deterministic_quest_task_answer,
@@ -7201,6 +7202,61 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("[", stored_action)
         self.assertNotIn("]", stored_action)
         self.assertEqual(stored_action, "I examine an old rope")
+
+    async def test_ai_player_accept_quest_example_has_no_leaked_hedge_text(self):
+        """
+        Real live bug (2026-08-14, topic-activity monitoring): an
+        autonomous AI party member's message was logged as "I accept
+        the quest (if the facts say you have it)" -- a near-verbatim
+        copy of the old always-shown example "I accept the quest (if
+        the facts below say something's posted or on offer)". Unlike
+        [bracketed] placeholders, the model is never told to scrub a
+        plain parenthetical, so it copied the authoring hint straight
+        into a live player-visible message, breaking the "looks like
+        an ordinary player typed this" illusion. Fixed by gating the
+        example on the real situation_facts substring instead of
+        writing the condition into the sentence -- same (required,
+        example) mechanism every other conditional example already
+        uses, so there's no hedge text left in the example to copy.
+        """
+        # The example list is rendered as `- "<example>"` bullet lines
+        # (see _action_style_prompt); the static "how to prioritize"
+        # closing guidance separately quotes "I accept the quest" in
+        # prose regardless of facts, so assertions below check for the
+        # bulleted example form specifically, not a bare substring.
+        ACCEPT_QUEST_BULLET = '- "I accept the quest"'
+        CHOOSE_BULLET = '- "I choose [the exact label of one of your options]"'
+
+        no_quest_facts = "Places reachable from here: The Tavern\nDanger here: a rat"
+        prompt = _action_style_prompt(no_quest_facts)
+        self.assertNotIn(ACCEPT_QUEST_BULLET, prompt)
+        self.assertNotIn(CHOOSE_BULLET, prompt)
+
+        quest_on_offer_facts = "A quest is on offer here: The Wrong Color"
+        prompt = _action_style_prompt(quest_on_offer_facts)
+        self.assertIn(ACCEPT_QUEST_BULLET, prompt)
+
+        board_posted_facts = "Quest board has something posted: Rat Extermination"
+        prompt = _action_style_prompt(board_posted_facts)
+        self.assertIn(ACCEPT_QUEST_BULLET, prompt)
+
+        # The "on offer BACK AT [elsewhere]" fact must NOT also trigger
+        # "I accept the quest" -- you can't accept a quest you haven't
+        # traveled to yet, only "I head to X" should show for that case.
+        offer_elsewhere_facts = 'A quest ("The Hush Below") is on offer back at Crossroads Tavern -- you could head there to accept it.'
+        prompt = _action_style_prompt(offer_elsewhere_facts)
+        self.assertNotIn(ACCEPT_QUEST_BULLET, prompt)
+
+        decision_facts = 'You have a decision to make on "The Wrong Color" -- your options are: "Spare him", "Turn him in"'
+        prompt = _action_style_prompt(decision_facts)
+        self.assertIn(CHOOSE_BULLET, prompt)
+        self.assertNotIn("(if the facts", prompt)
+
+        # No example anywhere should still embed a free-text hedge --
+        # guards against this exact class of bug recurring elsewhere.
+        from ai.autonomous_player import _EXAMPLE_LINES
+        for _, example in _EXAMPLE_LINES:
+            self.assertNotIn("(if the facts", example)
 
     async def test_multi_fight_sessions_do_not_cross_contaminate(self):
         """

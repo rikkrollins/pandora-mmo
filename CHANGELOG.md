@@ -2,6 +2,32 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.204] — Fix: AI party member leaked a prompt-authoring hedge into a live message
+
+Caught via routine Adventure-topic monitoring (not a report): an
+autonomous AI party member's live message logged as "I accept the
+quest (if the facts say you have it)" -- a near-verbatim copy of an
+always-shown few-shot example in `ai/autonomous_player.py`,
+`"I accept the quest (if the facts below say something's posted or on
+offer)"`. Unlike `[bracketed]` placeholders, which the prompt
+explicitly tells the model never to copy verbatim, that example's
+gating condition was hand-written as plain English INSIDE the
+sentence itself, so nothing told the model to scrub it -- and it
+leaked straight into a real player-visible message, breaking the
+"looks like an ordinary player typed this" design philosophy.
+
+Fixed by gating both offending examples (`accept_quest`, and the
+branch-decision `"I choose ..."`) the same way every OTHER conditional
+example in `_EXAMPLE_LINES` already works: a real `situation_facts`
+substring check (`"is on offer here"`, `"has something posted"`,
+`"You have a decision to make"`) that omits the example entirely
+unless it's actually grounded right now, instead of writing the
+condition into the sentence. No hedge text left in the example means
+nothing left to copy. New regression test confirms the example is
+shown only when grounded, is never shown for the "quest is on offer
+BACK AT [elsewhere]" case (you haven't traveled there yet), and that
+no `_EXAMPLE_LINES` entry anywhere still embeds a free-text hedge.
+
 ## [1.27.203] — Add: Eldritch Smite (Warlock), plus real button-tap logging
 
 Two closed-out open items, per Coffee: "do both."
