@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.208] — Fix: Arcane Circle's first riddle spoiled, swapped for a new one
+
+Real report (Coffee, dev topic): the Arcane Circle's "First Riddle"
+step's answer ("a map") got spelled out in a support reply earlier
+today, defeating the entire point of the step ("prove you can think
+past the obvious answer"). guild_curriculum.py's arc_2_the_first_riddle
+now asks a different riddle ("I speak without a mouth and hear without
+ears...", answer: an echo) with its own accepted_answers -- same list
+position, so no one's progress is affected. Manually re-posted and
+re-pinned the real announcement into the live Arcane Circle topic
+(the two members currently on this step, neither of whom had solved
+it yet, would otherwise have kept seeing the spoiled riddle text
+sitting pinned until their next unrelated step change).
+
 ## [1.27.207] — Fix: guild curriculum background sweep only ever saw a player's ACTIVE character slot
 
 The real bug behind Coffee's live reports (dev-bridge, proof screenshot:

@@ -158,17 +158,28 @@ GUILD_CURRICULUM = {
             "reward_gold": 10,
         },
         {
+            # Swapped 2026-08-14 (per Coffee: "NEVER give spoilers again... you
+            # shud make a new riddle quest now") after the original "I have
+            # cities, but no houses..." riddle's answer got spelled out in a
+            # support reply. New riddle, new accepted_answers -- an already-
+            # spoiled answer sitting in chat history/memory would otherwise
+            # let anyone finish this step without ever thinking about it,
+            # defeating the whole point of the step ("prove you can think
+            # past the obvious answer"). Keeping the same "id"/list position
+            # so no one's progress is affected; see
+            # [[feedback_never_spoil_puzzle_answers]] for the standing rule
+            # this enforces going forward.
             "id": "arc_2_the_first_riddle",
             "title": "The First Riddle",
             "flavor": (
                 "Before the Circle teaches you a single real working, it wants proof you can think past the "
-                "obvious answer. Solve this, in the Circle's own topic: \"I have cities, but no houses; "
-                "forests, but no trees; rivers, but no water. What am I?\""
+                "obvious answer. Solve this, in the Circle's own topic: \"I speak without a mouth and hear "
+                "without ears. I have no body, but I come alive on the wind. What am I?\""
             ),
             "min_level": 3,
             "trigger": {
                 "type": "solve_puzzle",
-                "accepted_answers": ["a map", "map", "a map of the world", "a globe"],
+                "accepted_answers": ["an echo", "echo"],
             },
             "reward_xp": 45,
             "reward_gold": 0,
