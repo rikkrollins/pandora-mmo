@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.205] — Fix: guild curriculum steps stuck waiting past their own cooldown
+
+Real report (2026-08-14, dev-bridge screenshot): "The guilds havent
+updated anything new for us. I thought we were supposed to have
+something new after six hours.?!" Root cause: a guild curriculum
+step's real cooldown gates CREDITING, not attempting -- if a member
+satisfied a `reach_location`/`gather_material` step's objective
+before `GUILD_CURRICULUM_STEP_COOLDOWN_HOURS` had elapsed since the
+step unlocked, `_check_guild_curriculum_progress` told them to come
+back later and returned, with nothing ever re-checking once the
+cooldown actually cleared. A member standing right at the required
+location (or still holding the required material) the whole time had
+no way to get credit without leaving and coming back (or re-gathering)
+to re-fire the same event -- a real, reasonable expectation gap, not
+just a messaging problem.
+
+New periodic sweep `_check_guild_curriculum_cooldowns` (same
+background-loop architecture as `_check_pending_loot_votes`/
+`_check_combat_timeouts`): once a character's current step's cooldown
+has cleared, if it's a `reach_location` or `gather_material` type --
+the two trigger types that are a pure present-state check rather than
+a one-off event -- and the character still currently satisfies it,
+credits it automatically. `defeat_monster`/`npc_dialogue`/
+`solve_puzzle`/`dice_challenge`/`alignment_choice` are unchanged
+(genuinely action-triggered; a player naturally re-triggers those by
+acting again). Covers secondary ("doubled up") Promotion guilds too,
+via the same `held_guild_ids` iteration every other curriculum
+checkpoint already uses.
+
 ## [1.27.204] — Fix: AI party member leaked a prompt-authoring hedge into a live message
 
 Caught via routine Adventure-topic monitoring (not a report): an

@@ -15106,6 +15106,104 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("won't credit" in s for s in sink))
         self.assertFalse(any("completes" in s for s in sink))
 
+    async def test_guild_curriculum_cooldown_sweep_auto_credits_reach_location(self):
+        """
+        Real live report (2026-08-14, dev-bridge screenshot): "The
+        guilds havent updated anything new for us. I thought we were
+        supposed to have something new after six hours.?!" Root cause:
+        a reach_location/gather_material step satisfied BEFORE its
+        cooldown elapsed was never automatically credited once the
+        cooldown actually passed -- crediting only ever happened at the
+        exact moment the trigger event fired, so a member standing
+        right at the required location the whole time had no way to
+        get credit without leaving and coming back to re-fire the
+        arrival event, which nothing ever told them to do.
+        _check_guild_curriculum_cooldowns (a new periodic sweep, same
+        pattern as _check_pending_loot_votes/_check_combat_timeouts)
+        closes this: this test confirms it does NOT fire early (still
+        cooling down), then confirms it DOES credit automatically, with
+        no re-move, purely because the cooldown cleared while the
+        character was still standing there.
+        """
+        class _FakeBot:
+            async def send_message(self, *a, **k):
+                return None
+
+        user_id = 700108
+        db.register_chat(-999, "Test Chat", user_id)
+        make_basic_character(
+            user_id, "CurriculumSweepTester", char_class="Fighter", current_location="crossroads_tavern",
+        )
+        db.update_character(user_id, -999, level=10, proven_in_combat=True)
+        await bot._do_join_guild(FakeUpdate(user_id, "I join the Adventurers' Guild", []), "I join the Adventurers' Guild")
+
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "Travel to market row", sink), "Travel to market row")
+        char = db.get_character(user_id, -999)
+        self.assertEqual(char["guild_curriculum_step"], 0, "cooldown hasn't elapsed yet")
+
+        # Sweep runs while still on cooldown -- must NOT credit early.
+        await bot._check_guild_curriculum_cooldowns(_FakeBot())
+        char = db.get_character(user_id, -999)
+        self.assertEqual(char["guild_curriculum_step"], 0, "sweep must respect the real cooldown, not credit immediately")
+
+        # Simulate real time passing -- the character never moved, still standing at market_row.
+        db.update_character(user_id, -999, guild_curriculum_step_unlocked_at="2020-01-01T00:00:00+00:00")
+        await bot._check_guild_curriculum_cooldowns(_FakeBot())
+        char = db.get_character(user_id, -999)
+        self.assertEqual(char["guild_curriculum_step"], 1, "cooldown cleared while still satisfying the objective -- should auto-credit")
+
+    async def test_guild_curriculum_cooldown_sweep_auto_credits_gather_material(self):
+        """Same fix, the other passive-state trigger type: still holding the required material once the cooldown clears."""
+        from unittest.mock import patch
+        import guild_curriculum as gc
+
+        class _FakeBot:
+            async def send_message(self, *a, **k):
+                return None
+
+        user_id = 700107
+        db.register_chat(-999, "Test Chat", user_id)
+        make_basic_character(
+            user_id, "CurriculumSweepTester2", char_class="Wizard", current_location="market_row",
+            ability_scores={"strength": 8, "dexterity": 12, "constitution": 14,
+                             "intelligence": 17, "wisdom": 10, "charisma": 10},
+        )
+        db.update_character(user_id, -999, level=10, proven_in_combat=True, subclass="Evocation")
+        with patch("bot.narrate_skill_check", return_value="Real training, quietly done."):
+            await bot._do_join_guild(FakeUpdate(user_id, "I join the Arcane Circle", []), "I join the Arcane Circle")
+            with patch.object(gc, "GUILD_CURRICULUM_STEP_COOLDOWN_HOURS", 0):
+                sink = []
+                await bot._do_move(FakeUpdate(user_id, "Go to the arcane nook", sink), "Go to the arcane nook")
+                char = db.get_character(user_id, -999)
+                self.assertEqual(char["guild_curriculum_step"], 1)
+
+                # Step 1 is the riddle -- must clear it before step 2 (gather_material) is even current.
+                sink = []
+                await bot.guild_topic_handler(
+                    FakeUpdate(user_id, "a map", sink, thread_id=config.GUILD_TOPIC_IDS["arcane_circle"]),
+                    DummyContext(), "arcane_circle",
+                )
+                char = db.get_character(user_id, -999)
+                self.assertEqual(char["guild_curriculum_step"], 2, "should now be on the gather_material step (3x moonpetal)")
+
+            # Cooldown patch exited -- step 2's own real 6h cooldown now applies.
+            db.update_character(user_id, -999, current_location="hollow_stump_shrine")
+            for _ in range(6):
+                if db.get_character(user_id, -999)["inventory"].get("moonpetal", 0) >= 3:
+                    break
+                sink = []
+                await bot._do_gather(FakeUpdate(user_id, "I gather moonpetal", sink), "I gather moonpetal", forced_roll=20)
+            char = db.get_character(user_id, -999)
+            self.assertGreaterEqual(char["inventory"].get("moonpetal", 0), 3, "must actually be holding all 3 for this test to mean anything")
+            self.assertEqual(char["guild_curriculum_step"], 2, "still on cooldown (real, not the 0-patched one) -- must not have auto-credited from the gather itself")
+
+        # Simulate real time passing -- still holding the material.
+        db.update_character(user_id, -999, guild_curriculum_step_unlocked_at="2020-01-01T00:00:00+00:00")
+        await bot._check_guild_curriculum_cooldowns(_FakeBot())
+        char = db.get_character(user_id, -999)
+        self.assertEqual(char["guild_curriculum_step"], 3, "cooldown cleared while still holding the material -- should auto-credit")
+
     async def test_guild_curriculum_gather_material_solve_puzzle_and_npc_dialogue(self):
         """
         Real end-to-end deliverable, Arcane Circle curriculum: covers the

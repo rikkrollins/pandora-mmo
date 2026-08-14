@@ -16595,6 +16595,56 @@ def _guild_curriculum_time_remaining_note(character: dict, guild_id: str | None 
     return f"{hours}h {minutes}m" if hours else f"{minutes}m"
 
 
+async def _check_guild_curriculum_cooldowns(bot) -> None:
+    """
+    Periodic sweep (same architecture as _check_pending_loot_votes/
+    _check_combat_timeouts, run from the same background loop) for a
+    real reported gap (2026-08-14, dev-bridge screenshot): "The guilds
+    havent updated anything new for us. I thought we were supposed to
+    have something new after six hours.?!" Root cause: crediting a
+    guild curriculum step only ever happens at the exact moment its
+    trigger event fires (arrival, a successful gather, a kill, ...) --
+    if the character satisfied the objective before
+    GUILD_CURRICULUM_STEP_COOLDOWN_HOURS had elapsed since the step
+    unlocked, _check_guild_curriculum_progress just tells them to wait
+    and returns, with nothing ever re-checking once the cooldown
+    actually clears. A player standing right at the required location
+    (or still holding the required material) the whole time reasonably
+    expects the guild to recognize that automatically once "six hours"
+    is up, not require them to walk away and back (or re-gather) to
+    re-fire the same event.
+
+    Only reach_location and gather_material are handled here -- these
+    are the two trigger types that are a pure PRESENT STATE (standing
+    somewhere / holding an item count) rather than a one-off event, so
+    they're the only ones honestly re-checkable without the character
+    doing anything new. defeat_monster/npc_dialogue/solve_puzzle/
+    dice_challenge/alignment_choice remain action-triggered, unchanged
+    -- a player naturally re-triggers those by acting again (dice/
+    puzzle/choice are typed directly in the guild's own topic anyway).
+    """
+    for chat_id in db.get_all_chat_ids():
+        for character in _get_party_members(chat_id):
+            for guild_id in held_guild_ids(character):
+                step_index = _guild_curriculum_step_index(character, guild_id)
+                step = guild_curriculum_module.get_step(guild_id, step_index)
+                if step is None or character["level"] < step["min_level"]:
+                    continue
+                trigger = step["trigger"]
+                if trigger["type"] not in ("reach_location", "gather_material"):
+                    continue
+                if not _guild_curriculum_step_ready(character, guild_id):
+                    continue
+                if trigger["type"] == "reach_location":
+                    matched = character["current_location"] == trigger["location"]
+                else:
+                    matched = character["inventory"].get(trigger["material"], 0) >= trigger.get("count", 1)
+                if not matched:
+                    continue
+                update_like = _AiPlayerUpdate(bot, chat_id, character["telegram_user_id"], "")
+                await _complete_guild_curriculum_step(update_like, character["telegram_user_id"], chat_id, step, guild_id=guild_id)
+
+
 # A real riddle answer is almost always said plainly, optionally behind
 # one of these short lead-ins -- stripped before the exact-match check in
 # _guild_curriculum_riddle_answer_matches below.
@@ -25193,6 +25243,10 @@ async def _idle_inactivity_loop(application: Application) -> None:
             _maybe_revive_standalone_ai_companions()
         except Exception as e:
             logger.error(f"[world_tick] standalone AI companion revival check failed this cycle: {e!r}")
+        try:
+            await _check_guild_curriculum_cooldowns(application.bot)
+        except Exception as e:
+            logger.error(f"[guild_curriculum] cooldown auto-credit sweep failed this cycle: {e!r}")
 
         # Phase 4b: everything below this point genuinely differs per
         # tenant chat (NPC wander state, the "meanwhile" heartbeat, the
