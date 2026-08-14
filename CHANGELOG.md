@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.211] — Fix: "I choose the path of X" swallowed by resolve_choice, never reached choose_subclass
+
+Real report (Coffee, dev-bridge screenshot, twice in a row): "I choose
+the path of the battle master" and "I choose the path of the Battle
+Master" both got "You don't have a decision to make right now." --
+resolve_choice's own generic (2026-07-13) "i choose" trigger runs much
+earlier in ai/intent_parser.py's _keyword_fallback than the real
+choose_subclass check, so it swallowed the message before
+choose_subclass (further down, and otherwise perfectly capable of
+matching "path of" + a real subclass name) ever got a chance. Same
+shape as the riddle/puzzle-vs-resolve_choice collision already fixed
+2026-07-13 in this exact function, and directly on the heels of
+v1.27.210 finally making that choice worth making informedly -- the
+player couldn't actually COMMIT to their now-informed pick.
+
+Added a narrow pre-check, same position/pattern as the existing
+riddle/puzzle preemption: "path of" immediately alongside any real
+subclass name (rules.leveling.CLASS_SUBCLASSES, all 22 across 11
+classes) now resolves to choose_subclass BEFORE resolve_choice's own
+trigger runs -- no board-quest branch choice is ever phrased that way,
+so this can't misfire the other direction.
+
+Confirmed live against the real _keyword_fallback: "I choose the path
+of the battle master/Battle Master/Champion" all now correctly resolve
+to choose_subclass; every existing resolve_choice/answer_puzzle
+phrasing ("I choose to keep it and collect the reward", "I have
+decided the answer to the riddle is a map", "I choose to leave it be
+instead") still resolves unchanged.
+
 ## [1.27.210] — Fix: subclass choice prompt named the options but never what they do
 
 Real report (Coffee, Support/dev topic): "It wants me to choose without

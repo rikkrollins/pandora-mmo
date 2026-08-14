@@ -1226,6 +1226,23 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if any(w in lowered for w in ["riddle", "puzzle", "the answer to"]):
         return {**base, "action": "answer_puzzle"}
 
+    # Checked BEFORE resolve_choice below, same reasoning/pattern as the
+    # riddle/puzzle preemption just above: real live bug (2026-08-14,
+    # dev-bridge screenshot, TWICE in a row): "I choose the path of the
+    # battle master"/"I choose the path of the Battle Master" both got
+    # swallowed by resolve_choice's own broad "i choose" trigger just
+    # below, since this real subclass-pick check normally lives much
+    # further down this function (see its full version there, kept
+    # unchanged for phrasings that don't say "i choose" at all, e.g.
+    # "specialize in evocation"). "path of " immediately followed by a
+    # real subclass name is unambiguous -- no board-quest branch choice
+    # is ever phrased that way -- so this narrow pre-check only needs to
+    # catch that one specific collision, not duplicate the full
+    # school/verb matching further down.
+    _subclass_names_early = tuple(n.lower() for pair in leveling.CLASS_SUBCLASSES.values() for n in pair)
+    if "path of" in lowered and any(name in lowered for name in _subclass_names_early):
+        return {**base, "action": "choose_subclass"}
+
     if any(w in lowered for w in ["i choose", "i decide to", "i decided to", "i've decided", "ive decided",
                                     "i have decided", "i'll go with", "ill go with",
                                     "my choice is", "i'll take the", "ill take the",
