@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.199] — Fix: loot vote now shows the timeout and who's voting, live
+
+Real live request (Coffee: "when voting if we click the other button
+after we already voted - let us change the vote. please say how long
+the time out is and show the players vote so people can see who is
+voting for that item"). Changing a vote already worked mechanically
+(`record["votes"]` was always a plain dict overwrite keyed by user_id)
+but gave no visible confirmation it took, the 60-second window was
+only ever described vaguely as "the next minute", and nobody could see
+who else had voted.
+
+New `_loot_vote_message_text(record)` builds the loot announcement
+(item stats, the real `LOOT_VOTE_WINDOW_SECONDS` value spelled out,
+and a live "Currently want it: ..." line naming every real current
+"yes" voter — humans and AI companions alike, via db.get_character,
+never invented) and is now shared by both the initial announcement
+AND every subsequent vote — new `_safe_edit_text` (same try/except
+pattern as the existing `_safe_edit_markup`) live-edits the shared
+message in place on every tap, so a changed vote visibly drops that
+name off the list the moment it's recorded. The private per-tap reply
+now also says "Vote changed" instead of "Vote recorded" when a real
+prior vote flips.
+
+2 new real tests, plus the full existing loot-vote/item-view/battle-
+menu-callback regression set (12 tests) confirmed clean — including
+catching and fixing a real test-isolation bug the new tests introduced
+(leaving an unresolved entry in the shared `_PENDING_LOOT_VOTES` dict
+broke a pre-existing test's `next(iter(...))` assumption; fixed by
+cleaning up each new test's own vote entry).
+
 ## [1.27.198] — Add: item view shows real equip requirements
 
 Real live request (Coffee: "when we view an equipable item please say

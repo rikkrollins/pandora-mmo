@@ -3570,6 +3570,24 @@ async def _safe_edit_markup(query, reply_markup=None) -> bool:
         return False
 
 
+async def _safe_edit_text(query, text: str, reply_markup=None) -> bool:
+    """
+    Same shape as _safe_edit_markup above, for a full text edit instead
+    of just the markup (2026-08-14, first real use: loot_vote_callback
+    live-updating who's currently voted). Telegram raises the same
+    "Message is not modified" BadRequest whenever the new text happens
+    to exactly match what's already shown (a real, harmless case here
+    too -- e.g. two rapid double-taps of the same choice) -- swallowed
+    the same way, never left to crash the whole callback.
+    """
+    try:
+        await query.edit_message_text(text, reply_markup=reply_markup)
+        return True
+    except TelegramError as e:
+        logger.warning(f"[callback] edit_message_text failed (likely already current): {e!r}")
+        return False
+
+
 # Sentinel passed as _safe_send's thread_id to mean "the Main/General
 # topic, explicitly" -- see the comment inside _safe_send for why this
 # can't just be None (None already means "unspecified, default to
@@ -4118,6 +4136,39 @@ def _ai_wants_item(pid: int, chat_id: int, loot_item: dict) -> bool:
     return False
 
 
+def _loot_vote_message_text(record: dict) -> str:
+    """
+    Shared by _grant_generated_loot (initial announcement) and
+    loot_vote_callback (live update on every vote, including a changed
+    one) so the message never drifts out of sync with the real
+    pending-vote state (2026-08-14, per Coffee: "please say how long
+    the time out is and show the players vote so people can see who is
+    voting for that item"). Names every real current wanter -- humans
+    who tapped "I want it" (record["votes"] is re-checked fresh every
+    call, so a changed vote drops off this list the moment it's
+    recorded) AND AI companions whose real _ai_wants_item decision was
+    yes -- real character names via db.get_character, never invented.
+    """
+    item = items_module.get_item(record["item_id"])
+    rarity_label = f" ({item['rarity'].replace('_', ' ')})" if item and item.get("rarity") else ""
+    stats_line = _format_item_stats_line(item) if item else None
+    stats_block = f"\n{stats_line}" if stats_line else ""
+    chat_id = record["chat_id"]
+    wanter_ids = [pid for pid in record["human_ids"] if record["votes"].get(pid) is True]
+    wanter_ids += [pid for pid, wants in record["ai_wants"].items() if wants]
+    wanter_names = []
+    for pid in wanter_ids:
+        character = db.get_character(pid, chat_id)
+        wanter_names.append(character["name"] if character else "Someone")
+    voters_line = f"\n🙋 Currently want it: {', '.join(wanter_names)}" if wanter_names else "\n🙋 Nobody's claimed it yet."
+    return (
+        f"🎲 **Loot found: {record['item_name']}**{rarity_label}{stats_block}\n"
+        f"Anyone who wants it, tap below within the next {LOOT_VOTE_WINDOW_SECONDS} seconds — "
+        f"if more than one hand goes up, it's random who gets it. Tap the other button any time to change your vote."
+        f"{voters_line}"
+    )
+
+
 async def _grant_generated_loot(update: Update, real_party_ids: list[int]) -> str:
     """
     Rolls a real, keepable, equippable magic item (2026-08-02 magic item
@@ -4144,23 +4195,27 @@ async def _grant_generated_loot(update: Update, real_party_ids: list[int]) -> st
     ai_wants = {pid: _ai_wants_item(pid, chat_id, loot_item) for pid in ai_ids}
 
     vote_id = f"loot{item_id}"
-    _PENDING_LOOT_VOTES[vote_id] = {
+    record = {
         "chat_id": chat_id, "item_id": item_id, "item_name": loot_item["name"],
         "human_ids": human_ids, "ai_wants": ai_wants, "votes": {}, "started_at": time.time(),
     }
-    stats_line = _format_item_stats_line(loot_item)
-    stats_block = f"\n{stats_line}" if stats_line else ""
+    _PENDING_LOOT_VOTES[vote_id] = record
     await _safe_send(
-        update,
-        f"🎲 **Loot found: {loot_item['name']}** ({loot_item['rarity'].replace('_', ' ')}){stats_block}\n"
-        f"Anyone who wants it, tap below within the next minute — if more than one hand goes up, it's random who gets it.",
+        update, _loot_vote_message_text(record),
         reply_markup=_loot_vote_keyboard(vote_id), speak=False,
     )
     return ""
 
 
 async def loot_vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Records one real human's yes/no vote on a pending loot drop; actual resolution happens later, in _check_pending_loot_votes."""
+    """
+    Records one real human's yes/no vote on a pending loot drop --
+    tapping the OTHER button any time before the window closes changes
+    it (a plain dict overwrite keyed by user_id, so a later vote always
+    wins; 2026-08-14, per Coffee, confirming this stayed changeable and
+    made it visibly so). Actual resolution happens later, in
+    _check_pending_loot_votes.
+    """
     query = update.callback_query
     parts = (query.data or "").split("|")
     vote_id = parts[1] if len(parts) > 1 else ""
@@ -4173,8 +4228,15 @@ async def loot_vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = update.effective_user.id
     if user_id not in record["human_ids"]:
         return
+    previous_vote = record["votes"].get(user_id)
     record["votes"][user_id] = (choice == "yes")
-    await _safe_send(update, f"Vote recorded: {'you want it!' if choice == 'yes' else 'you pass.'}")
+    changed = previous_vote is not None and previous_vote != record["votes"][user_id]
+    await _safe_send(
+        update,
+        f"{'Vote changed' if changed else 'Vote recorded'}: "
+        f"{'you want it!' if choice == 'yes' else 'you pass.'}",
+    )
+    await _safe_edit_text(query, _loot_vote_message_text(record), reply_markup=_loot_vote_keyboard(vote_id))
 
 
 async def _check_pending_loot_votes(bot) -> None:

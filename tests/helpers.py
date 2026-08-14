@@ -155,6 +155,7 @@ class FakeCallbackQuery:
         self.data = data
         self._sink = sink
         self.answered = None
+        self.last_edited_text = None
 
     async def answer(self, text=None, show_alert=False):
         self.answered = text or "<ack>"
@@ -162,6 +163,10 @@ class FakeCallbackQuery:
 
     async def edit_message_reply_markup(self, reply_markup=None):
         self._sink.append(f"<edit_markup:{reply_markup}>")
+
+    async def edit_message_text(self, text, reply_markup=None):
+        self.last_edited_text = text
+        self._sink.append(text)
 
 
 class FakeCallbackUpdate:

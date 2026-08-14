@@ -5994,6 +5994,65 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(item_id, db.get_character(996030, -999)["inventory"])
         self.assertNotIn(item_id, db.get_character(996031, -999)["inventory"])
 
+    async def test_loot_vote_can_be_changed_by_tapping_the_other_button(self):
+        """
+        Real live request (2026-08-14, Coffee: "when voting if we click
+        the other button after we already voted - let us change the
+        vote"). record["votes"] is a plain dict keyed by user_id, so a
+        second tap already overwrote the first -- this proves that end
+        to end through the real callback, including the "Vote changed"
+        (not "Vote recorded") acknowledgement.
+        """
+        make_basic_character(996040, "VoteChanger", current_location="crossroads_tavern")
+        loot_item = bot.generate_item(item_type="weapon")
+        item_id = bot._persist_generated_item(loot_item)
+        vote_id = "loottestchange"
+        bot._PENDING_LOOT_VOTES[vote_id] = {
+            "chat_id": -999, "item_id": item_id, "item_name": loot_item["name"],
+            "human_ids": [996040], "ai_wants": {}, "votes": {}, "started_at": time.time(),
+        }
+        sink1 = []
+        yes_update = FakeCallbackUpdate(996040, f"lootvote|{vote_id}|yes", sink1)
+        await bot.loot_vote_callback(yes_update, DummyContext())
+        self.assertTrue(bot._PENDING_LOOT_VOTES[vote_id]["votes"][996040])
+        self.assertTrue(any("Vote recorded" in msg for msg in sink1), sink1)
+
+        sink2 = []
+        no_update = FakeCallbackUpdate(996040, f"lootvote|{vote_id}|no", sink2)
+        await bot.loot_vote_callback(no_update, DummyContext())
+        self.assertFalse(bot._PENDING_LOOT_VOTES[vote_id]["votes"][996040])
+        self.assertTrue(any("Vote changed" in msg for msg in sink2), sink2)
+        # _PENDING_LOOT_VOTES is real module-level shared state -- other
+        # tests (e.g. test_looted_item_gets_a_view_button_with_working_
+        # actions) grab `next(iter(...))` and assume it's THEIRS, so an
+        # unresolved entry left behind here would corrupt them.
+        del bot._PENDING_LOOT_VOTES[vote_id]
+
+    async def test_loot_vote_message_shows_timeout_and_current_wanters(self):
+        """
+        Same live request -- "please say how long the time out is and
+        show the players vote so people can see who is voting for that
+        item". The shared loot-vote message must be edited live with
+        the real LOOT_VOTE_WINDOW_SECONDS value and the real name of
+        every current "yes" voter.
+        """
+        make_basic_character(996041, "VisibleVoter", current_location="crossroads_tavern")
+        loot_item = bot.generate_item(item_type="weapon")
+        item_id = bot._persist_generated_item(loot_item)
+        vote_id = "loottestvisible"
+        bot._PENDING_LOOT_VOTES[vote_id] = {
+            "chat_id": -999, "item_id": item_id, "item_name": loot_item["name"],
+            "human_ids": [996041], "ai_wants": {}, "votes": {}, "started_at": time.time(),
+        }
+        sink = []
+        update = FakeCallbackUpdate(996041, f"lootvote|{vote_id}|yes", sink)
+        await bot.loot_vote_callback(update, DummyContext())
+        edited_text = update.callback_query.last_edited_text
+        self.assertIsNotNone(edited_text)
+        self.assertIn("VisibleVoter", edited_text)
+        self.assertIn(f"{bot.LOOT_VOTE_WINDOW_SECONDS} seconds", edited_text)
+        del bot._PENDING_LOOT_VOTES[vote_id]
+
     # -- Dismantling (2026-08-13, per Coffee: unwanted gear breaks down
     #    into the real materials its own recipe would have used, tiered
     #    by a real forging/blacksmithing ability check) -----------------
