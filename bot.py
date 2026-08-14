@@ -6271,10 +6271,28 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
         # encounter math instead of always defaulting to one lone
         # monster, so a bigger/higher-level party actually faces a
         # proportionally bigger fight. See rules/leveling.scaled_enemy_count.
+        #
+        # Real live bug (2026-08-14, per Coffee, dev-bridge screenshot:
+        # a level-20+ party facing "The Unspoken 2" and "The Unspoken
+        # 4" in the same fight -- 4 separate copies of one named story
+        # boss). scaled_enemy_count was being called unconditionally
+        # here, with no is_boss exemption at all, even though the
+        # SIBLING check just below (stat_mult) already deliberately
+        # exempts a hand-placed story boss from party-size scaling for
+        # exactly this reason ("whose difficulty spike is intentional,
+        # not a bug"). A named boss stays a single instance when the
+        # count is auto-scaled -- same exemption, same is_boss check,
+        # now applied consistently to BOTH halves of encounter scaling
+        # instead of just one. An explicitly-requested count (e.g. a
+        # player literally typing "fight 2 goblins") is untouched --
+        # this only affects the auto-scaling path.
         if count is None:
-            count = scaled_enemy_count(
-                [p.get("level", 1) for p in party], template.get("xp_reward", 0)
-            )
+            if template.get("is_boss", False):
+                count = 1
+            else:
+                count = scaled_enemy_count(
+                    [p.get("level", 1) for p in party], template.get("xp_reward", 0)
+                )
 
         # Real live bug (2026-08-10, per Coffee: "Make it so when these
         # ai characters attack, they are the average party level. This

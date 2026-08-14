@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.201] — Fix: a named story boss could be duplicated 4x by encounter scaling
+
+Follow-up to v1.27.200's same dev-bridge report: the screenshot that
+led to that fix also showed "The Unspoken 2" and "The Unspoken 4" --
+four separate copies of one named boss in the same fight. Coffee,
+asked whether to fix it: "yes look into it and fix it."
+
+Root cause: `_do_start_combat`'s auto-scaling (`scaled_enemy_count`,
+picks a monster COUNT from the party's real 5E Medium-encounter XP
+budget) was called completely unconditionally -- even though the very
+next check right below it (`stat_mult`, which scales a monster's raw
+HP/damage) already deliberately exempts a hand-placed story boss for
+exactly this reason ("whose difficulty spike is intentional, not a
+bug"). A boss like The Unspoken (xp_reward 350) is tiny relative to a
+high-level party's real budget, so `scaled_enemy_count` maxed out at 4
+-- spawning 4 separate instances of a boss that's supposed to be a
+single named encounter.
+
+Fixed with the same `is_boss` exemption, now applied consistently to
+BOTH halves of encounter scaling: an auto-scaled fight against a real
+boss always gets `count = 1`. An explicitly-requested count (a player
+literally asking for N of something) is untouched.
+
+2 new tests (a high-level party auto-fighting The Unspoken gets
+exactly 1 instance; a regression guard confirming an ordinary,
+non-boss monster still scales normally for the same high-level party)
+plus the existing boss/mixed-encounter/summon test set confirmed
+clean.
+
 ## [1.27.200] — Fix: monster/boss spell casts dealt near-zero damage
 
 Real live bug (Coffee, dev-bridge screenshot: a level-20+ party facing

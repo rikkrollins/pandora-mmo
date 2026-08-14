@@ -8806,6 +8806,62 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(enemy["xp_reward"], template.get("xp_reward", 0))
         sessions.end_session(-999)
 
+    async def test_start_combat_never_duplicates_a_hand_placed_boss(self):
+        """
+        Real live bug (2026-08-14, Coffee, dev-bridge screenshot,
+        follow-up to the same report fixed in v1.27.200): a level-20+
+        party auto-fighting a real story boss (The Unspoken, xp_reward
+        350 -- tiny relative to a high-level party's real 5E Medium-
+        encounter XP budget) got FOUR separate copies of it in the same
+        fight ("The Unspoken 2", "The Unspoken 4" both visible in the
+        screenshot) -- scaled_enemy_count was called completely
+        unconditionally here, with no is_boss exemption at all, even
+        though the very next check (stat_mult) already deliberately
+        exempts a hand-placed story boss from party-size scaling for
+        the exact same stated reason ("whose difficulty spike is
+        intentional, not a bug"). A named boss must always stay a
+        single instance when the count is auto-scaled (never touches
+        an explicitly-requested count).
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock, Mock
+        sessions.end_session(-999)
+        user_id = 900702
+        make_basic_character(user_id, "HighLevelHero", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=20, hp_current=730, hp_max=730)
+        sink = []
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()), \
+             patch("bot.narrate_boss_intro", new=Mock(return_value="A shadow falls.")):
+            await bot._do_start_combat(FakeUpdate(user_id, "attack the unspoken", sink), monster_key="the_unspoken")
+        session = sessions.get_session_for_user(-999, user_id)
+        enemies = [p for p in session.participants if p.get("is_ai")]
+        self.assertEqual(len(enemies), 1, enemies)
+        self.assertEqual(enemies[0]["name"], "The Unspoken")
+        sessions.end_session(-999)
+
+    async def test_start_combat_still_auto_scales_a_normal_monster_for_a_high_level_party(self):
+        """
+        Regression guard for the fix above: only a real hand-placed
+        boss is exempt from count auto-scaling -- an ordinary monster
+        (never is_boss) at a location must still get multiple copies
+        for a high-level party, exactly as scaled_enemy_count intends.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        user_id = 900703
+        make_basic_character(user_id, "HighLevelHero2", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=20, hp_current=730, hp_max=730)
+        sink = []
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()):
+            await bot._do_start_combat(FakeUpdate(user_id, "attack a goblin", sink), monster_key="goblin")
+        session = sessions.get_session_for_user(-999, user_id)
+        enemies = [p for p in session.participants if p.get("is_ai")]
+        self.assertGreater(len(enemies), 1, enemies)
+        sessions.end_session(-999)
+
     async def test_start_combat_copies_elemental_resistance_pct_from_template(self):
         """
         Real feature (2026-08-10): the_waking_ember's real, hand-set
