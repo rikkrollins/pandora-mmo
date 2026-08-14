@@ -2,6 +2,54 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.217] — Synergy Pass Phase 11: the last 8 bosses — all 22 of 22 now have a real signature mechanic
+
+Completes the boss-mechanic arc started in Phase 9 (2 of 22) → Phase 10
+(11 of 22) → this phase, covering every remaining boss.
+
+**Generalized, not just extended**: Phase 10's `punishes_silenced_
+targets` (The Unspoken) was hardcoded to the string "silenced" — renamed
+to `punishes_own_condition`, which now reads the boss's own real
+`on_hit_condition` generically. One flag, reusable by any condition-
+inflicting boss, instead of needing a new near-duplicate flag per
+condition. The Unspoken's own behavior is unchanged. Applied to 4 more
+bosses this phase, each punishing ITS OWN on_hit_condition:
+
+- **The Waiting Dark** (paralyzed), **The Buried Current** (prone),
+  **The Archive's Keeper** (blinded), **The Deepest Record**
+  (frightened) — all +25% damage against a target already carrying that
+  exact condition, every hit.
+
+4 genuinely new mechanics for the remaining bosses:
+
+- **The Unopened** (`counters_divine_smite`) — a real seal, closed once
+  against a Paladin's Divine Smite: the first smite lands in full,
+  every one after that this fight is negated outright.
+- **The Wrathflame Unbound** (`ignited_after_first_hit`) — "anger that
+  WAS a shape": taking its first real hit permanently sets it alight,
+  +20% damage on every one of its own attacks for the rest of that
+  fight.
+- **The Farthest Span** (`empowered_by_crits`) — "what crosses back":
+  landing a real critical hit on it empowers its own very next attack
+  (+30%), re-arming every time it's crit again.
+- **The Spire's Grace** (`counters_empowered_spell`) — originally
+  planned as a Channel Divinity counter, but Channel Divinity in this
+  engine only ever targets `UNDEAD_MONSTER_KEYS` monsters (caught
+  during implementation — The Spire's Grace isn't undead-flavored, so
+  that counter could never actually trigger). Retargeted to a real,
+  reachable mechanic instead: resists a Sorcerer's Empowered Spell
+  metamagic reroll outright (not a "first free" shape like the others —
+  Empowered Spell is a once-PER-REST resource, so there's rarely a
+  genuine 2nd attempt in the same fight to distinguish from the 1st).
+
+7 new/updated real tests (seeded-RNG combat simulation + a real call
+into `bot._apply_empowered_spell` with an actual resisting target dict)
+confirmed all 5 mechanics fire under the right condition; the
+generalized `punishes_own_condition` re-verified against a different
+condition (paralyzed) than the one it originally shipped with
+(silenced), confirming the generalization didn't just special-case one
+string.
+
 ## [1.27.216] — Synergy Pass Phase 10: 5 more boss signature mechanics
 
 Continuation of Phase 9 (v1.27.214) — 6 of 22 bosses had a real

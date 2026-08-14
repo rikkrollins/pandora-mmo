@@ -612,15 +612,38 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
                     damage_dealt -= forge_bonus_amount // 2
                 else:
                     defender["_forge_guild_resisted"] = True
-        # Synergy Phase 10 punishes_silenced_targets (2026-08-14, The
+        # Synergy Phase 10 punishes_own_condition (2026-08-14, The
         # Unspoken -- a real combo with its own on_hit_condition:
         # "silenced": this boss silences whoever it hits, then hits
         # harder against anyone still carrying that silence, "the cavern
         # describes YOU back"). Every hit, not just the first -- this is
-        # a standing vulnerability while silenced, not a one-time "learn
+        # a standing vulnerability while afflicted, not a one-time "learn
         # the pattern" counter like counters_rage/counters_wild_shape.
-        if attacker.get("punishes_silenced_targets") and "silenced" in (defender.get("conditions") or []):
+        # Generalized in Synergy Phase 11 (2026-08-14, was originally
+        # `punishes_silenced_targets`, hardcoded to "silenced" only) --
+        # reads the boss's OWN real on_hit_condition instead of a fixed
+        # string, so any condition-inflicting boss can reuse this same
+        # real combo just by setting the one flag, no per-condition flag
+        # needed. The Unspoken's own behavior is unchanged (its
+        # on_hit_condition is still "silenced").
+        if (attacker.get("punishes_own_condition") and attacker.get("on_hit_condition")
+                and attacker["on_hit_condition"] in (defender.get("conditions") or [])):
             damage_dealt = int(damage_dealt * 1.25)
+        # Synergy Phase 11 ignited_after_first_hit (2026-08-14, The
+        # Wrathflame Unbound): the "mark it" half lives further down this
+        # function (right where reduces_first_hit_damage/punishes_
+        # repeat_attacker check the DEFENDER side) -- this is the "read
+        # it" half, checked here as the ATTACKER, permanent once set,
+        # every attack for the rest of the fight once it's taken its
+        # first real hit.
+        if attacker.get("_ignited"):
+            damage_dealt = int(damage_dealt * 1.2)
+        # Synergy Phase 11 empowered_by_crits (2026-08-14, The Farthest
+        # Span): consumed (popped) here -- only the very NEXT attack
+        # after being critically hit gets the bonus, not every attack for
+        # the rest of the fight like ignited_after_first_hit above.
+        if attacker.pop("_empowered_by_crit", False):
+            damage_dealt = int(damage_dealt * 1.3)
         # Real player-power rebalance (2026-07-26, per Coffee: "rebalance
         # everything... all skills and abilities and magic and spells and
         # cantrips"): monster HP/damage were already rescaled to match
@@ -716,6 +739,24 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
             if defender.get("_last_attacker_id") == attacker_id:
                 damage_dealt = damage_dealt // 2
             defender["_last_attacker_id"] = attacker_id
+
+        # Synergy Phase 11 ignited_after_first_hit (2026-08-14, The
+        # Wrathflame Unbound -- "anger that WAS a shape": taking its
+        # first real hit each fight sets it permanently alight for the
+        # rest of that fight. Checked/consumed on the ATTACKER side, near
+        # rage_bonus/counters_rage further up this function -- this is
+        # only the "mark it" half.
+        if defender.get("ignited_after_first_hit") and not defender.get("_ignited"):
+            defender["_ignited"] = True
+
+        # Synergy Phase 11 empowered_by_crits (2026-08-14, The Farthest
+        # Span -- "what crosses back"): landing a real critical hit on it
+        # empowers its own very next attack. Re-arms every time it's
+        # crit (not a one-time "learn the pattern" flag like counters_
+        # rage) -- consumed (popped) the moment it actually attacks, see
+        # the ATTACKER-side check further up this function.
+        if defender.get("empowered_by_crits") and attack_result["critical_hit"]:
+            defender["_empowered_by_crit"] = True
 
         # Synergy Phase 9 echoes_damage_type trigger (2026-08-14): fires
         # exactly once per fight, the moment a 3rd real hit of the same

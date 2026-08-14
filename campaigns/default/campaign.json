@@ -4250,7 +4250,7 @@
       "xp_reward": 350,
       "is_boss": true,
       "on_hit_condition": "silenced",
-      "punishes_silenced_targets": true,
+      "punishes_own_condition": true,
       "resistances": [
         "psychic"
       ],
@@ -5565,6 +5565,7 @@
       "proficiency_bonus": 5,
       "xp_reward": 1800,
       "is_boss": true,
+      "counters_divine_smite": true,
       "damage_dice": "2d10",
       "damage_bonus": 22,
       "damage_type": "force",
@@ -5585,6 +5586,7 @@
       "proficiency_bonus": 5,
       "xp_reward": 1600,
       "is_boss": true,
+      "ignited_after_first_hit": true,
       "damage_dice": "2d8",
       "damage_bonus": 20,
       "damage_type": "fire",
@@ -5698,6 +5700,7 @@
       "damage_type": "necrotic",
       "known_spells": ["voidcall"],
       "on_hit_condition": "paralyzed",
+      "punishes_own_condition": true,
       "resistances": [
         "necrotic"
       ],
@@ -5714,6 +5717,7 @@
       "proficiency_bonus": 5,
       "xp_reward": 1550,
       "is_boss": true,
+      "empowered_by_crits": true,
       "damage_dice": "2d8",
       "damage_bonus": 19,
       "damage_type": "lightning",
@@ -5739,6 +5743,7 @@
       "damage_type": "cold",
       "known_spells": ["ice_storm"],
       "on_hit_condition": "prone",
+      "punishes_own_condition": true,
       "resistances": [
         "cold"
       ],
@@ -5755,6 +5760,7 @@
       "proficiency_bonus": 5,
       "xp_reward": 1650,
       "is_boss": true,
+      "counters_empowered_spell": true,
       "damage_dice": "2d8",
       "damage_bonus": 20,
       "damage_type": "radiant",
@@ -5780,6 +5786,7 @@
       "damage_type": "psychic",
       "known_spells": ["vicious_mockery"],
       "on_hit_condition": "blinded",
+      "punishes_own_condition": true,
       "resistances": [
         "psychic"
       ],
@@ -5801,6 +5808,7 @@
       "damage_type": "force",
       "known_spells": ["magic_missile"],
       "on_hit_condition": "frightened",
+      "punishes_own_condition": true,
       "resistances": [
         "force"
       ],

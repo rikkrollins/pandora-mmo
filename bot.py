@@ -6467,17 +6467,30 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 "counters_backstab": slot_template.get("counters_backstab", False),
                 "resists_forge_guild": slot_template.get("resists_forge_guild", False),
                 # Synergy Phase 10 (2026-08-14): counters_wild_shape,
-                # punishes_silenced_targets, reduces_first_hit_damage, and
-                # punishes_repeat_attacker are all read by rules.combat.
-                # resolve_attack, same real checkpoint every Phase 9 flag
-                # above already uses. resists_arcane_circle is read in
-                # bot.py's own damage-spell cast handler, the spell-side
-                # counterpart to resists_forge_guild.
+                # punishes_own_condition (renamed from punishes_silenced_
+                # targets in Phase 11, now generic), reduces_first_hit_
+                # damage, and punishes_repeat_attacker are all read by
+                # rules.combat.resolve_attack, same real checkpoint every
+                # Phase 9 flag above already uses. resists_arcane_circle
+                # is read in bot.py's own damage-spell cast handler, the
+                # spell-side counterpart to resists_forge_guild.
                 "counters_wild_shape": slot_template.get("counters_wild_shape", False),
-                "punishes_silenced_targets": slot_template.get("punishes_silenced_targets", False),
+                "punishes_own_condition": slot_template.get("punishes_own_condition", False),
                 "reduces_first_hit_damage": slot_template.get("reduces_first_hit_damage", False),
                 "punishes_repeat_attacker": slot_template.get("punishes_repeat_attacker", False),
                 "resists_arcane_circle": slot_template.get("resists_arcane_circle", False),
+                # Synergy Phase 11 (2026-08-14): ignited_after_first_hit
+                # and empowered_by_crits are read by rules.combat.
+                # resolve_attack; counters_divine_smite and counters_
+                # empowered_spell are both read in bot.py's own damage-
+                # spell/attack handlers (Divine Smite and Empowered Spell
+                # are both computed outside resolve_attack entirely, same
+                # reason resists_forge_guild/resists_arcane_circle needed
+                # their own real checkpoints too).
+                "counters_divine_smite": slot_template.get("counters_divine_smite", False),
+                "ignited_after_first_hit": slot_template.get("ignited_after_first_hit", False),
+                "empowered_by_crits": slot_template.get("empowered_by_crits", False),
+                "counters_empowered_spell": slot_template.get("counters_empowered_spell", False),
                 # Real bug found live (2026-07-25, while building the
                 # rebirth dungeons): campaign.json monster templates
                 # have always supported real resistances/vulnerabilities/
@@ -6751,10 +6764,15 @@ def _build_echo_enemy(monster_key: str, tier: int, index: int, total: int, chall
         # Synergy Phase 10 (2026-08-14) -- same mirroring as Phase 9's
         # flags just above.
         "counters_wild_shape": template.get("counters_wild_shape", False),
-        "punishes_silenced_targets": template.get("punishes_silenced_targets", False),
+        "punishes_own_condition": template.get("punishes_own_condition", False),
         "reduces_first_hit_damage": template.get("reduces_first_hit_damage", False),
         "punishes_repeat_attacker": template.get("punishes_repeat_attacker", False),
         "resists_arcane_circle": template.get("resists_arcane_circle", False),
+        # Synergy Phase 11 (2026-08-14) -- same mirroring.
+        "counters_divine_smite": template.get("counters_divine_smite", False),
+        "ignited_after_first_hit": template.get("ignited_after_first_hit", False),
+        "empowered_by_crits": template.get("empowered_by_crits", False),
+        "counters_empowered_spell": template.get("counters_empowered_spell", False),
         "resistances": resistances,
         "is_echo_trial": True,
         # Real tier-scaled damage (2026-07-26 monster/area rebalance) --
@@ -7511,14 +7529,22 @@ def _boss_ability_facts(boss: dict) -> str | None:
         facts.append("resists a smith's guild-taught edge on their weapon")
     if boss.get("counters_wild_shape"):
         facts.append("sees through a borrowed animal shape after the first blow")
-    if boss.get("punishes_silenced_targets"):
-        facts.append("hits far harder against anyone it's already silenced")
+    if boss.get("punishes_own_condition") and boss.get("on_hit_condition"):
+        facts.append(f"hits far harder against anyone it's already left {boss['on_hit_condition']}")
     if boss.get("reduces_first_hit_damage"):
         facts.append("shrugs off the very first real hit it takes each fight")
     if boss.get("punishes_repeat_attacker"):
         facts.append("punishes the same attacker for striking it twice in a row")
     if boss.get("resists_arcane_circle"):
         facts.append("dampens a spellcaster's guild-taught edge after the first cast")
+    if boss.get("counters_divine_smite"):
+        facts.append("has learned to seal off a Paladin's Divine Smite after the first one lands")
+    if boss.get("ignited_after_first_hit"):
+        facts.append("hits noticeably harder once it's taken its first real wound")
+    if boss.get("empowered_by_crits"):
+        facts.append("strikes back harder the moment its own next attack lands after being critically hit")
+    if boss.get("counters_empowered_spell"):
+        facts.append("has learned to resist a Sorcerer's Empowered Spell reroll after the first one lands")
     if not facts:
         return None
     return f"{boss.get('name')} " + "; also ".join(facts) + "."
@@ -7780,6 +7806,18 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                 # power_scale_ratio multiplier -- applied explicitly here
                 # too, same as breath weapon below.
                 smite_dmg = int(smite_dmg * power_scale_ratio(attacker.get("level", 1), attacker.get("rebirth_count", 0)))
+                # Synergy Phase 11 counters_divine_smite (2026-08-14, The
+                # Unopened -- a real seal, closed once against the same
+                # burst of righteous damage): same "first hit still lands
+                # it, every hit after doesn't" shape as counters_rage/
+                # counters_wild_shape in rules/combat.py, just applied
+                # here since Divine Smite's own bonus is computed in
+                # bot.py, outside resolve_attack entirely.
+                if target.get("counters_divine_smite"):
+                    if target.get("_divine_smite_countered"):
+                        smite_dmg = 0
+                    else:
+                        target["_divine_smite_countered"] = True
                 result["damage_dealt"] += smite_dmg
                 target["hp_current"], warded = _apply_damage_with_death_ward(target, smite_dmg)
                 result["death_ward_triggered"] = result.get("death_ward_triggered") or warded
@@ -19680,7 +19718,7 @@ async def _do_steal_from_enemy(
 EMPOWERED_SPELL_MAX_USES = 1
 
 
-def _apply_empowered_spell(telegram_user_id: int, character: dict, spell: dict, result: dict) -> dict:
+def _apply_empowered_spell(telegram_user_id: int, character: dict, spell: dict, result: dict, target: dict | None = None) -> dict:
     """
     Sorcerer's Metamagic: Empowered Spell (real 5E, level 3+, previously
     pure flavor text in class_features.py) -- automatically rerolls any
@@ -19698,6 +19736,21 @@ def _apply_empowered_spell(telegram_user_id: int, character: dict, spell: dict, 
     if character.get("char_class") != "Sorcerer" or character.get("level", 1) < 3:
         return result
     if db.get_feature_uses(telegram_user_id, character["chat_id"], "empowered_spell") >= EMPOWERED_SPELL_MAX_USES:
+        return result
+    # Synergy Phase 11 counters_empowered_spell (2026-08-14, The Spire's
+    # Grace -- "something up there still believes" its own light can't
+    # be refined by a second roll): unlike counters_rage/counters_wild_
+    # shape's "first use still lands, every use after doesn't" shape,
+    # Empowered Spell is a once-PER-REST resource (EMPOWERED_SPELL_MAX_
+    # USES), so there's rarely a real "second attempt in the same fight"
+    # to negate -- this boss simply resists the reroll outright, every
+    # time, whether it's the caster's first attempt or their last this
+    # rest. The real feature_uses charge is still spent below (the
+    # Sorcerer genuinely tried; the target's own resistance is what
+    # fizzled it, same "you still used your resource" logic every other
+    # spent-resource mechanic in this game already follows).
+    if target and target.get("counters_empowered_spell"):
+        db.use_feature(telegram_user_id, character["chat_id"], "empowered_spell")
         return result
     match = re.match(r"(\d+)d(\d+)", spell.get("damage_dice", ""))
     if not match:
@@ -20565,7 +20618,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
 
             target = _pick_target(text, opposing)
             result = spells_module.resolve_damage_spell(spell_id, character, target)
-            result = _apply_empowered_spell(update.effective_user.id, character, spell, result)
+            result = _apply_empowered_spell(update.effective_user.id, character, spell, result, target=target)
             result = _apply_eldritch_smite(update.effective_user.id, character, spell_id, result)
             # Subclass system (2026-07-24): a Wizard specialized in this
             # spell's own school (spells.py's real "school" field) deals
