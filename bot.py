@@ -2656,6 +2656,16 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     action = parts[1] if len(parts) > 1 else ""
     value = parts[2] if len(parts) > 2 else None
     target_name = parts[3] if len(parts) > 3 else None
+    # Real gap found live (2026-08-13, dev-bridge report: "I casted
+    # eldritch blast, but it's saying I did an attack" -- investigated
+    # thoroughly but NOT reproducible, since a button tap's callback_
+    # data never gets logged anywhere, unlike a typed message's own
+    # "[intent]" line -- see memory project_eldritch_blast_attack_
+    # misclassification_unresolved.md's own recommended next step).
+    # Logged here, matching that exact "[intent]"-style format, so a
+    # future occurrence is actually traceable to the real button
+    # pressed instead of leaving no trace at all.
+    logger.info(f"[callback] user={user_id} data={query.data!r}")
     await _safe_answer(query)
     character = db.get_character(user_id, update.effective_chat.id)
 
@@ -19365,6 +19375,49 @@ def _apply_empowered_spell(telegram_user_id: int, character: dict, spell: dict, 
     return {**result, "rolls": new_rolls, "damage_dealt": result["damage_dealt"] + (sum(new_rolls) - sum(old_rolls))}
 
 
+ELDRITCH_SMITE_DICE = "2d6"
+
+
+def _apply_eldritch_smite(telegram_user_id: int, character: dict, spell_id: str, result: dict) -> dict:
+    """
+    Real gap (2026-08-13, per Coffee, dev-bridge: asked whether
+    Eldritch Blast should cost a slot "so ethers are relevant for all
+    characters" -- investigated live: cantrips correctly staying free
+    is real 5E, not a bug, Coffee agreed to keep that rule and find
+    another lever instead. Root cause of the actual complaint, traced
+    separately: spells.CLASS_SPELL_LISTS["warlock"] has ZERO damage
+    spells -- every leveled Warlock spell is situational utility
+    (Hex, Hold Person, ...), so a Warlock can fight indefinitely on
+    free Eldritch Blast alone and never actually need a spell-slot-
+    restoring tonic, unlike every other caster class. See memory
+    project_warlock_tonic_relevance_open.md's own "how to apply" note
+    for the two options it left open; this is option (b) -- a real
+    slot-spending damage boost, the exact "spend a slot for bonus
+    damage" pattern Divine Smite already established for Paladins
+    (bot.py's DIVINE_SMITE_DICE_BY_SLOT_LEVEL/_do_divine_smite).
+
+    A deliberate house addition -- no real 5E Eldritch Invocation
+    works this way -- flagged honestly, same as every other departure
+    in this file. Automatically spends ONE spell slot for +2d6 force
+    damage the next time a level 2+ Warlock lands Eldritch Blast, but
+    ONLY when a slot would still remain afterward (never silently
+    drains their last slot without asking -- Divine Smite protects the
+    same way, by only ever spending on an actual hit) and only once
+    per rest, same feature_uses economy every other limited ability
+    already shares.
+    """
+    if spell_id != "eldritch_blast" or character.get("char_class") != "Warlock" or character.get("level", 1) < 2:
+        return result
+    if character.get("spell_slots_current", 0) < 2:
+        return result
+    if db.get_feature_uses(telegram_user_id, character["chat_id"], "eldritch_smite") >= 1:
+        return result
+    db.update_character(telegram_user_id, character["chat_id"], spell_slots_current=character["spell_slots_current"] - 1)
+    db.use_feature(telegram_user_id, character["chat_id"], "eldritch_smite")
+    bonus = roll_damage(ELDRITCH_SMITE_DICE)["total"]
+    return {**result, "damage_dealt": result["damage_dealt"] + bonus, "eldritch_smite_bonus": bonus}
+
+
 def _with_menu_button(keyboard: InlineKeyboardMarkup | None) -> InlineKeyboardMarkup:
     """
     Appends a single "📖 Menu" row (callback_data "menu|root") to any
@@ -19866,6 +19919,9 @@ async def spell_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
+    # Same real gap/fix as battle_menu_callback's own logging above --
+    # see that comment for the live report this closes the loop on.
+    logger.info(f"[callback] user={update.effective_user.id} data={query.data!r}")
     await _safe_answer(query)
 
     if action == "cast":
@@ -20174,6 +20230,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             target = _pick_target(text, opposing)
             result = spells_module.resolve_damage_spell(spell_id, character, target)
             result = _apply_empowered_spell(update.effective_user.id, character, spell, result)
+            result = _apply_eldritch_smite(update.effective_user.id, character, spell_id, result)
             # Subclass system (2026-07-24): a Wizard specialized in this
             # spell's own school (spells.py's real "school" field) deals
             # more with it -- the one real mechanical hook this pilot
@@ -20263,6 +20320,12 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                 )
             if bloodied_triggered:
                 await _safe_send(update, f"🩸 **{target['name']} is bloodied!**")
+            if result.get("eldritch_smite_bonus"):
+                await _safe_send(
+                    update,
+                    f"🖤 **{character['name']}** channels a spell slot into the blast — "
+                    f"**+{result['eldritch_smite_bonus']} extra force damage!**",
+                )
 
             removed = session.remove_defeated()
             await _announce_defeats(update, session, removed)

@@ -2801,6 +2801,163 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.get_character(user_id, -999)["spell_slots_current"], 1)
         sessions.end_session(-999)
 
+    async def test_eldritch_smite_adds_bonus_damage_and_spends_a_slot(self):
+        """
+        Real gap (2026-08-13, per Coffee, dev-bridge: "shud [ethers]
+        not [be relevant] for all characters" -- investigated live and
+        traced to Warlock's leveled spell list having zero damage
+        spells, so a Warlock can fight indefinitely on free Eldritch
+        Blast alone and never actually need a spell-slot-restoring
+        tonic; see memory project_warlock_tonic_relevance_open.md).
+        New _apply_eldritch_smite mirrors Divine Smite's own "spend a
+        slot for bonus damage" pattern.
+        """
+        from unittest.mock import patch
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "The blast lances out and strikes true."}
+
+        import sessions
+        sessions.end_session(-999)
+        caster_id = 900479
+        make_basic_character(
+            caster_id, "SmiteBlaster", char_class="Warlock",
+            known_spells=["eldritch_blast"], spell_slots_max=3, current_location="crossroads_tavern",
+        )
+        db.update_character(caster_id, -999, level=2, spell_slots_current=2)
+        goblin = {"telegram_user_id": -5200902, "name": "SmiteGoblin", "dexterity": 10, "strength": 10,
+                  "armor_class": 5, "hp_current": 200, "hp_max": 200, "conditions": [],
+                  "is_ai": 1, "monster_key": "goblin"}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        session = sessions.start_session(-999, [caster, goblin], {caster_id: "party", -5200902: "enemy"})
+        session.turn_order = [caster_id, -5200902]
+
+        sink = []
+        with patch("ai.dm_agent.requests.post", return_value=FakeResponse()):
+            await bot._do_cast_spell(FakeUpdate(caster_id, "cast eldritch blast", sink), "cast eldritch blast")
+        self.assertTrue(any("extra force damage" in m for m in sink), sink)
+        self.assertEqual(db.get_character(caster_id, -999)["spell_slots_current"], 1)
+        self.assertEqual(db.get_feature_uses(caster_id, -999, "eldritch_smite"), 1)
+        sessions.end_session(-999)
+
+    async def test_eldritch_smite_never_spends_the_warlocks_last_slot(self):
+        """Regression guard: the bonus must never fire when it would leave the Warlock with zero slots."""
+        from unittest.mock import patch
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "The blast lances out and strikes true."}
+
+        import sessions
+        sessions.end_session(-999)
+        caster_id = 900480
+        make_basic_character(
+            caster_id, "LastSlotBlaster", char_class="Warlock",
+            known_spells=["eldritch_blast"], spell_slots_max=3, current_location="crossroads_tavern",
+        )
+        db.update_character(caster_id, -999, level=2, spell_slots_current=1)
+        goblin = {"telegram_user_id": -5200903, "name": "LastSlotGoblin", "dexterity": 10, "strength": 10,
+                  "armor_class": 5, "hp_current": 200, "hp_max": 200, "conditions": [],
+                  "is_ai": 1, "monster_key": "goblin"}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        session = sessions.start_session(-999, [caster, goblin], {caster_id: "party", -5200903: "enemy"})
+        session.turn_order = [caster_id, -5200903]
+
+        sink = []
+        with patch("ai.dm_agent.requests.post", return_value=FakeResponse()):
+            await bot._do_cast_spell(FakeUpdate(caster_id, "cast eldritch blast", sink), "cast eldritch blast")
+        self.assertFalse(any("extra force damage" in m for m in sink), sink)
+        self.assertEqual(db.get_character(caster_id, -999)["spell_slots_current"], 1)
+        sessions.end_session(-999)
+
+    def test_eldritch_smite_gated_to_warlock_level_2_and_once_per_rest(self):
+        """Unit-level gate checks: class, level, and the once-per-rest economy, without the full combat/narration path."""
+        caster_id = 900481
+        make_basic_character(caster_id, "GateBlaster", char_class="Warlock", current_location="crossroads_tavern")
+        db.update_character(caster_id, -999, level=1, spell_slots_current=3)
+        character = db.get_character(caster_id, -999)
+        result = {"damage_dealt": 5}
+        # Level 1 -- not yet available (mirrors Agonizing Blast's own level 2+ gate).
+        self.assertNotIn("eldritch_smite_bonus", bot._apply_eldritch_smite(caster_id, character, "eldritch_blast", result))
+
+        db.update_character(caster_id, -999, level=2)
+        character = db.get_character(caster_id, -999)
+        boosted = bot._apply_eldritch_smite(caster_id, character, "eldritch_blast", result)
+        self.assertIn("eldritch_smite_bonus", boosted)
+
+        # Already used this rest -- a second cast doesn't fire again.
+        character = db.get_character(caster_id, -999)
+        again = bot._apply_eldritch_smite(caster_id, character, "eldritch_blast", result)
+        self.assertNotIn("eldritch_smite_bonus", again)
+
+        # A non-Warlock never gets the bonus either.
+        fighter_id = 900482
+        make_basic_character(fighter_id, "NotAWarlock", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(fighter_id, -999, level=5, spell_slots_current=3)
+        fighter = db.get_character(fighter_id, -999)
+        self.assertNotIn("eldritch_smite_bonus", bot._apply_eldritch_smite(fighter_id, fighter, "eldritch_blast", result))
+
+    async def test_spell_menu_callback_logs_the_real_callback_data(self):
+        """
+        Real gap closed alongside the fix above, same live report
+        (2026-08-13, "I casted eldritch blast, but it's saying I did
+        an attack" -- unreproducible because a button tap's real
+        callback_data never appeared anywhere in the log, unlike a
+        typed message's own "[intent]" line; see memory
+        project_eldritch_blast_attack_misclassification_unresolved.md's
+        own recommended next step).
+        """
+        import sessions
+        sessions.end_session(-999)
+        caster_id = 900483
+        make_basic_character(
+            caster_id, "LogBlaster", char_class="Warlock",
+            known_spells=["eldritch_blast"], current_location="crossroads_tavern",
+        )
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        goblin = {"telegram_user_id": -5200904, "name": "LogGoblin", "dexterity": 10, "strength": 10,
+                  "armor_class": 30, "hp_current": 200, "hp_max": 200, "conditions": [],
+                  "is_ai": 1, "monster_key": "goblin"}
+        session = sessions.start_session(-999, [caster, goblin], {caster_id: "party", -5200904: "enemy"})
+        session.turn_order = [caster_id, -5200904]
+
+        sink = []
+        with self.assertLogs("pandora_mmo", level="INFO") as log_ctx:
+            await bot.spell_menu_callback(FakeCallbackUpdate(caster_id, "spell|cast|eldritch_blast", sink), DummyContext())
+        self.assertTrue(any("[callback]" in msg and "eldritch_blast" in msg for msg in log_ctx.output), log_ctx.output)
+        sessions.end_session(-999)
+
+    async def test_battle_menu_callback_logs_the_real_callback_data(self):
+        """Same fix, the OTHER real button-tap entry point (battle menu Fight/Skills/Items/Run)."""
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900484
+        make_basic_character(user_id, "LogFighter", char_class="Fighter", current_location="crossroads_tavern")
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        enemy = {"telegram_user_id": -5200905, "name": "LogEnemy", "dexterity": 10, "strength": 10,
+                 "armor_class": 30, "hp_current": 200, "hp_max": 200, "conditions": [],
+                 "is_ai": 1, "monster_key": "goblin"}
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", -5200905: "enemy"})
+        session.turn_order = [user_id, -5200905]
+        session.current_turn_index = 0
+
+        sink = []
+        with self.assertLogs("pandora_mmo", level="INFO") as log_ctx:
+            await bot.battle_menu_callback(FakeCallbackUpdate(user_id, "bm|menu", sink), DummyContext())
+        self.assertTrue(any("[callback]" in msg and "bm|menu" in msg for msg in log_ctx.output), log_ctx.output)
+        sessions.end_session(-999)
+
     async def test_flurry_of_blows_rejects_non_monk(self):
         import sessions
         sessions.end_session(-999)

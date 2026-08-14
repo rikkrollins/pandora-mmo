@@ -2,6 +2,38 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.203] — Add: Eldritch Smite (Warlock), plus real button-tap logging
+
+Two closed-out open items, per Coffee: "do both."
+
+**Warlock tonic relevance** (open since 2026-08-13): cantrips correctly
+staying free was confirmed not a bug; the real gap was that Warlock's
+leveled spell list has zero damage spells, so a Warlock can fight
+indefinitely on free Eldritch Blast alone and never actually need a
+spell-slot-restoring tonic, unlike every other caster. New Eldritch
+Smite (a deliberate house addition, flagged honestly -- no real 5E
+invocation works this way) mirrors Divine Smite's own established
+"spend a slot for bonus damage" pattern: automatically spends ONE
+spell slot for +2d6 force damage the next time a level 2+ Warlock
+lands Eldritch Blast, but only when a slot would still remain
+afterward (never silently drains their last one) and only once per
+rest. Makes spell tonics genuinely worth carrying for a Warlock, the
+actual gap the original question surfaced.
+
+**Eldritch Blast attack misclassification** (unresolved since
+2026-08-13): a dev-bridge report that casting Eldritch Blast resolved
+as a weapon attack instead, investigated thoroughly at the time but
+never reproducible -- a button tap's real callback_data never appeared
+anywhere in the log, unlike a typed message's own "[intent]" line, so
+there was no way to see which button was actually pressed. Both
+`spell_menu_callback` and `battle_menu_callback` now log every real
+tap (`[callback] user=... data=...`), matching that same format, so a
+future occurrence is actually traceable instead of leaving no trace.
+
+5 new tests (Eldritch Smite's damage/slot-spend, its last-slot
+protection, its class/level/once-per-rest gates, and both callbacks'
+new logging) confirmed clean.
+
 ## [1.27.202] — Fix: Support gave vague, ungrounded answers about guild benefits and subclasses
 
 Real live bug (Coffee, Support topic: "What does the arcana guild and
