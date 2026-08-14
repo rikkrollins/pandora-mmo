@@ -15690,8 +15690,42 @@ def _format_item_stats_line(item: dict) -> str | None:
         parts.append("grants an extra attack")
     if item.get("regen_bonus"):
         parts.append(f"+{item['regen_bonus']} HP regen")
-    if item.get("equip_requirement"):
-        parts.append("requires real progression to equip")
+    # Real weapon/armor proficiency category (2026-08-14, per Coffee:
+    # "when we view an equipable item please say what the requirements
+    # are to be able to equip it") -- every weapon/armor/shield already
+    # has a real category (weapon_category/armor_category) that
+    # db._meets_proficiency_requirement checks at equip time (blocking
+    # the swap for a non-proficient class, 2026-08-13), but nothing
+    # ever showed that category on the item's own view. Shown for
+    # every weapon/armor/shield, not just the restrictive categories --
+    # "light" armor looks universal at a glance but Monks/Sorcerers/
+    # Wizards actually get NO armor proficiency at all in this build's
+    # class_features.ARMOR_PROFICIENCIES, so even "light" is real,
+    # class-dependent information, not a safe one to omit.
+    if item_type == "weapon":
+        category = item.get("weapon_category", "simple")
+        parts.append(f"requires {category} weapon proficiency")
+    elif item_type in ("armor", "shield"):
+        category = item.get("armor_category", "shield" if item_type == "shield" else "light")
+        parts.append(f"requires {category} armor proficiency")
+    equip_req = item.get("equip_requirement")
+    if equip_req:
+        # Real conditions, not the old vague placeholder (2026-08-14,
+        # same request) -- "any_of" means proving progression ANY one
+        # of these ways, not all at once (see db._meets_equip_
+        # requirement's own docstring), so this reads as an OR list.
+        req_bits = []
+        for condition in equip_req.get("any_of", []):
+            kind, value = condition.get("kind"), condition.get("value")
+            if kind == "rebirth_count":
+                req_bits.append(f"{value}+ rebirth{'s' if value != 1 else ''}")
+            elif kind == "echo_trial_tier":
+                req_bits.append(f"Echo Trial tier {value}+")
+            elif kind == "completed_quest":
+                quest = CAMPAIGN.get("quests", {}).get(value)
+                req_bits.append(f"having completed \"{quest['title'] if quest else value}\"")
+        if req_bits:
+            parts.append(f"requires {' OR '.join(req_bits)} to equip")
     # Real worth, shown for equipables specifically (2026-08-03, per
     # Coffee: "in the description of the items can u show what it is
     # worth? do this for equipables") -- consumables/scrolls/materials

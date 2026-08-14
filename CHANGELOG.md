@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.198] — Add: item view shows real equip requirements
+
+Real live request (Coffee: "when we view an equipable item please say
+what the requirements are to be able to equip it"). Two real gates
+already existed but neither was ever shown on an item's own view:
+
+- Weapon/armor proficiency category (`weapon_category`/`armor_category`)
+  -- already blocked a non-proficient class's equip at equip-time
+  (v1.27.194-era `_meets_proficiency_requirement`), but the category
+  itself was invisible until you tried and got rejected. Now shown for
+  every weapon/armor/shield ("requires martial weapon proficiency",
+  "requires medium armor proficiency", etc.) -- even "light" armor is
+  shown, since Monk/Sorcerer/Wizard actually have zero armor
+  proficiency in this build's `class_features.ARMOR_PROFICIENCIES`, so
+  it's real class-dependent information, not safe to assume obvious.
+- Mythic gear's real `equip_requirement` (`any_of` rebirth_count/
+  echo_trial_tier/completed_quest) previously showed only a vague
+  "requires real progression to equip" placeholder. Now spells out the
+  actual OR'd conditions, e.g. "requires 1+ rebirth OR Echo Trial tier
+  10+ OR having completed \"The Unasked's Reckoning\"" -- the real
+  quest title pulled from campaign.json, not the raw quest id.
+
+Both land in `_format_item_stats_line`, shared by the item-view button,
+market listings, and the character sheet, so every surface that already
+shows item stats picks this up for free. 2 new real tests plus a 25-test
+equip/proficiency/mythic-gate regression sweep confirmed clean.
+
 ## [1.27.197] — Add: AI-controlled combatants use the remaining class/racial features
 
 Follow-up to v1.27.196 ("I want AI to be able to use all thier

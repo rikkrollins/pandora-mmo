@@ -2289,6 +2289,44 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("1d6+2", estats)
         self.assertIn("fire damage", estats)
 
+    def test_item_stats_line_shows_real_proficiency_categories(self):
+        """
+        Real live request (2026-08-14, Coffee: "when we view an
+        equipable item please say what the requirements are to be able
+        to equip it") -- weapon_category/armor_category already gate a
+        real equip via db._meets_proficiency_requirement, but the view
+        never showed them at all.
+        """
+        martial_weapon = bot._format_item_stats_line(items_module.get_item("longsword"))
+        self.assertIn("martial weapon proficiency", martial_weapon)
+
+        medium_armor = bot._format_item_stats_line(items_module.get_item("chain_shirt"))
+        self.assertIn("medium armor proficiency", medium_armor)
+
+        shield = bot._format_item_stats_line(items_module.get_item("wooden_shield"))
+        self.assertIn("shield armor proficiency", shield)
+
+    def test_item_stats_line_shows_real_mythic_equip_requirements(self):
+        """
+        Same request as above -- the old line ("requires real
+        progression to equip") never said what the real progression
+        actually was. Now spells out the real any_of conditions.
+        """
+        pandoras_answer_stats = bot._format_item_stats_line(items_module.get_item("pandoras_answer"))
+        self.assertIn("The Unasked's Reckoning", pandoras_answer_stats)
+        self.assertNotIn("requires real progression to equip", pandoras_answer_stats)
+
+        synthetic_mythic = {
+            "type": "weapon", "weapon_category": "martial",
+            "equip_requirement": {"any_of": [
+                {"kind": "rebirth_count", "value": 1},
+                {"kind": "echo_trial_tier", "value": 10},
+            ]},
+        }
+        synthetic_stats = bot._format_item_stats_line(synthetic_mythic)
+        self.assertIn("1+ rebirth", synthetic_stats)
+        self.assertIn("Echo Trial tier 10+", synthetic_stats)
+
     def test_character_sheet_shows_equipped_weapon_and_armor_stats(self):
         """
         Real live gap (2026-08-06, per Coffee): equipping a weapon/armor
