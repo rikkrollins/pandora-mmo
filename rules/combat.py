@@ -481,6 +481,15 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         wild_shape_bonus = (
             wild_shape_damage_bonus(attacker.get("level", 1)) if attacker.get("wild_shaped") else 0
         )
+        # Synergy Phase 10 counters_wild_shape (2026-08-14, The Root That
+        # Remembers -- a root older than the forest, unfooled by a
+        # borrowed animal shape): same real "first hit still lands it,
+        # every hit after doesn't" shape as counters_rage just above.
+        if wild_shape_bonus and defender.get("counters_wild_shape"):
+            if defender.get("_wild_shape_countered"):
+                wild_shape_bonus = 0
+            else:
+                defender["_wild_shape_countered"] = True
         # Silver Wardens guild benefit (bonus_damage_vs_undead, guilds.py):
         # +2 damage against this campaign's undead-flavored monsters.
         # Real live bug (2026-08-13, synergy pass, per Coffee: "make sure
@@ -603,6 +612,15 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
                     damage_dealt -= forge_bonus_amount // 2
                 else:
                     defender["_forge_guild_resisted"] = True
+        # Synergy Phase 10 punishes_silenced_targets (2026-08-14, The
+        # Unspoken -- a real combo with its own on_hit_condition:
+        # "silenced": this boss silences whoever it hits, then hits
+        # harder against anyone still carrying that silence, "the cavern
+        # describes YOU back"). Every hit, not just the first -- this is
+        # a standing vulnerability while silenced, not a one-time "learn
+        # the pattern" counter like counters_rage/counters_wild_shape.
+        if attacker.get("punishes_silenced_targets") and "silenced" in (defender.get("conditions") or []):
+            damage_dealt = int(damage_dealt * 1.25)
         # Real player-power rebalance (2026-07-26, per Coffee: "rebalance
         # everything... all skills and abilities and magic and spells and
         # cantrips"): monster HP/damage were already rescaled to match
@@ -676,6 +694,28 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
                 else:
                     defender["_backstab_countered"] = True
             damage_dealt = int(damage_dealt * effective_multiplier)
+
+        # Synergy Phase 10 reduces_first_hit_damage (2026-08-14, The
+        # Waiting Shape -- "something has been waiting a very long time,"
+        # slow to actually wake up): the very first confirmed hit landed
+        # against it each fight is halved; every hit after that is
+        # completely unaffected.
+        if defender.get("reduces_first_hit_damage") and not defender.get("_first_hit_landed"):
+            defender["_first_hit_landed"] = True
+            damage_dealt = damage_dealt // 2
+
+        # Synergy Phase 10 punishes_repeat_attacker (2026-08-14, The
+        # Unrepeating -- "walls stopped bothering to explain itself,"
+        # never doing the same thing twice): if the SAME attacker lands
+        # two hits on it back to back (no other attacker in between),
+        # every consecutive hit after the first from that one attacker is
+        # halved -- rewards the party rotating who actually swings,
+        # rather than one character just repeating the same attack.
+        if defender.get("punishes_repeat_attacker"):
+            attacker_id = attacker.get("telegram_user_id")
+            if defender.get("_last_attacker_id") == attacker_id:
+                damage_dealt = damage_dealt // 2
+            defender["_last_attacker_id"] = attacker_id
 
         # Synergy Phase 9 echoes_damage_type trigger (2026-08-14): fires
         # exactly once per fight, the moment a 3rd real hit of the same

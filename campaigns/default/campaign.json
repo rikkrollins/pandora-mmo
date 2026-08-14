@@ -4250,6 +4250,7 @@
       "xp_reward": 350,
       "is_boss": true,
       "on_hit_condition": "silenced",
+      "punishes_silenced_targets": true,
       "resistances": [
         "psychic"
       ],
@@ -4315,6 +4316,7 @@
       "is_boss": true,
       "on_hit_condition": "frightened",
       "life_drain": true,
+      "reduces_first_hit_damage": true,
       "resistances": [
         "necrotic"
       ],
@@ -4347,6 +4349,7 @@
       "is_boss": true,
       "on_hit_condition": "frightened",
       "life_drain": true,
+      "punishes_repeat_attacker": true,
       "resistances": [
         "force"
       ],
@@ -5624,6 +5627,7 @@
       "proficiency_bonus": 5,
       "xp_reward": 1500,
       "is_boss": true,
+      "counters_wild_shape": true,
       "damage_dice": "2d8",
       "damage_bonus": 19,
       "damage_type": "poison",
@@ -5645,6 +5649,7 @@
       "proficiency_bonus": 5,
       "xp_reward": 1550,
       "is_boss": true,
+      "resists_arcane_circle": true,
       "damage_dice": "2d8",
       "damage_bonus": 20,
       "damage_type": "psychic",

@@ -2,6 +2,49 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.216] — Synergy Pass Phase 10: 5 more boss signature mechanics
+
+Continuation of Phase 9 (v1.27.214) — 6 of 22 bosses had a real
+signature mechanic; this covers 5 more of the remaining 16, same
+established flag-in-campaign.json → copy-at-both-participant-build-
+sites → check-at-real-checkpoint → `_boss_ability_facts` entry pattern.
+
+- **The Unspoken** (`punishes_silenced_targets`) — a real combo with its
+  own existing `on_hit_condition: "silenced"`: deals +25% damage against
+  any target it's already silenced, every hit (not just the first) —
+  "the cavern describes YOU back."
+- **The Waiting Shape** (`reduces_first_hit_damage`) — the very first
+  confirmed hit landed against it each fight is halved, every hit after
+  is unaffected. "Something has been waiting a very long time," slow to
+  actually wake up.
+- **The Unrepeating** (`punishes_repeat_attacker`) — if the SAME
+  attacker lands two hits back to back (no other attacker in between),
+  every consecutive hit after the first from that one attacker is
+  halved, rewarding the party rotating who swings. "Walls stopped
+  bothering to explain itself," never doing the same thing twice.
+- **The Root That Remembers** (`counters_wild_shape`) — negates a
+  Druid's Wild Shape damage bonus after the first hit lands, same
+  "learns the pattern once" shape as Phase 9's counters_rage/
+  counters_backstab. A root older than the forest isn't fooled by a
+  borrowed animal shape.
+- **The Hollow Bell** (`resists_arcane_circle`) — the real spell-side
+  counterpart to Phase 9's weapon-side `resists_forge_guild`: negates
+  half of the Arcane Circle's own +15% spell-damage bonus specifically
+  on every cast after the first, checked immediately after that bonus
+  is applied in `bot.py`'s cast-spell handler (not folded into
+  `apply_damage_type_modifier`, which runs BEFORE the bonus exists in
+  the spell pipeline — same ordering trap Phase 9's own audit flagged,
+  confirmed to apply here too).
+
+4 of the 5 new mechanics (all in `rules/combat.py`) confirmed via real
+seeded-RNG combat simulation, each verified to fire under the right
+condition and not otherwise. `resists_arcane_circle` (in `bot.py`'s
+cast-spell handler, which requires a full live combat session to
+exercise end-to-end) was verified by careful code review and exact
+arithmetic parity with the already-tested `resists_forge_guild`
+pattern rather than a full integration run — noted here rather than
+overclaiming test coverage.
+
 ## [1.27.215] — Fix: guild curriculum "won't credit yet" reminder repeated every time
 
 Real report (Coffee, dev-bridge, right after v1.27.214 shipped): "You

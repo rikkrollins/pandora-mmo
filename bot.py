@@ -6466,6 +6466,18 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 "counters_rage": slot_template.get("counters_rage", False),
                 "counters_backstab": slot_template.get("counters_backstab", False),
                 "resists_forge_guild": slot_template.get("resists_forge_guild", False),
+                # Synergy Phase 10 (2026-08-14): counters_wild_shape,
+                # punishes_silenced_targets, reduces_first_hit_damage, and
+                # punishes_repeat_attacker are all read by rules.combat.
+                # resolve_attack, same real checkpoint every Phase 9 flag
+                # above already uses. resists_arcane_circle is read in
+                # bot.py's own damage-spell cast handler, the spell-side
+                # counterpart to resists_forge_guild.
+                "counters_wild_shape": slot_template.get("counters_wild_shape", False),
+                "punishes_silenced_targets": slot_template.get("punishes_silenced_targets", False),
+                "reduces_first_hit_damage": slot_template.get("reduces_first_hit_damage", False),
+                "punishes_repeat_attacker": slot_template.get("punishes_repeat_attacker", False),
+                "resists_arcane_circle": slot_template.get("resists_arcane_circle", False),
                 # Real bug found live (2026-07-25, while building the
                 # rebirth dungeons): campaign.json monster templates
                 # have always supported real resistances/vulnerabilities/
@@ -6736,6 +6748,13 @@ def _build_echo_enemy(monster_key: str, tier: int, index: int, total: int, chall
         "counters_rage": template.get("counters_rage", False),
         "counters_backstab": template.get("counters_backstab", False),
         "resists_forge_guild": template.get("resists_forge_guild", False),
+        # Synergy Phase 10 (2026-08-14) -- same mirroring as Phase 9's
+        # flags just above.
+        "counters_wild_shape": template.get("counters_wild_shape", False),
+        "punishes_silenced_targets": template.get("punishes_silenced_targets", False),
+        "reduces_first_hit_damage": template.get("reduces_first_hit_damage", False),
+        "punishes_repeat_attacker": template.get("punishes_repeat_attacker", False),
+        "resists_arcane_circle": template.get("resists_arcane_circle", False),
         "resistances": resistances,
         "is_echo_trial": True,
         # Real tier-scaled damage (2026-07-26 monster/area rebalance) --
@@ -7490,6 +7509,16 @@ def _boss_ability_facts(boss: dict) -> str | None:
         facts.append("has learned to blunt an ambush strike after the first one lands")
     if boss.get("resists_forge_guild"):
         facts.append("resists a smith's guild-taught edge on their weapon")
+    if boss.get("counters_wild_shape"):
+        facts.append("sees through a borrowed animal shape after the first blow")
+    if boss.get("punishes_silenced_targets"):
+        facts.append("hits far harder against anyone it's already silenced")
+    if boss.get("reduces_first_hit_damage"):
+        facts.append("shrugs off the very first real hit it takes each fight")
+    if boss.get("punishes_repeat_attacker"):
+        facts.append("punishes the same attacker for striking it twice in a row")
+    if boss.get("resists_arcane_circle"):
+        facts.append("dampens a spellcaster's guild-taught edge after the first cast")
     if not facts:
         return None
     return f"{boss.get('name')} " + "; also ".join(facts) + "."
@@ -20552,7 +20581,23 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             # synergy pass): checked primary guild only -- held_guild_ids
             # also covers a Promotion-earned secondary guild.
             if "arcane_circle" in held_guild_ids(character):
+                pre_arcane_bonus_damage = result["damage_dealt"]
                 result["damage_dealt"] = int(result["damage_dealt"] * (1 + ARCANE_CIRCLE_SPELL_DAMAGE_BONUS_PCT / 100))
+                # Synergy Phase 10 resists_arcane_circle (2026-08-14, The
+                # Hollow Bell -- "it rang once... the sound never finished
+                # arriving," a real spell-side counterpart to v1.27.214's
+                # weapon-side resists_forge_guild): negates half of the
+                # ARCANE CIRCLE BONUS SPECIFICALLY on every cast after the
+                # first, checked right here (after the bonus is added, not
+                # folded into apply_damage_type_modifier below -- same
+                # ordering trap that fix's own audit flagged, just for the
+                # spell pipeline this time).
+                if target and target.get("resists_arcane_circle"):
+                    arcane_bonus_amount = result["damage_dealt"] - pre_arcane_bonus_damage
+                    if target.get("_arcane_circle_resisted"):
+                        result["damage_dealt"] -= arcane_bonus_amount // 2
+                    else:
+                        target["_arcane_circle_resisted"] = True
             # Damage-type system (2026-07-24): resolve_damage_spell never
             # calls resolve_attack (its own, separate pipeline -- see
             # rules/combat.py's docstring), so it needs its own call to
