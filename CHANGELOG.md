@@ -2,6 +2,43 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.200] — Fix: monster/boss spell casts dealt near-zero damage
+
+Real live bug (Coffee, dev-bridge screenshot: a level-20+ party facing
+The Unspoken -- a real boss -- watched it repeatedly "hit" for 1, 2,
+and 4 damage. "I'm not sure if it's because our characters are a high
+level or if we have very good gear, but the enemy doesn't seem to be
+doing much damage... for this to be a boss don't you think it would be
+a bit more challenging?").
+
+Root cause: `spells.resolve_damage_spell` scales every caster's damage
+by `power_scale_ratio(caster.get("level", 1), ...)` -- a real, correct
+mechanic for a PLAYER's own flat, unscaled spell numbers. But no
+monster/boss participant dict has ever carried a "level" field (only
+real player/companion characters do), so `.get("level", 1)` silently
+defaulted to 1, and `power_scale_ratio(1, 0)` is exactly 1.0 -- a
+no-op. The Unspoken's own Vicious Mockery cast landed at its raw,
+completely unscaled 1d4 roll (1-4 damage) while that SAME boss's
+melee attack correctly used its real, hand-tuned damage_bonus (+17)
+via `resolve_attack`'s already-established "monsters carry their own
+pre-scaled damage directly" convention. Since v1.27.194 made monster
+spellcasting real for the 3 shaman variants plus ~18 bosses, EVERY one
+of them cast spells this weak, roughly a full order of magnitude below
+their own melee power -- not just The Unspoken.
+
+Fixed by mirroring `resolve_attack`'s own convention: a caster with no
+real "level" (i.e. a monster, never a real character) now adds its own
+`damage_bonus` directly instead of applying `power_scale_ratio`, which
+was only ever meant for a player's flat numbers. A boss's spell cast
+now lands in the same ballpark as its own melee attack, as intended.
+
+3 new real tests (a boss's Vicious Mockery cast now matches its melee
+power; a real character's spellcasting still uses power_scale_ratio,
+never the new damage_bonus branch; a decoy damage_bonus on a synthetic
+"companion" dict proves the player path is untouched) plus a 13-test
+sweep across every existing spell/monster/boss-cast/Counterspell test
+confirmed clean.
+
 ## [1.27.199] — Fix: loot vote now shows the timeout and who's voting, live
 
 Real live request (Coffee: "when voting if we click the other button

@@ -439,7 +439,35 @@ def resolve_damage_spell(spell_id: str, caster: dict, target: dict | None = None
     # rest of the game while monsters/HP/martial classes all now scale.
     # Same power_scale_ratio already applied to a real character's
     # weapon damage in rules/combat.py's resolve_attack.
-    total = int(total * power_scale_ratio(caster.get("level", 1), caster.get("rebirth_count", 0)))
+    #
+    # Real live bug (2026-08-14, Coffee, dev-bridge screenshot: "the
+    # enemy doesn't seem to be doing much damage... for this to be a
+    # boss don't you think it would be a bit more challenging?"): a
+    # MONSTER caster (the_unspoken and every other shaman/boss with
+    # known_spells, since v1.27.194's side-agnostic monster
+    # spellcasting reuses this exact function) has no real "level"
+    # field at all -- caster.get("level", 1) silently defaulted to 1,
+    # so power_scale_ratio(1, 0) == 1.0 (a no-op), leaving a boss's
+    # cast at its spell's raw, unscaled cantrip damage (e.g. Vicious
+    # Mockery's flat 1d4 == 1-4 damage, confirmed live) while that same
+    # boss's own melee attack correctly used its real, hand-tuned
+    # damage_bonus (+17) via rules/combat.py's resolve_attack --
+    # completely divorcing "the boss casts a spell" from "the boss
+    # attacks normally" in outgoing power, the opposite of the "same
+    # rules-layer pipeline" parity v1.27.194 was built to guarantee.
+    # rules.combat.resolve_attack's own docstring already establishes
+    # the real fix's shape for the melee side ("monsters already carry
+    # their own pre-scaled damage_dice/damage_bonus directly in
+    # campaign.json") -- mirrored here: a caster with no real "level"
+    # (every genuine player/companion character always has one; no
+    # monster participant dict ever sets it, confirmed by grep) is a
+    # monster, so its own already-tuned damage_bonus is added directly
+    # instead of applying power_scale_ratio (which was only ever meant
+    # for a real character's flat, unscaled spell numbers).
+    if "level" in caster:
+        total = int(total * power_scale_ratio(caster.get("level", 1), caster.get("rebirth_count", 0)))
+    else:
+        total += caster.get("damage_bonus", 0)
 
     result = {
         "spell": spell["name"], "caster": caster.get("name", "Unknown"),

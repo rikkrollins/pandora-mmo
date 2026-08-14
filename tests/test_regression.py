@@ -6175,6 +6175,67 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(player["hp_current"], 30 - result["damage_dealt"])
         sessions.end_session(-999)
 
+    async def test_boss_spell_damage_matches_its_own_melee_power_not_a_flat_cantrip(self):
+        """
+        Real live bug (2026-08-14, Coffee, dev-bridge screenshot: "the
+        enemy doesn't seem to be doing much damage... for this to be a
+        boss don't you think it would be a bit more challenging?").
+        Root cause: spells.resolve_damage_spell scaled every caster's
+        damage by power_scale_ratio(caster.get("level", 1), ...) -- but
+        no monster participant dict ever carries a "level" field, so it
+        silently defaulted to power_scale_ratio(1, 0) == 1.0 (a no-op),
+        leaving a boss's cast at its spell's raw unscaled roll (Vicious
+        Mockery's flat 1d4 == 1-4 damage, exactly what the screenshot
+        showed) while that SAME boss's melee attack correctly used its
+        real damage_bonus (+17) via rules/combat.py's resolve_attack.
+        Fixed: a caster with no real "level" (a monster) now adds its
+        own damage_bonus directly, same field its melee attack already
+        uses, instead of the player-only power_scale_ratio multiplier.
+        """
+        from unittest.mock import patch
+        import sessions
+        the_unspoken = {
+            "telegram_user_id": -700920, "name": "The Unspoken", "hp_current": 200, "hp_max": 200,
+            "known_spells": ["vicious_mockery"], "resistances": ["psychic"], "vulnerabilities": ["radiant"],
+            "immunities": [], "dexterity": 16, "strength": 14, "damage_bonus": 17, "is_boss": True,
+        }
+        player = make_basic_character(996095, "SpellTargetBoss", current_location="crossroads_tavern")
+        db.update_character(996095, -999, hp_current=730, hp_max=730)
+        player = db.get_character(996095, -999)
+        player["telegram_user_id"] = 996095
+        session = sessions.start_session(-999, [player, the_unspoken], {996095: "party", -700920: "enemy"})
+        sink = []
+        update = FakeUpdate(996095, "look", sink)
+        with patch("random.random", return_value=0.0), patch("rules.dice.random.randint", return_value=2):
+            result = await bot._maybe_monster_cast_spell(update, session, the_unspoken, player)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["spell_name"], "Vicious Mockery")
+        # Raw 1d4 roll (2, mocked) would be 2 without the fix -- with
+        # its own damage_bonus (+17) folded in, real damage should land
+        # in the same ballpark as its melee attack (1d8+17, ~18-25),
+        # never anywhere near the old flat 1-4 range.
+        self.assertGreaterEqual(result["damage_dealt"], 15, result)
+        sessions.end_session(-999)
+
+    def test_real_character_spellcasting_still_scales_by_power_scale_ratio_not_damage_bonus(self):
+        """
+        Regression guard for the same fix: a REAL character (always has
+        a "level" field, unlike any monster participant dict) must keep
+        using power_scale_ratio exactly as before -- never accidentally
+        pick up the new damage_bonus branch meant only for monsters.
+        """
+        from rules.leveling import power_scale_ratio
+        from unittest.mock import patch
+        real_caster = {
+            "name": "RealCaster", "level": 20, "rebirth_count": 0,
+            "damage_bonus": 999,  # decoy -- must NOT be added for a real character
+        }
+        with patch("rules.dice.random.randint", return_value=2):
+            result = spells.resolve_damage_spell("vicious_mockery", real_caster, None)
+        expected = int(2 * power_scale_ratio(20, 0))
+        self.assertEqual(result["damage_dealt"], expected)
+        self.assertLess(result["damage_dealt"], 999)
+
     async def test_counterspell_negates_a_monster_spell_and_spends_a_slot(self):
         from unittest.mock import patch
         import sessions
