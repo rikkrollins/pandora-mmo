@@ -115,7 +115,7 @@ from rules.leveling import (
     UTILITY_SUBCLASS_ABILITY_CHECK_BONUS, UTILITY_SUBCLASS_CHECK_BONUS_VALUE,
     rebirth_hp_max, power_scale_ratio, full_hp_max_for, proficiency_bonus_for_level,
     MEDIUM_ENCOUNTER_XP_PER_CHARACTER, backstab_tier_multiplier, describe_subclass_effect,
-    world_resistance_pct,
+    world_resistance_pct, world_damage_multiplier,
 )
 from rules.proficiency import practiced_bonus, MAX_PRACTICE_BONUS
 
@@ -1646,6 +1646,48 @@ def _equipped_profession_bonus(character: dict, profession: str) -> int:
     return total
 
 
+def _compute_equipped_resist_profile(character: dict) -> dict:
+    """
+    Pure, read-only computation of a character's real defensive profile
+    from their currently equipped gear -- extracted from _apply_
+    equipped_elemental_profile (2026-08-14, per Coffee: "make sure
+    players resistences and elemental stats are listed on the player
+    sheet") so the character sheet can show this WITHOUT the side
+    effects that function's own docstring is explicit about (mutating
+    combat-only fields onto the character dict) -- checking your sheet
+    happens far more often than starting a fight, and shouldn't leave
+    stray resistance/immunity data sitting on the dict outside combat.
+    """
+    resistances, vulnerabilities, immunities = set(), set(), set()
+    equipped_ids = [
+        character.get("equipped_weapon"), character.get("equipped_armor"), character.get("equipped_shield"),
+    ] + character.get("equipped_accessories", [])
+    ignores_resistance = False
+    free_extra_attack = False
+    elemental_resistance_pct = {}
+    for item_id in equipped_ids:
+        if not item_id:
+            continue
+        item = items_module.get_item(item_id)
+        if not item:
+            continue
+        resistances.update(item.get("resistances", []))
+        vulnerabilities.update(item.get("vulnerabilities", []))
+        immunities.update(item.get("immunities", []))
+        if item.get("ignores_resistance"):
+            ignores_resistance = True
+        if item.get("free_extra_attack"):
+            free_extra_attack = True
+        for entry in item.get("elemental_resistances", []):
+            dtype = entry["damage_type"]
+            elemental_resistance_pct[dtype] = elemental_resistance_pct.get(dtype, 0) + entry["value"]
+    return {
+        "resistances": resistances, "vulnerabilities": vulnerabilities, "immunities": immunities,
+        "ignores_resistance": ignores_resistance, "free_extra_attack": free_extra_attack,
+        "elemental_resistance_pct": elemental_resistance_pct,
+    }
+
+
 def _apply_equipped_elemental_profile(character: dict) -> None:
     """
     Phase 2 of the magic item system (2026-08-02): rules.combat's
@@ -1669,36 +1711,11 @@ def _apply_equipped_elemental_profile(character: dict) -> None:
     hand-authored unique wondrous item (e.g. Pandora's Answer) is just
     as real a source of these as a generated mythic weapon.
     """
-    resistances, vulnerabilities, immunities = set(), set(), set()
-    equipped_ids = [
-        character.get("equipped_weapon"), character.get("equipped_armor"), character.get("equipped_shield"),
-    ] + character.get("equipped_accessories", [])
-    ignores_resistance = False
-    free_extra_attack = False
-    elemental_resistance_pct = {}
-    for item_id in equipped_ids:
-        if not item_id:
-            continue
-        item = items_module.get_item(item_id)
-        if not item:
-            continue
-        resistances.update(item.get("resistances", []))
-        vulnerabilities.update(item.get("vulnerabilities", []))
-        immunities.update(item.get("immunities", []))
-        if item.get("ignores_resistance"):
-            ignores_resistance = True
-        if item.get("free_extra_attack"):
-            free_extra_attack = True
-        # Elemental resistance wards (2026-08-10, per Coffee: enchant
-        # armor/equipables to stack REAL, numeric resistance in Frost/
-        # Flame/Spark) -- additive across every equipped slot, same
-        # live-summed-at-read-time convention as everything else in this
-        # function, never baked into a stored column. rules.combat's
-        # apply_damage_type_modifier/elemental_overflow_heal read this
-        # dict directly.
-        for entry in item.get("elemental_resistances", []):
-            dtype = entry["damage_type"]
-            elemental_resistance_pct[dtype] = elemental_resistance_pct.get(dtype, 0) + entry["value"]
+    profile = _compute_equipped_resist_profile(character)
+    resistances, vulnerabilities, immunities = profile["resistances"], profile["vulnerabilities"], profile["immunities"]
+    ignores_resistance = profile["ignores_resistance"]
+    free_extra_attack = profile["free_extra_attack"]
+    elemental_resistance_pct = profile["elemental_resistance_pct"]
     if resistances:
         character["resistances"] = list(set(character.get("resistances", [])) | resistances)
     if vulnerabilities:
@@ -12566,16 +12583,36 @@ def _format_character_sheet(character: dict) -> str:
         if next_threshold is not None else " (Max level reached)"
     )
     # Damage resistances (2026-07-24, per Coffee: "when resistences
-    # apply show it on char sheets"): racial resistances (Dwarf/poison,
-    # Dragonborn+Tiefling/fire) are the only source a PLAYER character
-    # carries today -- monsters get their own resistances/vulnerabilities/
-    # immunities lists straight from campaign.json, not shown here since
-    # this sheet is player/companion-facing. Magic penetration (the
-    # rebirth-earned counter to any resistance an ENEMY has) is shown
-    # alongside it once earned, so a reborn character can see the two
-    # sides of the same system together.
-    racial_resistances = races_module.racial_damage_resistances(character["race"])
-    resistance_line = f"Resistances: {', '.join(sorted(racial_resistances))}\n" if racial_resistances else ""
+    # apply show it on char sheets" -- extended 2026-08-14: "make sure
+    # players resistences and elemental stats are listed on the player
+    # sheet when it becomes available"). Originally racial-only
+    # (Dwarf/poison, Dragonborn+Tiefling/fire, the only source a player
+    # carried at the time) -- now merged with real equipped-gear
+    # resistances/vulnerabilities/immunities/elemental wards too
+    # (_compute_equipped_resist_profile, the same read-only extraction
+    # combat's own _apply_equipped_elemental_profile uses, without that
+    # function's side effects -- checking your sheet shouldn't leave
+    # stray combat-only fields sitting on the character dict). Magic
+    # penetration (the rebirth-earned counter to any resistance an ENEMY
+    # has) is shown alongside it, so a reborn character sees both sides
+    # of the same system together.
+    equipped_profile = _compute_equipped_resist_profile(character)
+    all_resistances = set(races_module.racial_damage_resistances(character["race"])) | equipped_profile["resistances"]
+    resist_bits = []
+    if equipped_profile["immunities"]:
+        resist_bits.append(f"immune to {', '.join(sorted(equipped_profile['immunities']))}")
+    if all_resistances:
+        resist_bits.append(f"resistant to {', '.join(sorted(all_resistances))}")
+    if equipped_profile["vulnerabilities"]:
+        resist_bits.append(f"vulnerable to {', '.join(sorted(equipped_profile['vulnerabilities']))}")
+    for dtype, pct in sorted(equipped_profile["elemental_resistance_pct"].items()):
+        if pct >= 150:
+            resist_bits.append(f"heals from {dtype} damage")
+        elif pct >= 100:
+            resist_bits.append(f"nullifies {dtype} damage")
+        else:
+            resist_bits.append(f"{pct:.0f}% resistant to {dtype}")
+    resistance_line = f"🌡️ {'; '.join(resist_bits)}\n" if resist_bits else ""
     penetration = magic_penetration_pct(character.get("rebirth_count", 0))
     magic_penetration_line = f"🔮 Magic penetration: {penetration:.0f}% (counters enemy resistances)\n" if penetration > 0 else ""
     return (
@@ -16292,7 +16329,7 @@ async def _do_examine(update: Update, target_text: str) -> None:
                 await _safe_send(
                     update,
                     f"🔍 **{character['name']}** studies the {template['name'].lower()} here, "
-                    f"drawing on what they already know:\n{_format_bestiary_entry(monster_key, template)}",
+                    f"drawing on what they already know:\n{_format_bestiary_entry(monster_key, template, character.get('rebirth_count', 0))}",
                 )
             else:
                 await _safe_send(
@@ -16544,30 +16581,44 @@ async def map_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await _send_layer_map(update, character, layer_name)
 
 
-def _format_bestiary_entry(monster_key: str, template: dict) -> str:
-    tags = []
-    if template.get("is_boss"):
-        tags.append("boss")
+def _format_bestiary_entry(monster_key: str, template: dict, viewer_rebirth_count: int = 0) -> str:
+    """
+    Real bestiary compendium entry (2026-07-16 original), redesigned
+    2026-08-14 per Coffee's own back-to-back requests: (1) show a
+    monster's real spells/signature mechanics too, not just its raw
+    stats and boolean resistances -- reuses bot._boss_ability_facts
+    directly (already the single real source of truth for known_spells
+    + every Synergy Phase 9-11 mechanic flag, built for narration) rather
+    than re-deriving a second, partial copy of the same facts; (2) "The
+    World Evolves" (v1.27.218/219) means a monster's real toughness now
+    depends on the VIEWING character's own rebirth_count, which this
+    function couldn't know about before -- `viewer_rebirth_count`
+    (default 0, so any caller that hasn't been updated yet degrades to
+    the old always-zero behavior rather than erroring) lets the entry
+    show what this monster ACTUALLY carries against THIS player right
+    now, not just its frozen campaign.json baseline; (3) visually
+    reorganized into real labeled sections instead of one dense
+    paragraph, per "make the bestiary more visually appealing."
+    """
+    boss_tag = " 👑" if template.get("is_boss") else ""
+    lines = [f"**{template['name']}**{boss_tag}"]
+    lines.append(
+        f"❤️ HP {template['hp_max']}  🛡️ AC {template['armor_class']}  "
+        f"💪 STR {template['strength']}  🏃 DEX {template['dexterity']}  ⭐ XP {template.get('xp_reward', 0)}"
+    )
     if template.get("on_hit_condition"):
-        tags.append(f"inflicts {template['on_hit_condition']} on hit")
-    if template.get("life_drain"):
-        tags.append("drains life on hit")
-    tag_text = f" ({', '.join(tags)})" if tags else ""
-    lines = [
-        f"**{template['name']}**{tag_text}",
-        f"  HP {template['hp_max']} | AC {template['armor_class']} | "
-        f"STR {template['strength']} DEX {template['dexterity']} | "
-        f"XP {template.get('xp_reward', 0)}",
-    ]
-    # Real, learned resistance profile (2026-07-26 gap audit: the
-    # damage-type system has been fully wired into combat since
-    # 2026-07-24 -- apply_damage_type_modifier, real resistances/
-    # vulnerabilities/immunities on 24+ monster templates -- but nothing
-    # ever SHOWED a player this once they'd actually fought and learned
-    # a monster, so the whole "reward build diversity" point of the
-    # system was invisible. Only shown once genuinely known, same
-    # fog-of-war boundary as every other bestiary fact here -- never a
-    # spoiler for an unfought monster.
+        lines.append(f"🩸 Inflicts **{template['on_hit_condition']}** on a hit")
+    # Real spells/signature mechanics (2026-08-14) -- the exact same
+    # narration-grounding fact-builder every boss intro/defeat/decision
+    # line already uses, so the bestiary and the narration can never
+    # drift apart into two different descriptions of the same monster.
+    ability_facts = _boss_ability_facts(template)
+    if ability_facts:
+        lines.append(f"✨ {ability_facts}")
+    # Real, learned resistance profile (2026-07-26 gap audit): only
+    # shown once genuinely known, same fog-of-war boundary as every
+    # other bestiary fact here -- never a spoiler for an unfought
+    # monster.
     resist_bits = []
     if template.get("immunities"):
         resist_bits.append(f"immune to {', '.join(template['immunities'])}")
@@ -16576,12 +16627,10 @@ def _format_bestiary_entry(monster_key: str, template: dict) -> str:
     if template.get("vulnerabilities"):
         resist_bits.append(f"vulnerable to {', '.join(template['vulnerabilities'])}")
     if resist_bits:
-        lines.append(f"  {'; '.join(resist_bits)}")
-    # Elemental resistance stacking (2026-08-10, per Coffee: "note them
-    # on the Bestiary" -- a creature "strong in an element" enough to
-    # nullify or even heal from it is exactly the kind of build-diversity
-    # fact a player needs to actually SEE to plan around, same reasoning
-    # as the resist_bits block just above.
+        lines.append(f"🌡️ {'; '.join(resist_bits)}")
+    # Elemental resistance stacking (2026-08-10) -- a creature "strong in
+    # an element" enough to nullify or even heal from it is exactly the
+    # kind of build-diversity fact a player needs to actually SEE.
     elemental_bits = []
     for dtype, pct in (template.get("elemental_resistance_pct") or {}).items():
         if pct >= 150:
@@ -16589,15 +16638,26 @@ def _format_bestiary_entry(monster_key: str, template: dict) -> str:
         elif pct >= 100:
             elemental_bits.append(f"nullifies {dtype} damage")
         else:
-            elemental_bits.append(f"strongly resistant to {dtype} ({pct}%)")
+            elemental_bits.append(f"strongly resistant to {dtype} ({pct:.0f}%)")
     if elemental_bits:
-        lines.append(f"  {'; '.join(elemental_bits)}")
-    # Real stealable-item listing (2026-08-11, per Coffee: "post what
-    # can be stolen from them in the bestiary") -- same fog-of-war
-    # boundary as everything else here (only shown once the monster is
-    # actually known), and the SAME real weights bot._do_steal_from_
-    # enemy actually rolls against, never a separate made-up hint list.
-    # Sorted so the common item(s) always list before the rare one.
+        lines.append(f"🔥❄️ {'; '.join(elemental_bits)}")
+    # "The World Evolves" (2026-08-14): the SAME real per-encounter bonus
+    # bot._do_start_combat stamps onto a live combat participant,
+    # recomputed fresh here from the VIEWING character's current
+    # rebirth_count (not a stale snapshot from whenever they last fought
+    # it) -- see rules.leveling.world_resistance_pct/world_damage_
+    # multiplier's own docstrings for why this is deliberately uncapped.
+    world_resist = world_resistance_pct(viewer_rebirth_count)
+    if world_resist > 0:
+        world_dmg_pct = (world_damage_multiplier(viewer_rebirth_count) - 1) * 100
+        lines.append(
+            f"🌍 Also carries +{world_resist:.0f}% resistance to every damage type and hits "
+            f"{world_dmg_pct:.0f}% harder against you, matching your own {viewer_rebirth_count} rebirth(s)."
+        )
+    # Real stealable-item listing (2026-08-11) -- same fog-of-war
+    # boundary as everything else here, and the SAME real weights
+    # bot._do_steal_from_enemy actually rolls against, never a separate
+    # made-up hint list. Sorted so the common item(s) list before rare.
     stealable = template.get("stealable_items")
     if stealable:
         ranked = sorted(stealable, key=lambda e: -e["weight"])
@@ -16606,7 +16666,7 @@ def _format_bestiary_entry(monster_key: str, template: dict) -> str:
             name = items_module.get_item(entry["item_id"])["name"]
             rarity_tag = "common" if entry["weight"] >= 50 else "rare"
             parts.append(f"{name} ({rarity_tag})")
-        lines.append(f"  🎒 Can steal: {', '.join(parts)}")
+        lines.append(f"🎒 Can steal: {', '.join(parts)}")
     return "\n".join(lines)
 
 
@@ -16634,14 +16694,21 @@ async def _do_bestiary(update: Update) -> None:
         )
         return
 
-    lines = ["📖 **Bestiary**"]
+    entries = []
     for monster_key in known:
         template = cl.get_monster_template(CAMPAIGN, monster_key)
         if template is None:
             continue
-        lines.append(_format_bestiary_entry(monster_key, template))
+        entries.append(_format_bestiary_entry(monster_key, template, character.get("rebirth_count", 0)))
 
-    await _safe_send(update, "\n".join(lines), speak=False)
+    # Visual pass (2026-08-14, per Coffee: "make the bestiary more
+    # visually appealing") -- a real divider between entries instead of
+    # everything running together into one wall of text, and the real
+    # known-count up front instead of a bare title.
+    lines = [f"📖 **Bestiary** — {len(entries)} creature{'s' if len(entries) != 1 else ''} known"]
+    lines.append("\n━━━━━━━━━━━━━━━\n".join(entries))
+
+    await _safe_send(update, "\n\n".join(lines), speak=False)
 
 
 def _achievement_condition_met(character: dict, check: dict) -> bool:

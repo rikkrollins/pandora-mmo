@@ -2,6 +2,56 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.220] — Bestiary redesign + player resistance sheet, per Coffee's direct request
+
+Two real asks, same session: "when the enemies evolve and the players
+encounter them again, add thier resistences and elemental damages to
+the bestiary - also make sure players resistences and elemental stats
+are listed on the player sheet when it becomes available" -- then,
+right after: "put the spells and abilities from enemies on bestiary
+also - make the bestiary more visually appealing."
+
+**Bestiary** (`bot._format_bestiary_entry`, redesigned):
+- **World-scaled toughness, live**: a monster's real resistance/damage
+  now depends on the VIEWING character's own rebirth_count ("The World
+  Evolves," v1.27.218/219) -- the bestiary previously had no way to
+  know this at all (it only ever read the frozen campaign.json
+  template). Now recomputes fresh from the viewer's CURRENT
+  rebirth_count every time the entry is shown (not a stale snapshot
+  from a past fight), so it always reflects what the player would
+  actually face right now. A never-reborn viewer sees no change.
+- **Spells/abilities**: reuses `bot._boss_ability_facts` directly (the
+  same real fact-builder every boss intro/defeat/decision narration
+  line already draws from) instead of re-deriving a second, partial
+  copy -- known_spells and every Synergy Phase 9-11 signature mechanic
+  now show up as one real sentence, for every known monster, not just
+  bosses.
+- **Visual pass**: real emoji-labeled sections (❤️ HP/🛡️ AC/💪 STR/🏃
+  DEX/⭐ XP, 🩸 conditions, ✨ abilities, 🌡️ resistances, 🔥❄️ elemental,
+  🌍 world-scaling, 🎒 stealable items) instead of a dense paragraph, a
+  real 👑 boss tag, and a divider between entries plus a real known-count
+  header instead of a bare title.
+
+**Character sheet** (`bot._format_character_sheet`): the existing
+resistance/magic-penetration line was racial-only (Dwarf/poison,
+Dragonborn+Tiefling/fire) -- the only source a player carried when it
+was written, before enchanted gear could grant real elemental
+resistance wards (2026-08-10). New `bot._compute_equipped_resist_
+profile` (a pure, read-only extraction of the same real equipped-item
+resistance logic combat's own `_apply_equipped_elemental_profile`
+already uses, without that function's side effects -- checking your
+sheet shouldn't leave stray combat-only fields on the character dict)
+merges racial + equipped resistances/vulnerabilities/immunities/
+elemental wards into one real line, magic penetration still shown
+alongside it.
+
+2 new real tests (throwaway DB, a real Dwarf with a real enchanted
+frost-ward armor item equipped) confirmed: the sheet shows both racial
+poison resistance AND the equipped fire resistance merged together,
+plus the correct rebirth-5 magic penetration (50%); the bestiary shows
+zero world-scaling text for a never-reborn viewer and the correct
++75%/50%-harder line plus real boss abilities for a rebirth-5 viewer.
+
 ## [1.27.219] — Extend: "The World Evolves" now reaches Echo Trials
 
 Follow-up to v1.27.218's own "explicitly out of scope for this pass"
