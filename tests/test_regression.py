@@ -6828,6 +6828,55 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("subclass", catalog)
         self.assertIn("proving yourself in combat", catalog)
 
+    def test_support_guild_catalog_names_real_benefits_not_vague_filler(self):
+        """
+        Real live bug (2026-08-14, Coffee, Support topic: "What does the
+        arcana guild and the wild magic sub class offer to my player?"
+        answered with pure vague filler -- "amplifies your powers...
+        adds flexibility" -- no real number anywhere). Root cause:
+        _guilds_catalog_text never included a guild's own real
+        `benefits`/`permanent_stat` fields, so Support had nothing real
+        to answer "what does this guild give me" from.
+        """
+        from ai.support_agent import _guilds_catalog_text
+        catalog = _guilds_catalog_text()
+        self.assertIn("Arcane Circle", catalog)
+        self.assertIn("spell scroll", catalog)
+        self.assertIn("15%", catalog)
+        self.assertIn("intelligence", catalog)
+
+    def test_support_subclass_catalog_grounds_every_real_subclass(self):
+        """
+        Same live report as above -- the "wild magic sub class" half of
+        the question. Subclasses were never grounded anywhere in
+        support_agent.py at all, for any class. New _subclass_catalog_
+        text mirrors bot.py's own _do_choose_subclass real mechanical
+        branches exactly.
+        """
+        from ai.support_agent import _subclass_catalog_text
+        catalog = _subclass_catalog_text()
+        self.assertIn("Wild Magic", catalog)
+        self.assertIn("Charisma check", catalog)
+        self.assertIn("Draconic", catalog)
+        self.assertIn("20% more damage", catalog)
+        self.assertIn("Assassin", catalog)
+        self.assertIn("Backstab", catalog)
+        self.assertIn("Thief", catalog)
+        self.assertIn("steal attempt", catalog)
+
+    def test_support_catalog_reference_includes_subclasses_for_a_subclass_question(self):
+        """
+        Regression guard for the new keyword-filtered "subclasses"
+        section: a question naming a real subclass by name (no literal
+        word "subclass" at all -- the exact live phrasing) must still
+        trigger it, via the auto-generated per-name keyword list, not
+        just the generic "subclass"/"archetype" words.
+        """
+        from ai.support_agent import _build_catalog_reference
+        result = _build_catalog_reference("What does the wild magic sub class offer?")
+        self.assertIn("Wild Magic", result)
+        self.assertIn("Charisma check", result)
+
     def test_equipable_worth_shown_in_stats_line(self):
         """Real live request (2026-08-03): "in the description of the items can u show what it is worth? do this for equipables"."""
         from rules.item_generator import generate_weapon

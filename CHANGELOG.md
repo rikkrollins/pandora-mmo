@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.202] — Fix: Support gave vague, ungrounded answers about guild benefits and subclasses
+
+Real live bug (Coffee, Support topic: "What does the arcana guild and
+the wild magic sub class offer to my player?" answered "The Arcane
+Circle amplifies your powers; Wild Magic adds flexibility 🌟" -- pure
+filler, no real number anywhere).
+
+Two real grounding gaps, both violating CLAUDE.md's rule that Support
+must answer only from what's actually implemented:
+
+- `_guilds_catalog_text` never included a guild's own real `benefits`
+  list or `permanent_stat` -- Support had zero real facts to answer
+  "what does joining X actually give me." Now lists them (e.g. Arcane
+  Circle: "bonus spell scroll, shop discount 10%, bonus spell damage
+  15%, plus a permanent intelligence boost").
+- Subclasses were never grounded anywhere in support_agent.py, for any
+  class. New `_subclass_catalog_text` mirrors `bot.py`'s own
+  `_do_choose_subclass` real mechanical branches exactly (combat
+  subclasses' 20% damage bonus, Assassin's Backstab system, Thief's
+  steal bonus, Life's extra healing, Totem Warrior's spell-damage
+  halving while raging, and the generic +2 ability-check bonus for
+  every other utility subclass) for all 22 real subclasses. Wired into
+  the existing keyword-filtered catalog system with both generic
+  words ("subclass", "archetype") and every real subclass's own name,
+  built from `CLASS_SUBCLASSES` so it can't drift -- catches a
+  question naming one directly, exactly like the live report did.
+
+4 new tests plus the existing 11-test Support/catalog regression set
+confirmed clean.
+
 ## [1.27.201] — Fix: a named story boss could be duplicated 4x by encounter scaling
 
 Follow-up to v1.27.200's same dev-bridge report: the screenshot that

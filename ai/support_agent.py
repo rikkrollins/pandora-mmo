@@ -25,7 +25,11 @@ from ai.text_cleanup import strip_think_tags
 from guilds import GUILDS
 from models import VALID_CLASSES
 from rules.crafting import RECIPES, ENCHANT_RECIPES
-from rules.leveling import XP_THRESHOLDS, level_for_xp, MAX_LEVEL
+from rules.leveling import (
+    XP_THRESHOLDS, level_for_xp, MAX_LEVEL, CLASS_SUBCLASSES, COMBAT_SUBCLASS_NAMES,
+    COMBAT_SUBCLASS_DAMAGE_BONUS_PCT, THIEF_SUBCLASS_STEAL_BONUS, LIFE_SUBCLASS_HEAL_BONUS,
+    TOTEM_WARRIOR_SUBCLASS_NAME, UTILITY_SUBCLASS_ABILITY_CHECK_BONUS, UTILITY_SUBCLASS_CHECK_BONUS_VALUE,
+)
 
 # Same logger name/handlers as bot.py, so Support failures actually
 # land in bot_live_tmp.log -- real gap found 2026-08-10: this file's
@@ -196,6 +200,14 @@ def _spells_catalog_text() -> str:
     return "\n".join(lines)
 
 
+def _format_guild_benefit(benefit_id: str) -> str:
+    """Turns a raw benefit flag (e.g. "shop_discount_10") into readable text -- a trailing number is always a real percentage in this catalog's own data."""
+    words = benefit_id.split("_")
+    if words[-1].isdigit():
+        return " ".join(words[:-1]) + f" {words[-1]}%"
+    return " ".join(words)
+
+
 def _guilds_catalog_text() -> str:
     # Real live bug (2026-08-13, Coffee, Support topic): asked "How do i
     # join the forge guild?" and got back "No additional steps required
@@ -208,6 +220,16 @@ def _guilds_catalog_text() -> str:
     # player, left entirely out of its own grounding. Naming them here
     # is what CLAUDE.md's grounding rule requires: answer from what's
     # ACTUALLY implemented, not a partial read of it.
+    #
+    # Real live bug (2026-08-14, Coffee, Support topic: "What does the
+    # arcana guild and the wild magic sub class offer to my player?" ->
+    # got back "The Arcane Circle amplifies your powers; Wild Magic
+    # adds flexibility" -- pure vague filler, no real number anywhere).
+    # This catalog never listed a guild's own real `benefits`/
+    # `permanent_stat` fields at all, so Support had zero real facts to
+    # answer "what does joining X actually give me" -- confirmed the
+    # exact same "partial grounding" shape as the fix above, just for a
+    # different pair of real fields.
     lines = ["\nREAL GUILDS IN THIS GAME:"]
     for guild_id, guild in GUILDS.items():
         extra = []
@@ -215,7 +237,45 @@ def _guilds_catalog_text() -> str:
             extra.append(f"classes: {', '.join(guild['join_requirement_classes'])}")
             extra.append("must have chosen a real subclass first (say \"choose the path of...\")")
         extra.append("must have won at least one real fight (proving yourself in combat)")
-        lines.append(f"- {guild['name']}: requires level {guild['join_requirement_level']}, {', '.join(extra)}")
+        benefit_text = ", ".join(_format_guild_benefit(b) for b in guild.get("benefits", []))
+        lines.append(
+            f"- {guild['name']}: requires level {guild['join_requirement_level']}, {', '.join(extra)}. "
+            f"Real benefits: {benefit_text}, plus a permanent {guild.get('permanent_stat', '')} boost on joining."
+        )
+    return "\n".join(lines)
+
+
+def _subclass_catalog_text() -> str:
+    """
+    Real live bug, same report as the guild-benefits fix above (2026-08-14,
+    Coffee, Support topic: "...and the wild magic sub class offer to my
+    player?" answered with pure filler, "adds flexibility" -- no real
+    number). Subclasses were never grounded anywhere in this file at
+    all, for any class, so a subclass-specific question had nothing
+    real to draw from. Mirrors bot.py's own _do_choose_subclass exactly
+    -- the real mechanical branch (combat/Assassin/Thief/Life/Totem
+    Warrior/generic ability-check bonus) for every one of the 22 real
+    subclasses (11 classes x 2 each), never invented here.
+    """
+    lines = ["\nREAL SUBCLASSES IN THIS GAME (chosen via \"choose the path of...\"):"]
+    for char_class, (combat_name, utility_name) in CLASS_SUBCLASSES.items():
+        for name in (combat_name, utility_name):
+            if name in COMBAT_SUBCLASS_NAMES:
+                effect = f"weapon attacks deal {COMBAT_SUBCLASS_DAMAGE_BONUS_PCT}% more damage"
+            elif name == "Assassin":
+                effect = "every attack becomes a real Backstab attempt (a growing damage multiplier, up to x10, that gets more reliable the more you use it); thrown weapons always hit"
+            elif name == "Thief":
+                effect = f"+{THIEF_SUBCLASS_STEAL_BONUS} on every steal attempt"
+            elif name == "Life":
+                effect = f"healing spells restore +{LIFE_SUBCLASS_HEAL_BONUS} extra HP on top of Disciple of Life"
+            elif name == TOTEM_WARRIOR_SUBCLASS_NAME:
+                effect = "while raging, spell damage against you is halved too, not just weapon hits"
+            elif name in UTILITY_SUBCLASS_ABILITY_CHECK_BONUS:
+                ability = UTILITY_SUBCLASS_ABILITY_CHECK_BONUS[name]
+                effect = f"+{UTILITY_SUBCLASS_CHECK_BONUS_VALUE} on every {ability.capitalize()} check"
+            else:
+                effect = "no real mechanical hook built yet"
+            lines.append(f"- {char_class} / {name}: {effect}")
     return "\n".join(lines)
 
 
@@ -304,6 +364,17 @@ _CATALOG_SECTION_KEYWORDS = {
     "crafting": (["craft", "recipe", "brew", "gather", "herbalism", "mining",
                   "lumberjack", "fishing", "forage", "enchant", "imbue"], _crafting_catalog_text),
     "races": (["race", "ability score", "ability bonus", "stat bonus", "racial"], _race_bonus_catalog_text),
+    # "subclass"/"sub class"/"archetype" catch a generic question; every
+    # real subclass's own literal name (built from CLASS_SUBCLASSES, not
+    # hand-typed, so this can't drift if that table ever changes) catches
+    # a question that names one directly without ever saying "subclass"
+    # at all -- exactly the live report that surfaced this gap ("What
+    # does the arcana guild and the wild magic sub class offer").
+    "subclasses": (
+        ["subclass", "sub class", "archetype"]
+        + [name.lower() for names in CLASS_SUBCLASSES.values() for name in names],
+        _subclass_catalog_text,
+    ),
 }
 
 
