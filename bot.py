@@ -5633,6 +5633,8 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
             _refresh_real_player_spell_slots(target)
             result = await _maybe_monster_cast_spell(update, session, current, target, spell_id=pre_decided_spell_id)
             if result is None:
+                result = await _maybe_use_breath_weapon(update, session, current, target)
+            if result is None:
                 adv, disadv = _attack_advantage_disadvantage(current, target)
                 result = resolve_attack(
                     current, target, _weapon_for_attacker(current), advantage=adv, disadvantage=disadv,
@@ -6930,32 +6932,42 @@ async def _maybe_summon_minions(update: Update, session: sessions.Session, boss:
 
 SECOND_WIND_HP_THRESHOLD = 0.5
 BARDIC_INSPIRATION_HP_THRESHOLD = 0.7
+LAY_ON_HANDS_HP_THRESHOLD = 0.5
 
 
 def _maybe_use_class_ability(current: dict, session: sessions.Session) -> str | None:
     """
     Real AI class-ability usage (2026-08-13, per Coffee: "I want AI to
     be able to use all thier abilities, spells cantrips and anything
-    that there character has or levels up"). Every one of these 7 real
+    that there character has or levels up"). Every one of these real
     class features (Rage, Second Wind, Action Surge, Reckless Attack,
-    Flurry of Blows, Channel Divinity, Divine Smite) already works by
-    setting a flag/resource on the LIVE combat participant dict --
-    exactly the same in-memory state _do_rage/_do_second_wind/etc (the
-    human-facing command handlers) already set -- so this function only
-    ever DECIDES and SETS that same flag/resource; it never reimplements
-    the effect. The existing combat math (resolve_attack's raging/
-    smite_active checks, _attacks_per_turn's action_surge_active/
-    flurry_bonus_attacks checks, _attack_advantage_disadvantage's
-    reckless_active check) already reads these flags unconditionally, so
-    setting them here for an AI-controlled participant picks them up
-    completely unchanged. Bardic Inspiration is the one exception (heals
-    an ally directly, no flag to set) -- applied straight to the ally's
-    real in-memory HP, same convention _maybe_monster_cast_spell already
-    uses for damage. Called once per turn (attack_num == 0) for any
-    is_ai participant, so a companion/monster gets at most one bonus-
-    action-equivalent ability per turn, same real 5E economy every
-    class actually has. Returns a real flavor string if something was
-    used, else None (caller sends nothing extra that turn).
+    Flurry of Blows, Channel Divinity, Divine Smite, Wild Shape, Lay on
+    Hands) already works by setting a flag/resource on the LIVE combat
+    participant dict -- exactly the same in-memory state _do_rage/
+    _do_second_wind/etc (the human-facing command handlers) already set
+    -- so this function only ever DECIDES and SETS that same flag/
+    resource; it never reimplements the effect. The existing combat math
+    (resolve_attack's raging/smite_active checks, _attacks_per_turn's
+    action_surge_active/flurry_bonus_attacks checks, _attack_advantage_
+    disadvantage's reckless_active check, _do_cast_spell's wild_shaped
+    silence check) already reads these flags unconditionally, so setting
+    them here for an AI-controlled participant picks them up completely
+    unchanged. Bardic Inspiration and Lay on Hands are the two
+    exceptions (heal directly, no flag to set) -- applied straight to
+    the target's real in-memory HP, same convention _maybe_monster_
+    cast_spell already uses for damage. Called once per turn
+    (attack_num == 0) for any is_ai participant, so a companion/monster
+    gets at most one bonus-action-equivalent ability per turn, same real
+    5E economy every class actually has (an honest simplification
+    already used for every ability here, including the ones -- Channel
+    Divinity, Lay on Hands -- that spend a real action in actual 5E).
+    Returns a real flavor string if something was used, else None
+    (caller sends nothing extra that turn). Breath Weapon (Dragonborn)
+    and Arcane Recovery (Wizard) aren't decided here -- Breath Weapon
+    replaces the attack itself (wired into the attack/spell decision
+    alongside monster spellcasting, see _maybe_use_breath_weapon) and
+    Arcane Recovery isn't a combat action at all in real 5E (wired into
+    the AI party's downtime tick instead, see _ai_party_act_one_turn).
     """
     char_class = current.get("char_class")
     if not char_class:
@@ -7001,9 +7013,28 @@ def _maybe_use_class_ability(current: dict, session: sessions.Session) -> str | 
             db.use_feature(telegram_user_id, chat_id, "ki")
             return f"**{current['name']}** unleashes a Flurry of Blows!"
 
+    if char_class == "Paladin" and hp_pct < LAY_ON_HANDS_HP_THRESHOLD:
+        if db.get_feature_uses(telegram_user_id, chat_id, "lay_on_hands") < 1:
+            pool_per_level = 5 + _skill_points(current, "greater_mercy")
+            pool = pool_per_level * level
+            pool = int(pool * power_scale_ratio(level, current.get("rebirth_count", 0)))
+            new_hp = min(hp_max, current["hp_current"] + pool)
+            actual = new_hp - current["hp_current"]
+            current["hp_current"] = new_hp
+            db.use_feature(telegram_user_id, chat_id, "lay_on_hands")
+            return f"**{current['name']}** lays hands on themself, channeling divine healing — **{actual} HP** restored!"
+
     if char_class == "Paladin" and level >= 2 and not current.get("smite_active") and current.get("spell_slots_current", 0) >= 1:
         current["smite_active"] = True
         return f"**{current['name']}** channels divine wrath, ready to smite!"
+
+    if char_class == "Druid" and level >= 2 and not current.get("wild_shaped"):
+        if db.get_feature_uses(telegram_user_id, chat_id, "wild_shape") < WILD_SHAPE_MAX_USES:
+            current["wild_shaped"] = True
+            bonus_temp_hp = wild_shape_temp_hp(level) + 2 * _skill_points(current, "primal_surge")
+            current["temp_hp"] = max(current.get("temp_hp", 0), bonus_temp_hp)
+            db.use_feature(telegram_user_id, chat_id, "wild_shape")
+            return f"**{current['name']}** shifts into a beast — {bonus_temp_hp} temporary HP, claws and fangs bared!"
 
     if char_class == "Cleric" and level >= 2:
         if db.get_feature_uses(telegram_user_id, chat_id, "channel_divinity") < 1:
@@ -7160,6 +7191,58 @@ async def _maybe_monster_cast_spell(
         "defender_hp_remaining": target["hp_current"], "defender_hp_max": target.get("hp_max", target["hp_current"]),
         "damage_type": spell.get("damage_type", "physical"), "enrage_triggered": False, "bloodied_triggered": False,
         "elemental_heal_gained": elemental_heal_gained, "is_spell_cast": True, "spell_name": spell["name"], "counterspelled": False,
+    }
+
+
+async def _maybe_use_breath_weapon(
+    update: Update, session: sessions.Session, caster: dict, target: dict,
+) -> dict | None:
+    """
+    Real Dragonborn racial trait (2026-08-14, per Coffee: "I want AI to
+    be able to use all thier abilities... and anything that there
+    character has") -- an AI-controlled Dragonborn gets a real chance to
+    use Breath Weapon instead of a normal attack, mirroring _maybe_
+    monster_cast_spell's shape exactly (same MONSTER_SPELLCAST_CHANCE
+    roll, same resolve_attack-shaped return dict so the caller's
+    existing narration/defeat-detection code handles it unchanged) --
+    it consumes the attacker's action same as a spell cast does, so it's
+    decided at the same call site, not inside _maybe_use_class_ability
+    (which only ever handles bonus-action-equivalent abilities that
+    happen BEFORE an attack, never a replacement for one). Reuses the
+    exact same real 5E math (rules.leveling.breath_weapon_dice_count,
+    save-DC/save-roll, half damage on a successful save) _do_breath_
+    weapon already uses for a human player -- never invented here.
+    """
+    if caster.get("race") != "Dragonborn" or not caster.get("is_ai"):
+        return None
+    telegram_user_id = caster["telegram_user_id"]
+    chat_id = caster.get("chat_id")
+    if db.get_feature_uses(telegram_user_id, chat_id, "breath_weapon") >= 1:
+        return None
+    if random.random() > MONSTER_SPELLCAST_CHANCE:
+        return None
+
+    level = caster.get("level", 1)
+    dice_count = breath_weapon_dice_count(level)
+    dmg = roll_damage(f"{dice_count}d6")
+    scaled_total = int(dmg["total"] * power_scale_ratio(level, caster.get("rebirth_count", 0)))
+    save_dc = 8 + caster.get("proficiency_bonus", 2) + ability_modifier(caster.get("constitution", 10))
+    save_roll = roll_d20() + ability_modifier(target.get("dexterity", 10))
+    save_success = save_roll >= save_dc
+    damage_dealt = scaled_total // 2 if save_success else scaled_total
+    target["hp_current"] = max(target["hp_current"] - damage_dealt, 0)
+    db.use_feature(telegram_user_id, chat_id, "breath_weapon")
+
+    return {
+        "attacker": caster["name"], "defender": target["name"], "hit": True,
+        "critical_hit": False, "critical_fail": False, "raw_roll": None, "attack_roll": None,
+        "target_ac": None, "damage_dealt": damage_dealt, "relentless_endurance_triggered": False,
+        "death_ward_triggered": False, "dark_ones_blessing_gained": 0,
+        "shield_reaction_triggered": False, "uncanny_dodge_triggered": False,
+        "hybrid_bonus_damage": 0, "hybrid_temp_hp_gained": 0, "hybrid_self_heal_gained": 0,
+        "defender_hp_remaining": target["hp_current"], "defender_hp_max": target.get("hp_max", target["hp_current"]),
+        "damage_type": "fire", "enrage_triggered": False, "bloodied_triggered": False,
+        "elemental_heal_gained": 0, "is_spell_cast": True, "spell_name": "Breath Weapon", "counterspelled": False,
     }
 
 
@@ -24824,6 +24907,33 @@ async def _ai_party_act_one_turn(bot, actor: dict) -> None:
             db.update_character(user_id, actor["chat_id"], current_location=human_leader["current_location"])
             _log_world_event(
                 human_leader["current_location"], f"{actor['name']} hurries to catch up with the party.", chat_id,
+            )
+            return
+
+    # Arcane Recovery (2026-08-14, per Coffee: "I want AI to be able to
+    # use all thier abilities... and anything that there character has
+    # or levels up"): real Wizard class feature, but NOT a combat action
+    # in real 5E (a short rest, not a turn) -- so unlike the other 7
+    # class abilities (wired into _maybe_use_class_ability, decided
+    # mid-combat), this is decided here instead, on the AI's own
+    # downtime tick, exactly where a Wizard between fights would
+    # actually use it. Deterministic short-circuit, same shape as the
+    # party-cohesion snap-back above -- skips this tick's LLM call
+    # entirely rather than hoping the model thinks to ask for it.
+    if (actor.get("char_class") == "Wizard"
+            and actor.get("spell_slots_current", 0) < actor.get("spell_slots_max", 0)
+            and db.get_feature_uses(user_id, chat_id, "arcane_recovery") < 1):
+        max_recoverable = (actor.get("level", 1) + 1) // 2 + _skill_points(actor, "deeper_recovery")
+        missing = actor["spell_slots_max"] - actor["spell_slots_current"]
+        recovered = min(max_recoverable, missing)
+        if recovered > 0:
+            db.update_character(user_id, chat_id, spell_slots_current=actor["spell_slots_current"] + recovered)
+            db.use_feature(user_id, chat_id, "arcane_recovery")
+            _log_world_event(
+                actor["current_location"],
+                f"{actor['name']} pores over a spellbook, recovering {recovered} spell slot"
+                f"{'s' if recovered != 1 else ''} through Arcane Recovery.",
+                chat_id,
             )
             return
 

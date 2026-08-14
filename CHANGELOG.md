@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.197] — Add: AI-controlled combatants use the remaining class/racial features
+
+Follow-up to v1.27.196 ("I want AI to be able to use all thier
+abilities... and anything that there character has"). That release
+covered 8 class features; auditing every real `_do_*` ability command
+handler found 4 more that AI-controlled characters never used: Wild
+Shape (Druid, level 2+, real per-rest temp-HP shapeshift), Lay on
+Hands (Paladin, spends a real HP pool to heal themself when badly
+hurt, prioritized the same way Second Wind is for Fighters), Breath
+Weapon (Dragonborn racial trait — unlike the other 6 bonus-action-
+style abilities this REPLACES the attack itself, so it's decided at
+the same call site as monster spellcasting via new
+`_maybe_use_breath_weapon`, not inside `_maybe_use_class_ability`),
+and Arcane Recovery (Wizard — not a combat action in real 5E at all,
+so it's decided on the AI party's own downtime tick instead, before
+that turn's LLM call, the same deterministic-shortcut pattern already
+used for party-cohesion snap-back).
+
+Also corrected a stale claim from v1.27.194/196's own memory: the
+separate hardcoded autonomous AI party (Zara/Bram, `is_autonomous=1`)
+was believed to still be excluded from class-ability usage, distinct
+from recruited companions. Verified via a real test this was wrong —
+`_ensure_ai_party_exists` creates them through the same
+`db.create_ai_companion` call as any companion, so they're `is_ai=1`
+too, and `_maybe_use_class_ability`/monster-spellcasting are gated
+only on `is_ai`, not `is_autonomous`. They already got full ability/
+spell usage the moment v1.27.196 shipped.
+
+4 new real tests (Wild Shape temp-HP grant, Lay on Hands self-heal
+priority over priming Divine Smite, Breath Weapon replacing a normal
+attack + its own once-per-rest gate, Arcane Recovery firing on a real
+downtime tick without an LLM call) plus the full existing ability-
+usage/regression sweep confirmed clean.
+
 ## [1.27.196] — Add: AI-controlled combatants use their real class abilities
 
 Real live request (Coffee: "I want AI to be able to use all thier

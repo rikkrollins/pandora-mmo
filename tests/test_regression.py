@@ -6288,6 +6288,61 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(player.get("raging"))
         sessions.end_session(-999)
 
+    def test_ai_druid_companion_wild_shapes(self):
+        companion = self._make_ability_companion("AI Druid1", "Druid", level=3)
+        flavor = bot._maybe_use_class_ability(companion, None)
+        self.assertIsNotNone(flavor)
+        self.assertTrue(companion.get("wild_shaped"))
+        self.assertGreater(companion.get("temp_hp", 0), 0)
+        self.assertEqual(db.get_feature_uses(companion["telegram_user_id"], -999, "wild_shape"), 1)
+
+    def test_ai_paladin_companion_lays_hands_on_self_when_badly_hurt(self):
+        companion = self._make_ability_companion("AI Paladin2", "Paladin", level=3, hp_current=5, hp_max=30)
+        flavor = bot._maybe_use_class_ability(companion, None)
+        self.assertIsNotNone(flavor)
+        self.assertIn("lays hands", flavor)
+        self.assertGreater(companion["hp_current"], 5)
+        self.assertEqual(db.get_feature_uses(companion["telegram_user_id"], -999, "lay_on_hands"), 1)
+        # Divine Smite never primes in the same turn -- Lay on Hands already returned.
+        self.assertFalse(companion.get("smite_active"))
+
+    async def test_ai_dragonborn_uses_breath_weapon_instead_of_a_normal_attack(self):
+        from unittest.mock import patch
+        import sessions
+        caster = self._make_ability_companion("AI Dragonborn1", "Fighter", level=3, hp_current=30, hp_max=30)
+        caster["race"] = "Dragonborn"
+        caster["is_ai"] = 1
+        caster["proficiency_bonus"] = 2
+        caster["constitution"] = 14
+        target = {
+            "telegram_user_id": -700942, "name": "Target Dummy", "hp_current": 30, "hp_max": 30,
+            "dexterity": 8, "strength": 10,
+        }
+        session = sessions.start_session(-999, [caster, target], {caster["telegram_user_id"]: "party", -700942: "enemy"})
+        with patch("bot.random.random", return_value=0.0), patch("rules.dice.random.randint", return_value=4):
+            result = await bot._maybe_use_breath_weapon(None, session, caster, target)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["spell_name"], "Breath Weapon")
+        self.assertLess(target["hp_current"], 30)
+        self.assertEqual(db.get_feature_uses(caster["telegram_user_id"], -999, "breath_weapon"), 1)
+        # A second attempt this same rest cycle must not fire again.
+        result2 = await bot._maybe_use_breath_weapon(None, session, caster, target)
+        self.assertIsNone(result2)
+        sessions.end_session(-999)
+
+    async def test_wizard_companion_uses_arcane_recovery_on_its_downtime_tick(self):
+        companion = db.create_ai_companion(
+            -998, "AI Wizard Downtime", "Human", "Wizard", self._ABILITY_ABILITY_SCORES,
+            hp_max=20, armor_class=11, gold=0, inventory={},
+        )
+        db.update_character_by_id(companion["character_id"], level=3, spell_slots_max=4, spell_slots_current=1)
+        actor = db.get_character_by_id(companion["character_id"])
+        actor["current_location"] = "crossroads_tavern"
+        await bot._ai_party_act_one_turn(None, actor)
+        refreshed = db.get_character_by_id(companion["character_id"])
+        self.assertGreater(refreshed["spell_slots_current"], 1)
+        self.assertEqual(db.get_feature_uses(actor["telegram_user_id"], -998, "arcane_recovery"), 1)
+
     async def test_counterspell_never_negates_an_allys_own_spell(self):
         """
         Real correctness fix, caught while confirming AI party members
