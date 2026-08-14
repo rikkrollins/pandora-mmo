@@ -7,7 +7,7 @@ narrates what a spell looked like, but never decides its numeric effect.
 from rules.dice import roll_damage, roll_d20, ability_modifier
 from rules.leveling import (
     is_proficient_in_save, LIFE_SUBCLASS_HEAL_BONUS, power_scale_ratio,
-    COMBAT_SUBCLASS_NAMES, COMBAT_SUBCLASS_DAMAGE_BONUS_PCT,
+    COMBAT_SUBCLASS_NAMES, COMBAT_SUBCLASS_DAMAGE_BONUS_PCT, world_damage_multiplier,
 )
 from guilds import FAITH_CIRCLE_HEAL_BONUS, held_guild_ids
 import hybrid_features
@@ -471,6 +471,15 @@ def resolve_damage_spell(spell_id: str, caster: dict, target: dict | None = None
         total = int(total * power_scale_ratio(caster.get("level", 1), caster.get("rebirth_count", 0)))
     else:
         total += caster.get("damage_bonus", 0)
+        # "The World Evolves" (2026-08-14, per Coffee): same real
+        # inverse of power_scale_ratio rules/combat.py's resolve_attack
+        # now applies for monster weapon attacks -- a monster CASTER
+        # hits harder in proportion to how many times the target it's
+        # casting at has rebirthed. Only in the "else" (monster caster)
+        # branch, same reasoning as damage_bonus just above: a real
+        # character caster's own spell numbers are untouched by this.
+        if target is not None:
+            total = int(total * world_damage_multiplier(target.get("rebirth_count", 0)))
 
     # Real live gap (2026-08-14, Coffee: "Draconic shud be 20% more
     # damage on magic based attacks... shudnt the magic user have a

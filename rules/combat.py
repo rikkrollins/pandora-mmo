@@ -8,7 +8,7 @@ results computed here, never decides them.
 from rules.dice import roll_d20, roll_attack, roll_damage, ability_modifier
 from rules.leveling import (
     sneak_attack_dice_count, rage_damage_bonus, wild_shape_damage_bonus, magic_penetration_pct,
-    COMBAT_SUBCLASS_NAMES, COMBAT_SUBCLASS_DAMAGE_BONUS_PCT, power_scale_ratio,
+    COMBAT_SUBCLASS_NAMES, COMBAT_SUBCLASS_DAMAGE_BONUS_PCT, power_scale_ratio, world_damage_multiplier,
 )
 from class_features import is_weapon_proficient
 from guilds import FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT, held_guild_ids
@@ -659,6 +659,18 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         # damage_bonus directly in campaign.json.
         if attacker.get("char_class"):
             damage_dealt = int(damage_dealt * power_scale_ratio(attacker.get("level", 1), attacker.get("rebirth_count", 0)))
+        # "The World Evolves" (2026-08-14, per Coffee): the exact
+        # inverse of power_scale_ratio just above -- when the ATTACKER
+        # has no char_class (a real monster, never an AI party
+        # companion, which always has one), the world hits harder in
+        # proportion to how many times the DEFENDING player has
+        # rebirthed. Scaled to the defender specifically (not the
+        # attacking monster, which has no rebirth_count of its own) --
+        # the world reacts to how evolved the player being hit actually
+        # is, same "the world's forces get stronger" framing as world_
+        # resistance_pct's own docstring.
+        if not attacker.get("char_class"):
+            damage_dealt = int(damage_dealt * world_damage_multiplier(defender.get("rebirth_count", 0)))
         # Boss Enrage bonus (2026-07-27) -- see ENRAGE_HP_THRESHOLD's own
         # docstring above. Applies once the ATTACKING boss has already
         # crossed its own enrage threshold on a previous hit taken.

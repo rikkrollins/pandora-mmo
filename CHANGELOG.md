@@ -2,6 +2,64 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.218] — Add: "The World Evolves" — rebirth-scaled monster resistance & damage
+
+Real report (Coffee, dev-bridge): an AI party member one-shot Goblin
+Boss (93 HP) at level 19. Investigated: confirmed intentional, existing
+design -- `overtuned_monster_stat_multiplier` is explicitly one-
+directional (only ever shrinks an overtuned monster down for an
+underleveled party, never buffs an easy one up for an overleveled one),
+so outleveling old content is normal, not a bug. Confirmed keeping that
+as-is.
+
+But Coffee raised a real, distinct want on top of that: "when a
+character evolves, the worlds forces get stronger... using harder
+resistences and elemental damages... more evolutions more evolved the
+world around you becomes... you want to make ur player godly to break
+out of it" -- confirmed as deliberate: "the game is meant to be played
+multiple times so that shud be a working mechanic to make the
+evolutions make sense." A genuinely new axis (rebirth_count, not
+character level) -- a never-reborn party sees zero change from this
+either, so it doesn't touch or contradict the goblin_boss decision.
+
+The exact tension this asks for already existed half-built:
+`magic_penetration_pct(rebirth_count)` (10%/rebirth, capped at 100% at
+rebirth 10) already counters a resistant monster's damage reduction --
+but nothing ever made monsters actually resist MORE as the player kept
+evolving, so a deeply reborn character's own penetration was countering
+a threat that never grew to match them. New `rules.leveling.world_
+resistance_pct`/`world_damage_multiplier` (15%/rebirth resistance,
+10%/rebirth damage, both uncapped) close the gap:
+
+- Every monster in a real encounter (`bot._do_start_combat`'s build
+  loop -- unlike the level-based `stat_mult`, this DOES apply to
+  bosses too) gains `elemental_resistance_pct` scaled to the party's
+  own average `rebirth_count`, stacking on top of any hand-authored
+  resistance a monster already has (e.g. The Waking Ember's fire
+  resistance).
+- Monster-dealt damage (`rules/combat.py::resolve_attack`'s weapon
+  path AND `spells.py::resolve_damage_spell`'s monster-caster branch)
+  scales up by the DEFENDING player's own rebirth_count -- mirrors
+  `power_scale_ratio`'s existing player-side scaling exactly, just
+  inverted.
+- Deliberately uncapped, unlike `magic_penetration_pct` -- that
+  function's own existing 100%-at-rebirth-10 cap IS the "godly
+  breakthrough": at full penetration, `elemental_pct * (1 -
+  penetration)` reduces ANY amount of world resistance, no matter how
+  high it's climbed, straight to zero effect. Confirmed with real
+  numbers: even a rebirth-50 world's 750% resistance is fully
+  penetrated by a rebirth-10 player. Set higher than
+  `magic_penetration_pct`'s own rate (15 vs. 10) so the difficulty
+  spike is real and felt mid-game (rebirth 5: 75% world resistance vs.
+  only 50% penetration), not a wash that resolves itself automatically.
+
+6 new tests (pure function checks + real `resolve_attack`/`resolve_
+damage_spell`/`apply_damage_type_modifier` calls, seeded RNG) confirmed:
+zero change at rebirth 0, meaningfully harder monsters at rebirth 5
+(both resistance and damage, weapon AND spell paths), and the full
+rebirth-10 breakthrough working end to end against an extreme
+(rebirth-50-equivalent) world resistance value.
+
 ## [1.27.217] — Synergy Pass Phase 11: the last 8 bosses — all 22 of 22 now have a real signature mechanic
 
 Completes the boss-mechanic arc started in Phase 9 (2 of 22) → Phase 10

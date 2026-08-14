@@ -122,6 +122,51 @@ def magic_penetration_pct(rebirth_count: int) -> float:
     return min(100.0, MAGIC_PENETRATION_PCT_PER_REBIRTH * max(rebirth_count, 0))
 
 
+# "The World Evolves" (2026-08-14, per Coffee: "when a character
+# evolves, the worlds forces get stronger... using harder resistences
+# and elemental damages... more evolutions more evolved the world
+# around you becomes... you want to make ur player godly to break out
+# of it" -- confirmed as a deliberate, systemic mechanic: "the game is
+# meant to be played multiple times so that shud be a working mechanic
+# to make the evolutions make sense"). This is the OTHER half of the
+# tension magic_penetration_pct above only ever provided one side of:
+# a rebirth already earns real, permanent counter-play against a
+# RESISTANT monster, but nothing ever made the world itself lean on
+# that resistance harder as the player kept evolving -- so a deeply
+# reborn character's own penetration was countering a threat that
+# never actually grew to match them.
+#
+# Deliberately set HIGHER than MAGIC_PENETRATION_PCT_PER_REBIRTH (15 vs
+# 10) so the tension is real and felt well before rebirth 10 -- a
+# rebirth-5 party faces 75% world resistance while their own
+# penetration only cuts 50% of it back, a genuine mid-game difficulty
+# spike. Deliberately UNCAPPED (unlike magic_penetration_pct's explicit
+# 100% ceiling): the existing apply_damage_type_modifier math already
+# provides the real "godly breakthrough" for free -- at exactly 100%
+# penetration (rebirth 10), `elemental_pct * (1 - penetration)` reduces
+# ANY amount of resistance, no matter how high the world has climbed,
+# straight to zero effect. Nothing else needs to change for that payoff
+# to already work; this only ever needed its missing other half.
+#
+# Only ever scales with the PARTY'S/PLAYER'S OWN rebirth_count, never a
+# monster's (monsters have no rebirth_count at all) -- a rebirth-0
+# character sees zero change from either constant below, so this never
+# touches or contradicts the separate, deliberately one-directional
+# level-based scaling in overtuned_monster_stat_multiplier above.
+WORLD_RESISTANCE_PCT_PER_REBIRTH = 15.0
+WORLD_DAMAGE_PCT_PER_REBIRTH = 10.0
+
+
+def world_resistance_pct(party_rebirth_count: float) -> float:
+    """How much extra elemental_resistance_pct the world's monsters gain per the party's own average rebirth_count -- see the constants' own docstring above."""
+    return WORLD_RESISTANCE_PCT_PER_REBIRTH * max(party_rebirth_count, 0)
+
+
+def world_damage_multiplier(party_rebirth_count: float) -> float:
+    """How much harder the world's monsters hit per the defending player's own rebirth_count -- see the constants' own docstring above."""
+    return 1.0 + (WORLD_DAMAGE_PCT_PER_REBIRTH / 100) * max(party_rebirth_count, 0)
+
+
 # Real subclass choice, extended to the other 11 classes (2026-07-25,
 # following Wizard's Arcane Tradition pilot -- see bot.py's
 # _do_choose_subclass/CLASS_SUBCLASSES). Two genuine 5E archetypes per

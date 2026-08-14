@@ -115,6 +115,7 @@ from rules.leveling import (
     UTILITY_SUBCLASS_ABILITY_CHECK_BONUS, UTILITY_SUBCLASS_CHECK_BONUS_VALUE,
     rebirth_hp_max, power_scale_ratio, full_hp_max_for, proficiency_bonus_for_level,
     MEDIUM_ENCOUNTER_XP_PER_CHARACTER, backstab_tier_multiplier, describe_subclass_effect,
+    world_resistance_pct,
 )
 from rules.proficiency import practiced_bonus, MAX_PRACTICE_BONUS
 
@@ -6379,6 +6380,18 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 [p.get("level", 1) for p in party], template.get("xp_reward", 0)
             )
 
+        # "The World Evolves" (2026-08-14, per Coffee): unlike stat_mult
+        # just above, this DOES apply to bosses too -- strengthening the
+        # world for a party that's proven itself through real rebirth is
+        # the opposite concern from weakening a hand-placed boss for an
+        # underleveled party, so the is_boss exemption above doesn't
+        # apply here. A never-reborn party (the overwhelmingly common
+        # case) computes to exactly 0.0 and changes nothing.
+        world_avg_rebirth = (
+            sum(p.get("rebirth_count", 0) for p in party) / len(party) if party else 0
+        )
+        world_resist_bonus = world_resistance_pct(world_avg_rebirth)
+
         # Mixed encounter composition (2026-08-13, per Coffee: "why not
         # have 2 goblins and 2 shamans, or 3 goblin and 1 shaman... be
         # creative"): a real, unspecified wandering encounter used to
@@ -6512,7 +6525,20 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 # a hand-set "strong in an element" monster (e.g. The
                 # Waking Ember's real fire elemental_resistance_pct)
                 # actually reaches the live combat participant dict.
-                "elemental_resistance_pct": dict(slot_template.get("elemental_resistance_pct", {})),
+                # "The World Evolves" (2026-08-14, per Coffee): world_
+                # resist_bonus (computed once per encounter, above)
+                # applies to EVERY damage type baseline, with the
+                # template's own hand-authored value (if any) stacked
+                # additively on top -- so a monster the campaign already
+                # calls "strong in an element" stays proportionally
+                # stronger than the world baseline, not overwritten by it.
+                "elemental_resistance_pct": {
+                    **{dtype: world_resist_bonus for dtype in ECHO_TRIAL_RESISTANT_TYPES},
+                    **{
+                        dtype: pct + world_resist_bonus
+                        for dtype, pct in (slot_template.get("elemental_resistance_pct") or {}).items()
+                    },
+                },
                 # Real monster spellcasting (2026-08-13, per Coffee,
                 # dev-bridge: "Certain enemies definitely need to have
                 # magic.. lets get this working" -- reported right
