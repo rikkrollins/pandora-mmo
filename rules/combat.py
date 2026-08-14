@@ -29,6 +29,27 @@ def formation_ac_bonus(defender: dict) -> int:
     """
     return config.BACK_ROW_AC_BONUS if defender.get("formation_row") == "back" else 0
 
+
+def formation_damage_bonus_pct(attacker: dict) -> int:
+    """
+    Front-row damage bonus (2026-08-14, per Coffee: "front row used for
+    aggressors, front row can have a boost to attack %"). Symmetric with
+    formation_ac_bonus above -- front row (and anyone with no formation_
+    row set at all, e.g. a solo fight) gets the bonus; back row gets 0.
+    """
+    return config.FRONT_ROW_DAMAGE_BONUS_PCT if attacker.get("formation_row", "front") != "back" else 0
+
+
+def formation_damage_reduction_pct(defender: dict) -> int:
+    """
+    Back-row damage reduction (2026-08-14, per Coffee: "back row can
+    have a boost to def %") -- a genuine PERCENTAGE reduction on a
+    landed hit, distinct from formation_ac_bonus above (which only
+    affects whether the hit lands at all, never how much it hurts once
+    it does). Front row gets 0.
+    """
+    return config.BACK_ROW_DAMAGE_REDUCTION_PCT if defender.get("formation_row") == "back" else 0
+
 # Monsters this campaign treats as undead for the Silver Wardens guild's
 # bonus_damage_vs_undead benefit (guilds.py) -- no monster template field
 # for creature type exists in this game, so, same convention as Ranger's
@@ -612,6 +633,15 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
                     damage_dealt -= forge_bonus_amount // 2
                 else:
                     defender["_forge_guild_resisted"] = True
+        # Formation front-row damage bonus (2026-08-14, "Smarter,
+        # Formation-Aware Enemy AI" Phase B, per Coffee: "front row used
+        # for aggressors, front row can have a boost to attack %").
+        # Same multiplier-stack tier as the subclass/Forge Guild bonuses
+        # just above; applies symmetrically to either side since both
+        # party members and enemies carry the same formation_row field.
+        front_row_bonus_pct = formation_damage_bonus_pct(attacker)
+        if front_row_bonus_pct:
+            damage_dealt = int(damage_dealt * (1 + front_row_bonus_pct / 100))
         # Synergy Phase 10 punishes_own_condition (2026-08-14, The
         # Unspoken -- a real combo with its own on_hit_condition:
         # "silenced": this boss silences whoever it hits, then hits
@@ -706,6 +736,17 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
             damage_dealt = damage_dealt // 2
             defender["reaction_used_round"] = round_number
             uncanny_dodge_triggered = True
+
+        # Formation back-row damage reduction (2026-08-14, "Smarter,
+        # Formation-Aware Enemy AI" Phase B, per Coffee: "back row can
+        # have a boost to def %"). A genuine PERCENTAGE reduction on a
+        # landed hit -- distinct from formation_ac_bonus, which only
+        # affects whether the hit lands at all. Same tier as Uncanny
+        # Dodge's own halving, deliberately still before the backstab
+        # multiplier just below (backstab stays the true last step).
+        back_row_reduction_pct = formation_damage_reduction_pct(defender)
+        if back_row_reduction_pct and damage_dealt > 0:
+            damage_dealt = int(damage_dealt * (1 - back_row_reduction_pct / 100))
 
         # A Warlock's Otherworldly Patron (The Fiend, the default patron
         # for every Warlock here -- see resolve_attack's Martial Arts

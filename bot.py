@@ -116,6 +116,7 @@ from rules.leveling import (
     rebirth_hp_max, power_scale_ratio, full_hp_max_for, proficiency_bonus_for_level,
     MEDIUM_ENCOUNTER_XP_PER_CHARACTER, backstab_tier_multiplier, describe_subclass_effect,
     world_resistance_pct, world_damage_multiplier,
+    formation_target_discipline, formation_target_weight_floor,
 )
 from rules.proficiency import practiced_bonus, MAX_PRACTICE_BONUS
 
@@ -5670,11 +5671,23 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
             current["_multiattack_announced"] = True
             await _safe_send(update, f"⚔️ **{current['name']}** has **{attack_count} attacks** this turn!")
         combat_ended_mid_turn = False
+        # "Smarter, Formation-Aware Enemy AI" Phase D (2026-08-14): the
+        # real player party's own average rebirth_count, same source
+        # world_avg_rebirth already uses at encounter-build time --
+        # only the "party" side ever carries a meaningful rebirth_count
+        # (monsters don't), so this is computed from that side
+        # regardless of which side is actually attacking this turn.
+        living_party = session.living_on_side("party")
+        party_rebirth_count = (
+            sum(p.get("rebirth_count", 0) for p in living_party) / len(living_party) if living_party else 0
+        )
         for attack_num in range(attack_count):
             opposing = session.living_on_side(session.opposing_side(current["telegram_user_id"]))
             if not opposing:
                 break
-            target = _pick_formation_weighted_target(opposing, attacker_is_boss=current.get("is_boss", False))
+            target = _pick_formation_weighted_target(
+                opposing, attacker_is_boss=current.get("is_boss", False), party_rebirth_count=party_rebirth_count,
+            )
             if _extra_attack_countered(target, attack_num):
                 await _safe_send(
                     update,
@@ -5766,6 +5779,15 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
                     session.shown_monster_keys.add(current["monster_key"])
                     await _maybe_send_monster_image(update, current["monster_key"], monster_template)
             _refresh_real_player_spell_slots(target)
+            # "Smarter, Formation-Aware Enemy AI" Phase C (2026-08-14):
+            # checked before the damage-spell decision -- a real healer
+            # saves a dying ally over attacking. Only ever true for a
+            # back-row caster with a real rebirth-unlocked heal spell
+            # AND a wounded ally present; a plain `continue` (no attack
+            # resolved) skips the rest of this swing entirely, same as
+            # the extra-attack-countered guard above.
+            if await _maybe_monster_cast_heal(update, session, current):
+                continue
             result = await _maybe_monster_cast_spell(update, session, current, target, spell_id=pre_decided_spell_id)
             if result is None:
                 result = await _maybe_use_breath_weapon(update, session, current, target)
@@ -6120,7 +6142,9 @@ def _has_known_damage_spell(character: dict) -> bool:
     return False
 
 
-def _pick_formation_weighted_target(opposing: list[dict], attacker_is_boss: bool = False) -> dict:
+def _pick_formation_weighted_target(
+    opposing: list[dict], attacker_is_boss: bool = False, party_rebirth_count: float = 0,
+) -> dict:
     """
     Formation-aware target selection (2026-08-01, per Coffee: "front
     row get targeted... back row have a higher evade%... all players
@@ -6160,10 +6184,19 @@ def _pick_formation_weighted_target(opposing: list[dict], attacker_is_boss: bool
     BOSS_SPELLCASTER_TARGET_WEIGHT_MULTIPLIER -- irrelevant when the pool
     is a monster's own side (monsters never carry known_spells), so this
     only ever affects an enemy picking among the PARTY.
+
+    `party_rebirth_count` ("Smarter, Formation-Aware Enemy AI" Phase D,
+    2026-08-14): both the front/back row draw chance and the weighted-
+    pick floor below become genuinely sharper as the real player
+    party's own average rebirth_count climbs (rules.leveling.
+    formation_target_discipline/formation_target_weight_floor) -- 0 (the
+    default, and every non-rebirthed party) reproduces the exact
+    original fixed behavior unchanged.
     """
+    front_row_target_chance = formation_target_discipline(party_rebirth_count, config.FRONT_ROW_TARGET_CHANCE)
     front = [p for p in opposing if p.get("formation_row", "front") != "back"]
     back = [p for p in opposing if p.get("formation_row") == "back"]
-    if front and back and random.random() >= config.FRONT_ROW_TARGET_CHANCE:
+    if front and back and random.random() >= front_row_target_chance:
         pool = back
     elif front:
         pool = front
@@ -6171,6 +6204,7 @@ def _pick_formation_weighted_target(opposing: list[dict], attacker_is_boss: bool
         pool = back
     if len(pool) == 1:
         return pool[0]
+    weight_floor = formation_target_weight_floor(party_rebirth_count, 0.1)
     weights = []
     for p in pool:
         hp_max = p.get("hp_max") or p["hp_current"] or 1
@@ -6185,10 +6219,13 @@ def _pick_formation_weighted_target(opposing: list[dict], attacker_is_boss: bool
         # only job is picking a target, so it never lets HP outside
         # [0, hp_max] break that.
         hp_pct = max(0.0, min(1.0, p["hp_current"] / hp_max))
-        # Range (0.1, 1.1]: a member at full HP still keeps a real
-        # 0.1 floor of weight (never immune), a member near death
-        # approaches 1.1 (favored, not guaranteed).
-        weight = (1.0 - hp_pct) + 0.1
+        # Range (weight_floor, 1.0 + weight_floor]: a member at full HP
+        # still keeps a real weight_floor floor (never immune), a member
+        # near death approaches 1.0 + weight_floor (favored, not
+        # guaranteed). weight_floor itself shrinks toward a sharper
+        # value as party_rebirth_count climbs (Phase D) -- 0.1 at
+        # rebirth 0, same original fixed value as before this phase.
+        weight = (1.0 - hp_pct) + weight_floor
         if attacker_is_boss and _has_known_damage_spell(p):
             weight *= BOSS_SPELLCASTER_TARGET_WEIGHT_MULTIPLIER
         weights.append(weight)
@@ -6450,8 +6487,26 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             same_type_index = enemy_monster_keys[:i].count(slot_key)
             enemy_name = f"{slot_template['name']} {same_type_index + 1}" if same_type_total > 1 else slot_template["name"]
             scaled_hp = max(1, round(slot_template["hp_max"] * stat_mult))
+            # "The World Evolves" follow-up (2026-08-14, per Coffee:
+            # "when enemies evolve have them learn and use stronger
+            # spells"): a real stronger same-damage-type spell gets
+            # unlocked here, on the live copy only -- never mutates the
+            # campaign.json template, so a never-reborn party still
+            # sees this monster's exact original spell list.
+            slot_formation_row = _enemy_formation_row(slot_key, slot_template)
+            slot_known_spells = list(slot_template.get("known_spells", []))
+            unlocked_spell = _rebirth_unlocked_damage_spell(slot_known_spells, world_avg_rebirth)
+            if unlocked_spell:
+                slot_known_spells.append(unlocked_spell)
+            # "Smarter, Formation-Aware Enemy AI" Phase C (2026-08-14):
+            # a real NEW heal spell, not an upgrade of an existing one --
+            # see _rebirth_unlocked_heal_spell's own docstring for why
+            # its indexing differs from the damage-spell unlock above.
+            unlocked_heal = _rebirth_unlocked_heal_spell(slot_known_spells, world_avg_rebirth, slot_formation_row)
+            if unlocked_heal:
+                slot_known_spells.append(unlocked_heal)
             enemies.append({
-                "formation_row": _enemy_formation_row(slot_key, slot_template),
+                "formation_row": slot_formation_row,
                 "telegram_user_id": enemy_id, "name": enemy_name,
                 "dexterity": slot_template["dexterity"], "strength": slot_template["strength"],
                 "armor_class": slot_template["armor_class"], "hp_current": scaled_hp,
@@ -6569,8 +6624,10 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 # above, copied from the template so a real caster
                 # monster (currently the 3 shaman variants) actually
                 # reaches the live combat participant -- read by
-                # bot._maybe_monster_cast_spell.
-                "known_spells": list(slot_template.get("known_spells", [])),
+                # bot._maybe_monster_cast_spell. slot_known_spells
+                # (computed just above) already includes any real
+                # rebirth-unlocked stronger spell.
+                "known_spells": slot_known_spells,
                 # Real, tier-scaled natural attack (2026-07-26 monster/
                 # area rebalance) -- see _weapon_for_attacker's matching
                 # comment. Only set for monsters the rebalance actually
@@ -6783,9 +6840,28 @@ def _build_echo_enemy(monster_key: str, tier: int, index: int, total: int, chall
         resistances = [signature_type]
     enemy_id = -3_000_000 - (abs(hash((monster_key, tier))) % 100_000) - index
     name = f"Echo of {template['name']} {index + 1}" if total > 1 else f"Echo of {template['name']}"
+    # Real gap found while wiring Phase C (2026-08-14): this function
+    # never copied known_spells from the template at all, so an Echo
+    # Trial echo structurally could never cast a spell, regardless of
+    # Phase A/C -- fixed here, same rebirth-unlock mechanism as
+    # _do_start_combat's own encounter-build loop, scaled to the
+    # CHALLENGER's own rebirth_count (this function's existing single-
+    # challenger design, same source elemental_resistance_pct below
+    # already reads) rather than a party average that doesn't apply to
+    # a solo Echo Trial.
+    echo_formation_row = _enemy_formation_row(monster_key, template)
+    echo_world_rebirth = challenger.get("rebirth_count", 0) if challenger else 0
+    echo_known_spells = list(template.get("known_spells", []))
+    unlocked_echo_damage_spell = _rebirth_unlocked_damage_spell(echo_known_spells, echo_world_rebirth)
+    if unlocked_echo_damage_spell:
+        echo_known_spells.append(unlocked_echo_damage_spell)
+    unlocked_echo_heal_spell = _rebirth_unlocked_heal_spell(echo_known_spells, echo_world_rebirth, echo_formation_row)
+    if unlocked_echo_heal_spell:
+        echo_known_spells.append(unlocked_echo_heal_spell)
     return {
         "telegram_user_id": enemy_id, "name": name,
-        "formation_row": _enemy_formation_row(monster_key, template),
+        "formation_row": echo_formation_row,
+        "known_spells": echo_known_spells,
         "dexterity": template["dexterity"], "strength": template["strength"],
         "armor_class": int(template["armor_class"] * stat_mult),
         "hp_current": int(template["hp_max"] * stat_mult), "hp_max": int(template["hp_max"] * stat_mult),
@@ -7370,6 +7446,114 @@ def _maybe_use_class_ability(current: dict, session: sessions.Session) -> str | 
     return None
 
 
+def _spells_by_damage_type() -> dict[str, list[str]]:
+    """
+    Real damage-spell ladder per damage type, built fresh from the
+    actual spell catalog (spells.SPELLS) sorted by real spell level --
+    never a hand-authored table, so it can never drift from what
+    actually exists. Used by the rebirth-scaled monster spell-learning
+    system below ("The World Evolves" follow-up, 2026-08-14, per
+    Coffee: "when enemies evolve have them learn and use stronger
+    spells") to find the strongest REAL spell of a monster's own damage
+    type to unlock as the party evolves, rather than inventing new
+    spell content. Only one real spell kept per distinct level (first
+    encountered) -- two same-level spells (e.g. fire_bolt/produce_flame,
+    both level 0) aren't a real "next tier" over each other, so a tie
+    at the same level would otherwise let a monster "upgrade" sideways
+    into an equally weak spell instead of a genuinely stronger one.
+    """
+    by_type: dict[str, dict[int, str]] = {}
+    for sid, spell in spells_module.SPELLS.items():
+        if spell.get("effect") != "damage":
+            continue
+        by_type.setdefault(spell["damage_type"], {}).setdefault(spell.get("level", 0), sid)
+    return {dtype: [sid for _, sid in sorted(levels.items())] for dtype, levels in by_type.items()}
+
+
+_SPELLS_BY_DAMAGE_TYPE = _spells_by_damage_type()
+
+# 1 more real spell tier unlocked every this-many rebirths of the
+# party's own average rebirth_count (2026-08-14) -- deliberately
+# gradual (World Evolves' own resistance/damage scaling already applies
+# every single rebirth; spell access unlocks slower, since a whole new
+# tier of magic is a bigger jump than a numeric bonus).
+MONSTER_SPELL_TIER_REBIRTH_STEP = 2
+
+
+def _rebirth_unlocked_damage_spell(known_spells: list[str], world_avg_rebirth: float) -> str | None:
+    """
+    Returns the single strongest real damage spell a monster should now
+    know, given how far the party has evolved -- or None if nothing's
+    unlocked yet, or this monster doesn't cast damage spells at all.
+    Only ever grants a spell of a damage TYPE this monster already
+    casts (a fire-caster learns a stronger fire spell, never suddenly
+    picks up necromancy) -- capped at whatever the real catalog's own
+    highest-level spell for that type actually is; some types (psychic,
+    poison, necrotic each have exactly one real damage spell in this
+    game) simply have nothing to upgrade to, which is correct, not a
+    gap to fake-fill.
+    """
+    damage_types = {
+        spells_module.SPELLS[sid]["damage_type"]
+        for sid in known_spells
+        if spells_module.SPELLS.get(sid) and spells_module.SPELLS[sid].get("effect") == "damage"
+    }
+    if not damage_types:
+        return None
+    tier = int(world_avg_rebirth // MONSTER_SPELL_TIER_REBIRTH_STEP)
+    if tier <= 0:
+        return None
+    for dtype in damage_types:
+        ladder = _SPELLS_BY_DAMAGE_TYPE.get(dtype, [])
+        if not ladder:
+            continue
+        candidate = ladder[min(tier, len(ladder) - 1)]
+        if candidate not in known_spells:
+            return candidate
+    return None
+
+
+def _heal_spell_ladder() -> list[str]:
+    """
+    Same dynamic, never-hand-authored construction as
+    _spells_by_damage_type above, for the real catalog's heal-effect
+    spells specifically (currently cure_wounds/healing_word at level 1,
+    mass_cure_wounds at level 5).
+    """
+    by_level: dict[int, str] = {}
+    for sid, spell in spells_module.SPELLS.items():
+        if spell.get("effect") == "heal":
+            by_level[spell.get("level", 0)] = sid
+    return [sid for _, sid in sorted(by_level.items())]
+
+
+_HEAL_SPELL_LADDER = _heal_spell_ladder()
+
+
+def _rebirth_unlocked_heal_spell(known_spells: list[str], world_avg_rebirth: float, formation_row: str) -> str | None:
+    """
+    "Smarter, Formation-Aware Enemy AI" Phase C (2026-08-14, per Coffee:
+    "back row can be used for range, healing, protection"). Unlike
+    _rebirth_unlocked_damage_spell above (which only ever strengthens a
+    damage TYPE a monster already casts), this grants a genuinely NEW
+    capability -- so tier 1 (the lowest real rebirth threshold) grants
+    the base heal spell, not an upgrade over something already known.
+    Gated to a monster already flagged for the back row -- the same
+    formation_row already computed by _enemy_formation_row at the call
+    site -- so this reads as a real "healer" archetype (a shaman/
+    priest/witch-flavored caster), not every monster suddenly knowing
+    medicine. Requires the monster to already be a real caster (a
+    non-empty known_spells) rather than granting magic from nothing.
+    """
+    if not known_spells or formation_row != "back" or not _HEAL_SPELL_LADDER:
+        return None
+    tier = int(world_avg_rebirth // MONSTER_SPELL_TIER_REBIRTH_STEP)
+    if tier <= 0:
+        return None
+    candidate = _HEAL_SPELL_LADDER[min(tier - 1, len(_HEAL_SPELL_LADDER) - 1)]
+    return candidate if candidate not in known_spells else None
+
+
 MONSTER_SPELLCAST_CHANCE = 0.4
 
 
@@ -7493,6 +7677,67 @@ async def _maybe_monster_cast_spell(
         "damage_type": spell.get("damage_type", "physical"), "enrage_triggered": False, "bloodied_triggered": False,
         "elemental_heal_gained": elemental_heal_gained, "is_spell_cast": True, "spell_name": spell["name"], "counterspelled": False,
     }
+
+
+def _decide_monster_heal(caster: dict, allies: list[dict]) -> tuple[str, dict] | None:
+    """
+    "Smarter, Formation-Aware Enemy AI" Phase C (2026-08-14, per Coffee:
+    "back row can be used for range, healing, protection"). Pure,
+    no-side-effect decision mirroring _decide_monster_spell's own
+    shape: does this caster heal a wounded ally instead of attacking
+    this turn? Requires a real known heal spell (only ever present via
+    _rebirth_unlocked_heal_spell's rebirth-gated unlock) AND a real
+    living ally below full HP -- a healer with nothing to heal simply
+    attacks instead, same as before this phase existed. Targets the
+    single most critically wounded ally (lowest HP fraction), a real
+    healer's obvious priority, not a random pick among the wounded.
+    """
+    known_heals = [
+        sid for sid in (caster.get("known_spells") or [])
+        if spells_module.get_spell(sid) and spells_module.get_spell(sid)["effect"] == "heal"
+    ]
+    if not known_heals:
+        return None
+    wounded = [
+        a for a in allies
+        if a.get("hp_current", 0) > 0 and a.get("hp_current", 0) < a.get("hp_max", a.get("hp_current", 0))
+    ]
+    if not wounded or random.random() > MONSTER_SPELLCAST_CHANCE:
+        return None
+    heal_target = min(wounded, key=lambda a: a.get("hp_current", 0) / max(a.get("hp_max", 1), 1))
+    return random.choice(known_heals), heal_target
+
+
+async def _maybe_monster_cast_heal(update: Update, session: sessions.Session, caster: dict) -> bool:
+    """
+    "Smarter, Formation-Aware Enemy AI" Phase C: resolves a real monster
+    heal decision (_decide_monster_heal) through the exact same rules-
+    layer pipeline a player's own heal cast already uses
+    (spells_module.resolve_heal_spell) -- narration never invents the
+    outcome, same as every other mechanic in this game. Checked before
+    the damage-spell decision each swing in _resolve_ai_turns, so a
+    real healer prioritizes saving a dying ally over attacking. Returns
+    whether a heal was actually cast, so the caller skips its normal
+    attack/spell-cast resolution for this swing when True -- a monster
+    never both heals AND attacks on the same swing.
+    """
+    own_side = session.sides.get(caster["telegram_user_id"])
+    if own_side is None:
+        return False
+    allies = session.living_on_side(own_side)
+    decision = _decide_monster_heal(caster, allies)
+    if decision is None:
+        return False
+    spell_id, heal_target = decision
+    spell = spells_module.get_spell(spell_id)
+    result = spells_module.resolve_heal_spell(spell_id, caster, heal_target)
+    target_note = "itself" if heal_target is caster else f"**{heal_target['name']}**"
+    await _safe_send(
+        update,
+        f"✨ **{caster['name']}** casts {spell['name']} on {target_note} — heals "
+        f"{result['healing_done']} HP ({result['hp_current']}/{result['hp_max']}).",
+    )
+    return True
 
 
 async def _maybe_use_breath_weapon(
@@ -20241,6 +20486,36 @@ async def _do_show_story_so_far(update: Update) -> None:
     # below with guaranteed, reliable Markdown structure.
     next_step = _next_step_hint_facts(character)
 
+    # Instant ack (2026-08-14, per Coffee: "it seems to take awhile
+    # before even doing anything") -- this screen makes 2 real
+    # sequential Ollama calls (recap + hint), genuinely ~1-2 real
+    # minutes on this single-slot CPU-only instance, with nothing sent
+    # to the player until both finish. A cheap placeholder message
+    # fixes the "looks frozen" complaint even though the underlying
+    # generation time itself can't shrink -- Ollama has exactly one
+    # generation slot, so the two calls can't be made to run faster by
+    # parallelizing them against each other.
+    await update.effective_chat.send_message(
+        "📖 Recalling your story so far... (this can take a minute or two)",
+        message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+    )
+
+    # The chapter-art image call hits Pollinations.ai, not Ollama, so
+    # unlike the two narration calls above it genuinely CAN run
+    # concurrently without competing for the single Ollama slot --
+    # kicked off here instead of after the recap/hint so its real wall
+    # time overlaps with narration instead of stacking after it.
+    image_task = None
+    if current_arc_pair:
+        prompt = (
+            f"{current_arc_pair[1]}, fantasy tabletop RPG book illustration, "
+            "epic, atmospheric, painterly, no text or labels"
+        )
+        image_task = asyncio.create_task(_send_generated_image(
+            update, prompt, f"📖 {current_arc_pair[0]}", width=768, height=512,
+            seed=_deterministic_image_seed(f"arc:{current[0]}"), log_key=current[0],
+        ))
+
     recap = await asyncio.to_thread(
         narrate_story_so_far, character["name"], completed_arcs, current_arc_pair, completed_quests,
     )
@@ -20264,23 +20539,12 @@ async def _do_show_story_so_far(update: Update) -> None:
         rumor_lines = "\n".join(f"— *{data['name']}*: {data['lore']}" for _rid, data in rumors)
         whispers_block = f"\n\n━━━━━━━━━━━━━━\n🕯️ **Whispers**\n{rumor_lines}"
 
-    # A real, chapter-themed image alongside the recap (2026-07-25, per
-    # Coffee: "include images too please for all that"), grounded only
-    # in the CURRENT chapter's own title/description -- same
-    # Pollinations.ai convention as every other generated image in this
-    # game, deterministic per arc so revisiting this screen mid-chapter
-    # always shows the same art. Deliberately never grounded in the
-    # next quest's own destination, so it can't visually spoil a puzzle
-    # room or a hidden location before they've actually found it.
-    if current_arc_pair:
-        prompt = (
-            f"{current_arc_pair[1]}, fantasy tabletop RPG book illustration, "
-            "epic, atmospheric, painterly, no text or labels"
-        )
-        await _send_generated_image(
-            update, prompt, f"📖 {current_arc_pair[0]}", width=768, height=512,
-            seed=_deterministic_image_seed(f"arc:{current[0]}"), log_key=current[0],
-        )
+    # The chapter-art image (2026-07-25, per Coffee: "include images too
+    # please for all that") was already kicked off above, concurrently
+    # with the two narration calls, so its wall time overlaps theirs
+    # instead of stacking after -- just wait for it to land here.
+    if image_task is not None:
+        await image_task
 
     await _safe_send(
         update, f"📖 **Story So Far**\n\n{recap}{next_step_block}{whispers_block}\n\n" + "\n".join(chapter_lines),

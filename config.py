@@ -138,6 +138,17 @@ FRONT_ROW_TARGET_CHANCE = float(os.getenv("FRONT_ROW_TARGET_CHANCE", "0.8"))
 # mechanic.
 BACK_ROW_AC_BONUS = int(os.getenv("BACK_ROW_AC_BONUS", "2"))
 
+# Formation attack/defense percentages (2026-08-14, per Coffee: "front
+# row used for aggressors, front row can have a boost to attack %, and
+# back row can have a boost to def %"). Front row's own real damage
+# bonus (rules/combat.formation_damage_bonus_pct, same multiplier-stack
+# tier as the combat-subclass/guild-benefit % bonuses); back row's own
+# genuine PERCENTAGE damage reduction on a landed hit -- distinct from
+# BACK_ROW_AC_BONUS above, which only affects whether a hit lands at
+# all, never how much it hurts once it does.
+FRONT_ROW_DAMAGE_BONUS_PCT = int(os.getenv("FRONT_ROW_DAMAGE_BONUS_PCT", "10"))
+BACK_ROW_DAMAGE_REDUCTION_PCT = int(os.getenv("BACK_ROW_DAMAGE_REDUCTION_PCT", "15"))
+
 # Which campaigns/<id>/campaign.json to load (task #56). Previously
 # hardcoded directly in bot.py with no .env override at all -- moved
 # here so a new campaign folder can actually be activated without a

@@ -2,6 +2,106 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.223] — Story So Far screen feels faster (instant ack + overlapped image gen)
+
+Real ask: "is there a way to make the story so far fster ? when we
+click it it seems to take awhile before even doing anything.." The
+screen makes 2 real sequential Ollama calls (the recap, then the
+"What's Next" hint) — genuinely 1-2 real minutes on this single-slot
+CPU-only instance, and neither of those calls can be made to run
+faster by parallelizing them against each other (Ollama has exactly
+one generation slot; see CLAUDE.md). But two real, non-cosmetic
+improvements were available: (1) an instant "📖 Recalling your story
+so far..." placeholder message now fires before either narration call
+starts, directly fixing the "looks frozen" complaint even though the
+underlying generation time itself is unchanged; (2) the chapter-art
+image (Pollinations.ai, a completely different service, not Ollama) now
+fires concurrently with the two narration calls instead of only being
+requested after both finish — its real wall time now overlaps theirs
+instead of stacking after them.
+
+## [1.27.222] — Smarter, Formation-Aware Enemy AI (rebirth-scaled)
+
+Real asks, same session: "when enemies evolve have them learn and use
+stronger spells and abilities, using more advanced battle mechanics,
+enemies can use formations" + "i want it to feel like humans are
+battling an intellectual, make it smart and challenging, and fun" +
+(on formations specifically) "use the formation system similar to the
+party, back row can be used for range, healing, protection, and front
+row used for aggressors, front row can have a boost to attack % and
+back row can have a boost to def % ... so as the game evolves the AI
+gets more creative and strategic. Getting harder and harder." A
+follow-up to "The World Evolves" (v1.27.218-221), tied to the same
+real party rebirth_count axis throughout. 4 phases:
+
+**Phase A — rebirth-scaled monster spell learning.** New
+`bot._spells_by_damage_type()` builds a real, DYNAMIC level ladder per
+damage type straight from `spells.SPELLS` (never hand-authored, stays
+correct if spells are ever added). At encounter-build time, a monster
+whose own `known_spells` already includes a damage spell of type T
+gets the STRONGEST real spell of that same type unlocked onto its live
+copy once the party's own average rebirth_count crosses a real
+threshold (1 tier per 2 rebirths, capped at the catalog's own highest
+level for that type). `bot._decide_monster_spell` needed zero changes
+— a newly-unlocked spell is automatically in its existing random pool.
+
+**Phase B — formation attack/defense percentages.** New
+`rules.combat.formation_damage_bonus_pct` (front row, a real +10%
+weapon damage bonus, same multiplier-stack tier as the subclass/Forge
+Guild bonuses) and `formation_damage_reduction_pct` (back row, a real
+-15% damage reduction on a landed hit, same tier as Uncanny Dodge's own
+halving) — both symmetric, apply to either side generically since
+party members and enemies already share the same `formation_row`
+field. Distinct from the existing flat `BACK_ROW_AC_BONUS`, which only
+ever affected whether a hit lands at all, never how much it hurts once
+it does. New `config.FRONT_ROW_DAMAGE_BONUS_PCT`/`BACK_ROW_DAMAGE_
+REDUCTION_PCT`.
+
+**Phase C — AI healing role for back-row casters.** New
+`bot._rebirth_unlocked_heal_spell` grants a real heal spell (from a
+dynamically-built heal ladder, same never-hand-authored convention as
+Phase A) to a back-row caster once rebirth crosses a threshold —
+deliberately indexed differently than Phase A's upgrade-an-existing-
+type logic, since a heal spell is a genuinely NEW capability, not an
+upgrade of something already known. New `bot._decide_monster_heal`/
+`_maybe_monster_cast_heal`, checked in `_resolve_ai_turns` BEFORE the
+damage-spell decision each swing — a real healer now saves a dying
+ally over attacking, resolved through the exact same rules-layer
+`spells.resolve_heal_spell` a player's own heal cast already uses.
+Real gap found while wiring this: `bot._build_echo_enemy` never copied
+`known_spells` from the template at all, so an Echo Trial echo
+structurally could never cast ANY spell — fixed alongside Phase C,
+scaled to the challenger's own rebirth_count (this function's existing
+single-challenger design).
+
+**Phase D — rebirth-scaled formation discipline.** Two previously
+FIXED constants in `bot._pick_formation_weighted_target`
+(`config.FRONT_ROW_TARGET_CHANCE` and its hardcoded +0.1 weighted-pick
+floor) are now genuinely rebirth-scaled via new
+`rules.leveling.formation_target_discipline`/`formation_target_weight_
+floor` — back-row protection strengthens toward a 0.95 ceiling, and
+target selection sharpens toward a 0.02 floor (less randomness, a more
+decisive read on the highest-value target), both capped at rebirth 10,
+same tier `magic_penetration_pct`'s own ceiling uses. A never-reborn
+party (rebirth 0) sees the exact original fixed values, unchanged.
+
+Explicitly out of scope, confirmed during planning: a genuine spatial/
+positioning system (flanking, adjacency) — this engine has none, by
+repeated deliberate design; and multi-turn enemy planning — "smarter"
+here means sharper targeting/formation discipline and real new
+tactical options, not a planning AI.
+
+Real tests per phase (seeded RNG, `rules.combat.resolve_attack`
+directly for B, `bot._rebirth_unlocked_heal_spell`/`_decide_monster_
+heal` directly for C, `bot._pick_formation_weighted_target` directly
+for D): front-row attacker measurably outdamages an identical back-row
+one; back-row defender measurably takes less than an identical
+front-row one; a heal spell unlocks only for a back-row caster past
+the real rebirth threshold and only when a wounded ally is present;
+back-row targeting probability and weight-floor sharpness both move in
+the expected direction as rebirth climbs (confirmed with real numbers,
+rebirth 0 vs. 10).
+
 ## [1.27.221] — Add: AI-controlled players can throw un-needed weapons
 
 Real ask: "Make is so AI players can throw un-needed weapons." New

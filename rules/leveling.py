@@ -167,6 +167,47 @@ def world_damage_multiplier(party_rebirth_count: float) -> float:
     return 1.0 + (WORLD_DAMAGE_PCT_PER_REBIRTH / 100) * max(party_rebirth_count, 0)
 
 
+# "Smarter, Formation-Aware Enemy AI" Phase D (2026-08-14, per Coffee:
+# "use all those mechanics so as the game evolves the AI gets more
+# creative and strategic. Getting harder and harder."). Two previously
+# FIXED constants in bot._pick_formation_weighted_target (config.
+# FRONT_ROW_TARGET_CHANCE and its hardcoded +0.1 weight floor) become
+# rebirth-scaled here, using the exact same party_rebirth_count input
+# world_resistance_pct/world_damage_multiplier already read -- a
+# never-reborn party sees the exact base values unchanged (both
+# formulas below resolve to base_value at rebirth 0), so nothing about
+# a first playthrough changes; only a party that's actually evolved
+# faces a genuinely more disciplined, sharper-targeting world. Capped
+# at the same rebirth-10 tier magic_penetration_pct's own 100% ceiling
+# uses, for the same "a fixed, learnable ceiling, not infinite scaling"
+# reason.
+FORMATION_DISCIPLINE_REBIRTH_CAP = 10.0
+FRONT_ROW_TARGET_CHANCE_CEILING = 0.95
+FORMATION_TARGET_WEIGHT_FLOOR_SHARPENED = 0.02
+
+
+def formation_target_discipline(party_rebirth_count: float, base_chance: float) -> float:
+    """
+    How far FRONT_ROW_TARGET_CHANCE has closed its own gap toward
+    FRONT_ROW_TARGET_CHANCE_CEILING, given the party's own average
+    rebirth_count -- a genuinely more disciplined "focus the aggressor
+    row, protect the back row" instinct the more the world has evolved.
+    """
+    progress = min(max(party_rebirth_count, 0), FORMATION_DISCIPLINE_REBIRTH_CAP) / FORMATION_DISCIPLINE_REBIRTH_CAP
+    return base_chance + (FRONT_ROW_TARGET_CHANCE_CEILING - base_chance) * progress
+
+
+def formation_target_weight_floor(party_rebirth_count: float, base_floor: float) -> float:
+    """
+    The inverse shape of formation_target_discipline above: the HP-
+    weighted targeting floor SHRINKS toward FORMATION_TARGET_WEIGHT_
+    FLOOR_SHARPENED as rebirth climbs -- less randomness, a sharper,
+    more decisive read on who's actually the highest-value target.
+    """
+    progress = min(max(party_rebirth_count, 0), FORMATION_DISCIPLINE_REBIRTH_CAP) / FORMATION_DISCIPLINE_REBIRTH_CAP
+    return base_floor - (base_floor - FORMATION_TARGET_WEIGHT_FLOOR_SHARPENED) * progress
+
+
 # Real subclass choice, extended to the other 11 classes (2026-07-25,
 # following Wizard's Arcane Tradition pilot -- see bot.py's
 # _do_choose_subclass/CLASS_SUBCLASSES). Two genuine 5E archetypes per
