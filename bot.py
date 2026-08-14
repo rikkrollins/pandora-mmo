@@ -5574,6 +5574,20 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
                         f"🔥 **{current['name']} flies into a desperate rage — its attacks hit "
                         f"even harder for the rest of this fight!**",
                     )
+            # Real AI class-ability usage (2026-08-13, per Coffee: "I
+            # want AI to be able to use all thier abilities, spells
+            # cantrips and anything that there character has or levels
+            # up"). Once per turn (attack_num == 0), before the attack/
+            # spell decision below, so a real class ability (Rage,
+            # Second Wind, Action Surge, Reckless Attack, Flurry of
+            # Blows, Channel Divinity, Divine Smite, Bardic Inspiration)
+            # can actually affect the attack that follows this turn --
+            # only ever for AI-controlled participants (a real human
+            # still chooses their own abilities by typing them).
+            if current.get("is_ai") and attack_num == 0:
+                ability_flavor = _maybe_use_class_ability(current, session)
+                if ability_flavor:
+                    await _safe_send(update, f"✨ {ability_flavor}")
             # Real monster spellcasting (2026-08-13, per Coffee: "bosses
             # shud def have spells and abilities, narrations shud work
             # this in") -- decided HERE, before the "sizing up its
@@ -6912,6 +6926,116 @@ async def _maybe_summon_minions(update: Update, session: sessions.Session, boss:
     # it, same "epic moment" pattern boss intro/defeat already use.
     summon_flavor = await asyncio.to_thread(narrate_boss_summon, boss["name"], names)
     await _safe_send(update, f"🎬 {summon_flavor}")
+
+
+SECOND_WIND_HP_THRESHOLD = 0.5
+BARDIC_INSPIRATION_HP_THRESHOLD = 0.7
+
+
+def _maybe_use_class_ability(current: dict, session: sessions.Session) -> str | None:
+    """
+    Real AI class-ability usage (2026-08-13, per Coffee: "I want AI to
+    be able to use all thier abilities, spells cantrips and anything
+    that there character has or levels up"). Every one of these 7 real
+    class features (Rage, Second Wind, Action Surge, Reckless Attack,
+    Flurry of Blows, Channel Divinity, Divine Smite) already works by
+    setting a flag/resource on the LIVE combat participant dict --
+    exactly the same in-memory state _do_rage/_do_second_wind/etc (the
+    human-facing command handlers) already set -- so this function only
+    ever DECIDES and SETS that same flag/resource; it never reimplements
+    the effect. The existing combat math (resolve_attack's raging/
+    smite_active checks, _attacks_per_turn's action_surge_active/
+    flurry_bonus_attacks checks, _attack_advantage_disadvantage's
+    reckless_active check) already reads these flags unconditionally, so
+    setting them here for an AI-controlled participant picks them up
+    completely unchanged. Bardic Inspiration is the one exception (heals
+    an ally directly, no flag to set) -- applied straight to the ally's
+    real in-memory HP, same convention _maybe_monster_cast_spell already
+    uses for damage. Called once per turn (attack_num == 0) for any
+    is_ai participant, so a companion/monster gets at most one bonus-
+    action-equivalent ability per turn, same real 5E economy every
+    class actually has. Returns a real flavor string if something was
+    used, else None (caller sends nothing extra that turn).
+    """
+    char_class = current.get("char_class")
+    if not char_class:
+        return None
+    telegram_user_id = current["telegram_user_id"]
+    chat_id = current.get("chat_id")
+    level = current.get("level", 1)
+    hp_max = current.get("hp_max", current.get("hp_current", 1))
+    hp_pct = current.get("hp_current", 0) / hp_max if hp_max else 0
+
+    if char_class == "Barbarian" and not current.get("raging"):
+        max_rages = RAGE_MAX_USES + _skill_points(current, "endless_fury")
+        if db.get_feature_uses(telegram_user_id, chat_id, "rage") < max_rages:
+            current["raging"] = True
+            db.use_feature(telegram_user_id, chat_id, "rage")
+            return f"**{current['name']}** flies into a rage!"
+
+    if char_class == "Barbarian" and not current.get("reckless_active"):
+        current["reckless_active"] = True
+        return f"**{current['name']}** attacks recklessly!"
+
+    if char_class == "Fighter" and hp_pct < SECOND_WIND_HP_THRESHOLD:
+        if db.get_feature_uses(telegram_user_id, chat_id, "second_wind") < 1:
+            heal_dice = f"{1 + _skill_points(current, 'hardened_resolve')}d10"
+            healed = roll_damage(heal_dice, modifier=level)["total"]
+            healed = int(healed * power_scale_ratio(level, current.get("rebirth_count", 0)))
+            new_hp = min(hp_max, current["hp_current"] + healed)
+            actual = new_hp - current["hp_current"]
+            current["hp_current"] = new_hp
+            db.use_feature(telegram_user_id, chat_id, "second_wind")
+            return f"**{current['name']}** catches their breath with Second Wind, recovering **{actual} HP**!"
+
+    if char_class == "Fighter" and level >= 2 and not current.get("action_surge_active"):
+        if db.get_feature_uses(telegram_user_id, chat_id, "action_surge") < 1:
+            current["action_surge_active"] = True
+            db.use_feature(telegram_user_id, chat_id, "action_surge")
+            return f"**{current['name']}** surges with action!"
+
+    if char_class == "Monk" and level >= 2 and not current.get("flurry_bonus_attacks"):
+        max_ki = level + 2 * _skill_points(current, "iron_will")
+        if db.get_feature_uses(telegram_user_id, chat_id, "ki") < max_ki:
+            current["flurry_bonus_attacks"] = 2
+            db.use_feature(telegram_user_id, chat_id, "ki")
+            return f"**{current['name']}** unleashes a Flurry of Blows!"
+
+    if char_class == "Paladin" and level >= 2 and not current.get("smite_active") and current.get("spell_slots_current", 0) >= 1:
+        current["smite_active"] = True
+        return f"**{current['name']}** channels divine wrath, ready to smite!"
+
+    if char_class == "Cleric" and level >= 2:
+        if db.get_feature_uses(telegram_user_id, chat_id, "channel_divinity") < 1:
+            opposing = session.living_on_side(session.opposing_side(telegram_user_id))
+            target = next((p for p in opposing if p.get("monster_key") in UNDEAD_MONSTER_KEYS), None)
+            if target is not None:
+                target.setdefault("conditions", [])
+                if "frightened" not in target["conditions"]:
+                    target["conditions"].append("frightened")
+                db.use_feature(telegram_user_id, chat_id, "channel_divinity")
+                return f"**{current['name']}** channels divine power at **{target['name']}** — it recoils, FRIGHTENED!"
+
+    if char_class == "Bard":
+        max_uses = max(1, ability_modifier(current.get("charisma", 10)))
+        if db.get_feature_uses(telegram_user_id, chat_id, "bardic_inspiration") < max_uses:
+            allies = [
+                p for p in session.living_on_side(session.sides.get(telegram_user_id))
+                if p["telegram_user_id"] != telegram_user_id
+            ]
+            wounded = [p for p in allies if p.get("hp_current", 0) / p.get("hp_max", 1) < BARDIC_INSPIRATION_HP_THRESHOLD]
+            if wounded:
+                ally = min(wounded, key=lambda p: p["hp_current"] / p.get("hp_max", 1))
+                boost = sum(roll(1 + _skill_points(current, "greater_inspiration"), 6))
+                boost = int(boost * power_scale_ratio(level, current.get("rebirth_count", 0)))
+                ally_hp_max = ally.get("hp_max", ally["hp_current"])
+                new_hp = min(ally_hp_max, ally["hp_current"] + boost)
+                actual = new_hp - ally["hp_current"]
+                ally["hp_current"] = new_hp
+                db.use_feature(telegram_user_id, chat_id, "bardic_inspiration")
+                return f"**{current['name']}** inspires **{ally['name']}** with a stirring word — a bolstering **+{actual} HP**!"
+
+    return None
 
 
 MONSTER_SPELLCAST_CHANCE = 0.4

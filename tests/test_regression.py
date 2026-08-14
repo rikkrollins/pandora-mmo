@@ -6147,6 +6147,147 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(goblin["hp_current"], 20 - result["damage_dealt"])
         sessions.end_session(-999)
 
+    # -- Real AI class-ability usage (2026-08-13, per Coffee: "I want AI
+    #    to be able to use all thier abilities, spells cantrips and
+    #    anything that there character has or levels up"). db.use_feature
+    #    /get_feature_uses need a REAL character row (they resolve via
+    #    db.get_character), so every companion here is a real
+    #    db.create_ai_companion, not a bare synthetic dict. -----------
+    _ABILITY_ABILITY_SCORES = {
+        "strength": 14, "dexterity": 12, "constitution": 14,
+        "intelligence": 10, "wisdom": 12, "charisma": 10,
+    }
+
+    def _make_ability_companion(self, name, char_class, level=1, hp_current=30, hp_max=30, **overrides):
+        """
+        `level` is persisted for real (db.use_feature/get_feature_uses
+        resolve via db.get_character, so a real row is required for the
+        resource-tracking assertions below to mean anything) -- every
+        other override (raging, spell_slots_current, charisma, ...) is
+        applied purely to the in-memory dict, matching how a real live
+        combat participant dict already carries in-memory-only combat
+        state (raging/reckless_active/etc are never DB columns at all).
+        """
+        companion = db.create_ai_companion(
+            -999, name, "Human", char_class, self._ABILITY_ABILITY_SCORES,
+            hp_max=hp_max, armor_class=12, gold=0, inventory={},
+        )
+        db.update_character_by_id(companion["character_id"], level=level)
+        companion = db.get_character_by_id(companion["character_id"])
+        companion["hp_current"] = hp_current
+        companion.update(overrides)
+        return companion
+
+    def test_ai_barbarian_companion_rages_when_available(self):
+        companion = self._make_ability_companion("AI Barbarian1", "Barbarian")
+        flavor = bot._maybe_use_class_ability(companion, None)
+        self.assertIsNotNone(flavor)
+        self.assertTrue(companion.get("raging"))
+        self.assertEqual(db.get_feature_uses(companion["telegram_user_id"], -999, "rage"), 1)
+
+    def test_ai_barbarian_companion_attacks_recklessly_once_already_raging(self):
+        companion = self._make_ability_companion("AI Barbarian2", "Barbarian", raging=True)
+        flavor = bot._maybe_use_class_ability(companion, None)
+        self.assertIsNotNone(flavor)
+        self.assertTrue(companion.get("reckless_active"))
+
+    def test_ai_fighter_companion_uses_second_wind_when_hurt(self):
+        from unittest.mock import patch
+        companion = self._make_ability_companion("AI Fighter1", "Fighter", level=3, hp_current=10, hp_max=30)
+        with patch("rules.dice.random.randint", return_value=6):
+            flavor = bot._maybe_use_class_ability(companion, None)
+        self.assertIsNotNone(flavor)
+        self.assertGreater(companion["hp_current"], 10)
+        self.assertEqual(db.get_feature_uses(companion["telegram_user_id"], -999, "second_wind"), 1)
+
+    def test_ai_fighter_companion_skips_second_wind_at_full_health(self):
+        companion = self._make_ability_companion("AI Fighter2", "Fighter", level=2)
+        flavor = bot._maybe_use_class_ability(companion, None)
+        self.assertIsNotNone(flavor)  # falls through to Action Surge instead
+        self.assertTrue(companion.get("action_surge_active"))
+        self.assertEqual(db.get_feature_uses(companion["telegram_user_id"], -999, "second_wind"), 0)
+
+    def test_ai_monk_companion_uses_flurry_of_blows(self):
+        companion = self._make_ability_companion("AI Monk1", "Monk", level=3)
+        flavor = bot._maybe_use_class_ability(companion, None)
+        self.assertIsNotNone(flavor)
+        self.assertEqual(companion.get("flurry_bonus_attacks"), 2)
+        self.assertEqual(db.get_feature_uses(companion["telegram_user_id"], -999, "ki"), 1)
+
+    def test_ai_paladin_companion_primes_divine_smite_with_a_spell_slot(self):
+        companion = self._make_ability_companion("AI Paladin1", "Paladin", level=3, spell_slots_current=2)
+        flavor = bot._maybe_use_class_ability(companion, None)
+        self.assertIsNotNone(flavor)
+        self.assertTrue(companion.get("smite_active"))
+
+    async def test_ai_cleric_companion_channels_divinity_on_a_real_undead_target(self):
+        import sessions
+        companion = self._make_ability_companion("AI Cleric1", "Cleric", level=2)
+        undead = {
+            "telegram_user_id": -700940, "name": "Shadow Wisp", "monster_key": "shadow_wisp",
+            "hp_current": 15, "hp_max": 15, "dexterity": 10, "strength": 8,
+        }
+        session = sessions.start_session(-999, [companion, undead], {companion["telegram_user_id"]: "party", -700940: "enemy"})
+        flavor = bot._maybe_use_class_ability(companion, session)
+        self.assertIsNotNone(flavor)
+        self.assertIn("frightened", undead["conditions"])
+        self.assertEqual(db.get_feature_uses(companion["telegram_user_id"], -999, "channel_divinity"), 1)
+        sessions.end_session(-999)
+
+    async def test_ai_bard_companion_inspires_the_most_wounded_ally(self):
+        from unittest.mock import patch
+        import sessions
+        companion = self._make_ability_companion("AI Bard1", "Bard", level=2, charisma=14)
+        wounded_ally = {
+            "telegram_user_id": -1518, "name": "Wounded Ally", "hp_current": 5, "hp_max": 30,
+            "dexterity": 10, "strength": 10,
+        }
+        healthy_ally = {
+            "telegram_user_id": -1519, "name": "Healthy Ally", "hp_current": 30, "hp_max": 30,
+            "dexterity": 10, "strength": 10,
+        }
+        session = sessions.start_session(
+            -999, [companion, wounded_ally, healthy_ally],
+            {companion["telegram_user_id"]: "party", -1518: "party", -1519: "party"},
+        )
+        with patch("rules.dice.random.randint", return_value=6):
+            flavor = bot._maybe_use_class_ability(companion, session)
+        self.assertIsNotNone(flavor)
+        self.assertIn("Wounded Ally", flavor)
+        self.assertGreater(wounded_ally["hp_current"], 5)
+        self.assertEqual(healthy_ally["hp_current"], 30)  # never touched
+        sessions.end_session(-999)
+
+    def test_no_class_ability_used_when_class_has_none_of_these(self):
+        companion = {
+            "telegram_user_id": -1520, "name": "AI Rogue", "char_class": "Rogue",
+            "hp_current": 10, "hp_max": 30, "level": 3, "chat_id": -999,
+        }
+        self.assertIsNone(bot._maybe_use_class_ability(companion, None))
+
+    async def test_real_human_turn_never_auto_uses_a_class_ability(self):
+        """A real human still chooses their own abilities by typing them -- the is_ai gate must never fire this automatically for them."""
+        from unittest.mock import patch
+        import sessions
+        make_basic_character(996100, "RealBarbarian", char_class="Barbarian", current_location="crossroads_tavern")
+        db.update_character(996100, -999, hp_current=30, level=1)
+        player = db.get_character(996100, -999)
+        player["telegram_user_id"] = 996100
+        enemy = {
+            "telegram_user_id": -700941, "name": "Goblin", "dexterity": 8, "strength": 10,
+            "armor_class": 10, "hp_current": 20, "hp_max": 20, "proficiency_bonus": 2,
+            "is_ai": 1, "monster_key": "goblin",
+        }
+        session = sessions.start_session(-999, [player, enemy], {996100: "party", -700941: "enemy"})
+        session.turn_order = [996100, -700941]
+        session.current_turn_index = 0
+        sink = []
+        with patch("rules.dice.random.randint", return_value=4), patch("bot.narrate_action", return_value="A blow lands."):
+            await bot._do_attack(FakeUpdate(996100, "I attack the goblin", sink), "I attack the goblin", forced_roll=15)
+        self.assertFalse(any("flies into a rage" in msg for msg in sink), sink)
+        self.assertFalse(player.get("raging"))
+        sessions.end_session(-999)
+
     async def test_counterspell_never_negates_an_allys_own_spell(self):
         """
         Real correctness fix, caught while confirming AI party members

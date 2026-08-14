@@ -2,6 +2,24 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.196] — Add: AI-controlled combatants use their real class abilities
+
+Real live request (Coffee: "I want AI to be able to use all thier
+abilities, spells cantrips and anything that there character has or
+levels up"). Every AI-controlled combatant (recruited companions and
+autonomous AI players' turns alike) now gets a real chance, once per
+turn, to use one of their character's own real class features before
+attacking — Rage, Second Wind (only when meaningfully hurt), Action
+Surge, Reckless Attack, Flurry of Blows, Divine Smite, Channel
+Divinity (only against a real undead target), or Bardic Inspiration
+(heals the most-wounded living ally). New `_maybe_use_class_ability`
+sets the EXACT same in-memory flag/resource each human-facing command
+handler already does, so the existing combat math picks it up
+completely unchanged — this never reimplements an effect, only decides
+and sets it. Scoped to AI-controlled turns only; a real human still
+chooses their own abilities by typing them. 11 new real tests, plus a
+regression sweep of multiattack/boss/reaction tests confirmed clean.
+
 ## [1.27.195] — Fix: party-slot dedup + guild-hint dead ends + inactive-member cap
 
 Root-caused during a real dev-bridge investigation (a level-16 Fighter
