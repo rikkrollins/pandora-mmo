@@ -113,7 +113,7 @@ from rules.leveling import (
     THIEF_SUBCLASS_STEAL_BONUS, TOTEM_WARRIOR_SUBCLASS_NAME, LIFE_SUBCLASS_HEAL_BONUS,
     UTILITY_SUBCLASS_ABILITY_CHECK_BONUS, UTILITY_SUBCLASS_CHECK_BONUS_VALUE,
     rebirth_hp_max, power_scale_ratio, full_hp_max_for, proficiency_bonus_for_level,
-    MEDIUM_ENCOUNTER_XP_PER_CHARACTER, backstab_tier_multiplier,
+    MEDIUM_ENCOUNTER_XP_PER_CHARACTER, backstab_tier_multiplier, describe_subclass_effect,
 )
 from rules.proficiency import practiced_bonus, MAX_PRACTICE_BONUS
 
@@ -4879,7 +4879,12 @@ async def _do_choose_subclass(update: Update, text: str) -> None:
         return
     match = next((s for s in options if s.lower() in lowered), None)
     if match is None:
-        await _safe_send(update, f"Which subclass? Options for a {character['char_class']}: {', '.join(options)}.")
+        # 2026-08-14, per Coffee: bare names alone left a player choosing
+        # blind (see guilds.eligible_for_guild's own matching fix) --
+        # describe_subclass_effect surfaces the real effect for each
+        # option right here too, not just after they've already committed.
+        option_lines = "; ".join(f"{o} ({describe_subclass_effect(o)})" for o in options)
+        await _safe_send(update, f"Which subclass? Options for a {character['char_class']}: {option_lines}.")
         return
     db.update_character(update.effective_user.id, update.effective_chat.id, subclass=match)
     if match in COMBAT_SUBCLASS_NAMES:

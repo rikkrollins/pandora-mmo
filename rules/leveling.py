@@ -212,6 +212,37 @@ LIFE_SUBCLASS_HEAL_BONUS = 2
 TOTEM_WARRIOR_SUBCLASS_NAME = "Totem Warrior"
 
 
+def describe_subclass_effect(subclass_name: str) -> str:
+    """
+    One short, honest, mechanically-accurate line for a subclass name --
+    real live gap (2026-08-14, Coffee: "it wants me to choose without
+    explaining what they even do for my character"): a player facing the
+    "choose a subclass" prompt (guilds.eligible_for_guild's own rejection
+    message, and bot._do_choose_subclass's "which subclass?" re-ask) only
+    ever saw the two bare NAMES, never what either one actually does --
+    the real mechanical payoff only ever got revealed by
+    bot._do_choose_subclass AFTER the player already committed to one.
+    Built here (not bot.py) so guilds.py can show it too without a
+    circular import -- every number here is the same real constant
+    bot._do_choose_subclass's own post-choice message already uses, just
+    surfaced a step earlier.
+    """
+    if subclass_name == "Assassin":
+        return "every attack becomes a Backstab attempt for bonus damage, landing more often the more you use it"
+    if subclass_name == "Thief":
+        return f"+{THIEF_SUBCLASS_STEAL_BONUS} on every steal attempt"
+    if subclass_name == "Life":
+        return f"healing spells restore +{LIFE_SUBCLASS_HEAL_BONUS} extra HP"
+    if subclass_name == TOTEM_WARRIOR_SUBCLASS_NAME:
+        return "while raging, spell damage is halved too, not just weapon hits"
+    if subclass_name in COMBAT_SUBCLASS_NAMES:
+        return f"weapon attacks deal +{COMBAT_SUBCLASS_DAMAGE_BONUS_PCT}% more damage"
+    ability = UTILITY_SUBCLASS_ABILITY_CHECK_BONUS.get(subclass_name)
+    if ability:
+        return f"+{UTILITY_SUBCLASS_CHECK_BONUS_VALUE} on every {ability.capitalize()} check"
+    return "a real, chosen subclass, though no mechanical bonus is built for it yet"
+
+
 def utility_subclass_ability_check_bonus(subclass: str | None, ability: str) -> int:
     """Real +2 on an ability check when this is exactly the archetype's own flagged ability."""
     if subclass and UTILITY_SUBCLASS_ABILITY_CHECK_BONUS.get(subclass) == ability.lower():

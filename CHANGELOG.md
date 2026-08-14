@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.210] — Fix: subclass choice prompt named the options but never what they do
+
+Real report (Coffee, Support/dev topic): "It wants me to choose without
+explaining what they even do for my character." 2026-08-13 already
+fixed the prior gap (the prompt now names the two real options for your
+class) but stopped one layer short -- a player still had to blindly
+commit to a name before ever finding out what either one actually DOES;
+that only ever got revealed by bot._do_choose_subclass's OWN post-choice
+message, after the fact.
+
+New rules.leveling.describe_subclass_effect(name) surfaces the same
+real numbers that post-choice message already uses (e.g. "+20% weapon
+damage" for a combat pick, "+2 on every Strength check" for Battle
+Master, Thief's steal bonus, Life's heal bonus, Totem Warrior's rage
+effect, Assassin's Backstab) one step earlier, in BOTH places a player
+can hit this blind choice: guilds.eligible_for_guild's "requires a
+subclass first" rejection, and bot._do_choose_subclass's own "which
+subclass?" re-ask when the typed text doesn't match either option.
+Built in rules/leveling.py (not bot.py) so guilds.py can reuse it
+without a circular import.
+
+Confirmed live against the real functions: eligible_for_guild's Forge
+Guild rejection for a subclass-less Fighter now reads "...say 'choose
+the path of Champion' (weapon attacks deal +20% more damage) or
+'choose the path of Battle Master' (+2 on every Strength check)."; all
+22 real subclasses across all 11 classes produce a correct, grounded
+one-liner.
+
 ## [1.27.209] — Fix: "switch my player to X" silently misclassified as chat
 
 Found while investigating today's guild curriculum reports: the same

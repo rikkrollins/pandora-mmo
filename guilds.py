@@ -360,12 +360,20 @@ def eligible_for_guild(character: dict, guild_id: str) -> tuple[bool, str]:
             # reason to invoke separately. Naming the real options for
             # their own class right here, in the message that actually
             # gets shown, closes that loop.
-            from rules.leveling import CLASS_SUBCLASSES
+            from rules.leveling import CLASS_SUBCLASSES, describe_subclass_effect
             options = CLASS_SUBCLASSES.get(character["char_class"])
             if options:
+                # 2026-08-14, per Coffee: naming the two options (2026-08-13's
+                # own fix) still wasn't enough -- a player choosing blind
+                # between two bare names has no way to know what either
+                # actually DOES until after committing. describe_subclass_
+                # effect surfaces the same real numbers bot._do_choose_
+                # subclass's post-choice message already reveals, one step
+                # earlier, so the choice is actually informed.
                 return False, (
                     "Requires choosing a subclass first — say \"choose the path of "
-                    f"{options[0]}\" or \"choose the path of {options[1]}\"."
+                    f"{options[0]}\" ({describe_subclass_effect(options[0])}) or "
+                    f"\"choose the path of {options[1]}\" ({describe_subclass_effect(options[1])})."
                 )
             return False, "Requires choosing a subclass first (say \"choose the path of...\")."
     # Task #170, per Coffee: guild membership should require vetting, not
