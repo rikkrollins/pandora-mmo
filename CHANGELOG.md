@@ -2,6 +2,45 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.213] — Fix: 3 multi-class guilds grew the wrong permanent stat for half their members
+
+Follow-up to v1.27.212, per Coffee's own request to "cross reference ur
+subclass system and audit if the mechanics match the flavour of the
+guild." Full audit of all 22 subclasses found no further mismatches
+(the rest all check out against their real flavor), but the guild side
+turned up a real one: every guild grants ONE flat permanent ability
+score on level-up (guilds.GUILD_STAT_BONUS_LEVELS), but 3 guilds admit
+classes with genuinely different casting/primary abilities --
+
+- Arcane Circle (wizard/sorcerer/warlock) granted flat Intelligence --
+  correct for Wizard, but Sorcerer/Warlock actually cast on Charisma.
+- Enchanters' Guild (same 3 classes) granted flat Charisma -- correct
+  for Sorcerer/Warlock, wrong for Wizard (Intelligence).
+- Thieves' Guild (rogue/bard) granted flat Dexterity -- correct for
+  Rogue, wrong for Bard (Charisma).
+
+New guilds.permanent_stat_for(guild_id, character) resolves the real
+stat from a new per-guild permanent_stat_by_class map (checked against
+char_class, then hybrid_class -- same "qualifies on EITHER class's
+terms" rule guild join-eligibility already uses), falling back to the
+old flat permanent_stat for the 4 guilds that already only ever granted
+a stat every eligible class genuinely shares (Silver Wardens, Faith
+Circle, Forge Guild, Adventurers' Guild -- all confirmed correct,
+unchanged). Wired into every real site that reads a guild's growth stat:
+db.add_xp's own level-up growth, both join-guild and leave-guild's
+player-facing growth notes, and ai/support_agent's guild grounding
+catalog (which would otherwise keep confidently telling a Sorcerer they
+get an Intelligence boost). Only affects stat gains from this point
+forward -- any already-banked permanent_stat points a character earned
+under the old flat mapping are real and unchanged, same as any other
+past-earned bonus.
+
+Confirmed live: permanent_stat_for resolves correctly for all 10
+guild/class combinations tested (including the 6 that changed and the
+4 that didn't). End-to-end through the real level-up path (throwaway
+DB): a Sorcerer in Arcane Circle leveling from 1 to 16 gained +3
+Charisma and exactly 0 Intelligence.
+
 ## [1.27.212] — Fix: "combat" subclass damage bonus never reached spell damage
 
 Real report (Coffee, correctly spotted while asking about Sorcerer's

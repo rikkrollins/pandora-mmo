@@ -82,6 +82,7 @@ from guilds import (
     ADVENTURERS_GUILD_BOARD_QUEST_GOLD_BONUS_PCT, THIEVES_GUILD_LOCKPICK_BONUS,
     held_guild_ids, guild_title, GUILD_STAT_BONUS_LEVELS,
     GUILD_PERMANENT_PROFESSION, GUILD_PERMANENT_SCALAR_PROFICIENCY, GUILD_PROMOTION_PCT_BONUS,
+    permanent_stat_for,
 )
 from models import (
     VALID_CLASSES,
@@ -21008,7 +21009,7 @@ async def _do_join_guild(update: Update, text: str) -> None:
     is_secondary = bool(character.get("guild"))
     db.join_guild(update.effective_user.id, update.effective_chat.id, guild_id)
     character_for_growth_note = db.get_character(update.effective_user.id, update.effective_chat.id)
-    stat_name = GUILDS[guild_id].get("permanent_stat")
+    stat_name = permanent_stat_for(guild_id, character_for_growth_note)
     growth_bits = []
     if stat_name:
         growth_bits.append(f"your {stat_name.capitalize()} by 1")
@@ -21112,7 +21113,7 @@ async def _do_leave_guild(update: Update, text: str) -> None:
         await _safe_send(update, f"Leave which guild? You're a member of: {names}.")
         return
 
-    stat_name = GUILDS[guild_id].get("permanent_stat")
+    stat_name = permanent_stat_for(guild_id, character)
     join_level = (
         character.get("guild_join_level")
         if guild_id == character.get("guild")

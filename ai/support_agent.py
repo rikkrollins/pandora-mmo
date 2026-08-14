@@ -238,9 +238,25 @@ def _guilds_catalog_text() -> str:
             extra.append("must have chosen a real subclass first (say \"choose the path of...\")")
         extra.append("must have won at least one real fight (proving yourself in combat)")
         benefit_text = ", ".join(_format_guild_benefit(b) for b in guild.get("benefits", []))
+        # 2026-08-14, per Coffee's own class/guild flavor audit: 3 guilds
+        # (Arcane Circle, Enchanters' Guild, Thieves' Guild) now grow a
+        # DIFFERENT permanent stat depending on the joining character's
+        # own class (guilds.permanent_stat_for) rather than one flat stat
+        # for every member -- naming the per-class breakdown here too, or
+        # Support would keep confidently stating the WRONG stat to
+        # whichever class doesn't match the old flat value (e.g. still
+        # telling a Sorcerer "permanent Intelligence boost" when they'd
+        # actually gain Charisma), same "partial grounding" shape as both
+        # fixes already noted just above.
+        by_class = guild.get("permanent_stat_by_class")
+        if by_class:
+            stat_note = "; ".join(f"{cls.capitalize()}: {stat}" for cls, stat in by_class.items())
+            stat_note = f"a permanent stat boost that depends on your class ({stat_note})"
+        else:
+            stat_note = f"a permanent {guild.get('permanent_stat', '')} boost"
         lines.append(
             f"- {guild['name']}: requires level {guild['join_requirement_level']}, {', '.join(extra)}. "
-            f"Real benefits: {benefit_text}, plus a permanent {guild.get('permanent_stat', '')} boost on joining."
+            f"Real benefits: {benefit_text}, plus {stat_note} on joining."
         )
     return "\n".join(lines)
 

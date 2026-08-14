@@ -2351,7 +2351,7 @@ def _compute_xp_updates(character: dict, amount: int) -> dict:
             gained = _bonus_tiers(join_level, new_level) - _bonus_tiers(join_level, old_level)
             if not gained:
                 return
-            stat = guilds_module.GUILDS.get(guild_id, {}).get("permanent_stat")
+            stat = guilds_module.permanent_stat_for(guild_id, character)
             if stat:
                 current_value = updates.get(stat, character[stat])
                 updates[stat] = min(current_value + gained, cap)

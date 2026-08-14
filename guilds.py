@@ -113,6 +113,11 @@ GUILDS = {
         "join_requirement_classes": ["wizard", "sorcerer", "warlock"],
         "benefits": ["bonus_spell_scroll", "shop_discount_10", "bonus_spell_damage_15"],
         "permanent_stat": "intelligence",
+        # 2026-08-14, per Coffee (audit found this): a flat "intelligence"
+        # for every member fit Wizard but was flatly wrong for Sorcerer/
+        # Warlock, whose real spellcasting ability is Charisma, not
+        # Intelligence -- see permanent_stat_for's own docstring.
+        "permanent_stat_by_class": {"wizard": "intelligence", "sorcerer": "charisma", "warlock": "charisma"},
     },
     "silver_wardens": {
         "name": "The Silver Wardens",
@@ -129,6 +134,10 @@ GUILDS = {
         "join_requirement_classes": ["rogue", "bard"],
         "benefits": ["bonus_steal", "shop_discount_10"],
         "permanent_stat": "dexterity",
+        # 2026-08-14, per Coffee (audit found this): fit Rogue but was
+        # flatly wrong for Bard, whose real primary/casting ability is
+        # Charisma, not Dexterity -- see permanent_stat_for's docstring.
+        "permanent_stat_by_class": {"rogue": "dexterity", "bard": "charisma"},
     },
     "faith_circle": {
         "name": "The Faith Circle",
@@ -160,8 +169,46 @@ GUILDS = {
         "join_requirement_classes": ["wizard", "sorcerer", "warlock"],
         "benefits": ["guild_enchant_ladder", "shop_discount_10"],
         "permanent_stat": "charisma",
+        # 2026-08-14, per Coffee (audit found this): fit Sorcerer/Warlock
+        # but was flatly wrong for Wizard, whose real spellcasting
+        # ability is Intelligence, not Charisma -- see
+        # permanent_stat_for's own docstring.
+        "permanent_stat_by_class": {"wizard": "intelligence", "sorcerer": "charisma", "warlock": "charisma"},
     },
 }
+
+
+def permanent_stat_for(guild_id: str, character: dict) -> str | None:
+    """
+    Real fix (2026-08-14, per Coffee: full class/guild flavor audit,
+    prompted by catching the Draconic spell-damage gap): permanent_stat
+    used to be one flat ability score per guild, which meant a guild
+    open to multiple classes with different real casting abilities
+    (Arcane Circle, Enchanters' Guild, Thieves' Guild -- each spanning
+    at least one Intelligence/Dexterity-primary class and one Charisma-
+    primary one) granted the WRONG stat to whichever class didn't match
+    the guild's single flat pick. Those 3 guilds now carry a real
+    permanent_stat_by_class override, checked against the character's
+    own char_class first, then hybrid_class (same "qualifies on EITHER
+    class's terms" rule eligible_for_guild already uses for join
+    eligibility) -- falls back to the guild's flat permanent_stat for
+    every other guild (Silver Wardens, Faith Circle, Forge Guild,
+    Adventurers' Guild all already grant a stat every eligible class
+    genuinely shares) and for any class not explicitly listed. Only
+    affects stat gains from this point forward -- a character's already-
+    banked permanent_stat points from before this fix are real,
+    permanent, and unchanged, same as any other past-earned bonus.
+    """
+    guild = GUILDS.get(guild_id, {})
+    by_class = guild.get("permanent_stat_by_class")
+    if by_class:
+        char_class = (character.get("char_class") or "").lower()
+        if char_class in by_class:
+            return by_class[char_class]
+        hybrid_class = (character.get("hybrid_class") or "").lower()
+        if hybrid_class in by_class:
+            return by_class[hybrid_class]
+    return guild.get("permanent_stat")
 
 # Guild quests (task #77): one real, repeatable bounty per guild,
 # completed once per real calendar day per member by winning any fight
