@@ -2,6 +2,59 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.226] — Add: real difficulty scaling for content a party has genuinely outleveled
+
+Real ask (2026-08-15, Greymoor Downs screenshot): "All of these areas
+shud be lv20+... I want the enemies to have about 500 HP. Run a
+simulation with my current party so enemies do apx 30-150 damage (at
+the most) per hit. If there are bosses like the_unspoken make them one
+boss at 3000hp... We have to raise the bar, the game is too easy."
+
+Root cause: `rules.leveling.overtuned_monster_stat_multiplier`
+(2026-08-10) already scales a monster DOWN when it's too strong for the
+party, but was explicitly, deliberately one-directional — it never
+buffs an undertuned monster back up. A level-20 party had genuinely
+outleveled zone content that was still sitting at its original,
+much-lower-tier baseline (barrow_bound_wolf: 99 HP/140 xp_reward;
+the_unspoken, Coffee's own reference boss: 200 HP/350 xp_reward — both
+far below a real level-20 Medium-encounter budget of 5700).
+
+New `rules.leveling.undertuned_monster_stat_multiplier`, the grow-
+direction sibling, wired into `bot._do_start_combat` right alongside
+the existing shrink check (only ever runs when the shrink didn't
+already apply, so the two can never fight each other). Two calibrated
+ceilings, not one shared multiplier — trash mobs cap at 5x, bosses at
+15x — because Coffee's own two reference points don't fit a single
+ratio, and because this game already treats trash vs. bosses
+differently everywhere else (`scaled_enemy_count`/the shrink function
+both already exempt bosses from party-size scaling, "whose difficulty
+spike is intentional, not a bug"). Bosses, unlike the shrink direction,
+are NOT exempt from growth — a boss the party has badly outleveled is
+exactly the reported case. Damage scales by the SQUARE ROOT of the same
+ratio, not the full ratio — applying HP's full multiplier to damage
+overshot Coffee's own stated 150-damage ceiling badly (255 on a single
+hit); more HP is what makes a fight last and threaten across multiple
+rounds, which is what "too easy" actually meant here, not being
+under-hit. A new `UNDERTUNED_GROWTH_THRESHOLD_RATIO` gate (found during
+calibration, not requested but necessary) keeps this from firing during
+completely ordinary early-game progression — real 5E already treats a
+monster somewhat below budget as a normal "Easy" encounter, not a bug;
+without this gate a level-2 party fighting the exact starter goblin
+they're meant to be grinding got an unrequested 2x buff.
+
+Verified with real tests against Coffee's own two reference monsters:
+barrow_bound_wolf lands at 495 HP (target ~500), the_unspoken lands at
+exactly 3000 HP (target 3000), both stay within the 30-150 per-hit
+range, and a level-20 boss's max hit still can't kill even the
+squishiest class (Wizard, ~578 HP) in fewer than ~8 hits. Confirmed a
+level-1/2/3 party facing the same starter goblin gets zero change
+(threshold gate working), a level-10 party facing it DOES get scaled
+(genuine gap still triggers), and every other monster in the campaign
+was swept for a sanity check — the already-strongest hand-tuned bosses
+(the_deepest_record, the_unbegun, etc., all xp_reward 1500+) correctly
+stay untouched, since they already clear the new threshold on their
+own.
+
 ## [1.27.225] — Fix: item catalog corruption + fabricated combat-log narration
 
 Two more real dev-topic reports (same proactive dev-bridge sweep as

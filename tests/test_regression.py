@@ -9124,6 +9124,84 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(len(enemies), 1, enemies)
         sessions.end_session(-999)
 
+    async def test_start_combat_grows_an_undertuned_monster_for_an_overleveled_party(self):
+        """
+        Real live report (2026-08-15, per Coffee, Greymoor Downs
+        screenshot: "these areas shud be lv20+... I want the enemies to
+        have about 500 HP... the game is too easy"). The grow-direction
+        sibling of test_start_combat_shrinks_an_overtuned_wild_monster_
+        to_party_level above: a level-20 party fighting barrow_bound_wolf
+        (99 hp/140 xp_reward, far below a real level-20 budget) must get
+        a real, grown monster (5x, Coffee's own trash-tier reference
+        point: 99 -> 495 hp), never the stale low-tier template stats.
+        damage_bonus grows too, but by a DAMPENED (sqrt) ratio, not the
+        full 5x -- see UNDERTUNED_DAMAGE_SCALE_EXPONENT's own docstring
+        for why. armor_class/damage_dice stay unchanged by design, same
+        convention the shrink direction already established.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        user_id = 900710
+        make_basic_character(user_id, "Overleveled", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=20, hp_current=772, hp_max=772)
+        sink = []
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the barrow-bound wolf", sink),
+                                        monster_key="barrow_bound_wolf", count=1)
+        session = sessions.get_session_for_user(-999, user_id)
+        enemy = next(p for p in session.participants if p["telegram_user_id"] != user_id)
+        import campaign_loader as cl
+        template = cl.get_monster_template(bot.CAMPAIGN, "barrow_bound_wolf")
+        self.assertEqual(enemy["hp_max"], round(template["hp_max"] * 5.0))
+        self.assertEqual(enemy["hp_current"], enemy["hp_max"])
+        self.assertGreater(enemy["hp_max"], template["hp_max"])
+        self.assertEqual(enemy["armor_class"], template["armor_class"])
+        self.assertEqual(enemy["damage_dice"], template.get("damage_dice"))
+        self.assertGreater(enemy["damage_bonus"], template.get("damage_bonus", 0))
+        # Damage grows by sqrt(5) =~ 2.24x, nowhere near the full 5x HP grew by.
+        self.assertLess(enemy["damage_bonus"], template.get("damage_bonus", 0) * 3)
+        self.assertGreater(enemy["xp_reward"], template.get("xp_reward", 0))
+        sessions.end_session(-999)
+
+    async def test_start_combat_grows_an_undertuned_boss_for_an_overleveled_party(self):
+        """
+        Same real report as the trash-mob sibling above, but for a
+        NAMED BOSS -- unlike overtuned_monster_stat_multiplier's shrink
+        direction (which exempts every is_boss monster entirely, see
+        test_start_combat_never_shrinks_a_hand_placed_boss), growth
+        intentionally DOES apply to bosses: a boss the party has badly
+        outleveled is exactly Coffee's own reported case ("the_unspoken"
+        was his own real example). Real target: 200 hp -> exactly 3000
+        hp at a real level-20 party, Coffee's own explicit number.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        user_id = 900711
+        make_basic_character(user_id, "OverleveledVsBoss", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=20, hp_current=772, hp_max=772)
+        sink = []
+        # is_boss also triggers a real narrate_boss_intro Ollama call --
+        # see test_start_combat_never_shrinks_a_hand_placed_boss's own
+        # comment on this exact same real hang.
+        from unittest.mock import Mock
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()), \
+             patch("bot.narrate_boss_intro", new=Mock(return_value="A shadow falls.")):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the unspoken", sink),
+                                        monster_key="the_unspoken", count=1)
+        session = sessions.get_session_for_user(-999, user_id)
+        enemy = next(p for p in session.participants if p["telegram_user_id"] != user_id)
+        import campaign_loader as cl
+        template = cl.get_monster_template(bot.CAMPAIGN, "the_unspoken")
+        self.assertTrue(template.get("is_boss"))
+        self.assertEqual(enemy["hp_max"], 3000)
+        self.assertEqual(enemy["hp_current"], enemy["hp_max"])
+        self.assertGreater(enemy["damage_bonus"], template.get("damage_bonus", 0))
+        sessions.end_session(-999)
+
     async def test_start_combat_copies_elemental_resistance_pct_from_template(self):
         """
         Real feature (2026-08-10): the_waking_ember's real, hand-set

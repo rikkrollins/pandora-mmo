@@ -735,3 +735,95 @@ def overtuned_monster_stat_multiplier(party_levels: list[int], monster_xp_reward
     if monster_xp_reward <= reference_budget:
         return 1.0
     return max(floor, reference_budget / monster_xp_reward)
+
+
+# Real live report (2026-08-15, per Coffee, dev-topic screenshot at
+# Greymoor Downs: "All of these areas shud be lv20+ ... I want the
+# enemies to have about 500 HP ... enemies do apx 30-150 damage (at the
+# most) per hit ... make [a boss like the_unspoken] one boss at 3000hp
+# ... We have to raise the bar, the game is too easy"). The missing
+# OTHER direction of overtuned_monster_stat_multiplier just above: that
+# function only ever shrinks a monster too STRONG for the party,
+# deliberately never buffs one too WEAK -- exactly the gap here, a
+# level-20 party outleveling this content entirely (barrow_bound_wolf
+# was 99 HP/140 xp_reward, the_unspoken was 200 HP/350 xp_reward,
+# neither remotely matched to a real level-20 Medium-encounter budget
+# of 5700).
+#
+# Two DIFFERENT ceilings, not one shared multiplier: calibrated against
+# Coffee's own two real reference points, which don't fit a single
+# ratio (barrow_bound_wolf needs ~5x to reach ~500 HP; the_unspoken
+# needs ~15x to reach 3000 HP). This isn't arbitrary -- it matches how
+# this game already treats trash mobs vs bosses everywhere else
+# (scaled_enemy_count/overtuned_monster_stat_multiplier both already
+# exempt is_boss from count/shrink scaling, "whose difficulty spike is
+# intentional, not a bug"): trash is meant to die fast regardless of
+# level (a quick, satisfying kill, not a threat on its own), while a
+# named boss is the real "raise the bar" content -- so trash gets the
+# smaller ceiling, a boss the larger one.
+UNDERTUNED_TRASH_STAT_CEILING = 5.0
+UNDERTUNED_BOSS_STAT_CEILING = 15.0
+
+# Real calibration finding: applying the SAME multiplier to damage_bonus
+# that HP gets badly overshoots Coffee's own explicit "30-150 damage at
+# the most" ceiling (the_unspoken's 17 damage_bonus * 15x = 255, a
+# single hit exceeding his stated MAXIMUM outright). The actual
+# complaint was about fights ending too fast, not about being
+# under-hit -- these monsters already deal real damage (existing
+# damage_bonus values run high across this whole catalog); more HP is
+# what makes the fight LAST and threaten across multiple rounds. Damage
+# scales by the SQUARE ROOT of the same ratio instead -- still
+# genuinely harder, verified against real player HP at level 20
+# (rules.leveling.full_hp_max_for: ~580-870 HP depending on class) to
+# land as a real, felt threat without ever approaching a one-shot.
+UNDERTUNED_DAMAGE_SCALE_EXPONENT = 0.5
+
+# Real 5E already treats a monster below a party's Medium budget as
+# completely normal and intended -- that's just an "Easy" encounter,
+# not a bug (Easy/Medium/Deadly bands routinely span a 2-4x XP spread
+# per the DMG's own encounter-building rules). Found while sanity-
+# checking this against ordinary early-game progression: WITHOUT a real
+# floor here, a level-2 party fighting the exact starter goblin they're
+# meant to be grinding (goblin xp_reward=50, lvl2 budget=100, ratio 2.0)
+# would already get a 2x buff -- unrequested difficulty during totally
+# normal leveling, exactly what overtuned_monster_stat_multiplier's own
+# docstring already warns against creating. Growth now only engages
+# once the gap is genuinely large (the monster's xp_reward is at least
+# this many times below budget) -- both of Coffee's real reference
+# points (barrow_bound_wolf ~40.7x, the_unspoken ~16.3x raw ratio) clear
+# this by a wide margin; a level-2 party's starter goblin (2x) does not.
+UNDERTUNED_GROWTH_THRESHOLD_RATIO = 4.0
+
+
+def undertuned_monster_stat_multiplier(
+    party_levels: list[int], monster_xp_reward: int, is_boss: bool = False,
+) -> float:
+    """
+    The grow-direction sibling of overtuned_monster_stat_multiplier
+    above -- see that function's docstring for the shared XP-budget
+    mechanism (rules.leveling.MEDIUM_ENCOUNTER_XP_PER_CHARACTER) this
+    mirrors. Returns 1.0 (no change) whenever the monster's own
+    xp_reward is within UNDERTUNED_GROWTH_THRESHOLD_RATIO of the
+    party's real Medium-encounter budget -- an ordinary "Easy" encounter
+    a party is merely somewhat ahead of is left completely alone, same
+    as real 5E treats it; this function ONLY ever grows a monster the
+    party has badly outleveled, never shrinks one, so it's always safe
+    to call alongside the existing shrink function without the two ever
+    fighting each other (they can never both return something other
+    than 1.0 for the same monster).
+
+    `is_boss`: unlike the shrink function above (which exempts bosses
+    entirely, since weakening a hand-placed boss was never the goal),
+    growth intentionally DOES apply to bosses -- a boss the party has
+    badly outleveled is exactly Coffee's own reported case, and a
+    bigger ceiling here reflects that a named boss is meant to be the
+    real centerpiece fight once genuinely scaled to the party's level.
+    """
+    if not party_levels or monster_xp_reward <= 0:
+        return 1.0
+    avg_level = round(sum(party_levels) / len(party_levels))
+    reference_budget = MEDIUM_ENCOUNTER_XP_PER_CHARACTER.get(min(max(avg_level, 1), 20), 5700)
+    if monster_xp_reward * UNDERTUNED_GROWTH_THRESHOLD_RATIO >= reference_budget:
+        return 1.0
+    ceiling = UNDERTUNED_BOSS_STAT_CEILING if is_boss else UNDERTUNED_TRASH_STAT_CEILING
+    return min(ceiling, reference_budget / monster_xp_reward)

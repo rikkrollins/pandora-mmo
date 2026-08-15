@@ -106,7 +106,8 @@ from rules.crafting import (
 from rules.dice import roll, roll_damage, ability_modifier, roll_ability_check, roll_d20, roll_percentage_check, average_damage
 from rules.item_generator import generate_item
 from rules.leveling import (
-    CLASS_HIT_DICE, scaled_enemy_count, overtuned_monster_stat_multiplier, breath_weapon_dice_count,
+    CLASS_HIT_DICE, scaled_enemy_count, overtuned_monster_stat_multiplier, undertuned_monster_stat_multiplier,
+    UNDERTUNED_DAMAGE_SCALE_EXPONENT, breath_weapon_dice_count,
     CLASS_PRIMARY_ABILITY, CLASS_SAVE_PROFICIENCIES, is_proficient_in_skill, is_proficient_in_save,
     skill_check_proficiency_bonus, wild_shape_temp_hp, XP_THRESHOLDS,
     MAX_LEVEL, ability_score_cap, xp_gain_multiplier, hybrid_tier, HYBRID_MAX_TIER,
@@ -6437,6 +6438,27 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             stat_mult = overtuned_monster_stat_multiplier(
                 [p.get("level", 1) for p in party], template.get("xp_reward", 0)
             )
+        # Real live report (2026-08-15, per Coffee: "these areas shud be
+        # lv20+... the game is too easy"): the grow-direction sibling of
+        # the shrink just above -- only ever fires when stat_mult is
+        # still exactly 1.0 (either the shrink didn't apply because this
+        # monster wasn't overtuned, or this IS a boss, which the shrink
+        # always exempts) -- see undertuned_monster_stat_multiplier's own
+        # docstring for why bosses now get REAL growth even though they
+        # never get shrunk. damage_mult intentionally tracked separately
+        # (see UNDERTUNED_DAMAGE_SCALE_EXPONENT's own docstring) -- HP/
+        # xp_reward scale by the full stat_mult, but damage_bonus scales
+        # by its square root, since matching HP's full ratio badly
+        # overshot Coffee's own explicit damage ceiling.
+        damage_mult = stat_mult
+        if stat_mult == 1.0:
+            grow_mult = undertuned_monster_stat_multiplier(
+                [p.get("level", 1) for p in party], template.get("xp_reward", 0),
+                is_boss=template.get("is_boss", False),
+            )
+            if grow_mult > 1.0:
+                stat_mult = grow_mult
+                damage_mult = grow_mult ** UNDERTUNED_DAMAGE_SCALE_EXPONENT
 
         # "The World Evolves" (2026-08-14, per Coffee): unlike stat_mult
         # just above, this DOES apply to bosses too -- strengthening the
@@ -6639,7 +6661,7 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 # doesn't -- same "scale the flat bonus, not the dice"
                 # convention _build_echo_enemy already established, no
                 # string-parsing needed).
-                "damage_bonus": round(slot_template.get("damage_bonus", 0) * stat_mult),
+                "damage_bonus": round(slot_template.get("damage_bonus", 0) * damage_mult),
                 # Real elemental flavor per monster (2026-07-26 damage-
                 # type pass) -- read by _weapon_for_attacker's natural-
                 # attack branch, then apply_damage_type_modifier against
