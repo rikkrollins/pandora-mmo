@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.228] — Fix: plain crafted weapons/armor never got action buttons
+
+Real dev-topic report (2026-08-14, found via the same proactive
+dev-bridge sweep as the last two fixes): "After I crafted this item, it
+didn't give me the option to market it, sell it, give it, equip it,
+reforge or dismantle it. I want to push buttons to help the player with
+forging/crafting." His real example: a plain crafted Longsword.
+
+Root cause: the post-craft "🔍 Tap below to inspect" button (v1.27.145,
+already gives combat loot and advanced/generated crafts real equip/
+sell/market/give/reforge/dismantle buttons) was gated to advanced
+(generated, "gi<n>") crafts only, on the documented reasoning "a
+static-catalog craft has nothing to equip/forge/list" — true for a
+potion or scroll, but flatly wrong for a plain static WEAPON/ARMOR/
+SHIELD/RING/AMULET/WONDROUS craft. `itemview_callback` already handles
+a static item_id correctly and generically (equip/sell/market/give all
+already work against any owned item_id; Reforge/Dismantle already
+self-gate on real eligibility — Reforge requires `source == "crafted"`,
+which a static item never has, so it correctly never shows for one).
+This only ever needed the button itself to actually be offered for a
+real equippable static craft — scoped to those types specifically, so
+a crafted potion/scroll is still correctly excluded (nothing these
+buttons would do for one). 2 new regression tests (the static-craft
+case, and re-confirming the potion-exclusion case still holds).
+
 ## [1.27.227] — Fix: hostile NPC ambushes (Kess) never got v1.27.226's difficulty scaling
 
 Real dev-topic report, found via a proactive dev-bridge sweep (not

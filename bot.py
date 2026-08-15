@@ -13790,14 +13790,29 @@ async def _do_craft(update: Update, text: str) -> None:
         # push buttons like give, marketplace, reforge, equip") -- same
         # "🔍 Tap below to inspect" follow-up combat loot already gets
         # (see _grant_generated_loot), so crafting a magic item isn't
-        # treated any differently from finding one. Only real generated
-        # items ("gi<n>") have a real item-view screen at all -- a
-        # static-catalog craft (a potion, a scroll) has nothing to
-        # equip/forge/list, so this is advanced-craft only.
-        if is_advanced:
+        # treated any differently from finding one.
+        #
+        # Real live gap (2026-08-14, per Coffee, dev-bridge screenshot:
+        # "After I crafted this item, it didn't give me the option to
+        # market it, sell it, give it, equip it, reforge or dismantle
+        # it"): this used to be advanced-craft only, on the reasoning
+        # that "a static-catalog craft has nothing to equip/forge/
+        # list" -- true for a potion or scroll, but flatly wrong for a
+        # plain static-catalog WEAPON/ARMOR craft (his own real example
+        # was a plain crafted Longsword), which itemview_callback
+        # already handles correctly and generically for equip/sell/
+        # market/give (Reforge/Dismantle already gate themselves
+        # correctly on real eligibility -- can_reforge requires
+        # source == "crafted", which a static item never has, so the
+        # button itself never shows for one; can_dismantle already
+        # checks DISMANTLE_ELIGIBLE_TYPES). Scoped to real equippable
+        # types only -- a crafted potion/scroll genuinely has nothing
+        # these buttons would do, so it's still correctly excluded.
+        view_item_id = generated_item_id if is_advanced else result["result_item"]
+        if is_advanced or result_item.get("type") in ("weapon", "armor", "shield", "ring", "amulet", "wondrous"):
             await _safe_send(
                 update, f"🔍 Tap below to inspect the {result_item['name']} you just crafted.",
-                reply_markup=_item_view_keyboard(generated_item_id), speak=False,
+                reply_markup=_item_view_keyboard(view_item_id), speak=False,
             )
 
 

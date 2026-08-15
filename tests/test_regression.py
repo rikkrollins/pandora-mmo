@@ -5182,6 +5182,63 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(len(captured_markups) > 0)
         self.assertIsInstance(captured_markups[-1], bot.InlineKeyboardMarkup)
 
+    async def test_static_craft_of_an_equippable_item_also_attaches_a_view_item_button(self):
+        """
+        Real live gap (2026-08-14, per Coffee, dev-bridge screenshot: "I
+        crafted this item, it didn't give me the option to market it,
+        sell it, give it, equip it, reforge or dismantle it" -- his real
+        example was a plain crafted Longsword). The sibling test above
+        only ever covers an ADVANCED (generated, "gi<n>") craft -- this
+        used to be the ONLY case that got the button at all, on the
+        reasoning "a static-catalog craft has nothing to equip/forge/
+        list", which is true for a potion/scroll but flatly wrong for a
+        plain static WEAPON/ARMOR/etc. craft. itemview_callback already
+        handles a static item_id correctly and generically (equip/sell/
+        market/give all work; Reforge/Dismantle already self-gate on
+        real eligibility) -- this only needed the button to actually be
+        offered.
+        """
+        from unittest.mock import patch
+        user_id = 950951
+        make_basic_character(
+            user_id, "StaticButtonCraftTester", char_class="Fighter", current_location="crossroads_tavern",
+            ability_scores={"strength": 20, "dexterity": 10, "constitution": 14,
+                             "intelligence": 10, "wisdom": 10, "charisma": 10},
+        )
+        sink = []
+        update = FakeUpdate(user_id, "craft a longsword", sink)
+        real_safe_send = bot._safe_send
+        captured_markups = []
+
+        async def spying_safe_send(upd, text, **kwargs):
+            if "Tap below to inspect" in text:
+                captured_markups.append(kwargs.get("reply_markup"))
+            return await real_safe_send(upd, text, **kwargs)
+
+        with patch("bot.narrate_skill_check", return_value="You forge it true."), \
+             patch("bot._safe_send", side_effect=spying_safe_send):
+            succeeded = False
+            for _ in range(20):
+                sink.clear()
+                db.add_item(user_id, -999, "iron_ore", 3)
+                await bot._do_craft(update, "craft a longsword")
+                if any("Tap below to inspect" in s for s in sink):
+                    succeeded = True
+                    break
+        self.assertTrue(succeeded)
+        self.assertTrue(len(captured_markups) > 0)
+        self.assertIsInstance(captured_markups[-1], bot.InlineKeyboardMarkup)
+        # And a pure consumable (a potion) must still correctly get NO
+        # button at all -- nothing these actions would do for one.
+        db.add_item(user_id, -999, "silverleaf_herb", 2)
+        db.add_item(user_id, -999, "moonpetal", 1)
+        captured_markups.clear()
+        sink.clear()
+        with patch("bot.narrate_skill_check", return_value="It bubbles nicely."), \
+             patch("bot._safe_send", side_effect=spying_safe_send):
+            await bot._do_craft(update, "craft a healing potion")
+        self.assertEqual(captured_markups, [])
+
     async def test_itemview_reforge_button_upgrades_item_tier(self):
         """Real feature (2026-08-11): the item-view screen's new "Reforge" button runs the exact same tier-upgrade logic _do_forge_item's free-text path uses."""
         from unittest.mock import patch
