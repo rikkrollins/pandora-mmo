@@ -21,7 +21,7 @@ import config
 import items as items_module
 import races as races_module
 import spells as spells_module
-from ai.text_cleanup import strip_think_tags
+from ai.text_cleanup import strip_think_tags, is_placeholder_text
 from guilds import GUILDS
 from models import VALID_CLASSES
 from rules.crafting import RECIPES, ENCHANT_RECIPES
@@ -1284,7 +1284,7 @@ def answer_support_question(
                 response.raise_for_status()
                 data = response.json()
                 text = strip_think_tags(data.get("response", ""))
-                if text:
+                if text and not is_placeholder_text(text):
                     if character:
                         text = _correct_own_class_hallucination(text, character)
                     return text

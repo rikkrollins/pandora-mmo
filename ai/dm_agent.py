@@ -12,7 +12,7 @@ import requests
 
 import config
 from ai.story_mode import scaled_sentences, style_directive
-from ai.text_cleanup import strip_think_tags, strip_internal_jargon
+from ai.text_cleanup import strip_think_tags, strip_internal_jargon, is_placeholder_text
 
 # Real perf fix (2026-07-17, per Coffee): no call anywhere in this
 # module capped how many tokens the model could generate -- confirmed
@@ -256,7 +256,7 @@ def narrate_skill_check(character: dict, action_text: str, ability: str, mechani
         response.raise_for_status()
         data = response.json()
         text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
-        if text:
+        if text and not is_placeholder_text(text):
             return text
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] skill check narration call failed, falling back to template: {e}")
@@ -468,7 +468,7 @@ def narrate_action(character: dict, action_text: str, mechanical_result: dict,
         response.raise_for_status()
         data = response.json()
         text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
-        if text:
+        if text and not is_placeholder_text(text):
             return text
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] narration call failed, falling back to template: {e}")
@@ -566,7 +566,7 @@ def narrate_boss_decision(boss: dict, target: dict, spell_name: str | None = Non
         response.raise_for_status()
         data = response.json()
         text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
-        if text:
+        if text and not is_placeholder_text(text):
             return text
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] boss decision narration call failed, falling back to template: {e}")
@@ -639,7 +639,7 @@ def narrate_welcome(character: dict, location: dict, party_summary: str) -> str:
         response.raise_for_status()
         data = response.json()
         text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
-        if text:
+        if text and not is_placeholder_text(text):
             return text
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] welcome narration call failed, falling back to template: {e}")
@@ -713,7 +713,7 @@ def narrate_hourly_update(location_name: str, recent_events: list[str], activity
         response.raise_for_status()
         data = response.json()
         text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
-        if text:
+        if text and not is_placeholder_text(text):
             return text
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] hourly update narration call failed, falling back to template: {e}")
@@ -841,7 +841,7 @@ def narrate_next_step_hint(next_step: dict) -> str:
         response.raise_for_status()
         data = response.json()
         text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
-        if text:
+        if text and not is_placeholder_text(text):
             return text
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] next-step-hint narration call failed, falling back to template: {e}")
@@ -875,7 +875,7 @@ def narrate_story_so_far(
         response.raise_for_status()
         data = response.json()
         text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
-        if text:
+        if text and not is_placeholder_text(text):
             return text
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] story-so-far narration call failed, falling back to template: {e}")
@@ -943,7 +943,7 @@ def narrate_examine(character: dict, location_name: str, object_name: str, objec
         response.raise_for_status()
         data = response.json()
         text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
-        if text:
+        if text and not is_placeholder_text(text):
             return text
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] examine narration call failed, falling back to plain description: {e}")
@@ -1002,7 +1002,7 @@ def narrate_branching_quest_setup(location_name: str, npc_name: str | None,
         response.raise_for_status()
         data = response.json()
         text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
-        if text:
+        if text and not is_placeholder_text(text):
             return text
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] branching quest setup narration failed, falling back to plain text: {e}")
@@ -1036,7 +1036,7 @@ def narrate_branching_choice_outcome(location_name: str, choice_label: str, outc
         response.raise_for_status()
         data = response.json()
         text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
-        if text:
+        if text and not is_placeholder_text(text):
             return text
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] branching quest outcome narration failed, falling back to plain text: {e}")
@@ -1087,7 +1087,7 @@ def narrate_chapter_climax(quest_title: str, quest_description: str, reward_text
         response.raise_for_status()
         data = response.json()
         text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
-        if text:
+        if text and not is_placeholder_text(text):
             return text
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] chapter climax narration failed, falling back to template: {e}")
@@ -1151,7 +1151,7 @@ def narrate_boss_intro(
         response.raise_for_status()
         data = response.json()
         text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
-        if text:
+        if text and not is_placeholder_text(text):
             return text
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] boss intro narration failed, falling back to template: {e}")
@@ -1203,7 +1203,7 @@ def narrate_boss_defeat(monster_name: str, location_name: str, ability_facts: st
         response.raise_for_status()
         data = response.json()
         text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
-        if text:
+        if text and not is_placeholder_text(text):
             return text
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] boss defeat narration failed, falling back to template: {e}")
@@ -1256,7 +1256,7 @@ def narrate_boss_summon(boss_name: str, minion_names: str) -> str:
         response.raise_for_status()
         data = response.json()
         text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
-        if text:
+        if text and not is_placeholder_text(text):
             return text
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] boss summon narration failed, falling back to template: {e}")
@@ -1308,7 +1308,7 @@ def narrate_arc_opening(arc_title: str, arc_description: str, quest_title: str) 
         response.raise_for_status()
         data = response.json()
         text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
-        if text:
+        if text and not is_placeholder_text(text):
             return text
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] arc opening narration failed, falling back to template: {e}")

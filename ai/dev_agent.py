@@ -15,7 +15,7 @@ closer to what that model is already used for elsewhere in the project.
 import requests
 
 import config
-from ai.text_cleanup import strip_think_tags
+from ai.text_cleanup import strip_think_tags, is_placeholder_text
 
 DEV_SYSTEM_PROMPT = """You are a helpful development assistant for Pandora MMO, \
 a Python-based Dungeons & Dragons 5E Telegram bot. You help the developer \
@@ -62,7 +62,7 @@ def answer_dev_question(question: str, recent_context: list[str] | None = None) 
         response.raise_for_status()
         data = response.json()
         text = strip_think_tags(data.get("response", ""))
-        if text:
+        if text and not is_placeholder_text(text):
             return text
     except (requests.RequestException, ValueError) as e:
         print(f"[dev_agent] model call failed: {e}")

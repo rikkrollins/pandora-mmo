@@ -80,3 +80,27 @@ def strip_internal_jargon(text: str) -> str:
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     cleaned = re.sub(r"\s+([,.!?;:])", r"\1", cleaned)
     return cleaned.strip()
+
+
+# Real live bug (2026-08-15, dev-bridge screenshot, Coffee circled it):
+# a routine combat miss narrated as literally "(stub)" -- the model's
+# entire response for that call, verbatim, no think-tags or jargon
+# involved, just a bare placeholder-shaped token reaching a real
+# player. Neither strip_think_tags nor strip_internal_jargon catches
+# this (there's nothing snake_case or thinking-tagged about it) -- this
+# is a distinct failure mode: the model produced a degenerate,
+# non-prose completion instead of narration. No legitimate narration
+# sentence is ONE bracketed/parenthesized placeholder word, so this is
+# a safe, narrow catch, same "never trust the model alone" philosophy
+# as the checks above. Caller treats a match as an empty response and
+# falls back to the deterministic template, same as an Ollama error.
+_PLACEHOLDER_TEXT_RE = re.compile(
+    r"^[\(\[]?\s*(stub|placeholder|todo|tbd|n/?a|xxx|lorem ipsum|insert (?:text|narration|description)(?: here)?|"
+    r"\.{3,})\s*[\)\]]?\.?$",
+    re.IGNORECASE,
+)
+
+
+def is_placeholder_text(text: str) -> bool:
+    """True if `text` is a bare placeholder token (e.g. "(stub)") rather than real narration prose."""
+    return bool(_PLACEHOLDER_TEXT_RE.match(text.strip()))

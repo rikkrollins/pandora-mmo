@@ -1928,7 +1928,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock_sleep.call_count, 4)
         self.assertTrue(captured_options, "requests.post was never actually called")
         for options in captured_options:
-            self.assertEqual(options["num_predict"], 1200)
+            # v1.27.229: support_agent's budget was bumped again, 1200 -> 2400, to stay matched with dm_agent's own value.
+            self.assertEqual(options["num_predict"], 2400)
 
     def test_support_spell_slot_restoration_question_is_answered_deterministically(self):
         """
@@ -13213,6 +13214,48 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(mock_narrate.call_count, 0, sink)
                 self.assertTrue(any("Pre-warmed variant" in line for line in sink), sink)
                 sessions.end_session(-999)
+
+    def test_is_placeholder_text_catches_bare_placeholder_tokens_only(self):
+        """
+        Real live bug (2026-08-15, dev-bridge screenshot, Coffee circled
+        it): a routine combat miss was narrated as literally "(stub)" --
+        the model's entire response, verbatim, reaching a real player.
+        Confirms the new placeholder guard catches that exact shape and
+        close variants, while never flagging real narration prose (even
+        short prose, or prose that happens to mention "TBD" as a name).
+        """
+        from ai.text_cleanup import is_placeholder_text
+        for placeholder in ("(stub)", "stub", "[stub]", "TODO", "(TBD)", "n/a", "...", "placeholder"):
+            self.assertTrue(is_placeholder_text(placeholder), placeholder)
+        for real_text in (
+            "The blade finds its mark, drawing a pained cry.",
+            "Grask misses wide!",
+            "It stumbles back.",
+            "TBD the merchant counts her coins slowly.",
+        ):
+            self.assertFalse(is_placeholder_text(real_text), real_text)
+
+    async def test_narrate_action_falls_back_when_model_returns_a_bare_placeholder(self):
+        """Real live bug follow-up: narrate_action must never return "(stub)" verbatim -- it should fall back to the deterministic template, same as a real Ollama error."""
+        from unittest.mock import patch
+        import ai.dm_agent as dm_agent_module
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "(stub)"}
+
+        mechanical_result = {"hit": False, "raw_roll": 2, "attacker": "Grask Emberscale", "defender": "Shadow Wisp 3"}
+        with patch("ai.dm_agent.requests.post", return_value=FakeResponse()):
+            result = dm_agent_module.narrate_action(
+                {"name": "Grask Emberscale", "char_class": "Barbarian", "hp_current": 700, "hp_max": 779},
+                "attack the shadow wisp", mechanical_result,
+            )
+        self.assertNotEqual(result.strip(), "(stub)")
+        self.assertIn("Grask Emberscale", result)
+        self.assertIn("Shadow Wisp 3", result)
 
     async def test_narration_token_cap_gives_real_headroom_over_thinking_overhead(self):
         """

@@ -7,7 +7,7 @@ model as dm_agent.py), since dialogue also doesn't need tool calling.
 import requests
 
 import config
-from ai.text_cleanup import strip_think_tags
+from ai.text_cleanup import strip_think_tags, is_placeholder_text
 
 # In-memory NPC registry: npc_id -> {"persona": str, "memory": [(role, text), ...]}
 _NPCS: dict[str, dict] = {}
@@ -163,6 +163,8 @@ def talk_to_npc(npc_id: str, player_message: str, character_name: str = "the pla
         response.raise_for_status()
         data = response.json()
         reply = strip_think_tags(data.get("response", ""))
+        if is_placeholder_text(reply):
+            reply = "..."
     except (requests.RequestException, ValueError) as e:
         print(f"[npc_agent] NPC call failed, falling back: {e}")
         reply = "..."
@@ -210,6 +212,8 @@ def generate_ambient_line(npc_id: str, character_name: str, situation: str,
         response.raise_for_status()
         data = response.json()
         line = strip_think_tags(data.get("response", "")).strip()
+        if is_placeholder_text(line):
+            line = ""
     except (requests.RequestException, ValueError) as e:
         print(f"[npc_agent] ambient line failed, skipping: {e}")
         return ""

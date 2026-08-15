@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.237] — Fixed AI narration leaking bare placeholder text ("(stub)") to players
+
+Real dev-bridge report (2026-08-15, Coffee circled a screenshot):
+a routine combat miss was narrated as literally `(stub)` — the whole
+model response, verbatim, reaching a live player. Root cause: neither
+`strip_think_tags` nor `strip_internal_jargon` (the existing "never
+trust the model alone" guards in `ai/text_cleanup.py`) catch this —
+there's no `<think>` tag or snake_case leak involved, just the model
+occasionally producing a degenerate, non-prose completion instead of
+real narration. New `is_placeholder_text()` catches bare
+placeholder-shaped tokens (`(stub)`, `TODO`, `TBD`, `n/a`, `...`,
+`placeholder`, etc.) without ever flagging real prose (even short
+prose, or prose that happens to mention "TBD" as part of a sentence).
+Wired into every raw-Ollama-response call site across `ai/dm_agent.py`
+(all 15, one per narration type), `ai/npc_agent.py` (dialogue +
+ambient lines), `ai/support_agent.py` (retry loop — now retries on a
+placeholder same as it already retried on empty-after-stripping), and
+`ai/dev_agent.py` — a match is treated exactly like an Ollama error:
+falls back to the existing deterministic template/retry, never reaches
+a player raw. Also fixed a stale test assertion (`num_predict`
+expected 1200, real value has been 2400 since v1.27.229) found while
+touching this test file.
+
 ## [1.27.236] — Shadow Wisp damage output raised: survivability fix wasn't enough on its own
 
 Real live-battle-monitored follow-up to v1.27.235's AC22/HP400 fix
