@@ -4230,7 +4230,7 @@
         "radiant"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 16,
+      "damage_bonus": 30,
       "damage_type": "necrotic",
       "stealable_items": [
         {

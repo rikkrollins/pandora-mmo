@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.236] — Shadow Wisp damage output raised: survivability fix wasn't enough on its own
+
+Real live-battle-monitored follow-up to v1.27.235's AC22/HP400 fix
+(Coffee: "lets monitor this current fight to see if the wisps are a
+challenge for the party. and if not i need u to make it a challenge
+for them"). Watched a real 4-player, level 12-19 fight against 4 fresh
+Shadow Wisps (the first fight actually running on the new AC22/HP400
+stats) round by round via `sessions_snapshot.json` and
+`bot_live_tmp.log`. Confirmed the AC/HP half of the fix worked exactly
+as intended — wisps took many real rounds to whittle down instead of
+dying in 2 — but by round 12, one wisp still hadn't taken a SINGLE hit
+and another had barely been touched, while the party's Bard (Pip
+Thistledown) went the entire fight without taking one point of damage,
+and no other party member ever dropped below ~85% of their max HP.
+Root cause: `shadow_wisp.damage_bonus` (16) was never part of the
+original fix — its own attack (`1d8+16`, ~22.5 avg damage on a hit)
+was only 2.7%-6.6% of this party's real HP pools (343-822), so even
+landing hits couldn't threaten anyone. Raised `damage_bonus` 16 → 30,
+roughly doubling average hit damage to ~39 — AC22/HP400 (already
+correct) untouched. Verified via `python3 -c "...json.load..."` that
+this is the only field changed in campaign.json (68 monsters,
+confirmed via `git diff` showing a single line). Not retroactive to
+already-spawned monsters in an in-progress fight (matches v1.27.235's
+own AC/HP fix) — takes effect on the next fresh Shadow Wisp encounter.
+
 ## [1.27.235] — Narration cache identity bug fixed; Shadow Wisp toughness fix actually deployed
 
 Two real fixes, bundled because the second one was diagnosed while
