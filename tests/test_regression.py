@@ -9323,30 +9323,83 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(enemy["damage_bonus"], stats["damage_bonus"])
         sessions.end_session(-991)
 
-    def test_monster_danger_line_shows_the_real_authored_level(self):
+    def test_monster_danger_line_shows_the_real_authored_level_trash_only(self):
         """
         Real live bug (2026-08-15, per Coffee, dev-bridge screenshot:
         "You did NOT update the values.. go through the list and make
         the changes in the game" -- arriving at The Goblin Warrens still
-        showed "Goblin Shaman (Lv. 2)" and "Goblin Boss (???)" even
-        though both had just been given real, deliberately-authored
-        level fields (3 and 10) via the Encounter Ledger pass,
-        v1.27.231). _monster_danger_line always used the old inferred-
-        from-xp_reward heuristic and always hid every boss's level
-        behind "???", regardless of a real authored level being
-        present. A hand-authored level is no longer a spoiler -- Coffee
-        chose it himself and is actively verifying it took effect -- so
-        it's shown for a boss too now; an un-authored boss (not yet
-        through that pass) still correctly shows "???".
+        showed "Goblin Shaman (Lv. 2)" even though it had just been
+        given a real, deliberately-authored level field (3) via the
+        Encounter Ledger pass, v1.27.231). _monster_danger_line always
+        used the old inferred-from-xp_reward heuristic and never
+        checked the new "level" field at all.
+
+        Real correction, same session: bosses stay "???" regardless of
+        whether they've been hand-authored -- Coffee's immediate
+        follow-up ("(???) still please") walked back an initial fix
+        that showed a boss's real level once authored. Only trash
+        monsters (never is_boss) show their real level; the mystery
+        boss convention (2026-08-01) is untouched either way.
         """
         line = bot._monster_danger_line(["goblin", "goblin_shaman", "goblin_boss"])
         self.assertIn("Goblin (Lv. 1)", line)
         self.assertIn("Goblin Shaman (Lv. 3)", line)
-        self.assertIn("Goblin Boss (Lv. 10)", line)
-        self.assertNotIn("???", line)
+        self.assertIn("Goblin Boss (???)", line, "a boss must ALWAYS show ??? here, authored or not")
 
         unauthored_boss_line = bot._monster_danger_line(["the_verge_warden"])
         self.assertIn("(???)", unauthored_boss_line)
+
+    async def test_boss_level_hidden_until_defeated_then_shown_in_bestiary(self):
+        """
+        Real feature, same session (2026-08-15, per Coffee: "make the
+        bosses the same lvl as the ledger but dont show it to the
+        player until they beat the boss, then include it in bestiary").
+        A boss's real hand-authored level (goblin_boss = 10) must stay
+        hidden -- both on arrival (_monster_danger_line, tested above)
+        and in the bestiary/examine entry -- until this specific
+        character has actually WON against it at least once, tracked by
+        the new db.defeated_monsters (genuinely separate from
+        known_monsters, which is set the moment the fight merely
+        STARTS). _award_victory_xp is the one real place a party win
+        is confirmed, and remove_defeated() only ever prunes turn_order
+        (never session.participants itself), so the defeated boss's
+        real monster_key is still readable there when this runs.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock, Mock
+        sessions.end_session(-997)
+        user_id = 900713
+        make_basic_character(
+            user_id, "DefeatTester", chat_id=-997, char_class="Fighter", current_location="crossroads_tavern",
+        )
+        db.update_character(user_id, -997, level=20, hp_current=500, hp_max=500)
+        import campaign_loader as cl
+        template = cl.get_monster_template(bot.CAMPAIGN, "goblin_boss")
+        self.assertEqual(template.get("level"), 10)
+
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()), \
+             patch("bot.narrate_boss_intro", new=Mock(return_value="A shadow falls.")):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the goblin boss", [], chat_id=-997),
+                                        monster_key="goblin_boss", count=1)
+        session = sessions.get_session_for_user(-997, user_id)
+        enemy = next(p for p in session.participants if p["telegram_user_id"] != user_id)
+
+        # Not defeated yet -- bestiary entry must NOT show the level.
+        entry_before = bot._format_bestiary_entry("goblin_boss", template, defeated=False)
+        self.assertNotIn("Level", entry_before)
+
+        enemy["hp_current"] = 0
+        session.remove_defeated()
+        with patch("bot._adjust_faction_standing", new=AsyncMock()):
+            await bot._award_victory_xp(FakeUpdate(user_id, "irrelevant", [], chat_id=-997), session)
+
+        character_after = db.get_character(user_id, -997)
+        self.assertIn("goblin_boss", character_after.get("defeated_monsters", []))
+
+        entry_after = bot._format_bestiary_entry("goblin_boss", template, defeated=True)
+        self.assertIn("🎯 Level 10", entry_after)
+        sessions.end_session(-997)
 
     async def test_start_combat_copies_elemental_resistance_pct_from_template(self):
         """

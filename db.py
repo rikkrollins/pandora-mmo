@@ -827,6 +827,18 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN is_designated_summoner INTEGER NOT NULL DEFAULT 0")
         if "summoning_mastery_pct" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN summoning_mastery_pct REAL NOT NULL DEFAULT 1.0")
+        # Real live report (2026-08-15, per Coffee, following the
+        # Encounter Ledger level-curve pass: "make the bosses the same
+        # lvl as the ledger but dont show it to the player until they
+        # beat the boss, then include it in bestiary"). known_monsters
+        # (mark_known_monster) is set the moment a fight STARTS -- a
+        # boss fled from or lost is already "known" under that fog-of-
+        # war, which isn't good enough to gate a real spoiler (the
+        # boss's own level) behind. This is a genuinely separate fact
+        # ("have I actually WON against this monster type") from
+        # "have I fought it at all".
+        if "defeated_monsters" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN defeated_monsters TEXT NOT NULL DEFAULT '[]'")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -840,6 +852,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     d["feature_uses"] = json.loads(d["feature_uses"])
     d["equipped_accessories"] = json.loads(d["equipped_accessories"])
     d["known_monsters"] = json.loads(d["known_monsters"])
+    d["defeated_monsters"] = json.loads(d["defeated_monsters"])
     d["cleared_locations"] = json.loads(d["cleared_locations"])
     d["achievements"] = json.loads(d["achievements"])
     d["map_revealed_locations"] = json.loads(d["map_revealed_locations"])
@@ -985,7 +998,7 @@ def update_character(telegram_user_id: int, chat_id: int, **fields) -> dict | No
     if not fields:
         return get_character(telegram_user_id, chat_id)
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "defeated_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -1029,7 +1042,7 @@ def update_character_by_id(character_id: int, **fields) -> dict | None:
             row = conn.execute("SELECT * FROM characters WHERE character_id = ?", (character_id,)).fetchone()
         return _row_to_dict(row) if row else None
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "defeated_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -1760,6 +1773,28 @@ def mark_known_monster(telegram_user_id: int, chat_id: int, monster_key: str) ->
         return character
     character["known_monsters"].append(monster_key)
     return update_character(telegram_user_id, chat_id, known_monsters=character["known_monsters"])
+
+
+def mark_defeated_monster(telegram_user_id: int, chat_id: int, monster_key: str) -> dict | None:
+    """
+    Adds monster_key to this character's defeated_monsters, if new --
+    a genuinely separate fact from known_monsters above (2026-08-15,
+    per Coffee: "make the bosses the same lvl as the ledger but dont
+    show it to the player until they beat the boss, then include it in
+    bestiary"). known_monsters is set the moment a fight STARTS
+    (mark_known_monster, from _do_start_combat), so a boss fled from
+    or lost is already "known" -- not good enough to gate a real
+    spoiler (a boss's own level) behind. Only ever called from
+    _award_victory_xp, the one real place a party win is already
+    confirmed to have happened.
+    """
+    character = get_character(telegram_user_id, chat_id)
+    if character is None:
+        return None
+    if monster_key in character["defeated_monsters"]:
+        return character
+    character["defeated_monsters"].append(monster_key)
+    return update_character(telegram_user_id, chat_id, defeated_monsters=character["defeated_monsters"])
 
 
 def mark_location_cleared(telegram_user_id: int, chat_id: int, location_id: str) -> dict | None:

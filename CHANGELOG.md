@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.233] — Add: boss levels stay hidden until you actually beat them, then show in bestiary
+
+Real correction + follow-up, same conversation as v1.27.232 (per
+Coffee): "(???) still please" — a boss must ALWAYS show "???" on
+arrival, hand-authored or not; that was never the bug, only trash
+monsters not reflecting their real level was. Then: "make the bosses
+the same lvl as the ledger but dont show it to the player until they
+beat the boss, then include it in bestiary."
+
+`_monster_danger_line` reverted to always hiding boss levels behind
+"???" (the level-3/26 fix from v1.27.232 is now trash-only). New,
+genuinely separate tracking: `db.defeated_monsters` — distinct from
+`known_monsters`, which is set the moment a fight merely STARTS
+(`mark_known_monster`, `_do_start_combat`) and was never a strong
+enough fact to gate a real spoiler behind (a boss fled from or lost is
+already "known"). `defeated_monsters` is only ever set from
+`_award_victory_xp`, the one real place a party win is confirmed —
+found that `remove_defeated()` only ever prunes `session.turn_order`,
+never `session.participants` itself, so a defeated boss's real
+`monster_key` is still readable there when this runs.
+
+`_format_bestiary_entry` (and the "examine [monster]" path that
+shares it) now shows a real "🎯 Level N" line for a hand-authored
+monster — always for trash, only once `defeated=True` for a boss.
+Real end-to-end test: goblin_boss's bestiary entry has no level line
+before the kill, shows "Level 10" immediately after a real simulated
+victory.
+
 ## [1.27.232] — Fix: the "look around" danger line wasn't showing the real authored levels
 
 Real dev-topic report (2026-08-15, minutes after v1.27.231 deployed):

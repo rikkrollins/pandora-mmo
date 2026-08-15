@@ -4385,6 +4385,33 @@ async def _award_victory_xp(update: Update, session: sessions.Session) -> tuple[
             db.update_character(pid, update.effective_chat.id, proven_in_combat=1)
             newly_proven_names.append(proving_character["name"])
 
+    # Real bestiary spoiler fix (2026-08-15, per Coffee, following the
+    # Encounter Ledger level-curve pass: "make the bosses the same lvl
+    # as the ledger but dont show it to the player until they beat the
+    # boss, then include it in bestiary"). remove_defeated() (called
+    # before this function at every real call site) only ever prunes
+    # turn_order, never session.participants itself -- a defeated
+    # monster's full dict (hp_current <= 0, still real monster_key)
+    # stays right here for the rest of the fight, same reason the
+    # source_npc_id loop just below already works. This is the one
+    # real place a party win over a specific monster TYPE is confirmed,
+    # same as mark_known_monster's own "one real place" convention
+    # for the fight-started fact.
+    defeated_monster_keys = {
+        p["monster_key"] for p in session.participants
+        if session.sides.get(p["telegram_user_id"]) == "enemy"
+        and p.get("hp_current", 0) <= 0 and p.get("monster_key")
+    }
+    if defeated_monster_keys:
+        # Same "real (non-AI) party members only" fog-of-war scope as
+        # mark_known_monster's own call site (_do_start_combat) -- an
+        # AI companion never checks its own bestiary.
+        for p in session.participants:
+            if (session.sides.get(p["telegram_user_id"]) == "party" and not p.get("is_ai")
+                    and p["telegram_user_id"] in real_party_ids_all):
+                for mk in defeated_monster_keys:
+                    db.mark_defeated_monster(p["telegram_user_id"], session.chat_id, mk)
+
     for p in session.participants:
         if session.sides.get(p["telegram_user_id"]) == "enemy" and p.get("source_npc_id"):
             npc_id = p["source_npc_id"]
@@ -15903,23 +15930,17 @@ def _monster_danger_line(monster_keys: list[str]) -> str:
     reasons about fights, by finding the highest real 5E DMG "medium
     encounter" XP threshold (MEDIUM_ENCOUNTER_XP_PER_CHARACTER) this
     monster's own xp_reward clears, i.e. "a medium fight for a
-    level-N character" -- not an invented number. An UN-authored boss
-    still shows "???" instead, per Coffee's own original instruction,
-    same spoiler-avoidance convention as the locked chapter list.
+    level-N character" -- not an invented number.
 
-    Real live bug (2026-08-15, per Coffee, dev-bridge screenshot: "You
-    did NOT update the values.. go through the list and make the
-    changes in the game"): this always used the inferred heuristic and
-    always hid EVERY boss's level, even after 26 monsters got a real,
-    deliberately-authored "level" field (the Encounter Ledger pass,
-    v1.27.231) -- so Goblin Shaman kept showing the old inferred Lv. 2
-    instead of the real submitted 3, and Goblin Boss kept showing
-    "???" even though Coffee had just typed in a real Lv. 10 himself.
-    A hand-authored level is no longer a spoiler -- Coffee chose it
-    deliberately and is actively verifying it took effect -- so it's
-    now shown for a boss too, exactly like any other monster. Only a
-    boss that HASN'T been through that pass yet (no real "level" field)
-    still shows "???".
+    Real live bug + correction (2026-08-15, per Coffee, dev-bridge):
+    the level-3/26 fix in v1.27.232 initially showed a boss's real
+    level once it had been through the Encounter Ledger pass -- Coffee
+    corrected this immediately after ("(???) still please"): EVERY
+    boss keeps the "???" mystery, hand-authored or not -- that was
+    never the bug. The only real bug was trash monsters (Goblin,
+    Goblin Shaman, ...) not reflecting their real authored level yet,
+    which is what's actually fixed here; bosses are untouched from
+    their original 2026-08-01 behavior.
     """
     parts = []
     for key in monster_keys:
@@ -15927,12 +15948,12 @@ def _monster_danger_line(monster_keys: list[str]) -> str:
         if template is None:
             continue
         name = template["name"]
+        if template.get("is_boss"):
+            parts.append(f"{name} (???)")
+            continue
         authored_level = template.get("level")
         if authored_level is not None:
             parts.append(f"{name} (Lv. {authored_level})")
-            continue
-        if template.get("is_boss"):
-            parts.append(f"{name} (???)")
             continue
         xp = template.get("xp_reward", 0)
         level = 1
@@ -16843,10 +16864,14 @@ async def _do_examine(update: Update, target_text: str) -> None:
         if monster_match:
             monster_key, template = monster_match
             if monster_key in (character.get("known_monsters") or []):
+                bestiary_text = _format_bestiary_entry(
+                    monster_key, template, character.get("rebirth_count", 0),
+                    defeated=monster_key in (character.get("defeated_monsters") or []),
+                )
                 await _safe_send(
                     update,
                     f"🔍 **{character['name']}** studies the {template['name'].lower()} here, "
-                    f"drawing on what they already know:\n{_format_bestiary_entry(monster_key, template, character.get('rebirth_count', 0))}",
+                    f"drawing on what they already know:\n{bestiary_text}",
                 )
             else:
                 await _safe_send(
@@ -17098,7 +17123,7 @@ async def map_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await _send_layer_map(update, character, layer_name)
 
 
-def _format_bestiary_entry(monster_key: str, template: dict, viewer_rebirth_count: int = 0) -> str:
+def _format_bestiary_entry(monster_key: str, template: dict, viewer_rebirth_count: int = 0, defeated: bool = False) -> str:
     """
     Real bestiary compendium entry (2026-07-16 original), redesigned
     2026-08-14 per Coffee's own back-to-back requests: (1) show a
@@ -17116,6 +17141,19 @@ def _format_bestiary_entry(monster_key: str, template: dict, viewer_rebirth_coun
     now, not just its frozen campaign.json baseline; (3) visually
     reorganized into real labeled sections instead of one dense
     paragraph, per "make the bestiary more visually appealing."
+
+    `defeated` (2026-08-15, per Coffee, Encounter Ledger follow-up:
+    "make the bosses the same lvl as the ledger but dont show it to the
+    player until they beat the boss, then include it in bestiary") --
+    a boss's real hand-authored level is a genuine spoiler (same "???"
+    convention _monster_danger_line uses on arrival) until this specific
+    character has actually WON against it at least once (db.
+    defeated_monsters, distinct from known_monsters' looser "merely
+    fought it" fact) -- default False so a caller that hasn't been
+    updated degrades to hiding it, never accidentally leaking one.
+    A non-boss monster's level was never a spoiler in the first place
+    (danger_line already shows it on arrival), so it's shown here
+    unconditionally once known.
     """
     boss_tag = " 👑" if template.get("is_boss") else ""
     lines = [f"**{template['name']}**{boss_tag}"]
@@ -17123,6 +17161,9 @@ def _format_bestiary_entry(monster_key: str, template: dict, viewer_rebirth_coun
         f"❤️ HP {template['hp_max']}  🛡️ AC {template['armor_class']}  "
         f"💪 STR {template['strength']}  🏃 DEX {template['dexterity']}  ⭐ XP {template.get('xp_reward', 0)}"
     )
+    authored_level = template.get("level")
+    if authored_level is not None and (defeated or not template.get("is_boss")):
+        lines.append(f"🎯 Level {authored_level}")
     if template.get("on_hit_condition"):
         lines.append(f"🩸 Inflicts **{template['on_hit_condition']}** on a hit")
     # Real spells/signature mechanics (2026-08-14) -- the exact same
@@ -17211,12 +17252,15 @@ async def _do_bestiary(update: Update) -> None:
         )
         return
 
+    defeated = set(character.get("defeated_monsters") or [])
     entries = []
     for monster_key in known:
         template = cl.get_monster_template(CAMPAIGN, monster_key)
         if template is None:
             continue
-        entries.append(_format_bestiary_entry(monster_key, template, character.get("rebirth_count", 0)))
+        entries.append(_format_bestiary_entry(
+            monster_key, template, character.get("rebirth_count", 0), defeated=monster_key in defeated,
+        ))
 
     # Visual pass (2026-08-14, per Coffee: "make the bestiary more
     # visually appealing") -- a real divider between entries instead of
