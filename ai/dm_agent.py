@@ -400,6 +400,18 @@ def _build_prompt(character: dict, action_text: str, mechanical_result: dict,
         if location_description else ""
     )
 
+    # Real live bug (2026-08-15, dev-topic screenshot, TWICE now): "swings
+    # and misses against Goblin Shaman 2!" while the real target (per the
+    # deterministic block right below it) was Kess -- the model pulled a
+    # name from Recent events (an earlier fight this same session) instead
+    # of the real current target. mechanical_result's own "defender" key
+    # already has the real name, but it was only ever available buried
+    # inside the raw dict repr -- same fix shape as _NAMING_INSTRUCTION
+    # already uses for the ACTOR's name: an explicit, labeled fact line
+    # plus an instruction that this is the one authoritative source.
+    defender_name = mechanical_result.get("defender")
+    target_line = f"Target: {defender_name} -- this is the ONLY correct name for whoever is being acted upon in this narration; never substitute a different name, especially not one seen in Recent events below.\n\n" if defender_name else ""
+
     return (
         f"{_combat_preamble()}\n\n"
         f"Character: {character.get('name')} ({character.get('char_class')}), "
@@ -409,6 +421,7 @@ def _build_prompt(character: dict, action_text: str, mechanical_result: dict,
         f"{banter_line}"
         f"{environment_line}"
         f"Player action: {action_text}\n\n"
+        f"{target_line}"
         f"Mechanical result (already decided, narrate faithfully): {mechanical_result}\n\n"
         f"Tone guidance for this specific roll: {drama}\n\n"
         f"Recent events:\n{history}\n\n"

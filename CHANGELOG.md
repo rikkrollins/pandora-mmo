@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.230] — Fix: combat narration still naming the wrong target
+
+Real dev-topic report (2026-08-15, recurrence of the same bug pattern
+v1.27.224/225 partially addressed): "swings and misses against Goblin
+Shaman 2!" while actually fighting Kess — the deterministic Combat
+Resolution line right below correctly said "attacks Kess." v1.27.224
+stopped the model from fabricating a whole fake resolution LINE with
+invented numbers; this is the narrower, still-open half of the same
+root cause — the model can also just narrate a real hit/miss against
+the WRONG named target, most likely pulling a name from `recent_events`
+history (an earlier fight, same session) instead of the actual current
+target.
+
+Root cause: `ai/dm_agent.py`'s combat prompt already puts the real
+actor's name on its own labeled "Character:" line (see
+`_NAMING_INSTRUCTION`), but the real target's name was only ever
+available buried inside the raw `mechanical_result` dict repr — no
+equivalent labeled fact, no equivalent instruction. Fixed the same way:
+a new explicit `Target: {name}` line, with its own inline instruction
+that this is the one authoritative name and `recent_events` is never a
+valid source for it. Confirmed live: the exact reported scenario
+(fighting Kess, with a stale "Goblin Shaman" reference planted in
+recent_events) now narrates against Kess correctly.
+
 ## [1.27.229] — Fix: Support hallucinating crafting-XP answers + a stale Ollama token budget
 
 Real dev-topic report (2026-08-14, found via the same proactive
