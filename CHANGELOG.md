@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.234] — Balance revision: Goblin Boss, Shadow Wisp, Crystal Spider
+
+Real Encounter Ledger revisions from Coffee, submitted directly in
+chat after live-testing the real per-hit damage numbers for Crystal
+Spider and The Unspoken:
+
+- **Goblin Boss**: HP 200 → 500 (level 10, xp_reward 200, damage_bonus
+  15 unchanged).
+- **Shadow Wisp**: level 12 → 15, HP 100 → 175, xp_reward 150 → 225
+  (damage_bonus 16 unchanged) — still deliberately weaker than The
+  Unspoken (level 20) per Coffee's own explicit constraint from
+  earlier in this same pass.
+- **Crystal Spider**: HP 100 → 125, xp_reward 200 → 150 (level 10,
+  damage_bonus 15 unchanged).
+
+All three already carry a real `"level"` field from v1.27.231, so
+these are pure data edits — no code changes needed, `_do_start_combat`
+already skips all dynamic scaling for any hand-authored monster.
+Encounter Ledger artifact updated to match.
+
 ## [1.27.233] — Add: boss levels stay hidden until you actually beat them, then show in bestiary
 
 Real correction + follow-up, same conversation as v1.27.232 (per

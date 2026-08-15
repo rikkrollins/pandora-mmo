@@ -4117,7 +4117,7 @@
       "dexterity": 15,
       "strength": 12,
       "armor_class": 15,
-      "hp_max": 200,
+      "hp_max": 500,
       "proficiency_bonus": 2,
       "xp_reward": 200,
       "is_boss": true,
@@ -4190,9 +4190,9 @@
       "dexterity": 15,
       "strength": 10,
       "armor_class": 15,
-      "hp_max": 100,
+      "hp_max": 125,
       "proficiency_bonus": 2,
-      "xp_reward": 200,
+      "xp_reward": 150,
       "on_hit_condition": "poisoned",
       "resistances": [
         "poison"
@@ -4215,13 +4215,13 @@
       ]
     },
     "shadow_wisp": {
-      "name": "Shadow Wisp", "level": 12,
+      "name": "Shadow Wisp", "level": 15,
       "dexterity": 18,
       "strength": 6,
       "armor_class": 16,
-      "hp_max": 100,
+      "hp_max": 175,
       "proficiency_bonus": 3,
-      "xp_reward": 150,
+      "xp_reward": 225,
       "on_hit_condition": "blinded",
       "resistances": [
         "necrotic"
