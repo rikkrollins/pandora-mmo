@@ -91,7 +91,35 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
-def lookup(key: str | None) -> str | None:
+# Real live bug (2026-08-15, dev-topic reports, recurring): cache_key()
+# buckets purely on {actor class}:{outcome}:{damage tier} -- e.g. every
+# Warlock's routine mid-damage hit shares ONE bucket regardless of which
+# Warlock is swinging or which monster is on the other end. The stored
+# TEXT itself, though, is real Ollama prose that hard-names whoever was
+# actually fighting at generation time ("Ravenloft hits Goblin Shaman for
+# 18 damage"). Replaying that text verbatim against a later, different
+# attacker/defender pair (a different Warlock, or the same Warlock now
+# fighting a Crystal Spider) keeps the ORIGINAL fight's names baked in --
+# this was the true root cause of "why does it still say Goblin Shaman."
+# Fix: store text with the real names swapped for stable placeholders,
+# and re-fill them with whoever's ACTUALLY fighting at lookup time, so a
+# cached line stays fully reusable but is never stale about identity.
+def _placeholder_text(text: str, actor_name: str | None, defender_name: str | None) -> str:
+    if defender_name:
+        text = text.replace(defender_name, "{DEFENDER}")
+    if actor_name:
+        text = text.replace(actor_name, "{ACTOR}")
+    return text
+
+
+def _fill_placeholders(text: str, actor_name: str | None, defender_name: str | None) -> str:
+    return (
+        text.replace("{ACTOR}", actor_name or "the attacker")
+        .replace("{DEFENDER}", defender_name or "the target")
+    )
+
+
+def lookup(key: str | None, actor_name: str | None = None, defender_name: str | None = None) -> str | None:
     """
     Returns a random previously-stored variant for `key`, or None if
     this shouldn't be (or can't be) reused this time — a real Ollama
@@ -99,7 +127,9 @@ def lookup(key: str | None) -> str | None:
     bucket has built up real variety (MIN_VARIANTS_BEFORE_REUSE), and
     even once warm, still lets CACHE_HIT_RATE's remainder keep calling
     Ollama fresh so a bucket can keep growing new variants over time
-    rather than freezing at whatever it first collected.
+    rather than freezing at whatever it first collected. `actor_name`/
+    `defender_name` are THIS turn's real names, filled into the stored
+    text's placeholders so a reused line never names last time's fighters.
     """
     if key is None:
         return None
@@ -109,13 +139,15 @@ def lookup(key: str | None) -> str | None:
         return None
     if random.random() > CACHE_HIT_RATE:
         return None
-    return random.choice(rows)[0]
+    text = random.choice(rows)[0]
+    return _fill_placeholders(text, actor_name, defender_name)
 
 
-def remember(key: str | None, text: str) -> None:
-    """Stores a real Ollama-generated narration line for future reuse under `key`, capped at MAX_VARIANTS_PER_KEY so a bucket doesn't grow unbounded."""
+def remember(key: str | None, text: str, actor_name: str | None = None, defender_name: str | None = None) -> None:
+    """Stores a real Ollama-generated narration line for future reuse under `key`, capped at MAX_VARIANTS_PER_KEY so a bucket doesn't grow unbounded. Names are placeholder-ized first (see lookup) so reuse never carries a stale identity."""
     if key is None or not text:
         return
+    text = _placeholder_text(text, actor_name, defender_name)
     with _connect() as conn:
         count = conn.execute("SELECT COUNT(*) FROM variants WHERE key = ?", (key,)).fetchone()[0]
         if count >= MAX_VARIANTS_PER_KEY:

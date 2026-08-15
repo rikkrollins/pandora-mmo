@@ -13097,6 +13097,45 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                     count = conn.execute("SELECT COUNT(*) FROM variants WHERE key = ?", (key,)).fetchone()[0]
                 self.assertEqual(count, narration_cache.MAX_VARIANTS_PER_KEY)
 
+    def test_narration_cache_reuse_never_carries_a_stale_attacker_or_defender_name(self):
+        """
+        Real live bug (2026-08-15 dev-topic reports): a routine narration
+        line generated for one fight (Ravenloft vs. Goblin Shaman) was later
+        replayed verbatim for a totally different fight (a different Warlock
+        vs. Crystal Spider) because cache_key() buckets only by class/outcome/
+        damage tier, never by who's actually fighting. Confirms remember()
+        strips the ORIGINAL real names into placeholders, and lookup() refills
+        them with THIS turn's real names -- never the stale ones.
+        """
+        import tempfile
+        from ai import narration_cache
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("ai.narration_cache.CACHE_DIR", tmp), \
+                 patch("ai.narration_cache.CACHE_DB_PATH", f"{tmp}/n.db"):
+                key = "Warlock:hit:mid"
+                for text in (
+                    "Ravenloft's blade finds Goblin Shaman for a solid hit!",
+                    "Ravenloft lands a heavy blow on Goblin Shaman!",
+                    "Ravenloft cuts through Goblin Shaman's guard!",
+                ):
+                    narration_cache.remember(key, text, actor_name="Ravenloft", defender_name="Goblin Shaman")
+                with narration_cache._connect() as conn:
+                    stored = [r[0] for r in conn.execute("SELECT text FROM variants WHERE key = ?", (key,)).fetchall()]
+                # Stored text must never contain the original real names --
+                # only the placeholders, so a later reuse can't go stale.
+                for text in stored:
+                    self.assertNotIn("Ravenloft", text)
+                    self.assertNotIn("Goblin Shaman", text)
+                    self.assertIn("{ACTOR}", text)
+                    self.assertIn("{DEFENDER}", text)
+                with patch("ai.narration_cache.random.random", return_value=0.0):
+                    reused = narration_cache.lookup(key, actor_name="Dusk", defender_name="Crystal Spider 3")
+                self.assertIn("Dusk", reused)
+                self.assertIn("Crystal Spider 3", reused)
+                self.assertNotIn("Ravenloft", reused)
+                self.assertNotIn("Goblin Shaman", reused)
+
     async def test_post_narrated_cache_miss_calls_ollama_and_stores_result(self):
         """First-ever routine outcome for a bucket: no stored variants yet, so this must call the real (mocked) narration model and store its result for reuse."""
         import tempfile

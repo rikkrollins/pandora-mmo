@@ -2,6 +2,43 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.235] — Narration cache identity bug fixed; Shadow Wisp toughness fix actually deployed
+
+Two real fixes, bundled because the second one was diagnosed while
+chasing dev-bridge reports of the first:
+
+- **Narration cache no longer replays a stale attacker/defender name**
+  (repeated dev-bridge reports, e.g. "Why is it saying goblin shaman?
+  I'm fighting Kess right now," then again against Crystal Spider even
+  after the earlier per-prompt fix). Root cause: `ai/narration_cache.py`
+  buckets routine combat lines by `{actor class}:{outcome}:{damage
+  tier}` only — e.g. every Warlock's mid-damage hit shares ONE bucket
+  regardless of who's actually fighting. The stored TEXT, though, is
+  real Ollama prose that hard-names whoever was fighting at generation
+  time, so a line generated once against "Goblin Shaman" could be
+  replayed verbatim against a completely different monster later. This
+  bypassed v1.27.230's prompt-level "Target:" fix entirely, since a
+  cache hit never touches the prompt at all. Fixed at the storage layer
+  instead: `remember()` now swaps the real actor/defender names for
+  stable placeholders before storing, and `lookup()` refills them with
+  THIS turn's real names — a cached line stays fully reusable but can
+  never carry a stale identity again. The existing poisoned cache
+  (`.pdrx8k2f/n.db`, gitignored) was cleared as part of this deploy so
+  already-stored stale-named lines stop being served immediately.
+- **Shadow Wisp's AC 16 → 22 / HP 175 → 400 fix, deployed for real.**
+  This was derived live (2026-08-15) from Coffee monitoring a real
+  4-player, level 12-20 party fight: the party was clearing Shadow
+  Wisps in under 2 rounds with real simulation confirming ~102 avg
+  party damage/round vastly outstripping the old 175 HP pool — a
+  confirmed imbalance, not a one-off. The fix was made to
+  `campaigns/default/campaign.json` at the time but never actually
+  shipped (no restart), so every fight since then — including a
+  same-day retest ("the shadow wisps are barely hurting the
+  party... something is off") — was still running on the old,
+  already-disproven stats. This deploy is the first time the real fix
+  is live. Simulation at AC22/400HP: ~6.6 rounds to clear via
+  full-party focus fire, vs. ~1.7 rounds at the old AC16/175HP.
+
 ## [1.27.234] — Balance revision: Goblin Boss, Shadow Wisp, Crystal Spider
 
 Real Encounter Ledger revisions from Coffee, submitted directly in

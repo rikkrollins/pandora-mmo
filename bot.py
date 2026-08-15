@@ -3892,13 +3892,15 @@ async def _post_narrated(update: Update, character: dict, action_text: str,
         # reaction trigger, so this only ever shortcuts the routine
         # case, never the "long and entertaining" moments.
         narration_key = narration_cache.cache_key(character, mechanical_result, include_banter)
-        flavor = narration_cache.lookup(narration_key)
+        actor_name = character.get("name")
+        defender_name = mechanical_result.get("defender")
+        flavor = narration_cache.lookup(narration_key, actor_name, defender_name)
         if flavor is None:
             flavor = await asyncio.to_thread(
                 narrate_action, character, action_text, mechanical_result, session.recent_events(),
                 actor_personality, location_description, include_banter,
             )
-            narration_cache.remember(narration_key, flavor)
+            narration_cache.remember(narration_key, flavor, actor_name, defender_name)
     message = _format_combat_result(
         flavor, mechanical_result,
         actor_label=mechanical_result.get("attacker", character.get("name", "?")),
