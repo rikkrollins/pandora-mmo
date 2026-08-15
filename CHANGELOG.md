@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.232] — Fix: the "look around" danger line wasn't showing the real authored levels
+
+Real dev-topic report (2026-08-15, minutes after v1.27.231 deployed):
+"You did NOT update the values.. go through the list and make the
+changes in the game to represent the values i gave" — a screenshot of
+arriving at The Goblin Warrens still showing "Goblin Shaman (Lv. 2)"
+and "Goblin Boss (???)", even though both had just been given real,
+deliberately-authored level fields (3 and 10) in the same deploy.
+
+The stat numbers WERE correctly live (confirmed: v1.27.231's own real
+combat test already proved goblin_boss reaches a session with its
+exact authored 200 HP) — this was a second, separate display-only bug.
+`bot._monster_danger_line` (the "You sense danger here: ..." line on
+arrival, 2026-08-01) always computed a level from the OLD inferred-
+from-xp_reward heuristic and always hid every boss's level behind
+"???", regardless of whether a real authored level was now present —
+it never checked the new `"level"` field at all. Fixed to use the real
+authored level whenever one exists, for both trash and bosses alike —
+a hand-authored level is no longer a spoiler now that Coffee has
+chosen it himself and is actively verifying it took effect. A boss
+that hasn't been through the Encounter Ledger pass yet (arcs 6-14)
+still correctly shows "???". 1 new regression test.
+
 ## [1.27.231] — Add: real hand-authored level curve for arcs 1-5 + side content
 
 Real ask (2026-08-15, following the difficulty conversation): Coffee

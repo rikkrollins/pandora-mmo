@@ -15898,17 +15898,28 @@ def _monster_danger_line(monster_keys: list[str]) -> str:
     """
     Real difficulty signal for "look around" (2026-08-01, per Coffee:
     "show the lv of the enemies... it will give us an idea if we are
-    over our heads or not"). A monster has no stored level of its own
-    -- inferred here the same way scaled_enemy_count already reasons
-    about fights, by finding the highest real 5E DMG "medium
+    over our heads or not"). A monster with no real "level" field of
+    its own gets one inferred the same way scaled_enemy_count already
+    reasons about fights, by finding the highest real 5E DMG "medium
     encounter" XP threshold (MEDIUM_ENCOUNTER_XP_PER_CHARACTER) this
     monster's own xp_reward clears, i.e. "a medium fight for a
-    level-N character" -- not an invented number. A boss shows "???"
-    instead, per Coffee's own instruction, same spoiler-avoidance
-    convention as the locked chapter list. Also fixes a real, separate
-    display bug caught while building this: this line used to join
-    raw monster_keys directly ("colosseum_champion") instead of each
-    monster's real display name.
+    level-N character" -- not an invented number. An UN-authored boss
+    still shows "???" instead, per Coffee's own original instruction,
+    same spoiler-avoidance convention as the locked chapter list.
+
+    Real live bug (2026-08-15, per Coffee, dev-bridge screenshot: "You
+    did NOT update the values.. go through the list and make the
+    changes in the game"): this always used the inferred heuristic and
+    always hid EVERY boss's level, even after 26 monsters got a real,
+    deliberately-authored "level" field (the Encounter Ledger pass,
+    v1.27.231) -- so Goblin Shaman kept showing the old inferred Lv. 2
+    instead of the real submitted 3, and Goblin Boss kept showing
+    "???" even though Coffee had just typed in a real Lv. 10 himself.
+    A hand-authored level is no longer a spoiler -- Coffee chose it
+    deliberately and is actively verifying it took effect -- so it's
+    now shown for a boss too, exactly like any other monster. Only a
+    boss that HASN'T been through that pass yet (no real "level" field)
+    still shows "???".
     """
     parts = []
     for key in monster_keys:
@@ -15916,6 +15927,10 @@ def _monster_danger_line(monster_keys: list[str]) -> str:
         if template is None:
             continue
         name = template["name"]
+        authored_level = template.get("level")
+        if authored_level is not None:
+            parts.append(f"{name} (Lv. {authored_level})")
+            continue
         if template.get("is_boss"):
             parts.append(f"{name} (???)")
             continue

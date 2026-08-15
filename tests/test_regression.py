@@ -9323,6 +9323,31 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(enemy["damage_bonus"], stats["damage_bonus"])
         sessions.end_session(-991)
 
+    def test_monster_danger_line_shows_the_real_authored_level(self):
+        """
+        Real live bug (2026-08-15, per Coffee, dev-bridge screenshot:
+        "You did NOT update the values.. go through the list and make
+        the changes in the game" -- arriving at The Goblin Warrens still
+        showed "Goblin Shaman (Lv. 2)" and "Goblin Boss (???)" even
+        though both had just been given real, deliberately-authored
+        level fields (3 and 10) via the Encounter Ledger pass,
+        v1.27.231). _monster_danger_line always used the old inferred-
+        from-xp_reward heuristic and always hid every boss's level
+        behind "???", regardless of a real authored level being
+        present. A hand-authored level is no longer a spoiler -- Coffee
+        chose it himself and is actively verifying it took effect -- so
+        it's shown for a boss too now; an un-authored boss (not yet
+        through that pass) still correctly shows "???".
+        """
+        line = bot._monster_danger_line(["goblin", "goblin_shaman", "goblin_boss"])
+        self.assertIn("Goblin (Lv. 1)", line)
+        self.assertIn("Goblin Shaman (Lv. 3)", line)
+        self.assertIn("Goblin Boss (Lv. 10)", line)
+        self.assertNotIn("???", line)
+
+        unauthored_boss_line = bot._monster_danger_line(["the_verge_warden"])
+        self.assertIn("(???)", unauthored_boss_line)
+
     async def test_start_combat_copies_elemental_resistance_pct_from_template(self):
         """
         Real feature (2026-08-10): the_waking_ember's real, hand-set
