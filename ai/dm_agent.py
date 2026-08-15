@@ -99,6 +99,27 @@ _INTERNAL_FIELD_WARNING = (
     "in-world language instead."
 )
 
+# Real live bug (2026-08-14, same dev-topic screenshot report as above):
+# a separate deterministic "Combat Resolution" block ALWAYS follows your
+# prose and states the real numbers (target, exact damage dealt, HP
+# remaining) -- that is its one and only job. A real reported occurrence
+# had the model instead write its OWN fake summary sentence mimicking
+# that exact format inside its prose ("Wren Hollowbrook hits Goblin
+# Shaman 2 for 116 damage!"), naming a target that wasn't even in this
+# fight and inventing a damage number that didn't match the real one
+# printed right below it -- almost certainly picked up from past combat
+# log lines appearing in "Recent events" and mimicked as if they were a
+# style to imitate rather than raw data.
+_NO_FAKE_RESOLUTION_WARNING = (
+    "NEVER write your own summary sentence that states a specific damage "
+    "number, a target's remaining HP, or names who was hit in a "
+    "'X hits Y for Z damage' style line -- that is exclusively the job of "
+    "the deterministic block that automatically follows your narration, "
+    "and doing so risks stating a number or name that contradicts it. "
+    "Write atmosphere, action, and consequence in prose; never a log line, "
+    "and never mimic the format of anything in 'Recent events' below."
+)
+
 
 def _pronoun_line(character: dict) -> str:
     """
@@ -128,7 +149,7 @@ def _skill_check_preamble() -> str:
         "the physical scene: what the character sees, hears, and feels in "
         "this exact moment. Mention the actual raw d20 number rolled "
         "somewhere in your narration, and calibrate how dramatic your prose "
-        f"is to how good or bad that roll actually was. {_INTERNAL_FIELD_WARNING} "
+        f"is to how good or bad that roll actually was. {_INTERNAL_FIELD_WARNING} {_NO_FAKE_RESOLUTION_WARNING} "
         f"{_NAMING_INSTRUCTION} "
         f"{style_directive()} "
         # Real live bug (2026-07-18, task #165, reported by trusted dev
@@ -284,7 +305,7 @@ def _combat_preamble() -> str:
         "beyond them. "
         "Mention the actual raw d20 number rolled somewhere in your narration "
         "(e.g. 'rolling a 17...'), and calibrate how dramatic or restrained "
-        f"your prose is to how good or bad that roll actually was. {_INTERNAL_FIELD_WARNING} "
+        f"your prose is to how good or bad that roll actually was. {_INTERNAL_FIELD_WARNING} {_NO_FAKE_RESOLUTION_WARNING} "
         f"{_NAMING_INSTRUCTION} "
         f"{style_directive()}"
     )

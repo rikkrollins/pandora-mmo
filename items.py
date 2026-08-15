@@ -7,6 +7,7 @@ touching bot.py or the rules engine.
 Item categories: weapon, armor, shield, consumable, scroll, ring,
 amulet, wondrous, quest_item, material.
 """
+import copy
 import re
 
 ITEMS = {
@@ -656,7 +657,27 @@ def get_item(item_id: str) -> dict | None:
     """
     item = ITEMS.get(item_id)
     if item is not None:
-        return item
+        # Real live bug (2026-08-14/15, dev-topic screenshot reports: a
+        # plain, hand-authored "Silvered Dagger" -- base damage_type
+        # "silver" -- landing hits typed "poison" then later "fire" in
+        # the SAME fight, on the same weapon). ITEMS.get() used to hand
+        # back a LIVE reference into this module's own shared dict --
+        # any code anywhere that ever mutated a get_item() result in
+        # place (a reasonable thing to assume is safe; a generated
+        # item's own materialize_item_instance below already returns a
+        # fresh dict every call, so this was the one inconsistent
+        # exception) would permanently corrupt that catalog entry for
+        # every player, for the rest of the process's life, until
+        # restart -- explaining why the exact SAME static id could show
+        # two different damage types on different hits. The specific
+        # mutating call site was never conclusively found despite an
+        # extensive live-simulated hunt (multiple casters/rounds/
+        # elemental procs, all clean) -- fixed at the root instead: this
+        # now always returns an independent copy, exactly matching
+        # materialize_item_instance's existing per-call-fresh-dict
+        # behavior for generated items, closing the entire bug CLASS
+        # regardless of which caller was ever responsible.
+        return copy.deepcopy(item)
     if isinstance(item_id, str) and item_id.startswith("gi") and item_id[2:].isdigit():
         import db
         return db.materialize_item_instance(item_id)

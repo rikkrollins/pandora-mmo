@@ -2,6 +2,52 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.225] — Fix: item catalog corruption + fabricated combat-log narration
+
+Two more real dev-topic reports (same proactive dev-bridge sweep as
+v1.27.224): (1) a real screenshot showing "Wren Hollowbrook attacks
+Barrow-Bound Wolf 1 with their Silvered Dagger → Hits for 121 poison
+damage!" and, later in the same fight, "...Silvered Dagger → Hits for
+28 fire damage!" -- the Silvered Dagger's real, hardcoded damage_type
+(items.py) is "silver", never poison or fire. (2) A separate screenshot
+where the AI's own flavor-text prose contained a fabricated
+"[Attacker] hits [wrong target] for [wrong number] damage!" sentence
+mimicking the deterministic Combat Resolution line's exact format, with
+both the target name AND the damage number contradicting the real block
+printed right below it.
+
+**Root cause of (1), found after static analysis couldn't pin the
+exact mutating call site (extensive live-simulated combat, multiple
+casters/rounds/elemental effects, never reproduced it):** `items.
+get_item()` handed back a LIVE reference into this module's own shared
+`ITEMS` dict for every base (non-generated) catalog item -- unlike a
+generated item's `materialize_item_instance`, which already builds a
+fresh dict every call. Any code anywhere that ever mutated a get_item()
+result in place -- a reasonable-looking thing to do, since nothing in
+the return type signals "this is shared, read-only global state" --
+would permanently corrupt that one catalog entry for every player,
+process-wide, until the next restart. This is exactly the shape of bug
+that explains the same static item id showing two different damage
+types on different hits. Fixed at the root rather than chasing the
+specific caller: `get_item()` now always returns `copy.deepcopy()` of a
+base catalog entry, closing the entire bug class regardless of which
+caller was ever responsible -- matches the safety `materialize_item_
+instance` already had for generated items. Confirmed via a real test:
+force-mutating a get_item() result no longer affects the next fetch of
+the same id.
+
+**Fix for (2):** new `ai/dm_agent._NO_FAKE_RESOLUTION_WARNING`, added
+to both the combat and skill-check preambles alongside v1.27.224's
+jargon warning -- explicit instruction that stating a specific damage
+number, remaining HP, or a "X hits Y for Z damage" line is exclusively
+the deterministic block's job, and that the model must never mimic the
+format of anything in its own "Recent events" history (the likely
+source of the mimicry in the first place). Prompt-level defense only,
+matching how `_NAMING_INSTRUCTION`/`_drama_instruction` already work in
+this file -- a reliable deterministic strip isn't safe to build for
+natural-English sentences the way the snake_case jargon strip is,
+without risking false positives on legitimate combat prose.
+
 ## [1.27.224] — Fix: narration jargon leak + item-view redesign
 
 Two real dev-topic reports, found via a proactive dev-bridge check
