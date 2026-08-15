@@ -16442,6 +16442,104 @@ def _format_item_stats_line(item: dict) -> str | None:
     return "; ".join(parts)
 
 
+def _format_item_detail_block(item: dict) -> str:
+    """
+    Structured, multi-line item-view breakdown (2026-08-15, per Coffee,
+    with a Diablo-style item tooltip screenshot as a reference example:
+    "I want this to be very clear like this example as to what is on
+    the weapon"). Reads the exact same real fields
+    _format_item_stats_line already does -- this is purely a visual
+    reorganization of the same real data into labeled sections, same
+    "make it more visually appealing" treatment the bestiary redesign
+    (v1.27.220, _format_bestiary_entry) already got, never a second,
+    drifting source of truth. _format_item_stats_line itself is kept
+    unchanged for compact contexts (market listings, loot captions)
+    where a single summary line is more appropriate than a full
+    breakdown.
+    """
+    lines = []
+    header_bits = []
+    if item.get("rarity"):
+        header_bits.append(item["rarity"].replace("_", " ").title())
+    if item.get("type"):
+        header_bits.append(item["type"].title())
+    if header_bits:
+        lines.append(" ".join(header_bits))
+
+    combat_bits = []
+    if item.get("damage_dice"):
+        dtype = item.get("damage_type") or "physical"
+        element_label = "" if dtype == "physical" else f" {dtype}"
+        bonus_label = f" +{item['damage_bonus']}" if item.get("damage_bonus") else ""
+        combat_bits.append(f"⚔️ {item['damage_dice']}{bonus_label}{element_label} damage")
+    elif item.get("damage_bonus"):
+        combat_bits.append(f"⚔️ +{item['damage_bonus']} damage")
+    if item.get("ability") and item.get("type") == "weapon":
+        combat_bits.append(f"🎯 Uses {item['ability'].capitalize()}")
+    if item.get("ac_base"):
+        combat_bits.append(f"🛡️ AC {item['ac_base']}")
+    if item.get("ac_bonus"):
+        combat_bits.append(f"🛡️ +{item['ac_bonus']} AC")
+    if item.get("damage_type") and item["damage_type"] != "physical" and not item.get("damage_dice"):
+        combat_bits.append(f"🔥 Deals {item['damage_type']} damage")
+    if combat_bits:
+        lines.append("\n**Base Stats**")
+        lines.extend(combat_bits)
+
+    affix_bits = []
+    if item.get("resistances"):
+        affix_bits.append(f"🌡️ Resistance to {', '.join(item['resistances'])}")
+    if item.get("vulnerabilities"):
+        affix_bits.append(f"⚠️ Vulnerable to {', '.join(item['vulnerabilities'])}")
+    if item.get("immunities"):
+        affix_bits.append(f"✨ Immune to {', '.join(item['immunities'])}")
+    if item.get("grants_spell"):
+        spell_name = item["grants_spell"].replace("_", " ").title()
+        affix_bits.append(f"📜 Grants {spell_name} ({item.get('grants_spell_uses', 1)}/rest)")
+    for pb in item.get("profession_bonuses") or []:
+        affix_bits.append(f"🔧 +{pb['value']} {pb['profession']}")
+    if item.get("ignores_resistance"):
+        affix_bits.append("🗡️ Ignores enemy resistance")
+    if item.get("free_extra_attack"):
+        affix_bits.append("⚡ Grants an extra attack")
+    if item.get("regen_bonus"):
+        affix_bits.append(f"💚 +{item['regen_bonus']} HP regen")
+    if affix_bits:
+        lines.append("\n**Bonuses**")
+        lines.extend(affix_bits)
+
+    req_bits = []
+    item_type = item.get("type")
+    if item_type == "weapon":
+        category = item.get("weapon_category", "simple")
+        req_bits.append(f"🔒 Requires {category} weapon proficiency")
+    elif item_type in ("armor", "shield"):
+        category = item.get("armor_category", "shield" if item_type == "shield" else "light")
+        req_bits.append(f"🔒 Requires {category} armor proficiency")
+    equip_req = item.get("equip_requirement")
+    if equip_req:
+        cond_bits = []
+        for condition in equip_req.get("any_of", []):
+            kind, value = condition.get("kind"), condition.get("value")
+            if kind == "rebirth_count":
+                cond_bits.append(f"{value}+ rebirth{'s' if value != 1 else ''}")
+            elif kind == "echo_trial_tier":
+                cond_bits.append(f"Echo Trial tier {value}+")
+            elif kind == "completed_quest":
+                quest = CAMPAIGN.get("quests", {}).get(value)
+                cond_bits.append(f"having completed \"{quest['title'] if quest else value}\"")
+        if cond_bits:
+            req_bits.append(f"🔒 Requires {' OR '.join(cond_bits)} to equip")
+    if req_bits:
+        lines.append("\n**Requirements**")
+        lines.extend(req_bits)
+
+    if item_type in ("weapon", "armor", "shield", "ring", "amulet", "wondrous") and item.get("price"):
+        lines.append(f"\n💰 Worth {item['price']}g")
+
+    return "\n".join(lines)
+
+
 async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Handles every tap on the item-view system (2026-08-03, per Coffee:
@@ -16470,8 +16568,19 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
 
     if action == "show":
-        stats_line = _format_item_stats_line(item)
-        caption = f"🎒 {item['name']}" + (f"\n📊 {stats_line}" if stats_line else "")
+        # Structured, section-by-section breakdown (2026-08-15, per
+        # Coffee, Diablo tooltip screenshot as a reference example:
+        # "when we view the weapons, I want to be very clear like this
+        # example as to what is on the weapon"). Telegram photo
+        # captions cap at 1024 chars -- falls back to the older compact
+        # single-line summary for the rare maximally-affixed item where
+        # the full breakdown wouldn't fit, rather than risking a
+        # rejected sendPhoto call.
+        detail_block = _format_item_detail_block(item)
+        caption = f"🎒 **{item['name']}**\n{detail_block}" if detail_block else f"🎒 {item['name']}"
+        if len(caption) > 1024:
+            stats_line = _format_item_stats_line(item)
+            caption = f"🎒 {item['name']}" + (f"\n📊 {stats_line}" if stats_line else "")
         prompt = _item_image_prompt(item)
         sent = await _send_generated_image(
             update, prompt, caption, seed=_deterministic_image_seed(f"item:{item_id}"), log_key=item_id,

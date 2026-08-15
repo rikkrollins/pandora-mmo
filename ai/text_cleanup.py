@@ -56,3 +56,27 @@ def to_speakable_text(text: str, char_limit: int = TTS_CHAR_LIMIT) -> str:
     cleaned = _EMOJI_RE.sub("", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned[:char_limit]
+
+
+# Real live bug (2026-08-14, dev-topic screenshot report, combat
+# narration): ai/dm_agent.py's combat/skill-check prompts include the
+# real mechanical result as a raw Python dict repr (e.g. "{'raw_roll':
+# 9, 'attacker': ...}") so the model has real ground-truth facts to
+# narrate faithfully -- but nothing stops it from occasionally quoting
+# a literal internal field name instead of just using the value
+# naturally ("The raw_roll of 9 thudded through him" was a real,
+# reported live occurrence). No legitimate English sentence contains a
+# snake_case (underscore-joined) word, so any token matching that shape
+# is unambiguously a leaked internal identifier, never a false
+# positive -- stripped outright here, same "never trust the model
+# alone to follow an instruction perfectly" deterministic-strip
+# philosophy as strip_think_tags above.
+_SNAKE_CASE_LEAK_RE = re.compile(r"\b[a-z][a-z]*(?:_[a-z]+)+\b")
+
+
+def strip_internal_jargon(text: str) -> str:
+    """Remove any leaked snake_case internal field name and tidy the resulting whitespace/punctuation spacing."""
+    cleaned = _SNAKE_CASE_LEAK_RE.sub("", text)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"\s+([,.!?;:])", r"\1", cleaned)
+    return cleaned.strip()

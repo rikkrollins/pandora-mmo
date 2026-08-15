@@ -2,6 +2,57 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.224] — Fix: narration jargon leak + item-view redesign
+
+Two real dev-topic reports, found via a proactive dev-bridge check
+(`scripts/check_dev_bridge.py`), not waited-for: (1) "Do you feel that
+these responses are long-winded?" with a screenshot showing genuinely
+incoherent combat narration -- a raw internal field name ("The
+raw_roll of 9 thudded through him") had leaked straight into prose,
+mixed with confusing references to other characters' unrelated past
+actions. (2) A Diablo-style item tooltip screenshot: "when we view the
+weapons, I want to be very clear like this example as to what is on
+the weapon."
+
+**Root cause of (1), two real bugs, not just a tone problem:**
+`ai/dm_agent.py`'s combat/skill-check prompts hand the model the real
+mechanical result as a raw Python dict repr so it has real ground-truth
+facts to narrate faithfully -- nothing ever stopped it from
+occasionally quoting a literal field name instead of translating the
+value into prose. Fixed with the same "never trust the model alone to
+follow a formatting instruction perfectly" defense-in-depth philosophy
+this codebase already uses for `<think>` tag stripping and the
+AI-bracket leak (v1.27.164): a new explicit prompt instruction
+(`_INTERNAL_FIELD_WARNING`) PLUS a deterministic post-generation strip
+(`ai.text_cleanup.strip_internal_jargon` -- any snake_case/underscored
+token is unambiguously leaked internal data, since no legitimate
+English sentence ever contains one). Separately, the live `story_mode`
+override (a Development-topic "set story mode to N" command) had been
+left at 7 -- "rich, novelistic style... linger on sensory detail" --
+well past the documented intended baseline of 5 ("a modest step up...
+per Coffee's 'longer, a bit more detailed' request"), which is exactly
+what let the model wander into confusing tangents. Reset to 5 live.
+Confirmed via 2 real Ollama calls (story_mode 5 and 7, reproducing the
+exact reported scenario) that no jargon leaks through either way now.
+
+**Fix for (2):** new `bot._format_item_detail_block`, a structured,
+section-by-section breakdown (Base Stats / Bonuses / Requirements /
+Worth, emoji-labeled, same visual convention the bestiary redesign
+(v1.27.220) already established) replacing the old single semicolon-
+joined summary line on the item-view ("🔍 View Item" button) screen
+specifically -- reads the exact same real fields the old
+`_format_item_stats_line` already did, so it's a pure visual
+reorganization, never a second source of truth. `_format_item_stats_
+line` itself is untouched and still used for compact contexts (market
+listings, loot captions, the character sheet's per-equipped-item
+sub-lines) where a single summary line is more appropriate than a full
+per-item breakdown. Falls back to the old compact line if a
+maximally-affixed item's full block would exceed Telegram's 1024-char
+photo caption limit. Real tests: a hand-authored item, a generated
+legendary weapon, and a synthetic item exercising every real
+affix/requirement field all render correctly and stay well under the
+caption limit (399 chars for the fully-loaded case).
+
 ## [1.27.223] — Story So Far screen feels faster (instant ack + overlapped image gen)
 
 Real ask: "is there a way to make the story so far fster ? when we

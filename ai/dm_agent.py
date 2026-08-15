@@ -12,7 +12,7 @@ import requests
 
 import config
 from ai.story_mode import scaled_sentences, style_directive
-from ai.text_cleanup import strip_think_tags
+from ai.text_cleanup import strip_think_tags, strip_internal_jargon
 
 # Real perf fix (2026-07-17, per Coffee): no call anywhere in this
 # module capped how many tokens the model could generate -- confirmed
@@ -82,6 +82,23 @@ _NAMING_INSTRUCTION = (
     "NEVER the subject of your narration; only the Character: name is."
 )
 
+# Real live bug (2026-08-14, dev-topic screenshot report): the
+# "Mechanical result" dict handed to you below is internal data for
+# your reference only, in Python syntax -- a real reported occurrence
+# had the model quote a literal field name straight into prose ("The
+# raw_roll of 9 thudded through him"). Prompt-level instruction paired
+# with a deterministic post-generation strip (ai.text_cleanup.
+# strip_internal_jargon) as a real safety net either way -- same
+# defense-in-depth philosophy this codebase already uses everywhere
+# else (never trust the model alone to follow a formatting rule).
+_INTERNAL_FIELD_WARNING = (
+    "The 'Mechanical result' below is internal data in raw Python syntax, "
+    "for your reference only -- NEVER quote its field names (things like "
+    "raw_roll, damage_dealt, hp_current) or any snake_case/underscored word "
+    "literally in your narration; translate every value into plain, natural "
+    "in-world language instead."
+)
+
 
 def _pronoun_line(character: dict) -> str:
     """
@@ -111,7 +128,8 @@ def _skill_check_preamble() -> str:
         "the physical scene: what the character sees, hears, and feels in "
         "this exact moment. Mention the actual raw d20 number rolled "
         "somewhere in your narration, and calibrate how dramatic your prose "
-        f"is to how good or bad that roll actually was. {_NAMING_INSTRUCTION} "
+        f"is to how good or bad that roll actually was. {_INTERNAL_FIELD_WARNING} "
+        f"{_NAMING_INSTRUCTION} "
         f"{style_directive()} "
         # Real live bug (2026-07-18, task #165, reported by trusted dev
         # Sugar): a "Search for wolves" success came back as pure
@@ -216,7 +234,7 @@ def narrate_skill_check(character: dict, action_text: str, ability: str, mechani
         )
         response.raise_for_status()
         data = response.json()
-        text = strip_think_tags(data.get("response", ""))
+        text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
         if text:
             return text
     except (requests.RequestException, ValueError) as e:
@@ -266,7 +284,8 @@ def _combat_preamble() -> str:
         "beyond them. "
         "Mention the actual raw d20 number rolled somewhere in your narration "
         "(e.g. 'rolling a 17...'), and calibrate how dramatic or restrained "
-        f"your prose is to how good or bad that roll actually was. {_NAMING_INSTRUCTION} "
+        f"your prose is to how good or bad that roll actually was. {_INTERNAL_FIELD_WARNING} "
+        f"{_NAMING_INSTRUCTION} "
         f"{style_directive()}"
     )
 
@@ -414,7 +433,7 @@ def narrate_action(character: dict, action_text: str, mechanical_result: dict,
         )
         response.raise_for_status()
         data = response.json()
-        text = strip_think_tags(data.get("response", ""))
+        text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
         if text:
             return text
     except (requests.RequestException, ValueError) as e:
@@ -512,7 +531,7 @@ def narrate_boss_decision(boss: dict, target: dict, spell_name: str | None = Non
         )
         response.raise_for_status()
         data = response.json()
-        text = strip_think_tags(data.get("response", ""))
+        text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
         if text:
             return text
     except (requests.RequestException, ValueError) as e:
@@ -585,7 +604,7 @@ def narrate_welcome(character: dict, location: dict, party_summary: str) -> str:
         )
         response.raise_for_status()
         data = response.json()
-        text = strip_think_tags(data.get("response", ""))
+        text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
         if text:
             return text
     except (requests.RequestException, ValueError) as e:
@@ -659,7 +678,7 @@ def narrate_hourly_update(location_name: str, recent_events: list[str], activity
         )
         response.raise_for_status()
         data = response.json()
-        text = strip_think_tags(data.get("response", ""))
+        text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
         if text:
             return text
     except (requests.RequestException, ValueError) as e:
@@ -787,7 +806,7 @@ def narrate_next_step_hint(next_step: dict) -> str:
         )
         response.raise_for_status()
         data = response.json()
-        text = strip_think_tags(data.get("response", ""))
+        text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
         if text:
             return text
     except (requests.RequestException, ValueError) as e:
@@ -821,7 +840,7 @@ def narrate_story_so_far(
         )
         response.raise_for_status()
         data = response.json()
-        text = strip_think_tags(data.get("response", ""))
+        text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
         if text:
             return text
     except (requests.RequestException, ValueError) as e:
@@ -889,7 +908,7 @@ def narrate_examine(character: dict, location_name: str, object_name: str, objec
         )
         response.raise_for_status()
         data = response.json()
-        text = strip_think_tags(data.get("response", ""))
+        text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
         if text:
             return text
     except (requests.RequestException, ValueError) as e:
@@ -948,7 +967,7 @@ def narrate_branching_quest_setup(location_name: str, npc_name: str | None,
         )
         response.raise_for_status()
         data = response.json()
-        text = strip_think_tags(data.get("response", ""))
+        text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
         if text:
             return text
     except (requests.RequestException, ValueError) as e:
@@ -982,7 +1001,7 @@ def narrate_branching_choice_outcome(location_name: str, choice_label: str, outc
         )
         response.raise_for_status()
         data = response.json()
-        text = strip_think_tags(data.get("response", ""))
+        text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
         if text:
             return text
     except (requests.RequestException, ValueError) as e:
@@ -1033,7 +1052,7 @@ def narrate_chapter_climax(quest_title: str, quest_description: str, reward_text
         )
         response.raise_for_status()
         data = response.json()
-        text = strip_think_tags(data.get("response", ""))
+        text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
         if text:
             return text
     except (requests.RequestException, ValueError) as e:
@@ -1097,7 +1116,7 @@ def narrate_boss_intro(
         )
         response.raise_for_status()
         data = response.json()
-        text = strip_think_tags(data.get("response", ""))
+        text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
         if text:
             return text
     except (requests.RequestException, ValueError) as e:
@@ -1149,7 +1168,7 @@ def narrate_boss_defeat(monster_name: str, location_name: str, ability_facts: st
         )
         response.raise_for_status()
         data = response.json()
-        text = strip_think_tags(data.get("response", ""))
+        text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
         if text:
             return text
     except (requests.RequestException, ValueError) as e:
@@ -1202,7 +1221,7 @@ def narrate_boss_summon(boss_name: str, minion_names: str) -> str:
         )
         response.raise_for_status()
         data = response.json()
-        text = strip_think_tags(data.get("response", ""))
+        text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
         if text:
             return text
     except (requests.RequestException, ValueError) as e:
@@ -1254,7 +1273,7 @@ def narrate_arc_opening(arc_title: str, arc_description: str, quest_title: str) 
         )
         response.raise_for_status()
         data = response.json()
-        text = strip_think_tags(data.get("response", ""))
+        text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
         if text:
             return text
     except (requests.RequestException, ValueError) as e:
