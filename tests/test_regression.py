@@ -9202,6 +9202,55 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(enemy["damage_bonus"], template.get("damage_bonus", 0))
         sessions.end_session(-999)
 
+    async def test_hostile_npc_ambush_also_grows_for_an_overleveled_party(self):
+        """
+        Real live report (2026-08-14, per Coffee, dev-bridge screenshot:
+        "I thought you fixed the AI's levels that were enemies?!... This
+        player was incredibly under level... I want these players being
+        much stronger so they're an actual challenge"). Kess (the one
+        real hostile ambient NPC in this campaign, kess_the_bandit) went
+        through a COMPLETELY separate code path from _do_start_combat's
+        monster encounters (_maybe_trigger_npc_encounter's own ambush
+        branch) -- v1.27.226's real monster fix never touched it. Now
+        marked is_boss=true (a solo named rival facing a whole party
+        alone is exactly this game's existing "hand-placed, intentional
+        difficulty spike" convention) and wired through the SAME
+        overtuned/undertuned_monster_stat_multiplier functions monsters
+        use -- real end-to-end check, same ambush-trigger pattern as
+        test_battle_formation_image_sent_when_hostile_npc_ambush_starts.
+        """
+        from unittest.mock import patch, AsyncMock, Mock
+        import sessions
+        bot.setup_default_npcs()
+        sessions.end_session(-991)
+        user_id = 900712
+        character = make_basic_character(user_id, "OverleveledVsKess", chat_id=-991, current_location="crossroads_tavern")
+        db.update_character(user_id, -991, level=20, hp_current=772, hp_max=772)
+        character = db.get_character(user_id, -991)
+        location = cl.get_location(bot.CAMPAIGN, "crossroads_tavern")
+        sink = []
+        update = FakeUpdate(user_id, "irrelevant", sink, chat_id=-991)
+        # Now that Kess is is_boss=true, a real unmocked initiative roll
+        # can put her first -- which would reach _resolve_ai_turns' own
+        # real narrate_boss_decision Ollama call (unrelated to this
+        # test's own concern, real dice, genuinely flaky without this).
+        with patch("bot.AMBIENT_NPC_ENCOUNTER_CHANCE", 1.0), \
+             patch("bot.random.random", return_value=0.0), \
+             patch("bot._npcs_at_location", return_value=["kess_the_bandit"]), \
+             patch("bot._effective_disposition", return_value="hostile"), \
+             patch("bot.generate_ambient_line", return_value="You won't escape!"), \
+             patch("bot.narrate_boss_decision", new=Mock(return_value="Kess sizes you up.")), \
+             patch("bot.narrate_action", new=Mock(return_value="Kess strikes.")), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._maybe_trigger_npc_encounter(update, character, location)
+        session = sessions.get_session_for_user(-991, user_id)
+        self.assertIsNotNone(session, "ambush should have started a real combat session")
+        enemy = next(p for p in session.participants if p["telegram_user_id"] != user_id)
+        stats = bot.CAMPAIGN["npcs"]["kess_the_bandit"]["stats"]
+        self.assertEqual(enemy["hp_max"], round(stats["hp_max"] * 15.0))
+        self.assertGreater(enemy["damage_bonus"], stats["damage_bonus"])
+        sessions.end_session(-991)
+
     async def test_start_combat_copies_elemental_resistance_pct_from_template(self):
         """
         Real feature (2026-08-10): the_waking_ember's real, hand-set
@@ -13880,7 +13929,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         branch is the one actually taken, not the two ambient-flavor
         branches this same function can also pick.
         """
-        from unittest.mock import patch
+        from unittest.mock import patch, Mock
         import sessions
         bot.setup_default_npcs()
         sessions.end_session(-990)
@@ -13910,7 +13959,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
              patch("bot._npcs_at_location", return_value=[hostile_npc_id]), \
              patch("bot._effective_disposition", return_value="hostile"), \
              patch("bot.generate_ambient_line", return_value="You won't escape!"), \
-             patch("bot.narrate_action", return_value="Kess lunges in."):
+             patch("bot.narrate_action", return_value="Kess lunges in."), \
+             patch("bot.narrate_boss_decision", new=Mock(return_value="Kess sizes you up.")):
             await bot._maybe_trigger_npc_encounter(update, character, location)
 
         formation_markers = [line for line in sink if line.startswith("<photo:") and "formation" in line.lower()]

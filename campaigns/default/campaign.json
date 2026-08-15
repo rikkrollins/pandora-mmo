@@ -2504,13 +2504,16 @@
       "personality": "a cold, calculating highwaywoman who sizes up travelers as marks before they've even noticed her \u2014 cruel by choice, not desperation",
       "alignment": "Chaotic Evil",
       "disposition": "hostile",
+      "is_boss": true,
       "stats": {
         "dexterity": 16,
         "strength": 13,
         "armor_class": 14,
         "hp_max": 18,
         "proficiency_bonus": 2,
-        "xp_reward": 150
+        "xp_reward": 150,
+        "damage_dice": "1d6",
+        "damage_bonus": 3
       }
     },
     "ossian_vane": {

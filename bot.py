@@ -7060,24 +7060,57 @@ async def _check_echo_trial_progress(update: Update, session: sessions.Session) 
         )
 
 
-def _npc_combatant_from_stats(npc_id: str, npc_data: dict) -> dict:
+def _npc_combatant_from_stats(npc_id: str, npc_data: dict, party_levels: list[int] | None = None) -> dict:
     """
     Builds a combat participant dict for a named, alignment-driven NPC —
     identical shape to _do_start_combat's monster-derived enemies, plus
     source_npc_id so a win can be attributed back to this specific NPC
     (see _award_victory_xp, which marks them into _DEFEATED_NPCS).
+
+    Real live report (2026-08-14, per Coffee, dev-bridge screenshot: "I
+    thought you fixed the AI's levels that were enemies?!... This player
+    was incredibly under level... I want these players being much
+    stronger so they're an actual challenge"): a hostile ambient NPC
+    (Kess, 18 hp/150 xp_reward) never went through ANY of _do_start_
+    combat's real party-level scaling at all -- this whole code path is
+    completely separate from monster encounters, so v1.27.226's real
+    fix for undertuned monsters never touched it. `party_levels` (the
+    real, location-scoped party _maybe_trigger_npc_encounter already
+    has in scope) applies the exact same overtuned/undertuned_monster_
+    stat_multiplier scaling monsters now get -- same real functions,
+    same is_boss-aware ceilings, same sqrt-dampened damage, nothing
+    reinvented. Optional/defaults to no scaling so any other caller of
+    this function is unaffected.
     """
     stats = npc_data["stats"]
     enemy_id = -3_000_000 - (abs(hash(npc_id)) % 100_000)
-    return {
+    is_boss = npc_data.get("is_boss", False)
+    xp_reward = stats.get("xp_reward", 0)
+    stat_mult = 1.0
+    damage_mult = 1.0
+    if party_levels:
+        if not is_boss:
+            stat_mult = overtuned_monster_stat_multiplier(party_levels, xp_reward)
+        damage_mult = stat_mult
+        if stat_mult == 1.0:
+            grow_mult = undertuned_monster_stat_multiplier(party_levels, xp_reward, is_boss=is_boss)
+            if grow_mult > 1.0:
+                stat_mult = grow_mult
+                damage_mult = grow_mult ** UNDERTUNED_DAMAGE_SCALE_EXPONENT
+    scaled_hp = max(1, round(stats["hp_max"] * stat_mult))
+    combatant = {
         "telegram_user_id": enemy_id, "name": npc_data["name"],
         "dexterity": stats["dexterity"], "strength": stats["strength"],
-        "armor_class": stats["armor_class"], "hp_current": stats["hp_max"],
-        "hp_max": stats["hp_max"], "proficiency_bonus": stats["proficiency_bonus"],
-        "is_ai": 1, "xp_reward": stats.get("xp_reward", 0),
+        "armor_class": stats["armor_class"], "hp_current": scaled_hp,
+        "hp_max": scaled_hp, "proficiency_bonus": stats["proficiency_bonus"],
+        "is_ai": 1, "xp_reward": round(xp_reward * stat_mult),
         "source_npc_id": npc_id,
-        "is_boss": npc_data.get("is_boss", False),
+        "is_boss": is_boss,
     }
+    if stats.get("damage_dice"):
+        combatant["damage_dice"] = stats["damage_dice"]
+        combatant["damage_bonus"] = round(stats.get("damage_bonus", 0) * damage_mult)
+    return combatant
 
 
 FACTION_HOSTILE_ESCALATION_STANDING = -50  # a faction this soured on a player turns its own members hostile
@@ -7154,7 +7187,7 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
             taunt = await asyncio.to_thread(
                 generate_ambient_line, npc_id, character["name"], "arrives, about to be attacked", memory_facts
             )
-            enemy = _npc_combatant_from_stats(npc_id, npc_data)
+            enemy = _npc_combatant_from_stats(npc_id, npc_data, party_levels=[p.get("level", 1) for p in party])
             sides = {p["telegram_user_id"]: "party" for p in party}
             sides[enemy["telegram_user_id"]] = "enemy"
             session = sessions.start_session(chat_id, party + [enemy], sides=sides)

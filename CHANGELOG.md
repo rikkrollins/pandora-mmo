@@ -2,6 +2,44 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.227] — Fix: hostile NPC ambushes (Kess) never got v1.27.226's difficulty scaling
+
+Real dev-topic report, found via a proactive dev-bridge sweep (not
+waited-for): "I thought you fixed the AI's levels that were enemies?!
+... This player was incredibly under level... I want these players
+being much stronger so they're an actual challenge" — a screenshot of
+Kess, a hostile bandit-captain NPC, ambushing a real level-20, 5-person
+party alone.
+
+Root cause: `_maybe_trigger_npc_encounter`'s ambush branch
+(`_npc_combatant_from_stats`) is a COMPLETELY separate code path from
+`_do_start_combat`'s monster encounters — v1.27.226's real fix
+(`overtuned_monster_stat_multiplier`/`undertuned_monster_stat_
+multiplier`) never touched it at all. Kess (18 hp/150 xp_reward,
+campaigns/default/campaign.json) also had no `damage_dice`/
+`damage_bonus` fields whatsoever, meaning any attack she landed fell
+all the way back to `DEFAULT_WEAPON` (a generic 1d8 fist) regardless of
+her own stats.
+
+Fixed by wiring `_npc_combatant_from_stats` through the exact same
+scaling functions monsters already use (`party_levels` optional,
+defaults to no scaling for any other caller), and giving Kess real
+`damage_dice`/`damage_bonus` fields so there's something real to scale.
+Also marked her `is_boss: true` — a solo named rival facing an entire
+party alone is exactly this game's existing "hand-placed, intentional
+difficulty spike" convention (matches every other campaign boss), so
+she now gets the boss-tier 15x growth ceiling and, like every other
+boss, is never shrunk for an underleveled party either.
+
+Found and fixed 2 real test-suite flakiness bugs while adding a
+permanent regression test for this: now that Kess is `is_boss=true`, a
+genuinely random (unmocked) initiative roll can put her first, which
+reaches `_resolve_ai_turns`' own real `narrate_boss_decision`/
+`narrate_action` Ollama calls — an existing ambush test
+(`test_battle_formation_image_sent_when_hostile_npc_ambush_starts`)
+started intermittently hanging for this exact reason and needed the
+same real-call patches added.
+
 ## [1.27.226] — Add: real difficulty scaling for content a party has genuinely outleveled
 
 Real ask (2026-08-15, Greymoor Downs screenshot): "All of these areas
