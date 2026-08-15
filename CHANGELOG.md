@@ -2,6 +2,44 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.231] — Add: real hand-authored level curve for arcs 1-5 + side content
+
+Real ask (2026-08-15, following the difficulty conversation): Coffee
+reviewed the new Encounter Ledger artifact (every enemy/boss, real
+story order, editable HP/XP/damage/level) and submitted deliberate,
+reviewed numbers for 26 monsters — arcs 1 through 5, plus all 13 side
+content Remnant/wandering monsters — via three screenshots of his
+edits. "Let's try this first before I move any further and if the
+balance works, I will continue chapter 6 through 14."
+
+Applied exactly as submitted: `hp_max`/`xp_reward`/`damage_bonus`
+updated, and a new real `"level"` field added to each of the 26
+monster templates in `campaigns/default/campaign.json` — the first
+real, explicit level curve this campaign has ever had (previous
+tuning was always implicit, inferred only from `xp_reward`).
+
+Critical follow-up fix in `bot._do_start_combat`: any monster template
+carrying a real `"level"` field now skips the ENTIRE existing dynamic
+scaling system (both `overtuned_monster_stat_multiplier`'s shrink and
+`undertuned_monster_stat_multiplier`'s grow, shipped v1.27.226/227)
+outright — multiplying an already-deliberate, reviewed number would
+corrupt it. Monsters that haven't been through this pass yet (arcs
+6-14, no `"level"` field) keep the exact old dynamic behavior as a
+stopgap. Confirmed live: goblin_boss (now level 10, 200 hp) reaches a
+real combat session completely unmodified even against a level-90
+party, where the old system would have multiplied it further.
+
+One existing regression test (`test_start_combat_grows_an_undertuned_
+boss_for_an_overleveled_party`) needed retargeting from `the_unspoken`
+(now hand-authored, no longer a valid case for the dynamic-growth
+mechanism it tests) to `the_verge_warden` (not yet edited) — same real
+mechanism, still-valid test subject.
+
+The Encounter Ledger artifact was updated to match: 26 rows now show a
+"Locked in" badge and hold their real submitted level regardless of
+the party-size preview slider, which still only affects the remaining
+unedited rows.
+
 ## [1.27.230] — Fix: combat narration still naming the wrong target
 
 Real dev-topic report (2026-08-15, recurrence of the same bug pattern

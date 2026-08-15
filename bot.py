@@ -6434,31 +6434,47 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
         # one-directional (never buffs an easy monster up), floored
         # design.
         stat_mult = 1.0
-        if not template.get("is_boss", False):
-            stat_mult = overtuned_monster_stat_multiplier(
-                [p.get("level", 1) for p in party], template.get("xp_reward", 0)
-            )
-        # Real live report (2026-08-15, per Coffee: "these areas shud be
-        # lv20+... the game is too easy"): the grow-direction sibling of
-        # the shrink just above -- only ever fires when stat_mult is
-        # still exactly 1.0 (either the shrink didn't apply because this
-        # monster wasn't overtuned, or this IS a boss, which the shrink
-        # always exempts) -- see undertuned_monster_stat_multiplier's own
-        # docstring for why bosses now get REAL growth even though they
-        # never get shrunk. damage_mult intentionally tracked separately
-        # (see UNDERTUNED_DAMAGE_SCALE_EXPONENT's own docstring) -- HP/
-        # xp_reward scale by the full stat_mult, but damage_bonus scales
-        # by its square root, since matching HP's full ratio badly
-        # overshot Coffee's own explicit damage ceiling.
-        damage_mult = stat_mult
-        if stat_mult == 1.0:
-            grow_mult = undertuned_monster_stat_multiplier(
-                [p.get("level", 1) for p in party], template.get("xp_reward", 0),
-                is_boss=template.get("is_boss", False),
-            )
-            if grow_mult > 1.0:
-                stat_mult = grow_mult
-                damage_mult = grow_mult ** UNDERTUNED_DAMAGE_SCALE_EXPONENT
+        damage_mult = 1.0
+        # Real hand-authored level curve (2026-08-15, per Coffee: went
+        # through the Encounter Ledger and submitted real level/HP/XP/
+        # damage numbers for arcs 1-5 + side content, "let's try this
+        # first before I move any further"). A monster with a real
+        # "level" field on its template now has DELIBERATELY chosen
+        # final numbers -- the whole point of that exercise was to
+        # replace the old xp_reward-budget-relative guesswork with a
+        # real, reviewed curve, so none of the dynamic scaling below
+        # may touch it; multiplying an already-deliberate number would
+        # just corrupt it. Monsters that haven't been through this pass
+        # yet (no "level" field) keep the exact old dynamic behavior
+        # unchanged below, as a stopgap until they get one too.
+        if template.get("level") is None:
+            if not template.get("is_boss", False):
+                stat_mult = overtuned_monster_stat_multiplier(
+                    [p.get("level", 1) for p in party], template.get("xp_reward", 0)
+                )
+            # Real live report (2026-08-15, per Coffee: "these areas
+            # shud be lv20+... the game is too easy"): the grow-
+            # direction sibling of the shrink just above -- only ever
+            # fires when stat_mult is still exactly 1.0 (either the
+            # shrink didn't apply because this monster wasn't
+            # overtuned, or this IS a boss, which the shrink always
+            # exempts) -- see undertuned_monster_stat_multiplier's own
+            # docstring for why bosses now get REAL growth even though
+            # they never get shrunk. damage_mult intentionally tracked
+            # separately (see UNDERTUNED_DAMAGE_SCALE_EXPONENT's own
+            # docstring) -- HP/xp_reward scale by the full stat_mult,
+            # but damage_bonus scales by its square root, since
+            # matching HP's full ratio badly overshot Coffee's own
+            # explicit damage ceiling.
+            damage_mult = stat_mult
+            if stat_mult == 1.0:
+                grow_mult = undertuned_monster_stat_multiplier(
+                    [p.get("level", 1) for p in party], template.get("xp_reward", 0),
+                    is_boss=template.get("is_boss", False),
+                )
+                if grow_mult > 1.0:
+                    stat_mult = grow_mult
+                    damage_mult = grow_mult ** UNDERTUNED_DAMAGE_SCALE_EXPONENT
 
         # "The World Evolves" (2026-08-14, per Coffee): unlike stat_mult
         # just above, this DOES apply to bosses too -- strengthening the

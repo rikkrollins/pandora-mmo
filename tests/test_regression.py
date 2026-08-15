@@ -9230,8 +9230,20 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         test_start_combat_never_shrinks_a_hand_placed_boss), growth
         intentionally DOES apply to bosses: a boss the party has badly
         outleveled is exactly Coffee's own reported case ("the_unspoken"
-        was his own real example). Real target: 200 hp -> exactly 3000
-        hp at a real level-20 party, Coffee's own explicit number.
+        was his own real example -- now retargeted to the_verge_warden,
+        see below).
+
+        2026-08-15: the_unspoken itself is no longer a valid target for
+        THIS test -- Coffee has since gone through the Encounter Ledger
+        and given it (and 25 other monsters) a real, hand-authored
+        "level" field with deliberately chosen final stats, which
+        bot._do_start_combat now deliberately skips ALL dynamic scaling
+        for (see the real comment right above `stat_mult = 1.0` there --
+        multiplying an already-deliberate number would corrupt it).
+        the_verge_warden hasn't been through that pass yet (no "level"
+        field), so it's the real, live boss this dynamic-growth
+        mechanism now applies to -- exact expected value computed from
+        the real function this test is exercising, not hand-picked.
         """
         import sessions
         from unittest.mock import patch, AsyncMock
@@ -9247,14 +9259,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot._resolve_ai_turns", new=AsyncMock()), \
              patch("bot._maybe_send_monster_image", new=AsyncMock()), \
              patch("bot.narrate_boss_intro", new=Mock(return_value="A shadow falls.")):
-            await bot._do_start_combat(FakeUpdate(user_id, "fight the unspoken", sink),
-                                        monster_key="the_unspoken", count=1)
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the verge warden", sink),
+                                        monster_key="the_verge_warden", count=1)
         session = sessions.get_session_for_user(-999, user_id)
         enemy = next(p for p in session.participants if p["telegram_user_id"] != user_id)
         import campaign_loader as cl
-        template = cl.get_monster_template(bot.CAMPAIGN, "the_unspoken")
+        from rules.leveling import undertuned_monster_stat_multiplier, UNDERTUNED_DAMAGE_SCALE_EXPONENT
+        template = cl.get_monster_template(bot.CAMPAIGN, "the_verge_warden")
         self.assertTrue(template.get("is_boss"))
-        self.assertEqual(enemy["hp_max"], 3000)
+        self.assertIsNone(template.get("level"), "this test needs a boss that hasn't been hand-authored yet")
+        expected_mult = undertuned_monster_stat_multiplier([20], template["xp_reward"], is_boss=True)
+        self.assertEqual(enemy["hp_max"], round(template["hp_max"] * expected_mult))
         self.assertEqual(enemy["hp_current"], enemy["hp_max"])
         self.assertGreater(enemy["damage_bonus"], template.get("damage_bonus", 0))
         sessions.end_session(-999)
