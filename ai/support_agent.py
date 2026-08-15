@@ -311,6 +311,28 @@ def _crafting_catalog_text() -> str:
             f"- {result['name'] if result else recipe_id}: needs {material_names} "
             f"({recipe['ability']} check, DC {recipe['dc']})"
         )
+    # Real live bug (2026-08-14, dev-topic screenshot): "What item can I
+    # craft that gives me the most experience for forging?" got back
+    # "Gold. It's the resource you craft from, yielding maximum XP
+    # gain." -- pure hallucination (gold isn't craftable, and that
+    # sentence doesn't even answer the question asked). The real fact
+    # (db.record_skill_use: a flat +1 to this profession's use count per
+    # successful craft, completely independent of WHICH recipe was
+    # used) was never in this catalog for the model to ground on at
+    # all, so it invented an answer instead of correctly saying there's
+    # no such thing.
+    lines.append(
+        "\nREAL CRAFTING PROGRESS/XP MECHANIC: there is NO per-item or "
+        "per-recipe difference in experience/practice gained -- every "
+        "successful craft within a profession (blacksmithing, alchemy, "
+        "etc.) grants the exact same flat +1 to that profession's use "
+        "count, regardless of which recipe was crafted. If asked which "
+        "item gives the most crafting XP, the honest, correct answer is "
+        "that no such item exists -- practice progress only comes from "
+        "how MANY times you successfully craft, never from WHAT you "
+        "craft. Never invent an item or resource that supposedly gives "
+        "more."
+    )
     lines.append(
         "\nREAL GATHERING SKILLS IN THIS GAME: herbalism, mining, lumberjacking, "
         "fishing -- each is tied to real resource nodes at specific locations, "
@@ -1235,14 +1257,27 @@ def answer_support_question(
                         # answering every time. The actual failure was
                         # silent: strip_think_tags() left an EMPTY
                         # string on every attempt, because 600 tokens
-                        # (half of ai/dm_agent.py's proven 1200) wasn't
-                        # enough for this thinking model to finish
+                        # (half of ai/dm_agent.py's THEN-proven 1200)
+                        # wasn't enough for this thinking model to finish
                         # reasoning before ever emitting a real answer --
                         # see _UNCLOSED_THINK_RE's own docstring: a
                         # generation cut off mid-<think> strips to
                         # nothing. Matched to dm_agent's real working
-                        # budget instead of a narrower guess.
-                        "options": {"num_predict": 1200},
+                        # budget at the time instead of a narrower guess.
+                        #
+                        # Real live bug #2 (2026-08-15, live-reproduced
+                        # while adding a new crafting-XP grounding fact):
+                        # a longer catalog prompt hit the EXACT same
+                        # "spent its whole budget on <think>, never
+                        # emitted an answer" failure -- 5/5 real attempts,
+                        # not a fluke. dm_agent.py's own num_predict was
+                        # separately bumped 1200 -> 2400 later (v1.27.167,
+                        # narration cut off mid-word) -- this file's
+                        # comment above claimed to match dm_agent's real
+                        # budget but was never updated when that budget
+                        # changed, so the two silently drifted apart.
+                        # Matched again, for real this time.
+                        "options": {"num_predict": 2400},
                     },
                     timeout=200,
                 )

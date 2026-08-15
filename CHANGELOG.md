@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.229] — Fix: Support hallucinating crafting-XP answers + a stale Ollama token budget
+
+Real dev-topic report (2026-08-14, found via the same proactive
+dev-bridge sweep as the last several fixes): "What item can I craft
+that gives me the most experience for forging?" got back "Gold. It's
+the resource you craft from, yielding maximum XP gain." — pure
+hallucination (gold isn't craftable, and that sentence doesn't even
+answer the question). The real fact was simply never in Support's
+prompt: `db.record_skill_use` grants a flat +1 to a profession's use
+count per successful craft, completely independent of which recipe was
+used — there is no such thing as an item that gives "more" crafting
+XP. Added that fact directly to `ai/support_agent.py`'s
+`_crafting_catalog_text()` grounding block.
+
+**Found a second, more consequential bug while live-testing the fix:**
+the new (longer) grounding prompt reliably made the model spend its
+*entire* `num_predict` budget reasoning in `<think>` tags and never
+emit a real answer — confirmed via 5 straight real Ollama calls, all
+empty. Traced to `answer_support_question`'s own `num_predict: 1200`,
+whose comment claimed it was "matched to dm_agent's real working
+budget" — true when it was written (2026-08-10), but `ai/dm_agent.py`'s
+own budget was separately bumped 1200 → 2400 later (v1.27.167,
+narration cut off mid-word) without this file ever being updated to
+match, so the two silently drifted apart for months. Bumped to 2400 to
+actually match dm_agent's current, real, proven budget. Confirmed live:
+the exact same question that failed 5/5 times at 1200 succeeded on a
+real Ollama call at 2400, with a correct, grounded answer ("every valid
+craft yields consistent +1 per use count, no single item inherently
+surpasses others in XP accumulation").
+
 ## [1.27.228] — Fix: plain crafted weapons/armor never got action buttons
 
 Real dev-topic report (2026-08-14, found via the same proactive
