@@ -2,6 +2,48 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.238] — Level Gap Advantage: under-leveled back-row members can no longer hide indefinitely
+
+Real live report (2026-08-16, Coffee, mid-fight against Shadow Wisps
+freshly running on v1.27.236's real damage_bonus): "her and ravenloft
+are low level compared to the shadow wisp.. are you seeing this?"
+then, once confirmed, "the enemy shud have an advantage over ravenloft
+and charvanna." Live data confirmed it: Charvenna (16) and Ravenloft
+(13), both meaningfully under-leveled against a level-15 Shadow Wisp,
+sat at exactly 100% HP many rounds into a real fight — completely
+protected by back row's flat `FRONT_ROW_TARGET_CHANCE` 80/20 split
+(config.py), which had never accounted for a level gap, only row
+choice.
+
+Root gap: a monster's real, hand-authored `level` (campaign.json) was
+never copied onto its live combat participant dict — only ever used
+for display/scaling, so neither targeting nor attack-roll code had a
+real attacker level to check.
+
+New "Level Gap Advantage" mechanic (symmetric — whichever side's real
+level is far enough ahead gets the edge, though it only ever engages
+when BOTH sides carry a real level, so it's inert for the many
+dynamically-scaled monsters with no authored level):
+- `_do_start_combat` now copies `level` onto every monster participant.
+- `_pick_formation_weighted_target`: when an attacker's level is
+  `LEVEL_GAP_ADVANTAGE_THRESHOLD` (3) or more above a back-row
+  candidate's own level, that candidate's presence erodes the front-row
+  draw chance (`LEVEL_GAP_BACK_ROW_PROTECTION_EROSION_PCT`, 50%) and
+  multiplies their own weight within whichever pool is drawn
+  (`LEVEL_GAP_TARGET_WEIGHT_MULTIPLIER`, 3x) — real, felt odds, not
+  immunity removed outright.
+- `_attack_advantage_disadvantage`: the same level gap now also grants
+  real 5E advantage (roll twice, keep higher) on the attack roll once
+  that target IS attacked — same mechanic every other advantage source
+  in this function already uses (prone, blinded, Favored Enemy, etc.).
+
+Also investigated a separate report ("why isn't it showing the
+formations") — confirmed the formation-image renderer and the
+join-battle refresh both work correctly against real live fight data;
+the per-round refresh still needs a live-monitored confirmation before
+concluding whether it's a real bug or just easy to miss in a busy
+thread.
+
 ## [1.27.237] — Fixed AI narration leaking bare placeholder text ("(stub)") to players
 
 Real dev-bridge report (2026-08-15, Coffee circled a screenshot):

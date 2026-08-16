@@ -5717,6 +5717,7 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
                 break
             target = _pick_formation_weighted_target(
                 opposing, attacker_is_boss=current.get("is_boss", False), party_rebirth_count=party_rebirth_count,
+                attacker_level=current.get("level"),
             )
             if _extra_attack_countered(target, attack_num):
                 await _safe_send(
@@ -6174,6 +6175,7 @@ def _has_known_damage_spell(character: dict) -> bool:
 
 def _pick_formation_weighted_target(
     opposing: list[dict], attacker_is_boss: bool = False, party_rebirth_count: float = 0,
+    attacker_level: int | None = None,
 ) -> dict:
     """
     Formation-aware target selection (2026-08-01, per Coffee: "front
@@ -6222,10 +6224,33 @@ def _pick_formation_weighted_target(
     formation_target_discipline/formation_target_weight_floor) -- 0 (the
     default, and every non-rebirthed party) reproduces the exact
     original fixed behavior unchanged.
+
+    `attacker_level` (Level Gap Advantage, 2026-08-16, per Coffee, live
+    report: two meaningfully under-leveled party members sat completely
+    untouched at 100% HP many rounds into a real fight, fully shielded
+    by back row's flat 80/20 split regardless of the level gap). When
+    the attacker's real level is at least config.LEVEL_GAP_ADVANTAGE_
+    THRESHOLD above a back-row candidate's own level, that candidate's
+    presence erodes the front-row draw chance (never removes it
+    outright -- row choice still matters) AND multiplies their own
+    weight within whichever pool gets drawn, same mechanism as the
+    existing BOSS_SPELLCASTER_TARGET_WEIGHT_MULTIPLIER just above. None
+    for any attacker/candidate missing a real level (most monsters,
+    dynamically scaled instead of hand-authored) -- always a no-op then,
+    identical to this function's pre-2026-08-16 behavior.
     """
+    def _under_leveled(candidate: dict) -> bool:
+        candidate_level = candidate.get("level")
+        return (
+            attacker_level is not None and candidate_level is not None
+            and attacker_level - candidate_level >= config.LEVEL_GAP_ADVANTAGE_THRESHOLD
+        )
+
     front_row_target_chance = formation_target_discipline(party_rebirth_count, config.FRONT_ROW_TARGET_CHANCE)
     front = [p for p in opposing if p.get("formation_row", "front") != "back"]
     back = [p for p in opposing if p.get("formation_row") == "back"]
+    if back and any(_under_leveled(p) for p in back):
+        front_row_target_chance *= 1 - config.LEVEL_GAP_BACK_ROW_PROTECTION_EROSION_PCT / 100
     if front and back and random.random() >= front_row_target_chance:
         pool = back
     elif front:
@@ -6258,6 +6283,8 @@ def _pick_formation_weighted_target(
         weight = (1.0 - hp_pct) + weight_floor
         if attacker_is_boss and _has_known_damage_spell(p):
             weight *= BOSS_SPELLCASTER_TARGET_WEIGHT_MULTIPLIER
+        if _under_leveled(p):
+            weight *= config.LEVEL_GAP_TARGET_WEIGHT_MULTIPLIER
         weights.append(weight)
     return random.choices(pool, weights=weights, k=1)[0]
 
@@ -6712,6 +6739,23 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 # attack branch, then apply_damage_type_modifier against
                 # the DEFENDER's own resistances/vulnerabilities/immunities.
                 "damage_type": slot_template.get("damage_type", "physical"),
+                # Level Gap Advantage (2026-08-16, per Coffee, live
+                # dev-bridge: "the enemy shud have an advantage over
+                # ravenloft and charvanna" -- a real report during a
+                # Shadow Wisp fight where both were meaningfully under-
+                # leveled but sitting safely in back row, at 100% HP many
+                # rounds in, because FRONT_ROW_TARGET_CHANCE's 80/20
+                # split protects back row regardless of level gap). The
+                # monster's own hand-authored "level" (campaign.json) was
+                # never copied onto the live participant dict before --
+                # only used for display/scaling elsewhere -- so it wasn't
+                # available at targeting/attack-roll time. Copied here so
+                # _pick_formation_weighted_target and resolve_attack can
+                # both read a real attacker level for this new mechanic.
+                # None for any monster with no authored level (dynamic-
+                # scaling monsters) -- the mechanic below no-ops safely
+                # whenever either side's level is unknown.
+                "level": slot_template.get("level"),
             })
         sides = {p["telegram_user_id"]: "party" for p in party}
         for enemy in enemies:
@@ -9284,11 +9328,26 @@ def _attack_advantage_disadvantage(attacker: dict, defender: dict) -> tuple[bool
     # (see monster_night_aggression just above).
     protection_disadvantage = "protected" in defender_conditions and not attacker.get("char_class")
     disadvantage = disadvantage or protection_disadvantage
+    # Level Gap Advantage (2026-08-16, per Coffee): a real, symmetric
+    # level-gap check -- whichever side's own "level" is far enough
+    # ahead gets advantage over the other, same real 5E advantage
+    # mechanic every other case above already grants. Both sides must
+    # carry a real level (most monsters have none, since they're
+    # dynamically scaled instead of hand-authored) for this to ever
+    # fire, so it only ever engages for hand-authored monsters like
+    # Shadow Wisp against a real player/companion character.
+    attacker_level = attacker.get("level")
+    defender_level = defender.get("level")
+    level_gap_advantage = (
+        attacker_level is not None and defender_level is not None
+        and attacker_level - defender_level >= config.LEVEL_GAP_ADVANTAGE_THRESHOLD
+    )
     advantage = (
         "prone" in defender_conditions or "blinded" in defender_conditions
         or "paralyzed" in defender_conditions or favored_enemy or reckless
         or monster_night_aggression or hybrid_favored or hybrid_reckless
         or "invisible" in attacker_conditions or "faerie_fire" in defender_conditions
+        or level_gap_advantage
     )
     return advantage, disadvantage
 

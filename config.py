@@ -138,6 +138,33 @@ FRONT_ROW_TARGET_CHANCE = float(os.getenv("FRONT_ROW_TARGET_CHANCE", "0.8"))
 # mechanic.
 BACK_ROW_AC_BONUS = int(os.getenv("BACK_ROW_AC_BONUS", "2"))
 
+# Level Gap Advantage (2026-08-16, per Coffee, live dev report during a
+# real Shadow Wisp fight: "the enemy shud have an advantage over
+# ravenloft and charvanna" -- both meaningfully under-leveled for the
+# fight but sitting untouched at 100% HP many rounds in, protected by
+# back row's flat 80/20 split regardless of level gap). A level gap
+# this large or bigger between attacker and target both (a) erodes the
+# target's row protection at pick time and (b) grants the attacker a
+# real 5E advantage roll (roll twice, keep higher) once that target is
+# actually attacked -- see bot._pick_formation_weighted_target and
+# rules.combat.resolve_attack's own advantage parameter. Symmetric by
+# construction (whichever side's "level" is higher gets the edge over
+# the other), though a monster with no authored `level` (most of the
+# roster, dynamically scaled instead) never triggers this at all.
+LEVEL_GAP_ADVANTAGE_THRESHOLD = int(os.getenv("LEVEL_GAP_ADVANTAGE_THRESHOLD", "3"))
+# Multiplies an under-leveled candidate's weight within whichever row
+# pool was already drawn -- same mechanism/precedent as bot.py's own
+# BOSS_SPELLCASTER_TARGET_WEIGHT_MULTIPLIER.
+LEVEL_GAP_TARGET_WEIGHT_MULTIPLIER = float(os.getenv("LEVEL_GAP_TARGET_WEIGHT_MULTIPLIER", "3.0"))
+# How much an under-leveled back-row member's presence reduces the
+# front-row draw chance (a fraction of FRONT_ROW_TARGET_CHANCE itself,
+# not a flat subtraction, so it scales correctly if that base chance is
+# ever tuned) -- e.g. 0.5 against the default 0.8 front-row chance
+# means an eligible back-row target roughly doubles their draw odds
+# (from 20% to ~40%), a real, felt change without erasing row choice
+# entirely (never reaches "removes protection outright").
+LEVEL_GAP_BACK_ROW_PROTECTION_EROSION_PCT = float(os.getenv("LEVEL_GAP_BACK_ROW_PROTECTION_EROSION_PCT", "50"))
+
 # Formation attack/defense percentages (2026-08-14, per Coffee: "front
 # row used for aggressors, front row can have a boost to attack %, and
 # back row can have a boost to def %"). Front row's own real damage

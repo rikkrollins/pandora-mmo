@@ -7523,6 +7523,51 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(front_share, bot.config.FRONT_ROW_TARGET_CHANCE, delta=0.1)
         self.assertGreater(picks.count("Mage"), 0)  # still targetable, never immune
 
+    def test_level_gap_erodes_back_row_protection_for_an_under_leveled_target(self):
+        """
+        Real live report (2026-08-16, Coffee, mid-fight: "her and
+        ravenloft are low level compared to the shadow wisp.. are you
+        seeing this?" then "the enemy shud have an advantage over
+        ravenloft and charvanna"). Two meaningfully under-leveled party
+        members sat at 100% HP many rounds into a real fight, fully
+        protected by back row's flat FRONT_ROW_TARGET_CHANCE split
+        regardless of level gap. Confirms an attacker far above a
+        back-row target's own level (>= LEVEL_GAP_ADVANTAGE_THRESHOLD)
+        gets picked noticeably more than the flat ~20% baseline that
+        row would otherwise get.
+        """
+        import random
+        random.seed(3)
+        front_alive = {"telegram_user_id": 1, "name": "Grask", "hp_current": 500, "hp_max": 500, "formation_row": "front", "level": 18}
+        back_under_leveled = {"telegram_user_id": 2, "name": "Ravenloft", "hp_current": 300, "hp_max": 300, "formation_row": "back", "level": 13}
+        pool = [front_alive, back_under_leveled]
+        picks_without_gap = [
+            bot._pick_formation_weighted_target(pool, attacker_level=None)["name"] for _ in range(1000)
+        ]
+        picks_with_gap = [
+            bot._pick_formation_weighted_target(pool, attacker_level=18)["name"] for _ in range(1000)
+        ]
+        baseline_share = picks_without_gap.count("Ravenloft") / len(picks_without_gap)
+        gapped_share = picks_with_gap.count("Ravenloft") / len(picks_with_gap)
+        self.assertGreater(
+            gapped_share, baseline_share * 1.5,
+            f"level gap should meaningfully raise the under-leveled back-row member's odds "
+            f"(baseline {baseline_share:.2f}, with gap {gapped_share:.2f})",
+        )
+
+    def test_level_gap_no_effect_when_levels_missing_or_gap_too_small(self):
+        """Companion to the erosion test above: most monsters carry no real level (dynamically scaled), and a small gap below the threshold must not trigger anything -- both must reproduce the exact pre-2026-08-16 flat-odds behavior."""
+        import random
+        front_alive = {"telegram_user_id": 1, "name": "Grask", "hp_current": 500, "hp_max": 500, "formation_row": "front", "level": 18}
+        back_alive = {"telegram_user_id": 2, "name": "Ravenloft", "hp_current": 300, "hp_max": 300, "formation_row": "back", "level": 16}
+        pool = [front_alive, back_alive]
+        random.seed(5)
+        picks_no_level = [bot._pick_formation_weighted_target(pool, attacker_level=None)["name"] for _ in range(600)]
+        random.seed(5)
+        picks_small_gap = [bot._pick_formation_weighted_target(pool, attacker_level=18)["name"] for _ in range(600)]
+        # Gap here is 18 - 16 = 2, below the real LEVEL_GAP_ADVANTAGE_THRESHOLD (3) -- identical sequence expected.
+        self.assertEqual(picks_no_level, picks_small_gap)
+
     def test_formation_targeting_falls_back_to_back_row_when_front_wiped(self):
         back_alive = {"telegram_user_id": 2, "name": "Mage", "hp_current": 50, "formation_row": "back"}
         target = bot._pick_formation_weighted_target([back_alive])
@@ -9426,6 +9471,32 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         enemy = next(p for p in session.participants if p["telegram_user_id"] != user_id)
         self.assertEqual(enemy.get("elemental_resistance_pct", {}).get("fire"), 150)
         self.assertIn("cold", enemy.get("vulnerabilities", []))
+        sessions.end_session(-999)
+
+    async def test_start_combat_copies_the_monsters_authored_level_onto_the_live_participant(self):
+        """
+        Level Gap Advantage (2026-08-16): the monster's real, hand-
+        authored "level" (campaign.json) previously stopped at display/
+        scaling code -- never reached the live combat participant dict,
+        so _pick_formation_weighted_target/_attack_advantage_disadvantage
+        had no real attacker level to check. Confirms a fresh Shadow
+        Wisp fight's live participant actually carries level=15, its
+        real authored value.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock, Mock
+        sessions.end_session(-999)
+        user_id = 900703
+        make_basic_character(user_id, "WispLevelChecker", char_class="Fighter", current_location="the_hush_below")
+        sink = []
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()), \
+             patch("bot.narrate_boss_intro", new=Mock(return_value="A shadow flickers.")):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the shadow wisp", sink),
+                                        monster_key="shadow_wisp", count=1)
+        session = sessions.get_session_for_user(-999, user_id)
+        enemy = next(p for p in session.participants if p["telegram_user_id"] != user_id)
+        self.assertEqual(enemy.get("level"), 15)
         sessions.end_session(-999)
 
     async def test_skill_check_handler_applies_proficiency_for_the_right_class(self):
@@ -12196,6 +12267,37 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         plain_defender = {"conditions": []}
         adv3, disadv3 = bot._attack_advantage_disadvantage(invis_attacker, plain_defender)
         self.assertTrue(adv3)
+
+    def test_level_gap_advantage_fires_only_when_both_levels_are_real_and_the_gap_is_big_enough(self):
+        """
+        Real live report (2026-08-16, Coffee: "the enemy shud have an
+        advantage over ravenloft and charvanna"). A hand-authored
+        monster far above a defender's own level (>= LEVEL_GAP_
+        ADVANTAGE_THRESHOLD) gets real 5E advantage on the attack roll,
+        same mechanic every other advantage source in this function
+        already uses. Must NOT fire when either side's level is
+        unknown (most monsters, dynamically scaled) or the gap is below
+        threshold -- both reproduce this function's exact pre-2026-08-16
+        behavior.
+        """
+        # char_class set on every attacker below so real-world
+        # monster_night_aggression (attacker has no char_class + it's
+        # currently night) can never interfere with this test's own
+        # level-gap-only assertions, independent of when it actually runs.
+        big_gap_attacker = {"conditions": [], "level": 18, "char_class": "Fighter"}
+        under_leveled_defender = {"conditions": [], "level": 13}
+        adv, disadv = bot._attack_advantage_disadvantage(big_gap_attacker, under_leveled_defender)
+        self.assertTrue(adv)
+        self.assertFalse(disadv)
+
+        small_gap_attacker = {"conditions": [], "level": 16, "char_class": "Fighter"}
+        close_level_defender = {"conditions": [], "level": 15}
+        adv2, _ = bot._attack_advantage_disadvantage(small_gap_attacker, close_level_defender)
+        self.assertFalse(adv2)
+
+        no_level_attacker = {"conditions": [], "char_class": "Fighter"}
+        adv3, _ = bot._attack_advantage_disadvantage(no_level_attacker, under_leveled_defender)
+        self.assertFalse(adv3)
 
     async def test_counterspell_is_reaction_only_and_spends_nothing(self):
         # Real live bug (2026-08, Coffee: "i wasted a turn because of
