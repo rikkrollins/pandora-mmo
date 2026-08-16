@@ -935,6 +935,35 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         giver = db.get_character(giver_id, -999)
         self.assertEqual(giver["inventory"].get("healing_potion", 0), 1)  # nothing transferred
 
+    async def test_give_item_to_a_real_present_npc_gets_an_honest_rejection_not_a_denial(self):
+        """
+        Real live bug (2026-08-16, Sugar/Charvenna, dev-bridge: "Ossian
+        vane is there with me. Why can't I give him the scroll?").
+        _do_give_item was always scoped to real party members only,
+        never NPCs -- but the old rejection message ("Name someone real
+        who's actually here with you") flatly implied the named NPC
+        wasn't real or wasn't present, when they demonstrably were both
+        (she'd just been mid-conversation with him). Confirms naming a
+        real NPC actually at this location now gets an honest "can't
+        carry items yet" message instead of a denial of their existence.
+        """
+        use_test_db("tests/tmp/give_item_npc_test.db")
+        giver_id = 900007
+        make_basic_character(giver_id, "GiverNPC", current_location="crossroads_tavern")
+        db.add_item(giver_id, -999, "healing_potion", 1)
+
+        sink = []
+        await bot._do_give_item(
+            FakeUpdate(giver_id, "give my healing potion to Grimsby", sink),
+            "give my healing potion to Grimsby",
+        )
+        combined = " ".join(sink)
+        self.assertIn("Grimsby", combined)
+        self.assertIn("can't carry items yet", combined)
+        self.assertNotIn("Name someone real", combined)
+        giver = db.get_character(giver_id, -999)
+        self.assertEqual(giver["inventory"].get("healing_potion", 0), 1)  # nothing transferred
+
     async def test_give_item_rejects_item_the_giver_doesnt_have(self):
         use_test_db("tests/tmp/give_item_test3.db")
         giver_id, recipient_id = 900005, 900006
@@ -6210,6 +6239,40 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(item_id, db.get_character(996030, -999)["inventory"])
         self.assertNotIn(item_id, db.get_character(996031, -999)["inventory"])
 
+    async def test_loot_gold_still_reaches_the_real_owner_when_the_fight_was_all_ai_companions(self):
+        """
+        Real live bug (2026-08-16, Sugar/Charvenna, dev-bridge: "The
+        keen dagger was left behind after Battle loot and the players
+        are supposed to get gold shares from it if no one wants the
+        looted item"). human_ids on the vote record is scoped to the
+        ENCOUNTER that dropped the item -- if the real human owner was
+        resting/inactive while only her AI companions fought (confirmed
+        live: "Wake up" -> "Charvenna wakes and rejoins" landed right
+        after this exact report), human_ids was empty and the item was
+        discarded with no gold going anywhere, even though she's still
+        the real party's owner. Confirms the gold now falls back to
+        every real (non-AI) member of the full party roster in this
+        chat instead of vanishing.
+        """
+        make_basic_character(996040, "RestingOwner", current_location="crossroads_tavern")
+        loot_item = bot.generate_item(item_type="weapon")
+        item_id = bot._persist_generated_item(loot_item)
+        item = items_module.get_item(item_id)
+        gold_before = db.get_character(996040, -999)["gold"]
+        vote_id = "loottestitem_allai"
+        bot._PENDING_LOOT_VOTES[vote_id] = {
+            "chat_id": -999, "item_id": item_id, "item_name": loot_item["name"],
+            "human_ids": [], "ai_wants": {-700950: False},
+            "votes": {}, "started_at": time.time() - bot.LOOT_VOTE_WINDOW_SECONDS - 1,
+        }
+
+        class _FakeBot:
+            async def send_message(self, *a, **k):
+                return None
+
+        await bot._check_pending_loot_votes(_FakeBot())
+        self.assertEqual(db.get_character(996040, -999)["gold"], gold_before + item["price"])
+
     async def test_loot_vote_can_be_changed_by_tapping_the_other_button(self):
         """
         Real live request (2026-08-14, Coffee: "when voting if we click
@@ -9508,6 +9571,43 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_skill_check(FakeUpdate(user_id, "I sneak past the guard", sink), "dexterity", "I sneak past the guard", forced_roll=10)
         combined = " ".join(sink)
         self.assertIn("16", combined)
+
+    def test_mentions_hidden_passage_catches_real_phrasing_without_false_positives(self):
+        for text in (
+            "Search for a door in the floor of the nook",
+            "look for a hidden door", "check for a secret passage",
+            "is there a trapdoor here", "search for a hidden entrance",
+        ):
+            self.assertTrue(bot._mentions_hidden_passage(text), text)
+        for text in ("I sneak past the guard", "gather some iron ore", "look around"):
+            self.assertFalse(bot._mentions_hidden_passage(text), text)
+
+    async def test_skill_check_grounds_a_hidden_door_search_in_the_real_absence_of_one(self):
+        """
+        Real live bug (2026-08-16, Sugar/Charvenna, dev-bridge: "This
+        successful roll implies there is a hidden door in the floor of
+        the nook. If there is a door why can't I open it?"). This game
+        has no hidden-door/secret-passage mechanic anywhere in its data
+        -- a wisdom check searching for one previously got NO grounded
+        fact at all, leaving the narrator free to write ambiguous prose
+        that reads as confirming a real discovery on a lucky roll.
+        Confirms narrate_skill_check is now handed an explicit real fact
+        stating no such door exists, the same grounding pattern already
+        used for a real monster mentioned in a search.
+        """
+        from unittest.mock import patch
+        user_id = 900502
+        make_basic_character(user_id, "DoorSearcher", char_class="Rogue", current_location="crossroads_tavern")
+        sink = []
+        with patch("bot.narrate_skill_check", return_value="Nothing of note turns up.") as mock_narrate:
+            await bot._do_skill_check(
+                FakeUpdate(user_id, "Search for a door in the floor of the nook", sink),
+                "wisdom", "Search for a door in the floor of the nook", forced_roll=19,
+            )
+        self.assertTrue(mock_narrate.called)
+        grounded_fact = mock_narrate.call_args.kwargs.get("grounded_fact")
+        self.assertIsNotNone(grounded_fact)
+        self.assertIn("no hidden door", grounded_fact.lower())
 
     # -- Rogue/Bard Expertise + Bard Jack of All Trades (2026-07-16) ----
     def test_rogue_expertise_doubles_proficiency_from_level_1(self):

@@ -4319,9 +4319,31 @@ async def _check_pending_loot_votes(bot) -> None:
         else:
             item = items_module.get_item(item_id)
             sale_price = item.get("price", 0) if item else 0
-            if human_party and sale_price > 0:
-                share = sale_price // len(human_party)
-                for pid in human_party:
+            # Real live bug (2026-08-16, Sugar/Charvenna, dev-bridge:
+            # "The keen dagger was left behind after Battle loot and the
+            # players are supposed to get gold shares from it if no one
+            # wants the looted item"). human_party above is scoped to
+            # THIS ENCOUNTER's own turn_order -- if the party that won
+            # this fight was entirely AI companions (their real human
+            # owner was resting/inactive when the fight happened, as
+            # confirmed live: "Wake up" -> "Charvenna wakes and
+            # rejoins" landed right after this exact vote resolved),
+            # human_party was empty and the gold had nowhere to go, so
+            # the item was silently discarded instead -- even though a
+            # real human still owns this party and was always going to
+            # get the item's value per Coffee's own original design
+            # ("give the players the value in gold"). Falls back to
+            # every real (non-AI) member of the FULL party roster in
+            # this chat (_get_party_members, not encounter-scoped) so
+            # gold never just vanishes because nobody happened to be
+            # actively playing at the exact moment their AI companions
+            # won a fight.
+            gold_recipients = human_party or [
+                p["telegram_user_id"] for p in _get_party_members(chat_id) if not p.get("is_ai")
+            ]
+            if gold_recipients and sale_price > 0:
+                share = sale_price // len(gold_recipients)
+                for pid in gold_recipients:
                     character = db.get_character(pid, chat_id)
                     if character:
                         db.update_character(pid, chat_id, gold=character["gold"] + share)
@@ -5394,6 +5416,35 @@ async def _resolve_ai_turns(update: Update, session: sessions.Session) -> None:
     has no living members left (which a just-ended fight always has).
     """
     round_before = session.round_number
+    await _resolve_ai_turns_inner(update, session)
+    if session.round_number != round_before:
+        await _maybe_send_battle_formation_image(update, session)
+
+
+async def _advance_turn_and_resolve_ai_turns(update: Update, session: sessions.Session) -> None:
+    """
+    Real live bug (2026-08-16, Coffee: "there was nothing since 10:36
+    i jus searched it" -- the formation image hadn't refreshed once in
+    a real fight despite the round visibly advancing multiple times).
+    Root cause: _resolve_ai_turns' own round_before/round_after check
+    only ever sees a round-wrap that happens DURING its own call, but
+    nearly every real caller does `session.advance_turn()` (ending the
+    HUMAN's own turn) immediately before calling _resolve_ai_turns --
+    so whenever THAT advance_turn() call is the one that actually wraps
+    turn_order back to index 0 (i.e. the human who just acted happens
+    to be last in turn order, which is exactly what happened here:
+    Ravenloft, Coffee's own character, was turn_order's last slot),
+    the round had already changed before _resolve_ai_turns ever took
+    its own "before" snapshot -- so the refresh silently never fired,
+    every single time, for that one participant's turn specifically.
+    Fixed by moving the round_before snapshot to wrap BOTH calls: this
+    is now the one real call site every caller should use instead of
+    the old bare `session.advance_turn(); await _resolve_ai_turns(...)`
+    pair, so a round-wrap is caught no matter which of the two calls
+    inside actually causes it.
+    """
+    round_before = session.round_number
+    session.advance_turn()
     await _resolve_ai_turns_inner(update, session)
     if session.round_number != round_before:
         await _maybe_send_battle_formation_image(update, session)
@@ -8388,8 +8439,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                 sessions.end_session(chat_id, session)
                 return
 
-        session.advance_turn()
-        await _resolve_ai_turns(update, session)
+        await _advance_turn_and_resolve_ai_turns(update, session)
 
 
 def _throwable_weapon_ids(character: dict) -> list[str]:
@@ -8526,8 +8576,7 @@ async def _do_throw_weapon(update: Update, action_text: str) -> None:
             sessions.end_session(chat_id, session)
             return
 
-        session.advance_turn()
-        await _resolve_ai_turns(update, session)
+        await _advance_turn_and_resolve_ai_turns(update, session)
 
 
 async def _do_pass_turn(update: Update) -> None:
@@ -9069,6 +9118,20 @@ def _extract_combined_damage_roll(text: str) -> int | None:
     return int(next(g for g in match.groups() if g is not None))
 
 
+_HIDDEN_PASSAGE_KEYWORDS = (
+    "hidden door", "secret door", "hidden passage", "secret passage",
+    "hidden exit", "secret exit", "hidden tunnel", "secret tunnel",
+    "door in the floor", "trapdoor", "hidden room", "secret room",
+    "hidden entrance", "secret entrance",
+)
+
+
+def _mentions_hidden_passage(text: str) -> bool:
+    """True if free text is searching for a hidden door/passage/exit -- a real feature this game's data has no mechanical concept of at all, see _do_skill_check's grounding note."""
+    text_lower = text.lower()
+    return any(kw in text_lower for kw in _HIDDEN_PASSAGE_KEYWORDS)
+
+
 async def _do_skill_check(update: Update, ability: str, action_text: str, forced_roll: int | None = None) -> None:
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -9144,6 +9207,23 @@ async def _do_skill_check(update: Update, ability: str, action_text: str, forced
                 if success else
                 f"A real {template['name']} is present here, but this roll did not reveal it."
             )
+        elif _mentions_hidden_passage(action_text):
+            # Real live bug (2026-08-16, Sugar/Charvenna, dev-bridge:
+            # "This successful roll implies there is a hidden door in
+            # the floor of the nook. If there is a door why can't I
+            # open it?"). This game has NO hidden-door/secret-passage
+            # mechanic anywhere in campaign.json -- every location's
+            # real exits are its own authored `connections`, full stop.
+            # Without a grounded_fact, _skill_check_preamble's own
+            # "keep it honest and general... rather than fabricating a
+            # specific discovery" instruction is the ONLY thing stopping
+            # the model from writing exactly this kind of falsely-
+            # implied-discovery prose on a lucky high roll -- and this
+            # model doesn't always comply with an unstated default.
+            # Naming the real fact explicitly (same pattern as the
+            # monster-grounding branch above) makes it something the
+            # model is told to reflect, not just avoid contradicting.
+            grounded_fact = "There is no hidden door, passage, or secret exit here — nothing like that exists to find at this location."
 
     flavor = await asyncio.to_thread(
         narrate_skill_check, character, action_text, ability,
@@ -9468,8 +9548,7 @@ async def _do_shove(update: Update, action_text: str, forced_roll: int | None = 
             message += f"\n🛌 **{target['name']} is now PRONE** — attacks against them have advantage."
         await _safe_send(update, message)
 
-        session.advance_turn()
-        await _resolve_ai_turns(update, session)
+        await _advance_turn_and_resolve_ai_turns(update, session)
 
 
 async def _resolve_flee_attempt(update, session: sessions.Session, action_text: str, forced_roll: int | None = None) -> None:
@@ -9529,8 +9608,7 @@ async def _resolve_flee_attempt(update, session: sessions.Session, action_text: 
 
     if not success:
         await _safe_send(update, f"{message}\n\n💨 The attempt fails — you're still in the fight.")
-        session.advance_turn()
-        await _resolve_ai_turns(update, session)
+        await _advance_turn_and_resolve_ai_turns(update, session)
         return
 
     # Opportunity attacks (2026-07-13): breaking off from a fight
@@ -9579,8 +9657,7 @@ async def _resolve_flee_attempt(update, session: sessions.Session, action_text: 
             f"{message}\n\n⚠️ **{fleeing['name']} is cut down before escaping — knocked unconscious!** "
             f"Still in the fight, rolling death saving throws on their turns until stable, revived, or worse.",
         )
-        session.advance_turn()
-        await _resolve_ai_turns(update, session)
+        await _advance_turn_and_resolve_ai_turns(update, session)
         return
 
     character = db.get_character(user_id, update.effective_chat.id)
@@ -15036,8 +15113,7 @@ async def _do_breath_weapon(update: Update) -> None:
             sessions.end_session(chat_id, session)
             return
 
-        session.advance_turn()
-        await _resolve_ai_turns(update, session)
+        await _advance_turn_and_resolve_ai_turns(update, session)
 
 
 async def _do_use_environment(update: Update) -> None:
@@ -15147,8 +15223,7 @@ async def _do_use_environment(update: Update) -> None:
             sessions.end_session(chat_id, session)
             return
 
-        session.advance_turn()
-        await _resolve_ai_turns(update, session)
+        await _advance_turn_and_resolve_ai_turns(update, session)
 
 
 async def _do_channel_divinity(update: Update) -> None:
@@ -19006,10 +19081,36 @@ async def _do_give_item(update: Update, text: str) -> None:
     ]
     recipient = _match_member_by_name_or_username(text, candidates)
     if recipient is None:
-        await update.effective_chat.send_message(
-            f"**{character['name']}**: give it to whom? Name someone real who's actually here with you.",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        # Real live bug (2026-08-16, Sugar/Charvenna, dev-bridge: "Ossian
+        # vane is there with me. Why can't I give him the scroll?"): this
+        # function was always scoped to real party members only (a real
+        # player or AI companion), never NPCs -- but the old rejection
+        # ("Name someone real who's actually here with you") flatly
+        # implied Ossian Vane wasn't real or wasn't present, when he
+        # demonstrably was both (she'd just been talking to him). Checks
+        # whether the named recipient is a real NPC actually standing
+        # here first, so the message can be honest about the ACTUAL
+        # limitation (item trading doesn't reach NPCs yet) instead of
+        # denying a person's own existence.
+        text_lower = text.lower()
+        npc_here = next(
+            (
+                npc["name"] for npc_id in _npcs_at_location(character["current_location"], character["chat_id"])
+                if (npc := cl.get_npc(CAMPAIGN, npc_id)) and npc["name"].lower() in text_lower
+            ),
+            None,
         )
+        if npc_here:
+            await update.effective_chat.send_message(
+                f"**{character['name']}**: {npc_here} can't carry items yet — trading is between real party "
+                f"members (players and companions) only, not NPCs.",
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+            )
+        else:
+            await update.effective_chat.send_message(
+                f"**{character['name']}**: give it to whom? Name someone real who's actually here with you.",
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+            )
         return
 
     items_wanted = _extract_item_list(text, list(character["inventory"].keys()))
@@ -19388,8 +19489,7 @@ async def _do_use_item(update: Update, text: str) -> None:
     if in_combat and not combat_ended_by_undead_kill:
         async with _held_session(chat_id, user_id) as session:
             if session is not None:
-                session.advance_turn()
-                await _resolve_ai_turns(update, session)
+                await _advance_turn_and_resolve_ai_turns(update, session)
 
 
 HOLLOW_STUMP_SHRINE_OFFERING_COST = 100
@@ -20442,8 +20542,7 @@ async def _do_steal_from_enemy(
     message = _format_skill_check_result(flavor, result, "dexterity", STEAL_FROM_ENEMY_DC, success) + consequence_line
     await _safe_send(update, message)
 
-    session.advance_turn()
-    await _resolve_ai_turns(update, session)
+    await _advance_turn_and_resolve_ai_turns(update, session)
 
 
 EMPOWERED_SPELL_MAX_USES = 1
@@ -21502,8 +21601,7 @@ async def _do_cast_spell(update: Update, text: str) -> None:
                     await _notify_main_topic(update, note)
                 sessions.end_session(chat_id, session)
                 return
-            session.advance_turn()
-            await _resolve_ai_turns(update, session)
+            await _advance_turn_and_resolve_ai_turns(update, session)
 
     elif spell["effect"] == "heal":
         # Support spells (heal/cure) can target ANY party member by name,
@@ -22362,8 +22460,7 @@ async def _do_summon_remnant(update: Update, text: str, forced_roll: int | None 
             sessions.end_session(chat_id, session)
             return
 
-        session.advance_turn()
-        await _resolve_ai_turns(update, session)
+        await _advance_turn_and_resolve_ai_turns(update, session)
 
 
 # ---------------------------------------------------------------------

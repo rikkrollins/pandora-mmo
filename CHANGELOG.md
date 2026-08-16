@@ -2,6 +2,54 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.239] — Formation-image refresh bug + 3 real Sugar dev-bridge reports
+
+**Formation-image refresh, root-caused.** Confirmed live: Coffee
+searched Adventure and found zero formation-image refreshes since
+joining a fight, despite the round visibly advancing 1→5 in that same
+window. Root cause: `_resolve_ai_turns`'s own round_before/round_after
+check only ever sees a round-wrap that happens DURING its own call —
+but 11 call sites across bot.py do `session.advance_turn()` (ending
+the acting player's own turn) immediately BEFORE calling
+`_resolve_ai_turns`, so whenever THAT advance_turn() call is the one
+that wraps turn_order back to index 0 (i.e. that player happens to be
+last in turn order — which is exactly what happened: Ravenloft,
+Coffee's own character, was last in this fight's turn_order), the
+round had already changed before `_resolve_ai_turns` ever took its own
+"before" snapshot. The refresh silently never fired, every single
+time, for that one participant's turn specifically. New
+`_advance_turn_and_resolve_ai_turns` wraps both calls under one
+round_before snapshot; all 11 call sites now use it instead of the old
+bare two-line pattern.
+
+**Three real reports from Sugar (dev-bridge), all investigated and fixed:**
+- *"The keen dagger was left behind... players are supposed to get
+  gold shares."* Root cause: the loot-vote's no-wanters gold-split
+  only ever paid the humans who were live participants in THAT
+  encounter — if a party's real owner was resting/inactive while only
+  her AI companions fought (confirmed: "Wake up" → "Charvenna wakes
+  and rejoins" landed right after this exact report), there was no
+  live human to pay, so the item was silently discarded instead of
+  sold. Now falls back to every real member of the full party roster
+  in that chat, so gold never has nowhere to go.
+- *"Ossian vane is there with me. Why can't I give him the scroll?"*
+  Not a bug in scope (item trading was always player/companion-only,
+  never NPCs) but a genuinely misleading rejection: "Name someone real
+  who's actually here with you" flatly denied a real, present NPC's
+  existence. Now checks whether the name matches a real NPC actually
+  at that location and gives an honest "can't carry items yet" message
+  instead.
+- *"This successful roll implies there is a hidden door... why can't I
+  open it?"* This game has zero hidden-door/secret-passage mechanic
+  anywhere in its data. A wisdom check searching for one got no
+  grounded fact at all, leaving the narrator free to write prose that
+  reads as confirming a real discovery on a lucky roll — the exact
+  "invent a specific discovery" failure mode `_skill_check_preamble`'s
+  own instruction already warns against, just never given a concrete
+  fact to anchor to for this case. Now explicitly grounds a hidden-
+  passage search in the real fact that no such thing exists here, same
+  pattern already used for a real monster mentioned in a search.
+
 ## [1.27.238] — Level Gap Advantage: under-leveled back-row members can no longer hide indefinitely
 
 Real live report (2026-08-16, Coffee, mid-fight against Shadow Wisps
