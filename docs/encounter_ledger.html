@@ -1,0 +1,581 @@
+<title>The Encounter Ledger</title>
+<style>
+  :root {
+    --bg: #12151a;
+    --surface: #1a1e26;
+    --surface-alt: #1f2430;
+    --surface-raised: #242a37;
+    --border: rgba(228, 225, 214, 0.09);
+    --border-strong: rgba(228, 225, 214, 0.18);
+    --text: #e4e1d6;
+    --text-muted: #92978f;
+    --text-faint: #5c6169;
+    --accent: #c98a3e;
+    --accent-soft: rgba(201, 138, 62, 0.14);
+    --accent-2: #8a9a7e;
+    --accent-2-soft: rgba(138, 154, 126, 0.14);
+    --danger: #c1614a;
+    --danger-soft: rgba(193, 97, 74, 0.14);
+    --input-bg: #0e1116;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    margin: 0;
+    padding: 0 0 6rem;
+  }
+
+  .wrap {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 3rem 2rem 0;
+  }
+
+  header.masthead {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    padding-bottom: 2.2rem;
+    border-bottom: 1px solid var(--border-strong);
+    margin-bottom: 2.2rem;
+  }
+
+  .eyebrow {
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  h1 {
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+    font-size: clamp(1.9rem, 3.4vw, 2.6rem);
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: 0.01em;
+    text-wrap: balance;
+  }
+
+  .dek {
+    color: var(--text-muted);
+    max-width: 62ch;
+    font-size: 0.98rem;
+  }
+
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1.1rem;
+    margin-top: 0.4rem;
+  }
+
+  .control {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+
+  .control input[type="number"] {
+    width: 3.6rem;
+    background: var(--input-bg);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    border-radius: 5px;
+    padding: 0.3rem 0.45rem;
+    font-variant-numeric: tabular-nums;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+  }
+
+  .control input[type="number"]:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  button.pill {
+    background: var(--surface-raised);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 0.4rem 0.95rem;
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  button.pill:hover { border-color: var(--accent); background: var(--surface-alt); }
+  button.pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button.pill.primary { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+  /* --- Overview chart --- */
+  section.overview {
+    margin-bottom: 2.6rem;
+  }
+  .overview h2 {
+    font-family: Georgia, "Iowan Old Style", serif;
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin: 0 0 0.2rem;
+  }
+  .overview .cap {
+    color: var(--text-faint);
+    font-size: 0.8rem;
+    margin-bottom: 1rem;
+  }
+  .chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 150px;
+    padding: 0 0 0.4rem;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+  }
+  .chart .bar-col {
+    flex: 0 0 auto;
+    width: 9px;
+    height: 100%;
+    display: flex;
+    align-items: flex-end;
+    position: relative;
+  }
+  .chart .bar {
+    width: 100%;
+    border-radius: 2px 2px 0 0;
+    background: var(--accent-2);
+    min-height: 2px;
+  }
+  .chart .bar-col.is-boss .bar { background: var(--accent); }
+  .chart .bar-col.is-super .bar { background: var(--danger); }
+  .chart .bar-col.is-authored .bar { box-shadow: 0 0 0 1px var(--accent-2) inset; }
+  .chart .bar-col:hover .bar { filter: brightness(1.35); }
+  .chart .bar-col .tip {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface-raised);
+    border: 1px solid var(--border-strong);
+    padding: 0.35rem 0.55rem;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.1s ease;
+    margin-bottom: 6px;
+    z-index: 5;
+  }
+  .chart .bar-col:hover .tip { opacity: 1; }
+  .legend {
+    display: flex;
+    gap: 1.4rem;
+    margin-top: 0.7rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 0.4rem; }
+  .legend i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+
+  /* --- Arc sections --- */
+  section.arc {
+    margin-bottom: 2.2rem;
+  }
+  .arc-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.8rem;
+    margin-bottom: 0.65rem;
+  }
+  .arc-num {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color: var(--accent);
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+    min-width: 1.6rem;
+  }
+  .arc-title {
+    font-family: Georgia, "Iowan Old Style", serif;
+    font-size: 1.15rem;
+    font-weight: 600;
+  }
+  .arc-side .arc-title { color: var(--text-muted); font-style: italic; }
+
+  .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.86rem;
+    min-width: 860px;
+  }
+  thead th {
+    text-align: left;
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    font-weight: 600;
+    padding: 0.6rem 0.7rem;
+    background: var(--surface-alt);
+    border-bottom: 1px solid var(--border-strong);
+    white-space: nowrap;
+  }
+  thead th.num { text-align: right; }
+  tbody tr { background: var(--surface); border-bottom: 1px solid var(--border); }
+  tbody tr:nth-child(even) { background: var(--surface-alt); }
+  tbody tr.is-boss { background: var(--accent-soft); }
+  tbody tr.is-super { background: var(--danger-soft); }
+  tbody td { padding: 0.5rem 0.7rem; vertical-align: middle; }
+  td.name-cell { min-width: 170px; }
+  .mname { font-weight: 600; }
+  .mname .boss-tag {
+    display: inline-block;
+    margin-left: 0.4rem;
+    font-size: 0.62rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 0.05rem 0.32rem;
+    vertical-align: 1px;
+  }
+  .mname .locked-tag {
+    display: inline-block;
+    margin-left: 0.4rem;
+    font-size: 0.62rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent-2);
+    border: 1px solid var(--accent-2);
+    border-radius: 4px;
+    padding: 0.05rem 0.32rem;
+    vertical-align: 1px;
+  }
+  .mloc { color: var(--text-muted); font-size: 0.78rem; }
+  .mquest { color: var(--text-faint); font-size: 0.74rem; }
+  td.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  td input[type="number"] {
+    width: 100%;
+    min-width: 4.2rem;
+    background: var(--input-bg);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    border-radius: 5px;
+    padding: 0.32rem 0.45rem;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.83rem;
+  }
+  td input[type="number"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  td input.changed { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+  .lvl-input { width: 3.4rem !important; min-width: 3.4rem !important; }
+
+  /* --- Export panel --- */
+  section.export {
+    margin-top: 3rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border-strong);
+  }
+  section.export h2 {
+    font-family: Georgia, "Iowan Old Style", serif;
+    font-size: 1.05rem;
+    margin: 0 0 0.3rem;
+  }
+  section.export .cap { color: var(--text-faint); font-size: 0.82rem; margin-bottom: 0.9rem; }
+  textarea#exportBox {
+    width: 100%;
+    min-height: 160px;
+    background: var(--input-bg);
+    border: 1px solid var(--border-strong);
+    color: var(--text-muted);
+    border-radius: 8px;
+    padding: 0.8rem;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+    resize: vertical;
+    display: none;
+  }
+  #copyStatus { font-size: 0.78rem; color: var(--accent-2); margin-left: 0.6rem; }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="light"]) {
+      --bg: #f3f0e8;
+      --surface: #fbf9f4;
+      --surface-alt: #f3efe4;
+      --surface-raised: #ffffff;
+      --border: rgba(30, 26, 18, 0.09);
+      --border-strong: rgba(30, 26, 18, 0.18);
+      --text: #23201a;
+      --text-muted: #6b6355;
+      --text-faint: #948c7c;
+      --accent: #a5652a;
+      --accent-soft: rgba(165, 101, 42, 0.12);
+      --accent-2: #5f7150;
+      --accent-2-soft: rgba(95, 113, 80, 0.12);
+      --danger: #a3402b;
+      --danger-soft: rgba(163, 64, 43, 0.1);
+      --input-bg: #ffffff;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f3f0e8;
+    --surface: #fbf9f4;
+    --surface-alt: #f3efe4;
+    --surface-raised: #ffffff;
+    --border: rgba(30, 26, 18, 0.09);
+    --border-strong: rgba(30, 26, 18, 0.18);
+    --text: #23201a;
+    --text-muted: #6b6355;
+    --text-faint: #948c7c;
+    --accent: #a5652a;
+    --accent-soft: rgba(165, 101, 42, 0.12);
+    --accent-2: #5f7150;
+    --accent-2-soft: rgba(95, 113, 80, 0.12);
+    --danger: #a3402b;
+    --danger-soft: rgba(163, 64, 43, 0.1);
+    --input-bg: #ffffff;
+  }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <div class="eyebrow">Development Reference &middot; Live Balance Data</div>
+    <h1>The Encounter Ledger</h1>
+    <p class="dek">
+      Every enemy and boss in the current campaign, in real story order. Rows marked
+      <strong>Locked in</strong> are already live in the game with your real submitted numbers &mdash;
+      their level no longer moves with the party-size slider below, since it's a deliberate choice,
+      not a preview. Everything else still shows the old implied-level preview until it gets the
+      same treatment.
+    </p>
+    <div class="controls">
+      <div class="control">
+        <label for="partySize">Party size</label>
+        <input type="number" id="partySize" min="1" max="8" value="5">
+      </div>
+      <span id="curveNote" class="control" style="color: var(--text-faint);"></span>
+      <button class="pill" id="resetBtn" type="button">Reset all edits</button>
+      <button class="pill primary" id="exportBtn" type="button">Copy edited values</button>
+      <span id="copyStatus"></span>
+    </div>
+  </header>
+
+  <section class="overview">
+    <h2>The curve so far</h2>
+    <p class="cap">Level per encounter, in story order &mdash; locked-in rows show their real
+      submitted level; everything else still shows the implied level a
+      <span id="capPartySize">5</span>-person party would need for a fair fight, based on today's
+      numbers. Brass = boss. Rust = the joke superboss (off-scale). A ringed bar = locked in.
+      Hover a bar for the name.</p>
+    <div class="chart" id="chart"></div>
+    <div class="legend">
+      <span><i style="background: var(--accent-2);"></i>Regular enemy</span>
+      <span><i style="background: var(--accent);"></i>Boss</span>
+      <span><i style="background: var(--danger);"></i>Superboss (off-scale)</span>
+      <span><i style="background: transparent; box-shadow: 0 0 0 1.5px var(--accent-2) inset;"></i>Locked in (real, submitted)</span>
+    </div>
+  </section>
+
+  <div id="arcSections"></div>
+
+  <section class="export">
+    <h2>Hand your numbers back</h2>
+    <p class="cap">Only rows you've actually changed are included. Click "Copy edited values" above, then paste here or straight to me.</p>
+    <textarea id="exportBox" readonly></textarea>
+  </section>
+</div>
+
+<script>
+const DATA = {"monsters": [{"key": "goblin", "name": "Goblin", "hp": 25, "xp": 50, "dmg": 2, "boss": false, "arc": 1, "arcTitle": "Discovery", "loc": "The Goblin Warrens", "quest": "Clear the Goblin Warrens", "lvl": 1, "super": false, "authored": true}, {"key": "goblin_shaman", "name": "Goblin Shaman", "hp": 60, "xp": 100, "dmg": 4, "boss": false, "arc": 1, "arcTitle": "Discovery", "loc": "The Goblin Warrens", "quest": "Clear the Goblin Warrens", "lvl": 3, "super": false, "authored": true}, {"key": "goblin_boss", "name": "Goblin Boss", "hp": 500, "xp": 200, "dmg": 15, "boss": true, "arc": 1, "arcTitle": "Discovery", "loc": "The Goblin Warrens", "quest": "Clear the Goblin Warrens", "lvl": 10, "super": false, "authored": true}, {"key": "wolf", "name": "Wolf", "hp": 36, "xp": 50, "dmg": 1, "boss": false, "arc": 15, "arcTitle": "Side Content (Remnants / Wandering)", "loc": "The Whispering Wood", "quest": null, "lvl": 1, "super": false, "authored": true}, {"key": "giant_spider", "name": "Giant Spider", "hp": 108, "xp": 200, "dmg": 14, "boss": false, "arc": 15, "arcTitle": "Side Content (Remnants / Wandering)", "loc": "Stonearch Bridge", "quest": null, "lvl": 5, "super": false, "authored": true}, {"key": "crystal_spider", "name": "Crystal Spider", "hp": 125, "xp": 150, "dmg": 15, "boss": false, "arc": 2, "arcTitle": "The Descent", "loc": "Glimmerdeep Grotto", "quest": "The Wrong Color", "lvl": 10, "super": false, "authored": true}, {"key": "shadow_wisp", "name": "Shadow Wisp", "hp": 400, "xp": 225, "dmg": 30, "boss": false, "arc": 2, "arcTitle": "The Descent", "loc": "The Hush Below", "quest": "Into the Hush", "lvl": 15, "super": false, "authored": true}, {"key": "the_unspoken", "name": "The Unspoken", "hp": 750, "xp": 250, "dmg": 25, "boss": true, "arc": 2, "arcTitle": "The Descent", "loc": "The Hush Below", "quest": "Into the Hush", "lvl": 20, "super": false, "authored": true}, {"key": "the_waking_ember", "name": "The Waking Ember", "hp": 1000, "xp": 500, "dmg": 30, "boss": true, "arc": 3, "arcTitle": "What Was Buried", "loc": "The First City", "quest": "The First City", "lvl": 25, "super": false, "authored": true}, {"key": "the_waiting_shape", "name": "The Waiting Shape", "hp": 1500, "xp": 2000, "dmg": 50, "boss": true, "arc": 4, "arcTitle": "What Waits Above", "loc": "The Unmoored Isle", "quest": "What Waits Above", "lvl": 40, "super": false, "authored": true}, {"key": "the_unrepeating", "name": "The Unrepeating", "hp": 4630, "xp": 1000, "dmg": 40, "boss": true, "arc": 15, "arcTitle": "Side Content (Remnants / Wandering)", "loc": "The Forgotten Depth", "quest": null, "lvl": 20, "super": false, "authored": true}, {"key": "colosseum_champion", "name": "The Colosseum Champion", "hp": 2160, "xp": 500, "dmg": 20, "boss": true, "arc": 15, "arcTitle": "Side Content (Remnants / Wandering)", "loc": "The Colosseum", "quest": null, "lvl": 15, "super": false, "authored": true}, {"key": "verge_wraith", "name": "Verge Wraith", "hp": 149, "xp": 400, "dmg": 18, "boss": false, "arc": 11, "arcTitle": "The Hollow Verge", "loc": "The Hollow Verge", "quest": "The Wraith's Unrest", "lvl": 2, "super": false, "authored": false}, {"key": "bone_legionnaire", "name": "Bone Legionnaire", "hp": 174, "xp": 450, "dmg": 18, "boss": false, "arc": 11, "arcTitle": "The Hollow Verge", "loc": "The Bonefield", "quest": "The March That Never Ended", "lvl": 2, "super": false, "authored": false}, {"key": "cairn_watcher", "name": "Cairn Watcher", "hp": 198, "xp": 500, "dmg": 18, "boss": false, "arc": 11, "arcTitle": "The Hollow Verge", "loc": "The Sealed Cairn", "quest": "The Cairn's Silence", "lvl": 2, "super": false, "authored": false}, {"key": "the_verge_warden", "name": "The Verge Warden", "hp": 471, "xp": 1400, "dmg": 18, "boss": true, "arc": 11, "arcTitle": "The Hollow Verge", "loc": "The Verge Sanctum", "quest": "The Warden's Toll", "lvl": 5, "super": false, "authored": false}, {"key": "choir_remnant", "name": "Choir Remnant", "hp": 223, "xp": 550, "dmg": 18, "boss": false, "arc": 12, "arcTitle": "The Wordless Choir", "loc": "The Wordless Gate", "quest": "The Remnant's Echo", "lvl": 3, "super": false, "authored": false}, {"key": "still_machinery_sentinel", "name": "Still Machinery Sentinel", "hp": 347, "xp": 750, "dmg": 18, "boss": false, "arc": 12, "arcTitle": "The Wordless Choir", "loc": "The Still Machinery", "quest": "What the Machinery Still Remembers", "lvl": 3, "super": false, "authored": false}, {"key": "voiceless_warden", "name": "Voiceless Warden", "hp": 422, "xp": 950, "dmg": 18, "boss": false, "arc": 12, "arcTitle": "The Wordless Choir", "loc": "The Choir Hall", "quest": "The Choir's Silence", "lvl": 4, "super": false, "authored": false}, {"key": "the_undertone", "name": "The Undertone", "hp": 596, "xp": 2200, "dmg": 18, "boss": true, "arc": 12, "arcTitle": "The Wordless Choir", "loc": "The Source", "quest": "The Undertone's Reckoning", "lvl": 5, "super": false, "authored": false}, {"key": "hollow_watcher", "name": "Hollow Watcher", "hp": 298, "xp": 1000, "dmg": 18, "boss": false, "arc": 13, "arcTitle": "The Unbegun", "loc": "The Hollow Beneath the Wait", "quest": "The Hollow Watcher's Vigil", "lvl": 4, "super": false, "authored": false}, {"key": "turning_stair_guardian", "name": "Turning Stair Guardian", "hp": 497, "xp": 1300, "dmg": 18, "boss": false, "arc": 13, "arcTitle": "The Unbegun", "loc": "The Turning Stair", "quest": "The Turning Stair's Paradox", "lvl": 5, "super": false, "authored": false}, {"key": "loom_warden", "name": "Loom Warden", "hp": 546, "xp": 1500, "dmg": 18, "boss": false, "arc": 13, "arcTitle": "The Unbegun", "loc": "The Loom", "quest": "The Loom's Pattern", "lvl": 5, "super": false, "authored": false}, {"key": "the_unbegun", "name": "The Unbegun", "hp": 795, "xp": 5000, "dmg": 18, "boss": true, "arc": 13, "arcTitle": "The Unbegun", "loc": "The First Wait", "quest": "The Unbegun's Reckoning", "lvl": 9, "super": false, "authored": false}, {"key": "elder_bone_legionnaire", "name": "Elder Bone Legionnaire", "hp": 223, "xp": 550, "dmg": 18, "boss": false, "arc": 11, "arcTitle": "The Hollow Verge", "loc": "The Husk Orchard", "quest": "The Husk Orchard's Reckoning", "lvl": 3, "super": false, "authored": false}, {"key": "bound_verge_wraith", "name": "Bound Verge Wraith", "hp": 188, "xp": 500, "dmg": 18, "boss": false, "arc": 11, "arcTitle": "The Hollow Verge", "loc": "The Ashen Reliquary", "quest": "The Ashen Reliquary's Captive", "lvl": 2, "super": false, "authored": false}, {"key": "young_cairn_watcher", "name": "Young Cairn Watcher", "hp": 149, "xp": 350, "dmg": 18, "boss": false, "arc": 11, "arcTitle": "The Hollow Verge", "loc": "The Forgotten Nook", "quest": "The Forgotten Nook's Secret", "lvl": 2, "super": false, "authored": false}, {"key": "elder_choir_remnant", "name": "Elder Choir Remnant", "hp": 273, "xp": 650, "dmg": 18, "boss": false, "arc": 12, "arcTitle": "The Wordless Choir", "loc": "The Antechamber", "quest": "The Antechamber's Held Breath", "lvl": 3, "super": false, "authored": false}, {"key": "bound_voiceless_warden", "name": "Bound Voiceless Warden", "hp": 472, "xp": 1050, "dmg": 18, "boss": false, "arc": 12, "arcTitle": "The Wordless Choir", "loc": "The Resonance Well", "quest": "The Resonance Well's Answer", "lvl": 4, "super": false, "authored": false}, {"key": "young_choir_remnant", "name": "Young Choir Remnant", "hp": 174, "xp": 400, "dmg": 18, "boss": false, "arc": 12, "arcTitle": "The Wordless Choir", "loc": "The Forgotten Chord", "quest": "The Forgotten Chord's Return", "lvl": 2, "super": false, "authored": false}, {"key": "elder_hollow_watcher", "name": "Elder Hollow Watcher", "hp": 372, "xp": 1150, "dmg": 18, "boss": false, "arc": 13, "arcTitle": "The Unbegun", "loc": "The Afterimage", "quest": "The Afterimage's Watch", "lvl": 4, "super": false, "authored": false}, {"key": "bound_loom_warden", "name": "Bound Loom Warden", "hp": 646, "xp": 1800, "dmg": 18, "boss": false, "arc": 13, "arcTitle": "The Unbegun", "loc": "The Last Measure", "quest": "The Last Measure's End", "lvl": 5, "super": false, "authored": false}, {"key": "young_turning_stair_guardian", "name": "Young Turning Stair Guardian", "hp": 273, "xp": 700, "dmg": 18, "boss": false, "arc": 13, "arcTitle": "The Unbegun", "loc": "The Missed Step", "quest": "The Missed Step's Fall", "lvl": 3, "super": false, "authored": false}, {"key": "veteran_goblin", "name": "Veteran Goblin", "hp": 2300, "xp": 1750, "dmg": 46, "boss": false, "arc": 5, "arcTitle": "What the Warren Was Hiding", "loc": "The Supply Tunnel", "quest": "The Supply Tunnel's Veteran", "lvl": 45, "super": false, "authored": true}, {"key": "goblin_shaman_elder", "name": "Elder Goblin Shaman", "hp": 2750, "xp": 2000, "dmg": 47, "boss": false, "arc": 5, "arcTitle": "What the Warren Was Hiding", "loc": "The Deep Larder", "quest": "The Deep Larder's Elder", "lvl": 50, "super": false, "authored": true}, {"key": "young_goblin", "name": "Young Goblin", "hp": 1500, "xp": 1500, "dmg": 45, "boss": false, "arc": 5, "arcTitle": "What the Warren Was Hiding", "loc": "The Collapsed Tunnel", "quest": "The Collapsed Tunnel's Survivor", "lvl": 35, "super": false, "authored": true}, {"key": "root_bound_goblin", "name": "Root-Bound Goblin", "hp": 49, "xp": 70, "dmg": 18, "boss": false, "arc": 6, "arcTitle": "What the Roots Kept", "loc": "The Flooded Gallery", "quest": "The Flooded Gallery's Hold", "lvl": 1, "super": false, "authored": false}, {"key": "channel_bound_goblin", "name": "Channel-Bound Goblin", "hp": 59, "xp": 90, "dmg": 18, "boss": false, "arc": 6, "arcTitle": "What the Roots Kept", "loc": "The Precise Channel", "quest": "The Channel's Keeper", "lvl": 1, "super": false, "authored": false}, {"key": "elder_root_shaman", "name": "Elder Root Shaman", "hp": 99, "xp": 160, "dmg": 18, "boss": false, "arc": 6, "arcTitle": "What the Roots Kept", "loc": "The Hollow Wellspring", "quest": "The Hollow Wellspring's Elder", "lvl": 1, "super": false, "authored": false}, {"key": "root_goblin_pup", "name": "Root Goblin Pup", "hp": 20, "xp": 25, "dmg": 18, "boss": false, "arc": 6, "arcTitle": "What the Roots Kept", "loc": "The Side Pool", "quest": "The Side Pool's Straggler", "lvl": 1, "super": false, "authored": false}, {"key": "brood_spider", "name": "Brood Spider", "hp": 89, "xp": 140, "dmg": 18, "boss": false, "arc": 7, "arcTitle": "What the Gorge Swallowed", "loc": "The Web Hollow", "quest": "The Web Hollow's Brood", "lvl": 1, "super": false, "authored": false}, {"key": "current_bound_spider", "name": "Current-Bound Spider", "hp": 148, "xp": 220, "dmg": 18, "boss": false, "arc": 7, "arcTitle": "What the Gorge Swallowed", "loc": "The Deep Current", "quest": "The Deep Current's Keeper", "lvl": 1, "super": false, "authored": false}, {"key": "elder_web_spider", "name": "Elder Web Spider", "hp": 188, "xp": 350, "dmg": 18, "boss": false, "arc": 7, "arcTitle": "What the Gorge Swallowed", "loc": "The Undertow", "quest": "The Undertow's Elder", "lvl": 2, "super": false, "authored": false}, {"key": "spiderling", "name": "Spiderling", "hp": 39, "xp": 40, "dmg": 18, "boss": false, "arc": 7, "arcTitle": "What the Gorge Swallowed", "loc": "The Silked Nook", "quest": "The Silked Nook's Hatchling", "lvl": 1, "super": false, "authored": false}, {"key": "watchtower_stalker", "name": "Watchtower Stalker", "hp": 79, "xp": 90, "dmg": 18, "boss": false, "arc": 8, "arcTitle": "What the Downs Still Watches", "loc": "The Broken Watchtower", "quest": "The Watchtower's Stalker", "lvl": 1, "super": false, "authored": false}, {"key": "alpha_wolf", "name": "Alpha Wolf", "hp": 109, "xp": 150, "dmg": 18, "boss": false, "arc": 8, "arcTitle": "What the Downs Still Watches", "loc": "Beneath the Vantage", "quest": "Beneath the Vantage's Alpha", "lvl": 1, "super": false, "authored": false}, {"key": "wolf_pup", "name": "Wolf Pup", "hp": 25, "xp": 30, "dmg": 18, "boss": false, "arc": 8, "arcTitle": "What the Downs Still Watches", "loc": "The Tower Cellar", "quest": "The Tower Cellar's Pup", "lvl": 1, "super": false, "authored": false}, {"key": "barrow_bound_wolf", "name": "Barrow-Bound Wolf", "hp": 99, "xp": 140, "dmg": 18, "boss": false, "arc": 8, "arcTitle": "What the Downs Still Watches", "loc": "The Barrow Depths", "quest": "The Barrow Depths' Bound", "lvl": 1, "super": false, "authored": false}, {"key": "den_bound_wolf", "name": "Den-Bound Wolf", "hp": 79, "xp": 90, "dmg": 18, "boss": false, "arc": 9, "arcTitle": "What Was Built, Not Grown", "loc": "The Hollow Threshold", "quest": "The Hollow Threshold's Bound Wolf", "lvl": 1, "super": false, "authored": false}, {"key": "stray_wood_wolf", "name": "Stray Wood Wolf", "hp": 39, "xp": 40, "dmg": 18, "boss": false, "arc": 9, "arcTitle": "What Was Built, Not Grown", "loc": "The Stray Den", "quest": "The Stray Den's Wolf", "lvl": 1, "super": false, "authored": false}, {"key": "root_wrought_sentinel", "name": "Root-Wrought Sentinel", "hp": 128, "xp": 180, "dmg": 18, "boss": false, "arc": 9, "arcTitle": "What Was Built, Not Grown", "loc": "The Deeper Roots", "quest": "The Deeper Roots' Sentinel", "lvl": 1, "super": false, "authored": false}, {"key": "deep_root_warden", "name": "Deep Root Warden", "hp": 168, "xp": 280, "dmg": 18, "boss": false, "arc": 9, "arcTitle": "What Was Built, Not Grown", "loc": "The Deep Root Chamber", "quest": "The Deep Root Chamber's Warden", "lvl": 2, "super": false, "authored": false}, {"key": "pool_wrought_spider", "name": "Pool-Wrought Spider", "hp": 109, "xp": 220, "dmg": 18, "boss": false, "arc": 10, "arcTitle": "What the Glow Isn't", "loc": "The Glimmering Pool", "quest": "The Pool's Wrought Spider", "lvl": 1, "super": false, "authored": false}, {"key": "elder_crystal_spider", "name": "Elder Crystal Spider", "hp": 148, "xp": 320, "dmg": 18, "boss": false, "arc": 10, "arcTitle": "What the Glow Isn't", "loc": "The Buried Glow", "quest": "The Buried Glow's Elder", "lvl": 2, "super": false, "authored": false}, {"key": "crystal_spiderling", "name": "Crystal Spiderling", "hp": 39, "xp": 40, "dmg": 18, "boss": false, "arc": 10, "arcTitle": "What the Glow Isn't", "loc": "The Dim Hollow", "quest": "The Dim Hollow's Spiderling", "lvl": 1, "super": false, "authored": false}, {"key": "the_unasked", "name": "The Unasked", "hp": 100000000, "xp": 1000000, "dmg": 0, "boss": true, "arc": 14, "arcTitle": "The Answered", "loc": "The Last Question", "quest": "The Unasked's Reckoning", "lvl": 20, "super": true, "authored": false}, {"key": "the_unopened", "name": "The Unopened", "hp": 900, "xp": 1800, "dmg": 22, "boss": true, "arc": 14, "arcTitle": "The Answered", "loc": "The Unopened Seal", "quest": "The Unopened Seal's Riddle", "lvl": 5, "super": false, "authored": false}, {"key": "the_wrathflame_unbound", "name": "The Wrathflame Unbound", "hp": 820, "xp": 1000, "dmg": 20, "boss": true, "arc": 1, "arcTitle": "Discovery", "loc": "The Hollow Stump Shrine", "quest": "The Hollow Stump", "lvl": 15, "super": false, "authored": true}, {"key": "the_drowned_choir", "name": "The Drowned Choir", "hp": 8000, "xp": 3000, "dmg": 60, "boss": true, "arc": 15, "arcTitle": "Side Content (Remnants / Wandering)", "loc": "The Weeping Well", "quest": null, "lvl": 40, "super": false, "authored": true}, {"key": "the_root_that_remembers", "name": "The Root That Remembers", "hp": 7800, "xp": 1500, "dmg": 50, "boss": true, "arc": 15, "arcTitle": "Side Content (Remnants / Wandering)", "loc": "The Deep Glade", "quest": null, "lvl": 30, "super": false, "authored": true}, {"key": "the_hollow_bell", "name": "The Hollow Bell", "hp": 8000, "xp": 5000, "dmg": 75, "boss": true, "arc": 15, "arcTitle": "Side Content (Remnants / Wandering)", "loc": "The Root Hollow", "quest": null, "lvl": 50, "super": false, "authored": true}, {"key": "the_cairnbound", "name": "The Cairnbound", "hp": 8500, "xp": 40000, "dmg": 160, "boss": true, "arc": 15, "arcTitle": "Side Content (Remnants / Wandering)", "loc": "The Lonely Cairn", "quest": null, "lvl": 90, "super": false, "authored": true}, {"key": "the_waiting_dark", "name": "The Waiting Dark", "hp": 9000, "xp": 50000, "dmg": 210, "boss": true, "arc": 15, "arcTitle": "Side Content (Remnants / Wandering)", "loc": "Below the Cairn", "quest": null, "lvl": 95, "super": false, "authored": true}, {"key": "the_farthest_span", "name": "The Farthest Span", "hp": 7900, "xp": 10000, "dmg": 90, "boss": true, "arc": 15, "arcTitle": "Side Content (Remnants / Wandering)", "loc": "The Far End of the Span", "quest": null, "lvl": 60, "super": false, "authored": true}, {"key": "the_buried_current", "name": "The Buried Current", "hp": 8100, "xp": 20000, "dmg": 100, "boss": true, "arc": 15, "arcTitle": "Side Content (Remnants / Wandering)", "loc": "The Forgotten Cistern", "quest": null, "lvl": 70, "super": false, "authored": true}, {"key": "the_spires_grace", "name": "The Spire's Grace", "hp": 8300, "xp": 30000, "dmg": 130, "boss": true, "arc": 15, "arcTitle": "Side Content (Remnants / Wandering)", "loc": "The Spire Reaches", "quest": null, "lvl": 80, "super": false, "authored": true}, {"key": "the_archives_keeper", "name": "The Archive's Keeper", "hp": 1250, "xp": 1500, "dmg": 35, "boss": true, "arc": 3, "arcTitle": "What Was Buried", "loc": "The Sunken Archive", "quest": "The Archive's Recess", "lvl": 30, "super": false, "authored": true}, {"key": "the_deepest_record", "name": "The Deepest Record", "hp": 9500, "xp": 100000, "dmg": 230, "boss": true, "arc": 15, "arcTitle": "Side Content (Remnants / Wandering)", "loc": "The Deepest Record", "quest": null, "lvl": 100, "super": false, "authored": true}], "arcs": [{"idx": 1, "id": "arc_1_discovery", "title": "Discovery"}, {"idx": 2, "id": "arc_2_descent", "title": "The Descent"}, {"idx": 3, "id": "arc_3_revelation", "title": "What Was Buried"}, {"idx": 4, "id": "arc_4_ascension", "title": "What Waits Above"}, {"idx": 5, "id": "arc_5_goblin_warrens", "title": "What the Warren Was Hiding"}, {"idx": 6, "id": "arc_6_sunken_root_caverns", "title": "What the Roots Kept"}, {"idx": 7, "id": "arc_7_stonearch_gorge", "title": "What the Gorge Swallowed"}, {"idx": 8, "id": "arc_8_greymoor_downs", "title": "What the Downs Still Watches"}, {"idx": 9, "id": "arc_9_whispering_wood", "title": "What Was Built, Not Grown"}, {"idx": 10, "id": "arc_10_glimmerdeep_grotto", "title": "What the Glow Isn't"}, {"idx": 11, "id": "arc_11_hollow_verge", "title": "The Hollow Verge"}, {"idx": 12, "id": "arc_12_wordless_choir", "title": "The Wordless Choir"}, {"idx": 13, "id": "arc_13_the_unbegun", "title": "The Unbegun"}, {"idx": 14, "id": "arc_14_the_answered", "title": "The Answered"}, {"idx": 15, "id": "side", "title": "Side Content (Remnants / Wandering)"}]}
+;
+
+const state = JSON.parse(JSON.stringify(DATA.monsters)).map(m => ({...m, origLvl: m.lvl, origHp: m.hp, origXp: m.xp, origDmg: m.dmg}));
+
+function fmtNum(n) {
+  return n.toLocaleString('en-US');
+}
+
+function renderChart() {
+  const chart = document.getElementById('chart');
+  chart.innerHTML = '';
+  const maxLvl = Math.max(20, ...state.filter(m => !m.super).map(m => m.lvl));
+  state.forEach(m => {
+    const col = document.createElement('div');
+    col.className = 'bar-col' + (m.boss ? ' is-boss' : '') + (m.super ? ' is-super' : '') + (m.authored ? ' is-authored' : '');
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    const pct = Math.max(4, Math.min(100, (m.lvl / maxLvl) * 100));
+    bar.style.height = pct + '%';
+    const tip = document.createElement('div');
+    tip.className = 'tip';
+    tip.textContent = m.name + ' — lvl ' + (m.super ? '∞' : m.lvl) + (m.authored ? ' (locked in)' : '');
+    col.appendChild(bar);
+    col.appendChild(tip);
+    chart.appendChild(col);
+  });
+}
+
+function computeLevel(xp, partySize) {
+  // Mirrors rules.leveling.MEDIUM_ENCOUNTER_XP_PER_CHARACTER
+  const BUDGET = {1:50,2:100,3:150,4:250,5:500,6:600,7:750,8:900,9:1100,10:1200,
+                  11:1600,12:2000,13:2200,14:2500,15:2800,16:3200,17:3900,18:4200,19:4900,20:5700};
+  if (!xp || xp <= 0) return 1;
+  for (let lvl = 1; lvl <= 20; lvl++) {
+    if (partySize * BUDGET[lvl] >= xp) return lvl;
+  }
+  return 20;
+}
+
+function recomputeLevels() {
+  const partySize = parseInt(document.getElementById('partySize').value, 10) || 5;
+  document.getElementById('capPartySize').textContent = partySize;
+  state.forEach(m => {
+    // Locked-in (hand-authored, already live in the game) rows keep
+    // their real submitted level regardless of the party-size preview
+    // slider -- only the still-unedited rows (arcs 6-14) use the old
+    // implied-level preview.
+    if (!m.super && !m.authored) m.lvl = computeLevel(m.xp, partySize);
+  });
+  renderChart();
+}
+
+function markChanged(input, isChanged) {
+  input.classList.toggle('changed', isChanged);
+}
+
+function renderTables() {
+  const container = document.getElementById('arcSections');
+  container.innerHTML = '';
+  DATA.arcs.forEach(arc => {
+    const rows = state.filter(m => m.arc === arc.idx);
+    if (!rows.length) return;
+    const section = document.createElement('section');
+    section.className = 'arc' + (arc.idx === 15 ? ' arc-side' : '');
+    const head = document.createElement('div');
+    head.className = 'arc-head';
+    head.innerHTML = (arc.idx === 15 ? '' : '<span class="arc-num">' + String(arc.idx).padStart(2, '0') + '</span>')
+      + '<span class="arc-title">' + arc.title + '</span>';
+    section.appendChild(head);
+
+    const scroll = document.createElement('div');
+    scroll.className = 'table-scroll';
+    const table = document.createElement('table');
+    table.innerHTML = '<thead><tr>' +
+      '<th>Enemy</th><th class="num">Level</th><th class="num">HP</th>' +
+      '<th class="num">XP Reward</th><th class="num">Dmg Bonus</th></tr></thead>';
+    const tbody = document.createElement('tbody');
+
+    rows.forEach(m => {
+      const tr = document.createElement('tr');
+      tr.className = m.super ? 'is-super' : (m.boss ? 'is-boss' : '');
+      tr.dataset.key = m.key;
+
+      const nameTd = document.createElement('td');
+      nameTd.className = 'name-cell';
+      nameTd.innerHTML = '<div class="mname">' + m.name +
+        (m.boss ? '<span class="boss-tag">' + (m.super ? 'Superboss' : 'Boss') + '</span>' : '') +
+        (m.authored ? '<span class="locked-tag">Locked in</span>' : '') + '</div>' +
+        '<div class="mloc">' + m.loc + '</div>' +
+        (m.quest ? '<div class="mquest">' + m.quest + '</div>' : '');
+      tr.appendChild(nameTd);
+
+      const lvlTd = document.createElement('td');
+      lvlTd.className = 'num';
+      if (m.super) {
+        lvlTd.textContent = '—';
+      } else {
+        const lvlInput = document.createElement('input');
+        lvlInput.type = 'number'; lvlInput.min = 1; lvlInput.max = 99;
+        lvlInput.className = 'lvl-input';
+        lvlInput.value = m.lvl;
+        lvlInput.addEventListener('input', () => {
+          m.lvl = parseInt(lvlInput.value, 10) || 1;
+          markChanged(lvlInput, m.lvl !== m.origLvl);
+        });
+        lvlTd.appendChild(lvlInput);
+      }
+      tr.appendChild(lvlTd);
+
+      [['hp', m.hp], ['xp', m.xp], ['dmg', m.dmg]].forEach(([field, val]) => {
+        const td = document.createElement('td');
+        td.className = 'num';
+        const input = document.createElement('input');
+        input.type = 'number'; input.min = 0;
+        input.value = val;
+        input.addEventListener('input', () => {
+          m[field] = parseFloat(input.value) || 0;
+          markChanged(input, m[field] !== m['orig' + field[0].toUpperCase() + field.slice(1)]);
+        });
+        td.appendChild(input);
+        tr.appendChild(td);
+      });
+
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    scroll.appendChild(table);
+    section.appendChild(scroll);
+    container.appendChild(section);
+  });
+}
+
+document.getElementById('partySize').addEventListener('input', recomputeLevels);
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  state.forEach(m => {
+    m.lvl = m.origLvl; m.hp = m.origHp; m.xp = m.origXp; m.dmg = m.origDmg;
+  });
+  document.getElementById('partySize').value = 5;
+  recomputeLevels();
+  renderTables();
+});
+
+document.getElementById('exportBtn').addEventListener('click', () => {
+  const changed = state.filter(m =>
+    m.lvl !== m.origLvl || m.hp !== m.origHp || m.xp !== m.origXp || m.dmg !== m.origDmg
+  ).map(m => ({
+    key: m.key, name: m.name, level: m.lvl, hp: m.hp, xp_reward: m.xp, damage_bonus: m.dmg,
+  }));
+  const box = document.getElementById('exportBox');
+  box.style.display = 'block';
+  box.value = changed.length
+    ? JSON.stringify(changed, null, 2)
+    : '(no edits yet -- change a field above, then click Copy edited values again)';
+  box.focus();
+  box.select();
+  const status = document.getElementById('copyStatus');
+  if (changed.length) {
+    try {
+      navigator.clipboard.writeText(box.value).then(() => {
+        status.textContent = 'Copied ' + changed.length + ' row' + (changed.length === 1 ? '' : 's') + ' — also selected below.';
+      }).catch(() => {
+        status.textContent = changed.length + ' row' + (changed.length === 1 ? '' : 's') + ' selected below — copy manually (Cmd/Ctrl+C).';
+      });
+    } catch (e) {
+      status.textContent = changed.length + ' row' + (changed.length === 1 ? '' : 's') + ' selected below — copy manually (Cmd/Ctrl+C).';
+    }
+  } else {
+    status.textContent = '';
+  }
+});
+
+recomputeLevels();
+renderTables();
+</script>
