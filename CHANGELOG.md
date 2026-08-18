@@ -2,6 +2,24 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.243] — Bramble Thicket / Deep Tunnels goblins leveled up per Coffee's dev-bridge requests
+
+**Two real dev-bridge reports (2026-08-17, Coffee, each a screenshot
+circling "Goblin (Lv. 1)"):** "In this area make the goblins a lv23
+enemy" (The Bramble Thicket — a surface gate right before descending
+to Root Hollow, home to the level-50 The Hollow Bell) and "Make this
+battle in this location, a level five battle" (The Deep Tunnels —
+underground, gated toward Stonearch Bridge's Gorge Depths). Both were
+still using the shared tutorial-tier `goblin` template (level 1, 25
+HP) — trivial next to what they actually lead into, and can't just be
+bumped directly since that same key is still correctly level 1 in the
+real Goblin Warrens tutorial. Two new, separately-authored variants
+(`bramble_thicket_goblin`, level 23, 380 HP; `tunnel_goblin`, level 5,
+110 HP — stat blocks estimated from neighboring same-tier authored
+monsters, worth a look if the fights don't feel right) now sit in
+those two locations' own `monsters` lists instead. Encounter Ledger
+updated to match.
+
 ## [1.27.242] — The Wrathflame Unbound rebalanced to Coffee's requested level 20 / ~7000 HP
 
 **Real dev-bridge report (2026-08-18, Coffee, revised twice — 3500 HP

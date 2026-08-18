@@ -231,7 +231,7 @@
           "east": "whispering_wood_elder_glen"
         },
         "monsters": [
-          "goblin"
+          "bramble_thicket_goblin"
         ],
         "interactables": {
           "thicket_gap": {
@@ -1114,7 +1114,7 @@
           "stonearch_bridge_gorge_depths": "rubble_choked_passage"
         },
         "monsters": [
-          "goblin"
+          "tunnel_goblin"
         ],
         "interactables": {
           "tunnel_rubble_choke": {
@@ -4077,6 +4077,42 @@
       "xp_reward": 50,
       "damage_dice": "1d8",
       "damage_bonus": 2,
+      "damage_type": "physical",
+      "stealable_items": [
+        {
+          "item_id": "sulfur_dust",
+          "weight": 100
+        }
+      ]
+    },
+    "tunnel_goblin": {
+      "name": "Goblin", "level": 5,
+      "dexterity": 14,
+      "strength": 12,
+      "armor_class": 14,
+      "hp_max": 110,
+      "proficiency_bonus": 3,
+      "xp_reward": 120,
+      "damage_dice": "1d8",
+      "damage_bonus": 14,
+      "damage_type": "physical",
+      "stealable_items": [
+        {
+          "item_id": "sulfur_dust",
+          "weight": 100
+        }
+      ]
+    },
+    "bramble_thicket_goblin": {
+      "name": "Goblin", "level": 23,
+      "dexterity": 15,
+      "strength": 14,
+      "armor_class": 19,
+      "hp_max": 380,
+      "proficiency_bonus": 4,
+      "xp_reward": 300,
+      "damage_dice": "1d8",
+      "damage_bonus": 28,
       "damage_type": "physical",
       "stealable_items": [
         {

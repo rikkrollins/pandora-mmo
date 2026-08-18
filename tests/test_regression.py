@@ -9543,6 +9543,29 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         unauthored_boss_line = bot._monster_danger_line(["the_verge_warden"])
         self.assertIn("(???)", unauthored_boss_line)
 
+    def test_bramble_thicket_and_deep_tunnels_goblins_leveled_up_per_coffee(self):
+        """
+        Real dev-bridge reports (2026-08-17, Coffee, two separate
+        screenshots each circling "Goblin (Lv. 1)"): The Bramble Thicket
+        (a surface gate right before descending to Root Hollow, home to
+        the level-50 The Hollow Bell) and The Deep Tunnels (underground,
+        gated toward Stonearch Bridge's Gorge Depths) were both still
+        using the shared tutorial-tier "goblin" template -- trivial next
+        to what they actually lead into. Can't just bump the shared
+        "goblin" key itself (still correctly level 1 in the real Goblin
+        Warrens tutorial) -- each location now has its own real,
+        separately-authored variant instead.
+        """
+        camp = bot.CAMPAIGN
+        bramble = camp["locations"]["surface"]["whispering_wood_bramble_thicket"]
+        deep_tunnels = camp["locations"]["underground"]["sunken_root_caverns_deep_tunnels"]
+        self.assertEqual(bramble["monsters"], ["bramble_thicket_goblin"])
+        self.assertEqual(deep_tunnels["monsters"], ["tunnel_goblin"])
+        self.assertIn("Goblin (Lv. 23)", bot._monster_danger_line(bramble["monsters"]))
+        self.assertIn("Goblin (Lv. 5)", bot._monster_danger_line(deep_tunnels["monsters"]))
+        # The tutorial goblin itself is untouched.
+        self.assertIn("Goblin (Lv. 1)", bot._monster_danger_line(["goblin"]))
+
     async def test_boss_level_hidden_until_defeated_then_shown_in_bestiary(self):
         """
         Real feature, same session (2026-08-15, per Coffee: "make the
