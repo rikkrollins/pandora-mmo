@@ -286,6 +286,16 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_keyword_fallback("I attack the goblin", [])["action"], "attack")
         self.assertEqual(_keyword_fallback("give my potion to Sarah", [])["action"], "give_item")
 
+    def test_attack_typo_tolerance(self):
+        """
+        Found via topic-activity monitoring (2026-08-18): "atack.." during
+        a real combat turn fell all the way through to action='chat' --
+        silently drops a real, common in-combat action with no reply,
+        same consequential shape as the earlier "accepet" typo fix.
+        """
+        for text in ("atack..", "I atack the goblin", "atack"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "attack", text)
+
     def test_quest_info_phrasing_classified_as_ask_clue(self):
         """
         Real dev-bridge report (2026-08-18, Coffee): "I want more

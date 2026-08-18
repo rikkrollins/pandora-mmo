@@ -221,7 +221,12 @@ def _extract_json(text: str) -> dict | None:
 # worth correcting before the exact-substring checks below run. Keyed
 # by the correct spelling; only words of similar length get checked
 # against it, so this can't accidentally rewrite unrelated words.
-_TYPO_TOLERANT_WORDS = ["accept"]
+# "attack" added (2026-08-18, found via topic-activity monitoring):
+# "atack.." during a real combat turn silently fell all the way through
+# to action='chat' -- consequential in the exact same "silently drops a
+# real, common action with no reply" shape as "accepet", just during
+# someone's actual turn instead of a quest accept.
+_TYPO_TOLERANT_WORDS = ["accept", "attack"]
 
 
 def _normalize_common_typos(lowered: str) -> str:

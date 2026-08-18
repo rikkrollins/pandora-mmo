@@ -2,6 +2,16 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.251] — "attack" typo tolerance (found via topic-activity monitoring)
+
+First real finding from the new recurring topic-activity monitoring
+pass (scripts/check_topic_activity.py, [intent] log review): "atack.."
+during a real combat turn silently fell all the way through to
+action='chat' — the exact same consequential "a real, common action
+drops with no reply" shape the "accepet"→accept_quest typo fix already
+covered, just during someone's actual combat turn this time. `attack`
+added to `_TYPO_TOLERANT_WORDS`.
+
 ## [1.27.250] — "View the X" reaches its real screen, The Root That Remembers → 13,000 HP
 
 **Real dev-bridge report (2026-08-18, Coffee):** "When I use open, it
