@@ -325,6 +325,30 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if re.search(r"\bwaypoints?\b", lowered):
         return {**base, "action": "check_waypoints"}
 
+    # Real dev-bridge report (2026-08-18, Coffee): "When I use open, it
+    # seems to work, but when I say view, it doesn't seem to work" --
+    # "View the bestiary" got "Ravenloft doesn't spot anything like
+    # that here" (the generic examine fallback) instead of the real
+    # Bestiary screen. Same exact shadowing bug as menu/formation/
+    # waypoints above -- examine_verb_match's "view(ed/ing)?" (and
+    # "read"/"observed"/"checked out"/etc.) trigger sits much earlier
+    # in this function than bestiary/leaderboard/achievements' own
+    # keyword checks further down, so "view the bestiary" always
+    # matched the generic examine verb first. Bare "bestiary" and
+    # "leaderboard" are exactly as distinctive as menu/formation/
+    # waypoints (no other meaning in this game's vocabulary); "my
+    # achievements"/"my map" keep the same real, already-scoped phrases
+    # their own later checks already use, just moved early enough to
+    # actually be reachable via "view"/"read"/"check out" phrasing too.
+    if re.search(r"\bbestiary\b", lowered):
+        return {**base, "action": "bestiary"}
+    if re.search(r"\bleaderboard\b", lowered):
+        return {**base, "action": "leaderboard"}
+    if any(w in lowered for w in ["my achievements", "my titles", "unlocked achievements"]):
+        return {**base, "action": "check_achievements"}
+    if any(w in lowered for w in ["the map", "my map"]):
+        return {**base, "action": "show_map"}
+
     # Checked BEFORE check_quests below: "Accept the quest on the quest
     # board" and "Accept the quest 'a quiet request for Silverleaf Herb'"
     # both contain "quest board"/"quest" and would otherwise be swallowed

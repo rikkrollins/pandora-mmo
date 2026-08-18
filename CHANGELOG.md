@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.250] — "View the X" reaches its real screen, The Root That Remembers → 13,000 HP
+
+**Real dev-bridge report (2026-08-18, Coffee):** "When I use open, it
+seems to work, but when I say view, it doesn't seem to work" — "View
+the bestiary" got the generic "doesn't spot anything like that here"
+examine fallback instead of the real Bestiary screen. Same class of
+bug as the menu/formation/waypoints fix (v1.27.240):
+`examine_verb_match`'s "view(ed/ing)?" trigger sat earlier in
+`_keyword_fallback` than bestiary/leaderboard/achievements/map's own
+keyword checks, so "view X" always won first. Bestiary, leaderboard,
+"my achievements", and "the/my map" are now checked in that same early
+block — "view" still correctly reaches a real inventory item
+("View the herbalism guide"), unchanged.
+
+**Real dev-bridge report (2026-08-18, Coffee, screenshot circling
+7800/7800 HP):** "Make this boss have 13,000 HP." The Root That
+Remembers → `hp_max` 13000 (was 7800), campaign.json and the
+Encounter Ledger both updated.
+
 ## [1.27.249] — Actually fixed the recurring "why does it still say Goblin Shaman" narration bug
 
 **Real dev-bridge report (2026-08-18, Coffee), the 3rd time this exact

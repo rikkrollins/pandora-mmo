@@ -217,6 +217,25 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     def test_skills_keyword_classified_as_skill_tree(self):
         self.assertEqual(_keyword_fallback("skills", [])["action"], "skill_tree")
 
+    def test_view_prefixed_screen_names_reach_their_real_screen_not_examine(self):
+        """
+        Real dev-bridge report (2026-08-18, Coffee): "When I use open,
+        it seems to work, but when I say view, it doesn't seem to
+        work" -- "View the bestiary" got the generic "doesn't spot
+        anything like that here" examine fallback instead of the real
+        Bestiary screen. Same class of bug as check_menu/check_formation/
+        check_waypoints (v1.27.240): examine_verb_match's "view(ed/ing)?"
+        trigger sat earlier in the function than these screens' own
+        keyword checks, so "view X" always won first.
+        """
+        self.assertEqual(_keyword_fallback("View the bestiary", [])["action"], "bestiary")
+        self.assertEqual(_keyword_fallback("View my map", [])["action"], "show_map")
+        self.assertEqual(_keyword_fallback("View the leaderboard", [])["action"], "leaderboard")
+        self.assertEqual(_keyword_fallback("View my achievements", [])["action"], "check_achievements")
+        # No regression: "view" still reaches a real inventory item (the
+        # original 2026-08-12 reason this verb was added at all).
+        self.assertEqual(_keyword_fallback("View the herbalism guide", [])["action"], "examine")
+
     def test_feel_as_an_emotion_verb_doesnt_misfire(self):
         # "feel" is overwhelmingly an EMOTION verb in ordinary English --
         # confirmed live that folding it into the shared examine-verb
@@ -9803,6 +9822,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         Doubled here too (20->40) for the same real reason.
         """
         self.assertEqual(bot.CAMPAIGN["monsters"]["colosseum_champion"]["damage_bonus"], 40)
+
+    def test_root_that_remembers_hp_raised_per_coffee(self):
+        """Real dev-bridge report (2026-08-18, Coffee, screenshot circling 7800/7800 HP): "Make this boss have 13,000 HP"."""
+        self.assertEqual(bot.CAMPAIGN["monsters"]["the_root_that_remembers"]["hp_max"], 13000)
 
     async def test_boss_level_hidden_until_defeated_then_shown_in_bestiary(self):
         """
