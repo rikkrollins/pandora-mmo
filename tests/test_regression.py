@@ -8249,6 +8249,48 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(_keyword_fallback("assign Sarah as summoner", [])["action"], "assign_summoner")
 
+    def test_main_menu_merges_party_and_party_sheets_into_one_button(self):
+        """
+        Real feature request (2026-08-17, Coffee): "make one menu for
+        the party and the party sheets like have them under the same
+        push button." The separate top-level "Party Sheets" row is
+        gone -- its job moved into the Party screen's own per-member
+        View Sheet buttons instead (see the flow test below).
+        """
+        character = make_basic_character(950660, "MenuMergeTester", current_location="crossroads_tavern")
+        kb = bot._main_menu_keyboard(character)
+        labels = [btn.text for row in kb.inline_keyboard for btn in row]
+        self.assertTrue(any("Party" in l for l in labels))
+        self.assertFalse(any("Party Sheets" in l for l in labels))
+
+    async def test_party_keyboard_view_sheet_buttons_show_one_members_real_sheet(self):
+        """
+        Real feature request (2026-08-17, Coffee): "when they click
+        party sheets instead of showing all of the party sheets can you
+        show the buttons so that we can select the play player so we
+        can view their sheet." A real tap-per-member picker instead of
+        the old always-dump-everyone behavior (still reachable via
+        typed "check my party sheets", unchanged).
+        """
+        leader_id, member_id = 950661, 950662
+        make_basic_character(leader_id, "SheetPickerLeader", current_location="crossroads_tavern")
+        make_basic_character(member_id, "SheetPickerMember", current_location="crossroads_tavern")
+        party_id = db.create_party(leader_id, -999)
+        db.update_character(member_id, -999, party_id=party_id)
+        leader = db.get_character(leader_id, -999)
+
+        kb = bot._party_keyboard(leader)
+        buttons_by_data = {btn.callback_data: btn.text for row in kb.inline_keyboard for btn in row}
+        self.assertIn(f"party|viewsheet|{leader_id}", buttons_by_data)
+        self.assertIn(f"party|viewsheet|{member_id}", buttons_by_data)
+        self.assertIn("Your Sheet", buttons_by_data[f"party|viewsheet|{leader_id}"])
+        self.assertIn("SheetPickerMember", buttons_by_data[f"party|viewsheet|{member_id}"])
+
+        sink = []
+        await bot.party_menu_callback(FakeCallbackUpdate(leader_id, f"party|viewsheet|{member_id}", sink), DummyContext())
+        reply = "\n".join(sink)
+        self.assertIn("SheetPickerMember", reply)
+
     def test_battle_menu_shows_more_button_not_a_bare_run_button(self):
         import sessions
         sessions.end_session(-999)

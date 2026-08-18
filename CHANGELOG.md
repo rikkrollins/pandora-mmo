@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.248] — Party and Party Sheets merged into one menu, per-member sheet picker
+
+**Real feature request (2026-08-17, Coffee):** "Can you make one menu
+for the party and the party sheets like have them under the same push
+button and then when they click party sheets instead of showing all
+of the party sheets can you show the buttons so that we can select
+the play player so we can view their sheet?!" The top-level "🧾 Party
+Sheets" button (which always dumped every member's full sheet as a
+wall of separate messages) is gone; `_party_keyboard` (the Party
+screen's own buttons) now carries a real "📄 View Sheet" tap for
+yourself and each party member, showing just that one member's sheet
+on demand. Typed "check my party sheets" still reaches the old
+all-at-once dump directly, unchanged.
+
 ## [1.27.247] — Quest-detail questions actually answer the quest asked about
 
 **Real dev-bridge report (2026-08-18, Coffee):** "I'm not getting

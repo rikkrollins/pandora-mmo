@@ -12638,6 +12638,20 @@ def _party_keyboard(character: dict) -> InlineKeyboardMarkup | None:
             callback_data=f"party|setrow|{character['telegram_user_id']}|back",
         )])
 
+    # Real feature request (2026-08-17, Coffee): "make one menu for the
+    # party and the party sheets like have them under the same push
+    # button and then when they click party sheets instead of showing
+    # all of the party sheets can you show the buttons so that we can
+    # select the play player so we can view their sheet." Merges the
+    # old separate "Party Sheets" top-level menu button (which always
+    # dumped every member's full sheet as a wall of separate messages)
+    # into this same Party screen -- one real "View Sheet" tap per
+    # member instead, reusing the exact _format_character_sheet output
+    # each sheet button always has.
+    rows.append([InlineKeyboardButton(
+        "📄 View Your Sheet", callback_data=f"party|viewsheet|{character['telegram_user_id']}",
+    )])
+
     if party_id:
         # Per Coffee (2026-07-24: "buttons in equip for that?" -- asked
         # right after the new "auto equip the party" free-text command):
@@ -12677,6 +12691,9 @@ def _party_keyboard(character: dict) -> InlineKeyboardMarkup | None:
                     f"🛡️ {m['name']}: Front row (tap for Back)",
                     callback_data=f"party|setrow|{m['telegram_user_id']}|back",
                 )])
+            rows.append([InlineKeyboardButton(
+                f"📄 View {m['name']}'s Sheet", callback_data=f"party|viewsheet|{m['telegram_user_id']}",
+            )])
     elif character.get("pending_party_invite"):
         rows.append([InlineKeyboardButton("✅ Accept Invite", callback_data="party|accept")])
 
@@ -12736,6 +12753,22 @@ async def party_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         if target is None:
             return
         await _do_set_formation_row(update, target["name"], row)
+    elif action == "viewsheet" and len(parts) > 2:
+        # The per-member half of the merged Party/Party Sheets menu (see
+        # _party_keyboard's own docstring) -- one member's real sheet on
+        # demand, instead of the old top-level button that always
+        # dumped every member's sheet as a wall of separate messages.
+        try:
+            target_id = int(parts[2])
+        except ValueError:
+            return
+        target = db.get_character(target_id, update.effective_chat.id)
+        if target is None:
+            return
+        await _safe_send(
+            update, _format_character_sheet(target), speak=False,
+            reply_markup=_member_level_skill_keyboard(target),
+        )
 
 
 async def _do_invite_to_party(update: Update, target_name: str) -> None:
@@ -20855,7 +20888,6 @@ def _main_menu_keyboard(character: dict) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🎒 Inventory", callback_data="menu|inventory")],
         [InlineKeyboardButton("⚔️ Equip Gear", callback_data="menu|equip")],
         [InlineKeyboardButton("👥 Party", callback_data="menu|party")],
-        [InlineKeyboardButton("🧾 Party Sheets", callback_data="menu|partysheets")],
         [InlineKeyboardButton("🛠️ Professions", callback_data="menu|professions")],
         [InlineKeyboardButton("🎭 Switch Character", callback_data="menu|roster")],
         [InlineKeyboardButton("🧭 Waypoints", callback_data="menu|waypoints")],
@@ -20995,14 +21027,13 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     elif section == "leaderboard":
         await _do_leaderboard(update)
     elif section == "party":
+        # Real feature request (2026-08-17, Coffee): merged the old
+        # separate "Party Sheets" button in here -- _party_keyboard now
+        # carries a real "View Sheet" tap per member (see its own
+        # docstring), so this one screen covers both what the two
+        # buttons used to. "check my party sheets" (free text) still
+        # reaches the old all-at-once dump directly, unchanged.
         await _do_check_party(update)
-    elif section == "partysheets":
-        # Per Coffee (2026-07-24): "There's no way for me to see my
-        # party's details like hp and status... and lv exp." The full
-        # sheets view already existed via typing "check my party
-        # sheets" -- this button is the same real code path, just
-        # actually discoverable instead of needing exact free-text.
-        await _do_check_party(update, text="sheets")
     elif section == "professions":
         await _do_check_professions(update)
     elif section == "visualmap":
