@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.240] — Natural-language menu/formation/waypoints/equip keywords + bare-take silent-reply fix
+
+**Real dev-bridge feature request (2026-08-16, Coffee):** "Make a
+prompt so i can say in battle at anytime 'show me the battle
+formation' ... also make one for 'menu' ... and other keywords example
+being 'waypoints' ... 'equip' ... It allows us to text instead of
+using '/' commands." Added `check_menu`/`check_formation`/
+`check_waypoints`/`check_equip_menu` intents: bare `menu`, `formation`,
+`waypoints`/`waypoint`, and a bare `equip`/`equip gear`/`equip screen`
+(with no item named) now route to the existing `/menu`, battle
+formation image, waypoints screen, and equip-gear menu respectively,
+checked ahead of the more generic examine/open and equip-item triggers
+so they never get swallowed as "look at a physical object" or shadow a
+real "equip my sword". Also folded a bare "skills" into the existing
+skill-tree trigger.
+
+**Real live bug (2026-08-15, dev-bridge screenshot):** "Take the
+band" — a ring only ever shown in a quest/reward preview, never
+actually earned — got total silence: the keyword fallback deliberately
+defers a bare "take X" (no "from" clause) to the model, and here the
+model also landed on `chat` (intentionally silent). Once both have
+given up, a bare take/grab/pick-up phrase is now reclassified to
+`examine`, which gives an honest real answer either way (the item's
+real description if actually owned, or "doesn't spot anything like
+that here" otherwise) instead of dead silence. Never overrides a
+non-`chat` model read, so a correct `use_item` on "take the healing
+potion" is untouched.
+
 ## [1.27.239] — Formation-image refresh bug + 3 real Sugar dev-bridge reports
 
 **Formation-image refresh, root-caused.** Confirmed live: Coffee

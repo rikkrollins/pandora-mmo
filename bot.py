@@ -15893,6 +15893,25 @@ async def _maybe_send_battle_formation_image(update: Update, session: sessions.S
         logger.warning(f"[battle_render] formation image failed: {e!r}")
 
 
+async def _do_check_formation(update: Update) -> None:
+    """
+    Real dev-bridge feature request (2026-08-16, Coffee): "Make a prompt
+    so i can say in battle at anytime 'show me the battle formation' ...
+    so if it doesnt show up we can see it." The formation image
+    (_maybe_send_battle_formation_image) previously only ever sent
+    automatically at specific turn-resolution checkpoints -- a player
+    who missed it (scrolled past, joined mid-fight, or just wants a
+    fresh look) had no way to pull it up again on demand. Reuses the
+    exact same renderer, so this is never a second, divergent code path
+    -- just a manual trigger for it.
+    """
+    session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
+    if session is None:
+        await _safe_send(update, "You're not in a fight right now — there's no formation to show.")
+        return
+    await _maybe_send_battle_formation_image(update, session)
+
+
 def _spell_image_prompt(spell: dict) -> str:
     """
     Grounded only in the spell's own real name/effect/damage_type -- no
@@ -23349,6 +23368,14 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_check_inventory(update)
     elif action == "check_party":
         await _do_check_party(update, text)
+    elif action == "check_menu":
+        await _do_show_menu(update)
+    elif action == "check_formation":
+        await _do_check_formation(update)
+    elif action == "check_waypoints":
+        await _do_show_waypoints(update)
+    elif action == "check_equip_menu":
+        await _do_show_equip_menu(update)
     elif action == "buy":
         await _do_buy(update, text)
     elif action == "sell":

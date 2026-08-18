@@ -304,6 +304,27 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if (lowered.startswith("tell ") or " tell " in lowered) and "tell me" not in lowered:
         return {**base, "action": "message_ai"}
 
+    # Real dev-bridge feature request (2026-08-16, per Coffee: "make one
+    # for 'menu' so i can say 'open the menu' 'view the menu' ... It
+    # allows us to text instead of using '/' commands"). Checked FIRST,
+    # same priority as the "tell X to Y" relay check just above, since
+    # every one of these words would otherwise be swallowed by a more
+    # generic examine/open trigger further down this function ("view the
+    # menu" -> the view/examine verb match; "open the menu" -> the open
+    # -> examine match) and get misread as trying to look at a physical
+    # object named "menu"/"formation"/"waypoints" instead of opening the
+    # real screen. Bare "menu"/"formation"/"waypoints" are distinctive
+    # enough in this game's vocabulary to fire unconditionally -- none of
+    # them mean anything else here (no food/dining menu, no dance-
+    # formation flavor text, no other use of "waypoint" anywhere in this
+    # campaign).
+    if re.search(r"\bmenu\b", lowered):
+        return {**base, "action": "check_menu"}
+    if re.search(r"\bformation\b", lowered):
+        return {**base, "action": "check_formation"}
+    if re.search(r"\bwaypoints?\b", lowered):
+        return {**base, "action": "check_waypoints"}
+
     # Checked BEFORE check_quests below: "Accept the quest on the quest
     # board" and "Accept the quest 'a quiet request for Silverleaf Herb'"
     # both contain "quest board"/"quest" and would otherwise be swallowed
@@ -1270,7 +1291,7 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if "alignment" in lowered:
         return {**base, "action": "set_alignment"}
 
-    if any(w in lowered for w in ["skill tree", "skill points", "skilltree"]):
+    if any(w in lowered for w in ["skill tree", "skill points", "skilltree"]) or re.search(r"\bskills\b", lowered):
         return {**base, "action": "skill_tree"}
 
     # Real gap (2026-07-21, per Coffee: "a player tried 'replay intro'
@@ -1713,6 +1734,16 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # unequip feature).
     if any(w in lowered for w in ["take off", "unequip", "remove my", "i remove"]):
         return {**base, "action": "unequip_item"}
+
+    # check_equip_menu (2026-08-16, dev-bridge, same request as
+    # check_menu/check_formation/check_waypoints above): a bare "equip"
+    # with no item named means "show me what I can equip" (the existing
+    # _do_show_equip_menu, previously only reachable via "/menu" ->
+    # "Equip Gear") -- checked BEFORE equip_item's own "equip " trigger
+    # just below so it only ever catches the truly bare form, never
+    # shadowing a real "equip my sword"/"equip the longbow".
+    if re.fullmatch(r"equip(\s+(gear|menu|screen))?", lowered.strip(" .!?")):
+        return {**base, "action": "check_equip_menu"}
 
     if any(w in lowered for w in ["equip ", "wield ", "wear ", "put on the", "put on my",
                                     "i equip", "i wield"]):
@@ -2205,6 +2236,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "replay_intro", "visual_map", "rebirth", "choose_hybrid", "give_offering",
                 "drink_water", "choose_subclass", "start_echo_trial", "check_professions",
                 "talk_party", "use_environment", "throw_weapon",
+                "check_menu", "check_formation", "check_waypoints", "check_equip_menu",
             )
             if parsed["action"] not in valid_actions:
                 return fallback
@@ -2280,6 +2312,32 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
             # falls through to that safe, silent default instead.
             if parsed["action"] == "attack" and not re.search(r"[a-zA-Z]", text):
                 return fallback
+            # Real live bug (2026-08-15, dev-bridge screenshot): "Take
+            # the band" -- a ring the player had just been shown in a
+            # quest/reward preview but never actually earned yet -- came
+            # back as action="chat" (silence) from both the fallback
+            # (the take_from_match rule above deliberately only fires
+            # with a "from" clause) and the model. Reported as "was this
+            # supposed to happen?" -- a fully silent non-reply to an
+            # unambiguous imperative sentence is never correct, same
+            # "Say hello to grimsby" class of bug fixed above. Once the
+            # model has ALSO given up (still "chat" here), reclassify a
+            # bare take/grab/pick-up phrase as "examine": _do_examine
+            # already gives an honest, specific answer either way --
+            # the item's real description if it's actually owned, or "
+            # doesn't spot anything like that here" if it's a
+            # not-yet-earned reward/name mentioned only in flavor text --
+            # strictly better than silence in both cases. Never
+            # overrides a model action that ISN'T "chat" (e.g. a correct
+            # "use_item" read on "take the healing potion" is untouched).
+            if parsed["action"] == "chat":
+                bare_take_match = re.search(
+                    r"\b(?:take|took|grab|grabbed|pick up|picked up)\b\s+(?:the |a |an )?(.+)", text.lower(),
+                )
+                if bare_take_match:
+                    target = text[bare_take_match.start(1):bare_take_match.end(1)].strip()
+                    if target:
+                        return {**fallback, "action": "examine", "target": target}
             return parsed
     except (requests.RequestException, ValueError) as e:
         print(f"[intent_parser] model call failed, using keyword fallback: {e}")

@@ -192,6 +192,31 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["action"], "invite_to_party")
         self.assertEqual(result["target"], "Sheri")
 
+    # -- Real dev-bridge feature request (2026-08-16, Coffee): natural-
+    #    language keywords for the menu/formation/waypoints/equip screens,
+    #    previously only reachable via "/menu" or automatic triggers --
+    def test_menu_keyword_classified_as_check_menu(self):
+        for text in ("open the menu", "view the menu", "show me the menu", "menu"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "check_menu", text)
+
+    def test_formation_keyword_classified_as_check_formation(self):
+        for text in ("show me the battle formation", "formation", "what's the current formation"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "check_formation", text)
+
+    def test_waypoints_keyword_classified_as_check_waypoints(self):
+        for text in ("waypoints", "show me my waypoints"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "check_waypoints", text)
+
+    def test_bare_equip_classified_as_check_equip_menu_but_not_equip_item(self):
+        for text in ("equip", "equip gear"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "check_equip_menu", text)
+        # No regression: naming a real item still goes through equip_item.
+        result = _keyword_fallback("equip my longsword", [])
+        self.assertEqual(result["action"], "equip_item")
+
+    def test_skills_keyword_classified_as_skill_tree(self):
+        self.assertEqual(_keyword_fallback("skills", [])["action"], "skill_tree")
+
     def test_feel_as_an_emotion_verb_doesnt_misfire(self):
         # "feel" is overwhelmingly an EMOTION verb in ordinary English --
         # confirmed live that folding it into the shared examine-verb
@@ -2192,6 +2217,46 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         with patch("ai.intent_parser.requests.post", return_value=FakeResponse()):
             result = intent_parser_module.parse_intent("I try to flee from the goblin", [])
         self.assertEqual(result["action"], "flee")
+
+    def test_bare_take_reclassified_to_examine_when_model_also_says_chat(self):
+        """
+        Real live bug (2026-08-15, dev-bridge screenshot): "Take the
+        band" -- a ring only ever mentioned in a quest/reward preview,
+        never actually earned -- got total silence: the keyword fallback
+        deliberately defers bare "take X" (no "from" clause, see
+        test_take_without_a_from_clause_stays_chat_so_the_model_can_still_call_use_item
+        above) to the model, and here the model ALSO landed on "chat".
+        Once both have given up, a bare take/grab/pick-up phrase is
+        reclassified to "examine" -- _do_examine gives an honest, real
+        answer either way, which is strictly better than silence.
+        """
+        from unittest.mock import patch
+        import ai.intent_parser as intent_parser_module
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": '{"action": "chat"}'}
+
+        with patch("ai.intent_parser.requests.post", return_value=FakeResponse()):
+            result = intent_parser_module.parse_intent("Take the band", [])
+        self.assertEqual(result["action"], "examine")
+        self.assertEqual(result["target"], "band")
+
+        # No regression: when the model correctly reads a bare take as a
+        # real use_item on an owned consumable, that's untouched.
+        class FakeUseItemResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": '{"action": "use_item"}'}
+
+        with patch("ai.intent_parser.requests.post", return_value=FakeUseItemResponse()):
+            result = intent_parser_module.parse_intent("Take the healing potion", [])
+        self.assertEqual(result["action"], "use_item")
 
     # -- Real live bug (2026-07-17): capping num_predict for speed
     #    (ai/dm_agent.py, ai/support_agent.py, ai/intent_parser.py) can
