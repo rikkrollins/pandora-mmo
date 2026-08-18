@@ -5114,15 +5114,15 @@
       ]
     },
     "root_bound_goblin": {
-      "name": "Root-Bound Goblin",
+      "name": "Root-Bound Goblin", "level": 25,
       "dexterity": 13,
       "strength": 9,
-      "armor_class": 13,
-      "hp_max": 49,
-      "proficiency_bonus": 2,
-      "xp_reward": 70,
+      "armor_class": 19,
+      "hp_max": 450,
+      "proficiency_bonus": 4,
+      "xp_reward": 330,
       "damage_dice": "1d8",
-      "damage_bonus": 18,
+      "damage_bonus": 30,
       "damage_type": "physical",
       "stealable_items": [
         {
@@ -5177,18 +5177,18 @@
       ]
     },
     "root_goblin_pup": {
-      "name": "Root Goblin Pup",
+      "name": "Root Goblin Pup", "level": 32,
       "dexterity": 11,
       "strength": 6,
-      "armor_class": 11,
-      "hp_max": 20,
-      "proficiency_bonus": 1,
-      "xp_reward": 25,
+      "armor_class": 20,
+      "hp_max": 1150,
+      "proficiency_bonus": 5,
+      "xp_reward": 950,
       "vulnerabilities": [
         "poison"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18,
+      "damage_bonus": 40,
       "damage_type": "physical",
       "stealable_items": [
         {

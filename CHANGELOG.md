@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.244] — Flooded Gallery / Side Pool leveled up per Coffee's dev-bridge map request
+
+**Real dev-bridge follow-up (2026-08-17, Coffee, same session as
+v1.27.243):** a map screenshot circling the branches off The Flooded
+Gallery, asking for "progressively harder" enemies through the area —
+with two exact numbers given as the pattern: Root-Bound Goblin (The
+Flooded Gallery) to level 25, Root Goblin Pup (The Side Pool) to level
+32. Neither had a real authored `level` field at all before this —
+`_monster_danger_line`'s inferred-from-xp-reward fallback was showing
+both as "(Lv. 1)", same root cause the pre-v1.27.231 Encounter Ledger
+pass fixed elsewhere. Both keys are used at exactly one location each,
+so edited in place. The Gorge Depths branch on that same map (also
+circled) was deliberately left alone — it's the entry to the separate,
+already-coherent low-level "What the Gorge Swallowed" side dungeon
+(arc 7), not part of this specific request, and Coffee gave no number
+for it.
+
 ## [1.27.243] — Bramble Thicket / Deep Tunnels goblins leveled up per Coffee's dev-bridge requests
 
 **Two real dev-bridge reports (2026-08-17, Coffee, each a screenshot

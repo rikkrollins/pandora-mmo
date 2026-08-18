@@ -9566,6 +9566,26 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # The tutorial goblin itself is untouched.
         self.assertIn("Goblin (Lv. 1)", bot._monster_danger_line(["goblin"]))
 
+    def test_flooded_gallery_and_side_pool_leveled_up_per_coffee(self):
+        """
+        Real dev-bridge follow-up (2026-08-17, Coffee, same session as
+        the Bramble Thicket/Deep Tunnels reports above): a map
+        screenshot circling The Side Pool, The Hush Below/Glimmerdeep
+        Grotto, and The Gorge Depths -- all real branches off The
+        Flooded Gallery -- asking for "progressively harder" enemies
+        through this area, with two concrete numbers given as the
+        pattern to follow: The Flooded Gallery's Root-Bound Goblin to
+        level 25, The Side Pool's Root Goblin Pup to level 32. Both
+        monster keys are used at exactly one location each (confirmed
+        via campaign.json), so edited in place rather than needing a
+        new location-specific key. Neither previously had a real
+        authored `level` field at all -- _monster_danger_line's
+        inferred-from-xp-reward fallback was showing "(Lv. 1)" for both,
+        same root cause as the pre-v1.27.231 Encounter Ledger gap.
+        """
+        self.assertIn("Root-Bound Goblin (Lv. 25)", bot._monster_danger_line(["root_bound_goblin"]))
+        self.assertIn("Root Goblin Pup (Lv. 32)", bot._monster_danger_line(["root_goblin_pup"]))
+
     async def test_boss_level_hidden_until_defeated_then_shown_in_bestiary(self):
         """
         Real feature, same session (2026-08-15, per Coffee: "make the
