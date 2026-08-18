@@ -3825,7 +3825,25 @@ async def _announce_reaction(update: Update, defender: dict, result: dict) -> No
     real reaction firing.
     """
     if result.get("shield_reaction_triggered"):
-        await _safe_send(update, f"🛡️ **{defender['name']}** casts Shield as a reaction — the attack goes wide!")
+        # Real dev-bridge report (2026-08-18, Coffee): "My character
+        # cast two spell slots last battle and has 4 slots. Why did
+        # they have none left after only using two?" Root cause: Shield
+        # is a REAL auto-triggered reaction (rules/combat.py) that
+        # spends a slot every time it fires, with no player action
+        # involved -- against a boss landing several hits a round, it
+        # can burn through remaining slots fast, and this line never
+        # said so. Not a bug (the slot spend itself is correct and
+        # documented in CLAUDE.md's Reactions section), but a real
+        # narration gap: a player watching their slot count had no way
+        # to connect "it went to 0" with these reactions actually being
+        # the cause. Now states the real remaining count every time.
+        slots_left = defender.get("spell_slots_current", 0)
+        slots_max = defender.get("spell_slots_max", slots_left)
+        await _safe_send(
+            update,
+            f"🛡️ **{defender['name']}** casts Shield as a reaction — the attack goes wide! "
+            f"(spell slot used — {slots_left}/{slots_max} left)",
+        )
     elif result.get("uncanny_dodge_triggered"):
         await _safe_send(update, f"🌀 **{defender['name']}** uses Uncanny Dodge, halving the damage!")
 
@@ -7839,7 +7857,8 @@ async def _maybe_monster_cast_spell(
         _sync_player_to_db(counterspeller)
         await _safe_send(
             update,
-            f"🔵 **{counterspeller['name']}** counters it! **{caster['name']}**'s {spell['name']} fizzles with no effect.",
+            f"🔵 **{counterspeller['name']}** counters it! **{caster['name']}**'s {spell['name']} fizzles with no effect. "
+            f"(spell slot used — {counterspeller['spell_slots_current']}/{counterspeller.get('spell_slots_max', counterspeller['spell_slots_current'])} left)",
         )
         return {
             "attacker": caster["name"], "defender": target["name"], "hit": False,
@@ -18518,6 +18537,48 @@ async def _do_leaderboard(update: Update) -> None:
     await _safe_send(update, "\n".join(lines), speak=False)
 
 
+def _move_party_stragglers_along(mover_telegram_user_id: int, party_id: int, chat_id: int, destination_id: str) -> None:
+    """
+    Shared by _do_move (on-foot) and _do_fast_travel (waypoint warp): who
+    else gets physically relocated along with whoever just moved. Used to
+    be two independently-hand-written copies of this same block -- real
+    bug found live 2026-08-01 ("It's not letting me send to wren, who is
+    in my party") was exactly that divergence, on-foot travel already
+    dragging AI companions along while fast-travel silently didn't yet.
+    Extracted here (2026-08-18) after a SECOND real divergence bug of the
+    same shape (see the downed-real-player case below) so there's only
+    ever one place this logic can drift out of sync again.
+
+    Two real cases:
+    - An AI companion (is_ai, not dead) always travels with whoever
+      recruited them -- their own location is flavor/wandering, never a
+      deliberate choice to be left behind.
+    - A real human party member who is unconscious-but-not-dead (0 HP,
+      is_dead still 0) literally cannot move themselves, so the party
+      carries them along too -- otherwise they're stranded exactly where
+      they fell, unreachable by any location-gated heal/revive mechanic
+      (real dev-bridge report, 2026-08-18: Ravenloft left behind at the
+      old fight's location while the rest of the party walked to the
+      shrine, so neither the shrine's revive (is_dead-gated, correctly
+      not applicable) nor its bless-the-present-party fallback
+      (location-gated) had anything to work with).
+    A genuinely DEAD member is the one case that stays put on purpose --
+    same as a dead real player, their body has to be recovered, not
+    carried -- matching the documented death rule (bot.py's "3rd failed
+    death save" handling).
+    """
+    for member in db.get_party_members_by_id(party_id):
+        if member["telegram_user_id"] == mover_telegram_user_id or member.get("is_dead"):
+            continue
+        if member.get("is_ai"):
+            db.move_character(member["telegram_user_id"], chat_id, destination_id)
+        elif (
+            member.get("hp_current", 1) <= 0
+            and member["character_id"] == db.get_active_character_id(member["telegram_user_id"], chat_id)
+        ):
+            db.move_character(member["telegram_user_id"], chat_id, destination_id)
+
+
 def _find_location_by_name_fragment(fragment: str) -> str | None:
     lowered = fragment.strip().lower()
     for loc_id in cl.get_all_location_ids(CAMPAIGN):
@@ -18683,30 +18744,15 @@ async def _do_move(update: Update, text: str) -> None:
     # (is_ai=1, is_autonomous=0) are supposed to be traveling WITH
     # whoever recruited them, but this only ever moved the acting
     # player -- companions just stood still forever. Only moves real
-    # companions sharing this player's party_id.
-    #
-    # Second real bug found live (2026-07-24, Coffee: "the party's
-    # scattered all over the place... Pip is the only one staying with
-    # me"): this used to also exclude any is_autonomous=1 companion,
-    # meant to protect the separate hardcoded autonomous AI party
-    # (AI_PARTY_ROSTER) from being dragged around by an unrelated
-    # human's movement -- but a member of that roster (e.g. Zara
-    # Windrift) CAN later be genuinely recruited into a real player's
-    # own party via _do_recruit_npc, which reassigns their party_id
-    # to the recruiter's -- her stale is_autonomous=1 flag then wrongly
-    # kept excluding her from move-along even though party_id already
-    # says she belongs here now. party_id membership is the real,
-    # authoritative signal of "traveling with this player" -- the
-    # is_autonomous flag only matters for whether a character ALSO
-    # takes independent actions on its own tick (see
-    # _ai_party_autonomous_tick), not where it physically stands.
+    # companions sharing this player's party_id. See
+    # _move_party_stragglers_along's own docstring for the full,
+    # current set of who's dragged along and why (also covers the
+    # 2026-07-24 is_autonomous flag bug and the 2026-08-18
+    # downed-real-player fix).
     if character.get("party_id"):
-        for member in db.get_party_members_by_id(character["party_id"]):
-            # A dead companion (2026-07-24, see _announce_defeats) stays
-            # exactly where they fell until revived, same as a dead real
-            # player -- never dragged along by the rest of the party.
-            if member.get("is_ai") and not member.get("is_dead") and member["telegram_user_id"] != update.effective_user.id:
-                db.move_character(member["telegram_user_id"], update.effective_chat.id, destination_id)
+        _move_party_stragglers_along(
+            update.effective_user.id, character["party_id"], update.effective_chat.id, destination_id,
+        )
 
     # Per Coffee (2026-07-14): TTS coverage audit -- _do_move's primary
     # reply never went through _safe_send, so this (one of the most
@@ -18984,11 +19030,12 @@ async def _do_fast_travel(update: Update, text: str) -> None:
     # warp) never got the same fix, so warping anywhere silently left
     # every AI companion behind at the old location -- indistinguishable
     # from them just vanishing, and exactly why Wren wasn't "here"
-    # anymore for a give/equip/anything-location-scoped action.
+    # anymore for a give/equip/anything-location-scoped action. Now
+    # shared with _do_move via _move_party_stragglers_along (2026-08-18)
+    # so the two paths can't diverge like this a second time -- see that
+    # helper's docstring for the full current logic.
     if character.get("party_id"):
-        for member in db.get_party_members_by_id(character["party_id"]):
-            if member.get("is_ai") and not member.get("is_dead") and member["telegram_user_id"] != telegram_user_id:
-                db.move_character(member["telegram_user_id"], update.effective_chat.id, destination_id)
+        _move_party_stragglers_along(telegram_user_id, character["party_id"], update.effective_chat.id, destination_id)
     # Real live bug (2026-08-13, dev-topic screenshot, Coffee: "Instead
     # of saying, you fast travel, can you include the player's name?"):
     # the on-foot travel message (_do_move, just below) already names

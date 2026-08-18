@@ -6614,7 +6614,27 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         after = db.get_character(996093, -999)
         self.assertEqual(after["spell_slots_current"], 2)  # one spell slot spent
         self.assertTrue(any("counters it" in msg for msg in sink), sink)
+        # Real dev-bridge report (2026-08-18): "cast two spell slots...
+        # why did they have none left after only using two?" -- the
+        # reaction message now states the real remaining count so a
+        # slot silently spent by a reaction isn't mistaken for a bug.
+        self.assertTrue(any("2/3 left" in msg for msg in sink), sink)
         sessions.end_session(-999)
+
+    async def test_shield_reaction_announcement_states_slots_remaining(self):
+        """
+        Same real dev-bridge report as the Counterspell test above --
+        Shield is the OTHER auto-triggered reaction that silently spends
+        a spell slot (rules/combat.py), and its announcement previously
+        never said so either.
+        """
+        sink = []
+        update = FakeUpdate(996094, "look", sink)
+        defender = {"name": "Shieldy", "spell_slots_current": 1, "spell_slots_max": 4}
+        result = {"shield_reaction_triggered": True, "uncanny_dodge_triggered": False}
+        await bot._announce_reaction(update, defender, result)
+        self.assertTrue(any("1/4 left" in msg for msg in sink), sink)
+        self.assertTrue(any("Shield as a reaction" in msg for msg in sink), sink)
 
     async def test_ai_party_companion_can_cast_their_own_real_known_spell(self):
         """
@@ -11674,6 +11694,35 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(text_messages), 2)
         self.assertIn("travels to", text_messages[0])
         self.assertIn("You can travel to:", text_messages[1])
+
+    async def test_downed_real_party_member_is_carried_along_on_travel(self):
+        """
+        Real dev-bridge report (2026-08-18, Coffee, two characters under
+        his own account): "Ravenloft" went unconscious-and-stable (0 HP,
+        not dead) mid-fight, and was left behind at the old location when
+        the rest of the party (his other character, active) traveled to
+        the shrine to heal up -- confirmed live via the DB that
+        Ravenloft's current_location never moved. A downed, not-dead real
+        player can't act (including moving themselves), so they need to
+        be carried along like an AI companion already is, or every
+        shrine/heal-the-party mechanic (both location-gated) has nothing
+        to work with. A DEAD member (separate, real "recover the body"
+        case) must still be left behind untouched.
+        """
+        mover_id, downed_id, dead_id = 900562, 900563, 900564
+        make_basic_character(mover_id, "MoverChar", current_location="whispering_wood")
+        make_basic_character(downed_id, "DownedChar", current_location="whispering_wood")
+        make_basic_character(dead_id, "DeadChar", current_location="whispering_wood")
+        party_id = db.create_party(mover_id, -999)
+        db.update_character(downed_id, -999, party_id=party_id, hp_current=0)
+        db.update_character(dead_id, -999, party_id=party_id, hp_current=0, is_dead=1)
+        db.mark_location_cleared(mover_id, -999, "whispering_wood")
+        sink = []
+        await bot._do_move(FakeUpdate(mover_id, "", sink), "go south")
+        downed_after = db.get_character(downed_id, -999)
+        dead_after = db.get_character(dead_id, -999)
+        self.assertNotEqual(downed_after["current_location"], "whispering_wood")
+        self.assertEqual(dead_after["current_location"], "whispering_wood")
 
     async def test_arriving_on_foot_does_not_auto_look_for_an_ai_companion(self):
         """

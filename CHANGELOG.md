@@ -2,6 +2,42 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.241] — Reaction spell-slot transparency + downed real player left behind on travel
+
+**Real dev-bridge report (2026-08-18, Coffee):** "My character cast two
+spell slots last battle and has 4 slots. Why did they have none left
+after only using two?" Root cause: Shield (Wizard/Sorcerer) and
+Counterspell are both real auto-triggered reactions that spend a spell
+slot with no player action involved — against a boss landing several
+hits a round, they can burn through remaining slots fast, and neither
+reaction's announcement ever said so. Not a bug in the slot math itself
+(both are documented, deliberate mechanics), but a real narration gap —
+a player watching their slot count had no way to connect it hitting 0
+with these reactions being the actual cause. Both `_announce_reaction`
+(Shield) and the Counterspell narration now state the real remaining
+count every time they fire.
+
+**Real dev-bridge report (2026-08-18, Coffee, two characters under his
+own account):** "Why didn't it revive my other character, Ravenloft?"
+Root cause, confirmed live via the DB: Ravenloft went
+unconscious-and-stable (0 HP, `is_dead` still 0) mid-fight, then was
+left exactly where they fell when the rest of the party traveled on to
+the Hollow Stump Shrine — `_do_move`/`_do_fast_travel` only ever
+dragged AI companions along, never a real human party member, on the
+assumption a real player controls their own movement. But an
+unconscious player literally *can't* — so both the shrine's revive
+(correctly `is_dead`-gated, not applicable here) and its "bless the
+present party" fallback (location-gated) had nothing to work with:
+Ravenloft was never actually AT the shrine to receive either. A downed
+(0 HP, not dead) real party member is now carried along on travel same
+as an AI companion already is — a genuinely dead one still stays put on
+purpose, matching the documented "recover the body" death rule. Both
+call sites shared one previously-duplicated block (already the source
+of one real divergence bug, 2026-08-01, when fast-travel silently
+didn't get the on-foot companion-drag-along fix) — extracted into one
+shared `_move_party_stragglers_along` helper so they can't drift apart
+again.
+
 ## [1.27.240] — Natural-language menu/formation/waypoints/equip keywords + bare-take silent-reply fix
 
 **Real dev-bridge feature request (2026-08-16, Coffee):** "Make a
