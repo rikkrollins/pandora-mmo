@@ -2,6 +2,48 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.246] — Remnants: Support hallucination fix, real Summon battle button/menu, and a story_tied regression fix
+
+**Real live Support hallucination (2026-08-18, Coffee, screenshot):**
+asked "How do we summon a Remnant?" and got back a fully fabricated
+answer — "interact with Grask Emberscale... cast a ritual tied to the
+Deep Tunnels" — that even flagged its own guess ("*Remnant is not
+explicitly defined in provided data*") and invented an answer anyway.
+Remnants (remnants.py, real since 2026-08-13) were never grounded in
+`ai/support_agent.py`'s catalog at all — same root cause as the
+guild-benefits/subclass grounding gaps fixed in v1.27.202. New
+`_remnants_catalog_text()` states the real mechanic (bind on defeat,
+assign a Summoner, "summon [name]" in combat, spell-slot cost at
+Mastery) but deliberately never names which real bosses are Unbound —
+5 of 12 are intentional pure secrets.
+
+**Real feature request (2026-08-18, Coffee):** "make a 'summon' battle
+option for characters with Remnants, and make a menu for 'Remnants' so
+players can see what the summons do." `_do_summon_remnant` was only
+ever reachable by typing "summon [name]" — no tappable button, unlike
+every other real battle action. The battle menu now shows a 🔮 Summon
+button (only to the party's actual designated Summoner with a bound
+Remnant), listing bound Remnants → picking one → a target picker if
+more than one enemy is present, same shape as the existing Skills/cast
+flow. A new "Remnants" screen (say "remnants"/"my remnants") shows a
+player's own bound Remnants' real damage dice, element, average
+damage, and secondary effect — grounded only in what THIS character
+has actually bound, never the full secret catalog.
+
+**Real regression found while testing the above, unrelated to this
+session's other changes:** `remnants.py`'s own docstring documents "5
+strongest by real average summon damage stay pure secrets
+(story_tied=False)," but v1.27.214's "Synergy Pass Phase 9" had
+silently flipped all 5 of them to `story_tied=True` — a stale
+regression test (`test_remnant_story_tied_split_is_seven_story_five_secret`)
+caught it the moment it ran again. All 12 Remnants have been leaking
+as "Whispers" story rumors since that commit instead of the intended
+7. Restored the correct 5 (The Unopened, The Wrathflame Unbound, The
+Hollow Bell, The Farthest Span, The Deepest Record — confirmed via
+git blame as the exact 5 that commit touched, and independently
+confirmed as the real top-5-by-average-damage set the docstring
+describes) to `story_tied: False`.
+
 ## [1.27.245] — The Colosseum Champion's damage raised, same "toothless" shape as Shadow Wisp
 
 **Real dev-bridge report (2026-08-16, Coffee, live in a real fight):**

@@ -20,6 +20,7 @@ import campaign_loader as cl
 import config
 import items as items_module
 import races as races_module
+import remnants as remnants_module
 import spells as spells_module
 from ai.text_cleanup import strip_think_tags, is_placeholder_text
 from guilds import GUILDS
@@ -377,6 +378,45 @@ def _race_bonus_catalog_text() -> str:
     return "\n".join(lines)
 
 
+def _remnants_catalog_text() -> str:
+    """
+    Real live bug (2026-08-18, Coffee, Support topic screenshot): asked
+    "How do we summon a Remnant?" and got a fully fabricated answer
+    ("interact with Grask Emberscale... cast a ritual tied to the Deep
+    Tunnels") that even flagged its own guess with "*(Note: 'Remnant' is
+    not explicitly defined in provided data...)*" and invented an
+    answer anyway -- the exact hallucination-under-a-grounding-gap
+    pattern this file's CRITICAL_GROUNDING_RULE exists to prevent (see
+    the guild-benefits/subclass catalog fixes above for the same root
+    cause). Remnants (remnants.py) were never in this catalog at all.
+
+    Deliberately grounds the MECHANIC only, never which real bosses are
+    Unbound or where they're found -- this file's own system prompt
+    already forbids revealing plot/discovery content, and 5 of the 12
+    real Remnants are intentionally pure secrets (remnants.py's own
+    story_tied=False design), never to be hinted at here.
+    """
+    return (
+        "\nREAL REMNANTS SYSTEM IN THIS GAME: defeating a real 'Unbound' "
+        "boss-tier monster binds a fragment of it (a 'Remnant') to every "
+        "real party member present for the kill -- automatic, nothing to "
+        "equip or carry, tracked as bound_remnants on the character. To "
+        "actually USE a bound Remnant, the party must first designate ONE "
+        "member as its Summoner by saying \"assign [name] as summoner\" "
+        "(only one Summoner at a time, party-wide, reassignable anytime); "
+        "that Summoner can then, IN COMBAT ONLY, say \"summon [Remnant "
+        "name]\" to call it as a themed attack (a real damage roll through "
+        "this game's own damage-type pipeline, never a second combatant). "
+        "Before reaching 100% Summoning Mastery, each battle gives a "
+        "limited number of free summons (more banked Mastery = more free "
+        "uses per battle, capped at 5); at 100% Mastery, summoning is "
+        "unlimited per battle but costs one real spell slot per cast. "
+        "Never invent which specific bosses are Unbound or where they're "
+        "found -- that's real, deliberate discovery content, not a "
+        "how-to-play fact this catalog reveals."
+    )
+
+
 # Real live bug (2026-08-10, found via topic-activity monitoring): both
 # real Support questions ever asked in the live log failed with
 # "Pandora AI is genuinely overloaded" -- confirmed root cause by
@@ -413,6 +453,7 @@ _CATALOG_SECTION_KEYWORDS = {
         + [name.lower() for names in CLASS_SUBCLASSES.values() for name in names],
         _subclass_catalog_text,
     ),
+    "remnants": (["remnant", "unbound", "summoner", "summon"], _remnants_catalog_text),
 }
 
 

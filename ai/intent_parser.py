@@ -945,6 +945,14 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
         return {**base, "action": "summon_remnant"}
     if re.search(r"\bassign\b.+\bsummoner\b", lowered) or re.search(r"\bmake\b.+\bsummoner\b", lowered):
         return {**base, "action": "assign_summoner"}
+    # Real feature request (2026-08-18, per Coffee: "make a menu for
+    # 'Remnants' so players can see what the summons do... and their
+    # attack or ability"). Checked AFTER summon_remnant/assign_summoner
+    # above so an actual "summon [name]"/"assign X as summoner" command
+    # is never swallowed by this broader bare-word catch -- same
+    # ordering convention as the menu/formation/waypoints block above.
+    if re.search(r"\bremnants?\b", lowered):
+        return {**base, "action": "check_remnants"}
 
     # Bench/un-bench (2026-07-31, per Coffee: battle-planning roster
     # picker) -- checked before "unbench" would ever risk matching a
@@ -2237,6 +2245,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "drink_water", "choose_subclass", "start_echo_trial", "check_professions",
                 "talk_party", "use_environment", "throw_weapon",
                 "check_menu", "check_formation", "check_waypoints", "check_equip_menu",
+                "check_remnants",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

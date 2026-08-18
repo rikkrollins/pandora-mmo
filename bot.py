@@ -2624,6 +2624,17 @@ def _battle_menu_keyboard(session: sessions.Session) -> InlineKeyboardMarkup | N
     usable_ids = _battle_usable_item_ids(character)
     if usable_ids:
         row.append(InlineKeyboardButton("🎒 Items", callback_data="bm|items"))
+    # Real feature request (2026-08-18, Coffee, same session as the
+    # Support Remnants-grounding fix): "make a 'summon' battle option
+    # for characters with Remnants" -- _do_summon_remnant was only ever
+    # reachable by typing "summon [name]" with no tappable button at
+    # all, unlike every other real battle action here. Only shown to
+    # the party's actual designated Summoner (bot._do_assign_summoner)
+    # with at least one real bound Remnant -- same "grounded in this
+    # specific character's own real data" convention Skills/Items above
+    # already follow, never a generic button everyone sees.
+    if character.get("is_designated_summoner") and character.get("bound_remnants"):
+        row.append(InlineKeyboardButton("🔮 Summon", callback_data="bm|summon"))
     # "More" submenu (2026-08-01, per Coffee: "instead of run make it
     # an other command... Run, Give, Formation, Equip and other things
     # useful for battle that doesnt require a turn"): Run shares this
@@ -2903,6 +2914,42 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         spell_name = spell["name"] if spell else value
         await _safe_edit_markup(query)
         await _do_cast_spell(update, f"cast {spell_name} on {target_name}")
+        return
+
+    if action == "summon":
+        bound = character.get("bound_remnants", []) if character else []
+        remnant_buttons = [
+            [InlineKeyboardButton(remnants_module.get_remnant(rid)["name"], callback_data=f"bm|summonpick|{rid}")]
+            for rid in bound if remnants_module.get_remnant(rid)
+        ]
+        remnant_buttons.append([InlineKeyboardButton("« Back", callback_data="bm|menu")])
+        await _safe_edit_markup(query, InlineKeyboardMarkup(remnant_buttons))
+        return
+
+    if action == "summonpick":
+        remnant = remnants_module.get_remnant(value)
+        remnant_name = remnant["name"] if remnant else value
+        opposing = session.living_on_side(session.opposing_side(user_id))
+        if len(opposing) > 1:
+            buttons = [
+                [InlineKeyboardButton(
+                    f"{p['name']} ({p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP)",
+                    callback_data=f"bm|summontarget|{value}|{p['name']}",
+                )]
+                for p in opposing
+            ]
+            buttons.append([InlineKeyboardButton("« Back", callback_data="bm|summon")])
+            await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+            return
+        await _safe_edit_markup(query)
+        await _do_summon_remnant(update, f"summon {remnant_name}")
+        return
+
+    if action == "summontarget":
+        remnant = remnants_module.get_remnant(value)
+        remnant_name = remnant["name"] if remnant else value
+        await _safe_edit_markup(query)
+        await _do_summon_remnant(update, f"summon {remnant_name} on {target_name}")
         return
 
     if action == "items":
@@ -13796,6 +13843,65 @@ async def _do_check_professions(update: Update) -> None:
     await _safe_send(update, "\n".join(lines), speak=False)
 
 
+_SUMMON_SECONDARY_DESCRIPTIONS = {
+    "none": "no secondary effect — pure damage",
+    "dot": "leaves the target poisoned",
+    "self_heal": "heals the Summoner for a quarter of the damage dealt",
+    "party_heal": "heals the whole party for a sixth of the damage dealt each",
+}
+
+
+async def _do_check_remnants(update: Update) -> None:
+    """
+    Real feature request (2026-08-18, Coffee, same session as the
+    Support Remnants-grounding fix): "make a menu for 'Remnants' so
+    players can see what the summons do for the players and their
+    attack or ability" -- a real dev-bridge report the same day showed
+    Support fabricating an entire fake summon ritual because it had
+    nothing real to ground on, and even the real, correct mechanic
+    (assign a Summoner, "summon [name]" in combat) had no in-game
+    screen a player could just look at. Shows only THIS character's own
+    real bound_remnants (remnants.py) -- never the full REMNANTS table,
+    so it can't leak which of the 12 real Unbound exist or where they
+    are before a player has genuinely earned one.
+    """
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    bound = character.get("bound_remnants") or []
+    if not bound:
+        await _safe_send(
+            update,
+            "🔮 You haven't bound any Remnants yet — defeat a real Unbound (a rare, hidden boss-tier "
+            "fight) to earn one.",
+            speak=False,
+        )
+        return
+    summoner_note = (
+        "You're the party's designated Summoner — say \"summon [name]\" in battle to call one."
+        if character.get("is_designated_summoner") else
+        "You're not the party's designated Summoner right now — say \"assign [name] as summoner\" to "
+        "let someone actually call these into battle."
+    )
+    lines = [f"🔮 **{character['name']}**'s bound Remnants:", summoner_note, ""]
+    for remnant_id in bound:
+        remnant = remnants_module.get_remnant(remnant_id)
+        if not remnant:
+            continue
+        avg_dmg = average_damage(remnant["summon_damage_dice"], remnant["summon_damage_bonus"])
+        secondary_text = _SUMMON_SECONDARY_DESCRIPTIONS.get(remnant["summon_secondary"], "no secondary effect")
+        lines.append(
+            f"**{remnant['name']}** — {remnant['summon_damage_dice']}+{remnant['summon_damage_bonus']} "
+            f"{remnant['element']} damage (~{avg_dmg:.1f} avg); {secondary_text}."
+        )
+        lines.append(f"_{remnant['lore']}_")
+        lines.append("")
+    await _safe_send(update, "\n".join(lines).strip(), speak=False)
+
+
 async def _do_read_recipe_book(update: Update, item: dict) -> None:
     """
     Recipe books (2026-08-11, per Coffee: real "Cook Book"/"Herbalism
@@ -23423,6 +23529,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_show_waypoints(update)
     elif action == "check_equip_menu":
         await _do_show_equip_menu(update)
+    elif action == "check_remnants":
+        await _do_check_remnants(update)
     elif action == "buy":
         await _do_buy(update, text)
     elif action == "sell":

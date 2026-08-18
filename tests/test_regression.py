@@ -7241,6 +7241,30 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Wild Magic", result)
         self.assertIn("Charisma check", result)
 
+    def test_support_remnants_catalog_grounds_the_real_mechanic_not_secrets(self):
+        """
+        Real live bug (2026-08-18, Coffee, Support topic screenshot):
+        "How do we summon a Remnant?" got a fully fabricated answer
+        (interact with Grask Emberscale, cast a ritual) that even
+        flagged its own guess ("Remnant is not explicitly defined in
+        provided data") and invented one anyway -- Remnants
+        (remnants.py, real since 2026-08-13) were never grounded in
+        support_agent.py at all. New catalog states the real mechanic
+        (bind on defeat, assign a Summoner, "summon [name]" in combat,
+        spell-slot cost at Mastery) but deliberately never names which
+        real bosses are Unbound or where -- 5 of 12 are intentional pure
+        secrets.
+        """
+        from ai.support_agent import _remnants_catalog_text, _build_catalog_reference
+        catalog = _remnants_catalog_text()
+        self.assertIn("Summoner", catalog)
+        self.assertIn("assign", catalog)
+        self.assertIn("summon", catalog.lower())
+        self.assertIn("spell slot", catalog)
+        self.assertNotIn("Grask", catalog)
+        result = _build_catalog_reference("How do we summon a Remnant?")
+        self.assertIn("REAL REMNANTS SYSTEM", result)
+
     def test_equipable_worth_shown_in_stats_line(self):
         """Real live request (2026-08-03): "in the description of the items can u show what it is worth? do this for equipables"."""
         from rules.item_generator import generate_weapon
@@ -8113,6 +8137,99 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Back:", text2)
         self.assertNotIn("Front:", text2)
         sessions.end_session(-999)
+
+    def test_battle_menu_summon_button_only_for_the_designated_summoner_with_a_bound_remnant(self):
+        """
+        Real feature request (2026-08-18, Coffee): "make a 'summon'
+        battle option for characters with Remnants" -- _do_summon_remnant
+        was only ever reachable by typing "summon [name]", no button at
+        all, unlike every other real battle action. Grounded in the
+        SPECIFIC character's own real data (is_designated_summoner AND a
+        non-empty bound_remnants), same convention Skills/Items already
+        follow -- never a generic button shown to everyone.
+        """
+        import sessions
+        sessions.end_session(-999)
+        summoner_id = 950650
+        make_basic_character(summoner_id, "SummonMenuTester", current_location="crossroads_tavern")
+        enemy = {"telegram_user_id": -5100050, "name": "SummonMenuGoblin", "dexterity": 10, "hp_current": 20, "hp_max": 20}
+        summoner = db.get_character(summoner_id, -999)
+        summoner["telegram_user_id"] = summoner_id
+        session = sessions.start_session(-999, [summoner, enemy], {summoner_id: "party", -5100050: "enemy"})
+        session.turn_order = [summoner_id, -5100050]
+
+        kb_before = bot._battle_menu_keyboard(session)
+        labels_before = [btn.text for row in kb_before.inline_keyboard for btn in row]
+        self.assertFalse(any("Summon" in l for l in labels_before))
+
+        db.update_character(summoner_id, -999, bound_remnants=["the_wrathflame_unbound"], is_designated_summoner=1)
+        kb_after = bot._battle_menu_keyboard(session)
+        labels_after = [btn.text for row in kb_after.inline_keyboard for btn in row]
+        self.assertTrue(any("Summon" in l for l in labels_after))
+        sessions.end_session(-999)
+
+    async def test_battle_menu_summon_flow_lists_remnant_then_target_then_casts(self):
+        """Full tap-through: bm|summon -> bm|summonpick|<id> -> bm|summontarget|<id>|<name>, same shape as the existing cast/casttarget flow."""
+        import sessions
+        sessions.end_session(-999)
+        user_id = 950651
+        make_basic_character(user_id, "SummonFlowTester", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, bound_remnants=["the_wrathflame_unbound"], is_designated_summoner=1)
+        enemy_a = {"telegram_user_id": -5100051, "name": "SummonGoblinA", "hp_current": 20, "hp_max": 20,
+                   "is_ai": 1, "strength": 10, "dexterity": 10, "armor_class": 10}
+        enemy_b = {"telegram_user_id": -5100052, "name": "SummonGoblinB", "hp_current": 20, "hp_max": 20,
+                   "is_ai": 1, "strength": 10, "dexterity": 10, "armor_class": 10}
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy_a, enemy_b],
+                                          {user_id: "party", -5100051: "enemy", -5100052: "enemy"})
+        session.turn_order = [user_id, -5100051, -5100052]
+        session.current_turn_index = 0
+
+        async def tap(data):
+            sink = []
+            await bot.battle_menu_callback(FakeCallbackUpdate(user_id, data, sink), DummyContext())
+            return "\n".join(sink)
+
+        remnant_picker = await tap("bm|summon")
+        self.assertIn("bm|summonpick|the_wrathflame_unbound", remnant_picker)
+
+        target_picker = await tap("bm|summonpick|the_wrathflame_unbound")
+        self.assertIn("SummonGoblinA", target_picker)
+        self.assertIn("bm|summontarget|the_wrathflame_unbound|SummonGoblinB", target_picker)
+
+        result = await tap("bm|summontarget|the_wrathflame_unbound|SummonGoblinB")
+        self.assertIn("The Wrathflame Unbound", result)
+        self.assertIn("SummonGoblinB", result)
+        sessions.end_session(-999)
+
+    async def test_do_check_remnants_shows_real_bound_remnant_and_summoner_status(self):
+        """
+        Real feature request (2026-08-18, Coffee): "make a menu for
+        'Remnants' so players can see what the summons do... and their
+        attack or ability." Only ever shows THIS character's own real
+        bound_remnants, never the full secret REMNANTS table.
+        """
+        user_id = 950652
+        make_basic_character(user_id, "RemnantMenuTester", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, bound_remnants=["the_wrathflame_unbound"], is_designated_summoner=0)
+        sink = []
+        await bot._do_check_remnants(FakeUpdate(user_id, "", sink))
+        reply = sink[0]
+        self.assertIn("The Wrathflame Unbound", reply)
+        self.assertIn("fire damage", reply)
+        self.assertIn("assign", reply.lower())  # tells them they're not the Summoner yet
+
+    def test_remnants_keyword_classified_as_check_remnants(self):
+        from ai.intent_parser import _keyword_fallback
+        self.assertEqual(_keyword_fallback("show my remnants", [])["action"], "check_remnants")
+        self.assertEqual(_keyword_fallback("remnants", [])["action"], "check_remnants")
+        # A real "summon [name]"/"assign X as summoner" command must NOT
+        # be swallowed by this broader bare-word catch.
+        self.assertEqual(
+            _keyword_fallback("summon The Wrathflame Unbound", [])["action"], "summon_remnant",
+        )
+        self.assertEqual(_keyword_fallback("assign Sarah as summoner", [])["action"], "assign_summoner")
 
     def test_battle_menu_shows_more_button_not_a_bare_run_button(self):
         import sessions
