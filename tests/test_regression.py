@@ -9586,6 +9586,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Root-Bound Goblin (Lv. 25)", bot._monster_danger_line(["root_bound_goblin"]))
         self.assertIn("Root Goblin Pup (Lv. 32)", bot._monster_danger_line(["root_goblin_pup"]))
 
+    def test_colosseum_champion_damage_raised(self):
+        """
+        Real dev-bridge report (2026-08-16, Coffee, live in a real fight):
+        "I feel the enemy isn't doing much damage towards the party...
+        characters are currently level 15 to level 20." Confirmed from
+        the screenshot: damage_bonus 20 (~24.5 avg/hit) against a party
+        with 472-869 HP pools was only ~3-5% of a hit -- same "toothless"
+        shape the real Shadow Wisp damage fix (v1.27.236, damage_bonus
+        16->30) already diagnosed and fixed for this exact reason.
+        Doubled here too (20->40) for the same real reason.
+        """
+        self.assertEqual(bot.CAMPAIGN["monsters"]["colosseum_champion"]["damage_bonus"], 40)
+
     async def test_boss_level_hidden_until_defeated_then_shown_in_bestiary(self):
         """
         Real feature, same session (2026-08-15, per Coffee: "make the

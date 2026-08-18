@@ -2,6 +2,17 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.245] — The Colosseum Champion's damage raised, same "toothless" shape as Shadow Wisp
+
+**Real dev-bridge report (2026-08-16, Coffee, live in a real fight):**
+"I feel the enemy isn't doing much damage towards the party... our
+characters are currently level 15 to level 20." Confirmed from the
+screenshot: `damage_bonus` 20 (~24.5 avg/hit) against a party with
+472–869 HP pools was landing for only ~3–5% of a hit — the exact same
+"toothless" shape the real Shadow Wisp damage fix (v1.27.236,
+`damage_bonus` 16→30) already diagnosed and fixed. Doubled here too
+(20→40) for the same real reason; HP/AC/on-hit-condition untouched.
+
 ## [1.27.244] — Flooded Gallery / Side Pool leveled up per Coffee's dev-bridge map request
 
 **Real dev-bridge follow-up (2026-08-17, Coffee, same session as

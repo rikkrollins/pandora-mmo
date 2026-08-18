@@ -4422,7 +4422,7 @@
       "on_hit_condition": "frightened",
       "counters_extra_attack": true,
       "damage_dice": "1d8",
-      "damage_bonus": 20,
+      "damage_bonus": 40,
       "damage_type": "physical",
       "stealable_items": [
         {
