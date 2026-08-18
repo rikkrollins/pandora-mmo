@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.247] — Quest-detail questions actually answer the quest asked about
+
+**Real dev-bridge report (2026-08-18, Coffee):** "I'm not getting
+information on how to complete this quest... whenever I ask for
+details about the quest the game isn't telling me either." Two real
+gaps, confirmed from the screenshot's exact phrasing ("I want more
+information about the Wayfarer's circuit quest"):
+- That phrasing never matched any of `ask_clue`'s narrower "ask for a
+  clue"/"give me a hint" keyword triggers, so it fell through to the
+  model with no strong signal for a genuinely ambiguous question. A
+  broader "quest" + a real info-seeking verb (more info/details/how do
+  I/what do I) pattern now catches it directly.
+- Even when correctly classified, `_do_ask_clue` always dumped EVERY
+  active quest's clue lumped together — no honest way to tell which
+  line answered the actual question. Naming a real quest by title now
+  narrows the reply to just that one, same "name it if more than one
+  applies" convention `_do_accept_quest` already uses; asking generically
+  still shows every active clue, unchanged.
+
 ## [1.27.246] — Remnants: Support hallucination fix, real Summon battle button/menu, and a story_tied regression fix
 
 **Real live Support hallucination (2026-08-18, Coffee, screenshot):**

@@ -267,6 +267,24 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_keyword_fallback("I attack the goblin", [])["action"], "attack")
         self.assertEqual(_keyword_fallback("give my potion to Sarah", [])["action"], "give_item")
 
+    def test_quest_info_phrasing_classified_as_ask_clue(self):
+        """
+        Real dev-bridge report (2026-08-18, Coffee): "I want more
+        information about the Wayfarer's circuit quest" -- a completely
+        natural phrasing -- never matched any of ask_clue's narrower
+        "ask for a clue"/"give me a hint" triggers, so it fell through
+        to the model with no strong signal for a genuinely ambiguous
+        question.
+        """
+        for text in (
+            "I want more information about the Wayfarer's circuit quest",
+            "how do I complete this quest",
+            "what do I need to do for this quest",
+        ):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "ask_clue", text)
+        # Must not shadow the real "list my quests" intent.
+        self.assertEqual(_keyword_fallback("check my quests", [])["action"], "check_quests")
+
     async def test_player_can_actually_leave_tavern_upstairs(self):
         user_id = 222222
         make_basic_character(user_id, current_location="tavern_upstairs")
@@ -8976,6 +8994,34 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     #    switched both quests' triggers to defeat_monster. This doesn't
     #    need SlowLiveTests/Ollama -- _check_quest_completions_defeat_monster
     #    and _safe_send with FakeUpdate are both narration-free here. ---
+    async def test_ask_clue_narrows_to_a_named_quest_among_several_active(self):
+        """
+        Real dev-bridge report (2026-08-18, Coffee): "I'm not getting
+        information on how to complete this quest... whenever I ask for
+        details about the quest the game isn't telling me either." Root
+        cause: _do_ask_clue always dumped EVERY active quest's clue
+        together, with no honest way to tell which line answered the
+        actual question -- naming a real quest by title now narrows the
+        reply to just that one, same "name it if more than one applies"
+        convention _do_accept_quest already uses.
+        """
+        player_id = 999905
+        make_basic_character(player_id, "ClueAsker", current_location="whispering_wood")
+        db.accept_quest(player_id, -999, "wayfarers_circuit")
+        db.accept_quest(player_id, -999, "the_deeper_seam")
+
+        sink = []
+        await bot._do_ask_clue(FakeUpdate(player_id, "", sink), "I want more information about the Wayfarer's circuit quest")
+        reply = sink[0]
+        self.assertIn("Wayfarer's Circuit", reply)
+        self.assertNotIn("Deeper Seam", reply)
+
+        sink2 = []
+        await bot._do_ask_clue(FakeUpdate(player_id, "", sink2), "give me a clue")
+        reply2 = sink2[0]
+        self.assertIn("Wayfarer's Circuit", reply2)
+        self.assertIn("Deeper Seam", reply2)
+
     async def test_the_hush_quest_requires_defeating_the_unspoken(self):
         # Task #86/Full-storyline Phase 2 split the old single "the_hush"
         # quest into a 3-stage chain (the_hush_stage1_signs/stage2_the_

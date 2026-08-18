@@ -533,6 +533,25 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
                                     "ask for a hint", "what clues"]):
         return {**base, "action": "ask_clue"}
 
+    # Real live bug (2026-08-18, dev-bridge screenshot, Coffee: "I'm not
+    # getting information on how to complete this quest... whenever I
+    # ask for details about the quest the game isn't telling me
+    # either"). "I want more information about the Wayfarer's circuit
+    # quest" -- a completely natural way to ask the exact same thing the
+    # narrower "ask for a clue"/"give me a hint" phrasing above already
+    # covers -- never matched any of those, so it fell through to the
+    # model with no strong signal, and quest-detail questions are
+    # genuinely ambiguous for it to classify. "quest" plus a real
+    # info-seeking verb (more/details/info/help/how) is unambiguous
+    # enough to catch unconditionally, same "distinctive enough in this
+    # game's vocabulary" bar the menu/formation/waypoints block above
+    # uses.
+    if "quest" in lowered and re.search(
+        r"\b(?:more (?:info|information|details)|details|information|info|help with|how (?:do|to)|what do i)\b",
+        lowered,
+    ):
+        return {**base, "action": "ask_clue"}
+
     # give_item (player-to-player trading, 2026-07-15): checked after
     # ask_clue above so "give me a clue/hint" is never shadowed -- this
     # only fires on "give"/"hand"/"trade"/"send" phrasing that also names a

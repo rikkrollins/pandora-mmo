@@ -11587,7 +11587,7 @@ async def _do_check_quests(update: Update) -> None:
     )
 
 
-async def _do_ask_clue(update: Update) -> None:
+async def _do_ask_clue(update: Update, text: str = "") -> None:
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
         await update.effective_chat.send_message(
@@ -11601,8 +11601,26 @@ async def _do_ask_clue(update: Update) -> None:
         )
         return
 
+    # Real live bug (2026-08-18, dev-bridge screenshot, Coffee: "I want
+    # more information about the Wayfarer's circuit quest" got back
+    # every active quest's clue lumped together, no honest way to tell
+    # which line answered the actual question asked). Same "name it if
+    # more than one applies" convention _do_accept_quest already uses
+    # for board quests -- a real quest title mentioned in the text
+    # narrows the reply to just that one; naming nothing (or a title
+    # that matches none of the active quests) keeps the old "dump every
+    # active clue" behavior, since that's still a real, honest answer
+    # when there's no ambiguity to resolve.
+    lowered_text = text.lower()
+    active_quest_ids = list(character["active_quests"])
+    named_quest_ids = [
+        qid for qid in active_quest_ids
+        if (quest := CAMPAIGN["quests"].get(qid)) and quest["title"].lower() in lowered_text
+    ]
+    quest_ids_to_show = named_quest_ids or active_quest_ids
+
     lines = ["🔍 **What you know:**"]
-    for quest_id in character["active_quests"]:
+    for quest_id in quest_ids_to_show:
         quest = CAMPAIGN["quests"].get(quest_id)
         if quest and quest.get("clue"):
             lines.append(f"• *{quest['title']}*: {quest['clue']}")
@@ -23605,7 +23623,7 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     elif action == "check_quests":
         await _do_check_quests(update)
     elif action == "ask_clue":
-        await _do_ask_clue(update)
+        await _do_ask_clue(update, text)
     elif action == "answer_puzzle":
         await _do_answer_puzzle(update, text)
     elif action == "gamble":
