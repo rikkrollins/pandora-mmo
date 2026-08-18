@@ -2,6 +2,18 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.242] — The Wrathflame Unbound rebalanced to Coffee's requested level 20 / ~7000 HP
+
+**Real dev-bridge report (2026-08-18, Coffee, revised twice — 3500 HP
+then "make the wrathflame have about 7000 and make sure its a lv 20
+boss," the higher number superseding the first ask):** confirmed the
+request had never actually been applied — both `campaigns/default/
+campaign.json` and `docs/encounter_ledger.html` still had it at its
+original level 15 / 820 HP. Now level 20 / 7000 HP in both, matching
+Coffee's exact numbers; every other stat (AC 21, 2d8+20 fire damage,
+ignites-after-first-hit) is untouched, since he asked for HP/level
+specifically and those were already boss-appropriate.
+
 ## [1.27.241] — Reaction spell-slot transparency + downed real player left behind on travel
 
 **Real dev-bridge report (2026-08-18, Coffee):** "My character cast two

@@ -5581,11 +5581,11 @@
       ]
     },
     "the_wrathflame_unbound": {
-      "name": "The Wrathflame Unbound", "level": 15,
+      "name": "The Wrathflame Unbound", "level": 20,
       "dexterity": 16,
       "strength": 18,
       "armor_class": 21,
-      "hp_max": 820,
+      "hp_max": 7000,
       "proficiency_bonus": 5,
       "xp_reward": 1000,
       "is_boss": true,
