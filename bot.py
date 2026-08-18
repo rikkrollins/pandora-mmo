@@ -27042,6 +27042,7 @@ def build_application() -> Application:
 
 def main() -> None:
     db.init_db()
+    narration_cache.purge_stale_unplaceholdered_rows()
     setup_default_npcs()
     application = build_application()
     logger.info("BotApplication created successfully. Starting polling...")

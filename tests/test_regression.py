@@ -13714,6 +13714,53 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("Ravenloft", reused)
                 self.assertNotIn("Goblin Shaman", reused)
 
+    def test_purge_stale_unplaceholdered_rows_removes_pre_fix_baked_names(self):
+        """
+        Real dev-bridge report (2026-08-18, Coffee): "Why is it still
+        saying goblin shaman you said you fixed this issue?" -- reported
+        3 SEPARATE times (2026-08-14/15/16) after v1.27.235's own
+        "fix narration cache stale-identity bug" had already shipped.
+        Root cause, confirmed by reading the real live cache file: that
+        fix only changed what NEW writes look like -- 182 of 273 rows
+        already sitting in n.db from before the fix still hard-baked
+        real fighters' names with no {ACTOR}/{DEFENDER} token at all,
+        including the EXACT line from Coffee's report. MAX_VARIANTS_PER_
+        KEY's cap meant remember() had been silently refusing to add any
+        correctly placeholder-ized replacement to an already-full
+        bucket ever since -- these rows were permanent, not slow to age
+        out. This migration purges exactly the un-placeholder-ized
+        rows, once, and never rescans on a later call.
+        """
+        import tempfile
+        from ai import narration_cache
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("ai.narration_cache.CACHE_DIR", tmp), \
+                 patch("ai.narration_cache.CACHE_DB_PATH", f"{tmp}/n.db"):
+                key = "Warlock:miss:0"
+                with narration_cache._connect() as conn:
+                    # Simulate real pre-fix poisoned rows (bypassing remember(),
+                    # which already placeholder-izes on this branch).
+                    conn.execute(
+                        "INSERT INTO variants (key, text) VALUES (?, ?)",
+                        (key, "Ravenloft swings and misses (rolled a 9) against Goblin Shaman 2!"),
+                    )
+                    conn.execute(
+                        "INSERT INTO variants (key, text) VALUES (?, ?)",
+                        (key, "Some purely atmospheric line with no real name in it at all."),
+                    )
+                # A real, correctly placeholder-ized post-fix row, which must survive.
+                narration_cache.remember(key, "{ACTOR} swings and misses against {DEFENDER}!", actor_name="X", defender_name="Y")
+
+                deleted = narration_cache.purge_stale_unplaceholdered_rows()
+                self.assertEqual(deleted, 2)
+                with narration_cache._connect() as conn:
+                    remaining = [r[0] for r in conn.execute("SELECT text FROM variants WHERE key = ?", (key,)).fetchall()]
+                self.assertEqual(remaining, ["{ACTOR} swings and misses against {DEFENDER}!"])
+
+                # Safe to rerun -- a second call is a real no-op, not a re-scan.
+                self.assertEqual(narration_cache.purge_stale_unplaceholdered_rows(), 0)
+
     async def test_post_narrated_cache_miss_calls_ollama_and_stores_result(self):
         """First-ever routine outcome for a bucket: no stored variants yet, so this must call the real (mocked) narration model and store its result for reuse."""
         import tempfile

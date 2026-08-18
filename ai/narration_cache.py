@@ -153,3 +153,41 @@ def remember(key: str | None, text: str, actor_name: str | None = None, defender
         if count >= MAX_VARIANTS_PER_KEY:
             return
         conn.execute("INSERT INTO variants (key, text) VALUES (?, ?)", (key, text))
+
+
+# Real live bug (2026-08-18, dev-bridge, recurring 3x since 2026-08-14
+# despite v1.27.235's own "fix narration cache stale-identity bug" --
+# Coffee: "Why is it still saying goblin shaman you said you fixed
+# this issue?"). That fix only ever changed what NEW writes look like
+# (_placeholder_text at store time) -- it never touched the rows
+# already sitting in n.db from BEFORE that fix shipped (2026-08-13
+# through 2026-08-15 17:22), which hard-baked real fighters' names
+# with no {ACTOR}/{DEFENDER} token at all. Confirmed live by reading
+# the actual cache file: 182 of 273 stored rows still had zero
+# placeholder tokens, including the EXACT line from Coffee's own
+# report ("Warlock:miss:0" -> "Ravenloft swings and misses ... against
+# Goblin Shaman 2!"), and MAX_VARIANTS_PER_KEY's cap meant remember()
+# had been silently refusing to add any new (correctly placeholder-ized)
+# variant to an already-full bucket ever since -- the poisoned rows
+# were permanent, not just slow to age out. A row with NO placeholder
+# token is either unsafe (a real name baked in, reused verbatim against
+# whoever's ACTUALLY fighting later) or safe-but-never-needed-one (pure
+# mood text) -- either way, nothing of value survives purging it; a
+# fresh, correctly placeholder-ized replacement accumulates the next
+# time that bucket's routine outcome comes up. Runs once, gated by a
+# real marker row so a restart never re-scans the whole table.
+def purge_stale_unplaceholdered_rows() -> int:
+    """One-time, safe-to-rerun cleanup -- see the comment above. Returns how many rows were actually deleted (0 on a repeat call)."""
+    with _connect() as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY)")
+        already_ran = conn.execute(
+            "SELECT 1 FROM migrations WHERE name = ?", ("purge_stale_unplaceholdered_rows",)
+        ).fetchone()
+        if already_ran:
+            return 0
+        cur = conn.execute(
+            "DELETE FROM variants WHERE text NOT LIKE '%{ACTOR}%' AND text NOT LIKE '%{DEFENDER}%'"
+        )
+        deleted = cur.rowcount
+        conn.execute("INSERT INTO migrations (name) VALUES (?)", ("purge_stale_unplaceholdered_rows",))
+        return deleted

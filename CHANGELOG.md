@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.249] — Actually fixed the recurring "why does it still say Goblin Shaman" narration bug
+
+**Real dev-bridge report (2026-08-18, Coffee), the 3rd time this exact
+complaint was made (2026-08-14/15/16 too):** "Why is it still saying
+goblin shaman you said you fixed this issue?" v1.27.235 ("fix
+narration cache stale-identity bug") only ever changed what NEW
+narration-cache writes look like — it never touched the rows already
+sitting in the live cache from before that fix shipped. Confirmed by
+reading the actual live cache file: 182 of 273 stored rows still
+hard-baked real fighters' names with no `{ACTOR}`/`{DEFENDER}` token
+at all, including the *exact* line from Coffee's report
+("Ravenloft swings and misses ... against Goblin Shaman 2!"). Worse,
+`MAX_VARIANTS_PER_KEY`'s cap meant `remember()` had been silently
+refusing to add any new, correctly placeholder-ized variant to an
+already-full bucket ever since — the poisoned rows were permanent, not
+just slow to age out. New `purge_stale_unplaceholdered_rows()` (runs
+once at bot startup, real marker-gated so a restart never rescans)
+deletes exactly the un-placeholder-ized rows; already run once
+manually against the live cache (182 rows purged, 91 clean rows kept).
+
 ## [1.27.248] — Party and Party Sheets merged into one menu, per-member sheet picker
 
 **Real feature request (2026-08-17, Coffee):** "Can you make one menu
