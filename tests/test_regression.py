@@ -9751,6 +9751,12 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(enemy["damage_bonus"], stats["damage_bonus"])
         sessions.end_session(-991)
 
+    def test_kess_base_stats_raised_per_coffee(self):
+        """Real dev-bridge report (2026-08-19, Coffee): "Give kess 1200 HP Lv 23 enemy in greymoor downs"."""
+        stats = bot.CAMPAIGN["npcs"]["kess_the_bandit"]["stats"]
+        self.assertEqual(stats["hp_max"], 1200)
+        self.assertEqual(stats["level"], 23)
+
     def test_monster_danger_line_shows_the_real_authored_level_trash_only(self):
         """
         Real live bug (2026-08-15, per Coffee, dev-bridge screenshot:

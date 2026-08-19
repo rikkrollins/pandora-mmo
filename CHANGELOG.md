@@ -2,6 +2,17 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.252] — Kess rebalanced to Coffee's requested 1200 HP / level 23
+
+**Real dev-bridge report (2026-08-19, Coffee):** "Give kess 1200 HP Lv
+23 enemy in greymoor downs." Kess (`kess_the_bandit`, the one hostile
+ambient NPC ambush in this campaign) had `hp_max: 18` — her real
+combat stats are used as the base for `_npc_combatant_from_stats`'s
+own party-level scaling (v1.27.227), so this was the raw floor every
+scaled encounter multiplied up from. Now `hp_max: 1200`, `level: 23`
+(the latter not yet read by any code path, added for parity with
+every other authored boss stat block and Coffee's own explicit ask).
+
 ## [1.27.251] — "attack" typo tolerance (found via topic-activity monitoring)
 
 First real finding from the new recurring topic-activity monitoring

@@ -2506,10 +2506,11 @@
       "disposition": "hostile",
       "is_boss": true,
       "stats": {
+        "level": 23,
         "dexterity": 16,
         "strength": 13,
         "armor_class": 14,
-        "hp_max": 18,
+        "hp_max": 1200,
         "proficiency_bonus": 2,
         "xp_reward": 150,
         "damage_dice": "1d6",
