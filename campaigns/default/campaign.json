@@ -2510,7 +2510,7 @@
         "dexterity": 16,
         "strength": 13,
         "armor_class": 14,
-        "hp_max": 1200,
+        "hp_max": 600,
         "proficiency_bonus": 2,
         "xp_reward": 150,
         "damage_dice": "1d6",

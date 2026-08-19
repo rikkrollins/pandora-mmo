@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.262] — Kess's base HP revised down to land her scaled HP around 8-9k
+
+**Real dev-bridge follow-up (2026-08-19, Coffee):** after seeing Kess
+actually hit the table at 18,000 HP in a real fight, he asked for the
+base lowered so the real, scaled result lands "around 8000-9000 hp,"
+which he called "respectful" for a boss. Verified the exact math
+first (his own party is level 18-19, and Kess — flagged `is_boss` —
+gets the real 15x undertuned-boss scaling ceiling since her `xp_reward`
+badly undersells that level, per `rules.leveling.undertuned_monster_
+stat_multiplier`): `hp_max` 1200 → 600, so 600 × 15 = 9000, exactly in
+his requested range. Only affects Kess's next fresh encounter — her
+current live fight's already-locked-in HP is untouched (changing a
+combat participant's HP mid-fight was never asked for or done).
+
 ## [1.27.261] — Actually fixed "join the battle" — v1.27.260 corrected the wrong location
 
 **Coffee caught a real mistake in v1.27.260's own fix**, live: "we are

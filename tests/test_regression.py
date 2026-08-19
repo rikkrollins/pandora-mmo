@@ -9931,8 +9931,25 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     def test_kess_base_stats_raised_per_coffee(self):
         """Real dev-bridge report (2026-08-19, Coffee): "Give kess 1200 HP Lv 23 enemy in greymoor downs"."""
         stats = bot.CAMPAIGN["npcs"]["kess_the_bandit"]["stats"]
-        self.assertEqual(stats["hp_max"], 1200)
         self.assertEqual(stats["level"], 23)
+
+    def test_kess_hp_revised_down_per_coffee_after_seeing_the_scaled_result(self):
+        """
+        Real dev-bridge follow-up (2026-08-19, Coffee): after seeing
+        Kess actually hit the table at 18,000 scaled HP in a real
+        fight (1200 base x the real 15x undertuned-boss ceiling his
+        level 18-19 party triggers -- confirmed live via rules.leveling.
+        undertuned_monster_stat_multiplier), he asked for 600 base
+        instead so the real, scaled result lands at "around 8000-9000
+        hp," which he called "respectful" for a boss. 600 x 15 = 9000,
+        exactly in that range.
+        """
+        from rules.leveling import undertuned_monster_stat_multiplier
+        stats = bot.CAMPAIGN["npcs"]["kess_the_bandit"]["stats"]
+        self.assertEqual(stats["hp_max"], 600)
+        mult = undertuned_monster_stat_multiplier([18, 19, 18], stats["xp_reward"], is_boss=True)
+        scaled_hp = stats["hp_max"] * mult
+        self.assertTrue(8000 <= scaled_hp <= 9000, f"scaled HP {scaled_hp} outside Coffee's requested 8000-9000 range")
 
     def test_greymoor_downs_wolf_leveled_up_per_coffee(self):
         """
