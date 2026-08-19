@@ -2,6 +2,18 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.256] — Bare "Party" reaches the real Party screen (found via topic-activity monitoring)
+
+First real finding from the recurring self-improvement monitoring
+cron: a bare "Party" — the exact label on the merged Party/Party
+Sheets menu button (v1.27.248) — was silently falling all the way
+through to `chat` (no reply at all). Every existing `check_party`
+trigger required "my"/"who's" alongside "party", never a single bare
+word. Deliberately scoped to the whole message being just that one
+word (not menu/bestiary/waypoints' unconditional `\bword\b`-anywhere
+match) — "party" is common enough in ordinary roleplay text ("a party
+of dignitaries") that only a truly bare message is safe to claim.
+
 ## [1.27.255] — Spell-slot tonics and revive items can actually target a party member via the battle menu
 
 **Real dev-bridge report (2026-08-19, Coffee):** "I selected the tonic

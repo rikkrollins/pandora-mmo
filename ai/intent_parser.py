@@ -1270,6 +1270,19 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # Bare "who's here"/"anyone here" (no "with me" at all) is an equally
     # natural way to ask the same question, so it's added as its own
     # trigger rather than assuming "with me" is always spelled out.
+    # Found via topic-activity monitoring (2026-08-19): a bare "Party"
+    # (the exact label on the merged Party/Party Sheets menu button,
+    # v1.27.248) fell all the way through to silent 'chat' -- every
+    # trigger below requires "my"/"who's" alongside "party", never a
+    # single bare word. Deliberately scoped to the WHOLE message being
+    # just that one word (unlike menu/bestiary/waypoints/formation's
+    # unconditional \bword\b match anywhere in a sentence) -- "party" is
+    # a far more common ordinary English/roleplay word than those ("throw
+    # a party", "a party of dignitaries"), so only firing when nothing
+    # else was said keeps genuine narrative use of the word safe.
+    if lowered.strip(" .!?") == "party":
+        return {**base, "action": "check_party"}
+
     if (
         any(w in lowered for w in ["who's in my party", "whos in my party", "who is in my party",
                                     "who is with me", "who's with me", "am i in a party",

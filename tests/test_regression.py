@@ -8315,6 +8315,26 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(_keyword_fallback("assign Sarah as summoner", [])["action"], "assign_summoner")
 
+    def test_bare_party_keyword_classified_as_check_party(self):
+        """
+        Found via topic-activity monitoring (2026-08-19): a bare "Party"
+        -- the exact label on the merged Party/Party Sheets menu button
+        (v1.27.248) -- fell all the way through to silent 'chat'. Every
+        existing check_party trigger required "my"/"who's" alongside
+        "party", never a single bare word. Deliberately scoped to the
+        WHOLE message being just that one word (not menu/bestiary's
+        unconditional \\bword\\b-anywhere match) -- "party" is common
+        enough in ordinary roleplay text ("a party of dignitaries")
+        that only a truly bare message is safe to claim.
+        """
+        from ai.intent_parser import _keyword_fallback
+        for text in ("Party", "party", "party.", "party!"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "check_party", text)
+        # Must not swallow ordinary narrative use of the word.
+        self.assertNotEqual(_keyword_fallback("A party of dignitaries arrived", [])["action"], "check_party")
+        # No regression: the existing "my party" phrasing still works.
+        self.assertEqual(_keyword_fallback("who's in my party", [])["action"], "check_party")
+
     def test_main_menu_merges_party_and_party_sheets_into_one_button(self):
         """
         Real feature request (2026-08-17, Coffee): "make one menu for
