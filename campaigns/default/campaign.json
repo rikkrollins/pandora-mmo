@@ -386,7 +386,7 @@
           "east": "greymoor_downs_broken_watchtower"
         },
         "monsters": [
-          "wolf"
+          "windswept_ridge_wolf"
         ],
         "interactables": {
           "ridge_cairn_markers": {
@@ -4207,6 +4207,25 @@
       "on_hit_condition": "frightened",
       "damage_dice": "1d8",
       "damage_bonus": 28,
+      "damage_type": "physical",
+      "stealable_items": [
+        {
+          "item_id": "silverleaf_herb",
+          "weight": 100
+        }
+      ]
+    },
+    "windswept_ridge_wolf": {
+      "name": "Wolf", "level": 27,
+      "dexterity": 15,
+      "strength": 14,
+      "armor_class": 21,
+      "hp_max": 612,
+      "proficiency_bonus": 5,
+      "xp_reward": 400,
+      "on_hit_condition": "frightened",
+      "damage_dice": "1d8",
+      "damage_bonus": 50,
       "damage_type": "physical",
       "stealable_items": [
         {

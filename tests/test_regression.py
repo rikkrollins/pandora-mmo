@@ -9799,11 +9799,12 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         Real dev-bridge report (2026-08-19, Coffee, screenshot circling
         "Wolf (Lv. 1)" at The Greymoor Downs -- same zone as the Kess
         request above): "Make this a lv 18 wolf with apx 356 hp." The
-        shared "wolf" key is still used by 4 other locations (The
-        Whispering Wood, Windswept Ridge, Sunken Den, Sunken Barrow),
-        so a new greymoor_downs_wolf variant replaces it only here,
-        same "can't bump the shared key" pattern as the Bramble
-        Thicket/Deep Tunnels goblins.
+        shared "wolf" key is still used by other locations (The
+        Whispering Wood, Sunken Den, Sunken Barrow -- Windswept Ridge
+        got its own real level-27 variant separately, see below), so a
+        new greymoor_downs_wolf variant replaces it only here, same
+        "can't bump the shared key" pattern as the Bramble Thicket/
+        Deep Tunnels goblins.
         """
         camp = bot.CAMPAIGN
         greymoor = camp["locations"]["surface"]["greymoor_downs"]
@@ -9812,6 +9813,16 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(camp["monsters"]["greymoor_downs_wolf"]["hp_max"], 356)
         # The tutorial-tier wolf itself is untouched.
         self.assertIn("Wolf (Lv. 1)", bot._monster_danger_line(["wolf"]))
+
+    def test_windswept_ridge_wolf_leveled_up_per_coffee(self):
+        """Real dev-bridge report (2026-08-19, Coffee, screenshot circling "Wolf (Lv. 1)" at The Windswept Ridge): "Make this wolf in this location lv 27 with 612 hp and dmg bonus 50"."""
+        camp = bot.CAMPAIGN
+        ridge = camp["locations"]["surface"]["greymoor_downs_windswept_ridge"]
+        self.assertEqual(ridge["monsters"], ["windswept_ridge_wolf"])
+        self.assertIn("Wolf (Lv. 27)", bot._monster_danger_line(ridge["monsters"]))
+        stats = camp["monsters"]["windswept_ridge_wolf"]
+        self.assertEqual(stats["hp_max"], 612)
+        self.assertEqual(stats["damage_bonus"], 50)
 
     def test_monster_danger_line_shows_the_real_authored_level_trash_only(self):
         """

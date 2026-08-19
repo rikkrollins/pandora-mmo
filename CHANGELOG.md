@@ -2,6 +2,16 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.254] — Windswept Ridge wolf leveled up per Coffee's dev-bridge request
+
+**Real dev-bridge report (2026-08-19, Coffee, screenshot circling
+"Wolf (Lv. 1)" at The Windswept Ridge):** "Make this wolf in this
+location lv 27 with 612 hp and dmg bonus 50." New `windswept_ridge_wolf`
+variant (level 27, 612 HP, damage_bonus 50 — all Coffee's exact
+numbers) replaces the shared tutorial-tier `wolf` at this one
+location; the shared key elsewhere (and the separately-leveled
+`greymoor_downs_wolf` next door, v1.27.253) are both untouched.
+
 ## [1.27.253] — Stale battle-menu crash fix, Kess no longer talkable, Greymoor Downs wolf leveled up
 
 **Real dev-bridge report (2026-08-19, Coffee):** "Why is my character
