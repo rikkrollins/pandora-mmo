@@ -2514,7 +2514,7 @@
         "proficiency_bonus": 2,
         "xp_reward": 150,
         "damage_dice": "1d6",
-        "damage_bonus": 3
+        "damage_bonus": 15
       }
     },
     "ossian_vane": {
@@ -4113,7 +4113,7 @@
       "proficiency_bonus": 4,
       "xp_reward": 300,
       "damage_dice": "1d8",
-      "damage_bonus": 28,
+      "damage_bonus": 50,
       "damage_type": "physical",
       "stealable_items": [
         {
@@ -4206,7 +4206,7 @@
       "xp_reward": 280,
       "on_hit_condition": "frightened",
       "damage_dice": "1d8",
-      "damage_bonus": 28,
+      "damage_bonus": 50,
       "damage_type": "physical",
       "stealable_items": [
         {
@@ -4336,7 +4336,7 @@
         "radiant"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 25,
+      "damage_bonus": 50,
       "damage_type": "psychic",
       "known_spells": ["vicious_mockery"],
       "stealable_items": [
@@ -4363,7 +4363,7 @@
       "life_drain": true,
       "counters_rage": true,
       "damage_dice": "1d8",
-      "damage_bonus": 30,
+      "damage_bonus": 50,
       "damage_type": "fire",
       "known_spells": ["fireball"],
       "vulnerabilities": [
@@ -4435,7 +4435,7 @@
         "psychic"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 40,
+      "damage_bonus": 50,
       "damage_type": "force",
       "known_spells": ["magic_missile"],
       "stealable_items": [
@@ -5094,7 +5094,7 @@
       "proficiency_bonus": 2,
       "xp_reward": 1750,
       "damage_dice": "1d8",
-      "damage_bonus": 46,
+      "damage_bonus": 50,
       "damage_type": "physical",
       "stealable_items": [
         {
@@ -5120,7 +5120,7 @@
         "poison"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 47,
+      "damage_bonus": 50,
       "damage_type": "poison",
       "known_spells": ["produce_flame"],
       "stealable_items": [
@@ -5143,7 +5143,7 @@
       "proficiency_bonus": 1,
       "xp_reward": 1500,
       "damage_dice": "1d8",
-      "damage_bonus": 45,
+      "damage_bonus": 50,
       "damage_type": "physical",
       "stealable_items": [
         {
@@ -5161,7 +5161,7 @@
       "proficiency_bonus": 4,
       "xp_reward": 330,
       "damage_dice": "1d8",
-      "damage_bonus": 30,
+      "damage_bonus": 50,
       "damage_type": "physical",
       "stealable_items": [
         {
@@ -5227,7 +5227,7 @@
         "poison"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 40,
+      "damage_bonus": 50,
       "damage_type": "physical",
       "stealable_items": [
         {
@@ -5666,7 +5666,7 @@
       "is_boss": true,
       "ignited_after_first_hit": true,
       "damage_dice": "2d8",
-      "damage_bonus": 20,
+      "damage_bonus": 50,
       "damage_type": "fire",
       "known_spells": ["fireball"],
       "resistances": [
@@ -5860,7 +5860,7 @@
       "xp_reward": 1500,
       "is_boss": true,
       "damage_dice": "2d10",
-      "damage_bonus": 35,
+      "damage_bonus": 50,
       "damage_type": "psychic",
       "known_spells": ["vicious_mockery"],
       "on_hit_condition": "blinded",

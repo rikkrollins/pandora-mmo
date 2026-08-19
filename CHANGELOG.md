@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.263] — Level-15+ enemy damage floor, Kess damage bonus raised
+
+**Real dev-bridge report (2026-08-19, Coffee):** "Kess is NOT hurting
+the party. Look into this - his damage bonus may have to be
+jncreased". Live reproduction confirmed it: with `damage_bonus=3`, the
+real 15x-boss sqrt-scaled multiplier (~3.873x for his level 18-19
+party) only landed Kess at ~15.5 avg effective damage — negligible,
+matching a screenshot of the party sitting at full HP after 73 rounds.
+Raised Kess's base `damage_bonus` 3 → 15, landing the real scaled hit
+around 61.5 avg — meaningful again without being lethal.
+
+**Real follow-up dev-bridge request, same thread:** "it seems enemies
+past lv15 need to be more challengeing - i like the 50 damage bonus,
+can we use that as a minimum and make all enemies that are higher than
+lv 15 to increse thier damage bonus to 50 plus". Applied a system-wide
+floor: every monster in `campaigns/default/campaign.json` with
+`level > 15` and `damage_bonus < 50` was raised to exactly 50 (never
+lowered anything already at or above it). 12 monsters affected:
+`bramble_thicket_goblin`, `greymoor_downs_wolf`, `the_unspoken`,
+`the_waking_ember`, `the_unrepeating`, `veteran_goblin`,
+`goblin_shaman_elder`, `young_goblin`, `root_bound_goblin`,
+`root_goblin_pup`, `the_wrathflame_unbound`, `the_archives_keeper`.
+
+Both changes verified with real executed tests
+(`test_kess_damage_bonus_raised_per_coffee_party_not_getting_hurt`,
+`test_all_level_over_15_monsters_have_50_damage_bonus_floor` in
+`tests/test_regression.py`), the latter sweeping every level>15
+monster in the live campaign data, not just the 12 that needed fixing.
+
 ## [1.27.262] — Kess's base HP revised down to land her scaled HP around 8-9k
 
 **Real dev-bridge follow-up (2026-08-19, Coffee):** after seeing Kess

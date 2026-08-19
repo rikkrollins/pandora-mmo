@@ -9951,6 +9951,49 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         scaled_hp = stats["hp_max"] * mult
         self.assertTrue(8000 <= scaled_hp <= 9000, f"scaled HP {scaled_hp} outside Coffee's requested 8000-9000 range")
 
+    def test_kess_damage_bonus_raised_per_coffee_party_not_getting_hurt(self):
+        """
+        Real dev-bridge follow-up (2026-08-19, Coffee): "Kess is NOT
+        hurting the party. Look into this - his damage bonus may have
+        to be jncreased". Live reproduction: with damage_bonus=3, the
+        real 15x-boss sqrt-scaled multiplier (~3.873x) only landed
+        Kess at ~15.5 avg effective damage -- negligible against a
+        level 18-19 party, matching a screenshot of the party at full
+        HP after 73 rounds. Raised to 15 so the real scaled hit lands
+        meaningfully (~61.5 avg) without being lethal.
+        """
+        from rules.leveling import undertuned_monster_stat_multiplier
+        stats = bot.CAMPAIGN["npcs"]["kess_the_bandit"]["stats"]
+        self.assertEqual(stats["damage_bonus"], 15)
+        mult = undertuned_monster_stat_multiplier([18, 19, 18], stats["xp_reward"], is_boss=True)
+        damage_mult = mult ** 0.5
+        # 1d6 average (3.5) + scaled bonus
+        effective_avg = 3.5 + stats["damage_bonus"] * damage_mult
+        self.assertGreater(effective_avg, 50, "Kess's effective hit should be meaningful again, not negligible")
+
+    def test_all_level_over_15_monsters_have_50_damage_bonus_floor(self):
+        """
+        Real dev-bridge request (2026-08-19, Coffee): "it seems enemies
+        past lv15 need to be more challengeing - i like the 50 damage
+        bonus, can we use that as a minimum and make all enemies that
+        are higher than lv 15 to increse thier damage bonus to 50 plus".
+        Applies to every monster in the bestiary, not just Kess.
+        """
+        monsters = bot.CAMPAIGN["monsters"]
+        under_floor = []
+        checked = 0
+        for key, mon in monsters.items():
+            stats = mon.get("stats", mon)
+            level = stats.get("level")
+            damage_bonus = stats.get("damage_bonus")
+            if level is None or damage_bonus is None or level <= 15:
+                continue
+            checked += 1
+            if damage_bonus < 50:
+                under_floor.append((key, level, damage_bonus))
+        self.assertGreater(checked, 0, "expected at least one level>15 monster to check")
+        self.assertEqual(under_floor, [], f"monsters below the 50 damage_bonus floor: {under_floor}")
+
     def test_greymoor_downs_wolf_leveled_up_per_coffee(self):
         """
         Real dev-bridge report (2026-08-19, Coffee, screenshot circling
