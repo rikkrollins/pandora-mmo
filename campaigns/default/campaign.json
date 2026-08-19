@@ -338,7 +338,7 @@
           "north": "greymoor_downs_windswept_ridge"
         },
         "monsters": [
-          "wolf"
+          "greymoor_downs_wolf"
         ],
         "npcs": [
           "kess_the_bandit"
@@ -4188,6 +4188,25 @@
       "on_hit_condition": "frightened",
       "damage_dice": "1d8",
       "damage_bonus": 1,
+      "damage_type": "physical",
+      "stealable_items": [
+        {
+          "item_id": "silverleaf_herb",
+          "weight": 100
+        }
+      ]
+    },
+    "greymoor_downs_wolf": {
+      "name": "Wolf", "level": 18,
+      "dexterity": 15,
+      "strength": 14,
+      "armor_class": 20,
+      "hp_max": 356,
+      "proficiency_bonus": 4,
+      "xp_reward": 280,
+      "on_hit_condition": "frightened",
+      "damage_dice": "1d8",
+      "damage_bonus": 28,
       "damage_type": "physical",
       "stealable_items": [
         {

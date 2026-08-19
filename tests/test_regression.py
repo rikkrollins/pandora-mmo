@@ -3101,6 +3101,43 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("[callback]" in msg and "bm|menu" in msg for msg in log_ctx.output), log_ctx.output)
         sessions.end_session(-999)
 
+    async def test_battle_menu_stale_not_your_turn_tap_never_crashes(self):
+        """
+        Real dev-bridge report (2026-08-19): "Why is my character
+        attacking in battle when I haven't had a chance to select what
+        to do?" Traced via the live log to a genuinely UNHANDLED
+        telegram.error.BadRequest ("Query is too old...") right at this
+        exact "not your turn" early-return -- the one call site in this
+        file still using a bare `query.answer(text, show_alert=True)`
+        instead of _safe_answer, because _safe_answer never accepted
+        those two args before now. A player tapping a stale battle-menu
+        button (their turn had already auto-resolved) got a hard crash
+        instead of the real "not your turn" explanation -- indistin-
+        guishable, from their side, from the game secretly acting for
+        them with zero feedback. This confirms the crash is gone: the
+        handler must return cleanly even when answer() itself fails.
+        """
+        from unittest.mock import patch
+        from telegram.error import BadRequest
+        import sessions
+        sessions.end_session(-999)
+        user_id, other_id = 900485, 900486
+        make_basic_character(user_id, "StaleTapper", current_location="crossroads_tavern")
+        enemy = {"telegram_user_id": -5200906, "name": "StaleEnemy", "dexterity": 10, "hp_current": 20, "hp_max": 20, "is_ai": 1}
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", -5200906: "enemy"})
+        # It's the enemy's turn, not this player's -- exactly the "stale
+        # button tapped after the real turn already moved on" shape.
+        session.turn_order = [-5200906, user_id]
+        session.current_turn_index = 0
+
+        sink = []
+        update = FakeCallbackUpdate(user_id, "bm|skills", sink)
+        with patch.object(update.callback_query, "answer", side_effect=BadRequest("Query is too old and response timeout expired or query id is invalid")):
+            await bot.battle_menu_callback(update, DummyContext())  # must not raise
+        sessions.end_session(-999)
+
     async def test_flurry_of_blows_rejects_non_monk(self):
         import sessions
         sessions.end_session(-999)
@@ -9756,6 +9793,25 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         stats = bot.CAMPAIGN["npcs"]["kess_the_bandit"]["stats"]
         self.assertEqual(stats["hp_max"], 1200)
         self.assertEqual(stats["level"], 23)
+
+    def test_greymoor_downs_wolf_leveled_up_per_coffee(self):
+        """
+        Real dev-bridge report (2026-08-19, Coffee, screenshot circling
+        "Wolf (Lv. 1)" at The Greymoor Downs -- same zone as the Kess
+        request above): "Make this a lv 18 wolf with apx 356 hp." The
+        shared "wolf" key is still used by 4 other locations (The
+        Whispering Wood, Windswept Ridge, Sunken Den, Sunken Barrow),
+        so a new greymoor_downs_wolf variant replaces it only here,
+        same "can't bump the shared key" pattern as the Bramble
+        Thicket/Deep Tunnels goblins.
+        """
+        camp = bot.CAMPAIGN
+        greymoor = camp["locations"]["surface"]["greymoor_downs"]
+        self.assertEqual(greymoor["monsters"], ["greymoor_downs_wolf"])
+        self.assertIn("Wolf (Lv. 18)", bot._monster_danger_line(greymoor["monsters"]))
+        self.assertEqual(camp["monsters"]["greymoor_downs_wolf"]["hp_max"], 356)
+        # The tutorial-tier wolf itself is untouched.
+        self.assertIn("Wolf (Lv. 1)", bot._monster_danger_line(["wolf"]))
 
     def test_monster_danger_line_shows_the_real_authored_level_trash_only(self):
         """
@@ -16540,6 +16596,35 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("IdentityTester is a level 5 Wizard (evocation)", captured.get("prompt", ""))
         self.assertIn("Arcane Circle", captured.get("prompt", ""))
+
+    async def test_talk_npc_refuses_a_hostile_npc_no_ollama_call(self):
+        """
+        Real dev-bridge report (2026-08-19, Coffee): "Kess is an enemy
+        in greymoor downs and there is a character kess the bandit in
+        the same area. If kess is an enemy and is defeated how can kess
+        be a character we need to interact with for a quest as well?"
+        Root cause: talk_npc never checked disposition at all -- ANY
+        registered NPC, hostile included, could be freely talked to and
+        would generate a real, friendly-sounding AI reply, even though
+        Kess (kess_the_bandit) is purely a combat-only bandit with no
+        quest anywhere actually referencing her by name. Now refused
+        before ever reaching Ollama, matching how the ambient encounter
+        path already treats a hostile NPC as combat-only, never dialogue.
+        """
+        from unittest.mock import patch, Mock
+        bot.setup_default_npcs()
+        user_id = 950941
+        make_basic_character(user_id, "HostileTalkTester", current_location="greymoor_downs")
+
+        mock_post = Mock()
+        with patch("ai.npc_agent.requests.post", mock_post), \
+             patch("bot._find_npc_id_by_name", return_value="kess_the_bandit"):
+            intent = {"action": "talk_npc", "npc_name": "Kess", "raw_text": "hello Kess"}
+            sink = []
+            await bot._dispatch_intent(FakeUpdate(user_id, "hello Kess", sink), DummyContext(), intent, "hello Kess")
+
+        mock_post.assert_not_called()
+        self.assertTrue(any("isn't interested in talking" in msg for msg in sink), sink)
 
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):

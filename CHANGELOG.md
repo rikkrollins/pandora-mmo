@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.253] — Stale battle-menu crash fix, Kess no longer talkable, Greymoor Downs wolf leveled up
+
+**Real dev-bridge report (2026-08-19, Coffee):** "Why is my character
+attacking in battle when I haven't had a chance to select what to
+do?" Traced via the live log to a genuinely unhandled
+`telegram.error.BadRequest` ("Query is too old...") — the one call
+site in `battle_menu_callback` still using a bare
+`query.answer(text, show_alert=True)` instead of `_safe_answer`,
+because that helper never accepted those two args before now. A
+player tapping a stale battle-menu button (their turn had already
+auto-resolved via the real, intentional "timed out — attacks on
+instinct" mechanic) got a hard crash instead of the real "not your
+turn" explanation — indistinguishable, from their side, from the game
+secretly acting for them with zero feedback. `_safe_answer` now
+accepts `text`/`show_alert`; the one raw call site fixed.
+
+**Real dev-bridge report (2026-08-19, Coffee):** "Kess is an enemy in
+greymoor downs and there is a character kess the bandit in the same
+area. If kess is an enemy and is defeated how can kess be a character
+we need to interact with for a quest as well?" Root cause: `talk_npc`
+never checked disposition at all — ANY registered NPC, hostile
+included, could be freely talked to and would generate a real,
+friendly AI reply, even though Kess is purely a combat-only bandit
+(no quest anywhere actually references her by name — confirmed by
+search). Hostile NPCs (real faction-escalation included, via the same
+`_effective_disposition` the ambient-encounter path already uses) are
+now refused before ever reaching Ollama.
+
+**Real dev-bridge report (2026-08-19, Coffee, screenshot circling
+"Wolf (Lv. 1)" at The Greymoor Downs):** "Make this a lv 18 wolf with
+apx 356 hp." New `greymoor_downs_wolf` variant (level 18, 356 HP)
+replaces the shared tutorial-tier `wolf` at this one location — that
+key is still used by 4 others, so it's untouched everywhere else.
+
 ## [1.27.252] — Kess rebalanced to Coffee's requested 1200 HP / level 23
 
 **Real dev-bridge report (2026-08-19, Coffee):** "Give kess 1200 HP Lv

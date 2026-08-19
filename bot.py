@@ -2681,7 +2681,7 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await asyncio.to_thread(db.touch_last_active, user_id, chat_id)
     session = sessions.get_session_for_user(chat_id, user_id)
     if session is None or session.current_participant_id() != user_id:
-        await query.answer("It's not your turn right now.", show_alert=True)
+        await _safe_answer(query, "It's not your turn right now.", show_alert=True)
         return
 
     parts = (query.data or "").split("|")
@@ -3599,7 +3599,7 @@ async def _safe_send(
                 await asyncio.sleep(2)
 
 
-async def _safe_answer(query) -> bool:
+async def _safe_answer(query, text: str | None = None, show_alert: bool = False) -> bool:
     """
     Real live bug (2026-07-19, caught via monitoring): every callback-
     query handler in the game (battle menu, shop, spell, quest, item,
@@ -3617,9 +3617,22 @@ async def _safe_answer(query) -> bool:
     case), False if it had already expired/was invalid -- callers can
     use this to still fall through to a plain-text nudge instead of
     silently doing nothing.
+
+    `text`/`show_alert` (2026-08-19, found via dev-bridge report + live
+    log: "Why is my character attacking in battle when I haven't had a
+    chance to select what to do?" -- traced to a genuinely UNHANDLED
+    BadRequest at battle_menu_callback's own "it's not your turn right
+    now" early-return, the ONE call site in this file still using a
+    bare `query.answer(text, show_alert=True)` instead of this helper,
+    because this helper never accepted those two args before now. A
+    player tapping a stale battle-menu button (their turn had already
+    auto-resolved, e.g. an idle timeout auto-attack) got a hard crash
+    instead of the real "not your turn" explanation -- from their side,
+    indistinguishable from the game secretly acting for them with zero
+    feedback.
     """
     try:
-        await query.answer()
+        await query.answer(text=text, show_alert=show_alert)
         return True
     except TelegramError as e:
         logger.warning(f"[callback] query.answer() failed (likely expired): {e!r}")
@@ -23616,6 +23629,34 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
             await _do_examine(update, intent["npc_name"])
         elif npc_id and npc_id in _NPCS:
             character = db.get_character(update.effective_user.id, update.effective_chat.id)
+            npc_data_for_disposition = CAMPAIGN["npcs"].get(npc_id, {})
+            # Real dev-bridge report (2026-08-19, Coffee): "Kess is an
+            # enemy in greymoor downs and there is a character kess the
+            # bandit in the same area. If kess is an enemy and is
+            # defeated how can kess be a character we need to interact
+            # with for a quest as well?" Root cause, confirmed live:
+            # this whole talk_npc path never checked disposition at
+            # all -- ANY npc in CAMPAIGN["npcs"] (setup_default_npcs
+            # registers every one, hostile included) could be freely
+            # talked to and would generate a real, friendly-sounding AI
+            # reply, even though Kess is purely a combat-only bandit
+            # (_maybe_trigger_npc_encounter already only ever starts a
+            # fight for a hostile NPC, never dialogue -- this was the
+            # one OTHER real interaction path that disagreed). No
+            # quest anywhere in campaign.json ever actually references
+            # Kess by name -- confirmed by search -- so being able to
+            # "talk" to her was the entire misleading signal. Same
+            # _effective_disposition real faction-escalation check the
+            # ambient encounter already uses, so a friendly/neutral NPC
+            # whose faction has turned hostile toward THIS player is
+            # refused here too, not just a hardcoded-hostile one.
+            if _effective_disposition(update.effective_user.id, update.effective_chat.id, npc_id, npc_data_for_disposition) == "hostile":
+                await _safe_send(
+                    update,
+                    f"**{npc_data_for_disposition.get('name', intent['npc_name'])}** isn't interested in talking — "
+                    f"this ends in a fight, not a conversation.",
+                )
+                return
             character_name = character["name"] if character else "the player"
             relationship = db.get_relationship(update.effective_user.id, update.effective_chat.id, npc_id)
             quest_facts = _npc_quest_facts(character, npc_id) if character else None
