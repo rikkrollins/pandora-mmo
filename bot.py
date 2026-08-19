@@ -26976,6 +26976,43 @@ async def _on_startup(application: Application) -> None:
                         # so a restart alone is enough to un-stick it --
                         # confirmed live this exact restore left Wolf 1
                         # and Wolf 2 both at 0 HP with no resolution.
+                        # Real live bug (2026-08-19, traced from Sugar's
+                        # dev-bridge report "why is my character
+                        # attacking in battle when I haven't had a
+                        # chance to select what to do" -- the crash fix
+                        # in v1.27.253 addressed the SYMPTOM, this is
+                        # the actual root cause): to_json_dict/
+                        # from_json_dict round-trip the participant
+                        # dicts VERBATIM, including the in-memory-only
+                        # `_turn_prompt_announced` flag _resolve_ai_
+                        # turns sets right after sending a real player's
+                        # "it's your turn" battle menu (see that
+                        # function's own docstring -- it's meant to
+                        # survive only a same-request retry, cleared by
+                        # advance_turn() once the turn genuinely ends).
+                        # A snapshot saved AFTER that flag was set (e.g.
+                        # a restart landing seconds after the prompt
+                        # went out) restores it still True -- so this
+                        # exact restore call below correctly determines
+                        # it's still a real player's turn, but then
+                        # silently skips re-sending the battle menu
+                        # entirely, thinking it already did. The player
+                        # was left with only the bare "bot just
+                        # restarted" text above (no reply_markup) and no
+                        # working buttons until they thought to type a
+                        # plain-text command from memory -- indistin-
+                        # guishable, from their side, from the game
+                        # ignoring them. Cleared here, unconditionally,
+                        # for whoever's current turn actually is right
+                        # now -- forces a genuinely fresh re-announce
+                        # with real, working buttons on every restore,
+                        # same flags advance_turn() itself already pops
+                        # on an ordinary turn change.
+                        if live_session.turn_order:
+                            restored_current = live_session.current_participant()
+                            restored_current.pop("_turn_prompt_announced", None)
+                            restored_current.pop("_multiattack_announced", None)
+                            restored_current.pop("_boss_decision_announced", None)
                         stub_update = _StartupUpdateStub(application.bot, chat_id)
                         if not await _try_end_stale_combat(stub_update, live_session):
                             await _resolve_ai_turns(stub_update, live_session)

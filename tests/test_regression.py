@@ -11227,6 +11227,67 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             f"turn prompt should appear exactly once total across the re-entry, got: {sink}",
         )
         self.assertEqual(session.current_participant_id(), human_id)
+
+    async def test_restart_snapshot_restore_clears_stale_turn_prompt_flag(self):
+        """
+        Real live bug (2026-08-19, traced from Sugar's dev-bridge report
+        "why is my character attacking in battle when I haven't had a
+        chance to select what to do"): sessions.Session.to_json_dict
+        round-trips participant dicts VERBATIM, including the in-memory
+        -only _turn_prompt_announced flag (see the test just above --
+        meant to survive only a same-request retry, cleared by
+        advance_turn() once a turn genuinely ends). A snapshot saved
+        right after that flag was set (e.g. a restart landing seconds
+        after the "it's your turn" prompt went out) restores it still
+        True, so bot.py's _on_startup restore path correctly determined
+        it was still a real player's turn but silently skipped
+        re-sending the battle menu, thinking it already had -- the
+        player was left with only a bare restart notice and no working
+        buttons. _on_startup now pops the same 3 announce flags
+        advance_turn() itself already pops, for whoever's turn it
+        currently is, right before calling _resolve_ai_turns -- this
+        confirms that clearing (simulating the restore) is what makes
+        the fresh re-announce actually happen.
+        """
+        import sessions
+        sessions.end_session(-999)
+        human_id = 900922
+        make_basic_character(human_id, "RestoredPlayer", current_location="crossroads_tavern")
+        human = db.get_character(human_id, -999)
+        goblin = {
+            "telegram_user_id": -700603, "name": "Goblin 3", "is_ai": True,
+            "hp_current": 25, "hp_max": 25, "armor_class": 10,
+            "strength": 8, "dexterity": 14, "proficiency_bonus": 2,
+            "monster_key": "goblin", "xp_reward": 10, "conditions": [],
+        }
+        session = sessions.start_session(-999, [human, goblin], {human_id: "party", -700603: "enemy"})
+        session.turn_order = [human_id, -700603]
+        session.current_turn_index = 0
+
+        # Simulates the real bug: a snapshot restored with the flag
+        # already True (round-tripped verbatim from before the restart),
+        # same as a real Session.from_json_dict would produce.
+        current = session.current_participant()
+        current["_turn_prompt_announced"] = True
+
+        sink = []
+        update = FakeUpdate(human_id, "irrelevant", sink)
+        await bot._resolve_ai_turns(update, session)
+        self.assertEqual(
+            sum(1 for line in sink if "What do you do" in line), 0,
+            "confirms the bug reproduces: a stale True flag suppresses the real re-announce",
+        )
+
+        # The actual fix: _on_startup's restore path pops this flag
+        # (among the other 2 announce flags) for the current participant
+        # right before calling _resolve_ai_turns.
+        current.pop("_turn_prompt_announced", None)
+        await bot._resolve_ai_turns(update, session)
+        self.assertEqual(
+            sum(1 for line in sink if "What do you do" in line), 1,
+            "a genuinely fresh battle menu with working buttons must go out after the flag is cleared",
+        )
+        sessions.end_session(-999)
         sessions.end_session(-999)
 
     async def test_human_attack_multiattack_announcement_not_repeated_on_a_crash_and_retry(self):

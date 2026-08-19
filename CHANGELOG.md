@@ -2,6 +2,41 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.258] — Root-caused Sugar's "it attacked without me" reports: restart mid-turn ate the real battle menu
+
+**Investigated per Coffee's direct question** ("did u troubleshoot
+sugars reports on the battle skipping her turn... its as if when the
+battle would start it would attack for her and she wouldnt get to go
+until her next turn"). Traced through last night's actual logs, not
+guessed: her exact crash (already fixed as a symptom in v1.27.253)
+landed at 2026-08-19 01:59:23 — a deploy restart window
+(01:57:39–01:59:22) that overlapped almost exactly with her real
+"Round 1 — it's now Charvenna's turn!" prompt (sent 01:58:37). That
+alone explained the crash, but not the deeper pattern — so the actual
+combat/turn-order logic got audited directly rather than assuming the
+crash was the whole story.
+
+**Real root cause found:** `sessions.Session.to_json_dict` round-trips
+every participant dict verbatim into the disk snapshot, including the
+in-memory-only `_turn_prompt_announced` flag `_resolve_ai_turns` sets
+right after sending a real player's "it's your turn" battle menu
+(meant to survive only a same-request retry — see v1.27.190-era code
+— cleared by `advance_turn()` once a turn genuinely ends). A snapshot
+saved after that flag was set — exactly what a restart landing
+seconds after the prompt went out produces — restores it still
+`True`. `_on_startup`'s restore path correctly determines it's still a
+real player's turn, but then silently skips re-sending the battle
+menu, thinking it already had. The player was left with only the bare
+"🔄 bot just restarted" text notice (no buttons at all) until they
+thought to type a plain-text command from memory — indistinguishable,
+from their side, from the game ignoring them or acting on its own.
+
+**Fix:** `_on_startup` now clears `_turn_prompt_announced` (and the
+same two sibling flags `advance_turn()` already pops) for whoever's
+turn it currently is, right before resolving the restored session —
+forcing a genuinely fresh re-announce with real, working buttons on
+every restart, not just a text notice.
+
 ## [1.27.257] — Scroll of Shield/Invisibility can actually target a party member via the battle menu
 
 Proactive audit, same exact shape as the Greater Spell Tonic bug just
