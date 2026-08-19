@@ -8577,6 +8577,50 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("shield_active", caster_p.get("conditions", []))
         sessions.end_session(-999)
 
+    async def test_scroll_of_shield_via_battle_menu_offers_an_ally_target_picker(self):
+        """
+        Found via proactive audit (2026-08-19), same real shape as the
+        Greater Spell Tonic bug (v1.27.255): the "scroll" battle-menu
+        branch's own docstring claims it mirrors "cast"'s per-effect
+        picker, but only ever copied damage/heal/cure_poison/resurrect --
+        never the single-target buff spells (shield/invisibility/etc.,
+        keyed by spell id) "cast" already picks further down that same
+        branch. Scroll of Shield is a real, purchasable item -- using it
+        via this button silently cast on self with no way to protect an
+        ally.
+        """
+        import sessions
+        sessions.end_session(-999)
+        caster_id, ally_id = 950941, 950942
+        make_basic_character(caster_id, "ScrollShieldCaster", current_location="crossroads_tavern",
+                              inventory={"scroll_shield": 1})
+        make_basic_character(ally_id, "ScrollShieldAlly", current_location="crossroads_tavern")
+        enemy = {"telegram_user_id": -5200912, "name": "ScrollShieldGoblin", "dexterity": 10,
+                 "hp_current": 20, "hp_max": 20, "conditions": []}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        ally = db.get_character(ally_id, -999)
+        ally["telegram_user_id"] = ally_id
+        session = sessions.start_session(-999, [caster, ally, enemy],
+                                          {caster_id: "party", ally_id: "party", -5200912: "enemy"})
+        session.turn_order = [caster_id, ally_id, -5200912]
+
+        async def tap(data):
+            sink = []
+            await bot.battle_menu_callback(FakeCallbackUpdate(caster_id, data, sink), DummyContext())
+            return "\n".join(sink)
+
+        picker = await tap("bm|scroll|scroll_shield")
+        self.assertIn("ScrollShieldAlly", picker)
+        self.assertIn("bm|scrolltarget|scroll_shield|ScrollShieldAlly", picker)
+
+        await tap("bm|scrolltarget|scroll_shield|ScrollShieldAlly")
+        ally_p = next(p for p in session.participants if p["telegram_user_id"] == ally_id)
+        caster_p = next(p for p in session.participants if p["telegram_user_id"] == caster_id)
+        self.assertIn("shield_active", ally_p.get("conditions", []))
+        self.assertNotIn("shield_active", caster_p.get("conditions", []))
+        sessions.end_session(-999)
+
     async def test_spare_the_dying_via_battle_menu_targets_the_one_down_ally_not_self(self):
         """
         Spare the Dying only ever has a real effect on someone at 0 HP

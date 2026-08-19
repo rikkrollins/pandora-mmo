@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.257] — Scroll of Shield/Invisibility can actually target a party member via the battle menu
+
+Proactive audit, same exact shape as the Greater Spell Tonic bug just
+shipped in v1.27.255: the battle-menu "scroll" branch's own docstring
+claims it mirrors "cast"'s per-effect target picker, but only ever
+copied damage/heal/cure_poison/resurrect — never the single-target
+buff spells (shield/invisibility/protection_from_evil_and_good/
+death_ward, keyed by spell id since Bless shares invisibility's "buff"
+effect but is party-wide) the "cast" branch already handles. Scroll of
+Shield and Scroll of Invisibility are both real, purchasable items —
+using either via this button silently cast on self with no way to
+protect an ally. Now offers the same real ally picker "cast" does.
+
 ## [1.27.256] — Bare "Party" reaches the real Party screen (found via topic-activity monitoring)
 
 First real finding from the recurring self-improvement monitoring

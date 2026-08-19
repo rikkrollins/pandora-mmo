@@ -3097,6 +3097,33 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             buttons.append([InlineKeyboardButton("« Back", callback_data="bm|items")])
             await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
             return
+        # Found via proactive audit (2026-08-19), same real shape as the
+        # Greater Spell Tonic bug (v1.27.255): this branch's own docstring
+        # says it "mirrors 'cast's own per-effect branching" but only ever
+        # copied damage/heal/cure_poison/resurrect, never the single-
+        # target buff spells "cast" picks by spell ID further down that
+        # branch (shield/invisibility/protection_from_evil_and_good/
+        # death_ward -- keyed by id, not spell["effect"], since Bless
+        # shares invisibility's "buff" effect but is party-wide, no
+        # picker needed). Scroll of Shield and Scroll of Invisibility are
+        # both real, purchasable items -- using either one via this
+        # battle-menu button silently defaulted to self with no way to
+        # protect an ally, exactly the tonic bug's shape.
+        elif spell and item.get("spell") in ("shield", "invisibility", "protection_from_evil_and_good", "death_ward"):
+            own_side = session.sides.get(user_id)
+            allies = session.living_on_side(own_side) if own_side else []
+            if len(allies) > 1:
+                buttons = [
+                    [InlineKeyboardButton(
+                        f"{p['name']} ({p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP)"
+                        + (" — you" if p["telegram_user_id"] == user_id else ""),
+                        callback_data=f"bm|scrolltarget|{value}|{p['name']}",
+                    )]
+                    for p in allies
+                ]
+                buttons.append([InlineKeyboardButton("« Back", callback_data="bm|items")])
+                await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+                return
         await _safe_edit_markup(query)
         await _do_cast_spell(update, f"cast {spell_name}")
         return
