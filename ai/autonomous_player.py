@@ -83,6 +83,16 @@ _EXAMPLE_LINES = [
     ("aren't carrying any healing items", "I want to buy [the exact item named in the healing-supplies fact below]"),
     ("Shop here sells", "I want to buy [something listed under Shop here sells]"),
     ("You're carrying", "sell my [something listed under You're carrying]"),
+    # Real feature (2026-08-19, per Coffee: "can the AI players place
+    # weapons, armour, rings, amulutes, shield, and other items for
+    # sale on the Market place? can they purchase from the market
+    # place?"). Both gated on real facts bot.py's _build_ai_player_
+    # situation_facts only ever writes when genuinely true right now
+    # (a real live listing this character can actually afford; real
+    # carried inventory), same "never show an example with nothing
+    # real behind it" convention every other line here already follows.
+    ("The player marketplace has", "buy [something listed under The player marketplace has] from the market"),
+    ("You're carrying", "sell my [something listed under You're carrying] on the market for [a real number, e.g. 30] gold"),
     ("Guilds you could join", "I want to join the [a guild listed under Guilds you could join]"),
     ("Spells you know", "I cast [something listed under Spells you know]"),
     ("Resources here", "I gather [something listed under Resources here]"),

@@ -2,6 +2,38 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.259] — Player Marketplace: natural-language sell/buy, and AI companions can now use it
+
+**Real feature request (Coffee):** "can the AI players place weapons,
+armour, rings, amulutes, shield, and other items for sale on the
+Market place? can they purchase from the market place?" Checked the
+actual code first: `/sell_market`/`/buy_market` only ever existed as
+slash commands (only `/cancel_market`/`check the market` had real
+natural-language support already) — and AI companions' own autonomous
+actions (`ai/autonomous_player.py`) are *always* natural-language
+sentences, never slash commands, so no AI companion could ever reach
+the market at all, by design or otherwise.
+
+- **New natural-language `sell_market`/`buy_market` intents**: "sell 3
+  Silverleaf Herb for 50 gold on the market", "list my longsword for
+  100 gold", "buy listing 3 from the market", "buy the silvered dagger
+  from the market" — all dispatch through the exact same real
+  `_do_sell_market`/`_do_buy_market` a typed slash command already
+  used, never a second, divergent path. Found and fixed a real
+  shadowing bug while building this: the whole market-phrase block
+  used to sit well *after* the generic "buy"/"sell" (plain shop)
+  checks in `_keyword_fallback`, so "sell X for Y gold on the market"
+  was always misread as an ordinary shop sale before ever reaching the
+  market-specific logic — moved the whole block ahead of them.
+- **AI companions are now genuinely market-aware**: their situation
+  facts now include real, currently-live, affordable listings (never
+  their own — that's not a real purchase), so `choose_next_action` can
+  actually generate "buy [X] from the market" or "sell my [X] on the
+  market for [N] gold" when it's genuinely true, same grounded-example
+  convention every other AI action already follows.
+- Help text (`/market`, empty-marketplace message) now mentions the
+  plain-English phrasing alongside the slash-command form.
+
 ## [1.27.258] — Root-caused Sugar's "it attacked without me" reports: restart mid-turn ate the real battle menu
 
 **Investigated per Coffee's direct question** ("did u troubleshoot

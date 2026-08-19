@@ -438,6 +438,71 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     ):
         return {**base, "action": "check_quests"}
 
+    # Real live bug (2026-08-09, found via topic-activity monitoring):
+    # "Go to the market row" came back check_market instead of move --
+    # "market row" is a REAL location (campaigns/default/campaign.json's
+    # "market_row"), and its full display name "Market Row" contains
+    # "market" as a substring of "the market", so the general
+    # marketplace check below swallowed a perfectly explicit "go to <a
+    # real place>" travel command before move_words ever got a chance
+    # (confirmed live: "go to market row", no "the", already correctly
+    # returned move -- only the "the market row" phrasing tripped this).
+    # Excluded here rather than reordered, so every other genuine
+    # marketplace phrase (check/cancel/sell/buy) below is completely
+    # unaffected.
+    #
+    # Real live bug, same root cause (2026-08-13, found via topic-activity
+    # monitoring): "Go to the market" (no "row" at all) hit this exact
+    # same collision -- Market Row is the only real market-flavored
+    # location in this game, and _do_move's own word-level fallback
+    # (bot.py) already resolves the bare word "market" to it uniquely, so
+    # this phrasing was always a genuine travel command, never a request
+    # to see marketplace listings. The "market row" substring exclusion
+    # above doesn't help here since the player never said "row" at all.
+    # Generalized: any explicit travel verb immediately preceding
+    # "market" (with an optional "the"/"a" and, e.g., "back", in between)
+    # is excluded from the marketplace check the same way "market row"
+    # already is, so move_words gets its turn instead.
+    #
+    # Moved here, ahead of the generic buy/sell/purchase checks below
+    # (2026-08-19, per Coffee: "can the AI players place weapons...
+    # for sale on the Market place? can they purchase from the market
+    # place?"): this whole block used to live much further down this
+    # function, well AFTER the generic "buy"/"sell" checks -- so "sell
+    # my sword for 50 gold on the market" and "buy listing 3 from the
+    # market" were always shadowed as the plain shop actions (buy/sell)
+    # before ever reaching the market-specific logic, exactly the same
+    # class of bug this file has hit many times before whenever a
+    # specific case sits after a broader one. /sell_market and
+    # /buy_market previously only ever existed as slash commands too,
+    # cutting against this whole game's "no slash commands required"
+    # design AND leaving AI companions -- whose own autonomous actions
+    # are always natural-language sentences, see ai/autonomous_
+    # player.py, never slash commands -- with no way to ever reach
+    # either one, regardless of ordering.
+    _market_travel_phrase = re.search(
+        r"\b(?:go|goes|going|head|heads|heading|walk|walks|walking|"
+        r"travel|travels|traveling|move|moves|moving|return|returns|returning|"
+        r"back)\s+(?:back\s+)?to\s+(?:the\s+|a\s+)?market\b", lowered,
+    )
+    if "market row" not in lowered and not _market_travel_phrase and any(
+        w in lowered for w in ["the market", "marketplace", "market listings"]
+    ):
+        # Real live gap (2026-08-03, Coffee): "Cancel my listing in the
+        # market" got swallowed by the plain "the market" check below
+        # and showed him the market instead of cancelling anything --
+        # this needs to be checked FIRST, same "specific case before the
+        # general one" shape as the "duel"/"accept" check above.
+        if any(w in lowered for w in ["cancel", "remove", "take back", "pull back", "unlist", "un-list", "delist"]):
+            return {**base, "action": "cancel_market"}
+        # "list " (trailing space) rather than a bare "list" so this
+        # never fires on "market listings" itself.
+        if any(w in lowered for w in ["sell", "list "]):
+            return {**base, "action": "sell_market"}
+        if any(w in lowered for w in ["buy", "purchase"]):
+            return {**base, "action": "buy_market"}
+        return {**base, "action": "check_market"}
+
     # Checked BEFORE "buy" below: "where can I buy potions" is asking
     # about location/availability, not attempting an actual purchase --
     # confirmed live 2026-07-12 this got shadowed as "buy" once that
@@ -1379,47 +1444,6 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
             return {**base, "action": "accept_duel"}
         return {**base, "action": "challenge_duel"}
 
-    # Real live bug (2026-08-09, found via topic-activity monitoring):
-    # "Go to the market row" came back check_market instead of move --
-    # "market row" is a REAL location (campaigns/default/campaign.json's
-    # "market_row"), and its full display name "Market Row" contains
-    # "market" as a substring of "the market", so the general
-    # marketplace check below swallowed a perfectly explicit "go to <a
-    # real place>" travel command before move_words ever got a chance
-    # (confirmed live: "go to market row", no "the", already correctly
-    # returned move -- only the "the market row" phrasing tripped this).
-    # Excluded here rather than reordered, so every other genuine
-    # marketplace phrase (check/cancel) below is completely unaffected.
-    #
-    # Real live bug, same root cause (2026-08-13, found via topic-activity
-    # monitoring): "Go to the market" (no "row" at all) hit this exact
-    # same collision -- Market Row is the only real market-flavored
-    # location in this game, and _do_move's own word-level fallback
-    # (bot.py) already resolves the bare word "market" to it uniquely, so
-    # this phrasing was always a genuine travel command, never a request
-    # to see marketplace listings. The "market row" substring exclusion
-    # above doesn't help here since the player never said "row" at all.
-    # Generalized: any explicit travel verb immediately preceding
-    # "market" (with an optional "the"/"a" and, e.g., "back", in between)
-    # is excluded from the marketplace check the same way "market row"
-    # already is, so move_words gets its turn instead.
-    _market_travel_phrase = re.search(
-        r"\b(?:go|goes|going|head|heads|heading|walk|walks|walking|"
-        r"travel|travels|traveling|move|moves|moving|return|returns|returning|"
-        r"back)\s+(?:back\s+)?to\s+(?:the\s+|a\s+)?market\b", lowered,
-    )
-    if "market row" not in lowered and not _market_travel_phrase and any(
-        w in lowered for w in ["the market", "marketplace", "market listings"]
-    ):
-        # Real live gap (2026-08-03, Coffee): "Cancel my listing in the
-        # market" got swallowed by the plain "the market" check below
-        # and showed him the market instead of cancelling anything --
-        # this needs to be checked FIRST, same "specific case before the
-        # general one" shape as the "duel"/"accept" check above.
-        if any(w in lowered for w in ["cancel", "remove", "take back", "pull back", "unlist", "un-list", "delist"]):
-            return {**base, "action": "cancel_market"}
-        return {**base, "action": "check_market"}
-
     if any(w in lowered for w in ["join the battle", "join the fight", "help them fight",
                                     "jump into the fight", "join in the fight"]):
         return {**base, "action": "join_battle"}
@@ -2301,7 +2325,8 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "set_description", "set_pronouns",
                 "bestiary", "list_shop", "leaderboard", "check_achievements", "set_title", "check_weather",
                 "check_guild_quest", "dice_game", "fortunes_wheel", "set_alignment", "message_ai",
-                "skill_tree", "challenge_duel", "accept_duel", "check_market", "cancel_market", "join_battle",
+                "skill_tree", "challenge_duel", "accept_duel", "check_market", "cancel_market",
+                "sell_market", "buy_market", "join_battle",
                 "replay_intro", "visual_map", "rebirth", "choose_hybrid", "give_offering",
                 "drink_water", "choose_subclass", "start_echo_trial", "check_professions",
                 "talk_party", "use_environment", "throw_weapon",

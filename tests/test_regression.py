@@ -12960,6 +12960,149 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         remaining = [l for l in db.get_market_listings(-999) if l["seller_id"] == seller_id]
         self.assertEqual(len(remaining), 2)
 
+    def test_sell_and_buy_market_natural_language_routes_correctly(self):
+        """
+        Real feature (2026-08-19, per Coffee: "can the AI players place
+        weapons, armour, rings, amulutes, shield, and other items for
+        sale on the Market place? can they purchase from the market
+        place?"). /sell_market and /buy_market previously only ever
+        existed as slash commands -- AI companions' own autonomous
+        actions (ai/autonomous_player.py) are ALWAYS natural-language
+        sentences, never slash commands, so no AI companion could ever
+        reach the market at all before this. Also confirms the fix for
+        the real shadowing bug found while building this: the generic
+        "buy"/"sell" checks sit much earlier in this function than the
+        old market block did, so "sell X for Y gold on the market" and
+        "buy listing N from the market" were always misread as the
+        plain shop actions until the whole market block was moved ahead
+        of them.
+        """
+        for text in (
+            "sell 3 silverleaf herb for 50 gold on the market",
+            "sell my old sword for 200 gold on the marketplace",
+            "list my longsword for 100 gold on the market",
+        ):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "sell_market", text)
+        for text in (
+            "buy listing 3 from the market", "buy #3 on the market", "buy the silverleaf herb from the market",
+        ):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "buy_market", text)
+        # No regression: plain shop buy/sell (no "market"/"marketplace"
+        # word at all) still work exactly as before.
+        self.assertEqual(_keyword_fallback("buy a healing potion", [])["action"], "buy")
+        self.assertEqual(_keyword_fallback("sell my rusty dagger", [])["action"], "sell")
+
+    async def test_sell_market_intent_parses_quantity_price_and_item_from_free_text(self):
+        seller_id = 900575
+        make_basic_character(seller_id, "NLSeller", inventory={"silverleaf_herb": 5})
+        sink = []
+        await bot._do_sell_market_intent(
+            FakeUpdate(seller_id, "", sink), "sell 3 silverleaf herb for 50 gold on the market",
+        )
+        self.assertTrue(any("lists" in msg and "50 gold" in msg for msg in sink), sink)
+        listings = db.get_market_listings(-999)
+        listing = next(l for l in listings if l["seller_id"] == seller_id)
+        self.assertEqual(listing["item_id"], "silverleaf_herb")
+        self.assertEqual(listing["quantity"], 3)
+        self.assertEqual(listing["price"], 50)
+        self.assertEqual(db.get_character(seller_id, -999)["inventory"].get("silverleaf_herb", 0), 2)
+
+    async def test_sell_market_intent_asks_for_a_price_when_none_given(self):
+        seller_id = 900576
+        make_basic_character(seller_id, "NoPriceSeller", inventory={"rusty_dagger": 1})
+        sink = []
+        await bot._do_sell_market_intent(FakeUpdate(seller_id, "", sink), "sell my rusty dagger on the market")
+        self.assertIn("How much gold", sink[-1])
+        self.assertEqual(db.get_character(seller_id, -999)["inventory"].get("rusty_dagger", 0), 1)  # untouched
+
+    async def test_buy_market_intent_by_listing_number(self):
+        seller_id, buyer_id = 900577, 900578
+        make_basic_character(seller_id, "NLSeller2", inventory={"rusty_dagger": 1})
+        make_basic_character(buyer_id, "NLBuyer", gold=200)
+        sink = []
+        await bot._do_sell_market(FakeUpdate(seller_id, "", sink), ["1", "50", "rusty dagger"])
+        listing = next(l for l in db.get_market_listings(-999) if l["seller_id"] == seller_id)
+
+        sink2 = []
+        await bot._do_buy_market_intent(FakeUpdate(buyer_id, "", sink2), f"buy listing {listing['listing_id']} from the market")
+        self.assertTrue(any("buys" in msg for msg in sink2), sink2)
+        self.assertEqual(db.get_character(buyer_id, -999)["inventory"].get("rusty_dagger", 0), 1)
+        self.assertEqual(db.get_character(buyer_id, -999)["gold"], 150)
+
+    async def test_buy_market_intent_by_item_name_auto_resolves_a_single_match(self):
+        seller_id, buyer_id = 900579, 900580
+        make_basic_character(seller_id, "NLSeller3", inventory={"silvered_dagger": 1})
+        make_basic_character(buyer_id, "NLBuyer2", gold=200)
+        sink = []
+        await bot._do_sell_market(FakeUpdate(seller_id, "", sink), ["1", "80", "silvered dagger"])
+
+        sink2 = []
+        await bot._do_buy_market_intent(FakeUpdate(buyer_id, "", sink2), "buy the silvered dagger from the market")
+        self.assertTrue(any("buys" in msg for msg in sink2), sink2)
+        self.assertEqual(db.get_character(buyer_id, -999)["inventory"].get("silvered_dagger", 0), 1)
+
+    async def test_buy_market_intent_no_match_gives_an_honest_answer(self):
+        # Real item name that no seller in this test could plausibly
+        # have listed -- other tests sharing this same chat_id (-999)
+        # may leave real listings behind, so this can't assume the
+        # whole market is empty, only that nothing matches THIS name.
+        buyer_id = 900581
+        make_basic_character(buyer_id, "NLBuyer3", gold=200)
+        sink = []
+        await bot._do_buy_market_intent(FakeUpdate(buyer_id, "", sink), "buy the flametongue shortsword from the market")
+        self.assertTrue(
+            any("marketplace is empty" in msg or "Buy which listing" in msg for msg in sink), sink,
+        )
+
+    async def test_ai_companion_situation_facts_ground_affordable_market_listings(self):
+        """
+        Real feature (2026-08-19, per Coffee: "can the AI players place
+        weapons, armour, rings, amulutes, shield, and other items for
+        sale on the Market place? can they purchase from the market
+        place?"). AI companions' own autonomous actions (ai/
+        autonomous_player.py) are ALWAYS grounded in real facts this
+        function builds -- before this, it never mentioned the market
+        at all, so an AI companion could never even consider buying
+        from it. Grounded exactly like the existing "Shop here sells"
+        fact: only real, currently-live listings, never the
+        character's OWN (not a real purchase option), and only ones
+        this character can actually afford.
+        """
+        import sessions
+        sessions.end_session(-999)
+        seller_id, buyer_id = 900582, 900583
+        make_basic_character(seller_id, "FactsSeller", inventory={"rusty_dagger": 1})
+        buyer = make_basic_character(buyer_id, "FactsBuyer", current_location="crossroads_tavern", gold=100)
+        sink = []
+        await bot._do_sell_market(FakeUpdate(seller_id, "", sink), ["1", "60", "rusty dagger"])
+
+        facts = bot._build_ai_player_situation_facts(buyer, "crossroads_tavern")
+        self.assertIn("The player marketplace has", facts)
+        self.assertIn("Rusty Dagger", facts)
+        self.assertIn("60 gold", facts)
+
+        # The seller's own listing must never appear as something THEY could buy.
+        seller = db.get_character(seller_id, -999)
+        seller_facts = bot._build_ai_player_situation_facts(seller, "crossroads_tavern")
+        self.assertNotIn("The player marketplace has", seller_facts)
+
+        # Too expensive to afford -- must not appear either.
+        db.update_character(buyer_id, -999, gold=10)
+        poor_buyer = db.get_character(buyer_id, -999)
+        poor_facts = bot._build_ai_player_situation_facts(poor_buyer, "crossroads_tavern")
+        self.assertNotIn("The player marketplace has", poor_facts)
+
+    def test_ai_companion_example_prompt_includes_market_buy_and_sell(self):
+        """Companion test: the real example lines only appear when their real grounding fact is actually present in the situation facts, same convention every other example already follows."""
+        from ai.autonomous_player import _action_style_prompt
+        with_market = _action_style_prompt("The player marketplace has: 1x Rusty Dagger for 60 gold\nYou're carrying: Rusty Dagger")
+        self.assertIn("from the market", with_market)
+        self.assertIn("on the market for", with_market)
+
+        without_market = _action_style_prompt("Location: The Crossroads Tavern")
+        self.assertNotIn("from the market", without_market)
+        self.assertNotIn("on the market for", without_market)
+
     # -- Task #265, per Coffee ("i wasted a turn ... u said it was
     #    complete"): 27 spells whose effect type (buff/negate/ac_bonus)
     #    fell into one shared flavor-only branch that still spent the

@@ -11818,8 +11818,8 @@ async def _do_check_market(update: Update) -> None:
         await _safe_send(
             update,
             "The marketplace is empty right now — nobody's listed anything for sale.\n\n"
-            "Want to sell something yourself? Say \"/sell_market <quantity> <price> <item name>\" "
-            "(e.g. \"/sell_market 3 50 Silverleaf Herb\") to list it for other players to buy.",
+            "Want to sell something yourself? Just say \"sell 3 Silverleaf Herb for 50 gold on the market\" "
+            "(or \"/sell_market 3 50 Silverleaf Herb\") to list it for other players to buy.",
             speak=False,
         )
         return
@@ -11841,10 +11841,10 @@ async def _do_check_market(update: Update) -> None:
             line += f"\n     📊 {stats_line}"
         lines.append(line)
     lines.append(
-        "\nTap a listing below to buy it, or say \"/buy_market <#>\".\n"
-        "Selling something yourself? Say \"/sell_market <quantity> <price> <item name>\" "
-        "(e.g. \"/sell_market 3 50 Silverleaf Herb\").\n"
-        "Listed something by mistake? \"/cancel_market <#>\" pulls your own listing back."
+        "\nTap a listing below to buy it, or just say \"buy listing <#>\" (or \"/buy_market <#>\").\n"
+        "Selling something yourself? Say \"sell 3 Silverleaf Herb for 50 gold on the market\" "
+        "(or \"/sell_market 3 50 Silverleaf Herb\").\n"
+        "Listed something by mistake? Say \"cancel my listing\" (or \"/cancel_market <#>\") to pull it back."
     )
     await _safe_send(update, "\n".join(lines), reply_markup=_market_keyboard(listings), speak=False)
 
@@ -11999,6 +11999,100 @@ async def _do_cancel_market_intent(update: Update, text: str) -> None:
         item_name = item["name"] if item else listing["item_id"]
         lines.append(f"#{listing['listing_id']}: {listing['quantity']}x {item_name} — {listing['price']} gold")
     await _safe_send(update, "\n".join(lines), speak=False)
+
+
+async def _do_sell_market_intent(update: Update, text: str) -> None:
+    """
+    Real feature (2026-08-19, per Coffee: "can the AI players place
+    weapons, armour, rings, amulutes, shield, and other items for sale
+    on the Market place?") -- /sell_market only ever existed as a slash
+    command, same gap _do_cancel_market_intent already closed for
+    cancelling: this whole game's design is "no slash commands
+    required," and AI companions' own autonomous actions (see
+    ai/autonomous_player.py's choose_next_action) are ALWAYS natural-
+    language sentences, never slash commands -- so before this, no AI
+    companion could ever reach the market at all, regardless of intent.
+    Pulls price (anchored on "gold"/"g", so it's never confused with a
+    quantity) and an optional leading quantity out of free text, then
+    dispatches through the exact same real _do_sell_market a typed
+    "/sell_market" already uses -- never a second, divergent listing
+    path.
+    """
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    price_match = (
+        re.search(r"\bfor\s+(\d+)\s*(?:gold|g)\b", text, re.IGNORECASE)
+        or re.search(r"\b(\d+)\s*gold\b", text, re.IGNORECASE)
+    )
+    if not price_match:
+        await _safe_send(
+            update,
+            "How much gold do you want for it? Say something like \"sell 3 Silverleaf Herb for 50 gold "
+            "on the market\".",
+        )
+        return
+    price = price_match.group(1)
+    remainder = text[:price_match.start()] + text[price_match.end():]
+    # A leading quantity number ("sell 3 Silverleaf Herb...") -- checked
+    # against the text with the price already removed, so the price's
+    # own digits can never be mistaken for a quantity.
+    qty_match = re.search(r"\b(\d+)\b", remainder)
+    quantity = qty_match.group(1) if qty_match else "1"
+    if qty_match:
+        remainder = remainder[:qty_match.start()] + remainder[qty_match.end():]
+    await _do_sell_market(update, [quantity, price, remainder.strip()])
+
+
+async def _do_buy_market_intent(update: Update, text: str) -> None:
+    """
+    Real feature (2026-08-19, per Coffee -- same request as sell_market
+    above): "can they purchase from the market place?" A listing number
+    said outright ("buy listing 3", "buy #3") is unambiguous and
+    dispatches straight through. Otherwise, matches the named item
+    against every LIVE listing's own real item_id (never a guess) --
+    zero or many real matches ask rather than assume, same "only
+    auto-resolve when it's genuinely unambiguous" convention
+    _do_cancel_market_intent already uses for a bare "cancel my
+    listing."
+    """
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    match = re.search(r"#?(\d+)", text)
+    if match:
+        await _do_buy_market(update, [match.group(1)])
+        return
+
+    listings = db.get_market_listings(update.effective_chat.id)
+    if not listings:
+        await _safe_send(
+            update, "The marketplace is empty right now — nobody's listed anything for sale.", speak=False,
+        )
+        return
+    matched = [l for l in listings if items_module.find_item_mentioned_in_text(text, candidate_ids=[l["item_id"]])]
+    if len(matched) == 1:
+        await _do_buy_market(update, [str(matched[0]["listing_id"])])
+        return
+    if len(matched) > 1:
+        lines = ["More than one listing matches that — which one? Say \"buy listing <#>\":"]
+        for listing in matched:
+            item = items_module.get_item(listing["item_id"])
+            item_name = item["name"] if item else listing["item_id"]
+            lines.append(f"#{listing['listing_id']}: {listing['quantity']}x {item_name} — {listing['price']} gold")
+        await _safe_send(update, "\n".join(lines), speak=False)
+        return
+    await _safe_send(
+        update,
+        "Buy which listing? Say \"buy listing <#>\", or check \"the market\" to see what's up for sale.",
+        speak=False,
+    )
 
 
 GAMBLE_WIN_THRESHOLD = 8  # 2d6 total needed to double your wager
@@ -23778,6 +23872,10 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_check_market(update)
     elif action == "cancel_market":
         await _do_cancel_market_intent(update, text)
+    elif action == "sell_market":
+        await _do_sell_market_intent(update, text)
+    elif action == "buy_market":
+        await _do_buy_market_intent(update, text)
     elif action == "join_battle":
         await _do_join_battle(update)
     elif action == "replay_intro":
@@ -26152,6 +26250,28 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
         item_names = [items_module.get_item(i)["name"] for i in inventory if items_module.get_item(i)]
         if item_names:
             lines.append(f"You're carrying: {', '.join(item_names)}")
+
+    # Real feature (2026-08-19, per Coffee: "can the AI players place
+    # weapons, armour, rings, amulutes, shield, and other items for
+    # sale on the Market place? can they purchase from the market
+    # place?"): grounded exactly like "Shop here sells" below -- real,
+    # currently-live listings only, someone else's own (never the
+    # character's own listing, which isn't a real purchase option), and
+    # only the ones this character can actually afford, so a "buy"
+    # example never points at something it can't real-world reach.
+    # Global (not location-scoped), matching the market's own real
+    # design (Task #79) -- reachable from anywhere.
+    affordable_listings = [
+        l for l in db.get_market_listings(character["chat_id"])
+        if l["seller_id"] != character["telegram_user_id"] and l["price"] <= character.get("gold", 0)
+    ]
+    if affordable_listings:
+        listing_bits = [
+            f"{l['quantity']}x {items_module.get_item(l['item_id'])['name']} for {l['price']} gold"
+            for l in affordable_listings if items_module.get_item(l["item_id"])
+        ]
+        if listing_bits:
+            lines.append(f"The player marketplace has: {', '.join(listing_bits)}")
     known_spells = character.get("known_spells") or []
     if known_spells:
         spell_names = [spells_module.get_spell(s)["name"] for s in known_spells if spells_module.get_spell(s)]
