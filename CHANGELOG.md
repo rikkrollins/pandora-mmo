@@ -2,6 +2,22 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.264] — The Cairnbound raised to level 99, 85,000 HP
+
+**Real request (2026-08-19, Coffee):** "make it a lv 99 with 85000 HP"
+for The Cairnbound (the Greymoor Downs chapter-8 boss, `arc_8_
+greymoor_downs`, found at The Lonely Cairn). `damage_bonus` (160→225)
+and `xp_reward` (40,000→90,000) were calculated by interpolating the
+game's own established level→stat curve for chapter-boss-tier monsters
+(level 90: bonus 160/xp 40,000; level 95: bonus 210/xp 50,000; level
+100: bonus 230/xp 100,000). Verified via `rules.leveling.undertuned_
+monster_stat_multiplier` that at `xp_reward=90000` the live difficulty-
+scaling system's own threshold (needs `xp_reward >= 1425` to skip
+extra scaling) means 85,000 HP / 225 damage bonus are the exact live
+numbers a party will face, not a pre-scaling base. Verified with a real
+executed test (`test_the_cairnbound_raised_to_lv99_per_coffee` in
+`tests/test_regression.py`).
+
 ## [1.27.263] — Level-15+ enemy damage floor, Kess damage bonus raised
 
 **Real dev-bridge report (2026-08-19, Coffee):** "Kess is NOT hurting

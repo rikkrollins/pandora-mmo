@@ -9994,6 +9994,28 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(checked, 0, "expected at least one level>15 monster to check")
         self.assertEqual(under_floor, [], f"monsters below the 50 damage_bonus floor: {under_floor}")
 
+    def test_the_cairnbound_raised_to_lv99_per_coffee(self):
+        """
+        Real request (2026-08-19, Coffee): "make it a lv 99 with 85000
+        HP" for The Cairnbound (Greymoor Downs chapter boss, arc_8).
+        damage_bonus (225) and xp_reward (90000) were calculated by
+        interpolating the game's own established level->stat curve for
+        chapter-boss-tier monsters (level 90: bonus 160/xp 40000,
+        level 100: bonus 230/xp 100000; level 95: bonus 210/xp 50000).
+        At xp_reward=90000, undertuned_monster_stat_multiplier's own
+        threshold check (monster_xp_reward * 4.0 >= 5700, i.e.
+        xp_reward >= 1425) means no live scaling ever applies on top --
+        85000 HP / 225 damage_bonus are the exact live numbers.
+        """
+        from rules.leveling import undertuned_monster_stat_multiplier
+        stats = bot.CAMPAIGN["monsters"]["the_cairnbound"]
+        self.assertEqual(stats["level"], 99)
+        self.assertEqual(stats["hp_max"], 85000)
+        self.assertEqual(stats["damage_bonus"], 225)
+        self.assertEqual(stats["xp_reward"], 90000)
+        mult = undertuned_monster_stat_multiplier([99, 99, 99], stats["xp_reward"], is_boss=True)
+        self.assertEqual(mult, 1.0, "xp_reward is high enough that no extra scaling should apply")
+
     def test_greymoor_downs_wolf_leveled_up_per_coffee(self):
         """
         Real dev-bridge report (2026-08-19, Coffee, screenshot circling
