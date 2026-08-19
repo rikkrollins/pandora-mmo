@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.260] — "Join the battle" said no fight existed while allies were actively fighting
+
+**Real live report (2026-08-19, Coffee): "im saying join the battle
+and it says there is no battle."** Confirmed live via the actual
+running session state + DB, not guessed: Sarah and Bram Ashfield (AI
+companions) were genuinely mid-combat against Kess at Greymoor Downs
+at that exact moment — but their stored `current_location` had
+already been dragged to a different location by `_move_party_
+stragglers_along`, because another real party member (not himself in
+that fight) had walked there. An AI companion can't actually be in two
+places at once — physically fighting per the live combat session, yet
+"standing" somewhere else per the database — and `_do_join_battle`'s
+own location match reads exactly that now-wrong column, so a
+perfectly correctly-timed "join the battle" found a bogus location
+mismatch this bug caused. Fixed: an AI companion already in an active
+combat session is now exactly as frozen in place as a dead one until
+the fight resolves, and no longer gets dragged along by an unrelated
+party member's own travel. The two corrupted rows already live were
+also corrected by hand back to the real battle location.
+
 ## [1.27.259] — Player Marketplace: natural-language sell/buy, and AI companions can now use it
 
 **Real feature request (Coffee):** "can the AI players place weapons,

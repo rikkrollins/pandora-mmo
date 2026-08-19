@@ -12292,6 +12292,55 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(downed_after["current_location"], "whispering_wood")
         self.assertEqual(dead_after["current_location"], "whispering_wood")
 
+    async def test_ai_companion_mid_combat_is_not_dragged_along_by_unrelated_travel(self):
+        """
+        Real live bug (2026-08-19, Coffee: "im saying join the battle
+        and it says there is no battle"). Confirmed live via the real
+        sessions_snapshot.json + DB: Sarah and Bram Ashfield (AI
+        companions) were genuinely mid-combat against Kess at
+        greymoor_downs -- but their DB current_location had already
+        been dragged to a different location by this exact function,
+        because Ravenloft (same party, NOT himself in that fight)
+        walked there. An AI companion can't actually be in two places
+        at once; _do_join_battle's own location match reads the now-
+        wrong DB column, not the real combat snapshot, so a real
+        player's own "join the battle" attempt found a bogus location
+        mismatch this bug caused, not their own actual position. An AI
+        companion already mid-fight must now stay frozen in place,
+        same as a dead one, until it resolves.
+        """
+        import sessions
+        sessions.end_session(-999)
+        mover_id, companion_id = 900565, 900566
+        make_basic_character(mover_id, "UnrelatedMover", current_location="whispering_wood")
+        companion = db.create_ai_companion(
+            -999, "FightingCompanion", "Elf", "Ranger",
+            ability_scores={"strength": 12, "dexterity": 17, "constitution": 13,
+                             "intelligence": 11, "wisdom": 15, "charisma": 10},
+            hp_max=30, armor_class=14, gold=0, inventory={},
+        )
+        party_id = db.create_party(mover_id, -999)
+        db.add_ai_companion_to_party(companion["telegram_user_id"], -999, party_id)
+        db.update_character(companion["telegram_user_id"], -999, current_location="the_hush_below")
+        db.mark_location_cleared(mover_id, -999, "whispering_wood")
+
+        enemy = {"telegram_user_id": -700620, "name": "FightWolf", "dexterity": 10, "hp_current": 20, "hp_max": 20}
+        live_companion = db.get_character(companion["telegram_user_id"], -999)
+        live_companion["telegram_user_id"] = companion["telegram_user_id"]
+        session = sessions.start_session(
+            -999, [live_companion, enemy], {companion["telegram_user_id"]: "party", -700620: "enemy"},
+        )
+        session.turn_order = [companion["telegram_user_id"], -700620]
+
+        sink = []
+        await bot._do_move(FakeUpdate(mover_id, "", sink), "go south")
+        companion_after = db.get_character(companion["telegram_user_id"], -999)
+        self.assertEqual(
+            companion_after["current_location"], "the_hush_below",
+            "an AI companion actively mid-combat must stay frozen at the real fight's location",
+        )
+        sessions.end_session(-999)
+
     async def test_arriving_on_foot_does_not_auto_look_for_an_ai_companion(self):
         """
         Companion to the test above: the auto "look around" on arrival

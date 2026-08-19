@@ -18890,11 +18890,31 @@ def _move_party_stragglers_along(mover_telegram_user_id: int, party_id: int, cha
     same as a dead real player, their body has to be recovered, not
     carried -- matching the documented death rule (bot.py's "3rd failed
     death save" handling).
+
+    Real live bug (2026-08-19, Coffee: "im saying join the battle and
+    it says there is no battle" -- confirmed live via the actual
+    sessions_snapshot.json + DB: Sarah and Bram Ashfield, both AI
+    companions, were genuinely mid-combat against Kess at
+    greymoor_downs at that exact moment -- but their DB current_location
+    had ALREADY been dragged to greymoor_downs_lonely_cairn by this
+    exact function, because Ravenloft (same party, not himself in that
+    fight) had walked there unrelated to the battle. An AI companion
+    can't actually BE in two places at once -- physically fighting
+    Kess per the live session, yet "standing" somewhere else per the
+    DB -- and _do_join_battle's own location match (bot.py) reads
+    exactly that now-wrong DB column, not the real combat snapshot, so
+    Ravenloft's own "join the battle" correctly (if confusingly) found
+    a location mismatch caused by this bug, not his own actual
+    position. An AI companion already mid-fight is exactly as frozen
+    in place as a dead one until it resolves -- same real principle,
+    now checked the same way.
     """
     for member in db.get_party_members_by_id(party_id):
         if member["telegram_user_id"] == mover_telegram_user_id or member.get("is_dead"):
             continue
         if member.get("is_ai"):
+            if _in_active_combat(member["telegram_user_id"], chat_id):
+                continue
             db.move_character(member["telegram_user_id"], chat_id, destination_id)
         elif (
             member.get("hp_current", 1) <= 0
