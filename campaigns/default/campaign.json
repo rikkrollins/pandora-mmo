@@ -5340,15 +5340,16 @@
     },
     "watchtower_stalker": {
       "name": "Watchtower Stalker",
+      "level": 99,
       "dexterity": 16,
       "strength": 13,
       "armor_class": 14,
-      "hp_max": 79,
+      "hp_max": 7150,
       "proficiency_bonus": 2,
-      "xp_reward": 90,
+      "xp_reward": 4450,
       "on_hit_condition": "frightened",
       "damage_dice": "1d8",
-      "damage_bonus": 18,
+      "damage_bonus": 130,
       "damage_type": "physical",
       "stealable_items": [
         {
@@ -5359,15 +5360,16 @@
     },
     "alpha_wolf": {
       "name": "Alpha Wolf",
+      "level": 99,
       "dexterity": 16,
       "strength": 15,
       "armor_class": 15,
-      "hp_max": 109,
+      "hp_max": 9900,
       "proficiency_bonus": 3,
-      "xp_reward": 150,
+      "xp_reward": 7400,
       "on_hit_condition": "frightened",
       "damage_dice": "1d8",
-      "damage_bonus": 18,
+      "damage_bonus": 180,
       "damage_type": "physical",
       "stealable_items": [
         {
@@ -5382,14 +5384,15 @@
     },
     "wolf_pup": {
       "name": "Wolf Pup",
+      "level": 99,
       "dexterity": 13,
       "strength": 9,
       "armor_class": 11,
-      "hp_max": 25,
+      "hp_max": 2250,
       "proficiency_bonus": 1,
-      "xp_reward": 30,
+      "xp_reward": 1500,
       "damage_dice": "1d8",
-      "damage_bonus": 18,
+      "damage_bonus": 50,
       "damage_type": "physical",
       "stealable_items": [
         {

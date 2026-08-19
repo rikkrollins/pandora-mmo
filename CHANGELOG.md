@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.265] — Broken Watchtower quest trio leveled to match the chapter
+
+**Real request (2026-08-19, Coffee):** "level up all three to match
+the level that the character shud for them" — Watchtower Stalker (The
+Broken Watchtower), Wolf Pup (The Tower Cellar), and Alpha Wolf
+(Beneath the Vantage), the three non-boss monsters in the same
+`arc_8_greymoor_downs` quest chain that leads into The Cairnbound
+(v1.27.264), had been left at their original ~level-1-5-tier stats
+(hp 25–109) even after the chapter's `required_level` (99) and The
+Cairnbound itself were raised there. All three set to `level: 99`.
+`hp_max`/`xp_reward` extrapolated from the game's own trash-mob growth
+curve (level 45→50 grows ~90 hp/level, ~50 xp/level), extended 49 more
+levels to 99, then scaled per-monster by each one's original relative
+hp/xp ratio to Watchtower Stalker so Wolf Pup stays the weakest and
+Alpha Wolf the strongest, same as before: Watchtower Stalker
+hp 79→7150 / xp 90→4450 / dmg 18→130; Alpha Wolf hp 109→9900 /
+xp 150→7400 / dmg 18→180; Wolf Pup hp 25→2250 / xp 30→1500 /
+dmg 18→50 (floored at the existing level>15 minimum, since its
+proportional value undershot it). Verified with a real executed test
+(`test_broken_watchtower_trio_leveled_to_match_the_chapter`).
+
 ## [1.27.264] — The Cairnbound raised to level 99, 85,000 HP
 
 **Real request (2026-08-19, Coffee):** "make it a lv 99 with 85000 HP"

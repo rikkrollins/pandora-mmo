@@ -10016,6 +10016,40 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         mult = undertuned_monster_stat_multiplier([99, 99, 99], stats["xp_reward"], is_boss=True)
         self.assertEqual(mult, 1.0, "xp_reward is high enough that no extra scaling should apply")
 
+    def test_broken_watchtower_trio_leveled_to_match_the_chapter(self):
+        """
+        Real request (2026-08-19, Coffee): "level up all three to match
+        the level that the character shud for them" -- referring to
+        Watchtower Stalker (The Broken Watchtower), Wolf Pup (The Tower
+        Cellar), and Alpha Wolf (Beneath the Vantage), the three
+        non-boss monsters in the same arc_8_greymoor_downs quest chain
+        (watchtowers_stalker/the_tower_cellars_pup/the_vantage_belows_
+        alpha, leading into the_barrow_depths_bound -- The Cairnbound)
+        that got left at their original unleveled ~1-5-tier stats even
+        after the chapter's required_level (99) and The Cairnbound
+        itself were raised there. All three set to level 99 to match.
+        hp_max/xp_reward extrapolated from the game's own trash-mob
+        growth curve (level 45->50: goblin_shaman_elder-style +90
+        hp/level, +50 xp/level), extended 49 more levels to 99, then
+        scaled per-monster by each one's ORIGINAL relative hp/xp ratio
+        to Watchtower Stalker (the "typical" one of the three) so Wolf
+        Pup stays the weakest and Alpha Wolf the strongest, same as
+        before. damage_bonus scaled the same way but never below the
+        level>15 floor of 50 (Wolf Pup's proportional value undershot
+        it and was floored).
+        """
+        monsters = bot.CAMPAIGN["monsters"]
+        stalker = monsters["watchtower_stalker"]
+        pup = monsters["wolf_pup"]
+        alpha = monsters["alpha_wolf"]
+        for m in (stalker, pup, alpha):
+            self.assertEqual(m["level"], 99)
+            self.assertGreaterEqual(m["damage_bonus"], 50)
+        self.assertLess(pup["hp_max"], stalker["hp_max"])
+        self.assertLess(stalker["hp_max"], alpha["hp_max"])
+        self.assertLess(pup["xp_reward"], stalker["xp_reward"])
+        self.assertLess(stalker["xp_reward"], alpha["xp_reward"])
+
     def test_greymoor_downs_wolf_leveled_up_per_coffee(self):
         """
         Real dev-bridge report (2026-08-19, Coffee, screenshot circling
