@@ -8441,6 +8441,82 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(caster_p.get("marked_target_id"), -5200002)  # the chosen goblin, not the default first one
         sessions.end_session(-999)
 
+    async def test_spell_tonic_via_battle_menu_offers_an_ally_target_picker(self):
+        """
+        Real dev-bridge report (2026-08-19, Coffee): "I selected the
+        tonic and it wouldnt let me use it on Charvenna - it used it in
+        myself." restore_spell_slots (the Greater Spell Tonic) is just
+        as real a per-target consumable as heal/cure_poison -- _do_use_
+        item's own branch already supports a named recipient -- but the
+        battle-menu button's target-picker condition never included it,
+        so it always skipped straight to using it on self.
+        """
+        import sessions
+        sessions.end_session(-999)
+        user_id, ally_id = 950940, 950941
+        make_basic_character(user_id, "TonicUser", current_location="crossroads_tavern",
+                              inventory={"greater_spell_tonic": 1}, spell_slots_max=4)
+        make_basic_character(ally_id, "TonicAlly", current_location="crossroads_tavern", spell_slots_max=4)
+        party_id = db.create_party(user_id, -999)
+        db.update_character(ally_id, -999, party_id=party_id)
+        db.update_character(user_id, -999, spell_slots_current=4)
+        db.update_character(ally_id, -999, spell_slots_current=0)
+        user = db.get_character(user_id, -999)
+        user["telegram_user_id"] = user_id
+        ally = db.get_character(ally_id, -999)
+        ally["telegram_user_id"] = ally_id
+        enemy = {"telegram_user_id": -5200910, "name": "TonicGoblin", "dexterity": 10, "hp_current": 20, "hp_max": 20}
+        session = sessions.start_session(-999, [user, ally, enemy], {user_id: "party", ally_id: "party", -5200910: "enemy"})
+        session.turn_order = [user_id, ally_id, -5200910]
+
+        async def tap(data):
+            sink = []
+            await bot.battle_menu_callback(FakeCallbackUpdate(user_id, data, sink), DummyContext())
+            return "\n".join(sink)
+
+        picker = await tap("bm|use|greater_spell_tonic")
+        self.assertIn("TonicAlly", picker)
+        self.assertIn("bm|usetarget|greater_spell_tonic|TonicAlly", picker)
+
+        await tap("bm|usetarget|greater_spell_tonic|TonicAlly")
+        self.assertEqual(db.get_character(ally_id, -999)["spell_slots_current"], 4)  # the chosen ally, not self
+        self.assertEqual(db.get_character(user_id, -999)["spell_slots_current"], 4)  # unchanged
+        sessions.end_session(-999)
+
+    async def test_single_target_revive_item_via_battle_menu_offers_the_dead_roster(self):
+        """
+        Same real gap, the other per-target consumable shape: a
+        single-target heal_and_revive item (Tent, revive_targets=1)
+        needs the DEAD roster, not the living-allies list -- reviving
+        is the whole point. Mirrors the existing Revivify-scroll picker.
+        """
+        import sessions
+        sessions.end_session(-999)
+        user_id, dead_id = 950942, 950943
+        make_basic_character(user_id, "ReviverUser", current_location="crossroads_tavern", inventory={"tent": 1})
+        make_basic_character(dead_id, "FallenAlly", current_location="crossroads_tavern")
+        party_id = db.create_party(user_id, -999)
+        db.update_character(dead_id, -999, party_id=party_id, hp_current=0, is_dead=1)
+        user = db.get_character(user_id, -999)
+        user["telegram_user_id"] = user_id
+        enemy = {"telegram_user_id": -5200911, "name": "ReviveGoblin", "dexterity": 10, "hp_current": 20, "hp_max": 20}
+        session = sessions.start_session(-999, [user, enemy], {user_id: "party", -5200911: "enemy"})
+        session.turn_order = [user_id, -5200911]
+
+        async def tap(data):
+            sink = []
+            await bot.battle_menu_callback(FakeCallbackUpdate(user_id, data, sink), DummyContext())
+            return "\n".join(sink)
+
+        picker = await tap("bm|use|tent")
+        self.assertIn("FallenAlly", picker)
+        self.assertIn("bm|usetarget|tent|FallenAlly", picker)
+
+        await tap("bm|usetarget|tent|FallenAlly")
+        revived = db.get_character(dead_id, -999)
+        self.assertFalse(revived["is_dead"])
+        sessions.end_session(-999)
+
     async def test_shield_cast_via_battle_menu_offers_an_ally_target_picker(self):
         """
         Same gap, ally-facing side: Shield genuinely applies its AC

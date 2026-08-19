@@ -2980,7 +2980,17 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         # cure_poison items can genuinely go on anyone in the fight.
         # Flavor-only consumables (rations, ale, torch, etc.) have no real
         # target choice either way, so they're unchanged.
-        if item and item.get("effect") in ("heal", "cure_poison"):
+        #
+        # Real live bug (2026-08-19, dev-bridge screenshot, Coffee: "I
+        # selected the tonic and it wouldnt let me use it on Charvenna -
+        # it used it in myself"): "restore_spell_slots" (the Greater
+        # Spell Tonic) is JUST as real a per-target consumable as heal/
+        # cure_poison -- _do_use_item's own restore_spell_slots branch
+        # already supports a named recipient -- but this picker's
+        # condition never included it, so it always skipped straight to
+        # "use {item_name}" with no name, defaulting to self exactly
+        # like the original 2026-07-19 bug.
+        if item and item.get("effect") in ("heal", "cure_poison", "restore_spell_slots"):
             own_side = session.sides.get(user_id)
             allies = session.living_on_side(own_side) if own_side else []
             if len(allies) > 1:
@@ -2995,6 +3005,29 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 buttons.append([InlineKeyboardButton("« Back", callback_data="bm|items")])
                 await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
                 return
+        # Same real gap, the other real per-target consumable shape: a
+        # single-target heal_and_revive item (Tent -- revive_targets=1;
+        # House/Cabin reach several/everyone automatically and are
+        # deliberately excluded, a picker there would be actively wrong)
+        # needs the DEAD roster, not the living-allies list above --
+        # reviving is the whole point. Mirrors the scroll branch's own
+        # real Revivify-scroll picker just below (same _dead_party_
+        # members lookup, same "nothing to revive" fallback message).
+        elif item and item.get("effect") == "heal_and_revive" and item.get("revive_targets", 1) == 1:
+            dead = _dead_party_members(character) if character else []
+            if not dead:
+                await _safe_edit_markup(query)
+                await update.effective_chat.send_message(
+                    "No one in your party is dead right now.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+                )
+                return
+            buttons = [
+                [InlineKeyboardButton(p["name"], callback_data=f"bm|usetarget|{value}|{p['name']}")]
+                for p in dead
+            ]
+            buttons.append([InlineKeyboardButton("« Back", callback_data="bm|items")])
+            await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
+            return
         await _safe_edit_markup(query)
         await _do_use_item(update, f"use {item_name}")
         return

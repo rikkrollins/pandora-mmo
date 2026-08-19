@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.255] — Spell-slot tonics and revive items can actually target a party member via the battle menu
+
+**Real dev-bridge report (2026-08-19, Coffee):** "I selected the tonic
+and it wouldnt let me use it on Charvenna - it used it in myself - we
+shud be able to pick players when using consumable items in the
+battle menu or the item menu." Root cause: the battle-menu Items
+button's target-picker only ever checked for `effect in ("heal",
+"cure_poison")` — `restore_spell_slots` (Greater/Lesser/Superior Spell
+Tonic) was missing entirely, so it always skipped straight to using
+the item with no recipient named, silently defaulting to self.
+`restore_spell_slots` added to that picker.
+
+Found and fixed the same gap for the other real per-target consumable
+shape while in there: a single-target `heal_and_revive` item (Tent,
+`revive_targets: 1`) needs the DEAD roster, not the living-allies
+list — reviving is the whole point — so it now gets its own picker
+mirroring the existing Revivify-scroll one, instead of silently
+reviving whoever tapped the button (who, being alive enough to tap a
+button, was never a sensible target for a revive item to begin with).
+
 ## [1.27.254] — Windswept Ridge wolf leveled up per Coffee's dev-bridge request
 
 **Real dev-bridge report (2026-08-19, Coffee, screenshot circling
