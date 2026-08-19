@@ -9792,14 +9792,23 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         screenshot: "these areas shud be lv20+... I want the enemies to
         have about 500 HP... the game is too easy"). The grow-direction
         sibling of test_start_combat_shrinks_an_overtuned_wild_monster_
-        to_party_level above: a level-20 party fighting barrow_bound_wolf
-        (99 hp/140 xp_reward, far below a real level-20 budget) must get
-        a real, grown monster (5x, Coffee's own trash-tier reference
-        point: 99 -> 495 hp), never the stale low-tier template stats.
-        damage_bonus grows too, but by a DAMPENED (sqrt) ratio, not the
-        full 5x -- see UNDERTUNED_DAMAGE_SCALE_EXPONENT's own docstring
-        for why. armor_class/damage_dice stay unchanged by design, same
-        convention the shrink direction already established.
+        to_party_level above: a level-20 party fighting a still-unleveled
+        trash monster must get a real, grown monster (5x, Coffee's own
+        trash-tier reference point), never the stale low-tier template
+        stats. damage_bonus grows too, but by a DAMPENED (sqrt) ratio,
+        not the full 5x -- see UNDERTUNED_DAMAGE_SCALE_EXPONENT's own
+        docstring for why. armor_class/damage_dice stay unchanged by
+        design, same convention the shrink direction already established.
+
+        2026-08-19: retargeted from barrow_bound_wolf to verge_wraith --
+        same reason the_unspoken was retargeted to the_verge_warden below
+        (2026-08-15): barrow_bound_wolf got a real, deliberate "level"
+        field of its own in Coffee's arc_8_greymoor_downs chapter-band
+        pass (v1.27.266), which now deliberately SKIPS all the dynamic
+        scaling this test exists to verify (see the real comment above
+        `stat_mult = 1.0` in bot.py). verge_wraith hasn't been through
+        any hand-authoring pass yet, so it's the real, live trash monster
+        this dynamic-growth path still needs to cover.
         """
         import sessions
         from unittest.mock import patch, AsyncMock
@@ -9810,12 +9819,12 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink = []
         with patch("bot._resolve_ai_turns", new=AsyncMock()), \
              patch("bot._maybe_send_monster_image", new=AsyncMock()):
-            await bot._do_start_combat(FakeUpdate(user_id, "fight the barrow-bound wolf", sink),
-                                        monster_key="barrow_bound_wolf", count=1)
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the verge wraith", sink),
+                                        monster_key="verge_wraith", count=1)
         session = sessions.get_session_for_user(-999, user_id)
         enemy = next(p for p in session.participants if p["telegram_user_id"] != user_id)
         import campaign_loader as cl
-        template = cl.get_monster_template(bot.CAMPAIGN, "barrow_bound_wolf")
+        template = cl.get_monster_template(bot.CAMPAIGN, "verge_wraith")
         self.assertEqual(enemy["hp_max"], round(template["hp_max"] * 5.0))
         self.assertEqual(enemy["hp_current"], enemy["hp_max"])
         self.assertGreater(enemy["hp_max"], template["hp_max"])
@@ -10016,39 +10025,108 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         mult = undertuned_monster_stat_multiplier([99, 99, 99], stats["xp_reward"], is_boss=True)
         self.assertEqual(mult, 1.0, "xp_reward is high enough that no extra scaling should apply")
 
-    def test_broken_watchtower_trio_leveled_to_match_the_chapter(self):
+    def test_broken_watchtower_trio_ramps_across_chapter_8_band(self):
         """
-        Real request (2026-08-19, Coffee): "level up all three to match
-        the level that the character shud for them" -- referring to
-        Watchtower Stalker (The Broken Watchtower), Wolf Pup (The Tower
-        Cellar), and Alpha Wolf (Beneath the Vantage), the three
-        non-boss monsters in the same arc_8_greymoor_downs quest chain
-        (watchtowers_stalker/the_tower_cellars_pup/the_vantage_belows_
-        alpha, leading into the_barrow_depths_bound -- The Cairnbound)
-        that got left at their original unleveled ~1-5-tier stats even
-        after the chapter's required_level (99) and The Cairnbound
-        itself were raised there. All three set to level 99 to match.
-        hp_max/xp_reward extrapolated from the game's own trash-mob
-        growth curve (level 45->50: goblin_shaman_elder-style +90
-        hp/level, +50 xp/level), extended 49 more levels to 99, then
-        scaled per-monster by each one's ORIGINAL relative hp/xp ratio
-        to Watchtower Stalker (the "typical" one of the three) so Wolf
-        Pup stays the weakest and Alpha Wolf the strongest, same as
-        before. damage_bonus scaled the same way but never below the
-        level>15 floor of 50 (Wolf Pup's proportional value undershot
-        it and was floored).
+        Real request (2026-08-19, Coffee), revised: the v1.27.265 flat
+        level-99 pass on this quest chain (Watchtower Stalker, Wolf
+        Pup, Alpha Wolf, plus barrow_bound_wolf, all in arc_8's own
+        quest chain leading to The Cairnbound) was itself corrected
+        once Coffee clarified the intended model: chapters should have
+        a real level BAND (arc_8 = 75-99, confirmed against the other
+        7 chapters' own 15-level-span bands), and non-boss monsters
+        within a chapter should RAMP across that band (weakest near
+        the bottom, strongest near the top) rather than all sitting
+        flat at the chapter's ceiling -- only the true chapter-capping
+        boss (The Cairnbound) belongs at the very top. Also corrected:
+        every OTHER non-boss monster in the entire bestiary caps
+        damage_bonus at exactly 50 regardless of level (verified via a
+        live sweep) -- the flat-99 pass's 130/180 bonuses on this trio
+        were themselves an inconsistency, now reverted to the same 50
+        floor every other trash-tier monster uses.
         """
         monsters = bot.CAMPAIGN["monsters"]
-        stalker = monsters["watchtower_stalker"]
         pup = monsters["wolf_pup"]
+        stalker = monsters["watchtower_stalker"]
+        barrow = monsters["barrow_bound_wolf"]
         alpha = monsters["alpha_wolf"]
-        for m in (stalker, pup, alpha):
-            self.assertEqual(m["level"], 99)
-            self.assertGreaterEqual(m["damage_bonus"], 50)
-        self.assertLess(pup["hp_max"], stalker["hp_max"])
-        self.assertLess(stalker["hp_max"], alpha["hp_max"])
-        self.assertLess(pup["xp_reward"], stalker["xp_reward"])
-        self.assertLess(stalker["xp_reward"], alpha["xp_reward"])
+        cairnbound = monsters["the_cairnbound"]
+        ordered = [pup, stalker, barrow, alpha]
+        for m in ordered:
+            self.assertEqual(m["damage_bonus"], 50)
+            self.assertGreaterEqual(m["level"], 75)
+            self.assertLess(m["level"], 99)
+        levels = [m["level"] for m in ordered]
+        self.assertEqual(levels, sorted(levels))
+        hps = [m["hp_max"] for m in ordered]
+        self.assertEqual(hps, sorted(hps))
+        self.assertLess(alpha["level"], cairnbound["level"])
+        self.assertLess(alpha["hp_max"], cairnbound["hp_max"])
+
+    def test_chapters_1_through_8_level_bands_and_non_boss_damage_floor(self):
+        """
+        Real request (2026-08-19, Coffee): confirmed an explicit 8-chapter
+        level-band model (each a 15-level span with a 5-level overlap
+        into the next, chapter 8 alone running long at 75-99 since it's
+        the last chapter of the first playthrough / evolution point):
+        ch1 1-15, ch2 10-25, ch3 20-35, ch4 30-45, ch5 40-55, ch6 50-65,
+        ch7 60-75, ch8 75-99. Verifies each arc's own quest-linked
+        monster roster (trash + the arc's own required story
+        boss/quest-target, found via story_arcs[arc].quests ->
+        quests[q].location/objective_location/trigger.monster) actually
+        falls within that arc's band, and that every non-boss (trash)
+        monster in the whole bestiary shares the same damage_bonus=50
+        ceiling (a real, previously-undocumented design constant this
+        pass surfaced and enforced -- see the watchtower-trio test
+        above for the correction this caught). Remnant superbosses
+        (the 12 remnant_* quests) are deliberately excluded -- they're
+        a separate, already-internally-consistent difficulty ladder
+        spanning far outside any one chapter's band by design (e.g.
+        3 of them sit in the arc_1 zone at levels 20/30/50, well above
+        arc_1's own 1-15 band -- optional superbosses you can reach
+        early but aren't meant to beat until much later).
+        """
+        monsters = bot.CAMPAIGN["monsters"]
+        bands = {
+            "arc_1_discovery": (1, 15),
+            "arc_2_descent": (10, 25),
+            "arc_3_revelation": (20, 35),
+            "arc_4_ascension": (30, 45),
+            "arc_5_goblin_warrens": (40, 55),
+            "arc_6_sunken_root_caverns": (50, 65),
+            "arc_7_stonearch_gorge": (60, 75),
+            "arc_8_greymoor_downs": (75, 99),
+        }
+        rosters = {
+            "arc_1_discovery": ["goblin", "wolf", "goblin_shaman", "goblin_boss"],
+            "arc_2_descent": ["crystal_spider", "shadow_wisp", "the_unspoken"],
+            "arc_3_revelation": ["shadow_wisp", "the_unspoken", "the_waking_ember"],
+            "arc_4_ascension": ["the_waiting_shape", "the_waking_ember"],
+            "arc_5_goblin_warrens": ["young_goblin", "veteran_goblin", "goblin_shaman_elder"],
+            "arc_6_sunken_root_caverns": ["channel_bound_goblin", "elder_root_shaman",
+                                           "root_bound_goblin", "root_goblin_pup"],
+            "arc_7_stonearch_gorge": ["spiderling", "brood_spider", "current_bound_spider", "elder_web_spider"],
+            "arc_8_greymoor_downs": ["wolf_pup", "watchtower_stalker", "barrow_bound_wolf", "alpha_wolf"],
+        }
+        # Shared monster keys (e.g. shadow_wisp/the_unspoken/the_waking_ember
+        # span two adjacent arcs) can only carry one real level, so a
+        # shared key is checked against the UNION of every arc band it
+        # appears in, not each arc individually.
+        key_arcs: dict[str, list[str]] = {}
+        for arc in bands:
+            for key in rosters[arc]:
+                key_arcs.setdefault(key, []).append(arc)
+        for key, arcs in key_arcs.items():
+            level = monsters[key].get("level")
+            self.assertIsNotNone(level, f"{key} has no level")
+            lo = min(bands[a][0] for a in arcs)
+            hi = max(bands[a][1] for a in arcs)
+            self.assertTrue(lo <= level <= hi, f"{key} level {level} outside band {lo}-{hi} ({arcs})")
+
+        non_boss_over_floor = [
+            (k, m.get("damage_bonus")) for k, m in monsters.items()
+            if not m.get("is_boss") and (m.get("damage_bonus") or 0) > 50
+        ]
+        self.assertEqual(non_boss_over_floor, [], f"non-boss monsters above the 50 damage_bonus ceiling: {non_boss_over_floor}")
 
     def test_greymoor_downs_wolf_leveled_up_per_coffee(self):
         """
@@ -10146,8 +10224,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         inferred-from-xp-reward fallback was showing "(Lv. 1)" for both,
         same root cause as the pre-v1.27.231 Encounter Ledger gap.
         """
-        self.assertIn("Root-Bound Goblin (Lv. 25)", bot._monster_danger_line(["root_bound_goblin"]))
-        self.assertIn("Root Goblin Pup (Lv. 32)", bot._monster_danger_line(["root_goblin_pup"]))
+        # Levels re-raised again (2026-08-19, Coffee's arc_6_sunken_root_caverns
+        # chapter-band pass, v1.27.266): 25->60 and 32->65, to fit that
+        # chapter's confirmed 50-65 level band instead of the original ask's
+        # numbers -- the real fix this test guards (an authored `level` field
+        # existing at all, vs. the old inferred-from-xp-reward "(Lv. 1)" bug)
+        # is unaffected by which specific number that field holds today.
+        self.assertIn("Root-Bound Goblin (Lv. 60)", bot._monster_danger_line(["root_bound_goblin"]))
+        self.assertIn("Root Goblin Pup (Lv. 65)", bot._monster_danger_line(["root_goblin_pup"]))
 
     def test_colosseum_champion_damage_raised(self):
         """
@@ -10171,7 +10255,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         Real feature, same session (2026-08-15, per Coffee: "make the
         bosses the same lvl as the ledger but dont show it to the
         player until they beat the boss, then include it in bestiary").
-        A boss's real hand-authored level (goblin_boss = 10) must stay
+        A boss's real hand-authored level (goblin_boss = 15, re-raised
+        2026-08-19 per Coffee's chapter-band pass, v1.27.266, to sit at
+        the top of arc_1_discovery's confirmed 1-15 band) must stay
         hidden -- both on arrival (_monster_danger_line, tested above)
         and in the bestiary/examine entry -- until this specific
         character has actually WON against it at least once, tracked by
@@ -10192,7 +10278,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         db.update_character(user_id, -997, level=20, hp_current=500, hp_max=500)
         import campaign_loader as cl
         template = cl.get_monster_template(bot.CAMPAIGN, "goblin_boss")
-        self.assertEqual(template.get("level"), 10)
+        self.assertEqual(template.get("level"), 15)
 
         with patch("bot._resolve_ai_turns", new=AsyncMock()), \
              patch("bot._maybe_send_monster_image", new=AsyncMock()), \
@@ -10215,7 +10301,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("goblin_boss", character_after.get("defeated_monsters", []))
 
         entry_after = bot._format_bestiary_entry("goblin_boss", template, defeated=True)
-        self.assertIn("🎯 Level 10", entry_after)
+        self.assertIn("🎯 Level 15", entry_after)
         sessions.end_session(-997)
 
     async def test_start_combat_copies_elemental_resistance_pct_from_template(self):

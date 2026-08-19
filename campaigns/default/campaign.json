@@ -4150,17 +4150,17 @@
       ]
     },
     "goblin_boss": {
-      "name": "Goblin Boss", "level": 10,
+      "name": "Goblin Boss", "level": 15,
       "dexterity": 15,
       "strength": 12,
       "armor_class": 15,
-      "hp_max": 500,
+      "hp_max": 750,
       "proficiency_bonus": 2,
-      "xp_reward": 200,
+      "xp_reward": 300,
       "is_boss": true,
       "on_hit_condition": "paralyzed",
       "damage_dice": "1d8",
-      "damage_bonus": 15,
+      "damage_bonus": 23,
       "damage_type": "physical",
       "stealable_items": [
         {
@@ -4319,13 +4319,13 @@
       ]
     },
     "the_unspoken": {
-      "name": "The Unspoken", "level": 20,
+      "name": "The Unspoken", "level": 25,
       "dexterity": 16,
       "strength": 14,
       "armor_class": 16,
-      "hp_max": 750,
+      "hp_max": 938,
       "proficiency_bonus": 3,
-      "xp_reward": 250,
+      "xp_reward": 313,
       "is_boss": true,
       "on_hit_condition": "silenced",
       "punishes_own_condition": true,
@@ -4336,7 +4336,7 @@
         "radiant"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 50,
+      "damage_bonus": 63,
       "damage_type": "psychic",
       "known_spells": ["vicious_mockery"],
       "stealable_items": [
@@ -4351,19 +4351,19 @@
       ]
     },
     "the_waking_ember": {
-      "name": "The Waking Ember", "level": 25,
+      "name": "The Waking Ember", "level": 35,
       "dexterity": 12,
       "strength": 18,
       "armor_class": 18,
-      "hp_max": 1000,
+      "hp_max": 1400,
       "proficiency_bonus": 4,
-      "xp_reward": 500,
+      "xp_reward": 700,
       "is_boss": true,
       "on_hit_condition": "paralyzed",
       "life_drain": true,
       "counters_rage": true,
       "damage_dice": "1d8",
-      "damage_bonus": 50,
+      "damage_bonus": 70,
       "damage_type": "fire",
       "known_spells": ["fireball"],
       "vulnerabilities": [
@@ -4384,13 +4384,13 @@
       ]
     },
     "the_waiting_shape": {
-      "name": "The Waiting Shape", "level": 40,
+      "name": "The Waiting Shape", "level": 45,
       "dexterity": 14,
       "strength": 18,
       "armor_class": 17,
-      "hp_max": 1500,
+      "hp_max": 1688,
       "proficiency_bonus": 4,
-      "xp_reward": 2000,
+      "xp_reward": 2250,
       "is_boss": true,
       "on_hit_condition": "frightened",
       "life_drain": true,
@@ -4402,7 +4402,7 @@
         "radiant"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 50,
+      "damage_bonus": 56,
       "damage_type": "necrotic",
       "known_spells": ["voidcall"],
       "stealable_items": [
@@ -5108,13 +5108,13 @@
       ]
     },
     "goblin_shaman_elder": {
-      "name": "Elder Goblin Shaman", "level": 50,
+      "name": "Elder Goblin Shaman", "level": 55,
       "dexterity": 14,
       "strength": 9,
       "armor_class": 14,
-      "hp_max": 2750,
+      "hp_max": 3200,
       "proficiency_bonus": 3,
-      "xp_reward": 2000,
+      "xp_reward": 2250,
       "on_hit_condition": "silenced",
       "resistances": [
         "poison"
@@ -5135,11 +5135,11 @@
       ]
     },
     "young_goblin": {
-      "name": "Young Goblin", "level": 35,
+      "name": "Young Goblin", "level": 40,
       "dexterity": 12,
       "strength": 7,
       "armor_class": 12,
-      "hp_max": 1500,
+      "hp_max": 1850,
       "proficiency_bonus": 1,
       "xp_reward": 1500,
       "damage_dice": "1d8",
@@ -5153,13 +5153,13 @@
       ]
     },
     "root_bound_goblin": {
-      "name": "Root-Bound Goblin", "level": 25,
+      "name": "Root-Bound Goblin", "level": 60,
       "dexterity": 13,
       "strength": 9,
       "armor_class": 19,
-      "hp_max": 450,
+      "hp_max": 3650,
       "proficiency_bonus": 4,
-      "xp_reward": 330,
+      "xp_reward": 2500,
       "damage_dice": "1d8",
       "damage_bonus": 50,
       "damage_type": "physical",
@@ -5172,14 +5172,15 @@
     },
     "channel_bound_goblin": {
       "name": "Channel-Bound Goblin",
+      "level": 50,
       "dexterity": 13,
       "strength": 9,
       "armor_class": 14,
-      "hp_max": 59,
+      "hp_max": 2750,
       "proficiency_bonus": 2,
-      "xp_reward": 90,
+      "xp_reward": 2000,
       "damage_dice": "1d8",
-      "damage_bonus": 18,
+      "damage_bonus": 50,
       "damage_type": "physical",
       "stealable_items": [
         {
@@ -5190,18 +5191,19 @@
     },
     "elder_root_shaman": {
       "name": "Elder Root Shaman",
+      "level": 55,
       "dexterity": 13,
       "strength": 9,
       "armor_class": 14,
-      "hp_max": 99,
+      "hp_max": 3200,
       "proficiency_bonus": 3,
-      "xp_reward": 160,
+      "xp_reward": 2250,
       "on_hit_condition": "poisoned",
       "resistances": [
         "poison"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18,
+      "damage_bonus": 50,
       "damage_type": "poison",
       "known_spells": ["produce_flame"],
       "stealable_items": [
@@ -5216,13 +5218,13 @@
       ]
     },
     "root_goblin_pup": {
-      "name": "Root Goblin Pup", "level": 32,
+      "name": "Root Goblin Pup", "level": 65,
       "dexterity": 11,
       "strength": 6,
       "armor_class": 20,
-      "hp_max": 1150,
+      "hp_max": 4100,
       "proficiency_bonus": 5,
-      "xp_reward": 950,
+      "xp_reward": 2750,
       "vulnerabilities": [
         "poison"
       ],
@@ -5238,18 +5240,19 @@
     },
     "brood_spider": {
       "name": "Brood Spider",
+      "level": 65,
       "dexterity": 16,
       "strength": 12,
       "armor_class": 14,
-      "hp_max": 89,
+      "hp_max": 4100,
       "proficiency_bonus": 2,
-      "xp_reward": 140,
+      "xp_reward": 2750,
       "on_hit_condition": "poisoned",
       "resistances": [
         "poison"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18,
+      "damage_bonus": 50,
       "damage_type": "poison",
       "stealable_items": [
         {
@@ -5264,12 +5267,13 @@
     },
     "current_bound_spider": {
       "name": "Current-Bound Spider",
+      "level": 70,
       "dexterity": 17,
       "strength": 14,
       "armor_class": 15,
-      "hp_max": 148,
+      "hp_max": 4550,
       "proficiency_bonus": 3,
-      "xp_reward": 220,
+      "xp_reward": 3000,
       "on_hit_condition": "poisoned",
       "resistances": [
         "poison"
@@ -5278,7 +5282,7 @@
         "fire"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18,
+      "damage_bonus": 50,
       "damage_type": "poison",
       "stealable_items": [
         {
@@ -5293,18 +5297,19 @@
     },
     "elder_web_spider": {
       "name": "Elder Web Spider",
+      "level": 75,
       "dexterity": 17,
       "strength": 16,
       "armor_class": 16,
-      "hp_max": 188,
+      "hp_max": 5000,
       "proficiency_bonus": 4,
-      "xp_reward": 350,
+      "xp_reward": 3250,
       "on_hit_condition": "poisoned",
       "resistances": [
         "poison"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18,
+      "damage_bonus": 50,
       "damage_type": "poison",
       "stealable_items": [
         {
@@ -5319,17 +5324,18 @@
     },
     "spiderling": {
       "name": "Spiderling",
+      "level": 60,
       "dexterity": 14,
       "strength": 8,
       "armor_class": 12,
-      "hp_max": 39,
+      "hp_max": 3650,
       "proficiency_bonus": 1,
-      "xp_reward": 40,
+      "xp_reward": 2500,
       "resistances": [
         "poison"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18,
+      "damage_bonus": 50,
       "damage_type": "poison",
       "stealable_items": [
         {
@@ -5340,16 +5346,16 @@
     },
     "watchtower_stalker": {
       "name": "Watchtower Stalker",
-      "level": 99,
+      "level": 80,
       "dexterity": 16,
       "strength": 13,
       "armor_class": 14,
-      "hp_max": 7150,
+      "hp_max": 5450,
       "proficiency_bonus": 2,
-      "xp_reward": 4450,
+      "xp_reward": 3500,
       "on_hit_condition": "frightened",
       "damage_dice": "1d8",
-      "damage_bonus": 130,
+      "damage_bonus": 50,
       "damage_type": "physical",
       "stealable_items": [
         {
@@ -5360,16 +5366,16 @@
     },
     "alpha_wolf": {
       "name": "Alpha Wolf",
-      "level": 99,
+      "level": 90,
       "dexterity": 16,
       "strength": 15,
       "armor_class": 15,
-      "hp_max": 9900,
+      "hp_max": 6350,
       "proficiency_bonus": 3,
-      "xp_reward": 7400,
+      "xp_reward": 4000,
       "on_hit_condition": "frightened",
       "damage_dice": "1d8",
-      "damage_bonus": 180,
+      "damage_bonus": 50,
       "damage_type": "physical",
       "stealable_items": [
         {
@@ -5384,13 +5390,13 @@
     },
     "wolf_pup": {
       "name": "Wolf Pup",
-      "level": 99,
+      "level": 75,
       "dexterity": 13,
       "strength": 9,
       "armor_class": 11,
-      "hp_max": 2250,
+      "hp_max": 5000,
       "proficiency_bonus": 1,
-      "xp_reward": 1500,
+      "xp_reward": 3250,
       "damage_dice": "1d8",
       "damage_bonus": 50,
       "damage_type": "physical",
@@ -5403,18 +5409,19 @@
     },
     "barrow_bound_wolf": {
       "name": "Barrow-Bound Wolf",
+      "level": 85,
       "dexterity": 16,
       "strength": 14,
       "armor_class": 15,
-      "hp_max": 99,
+      "hp_max": 5900,
       "proficiency_bonus": 3,
-      "xp_reward": 140,
+      "xp_reward": 3750,
       "on_hit_condition": "frightened",
       "resistances": [
         "necrotic"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 18,
+      "damage_bonus": 50,
       "damage_type": "physical",
       "stealable_items": [
         {
@@ -5638,17 +5645,17 @@
       "adapts_to_damage": true
     },
     "the_unopened": {
-      "name": "The Unopened",
+      "name": "The Unopened", "level": 99,
       "dexterity": 14,
       "strength": 20,
       "armor_class": 22,
-      "hp_max": 900,
+      "hp_max": 9400,
       "proficiency_bonus": 5,
-      "xp_reward": 1800,
+      "xp_reward": 90000,
       "is_boss": true,
       "counters_divine_smite": true,
       "damage_dice": "2d10",
-      "damage_bonus": 22,
+      "damage_bonus": 225,
       "damage_type": "force",
       "known_spells": ["magic_missile"],
       "resistances": [

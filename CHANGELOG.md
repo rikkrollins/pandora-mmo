@@ -2,6 +2,64 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.266] — Confirmed 8-chapter level-band model, releveled chapters 1-8
+
+**Real design confirmation (2026-08-19, Coffee):** established an
+explicit level band per story chapter, each a 15-level span overlapping
+5 into the next (chapter 8 alone runs long, 75-99, since it's the last
+chapter of the first playthrough before the evolution/rebirth system
+takes over): ch1 1-15, ch2 10-25, ch3 20-35, ch4 30-45, ch5 40-55,
+ch6 50-65, ch7 60-75, ch8 75-99. Applied to every arc's own quest-linked
+monster roster (mapped via `story_arcs[arc].quests` ->
+`quests[q].location`/`objective_location`/`trigger.monster`):
+
+- Non-boss (trash) monsters ramp weakest-to-strongest across their
+  chapter's band, only the chapter's own required story boss at the
+  top. A live sweep found every non-boss monster in the whole bestiary
+  caps `damage_bonus` at exactly 50 regardless of level — a real,
+  previously-undocumented design constant, now enforced everywhere
+  (including reverting the Broken Watchtower trio's v1.27.265 130/180
+  bonuses, which had drifted from that pattern, and re-ramping that
+  trio + `barrow_bound_wolf` across 75-90 instead of flat 99 — The
+  Cairnbound alone keeps the chapter's true ceiling, 99).
+- Chapter-required story bosses (`goblin_boss` 10→15, `the_unspoken`
+  20→25, `the_waking_ember` 25→35, `the_waiting_shape` 40→45) moved to
+  the top of their own chapter's band, stats scaled proportionally by
+  the level ratio.
+- Fully unleveled monsters given real levels for the first time:
+  `channel_bound_goblin`/`elder_root_shaman`/`root_bound_goblin`/
+  `root_goblin_pup` (ch6, 50/55/60/65), `spiderling`/`brood_spider`/
+  `current_bound_spider`/`elder_web_spider` (ch7, 60/65/70/75).
+- `the_unopened` (a Remnant superboss, same lonely-cairn dungeon as The
+  Cairnbound) had no level at all despite `is_boss: true` — given
+  level 99 and stats from the same natural boss curve The Cairnbound
+  itself was interpolated from (hp 9400, dmg 225, xp 90000), distinct
+  from Cairnbound's own explicitly-requested 85,000 HP.
+- The other 11 Remnant superbosses were reviewed and left unchanged —
+  they already form a coherent, separate difficulty ladder (levels
+  20-100) deliberately independent of the story chapter they happen to
+  sit in (e.g. 3 of them occupy the arc_1 zone at levels 20/30/50, well
+  above arc_1's own 1-15 band — optional superbosses reachable early,
+  not meant to be beaten that early).
+
+**Real architectural fact surfaced while doing this:** any monster
+template with a real `level` field has ALL dynamic party-level scaling
+permanently disabled in `bot._do_start_combat` (see the comment above
+`stat_mult = 1.0`) — giving a monster a level is a deliberate, final
+stat-authoring act, not cosmetic. `barrow_bound_wolf` newly getting a
+level broke `test_start_combat_grows_an_undertuned_monster_for_an_
+overleveled_party`'s premise (it needed a still-unleveled monster);
+retargeted to `verge_wraith`, same pattern already used once before for
+`the_unspoken` → `the_verge_warden`. Also updated two other tests that
+hardcoded now-changed exact levels (`goblin_boss` 10→15,
+`root_bound_goblin`/`root_goblin_pup` 25/32→60/65).
+
+Verified with real executed tests: `test_broken_watchtower_trio_ramps_
+across_chapter_8_band`, `test_chapters_1_through_8_level_bands_and_
+non_boss_damage_floor` (sweeps every arc's roster against its band and
+every non-boss monster's damage_bonus ceiling), plus all previously
+passing tests these changes touched re-verified green.
+
 ## [1.27.265] — Broken Watchtower quest trio leveled to match the chapter
 
 **Real request (2026-08-19, Coffee):** "level up all three to match
