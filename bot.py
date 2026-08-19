@@ -14898,7 +14898,40 @@ async def _do_join_battle(update: Update) -> None:
     other_battle_locations = []
     for candidate in candidate_sessions:
         party_members = [p for p in candidate.participants if candidate.sides.get(p["telegram_user_id"]) == "party"]
-        battle_location = next((p.get("current_location") for p in party_members if p.get("current_location")), None)
+        # Real live bug (2026-08-19, Coffee: "im saying join the battle
+        # and it says there is no battle... we are at the LONELY
+        # CAIRN"): this used to read current_location straight off the
+        # in-memory combat participant dict -- a one-time snapshot taken
+        # when the fight started, never refreshed afterward. Confirmed
+        # live via the real DB: Charvenna's own row genuinely said
+        # "greymoor_downs_lonely_cairn" (matching Coffee's own report,
+        # and matching where she and Ravenloft were actually both
+        # standing), while her in-memory combat snapshot still said the
+        # stale "greymoor_downs" from whenever the fight actually
+        # began -- a real, live location drift the earlier v1.27.260
+        # fix for the AI-companion case doesn't cover (Charvenna's a
+        # real human, not an AI companion, so that fix's guard never
+        # applied to her at all). Rather than trying to hunt down every
+        # possible way this snapshot can drift, this now reads each
+        # party-side member's REAL, CURRENT database row instead of the
+        # frozen-in-time in-memory copy -- the one genuinely
+        # authoritative source for "where is this person right now,"
+        # matching what "join the battle" is actually asking.
+        # A real human's own row is the more trustworthy source when
+        # both exist: they can't be silently relocated by anything else
+        # (an AI companion's row can still drift for other, unrelated
+        # reasons even after v1.27.260's fix -- e.g. it hadn't rushed in
+        # yet before that fix landed, or a still-unknown path this bug
+        # class hasn't surfaced yet). Real humans checked first, AI
+        # companions only as a fallback when no real human is fighting.
+        battle_location = None
+        for p in sorted(party_members, key=lambda p: p.get("is_ai", False)):
+            live_row = db.get_character(p["telegram_user_id"], chat_id)
+            if live_row and live_row.get("current_location"):
+                battle_location = live_row["current_location"]
+                break
+        if battle_location is None:
+            battle_location = next((p.get("current_location") for p in party_members if p.get("current_location")), None)
         if battle_location is not None and character["current_location"] == battle_location:
             matching_session = candidate
             break

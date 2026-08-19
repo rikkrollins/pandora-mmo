@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.261] — Actually fixed "join the battle" — v1.27.260 corrected the wrong location
+
+**Coffee caught a real mistake in v1.27.260's own fix**, live: "we are
+at the LONELY CAIRN — it WONT LET ME JOIN." Re-verified directly
+against the running session and the real DB instead of trusting the
+earlier diagnosis, and confirmed he was right — the real, authoritative
+fight location was **greymoor_downs_lonely_cairn**, not greymoor_downs.
+Root cause of the actual bug: `_do_join_battle` read a combat
+participant's `current_location` off the in-memory session snapshot —
+a one-time copy taken when the fight started, never refreshed
+afterward — instead of their real, current database row, which had
+moved on. v1.27.260's own fix incorrectly "corrected" two AI
+companions' locations back to the *stale* value, compounding the
+error. Now `_do_join_battle` reads each party-side member's real,
+current DB row directly (a real human checked before any AI companion,
+since their own row can't be silently relocated by anything else while
+they're mid-fight) — the two miscorrected rows have been set back to
+the real location by hand.
+
 ## [1.27.260] — "Join the battle" said no fight existed while allies were actively fighting
 
 **Real live report (2026-08-19, Coffee): "im saying join the battle

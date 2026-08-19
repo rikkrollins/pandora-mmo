@@ -15394,6 +15394,49 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Glimmerdeep Grotto", reply, f"real fight location missing from rejection: {reply!r}")
         sessions.end_session(-988)
 
+    async def test_join_battle_uses_real_current_location_not_a_stale_combat_snapshot(self):
+        """
+        Real live bug (2026-08-19, Coffee: "im saying join the battle
+        and it says there is no battle... we are at the LONELY CAIRN").
+        Confirmed live: a real human combat participant's OWN database
+        row had moved on to a new location (greymoor_downs_lonely_cairn)
+        while her in-memory combat participant dict still carried the
+        stale location from whenever the fight actually began
+        (greymoor_downs) -- _do_join_battle used to read that frozen
+        in-memory copy, so a player standing at the real, current fight
+        location got told there was no fight there. Now reads each
+        party-side member's real, current DB row instead (real humans
+        checked before AI companions, since a human's own row can't be
+        silently relocated by anything else while they're mid-fight).
+        """
+        import sessions
+        sessions.end_session(-987)
+        fighter_id, joiner_id = 900952, 900953
+        make_basic_character(fighter_id, "DriftedFighter", chat_id=-987, current_location="greymoor_downs")
+        make_basic_character(joiner_id, "RealJoiner", chat_id=-987, current_location="greymoor_downs_lonely_cairn")
+        fighter = db.get_character(fighter_id, -987)
+        fighter["telegram_user_id"] = fighter_id
+        # The combat snapshot still carries the OLD location the fight
+        # actually started at -- never refreshed once combat began.
+        fighter["current_location"] = "greymoor_downs"
+        enemy = {"telegram_user_id": -2_500_099, "name": "DriftGoblin", "dexterity": 10, "strength": 10,
+                 "hp_current": 25, "hp_max": 25, "armor_class": 10, "is_ai": 1, "monster_key": "goblin"}
+        sessions.start_session(-987, [fighter, enemy], {fighter_id: "party", -2_500_099: "enemy"})
+
+        # The real, current DB row has since moved on -- this is the
+        # authoritative "where is this person right now" this fix reads.
+        db.update_character(fighter_id, -987, current_location="greymoor_downs_lonely_cairn")
+
+        sink = []
+        update = FakeUpdate(joiner_id, "join the battle", sink, chat_id=-987)
+        await bot._do_join_battle(update)
+
+        reply = "\n".join(sink)
+        self.assertNotIn("no fight", reply.lower(), f"should have joined, got: {reply!r}")
+        session = sessions.get_session_for_user(-987, joiner_id)
+        self.assertIsNotNone(session, "the real joiner should now be a genuine combat participant")
+        sessions.end_session(-987)
+
     # -- Task #11, real live request (2026-08-09, Coffee, Development-
     #    topic screenshot): "This does not look like a map. I want an
     #    accurate map... use circles and names with labels" -- the old
