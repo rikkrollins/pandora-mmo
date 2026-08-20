@@ -3023,6 +3023,250 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.get_character(user_id, -999)["spell_slots_current"], 1)
         sessions.end_session(-999)
 
+    async def test_weapon_mastery_overflow_scales_the_bonus_strike(self):
+        """
+        Real live request (2026-08-20, Coffee): "add the extra % to the
+        damage so it scales", uncapped, past 100% Weapon proficiency.
+        roll_percentage_check is forced True so the mastery bonus always
+        triggers (trigger FREQUENCY is unaffected by overflow -- only
+        magnitude); bot.roll_damage is forced to a fixed total so the
+        bonus roll itself is deterministic, isolating the overflow
+        multiplier as the only variable between the two runs.
+        """
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        user_id = 960030
+        make_basic_character(user_id, "WeaponOverflowTester", char_class="Fighter", current_location="crossroads_tavern", inventory={"rusty_dagger": 1})
+        db.equip_item(user_id, -999, "rusty_dagger")
+        enemy_id = -960030
+        enemy = {"telegram_user_id": enemy_id, "name": "OverflowDummy", "dexterity": 10, "strength": 10,
+                 "armor_class": 1, "hp_current": 100000, "hp_max": 100000, "is_ai": 1, "monster_key": "goblin"}
+
+        def run(pct):
+            db.update_character(user_id, -999, weapon_proficiency_pct={"simple": pct})
+            player = db.get_character(user_id, -999)
+            player["telegram_user_id"] = user_id
+            enemy["hp_current"] = 100000
+            session = sessions.start_session(-999, [player, enemy], {user_id: "party", enemy_id: "enemy"})
+            session.turn_order = [user_id, enemy_id]
+            session.current_turn_index = 0
+            return enemy
+
+        # rules.combat.roll_damage is resolve_attack's OWN bound reference
+        # (imported separately from bot.roll_damage at rules/combat.py's
+        # own import time) -- both are patched to the same fixed total so
+        # the base hit's damage is exactly as deterministic as the mastery
+        # bonus roll, isolating the overflow multiplier as the ONLY
+        # variable between the two runs.
+        with patch("bot.roll_percentage_check", return_value=True), \
+             patch("bot.roll_damage", return_value={"total": 20}), \
+             patch("rules.combat.roll_damage", return_value={"total": 20}):
+            enemy_at_100 = run(100.0)
+            await bot._do_attack(FakeUpdate(user_id, "attack the dummy", []), "attack the dummy", forced_roll=20)
+            damage_at_100 = 100000 - enemy_at_100["hp_current"]
+            sessions.end_session(-999)
+
+            enemy_at_200 = run(200.0)
+            await bot._do_attack(FakeUpdate(user_id, "attack the dummy", []), "attack the dummy", forced_roll=20)
+            damage_at_200 = 100000 - enemy_at_200["hp_current"]
+            sessions.end_session(-999)
+
+        # Base hit is identical in both runs (same weapon, same forced
+        # roll, same mocked dice, same attacker) -- confirmed live it
+        # also includes the attacker's own real ability modifier on top
+        # of the mocked dice total, which this delta comparison doesn't
+        # need to know the exact value of, since it's identical either
+        # way. Only the mastery bonus itself changes: 20*1.0=20 at
+        # pct=100, 20*2.0=40 at pct=200 -- an exact +20 delta.
+        self.assertEqual(damage_at_200 - damage_at_100, 20)
+
+    async def test_armor_mastery_overflow_scales_the_damage_reduction(self):
+        """
+        Same rule as weapon mastery above, defender's side. Armor
+        mastery's own code (bot.py's weapon/armor mastery block, both
+        gated on target.get("char_class")) is only reachable when the
+        DEFENDER is a real player character too -- currently only true
+        inside _do_attack (a real player attacking another real player,
+        e.g. a duel), confirmed by grep: _roll_armor_proficiency has
+        exactly one call site in the whole file. Base hit fixed at 100
+        (mocked roll_damage on both bound references) so the reduction
+        amount is exact: 25 at pct=100 (25% of 100), 50 at pct=200 (50%
+        of 100) -- an exact +25 delta in HP given back to the defender.
+        """
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        attacker_id = 960032
+        defender_id = 960033
+        make_basic_character(attacker_id, "ArmorOverflowAttacker", char_class="Fighter", current_location="crossroads_tavern", inventory={"rusty_dagger": 1})
+        db.equip_item(attacker_id, -999, "rusty_dagger")
+        make_basic_character(
+            defender_id, "ArmorOverflowDefender", char_class="Fighter", current_location="crossroads_tavern",
+            inventory={"leather_armor": 1}, hp_max=100000, armor_class=1,
+        )
+        db.equip_item(defender_id, -999, "leather_armor")
+
+        # Defender starts at a fixed HP far from both 0 and hp_max, so
+        # neither death (a first run that accidentally kills them,
+        # corrupting the second run's db.get_character lookup) nor the
+        # min(hp_current + reduction, hp_max) restoration ceiling can
+        # ever interfere -- armor mastery's own code applies the FULL
+        # (pre-reduction) hit inside resolve_attack, then heals back
+        # exactly the reduction amount, so hp_current afterward moves by
+        # a fixed (full_damage) minus a variable (reduction) -- isolating
+        # the delta between the two runs to the reduction alone.
+        STARTING_HP = 50000
+
+        def run(pct):
+            db.update_character(defender_id, -999, armor_proficiency_pct={"light": pct}, hp_current=STARTING_HP)
+            attacker = db.get_character(attacker_id, -999)
+            attacker["telegram_user_id"] = attacker_id
+            defender = db.get_character(defender_id, -999)
+            defender["telegram_user_id"] = defender_id
+            session = sessions.start_session(-999, [attacker, defender], {attacker_id: "party", defender_id: "enemy"})
+            session.turn_order = [attacker_id, defender_id]
+            session.current_turn_index = 0
+            return defender
+
+        # No weapon-mastery noise in this test: weapon proficiency stays
+        # at the default 1% (far below the roll_percentage_check(True)
+        # mock would need to matter) is irrelevant here since weapon
+        # mastery has its OWN separate roll -- both are forced True by
+        # the same patch, so mastery_strike_dmg also fires. That's fine:
+        # it's identical (deterministic, mocked to 100) in both runs, so
+        # it cancels out of the hp_after delta entirely.
+        with patch("bot.roll_percentage_check", return_value=True), \
+             patch("bot.roll_damage", return_value={"total": 100}), \
+             patch("rules.combat.roll_damage", return_value={"total": 100}):
+            run(100.0)
+            await bot._do_attack(FakeUpdate(attacker_id, "attack ArmorOverflowDefender", []), "attack ArmorOverflowDefender", forced_roll=20)
+            hp_after_100 = db.get_character(defender_id, -999)["hp_current"]
+            sessions.end_session(-999)
+
+            run(200.0)
+            await bot._do_attack(FakeUpdate(attacker_id, "attack ArmorOverflowDefender", []), "attack ArmorOverflowDefender", forced_roll=20)
+            hp_after_200 = db.get_character(defender_id, -999)["hp_current"]
+            sessions.end_session(-999)
+
+        # hp_after = STARTING_HP - full_damage + armor_mastery_reduction.
+        # full_damage is identical both runs, so hp_after_200 must be
+        # strictly higher (a bigger reduction healed back more).
+        self.assertGreater(hp_after_200, hp_after_100)
+
+    async def test_backstab_overflow_scales_the_multiplied_hit(self):
+        """
+        Same rule as weapon/armor mastery above: past 100% Backstab
+        proficiency, the overflow multiplies straight onto the EXISTING
+        level/rebirth-tier multiplier (_effective_backstab_multiplier --
+        x2 at level 1, per rules.leveling.BACKSTAB_LEVEL_TIERS), never
+        changing how often it triggers (still the same roll_percentage_
+        check gate). At pct=100 the total multiplier is 2*1.0=2; at
+        pct=200 it's 2*2.0=4 -- damage should roughly double.
+        """
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        attacker_id = 960034
+        make_basic_character(
+            attacker_id, "BackstabOverflowTester", race="Halfling", char_class="Rogue",
+            current_location="crossroads_tavern", inventory={"rusty_dagger": 1},
+        )
+        db.update_character(attacker_id, -999, subclass="Assassin")
+        db.equip_item(attacker_id, -999, "rusty_dagger")
+        enemy_id = -960034
+        enemy = {"telegram_user_id": enemy_id, "name": "BackstabDummy", "dexterity": 10, "strength": 10,
+                 "armor_class": 1, "hp_current": 1000000, "hp_max": 1000000, "is_ai": 1, "monster_key": "goblin"}
+
+        def run(pct):
+            db.update_character(attacker_id, -999, backstab_proficiency_pct=pct)
+            player = db.get_character(attacker_id, -999)
+            player["telegram_user_id"] = attacker_id
+            enemy["hp_current"] = 1000000
+            session = sessions.start_session(-999, [player, enemy], {attacker_id: "party", enemy_id: "enemy"})
+            session.turn_order = [attacker_id, enemy_id]
+            session.current_turn_index = 0
+            return enemy
+
+        with patch("bot.roll_percentage_check", return_value=True), \
+             patch("bot.roll_damage", return_value={"total": 100}), \
+             patch("rules.combat.roll_damage", return_value={"total": 100}):
+            enemy_at_100 = run(100.0)
+            await bot._do_attack(FakeUpdate(attacker_id, "attack the dummy", []), "attack the dummy", forced_roll=20)
+            damage_at_100 = 1000000 - enemy_at_100["hp_current"]
+            sessions.end_session(-999)
+
+            enemy_at_200 = run(200.0)
+            await bot._do_attack(FakeUpdate(attacker_id, "attack the dummy", []), "attack the dummy", forced_roll=20)
+            damage_at_200 = 1000000 - enemy_at_200["hp_current"]
+            sessions.end_session(-999)
+
+        self.assertGreater(damage_at_200, damage_at_100)
+        # This character's own char_class ("Rogue") ALSO qualifies for
+        # the separate weapon-mastery bonus (also force-triggered by the
+        # same roll_percentage_check(True) mock) -- a fixed +100 (the
+        # mocked roll_damage total, at the default 1% weapon proficiency,
+        # so its own overflow multiplier is 1.0x, identical both runs)
+        # added AFTER the backstab multiplier, not multiplied by it.
+        # Confirmed live: 320 at pct=100, 540 at pct=200 -- subtracting
+        # that known constant isolates backstab's own multiplier, which
+        # really does double: (320-100)*2 == (540-100) exactly.
+        WEAPON_MASTERY_CONSTANT = 100
+        self.assertEqual(
+            (damage_at_200 - WEAPON_MASTERY_CONSTANT), (damage_at_100 - WEAPON_MASTERY_CONSTANT) * 2,
+        )
+
+    async def test_throw_mastery_overflow_scales_bonus_damage(self):
+        """
+        Same rule as weapon mastery above, for Throw's own real bonus
+        (an extra weapon damage roll on a landed throw). An Assassin
+        throw is a guaranteed hit (forced_hit=True inside _do_throw_
+        weapon, no roll at all needed), so the attacker here is a fresh
+        Assassin purely to make the base hit deterministic -- Throw's
+        own mastery bonus is entirely separate from Backstab's.
+        """
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        attacker_id = 960035
+        make_basic_character(
+            attacker_id, "ThrowOverflowTester", race="Halfling", char_class="Rogue",
+            current_location="crossroads_tavern", inventory={"rusty_dagger": 1},
+        )
+        db.update_character(attacker_id, -999, subclass="Assassin")
+        db.equip_item(attacker_id, -999, "rusty_dagger")
+        enemy_id = -960035
+        enemy = {"telegram_user_id": enemy_id, "name": "ThrowDummy", "dexterity": 10, "strength": 10,
+                 "armor_class": 1, "hp_current": 1000000, "hp_max": 1000000, "is_ai": 1, "monster_key": "goblin"}
+
+        def run(pct):
+            db.update_character(attacker_id, -999, throw_proficiency_pct=pct)
+            db.add_item(attacker_id, -999, "shortsword", 1)
+            player = db.get_character(attacker_id, -999)
+            player["telegram_user_id"] = attacker_id
+            enemy["hp_current"] = 1000000
+            session = sessions.start_session(-999, [player, enemy], {attacker_id: "party", enemy_id: "enemy"})
+            session.turn_order = [attacker_id, enemy_id]
+            session.current_turn_index = 0
+            return enemy
+
+        with patch("bot.roll_percentage_check", return_value=True), \
+             patch("bot.roll_damage", return_value={"total": 20}), \
+             patch("rules.combat.roll_damage", return_value={"total": 20}):
+            enemy_at_100 = run(100.0)
+            await bot._do_throw_weapon(FakeUpdate(attacker_id, "throw shortsword at the dummy", []), "throw shortsword at the dummy")
+            damage_at_100 = 1000000 - enemy_at_100["hp_current"]
+            sessions.end_session(-999)
+
+            enemy_at_200 = run(200.0)
+            await bot._do_throw_weapon(FakeUpdate(attacker_id, "throw shortsword at the dummy", []), "throw shortsword at the dummy")
+            damage_at_200 = 1000000 - enemy_at_200["hp_current"]
+            sessions.end_session(-999)
+
+        # Base thrown hit is identical both runs; only the mastery bonus
+        # changes: 20*1.0=20 at pct=100, 20*2.0=40 at pct=200 -- exact +20.
+        self.assertEqual(damage_at_200 - damage_at_100, 20)
+
     async def test_eldritch_smite_adds_bonus_damage_and_spends_a_slot(self):
         """
         Real gap (2026-08-13, per Coffee, dev-bridge: "shud [ethers]
@@ -5710,6 +5954,45 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             character = db.get_character(960003, -999)
         self.assertGreater(character["steal_proficiency_pct"], 1.0)
         self.assertGreaterEqual(bot._steal_proficiency_bonus(character), 0)
+
+    def test_mastery_overflow_multiplier_formula(self):
+        """
+        Real live request (2026-08-20, Coffee: "let them increase the %
+        ... make it worth the grind" -> "add the extra % to the damage
+        so it scales", explicitly uncapped). A no-op at or under the old
+        100% cap; grows linearly past it.
+        """
+        self.assertEqual(bot._mastery_overflow_multiplier(1.0), 1.0)
+        self.assertEqual(bot._mastery_overflow_multiplier(100.0), 1.0)
+        self.assertEqual(bot._mastery_overflow_multiplier(150.0), 1.5)
+        self.assertEqual(bot._mastery_overflow_multiplier(200.0), 2.0)
+        self.assertEqual(bot._mastery_overflow_multiplier(350.0), 3.5)
+
+    def test_grind_flat_and_dict_proficiency_are_no_longer_capped_at_100(self):
+        """
+        Real live bug/request (2026-08-20, Coffee): every grindable
+        proficiency used to hard-stop at PROFICIENCY_MAX_PCT (100),
+        giving zero reward for continued use once reached. Both shared
+        grind helpers (steal/lockpick/backstab/throw route through
+        _grind_flat_proficiency; weapon/armor through _grind_dict_
+        proficiency) must keep climbing past 100 with continued use.
+        """
+        user_id = 960020
+        make_basic_character(user_id, "OverflowGrindTester", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, steal_proficiency_pct=99.995, weapon_proficiency_pct={"simple": 99.995})
+        character = db.get_character(user_id, -999)
+        bot._grind_steal_proficiency(user_id, -999, character)
+        bot._grind_dict_proficiency(user_id, -999, "weapon_proficiency_pct", character["weapon_proficiency_pct"], "simple")
+        updated = db.get_character(user_id, -999)
+        self.assertGreater(updated["steal_proficiency_pct"], 100.0)
+        self.assertGreater(updated["weapon_proficiency_pct"]["simple"], 100.0)
+
+    def test_steal_and_lockpick_bonus_keeps_scaling_past_the_old_plus_10_ceiling(self):
+        character = make_basic_character(960021, "OverflowStealTester", current_location="crossroads_tavern")
+        db.update_character(960021, -999, steal_proficiency_pct=200.0, lockpick_proficiency_pct=300.0)
+        character = db.get_character(960021, -999)
+        self.assertEqual(bot._steal_proficiency_bonus(character), 20)
+        self.assertEqual(bot._lockpick_proficiency_bonus(character), 30)
 
     async def test_lockpick_gives_a_thieves_guild_bonus(self):
         """
@@ -17712,6 +17995,52 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         actual_damage = 100000 - goblin["hp_current"]
         self.assertTrue(339 <= actual_damage <= 348, f"damage {actual_damage} outside expected 339-348 baseline range (no penalty)")
         sessions.end_session(-984)
+
+    async def test_summon_remnant_mastery_overflow_scales_the_final_damage(self):
+        """
+        Real live request (2026-08-20, Coffee): "add the extra % to the
+        damage so it scales", uncapped -- the literal answer to his own
+        original "make it worth the grind" question about Summoning
+        mastery. summoning_mastery_pct=150 (50% overflow -> 1.5x) should
+        scale the whole final damage total, same 339-348 baseline range
+        (charisma 10, mastery at the old 100% cap) from the sibling test
+        above, scaled by 1.5 and int()-truncated: 508-522.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-983)
+        user_id = 800217
+        make_basic_character(user_id, "MasteryOverflowSummoner", current_location="crossroads_tavern", chat_id=-983)
+        # summoning_mastery_pct=150 is past the real Mastery threshold
+        # (_summons_per_battle's own pct>=100 check), which lifts the
+        # per-battle free-use cap but requires a real spell slot per
+        # cast (see _do_summon_remnant's own "at Mastery" branch) --
+        # unlike the sibling Charisma test above (pct stays at the
+        # default 1.0, well under Mastery, so it never needed one.
+        db.update_character(
+            user_id, -983, bound_remnants=["the_cairnbound"], summoning_mastery_pct=150.0,
+            spell_slots_max=1, spell_slots_current=1,
+        )
+        enemy_id = -10
+        player = db.get_character(user_id, -983)
+        player["telegram_user_id"] = user_id
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "hp_current": 100000, "hp_max": 100000,
+                 "armor_class": 10, "dexterity": 10, "resistances": [], "vulnerabilities": []}
+        session = sessions.start_session(-983, [player, enemy], {user_id: "party", enemy_id: "enemy"})
+        session.turn_order = [user_id, enemy_id]
+        session.current_turn_index = 0
+        sink = []
+        with patch("bot.narrate_remnant_summon", return_value="You should not have come here."), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._do_summon_remnant(
+                FakeUpdate(user_id, "summon The Cairnbound on the goblin", sink, chat_id=-983),
+                "summon The Cairnbound on the goblin",
+                forced_roll=10,
+            )
+        goblin = next(p for p in session.participants if p["telegram_user_id"] == enemy_id)
+        actual_damage = 100000 - goblin["hp_current"]
+        self.assertTrue(508 <= actual_damage <= 522, f"damage {actual_damage} outside expected 508-522 overflow-scaled range")
+        sessions.end_session(-983)
 
     async def test_check_remnants_preview_reflects_the_viewers_own_charisma_bonus(self):
         """

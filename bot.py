@@ -233,6 +233,27 @@ PROFICIENCY_MAX_PCT = 100.0
 ARMOR_MASTERY_DAMAGE_REDUCTION_PCT = 25
 
 
+def _mastery_overflow_multiplier(pct: float) -> float:
+    """
+    Real live request (2026-08-20, per Coffee: "let them increase the %
+    ... and let them grow it so it becomes more effective or stronger -
+    make it worth the grind" -- followed by "add the extra % to the
+    damage so it scales", uncapped). A proficiency's stored % no longer
+    stops climbing at PROFICIENCY_MAX_PCT (see _grind_flat_proficiency/
+    _grind_dict_proficiency/_do_summon_remnant's own mastery increment)
+    -- once it grows past 100, the overflow is added straight onto
+    whatever damage/effect that system already produces as a real
+    percentage bonus. 1.0 (a no-op) at pct<=100, so nothing at or under
+    the old cap ever changes; always >= 1.0, same "a bonus, never a
+    penalty" rule the Charisma summon-damage bonus already follows.
+    Computed from the character's own raw stored pct only -- deliberately
+    never _equipped_proficiency_bonus's item-granted bonus, since this is
+    a reward for the real grind specifically, not something gear should
+    be able to shortcut.
+    """
+    return 1.0 + max(pct - PROFICIENCY_MAX_PCT, 0.0) / 100.0
+
+
 def _equipped_proficiency_bonus(character: dict, stat: str, category: str | None = None) -> float:
     """
     Grindable mastery proficiency gear (2026-08-08): sum of every
@@ -267,21 +288,29 @@ def _grind_flat_proficiency(telegram_user_id: int, chat_id: int, field_name: str
     """
     Grindable mastery proficiency (2026-08-08, per Coffee, verbatim:
     "each time they use it it raises the % by .01 (make it an absolute
-    grind to level up to 100%)"). Persists the INCREMENTED value (capped
-    at PROFICIENCY_MAX_PCT) but returns the value as it stood BEFORE
-    this use, since the roll for THIS attempt should reflect everything
-    earned up through the previous use, not include the use currently
-    in progress.
+    grind to level up to 100%)"). Persists the INCREMENTED value but
+    returns the value as it stood BEFORE this use, since the roll for
+    THIS attempt should reflect everything earned up through the
+    previous use, not include the use currently in progress.
+
+    No longer capped at PROFICIENCY_MAX_PCT (2026-08-20, per Coffee:
+    "let them increase the % ... make it worth the grind", explicitly
+    uncapped) -- the per-roll chance calculations at every _roll_*_
+    proficiency call site still separately clamp at PROFICIENCY_MAX_PCT
+    (trigger frequency never exceeds 100%), but the raw stored value
+    itself now keeps climbing forever with continued real use, feeding
+    _mastery_overflow_multiplier's real damage/effect bonus once it
+    passes 100.
     """
-    db.update_character(telegram_user_id, chat_id, **{field_name: min(current_value + PROFICIENCY_GRIND_INCREMENT, PROFICIENCY_MAX_PCT)})
+    db.update_character(telegram_user_id, chat_id, **{field_name: current_value + PROFICIENCY_GRIND_INCREMENT})
     return current_value
 
 
 def _grind_dict_proficiency(telegram_user_id: int, chat_id: int, field_name: str, current_dict: dict, key: str) -> float:
-    """Same as _grind_flat_proficiency, for the per-category (weapon_category/armor_category) dict fields."""
+    """Same as _grind_flat_proficiency (including the 2026-08-20 uncapped-growth change), for the per-category (weapon_category/armor_category) dict fields."""
     current_value = current_dict.get(key, PROFICIENCY_STARTING_PCT)
     updated = dict(current_dict)
-    updated[key] = min(current_value + PROFICIENCY_GRIND_INCREMENT, PROFICIENCY_MAX_PCT)
+    updated[key] = current_value + PROFICIENCY_GRIND_INCREMENT
     db.update_character(telegram_user_id, chat_id, **{field_name: updated})
     return current_value
 
@@ -8399,6 +8428,11 @@ async def _maybe_ai_throw_weapon(update: Update, session: sessions.Session, atta
     if result["hit"] and _roll_throw_proficiency(attacker):
         mastery_throw_dmg = roll_damage(weapon_item["damage_dice"], modifier=weapon_item.get("damage_bonus", 0))["total"]
         mastery_throw_dmg = apply_damage_type_modifier(mastery_throw_dmg, weapon_item.get("damage_type", "physical"), target, attacker)
+        # Mastery Overflow (2026-08-20, per Coffee) -- same rule as
+        # weapon/armor mastery: a real, growing bonus past 100% Throw
+        # proficiency, never affecting trigger frequency.
+        throw_pct = attacker.get("throw_proficiency_pct", PROFICIENCY_STARTING_PCT)
+        mastery_throw_dmg = int(mastery_throw_dmg * _mastery_overflow_multiplier(throw_pct))
         result["damage_dealt"] += mastery_throw_dmg
         target["hp_current"], _warded = _apply_damage_with_death_ward(target, mastery_throw_dmg)
         result["defender_hp_remaining"] = target["hp_current"]
@@ -8659,13 +8693,22 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
             # x1 attack, never a partial/guaranteed backstab.
             backstab_triggered = _is_assassin(attacker) and _roll_backstab_proficiency(attacker)
             weapon_used = _weapon_for_attacker(attacker)
+            # Mastery Overflow (2026-08-20, per Coffee: "add the extra %
+            # to the damage so it scales", uncapped) -- once Backstab's
+            # own proficiency climbs past 100%, the overflow stacks
+            # straight onto the existing level/rebirth-tier multiplier,
+            # same "bigger when it triggers, never more often" rule
+            # weapon/armor mastery above both follow.
+            backstab_overflow = _mastery_overflow_multiplier(
+                attacker.get("backstab_proficiency_pct", PROFICIENCY_STARTING_PCT)
+            ) if backstab_triggered else 1.0
             result = resolve_attack(
                 attacker, target, weapon_used, advantage=adv, disadvantage=disadv,
                 defender_relentless_endurance_available=_relentless_endurance_available(target),
                 round_number=session.round_number,
                 forced_roll=forced_roll if attack_num == 0 else None,
                 forced_damage_roll=forced_damage_roll if attack_num == 0 else None,
-                damage_multiplier=_effective_backstab_multiplier(attacker) if backstab_triggered else 1,
+                damage_multiplier=_effective_backstab_multiplier(attacker) * backstab_overflow if backstab_triggered else 1,
             )
             if result["relentless_endurance_triggered"]:
                 db.use_feature(target["telegram_user_id"], update.effective_chat.id, "relentless_endurance")
@@ -8696,6 +8739,13 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
             if result["hit"] and attacker.get("char_class") and _roll_weapon_proficiency(attacker, weapon_used.get("weapon_category", "simple")):
                 mastery_strike_dmg = roll_damage(weapon_used["damage_dice"], modifier=weapon_used.get("damage_bonus", 0))["total"]
                 mastery_strike_dmg = apply_damage_type_modifier(mastery_strike_dmg, weapon_used.get("damage_type", "physical"), target, attacker)
+                # Mastery Overflow (2026-08-20, per Coffee: "add the
+                # extra % to the damage so it scales", uncapped) -- a
+                # real, growing bonus once weapon proficiency climbs
+                # past 100%, never touching how OFTEN this triggers
+                # (still gated by the same roll_percentage_check above).
+                weapon_pct = attacker.get("weapon_proficiency_pct", {}).get(weapon_used.get("weapon_category", "simple"), PROFICIENCY_STARTING_PCT)
+                mastery_strike_dmg = int(mastery_strike_dmg * _mastery_overflow_multiplier(weapon_pct))
                 result["damage_dealt"] += mastery_strike_dmg
                 target["hp_current"], _warded = _apply_damage_with_death_ward(target, mastery_strike_dmg)
                 result["defender_hp_remaining"] = target["hp_current"]
@@ -8710,8 +8760,14 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
             defender_armor = items_module.get_item(target.get("equipped_armor")) if target.get("equipped_armor") else None
             if result["hit"] and result["damage_dealt"] > 0 and target.get("char_class") and defender_armor:
                 if _roll_armor_proficiency(target, defender_armor.get("armor_category", "light")):
-                    armor_mastery_reduction = max(int(result["damage_dealt"] * ARMOR_MASTERY_DAMAGE_REDUCTION_PCT / 100), 1)
-                    result["damage_dealt"] -= armor_mastery_reduction
+                    # Mastery Overflow, same rule as weapon mastery above --
+                    # the reduction itself grows past the base 25% as
+                    # armor proficiency climbs past 100%.
+                    armor_pct = target.get("armor_proficiency_pct", {}).get(defender_armor.get("armor_category", "light"), PROFICIENCY_STARTING_PCT)
+                    armor_mastery_reduction = max(
+                        int(result["damage_dealt"] * ARMOR_MASTERY_DAMAGE_REDUCTION_PCT / 100 * _mastery_overflow_multiplier(armor_pct)), 1,
+                    )
+                    result["damage_dealt"] = max(result["damage_dealt"] - armor_mastery_reduction, 0)
                     target_hp_max = target.get("hp_max", target["hp_current"])
                     target["hp_current"] = min(target["hp_current"] + armor_mastery_reduction, target_hp_max)
                     result["defender_hp_remaining"] = target["hp_current"]
@@ -8900,6 +8956,11 @@ async def _do_throw_weapon(update: Update, action_text: str) -> None:
         if result["hit"] and _roll_throw_proficiency(attacker):
             mastery_throw_dmg = roll_damage(weapon_item["damage_dice"], modifier=weapon_item.get("damage_bonus", 0))["total"]
             mastery_throw_dmg = apply_damage_type_modifier(mastery_throw_dmg, weapon_item.get("damage_type", "physical"), target, attacker)
+            # Mastery Overflow (2026-08-20, per Coffee) -- same rule as
+            # weapon/armor mastery: a real, growing bonus past 100%
+            # Throw proficiency, never affecting trigger frequency.
+            throw_pct = attacker.get("throw_proficiency_pct", PROFICIENCY_STARTING_PCT)
+            mastery_throw_dmg = int(mastery_throw_dmg * _mastery_overflow_multiplier(throw_pct))
             result["damage_dealt"] += mastery_throw_dmg
             target["hp_current"], _warded = _apply_damage_with_death_ward(target, mastery_throw_dmg)
             result["defender_hp_remaining"] = target["hp_current"]
@@ -23679,6 +23740,13 @@ async def _do_summon_remnant(update: Update, text: str, forced_roll: int | None 
             forced_roll=forced_roll,
         )
         damage = apply_damage_type_modifier(roll["total"], remnant["element"], target, caster)
+        # Mastery Overflow (2026-08-20, per Coffee: "let them increase
+        # the % ... add the extra % to the damage so it scales",
+        # uncapped) -- this is the literal answer to his own original
+        # "make it worth the grind" question about Summoning mastery
+        # specifically: past 100%, the overflow is a real, growing
+        # damage multiplier, stacking with the Charisma bonus above.
+        damage = int(damage * _mastery_overflow_multiplier(caster.get("summoning_mastery_pct", PROFICIENCY_STARTING_PCT)))
         target["hp_current"] = max(target["hp_current"] - damage, 0)
         caster["summons_used_this_battle"] = used + 1
         if mastery:
@@ -23707,7 +23775,14 @@ async def _do_summon_remnant(update: Update, text: str, forced_roll: int | None 
         # mastery elsewhere in this game) -- never on a failed/blocked
         # attempt, same "success-only" convention _grind_steal_
         # proficiency and friends already use.
-        new_pct = min(character["summoning_mastery_pct"] + 1.0, SUMMONING_MASTERY_PCT)
+        #
+        # No longer capped at SUMMONING_MASTERY_PCT (2026-08-20, per
+        # Coffee: "let them increase the % ... make it worth the
+        # grind", explicitly uncapped) -- _summons_per_battle's own
+        # `pct >= SUMMONING_MASTERY_PCT` Mastery check still correctly
+        # stays True forever past 100; the raw value keeps climbing to
+        # feed _mastery_overflow_multiplier's real damage bonus below.
+        new_pct = character["summoning_mastery_pct"] + 1.0
         db.update_character(update.effective_user.id, chat_id, summoning_mastery_pct=new_pct)
 
         await _safe_send(

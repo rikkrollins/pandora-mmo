@@ -2,6 +2,38 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.287] — Mastery Overflow: every grindable proficiency keeps paying off past 100%
+
+**Real live request (2026-08-20, Coffee):** after asking how Summoning
+mastery works, generalized to all of them: "let them increase the % ...
+let them grow it so it becomes more effective or stronger — make it
+worth the grind," then clarified: overflow past the old 100% cap
+should be **added directly as a percentage damage bonus** to whatever
+each system already does, **fully uncapped** — no second ceiling.
+
+Every grindable proficiency (Steal, Lockpick, Weapon×category,
+Armor×category, Backstab, Throw, Summoning) used to hard-stop at
+100%, giving zero reward for continued use once reached. Now:
+- The two shared grind functions (`_grind_flat_proficiency`,
+  `_grind_dict_proficiency` — covering Steal/Lockpick/Backstab/Throw/
+  Weapon/Armor) and Summoning's own increment no longer cap the
+  *stored* value. The per-roll trigger-chance clamps at every
+  `_roll_*_proficiency` call site are untouched — how *often* a bonus
+  fires never changes, only how *big* it is once it does.
+- New `_mastery_overflow_multiplier(pct)`: 1.0 (no-op) at or under
+  100%, growing linearly past it (150% → 1.5x, 200% → 2.0x). Computed
+  from the character's own raw grind only, never `_equipped_
+  proficiency_bonus`'s item-granted bonus — a reward for the grind
+  specifically, gear can't shortcut it.
+- Applied at each system's real damage site: Weapon/Throw mastery's
+  bonus strike, Armor mastery's damage reduction (now floored at 0
+  instead of assuming it can never exceed the hit), Backstab's
+  existing level/rebirth multiplier, and Summoning's final damage
+  (stacking with v1.27.284's Charisma bonus) — the literal answer to
+  Coffee's own original question.
+- Steal/Lockpick needed no new math: `round(pct/10)` already scales
+  unbounded once `pct` itself is unbounded.
+
 ## [1.27.286] — Two real live bugs: chapter-intro invented names, branching board quests silently expiring
 
 **Real live report #1 (2026-08-20, Coffee, screenshot: "I think the
