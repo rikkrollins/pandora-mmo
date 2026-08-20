@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.282] — Market seller-name filtering + My Listings view
+
+**Real live follow-up (2026-08-20, Coffee): "add seller name filtering
+and My Listings view."** Extends v1.27.281's market buttons:
+- **Seller filter**: one button per real seller with something
+  currently listed (grounded in `db.get_market_listings`, never a
+  static roster) — tap to narrow the board to just that seller.
+- **My Listings**: a shortcut aimed at the viewer's own seller id,
+  reusing the exact same `market|sellerfilter|<id>` action rather than
+  a third code path — only shown when the viewer actually has
+  something listed right now, and never shown alongside a redundant
+  seller-filter button for themselves.
+- **AI parity**: `_infer_market_seller_filter` gives the same free-text
+  path ("show my listings on the market" / "what's EldrinTheSeller
+  selling on the market") that the buttons use, matched against real
+  currently-listed seller names, never invented ones.
+- Type and seller filters are mutually exclusive in this version —
+  whichever the player picks wins, same simple one-axis-at-a-time
+  shape the type filter already had.
+
 ## [1.27.281] — Battle menu legibility fix + real market buy/sell/unlist/search/view buttons
 
 **Real live reports (2026-08-20, Coffee, two screenshots):** (1) "The

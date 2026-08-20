@@ -12099,9 +12099,30 @@ def _infer_market_filter_type(text: str) -> str | None:
     return None
 
 
+def _infer_market_seller_filter(text: str, chat_id: int, viewer_id: int) -> int | None:
+    """
+    Free-text equivalent of the market's seller-filter buttons and "My
+    Listings" shortcut (2026-08-20, per Coffee: "add seller name
+    filtering and My Listings view"). "my listings"/"what am I
+    selling" is unambiguous and always resolves to the viewer's own
+    id; otherwise this matches a REAL currently-listed seller's real
+    name against the text (grounded in db.get_market_listings, never a
+    guessed/invented name) -- same "only ever real data" convention
+    the type-filter keywords already follow.
+    """
+    lowered = text.lower()
+    if any(p in lowered for p in ("my listing", "what am i selling", "what i'm selling", "things i've listed", "my own listing")):
+        return viewer_id
+    sellers = {(l["seller_id"], l["seller_name"]) for l in db.get_market_listings(chat_id)}
+    for seller_id, seller_name in sellers:
+        if seller_name.lower() in lowered:
+            return seller_id
+    return None
+
+
 def _market_keyboard(
     listings: list[dict], viewer_id: int | None = None, all_listings: list[dict] | None = None,
-    active_filter: str | None = None,
+    active_filter: str | None = None, active_seller_id: int | None = None,
 ) -> InlineKeyboardMarkup | None:
     """
     Per Coffee (2026-07-22): "make buttons on market and tell players
@@ -12125,6 +12146,16 @@ def _market_keyboard(
     static "browse everything" list of categories nothing's listed
     under) -- same "grounded in real data" convention Skills/Items on
     the battle menu already follow.
+
+    Further extended 2026-08-20, per Coffee's live follow-up ("add
+    seller name filtering and My Listings view"): seller-filter buttons
+    are grounded the same way -- one per REAL seller with something
+    currently listed, never a static roster. "My Listings" is just
+    that same seller filter pre-aimed at the viewer's own id, so it
+    reuses the identical market|sellerfilter|<id> action rather than a
+    third, divergent code path -- only shown when the viewer actually
+    has something listed right now, same "never show a dead-end
+    button" convention every other grounded button here follows.
     """
     buttons = []
     for listing in listings:
@@ -12142,6 +12173,8 @@ def _market_keyboard(
             )])
 
     filter_source = all_listings if all_listings is not None else listings
+    any_filter_active = bool(active_filter) or active_seller_id is not None
+
     present_types = {
         items_module.get_item(l["item_id"]).get("type")
         for l in filter_source if items_module.get_item(l["item_id"])
@@ -12149,7 +12182,7 @@ def _market_keyboard(
     present_types.discard(None)
     if len(present_types) > 1:
         filter_row = []
-        if active_filter:
+        if any_filter_active:
             filter_row.append(InlineKeyboardButton("🔄 Show All", callback_data="market|filter|all"))
         for item_type in sorted(present_types):
             if item_type == active_filter:
@@ -12159,17 +12192,42 @@ def _market_keyboard(
         for i in range(0, len(filter_row), 3):
             buttons.append(filter_row[i:i + 3])
 
+    sellers = {(l["seller_id"], l["seller_name"]) for l in filter_source}
+    if len(sellers) > 1:
+        seller_row = []
+        for seller_id, seller_name in sorted(sellers, key=lambda s: s[1].lower()):
+            # The viewer's own name is skipped here even when no filter is
+            # active yet -- "My Listings" below already covers that exact
+            # same market|sellerfilter|<viewer_id> action, so this never
+            # shows two buttons that do the same thing.
+            if seller_id == active_seller_id or seller_id == viewer_id:
+                continue
+            seller_row.append(InlineKeyboardButton(f"👤 {seller_name}", callback_data=f"market|sellerfilter|{seller_id}"))
+        for i in range(0, len(seller_row), 3):
+            buttons.append(seller_row[i:i + 3])
+
+    if viewer_id is not None and active_seller_id != viewer_id and any(l["seller_id"] == viewer_id for l in filter_source):
+        buttons.append([InlineKeyboardButton("📋 My Listings", callback_data=f"market|sellerfilter|{viewer_id}")])
+
     buttons.append([InlineKeyboardButton("💰 Sell an Item", callback_data="market|sell")])
     return InlineKeyboardMarkup(buttons) if buttons else None
 
 
-async def _do_check_market(update: Update, filter_type: str | None = None) -> None:
+async def _do_check_market(update: Update, filter_type: str | None = None, filter_seller_id: int | None = None) -> None:
     """
     2026-08-20 update, per Coffee's screenshot request for real buy/
     sell/unlist/search buttons: filter_type narrows the shown listings
     down to one real item type (grounded in _market_keyboard's own
     present_types set, tapped via a market|filter|<type> button) --
     None shows the whole board, same as before.
+
+    filter_seller_id added same day, per Coffee's live follow-up ("add
+    seller name filtering and My Listings view") -- narrows to one
+    real seller (tapped via market|sellerfilter|<id>, or the "My
+    Listings" shortcut aimed at the viewer's own id). type and seller
+    filters are mutually exclusive in this first version (whichever is
+    passed wins) -- simplest UX for one filter axis at a time, same
+    shape as the type filter already had.
     """
     all_listings = db.get_market_listings(update.effective_chat.id)
     if not all_listings:
@@ -12182,16 +12240,24 @@ async def _do_check_market(update: Update, filter_type: str | None = None) -> No
             speak=False,
         )
         return
-    listings = (
-        [l for l in all_listings if (items_module.get_item(l["item_id"]) or {}).get("type") == filter_type]
-        if filter_type else all_listings
-    )
+    if filter_seller_id is not None:
+        listings = [l for l in all_listings if l["seller_id"] == filter_seller_id]
+    elif filter_type:
+        listings = [l for l in all_listings if (items_module.get_item(l["item_id"]) or {}).get("type") == filter_type]
+    else:
+        listings = all_listings
     header = "🏛️ **Player Marketplace:**"
-    if filter_type:
+    if filter_seller_id is not None:
+        is_own = update.effective_user is not None and filter_seller_id == update.effective_user.id
+        seller_label = "My Listings" if is_own else next(
+            (l["seller_name"] for l in all_listings if l["seller_id"] == filter_seller_id), "that seller",
+        )
+        header += f" (filtered: {seller_label})"
+    elif filter_type:
         header += f" (filtered: {_MARKET_TYPE_FILTER_LABELS.get(filter_type, filter_type.title())})"
     lines = [header]
     if not listings:
-        lines.append("Nothing of that type is listed right now.")
+        lines.append("Nothing matches that filter right now.")
     for listing in listings:
         item = items_module.get_item(listing["item_id"])
         item_name = item["name"] if item else listing["item_id"]
@@ -12216,7 +12282,10 @@ async def _do_check_market(update: Update, filter_type: str | None = None) -> No
         "Listed something by mistake? Tap Unlist, or say \"cancel my listing\" (or \"/cancel_market <#>\")."
     )
     viewer_id = update.effective_user.id if update.effective_user else None
-    keyboard = _market_keyboard(listings, viewer_id=viewer_id, all_listings=all_listings, active_filter=filter_type)
+    keyboard = _market_keyboard(
+        listings, viewer_id=viewer_id, all_listings=all_listings,
+        active_filter=filter_type, active_seller_id=filter_seller_id,
+    )
     await _safe_send(update, "\n".join(lines), reply_markup=keyboard, speak=False)
 
 
@@ -21180,7 +21249,8 @@ async def market_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     "/cancel_market <#>" already use. Extended 2026-08-20 (per Coffee's
     real buy/sell/unlist/search/full-view button request) with unlist,
     sell (item picker -> reuses itemview_callback's existing real
-    "market" action, not a second listing code path), filter, and view.
+    "market" action, not a second listing code path), filter, view, and
+    (same day, live follow-up) sellerfilter/"My Listings".
     """
     query = update.callback_query
     parts = (query.data or "").split("|")
@@ -21198,6 +21268,10 @@ async def market_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if action == "filter":
         filter_type = parts[2] if len(parts) > 2 else "all"
         await _do_check_market(update, filter_type=None if filter_type == "all" else filter_type)
+        return
+
+    if action == "sellerfilter" and len(parts) >= 3:
+        await _do_check_market(update, filter_seller_id=int(parts[2]))
         return
 
     if action == "view" and len(parts) >= 3:
@@ -24670,7 +24744,12 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     elif action == "accept_duel":
         await _do_accept_duel(update)
     elif action == "check_market":
-        await _do_check_market(update, filter_type=_infer_market_filter_type(text))
+        _market_seller_filter = _infer_market_seller_filter(text, update.effective_chat.id, update.effective_user.id)
+        await _do_check_market(
+            update,
+            filter_type=None if _market_seller_filter is not None else _infer_market_filter_type(text),
+            filter_seller_id=_market_seller_filter,
+        )
     elif action == "cancel_market":
         await _do_cancel_market_intent(update, text)
     elif action == "sell_market":

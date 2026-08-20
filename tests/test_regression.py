@@ -13703,7 +13703,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         Unlist (they could never Buy their own listing anyway); every
         other listing still shows the real, pre-existing Buy button.
         """
-        chat_id = self.MARKET_BUTTONS_CHAT
+        chat_id = self.MARKET_BUTTONS_CHAT - 1
         seller_id, viewer_id = 900580, 900581
         make_basic_character(seller_id, "MarketOwnLister", inventory={"rusty_dagger": 1}, chat_id=chat_id)
         make_basic_character(viewer_id, "MarketOtherViewer", gold=1000, chat_id=chat_id)
@@ -13722,7 +13722,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any("Unlist" in l for l in other_labels))
 
     async def test_market_menu_callback_unlist_button_cancels_own_listing(self):
-        chat_id = self.MARKET_BUTTONS_CHAT
+        chat_id = self.MARKET_BUTTONS_CHAT - 2
         seller_id = 900582
         make_basic_character(seller_id, "MarketUnlistTapper", inventory={"rusty_dagger": 1}, chat_id=chat_id)
         sink = []
@@ -13746,7 +13746,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         more than a single unit (see the sellpick+free-text tests
         below).
         """
-        chat_id = self.MARKET_BUTTONS_CHAT
+        chat_id = self.MARKET_BUTTONS_CHAT - 3
         make_basic_character(900583, "MarketSellTapper", inventory={"rusty_dagger": 1, "silverleaf_herb": 5}, chat_id=chat_id)
         kb = bot._market_sell_picker_keyboard(db.get_character(900583, chat_id))
         labels = {b.text: b.callback_data for row in kb.inline_keyboard for b in row}
@@ -13764,7 +13764,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         both, parsed through the same real _do_sell_market_intent
         regex "sell 3 X for 50 gold" already uses.
         """
-        chat_id = self.MARKET_BUTTONS_CHAT
+        chat_id = self.MARKET_BUTTONS_CHAT - 4
         seller_id = 900586
         make_basic_character(seller_id, "MarketSellPicker", inventory={"silverleaf_herb": 5}, chat_id=chat_id)
         sink = []
@@ -13797,7 +13797,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         and appends the two listing-specific facts that aren't part of
         the item template itself: who's selling it and what it costs.
         """
-        chat_id = self.MARKET_BUTTONS_CHAT
+        chat_id = self.MARKET_BUTTONS_CHAT - 5
         seller_id, viewer_id = 900587, 900588
         make_basic_character(seller_id, "MarketViewSeller", inventory={"longsword": 1}, chat_id=chat_id)
         make_basic_character(viewer_id, "MarketViewer", chat_id=chat_id)
@@ -13825,7 +13825,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         🔍 View button. Same "listing # is unambiguous, else match by
         real item name" resolution _do_buy_market_intent already uses.
         """
-        chat_id = self.MARKET_BUTTONS_CHAT
+        chat_id = self.MARKET_BUTTONS_CHAT - 6
         seller_id, viewer_id = 900589, 900590
         make_basic_character(seller_id, "MarketViewNLSeller", inventory={"longsword": 1}, chat_id=chat_id)
         make_basic_character(viewer_id, "MarketViewNLViewer", chat_id=chat_id)
@@ -13858,7 +13858,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_keyword_fallback("what's on the market", [])["action"], "check_market")
 
     async def test_market_menu_callback_filter_button_narrows_to_real_type(self):
-        chat_id = self.MARKET_BUTTONS_CHAT
+        chat_id = self.MARKET_BUTTONS_CHAT - 7
         seller_id, buyer_id = 900584, 900585
         make_basic_character(seller_id, "MarketFilterSeller", inventory={"rusty_dagger": 1, "silverleaf_herb": 3}, chat_id=chat_id)
         make_basic_character(buyer_id, "MarketFilterBuyer", gold=1000, chat_id=chat_id)
@@ -13877,7 +13877,77 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         listing_lines = [line for line in combined.splitlines() if line.startswith("#")]
         self.assertTrue(listing_lines, combined)
         self.assertTrue(all("Silverleaf" not in line for line in listing_lines), listing_lines)
-        self.assertIn("filtered", combined.lower())
+
+    async def test_market_keyboard_shows_grounded_seller_filter_and_my_listings(self):
+        """
+        Real live request (2026-08-20, Coffee: "add seller name
+        filtering and My Listings view"). Seller-filter buttons are
+        grounded in REAL current sellers only (never a static roster);
+        "My Listings" only appears for a viewer who actually has
+        something listed right now, same "never a dead-end button"
+        convention every other grounded button here follows.
+        """
+        chat_id = self.MARKET_BUTTONS_CHAT - 8
+        seller_a, seller_b, browser_id = 900591, 900592, 900593
+        make_basic_character(seller_a, "AldricTheSeller", inventory={"rusty_dagger": 1}, chat_id=chat_id)
+        make_basic_character(seller_b, "BrynnTheSeller", inventory={"silverleaf_herb": 3}, chat_id=chat_id)
+        make_basic_character(browser_id, "MarketBrowser", gold=500, chat_id=chat_id)
+        sink = []
+        await bot._do_sell_market(FakeUpdate(seller_a, "", sink, chat_id=chat_id), ["1", "20", "rusty dagger"])
+        await bot._do_sell_market(FakeUpdate(seller_b, "", sink, chat_id=chat_id), ["3", "15", "silverleaf herb"])
+        listings = db.get_market_listings(chat_id)
+
+        kb_browser = bot._market_keyboard(listings, viewer_id=browser_id, all_listings=listings)
+        browser_labels = {b.text: b.callback_data for row in kb_browser.inline_keyboard for b in row}
+        self.assertTrue(any("AldricTheSeller" in l for l in browser_labels))
+        self.assertTrue(any("BrynnTheSeller" in l for l in browser_labels))
+        self.assertTrue(any(cb == f"market|sellerfilter|{seller_a}" for cb in browser_labels.values()))
+        # A browser with nothing listed never sees a dead-end My Listings button.
+        self.assertFalse(any("My Listings" in l for l in browser_labels))
+
+        kb_seller = bot._market_keyboard(listings, viewer_id=seller_a, all_listings=listings)
+        seller_labels = {b.text: b.callback_data for row in kb_seller.inline_keyboard for b in row}
+        self.assertTrue(any("My Listings" in l for l in seller_labels))
+        self.assertEqual(next(cb for l, cb in seller_labels.items() if "My Listings" in l), f"market|sellerfilter|{seller_a}")
+        # Filtering by yourself doesn't also show a redundant seller button for yourself.
+        self.assertFalse(any(cb == f"market|sellerfilter|{seller_a}" and "My Listings" not in l for l, cb in seller_labels.items()))
+
+    async def test_market_menu_callback_sellerfilter_narrows_to_one_real_seller(self):
+        chat_id = self.MARKET_BUTTONS_CHAT - 9
+        seller_a, seller_b, browser_id = 900594, 900595, 900596
+        make_basic_character(seller_a, "CorwinTheSeller", inventory={"rusty_dagger": 1}, chat_id=chat_id)
+        make_basic_character(seller_b, "DelaTheSeller", inventory={"silverleaf_herb": 3}, chat_id=chat_id)
+        make_basic_character(browser_id, "SellerFilterBrowser", gold=500, chat_id=chat_id)
+        sink = []
+        await bot._do_sell_market(FakeUpdate(seller_a, "", sink, chat_id=chat_id), ["1", "20", "rusty dagger"])
+        await bot._do_sell_market(FakeUpdate(seller_b, "", sink, chat_id=chat_id), ["3", "15", "silverleaf herb"])
+
+        sink2 = []
+        await bot.market_menu_callback(
+            FakeCallbackUpdate(browser_id, f"market|sellerfilter|{seller_a}", sink2, chat_id=chat_id), DummyContext(),
+        )
+        combined = "\n".join(sink2)
+        self.assertIn("CorwinTheSeller", combined)
+        self.assertIn("filtered: CorwinTheSeller", combined)
+        listing_lines = [line for line in combined.splitlines() if line.startswith("#")]
+        self.assertTrue(listing_lines, combined)
+        self.assertTrue(all("Dela" not in line for line in listing_lines), listing_lines)
+
+    async def test_infer_market_seller_filter_matches_my_listings_and_real_seller_names(self):
+        chat_id = self.MARKET_BUTTONS_CHAT - 10
+        seller_id, viewer_id = 900597, 900598
+        make_basic_character(seller_id, "EldrinTheSeller", inventory={"rusty_dagger": 1}, chat_id=chat_id)
+        make_basic_character(viewer_id, "SellerFilterNLViewer", chat_id=chat_id)
+        sink = []
+        await bot._do_sell_market(FakeUpdate(seller_id, "", sink, chat_id=chat_id), ["1", "20", "rusty dagger"])
+
+        self.assertEqual(bot._infer_market_seller_filter("show my listings on the market", chat_id, viewer_id), viewer_id)
+        self.assertEqual(bot._infer_market_seller_filter("what am I selling on the market", chat_id, viewer_id), viewer_id)
+        self.assertEqual(
+            bot._infer_market_seller_filter("show what EldrinTheSeller has on the market", chat_id, viewer_id), seller_id,
+        )
+        self.assertIsNone(bot._infer_market_seller_filter("what's on the market", chat_id, viewer_id))
+        self.assertIsNone(bot._infer_market_seller_filter("show me weapons on the market", chat_id, viewer_id))
 
     def test_cancel_market_natural_language_routes_correctly(self):
         """
