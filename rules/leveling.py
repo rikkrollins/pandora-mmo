@@ -149,18 +149,72 @@ def magic_penetration_pct(rebirth_count: int) -> float:
 # character sees zero change from either constant below, so this never
 # touches or contradicts the separate, deliberately one-directional
 # level-based scaling in overtuned_monster_stat_multiplier above.
-WORLD_RESISTANCE_PCT_PER_REBIRTH = 15.0
-WORLD_DAMAGE_PCT_PER_REBIRTH = 10.0
+# Real live instruction (2026-08-20, Coffee, Noita NG+ reference --
+# enemy HP/attack-rate/player-damage-multipliers all COMPOUND per NG+
+# level, never a flat linear add): "keep in mind when the player
+# evolves the same thing happens for the players, eventually causing
+# exponential growth." Both sides of this arms race now share ONE real
+# growth rate -- the world's own scaling below, and the player's own
+# rebirth_power_multiplier further down -- rather than escalating at
+# arbitrarily different, undocumented rates. Deliberately uncapped,
+# same "godly, breaking the game on purpose" precedent this session
+# already set (ability-score cap removal, uncapped Mastery Overflow):
+# Coffee's own words, "this is why 'breaking the game' mechanics in
+# needed so the players can beat the impossible bosses."
+REBIRTH_POWER_GROWTH_RATE = 1.5  # +50% per rebirth, compounding
+
+
+def rebirth_power_multiplier(rebirth_count: int) -> float:
+    """
+    The player's own compounding power growth per rebirth -- the
+    missing "other half" of world_damage_multiplier's own growth
+    below, applied once at the real universal choke-point every damage
+    source in this game already shares (rules.combat.apply_damage_
+    type_modifier), so attacks/spells/summons/mastery-bonus damage all
+    scale together automatically. Exactly 1.0 at rebirth 0 -- a never-
+    reborn character sees byte-for-byte the same damage as before this
+    system existed.
+    """
+    return REBIRTH_POWER_GROWTH_RATE ** max(rebirth_count, 0)
 
 
 def world_resistance_pct(party_rebirth_count: float) -> float:
-    """How much extra elemental_resistance_pct the world's monsters gain per the party's own average rebirth_count -- see the constants' own docstring above."""
-    return WORLD_RESISTANCE_PCT_PER_REBIRTH * max(party_rebirth_count, 0)
+    """
+    How much extra elemental_resistance_pct the world's monsters gain
+    per the party's own average rebirth_count -- now the same
+    compounding curve as rebirth_power_multiplier (was flat +15%/
+    rebirth). Safe uncapped: rules.combat.apply_damage_type_modifier's
+    own magic_penetration_pct math already fully negates ANY resistance
+    magnitude once penetration reaches 100% (`elemental_pct * (1 -
+    1.0) == 0`, regardless of how large elemental_pct itself is), and
+    elemental_overflow_heal already handles the >100% case -- nothing
+    else needed to change for this to compound safely.
+    """
+    return (REBIRTH_POWER_GROWTH_RATE ** max(party_rebirth_count, 0) - 1.0) * 100
 
 
 def world_damage_multiplier(party_rebirth_count: float) -> float:
-    """How much harder the world's monsters hit per the defending player's own rebirth_count -- see the constants' own docstring above."""
-    return 1.0 + (WORLD_DAMAGE_PCT_PER_REBIRTH / 100) * max(party_rebirth_count, 0)
+    """How much harder the world's monsters hit per the defending player's own rebirth_count -- same compounding curve as rebirth_power_multiplier (was flat +10%/rebirth), so both sides of the fight escalate at the same real rate."""
+    return REBIRTH_POWER_GROWTH_RATE ** max(party_rebirth_count, 0)
+
+
+# Turn-based equivalent of Noita's exponential "attacks faster" NG+
+# axis (real-time attack-rate scaling has no direct analog in turn-
+# based combat) -- generalizes the existing extra_attack_when_enraged
+# boss-only flag (bot.py) into a real, universal, rebirth-scaled bonus
+# any monster's turn can read. Deliberately CAPPED, unlike the damage
+# multipliers above: an uncapped ACTION COUNT risks a genuinely
+# unplayable/endless combat round, a different kind of risk than a
+# large damage number (always resolved in a bounded number of hits).
+# Same "tiered, capped" shape bot._summons_per_battle already
+# established for a comparable "more of a good thing" scaling curve.
+EXTRA_MONSTER_ACTIONS_PER_REBIRTH_TIER = 3.0  # +1 action per this many average party rebirths
+EXTRA_MONSTER_ACTIONS_CAP = 3
+
+
+def extra_monster_actions(party_rebirth_count: float) -> int:
+    """Bonus actions per round any monster's turn gets on top of its own baseline, from the party's own average rebirth_count -- 0 at rebirth 0 (unchanged from today), capped at EXTRA_MONSTER_ACTIONS_CAP."""
+    return min(int(max(party_rebirth_count, 0) // EXTRA_MONSTER_ACTIONS_PER_REBIRTH_TIER), EXTRA_MONSTER_ACTIONS_CAP)
 
 
 # "Smarter, Formation-Aware Enemy AI" Phase D (2026-08-14, per Coffee:

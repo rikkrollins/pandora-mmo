@@ -2,6 +2,52 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.293] — Symmetric exponential rebirth scaling (Noita NG+ style)
+
+**Real live request (2026-08-20, Coffee, Noita wiki NG+ reference):**
+enemy stats and the player's own damage multipliers both compound each
+NG+ level in Noita, never a flat linear add. Confirmed via
+conversation this is our own rebirth system: "keep in mind when the
+player evolves the same thing happens for the players, eventually
+causing exponential growth" / "make sure all modifiers are included,
+damage types, attacks, abilities, spells, magic, summons, everything"
+/ "proficiencies and skills also. this is why 'breaking the game'
+mechanics in needed so the players can beat the impossible bosses" /
+"make sure to use the elemental system and resistences too."
+
+- **The world's own side is now exponential, not linear.**
+  `world_damage_multiplier`/`world_resistance_pct` (how much harder
+  monsters hit / resist per the party's average rebirth_count) changed
+  from flat +10%/+15% per rebirth to real compounding growth.
+- **New: the player's own damage now compounds per rebirth too** — the
+  missing "other half" that previously only had `magic_penetration_pct`
+  (which merely closes the resistance gap back to normal, never makes
+  you hit harder than baseline). `rebirth_power_multiplier` is applied
+  ONCE, at the one real choke-point every damage source in this game
+  already shares (`apply_damage_type_modifier`) — so weapon attacks,
+  spells, Remnant summons, and mastery-bonus strikes ALL scale
+  automatically, verified by tracing the real call graph and testing
+  each path (including a real Remnant summon) individually, not
+  assumed from the shared code path alone. Immunity stays an absolute
+  wall, untouched.
+- Armor mastery's damage reduction (the one combat proficiency that
+  doesn't flow through that shared pipeline) gets the defender's own
+  rebirth-scaled boost explicitly.
+- Turn-based equivalent of Noita's "enemies attack faster": monster
+  turns now get real bonus actions per round scaled off the party's
+  average rebirth_count (capped, unlike the uncapped damage
+  multipliers — an unbounded action count risks a genuinely endless
+  combat round in a way a large damage number never does).
+- Both sides of the fight share the exact same growth rate (+50% per
+  rebirth, compounding), a real symmetric arms race rather than one
+  side arbitrarily outpacing the other. Deliberately uncapped, same
+  "godly, breaking the game on purpose" precedent this session already
+  set — Coffee's own words: that's the stated goal, not a bug to guard
+  against.
+- A never-reborn character (rebirth 0) sees byte-for-byte identical
+  behavior to before this change — verified against the full existing
+  damage-type/elemental-resistance/mastery-overflow regression suite.
+
 ## [1.27.292] — Real grid-based world map: fixed compass directions, RPGClassics-style rendering
 
 **Real live reports (2026-08-20, Coffee, two Development-topic

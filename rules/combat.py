@@ -9,6 +9,7 @@ from rules.dice import roll_d20, roll_attack, roll_damage, ability_modifier
 from rules.leveling import (
     sneak_attack_dice_count, rage_damage_bonus, wild_shape_damage_bonus, magic_penetration_pct,
     COMBAT_SUBCLASS_NAMES, COMBAT_SUBCLASS_DAMAGE_BONUS_PCT, power_scale_ratio, world_damage_multiplier,
+    rebirth_power_multiplier,
 )
 from class_features import is_weapon_proficient
 from guilds import FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT, held_guild_ids
@@ -173,9 +174,26 @@ def apply_damage_type_modifier(damage: int, damage_type: str | None, defender: d
     independently by callers right after this function, exactly so
     that overflow can never leak into this one's always-non-negative
     contract.
+
+    Rebirth power (rules.leveling.rebirth_power_multiplier, 2026-08-20,
+    per Coffee's Noita NG+ reference: "when the player evolves the same
+    thing happens for the players, eventually causing exponential
+    growth" / "make sure all modifiers are included, damage types,
+    attacks, abilities, spells, magic, summons, everything") -- applied
+    ONCE, as the very last step, to every real branch below except
+    immunity (which stays an absolute 0, unscaled). This is THE single
+    choke-point every real damage source in this game already shares
+    (weapon attacks, thrown weapons, backstab, weapon-mastery bonus
+    strikes, player/monster spells, Remnant summons), so this one
+    change reaches every one of them without touching their individual
+    call sites. Exactly 1.0 at rebirth 0 -- every existing test/
+    behavior for a never-reborn character is unchanged.
     """
-    if damage <= 0 or not damage_type:
+    if damage <= 0:
         return damage
+    power = rebirth_power_multiplier(attacker.get("rebirth_count", 0) if attacker else 0)
+    if not damage_type:
+        return int(round(damage * power))
     resistances, vulnerabilities, immunities = _defender_resistance_profile(defender)
     if damage_type in immunities:
         return 0
@@ -189,22 +207,25 @@ def apply_damage_type_modifier(damage: int, damage_type: str | None, defender: d
     if elemental_pct > 0:
         penetration = magic_penetration_pct(attacker.get("rebirth_count", 0) if attacker else 0) / 100.0
         effective_pct = min(elemental_pct * (1 - penetration), 100.0)
-        return max(0, int(round(damage * (1 - effective_pct / 100))))
+        modified = max(0, int(round(damage * (1 - effective_pct / 100))))
+        return int(round(modified * power))
     resistant = damage_type in resistances
     vulnerable = damage_type in vulnerabilities
     if resistant and vulnerable:
-        return damage
-    if resistant and ignores:
-        return damage
-    if resistant:
+        modified = damage
+    elif resistant and ignores:
+        modified = damage
+    elif resistant:
         halved = damage // 2
         cut_off = damage - halved
         penetration = magic_penetration_pct(attacker.get("rebirth_count", 0) if attacker else 0) / 100.0
         recovered = int(round(cut_off * penetration))
-        return min(damage, halved + recovered)
-    if vulnerable:
-        return damage * 2
-    return damage
+        modified = min(damage, halved + recovered)
+    elif vulnerable:
+        modified = damage * 2
+    else:
+        modified = damage
+    return int(round(modified * power))
 
 
 def elemental_overflow_heal(raw_damage: int, damage_type: str | None, defender: dict, attacker: dict | None = None) -> int:

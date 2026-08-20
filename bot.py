@@ -118,6 +118,7 @@ from rules.leveling import (
     MEDIUM_ENCOUNTER_XP_PER_CHARACTER, backstab_tier_multiplier, describe_subclass_effect,
     world_resistance_pct, world_damage_multiplier,
     formation_target_discipline, formation_target_weight_floor,
+    rebirth_power_multiplier, extra_monster_actions,
 )
 from rules.proficiency import practiced_bonus, MAX_PRACTICE_BONUS
 
@@ -6038,6 +6039,18 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
         # resolution below either once or several times; breaks early if a
         # mid-turn kill leaves no target for the next attack, or if combat
         # itself ends mid-sequence.
+        # "Smarter, Formation-Aware Enemy AI" Phase D (2026-08-14): the
+        # real player party's own average rebirth_count, same source
+        # world_avg_rebirth already uses at encounter-build time --
+        # only the "party" side ever carries a meaningful rebirth_count
+        # (monsters don't), so this is computed from that side
+        # regardless of which side is actually attacking this turn.
+        # Moved ahead of attack_count below (2026-08-20) so the new
+        # extra_monster_actions scaling can read it too.
+        living_party = session.living_on_side("party")
+        party_rebirth_count = (
+            sum(p.get("rebirth_count", 0) for p in living_party) / len(living_party) if living_party else 0
+        )
         # Synergy Phase 6 (2026-08-13): The Unbegun's real signature
         # mechanic -- extra_attack_when_enraged (campaign.json flag,
         # currently only set on the_unbegun) grants a real 3rd attack
@@ -6047,6 +6060,16 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
             attack_count = 3
         else:
             attack_count = 2 if current.get("is_boss") else _attacks_per_turn(current)
+        # Turn-based equivalent of Noita NG+'s exponential "attacks
+        # faster" axis (2026-08-20, per Coffee: "when the player evolves
+        # the same thing happens... the world/enemies/bosses evolve").
+        # Generalizes what extra_attack_when_enraged above used to be
+        # the ONE boss's unique flag for into a real, universal,
+        # rebirth-scaled bonus every monster's turn gets -- capped (see
+        # rules.leveling.extra_monster_actions's own docstring for why
+        # this one stays bounded, unlike the uncapped damage
+        # multipliers).
+        attack_count += extra_monster_actions(party_rebirth_count)
         # Per Coffee (2026-07-21): same clear preface as the human attack
         # path above -- skipped for bosses specifically, since those
         # already get their own "sizing up its target" flavor line each
@@ -6055,16 +6078,6 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
             current["_multiattack_announced"] = True
             await _safe_send(update, f"⚔️ **{current['name']}** has **{attack_count} attacks** this turn!")
         combat_ended_mid_turn = False
-        # "Smarter, Formation-Aware Enemy AI" Phase D (2026-08-14): the
-        # real player party's own average rebirth_count, same source
-        # world_avg_rebirth already uses at encounter-build time --
-        # only the "party" side ever carries a meaningful rebirth_count
-        # (monsters don't), so this is computed from that side
-        # regardless of which side is actually attacking this turn.
-        living_party = session.living_on_side("party")
-        party_rebirth_count = (
-            sum(p.get("rebirth_count", 0) for p in living_party) / len(living_party) if living_party else 0
-        )
         for attack_num in range(attack_count):
             opposing = session.living_on_side(session.opposing_side(current["telegram_user_id"]))
             if not opposing:
@@ -8829,8 +8842,18 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                     # the reduction itself grows past the base 25% as
                     # armor proficiency climbs past 100%.
                     armor_pct = target.get("armor_proficiency_pct", {}).get(defender_armor.get("armor_category", "light"), PROFICIENCY_STARTING_PCT)
+                    # Rebirth power (2026-08-20, per Coffee: "proficiencies
+                    # and skills also") -- the DEFENDER's own rebirth_count,
+                    # since this is a defensive proficiency. The one combat
+                    # mastery bonus that doesn't already flow through
+                    # rules.combat.apply_damage_type_modifier (it operates
+                    # on the already-resolved damage_dealt, not a fresh
+                    # damage roll), so it needs this explicitly.
                     armor_mastery_reduction = max(
-                        int(result["damage_dealt"] * ARMOR_MASTERY_DAMAGE_REDUCTION_PCT / 100 * _mastery_overflow_multiplier(armor_pct)), 1,
+                        int(
+                            result["damage_dealt"] * ARMOR_MASTERY_DAMAGE_REDUCTION_PCT / 100
+                            * _mastery_overflow_multiplier(armor_pct) * rebirth_power_multiplier(target.get("rebirth_count", 0))
+                        ), 1,
                     )
                     result["damage_dealt"] = max(result["damage_dealt"] - armor_mastery_reduction, 0)
                     target_hp_max = target.get("hp_max", target["hp_current"])

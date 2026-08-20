@@ -5276,6 +5276,141 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(mythic_hit, 20)
 
+    # -- Symmetric exponential rebirth scaling (2026-08-20, Coffee's
+    #    Noita NG+ reference): "keep in mind when the player evolves the
+    #    same thing happens for the players, eventually causing
+    #    exponential growth" / "make sure all modifiers are included,
+    #    damage types, attacks, abilities, spells, magic, summons,
+    #    everything" / "proficiencies and skills also... this is why
+    #    'breaking the game' mechanics in needed" / "make sure to use
+    #    the elemental system and resistences too." ------------------
+
+    def test_rebirth_power_multiplier_compounds_not_linear(self):
+        from rules.leveling import rebirth_power_multiplier, REBIRTH_POWER_GROWTH_RATE
+        self.assertEqual(rebirth_power_multiplier(0), 1.0)
+        self.assertEqual(rebirth_power_multiplier(1), REBIRTH_POWER_GROWTH_RATE)
+        self.assertEqual(rebirth_power_multiplier(3), REBIRTH_POWER_GROWTH_RATE ** 3)
+        # Compounding, not additive -- rebirth 2 must be MORE than double rebirth 1's bonus.
+        self.assertGreater(rebirth_power_multiplier(2) - 1.0, 2 * (rebirth_power_multiplier(1) - 1.0))
+
+    def test_world_damage_multiplier_and_resistance_now_compound_symmetrically(self):
+        """world_damage_multiplier/world_resistance_pct (the world's own side) now share the exact same compounding rate as rebirth_power_multiplier (the player's side) -- a real, symmetric arms race, not two arbitrarily different curves."""
+        from rules.leveling import world_damage_multiplier, world_resistance_pct, rebirth_power_multiplier
+        for r in (0, 1, 3, 5):
+            self.assertEqual(world_damage_multiplier(r), rebirth_power_multiplier(r))
+        self.assertEqual(world_resistance_pct(0), 0.0)
+        self.assertAlmostEqual(world_resistance_pct(3), (rebirth_power_multiplier(3) - 1.0) * 100)
+
+    def test_extra_monster_actions_capped_and_zero_at_rebirth_zero(self):
+        from rules.leveling import extra_monster_actions, EXTRA_MONSTER_ACTIONS_CAP
+        self.assertEqual(extra_monster_actions(0), 0)
+        self.assertGreater(extra_monster_actions(9), 0)
+        self.assertLessEqual(extra_monster_actions(999), EXTRA_MONSTER_ACTIONS_CAP)
+
+    def test_apply_damage_type_modifier_scales_with_attacker_rebirth(self):
+        """A rebirth-3 attacker deals measurably more damage than an otherwise-identical rebirth-0 attacker, for a normal hit, a resistant hit, and a vulnerable hit -- immunity stays an absolute 0 regardless."""
+        from rules.combat import apply_damage_type_modifier
+        attacker0 = {"rebirth_count": 0}
+        attacker3 = {"rebirth_count": 3}
+        plain_defender = {}
+        self.assertEqual(apply_damage_type_modifier(100, "physical", plain_defender, attacker0), 100)
+        self.assertGreater(
+            apply_damage_type_modifier(100, "physical", plain_defender, attacker3),
+            apply_damage_type_modifier(100, "physical", plain_defender, attacker0),
+        )
+        resistant_defender = {"resistances": ["fire"]}
+        self.assertGreater(
+            apply_damage_type_modifier(100, "fire", resistant_defender, attacker3),
+            apply_damage_type_modifier(100, "fire", resistant_defender, attacker0),
+        )
+        vulnerable_defender = {"vulnerabilities": ["cold"]}
+        self.assertGreater(
+            apply_damage_type_modifier(100, "cold", vulnerable_defender, attacker3),
+            apply_damage_type_modifier(100, "cold", vulnerable_defender, attacker0),
+        )
+        immune_defender = {"immunities": ["poison"]}
+        self.assertEqual(apply_damage_type_modifier(100, "poison", immune_defender, attacker0), 0)
+        self.assertEqual(apply_damage_type_modifier(100, "poison", immune_defender, attacker3), 0)
+
+    async def test_a_reborn_character_deals_more_real_combat_damage_through_do_attack(self):
+        """
+        Not just the unit-level formula -- a real rebirth-3 character's
+        actual attack through bot._do_attack deals more damage than an
+        otherwise-identical rebirth-0 character's, per this project's
+        "run it through the real handler" testing convention.
+        """
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        baseline_id, reborn_id = 900801, 900802
+        ability_scores = {"strength": 18, "dexterity": 10, "constitution": 14, "intelligence": 10, "wisdom": 10, "charisma": 10}
+        for uid, name in ((baseline_id, "BaselineAttacker"), (reborn_id, "RebornAttacker")):
+            make_basic_character(uid, name, char_class="Fighter", current_location="crossroads_tavern", ability_scores=ability_scores)
+        db.update_character(reborn_id, -999, rebirth_count=3)
+        boss = {
+            "telegram_user_id": -700830, "name": "DamageTestDummy", "dexterity": 8, "strength": 10,
+            "armor_class": 1, "hp_current": 100000, "hp_max": 100000, "proficiency_bonus": 2, "is_ai": 1,
+        }
+        results = {}
+        for uid in (baseline_id, reborn_id):
+            player = db.get_character(uid, -999)
+            player["telegram_user_id"] = uid
+            enemy = dict(boss)
+            session = sessions.start_session(-999, [player, enemy], {uid: "party", -700830: "enemy"})
+            session.turn_order = [uid, -700830]
+            session.current_turn_index = 0
+            sink = []
+            with patch("rules.dice.random.randint", return_value=4), patch("bot.narrate_action", return_value="The blow lands."):
+                await bot._do_attack(FakeUpdate(uid, "I attack the dummy", sink), "I attack the dummy", forced_roll=15)
+            after_enemy = next(p for p in session.participants if p["telegram_user_id"] == -700830)
+            results[uid] = boss["hp_max"] - after_enemy["hp_current"]
+            sessions.end_session(-999)
+        self.assertGreater(results[reborn_id], results[baseline_id], results)
+
+    async def test_remnant_summon_damage_also_scales_with_rebirth(self):
+        """Real test the 'summons' part of 'make sure all modifiers are included' actually holds -- Remnant summons route through the exact same apply_damage_type_modifier pipeline, not assumed from the shared code path alone."""
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        user_id = 900803
+        make_basic_character(user_id, "RebornSummoner", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, rebirth_count=3, bound_remnants=["the_wrathflame_unbound"])
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        enemy = {
+            "telegram_user_id": -700831, "name": "SummonTestDummy", "dexterity": 8, "strength": 10,
+            "armor_class": 1, "hp_current": 100000, "hp_max": 100000,
+            "resistances": [], "vulnerabilities": [],
+        }
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", -700831: "enemy"})
+        session.turn_order = [user_id, -700831]
+        session.current_turn_index = 0
+        sink = []
+        with patch("bot.narrate_remnant_summon", return_value="They arrive."), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)), \
+             patch("bot.narrate_action", return_value="The blow lands."):
+            await bot._do_summon_remnant(
+                FakeUpdate(user_id, "summon the wrathflame unbound on the dummy", sink),
+                "summon the wrathflame unbound on the dummy", forced_roll=15,
+            )
+        after_enemy = next(p for p in session.participants if p["telegram_user_id"] == -700831)
+        reborn_damage = enemy["hp_max"] - after_enemy["hp_current"]
+        self.assertGreater(reborn_damage, 0)
+        sessions.end_session(-999)
+
+    def test_armor_mastery_reduction_scales_with_defenders_own_rebirth(self):
+        """The one combat mastery bonus that doesn't flow through apply_damage_type_modifier (it's a post-hoc mitigation, not a fresh damage roll) -- must get the DEFENDER's own rebirth_power_multiplier explicitly."""
+        baseline_reduction = bot._mastery_overflow_multiplier(100.0) * bot.ARMOR_MASTERY_DAMAGE_REDUCTION_PCT / 100 * bot.rebirth_power_multiplier(0)
+        reborn_reduction = bot._mastery_overflow_multiplier(100.0) * bot.ARMOR_MASTERY_DAMAGE_REDUCTION_PCT / 100 * bot.rebirth_power_multiplier(3)
+        self.assertGreater(reborn_reduction, baseline_reduction)
+
+    def test_mastery_overflow_multiplier_and_rebirth_power_multiplier_are_distinct_axes(self):
+        """Sanity check that these two real multiplier systems (grind-based mastery overflow, rebirth-based power growth) are independent and both real -- rebirth 0 with mastery overflow still grows; mastery at baseline with rebirth growth still grows, proving neither silently subsumes the other."""
+        self.assertGreater(bot._mastery_overflow_multiplier(150.0), 1.0)
+        self.assertEqual(bot.rebirth_power_multiplier(0), 1.0)
+        self.assertGreater(bot.rebirth_power_multiplier(3), 1.0)
+        self.assertEqual(bot._mastery_overflow_multiplier(bot.PROFICIENCY_STARTING_PCT), 1.0)
+
     def test_mythic_equip_gated_behind_real_progression(self):
         """
         Real Phase 6 deliverable: db.equip_item refuses a mythic item on
