@@ -20763,7 +20763,14 @@ async def _do_list_shop(update: Update) -> None:
         )
         return
     shop_data = cl.get_shop(CAMPAIGN, shop_id)
-    lines = [f"🛒 **{cl.get_location(CAMPAIGN, character['current_location'])['name']}**"]
+    # Real gap (2026-08-20, per Coffee: "when we visit shops show how
+    # much gold we have somewhere (its not shown as far as i know)")
+    # -- confirmed true: this screen listed every real price but never
+    # the player's own real gold to weigh them against.
+    lines = [
+        f"🛒 **{cl.get_location(CAMPAIGN, character['current_location'])['name']}**",
+        f"💰 Your gold: {character['gold']}",
+    ]
     if shop_data.get("description"):
         lines.append(shop_data["description"])
     # Per Coffee (2026-07-21): "make different shops for the

@@ -11731,12 +11731,16 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_list_shop_shows_real_stocked_items_and_prices(self):
         user_id = 900518
         make_basic_character(user_id, "Shopper", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, gold=250)
         sink = []
         await bot._do_list_shop(FakeUpdate(user_id, "I want to shop", sink))
         combined = " ".join(sink)
         self.assertIn("Rations", combined)
         self.assertIn("Healing Potion", combined)
         self.assertIn("gold", combined)
+        # Real gap (2026-08-20, Coffee): "when we visit shops show how
+        # much gold we have somewhere (its not shown as far as i know)".
+        self.assertIn("Your gold: 250", combined)
 
     async def test_list_shop_says_no_shop_when_none_here(self):
         user_id = 900519

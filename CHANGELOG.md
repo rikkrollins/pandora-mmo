@@ -2,6 +2,15 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.272] — Shops now show your own gold
+
+**Real request (2026-08-20, Coffee):** "when we visit shops show how
+much gold we have somewhere (its not shown as far as i know)."
+Confirmed true: `_do_list_shop` listed every real item's price but
+never the player's own real gold to weigh them against. Added a
+"💰 Your gold: N" line right under the shop header. Verified with a
+real executed test.
+
 ## [1.27.271] — Remnant lore art, and a real gap closed: story-arc opening art
 
 **Real request (2026-08-20, Coffee):** "include images for the remnant
