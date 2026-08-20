@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.280] — Encounter Ledger refreshed to match live campaign.json
+
+**Real request (2026-08-20, Coffee): "can u update the encounter
+ledger and also update it on github."** `docs/encounter_ledger.html`'s
+embedded `DATA.monsters` snapshot hadn't been regenerated since it was
+moved into the repo (2026-08-16) and had drifted badly stale against
+this session's own extensive rebalancing: The Cairnbound still showed
+its pre-v1.27.264 numbers (hp 8,500/xp 40,000/dmg 160/lvl 90 instead of
+the real 85,000/90,000/225/99), The Unopened still showed pre-rework
+numbers (hp 900/dmg 22/lvl 5 instead of 9,400/225/99), and every arc
+6-8 monster touched by the chapter-band leveling pass (channel_bound_
+goblin, watchtower_stalker, alpha_wolf, the four spider/wolf variants,
+etc.) still showed `"authored": false` with filler `lvl: 1` even
+though they'd since been given real, hand-submitted `level` fields in
+campaign.json. Wrote a one-off regeneration pass (not committed as a
+script — a straight re-derivation of `hp`/`xp`/`dmg`/`boss`/`authored`/
+`lvl` per monster key, straight from the current
+`campaigns/default/campaign.json`, leaving each monster's key/name/arc/
+loc/quest/super grouping untouched since none of that story/location
+metadata changed) confirming 26 of the ledger's 72 monster rows were
+stale; all 26 now match the live game exactly. This tool is Coffee's
+own editable review/export page (party-size level-curve preview +
+"Copy edited values" JSON export for still-unauthored rows) — it needs
+an accurate starting snapshot to be useful for the next review pass,
+same as any other diff tool. No runtime/bot-facing code touched; this
+is a static docs page, not something `pandora-mmo-bot.service` serves,
+so no redeploy/restart is needed for this change to take effect on
+GitHub.
+
 ## [1.27.279] — Remnant summon damage raised across all 12
 
 **Real live report (2026-08-20, Coffee, tested against a real Giant
