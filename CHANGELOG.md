@@ -2,6 +2,18 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.278] — Fixed "move X to backrow" (one word, no "the") misclassification
+
+**Found via self-improvement topic-activity monitoring:** "Move
+Ravenloft to backrow" was falling through to plain travel instead of
+a formation change. Root cause: `ai/intent_parser.py`'s formation-
+command matching only recognized "to the back row"/"to the back" cuts
+and a bare trailing "back" — never the one-word "backrow"/"frontrow"
+variant (no "the", no space), a spacing gap neither the original "to
+the backrow" fix nor the later bare-trailer/"forward" fixes covered.
+Added both the "to backrow"/"to frontrow" cuts and bare "X backrow"/
+"X frontrow" trailers. Verified with 3 new/re-run real executed tests.
+
 ## [1.27.277] — Counterspell redesigned: free, DEX-gated, no more spam
 
 **Real dev-bridge follow-up (2026-08-20, Coffee, live report on a

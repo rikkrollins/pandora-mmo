@@ -8472,6 +8472,31 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r["action"], "set_front_row")
         self.assertEqual((r.get("target") or "").lower(), "zara")
 
+    def test_formation_command_to_backrow_no_the_names_the_target(self):
+        """
+        Real live bug (2026-08-20, topic-activity monitoring): "Move
+        Ravenloft to backrow" came back as plain "move" (travel)
+        instead of a formation change. Root cause: every existing cut
+        required either "the" ("to the back row") or a two-word "back
+        row" -- "to backrow" (no "the", one word) matched none of them,
+        a spacing variant neither the original "to the backrow" fix nor
+        the later bare-trailer/"forward" fixes covered either
+        (_MOVE_BARE_TRAILERS only matches a trailing bare "back", not
+        "backrow"). Covers both the "to backrow" and bare "X backrow"
+        (no "to") phrasings.
+        """
+        r = _keyword_fallback("Move Ravenloft to backrow", ["Ravenloft"])
+        self.assertEqual(r["action"], "set_back_row")
+        self.assertEqual((r.get("target") or "").lower(), "ravenloft")
+
+        r2 = _keyword_fallback("Move Ravenloft backrow", ["Ravenloft"])
+        self.assertEqual(r2["action"], "set_back_row")
+        self.assertEqual((r2.get("target") or "").lower(), "ravenloft")
+
+        r3 = _keyword_fallback("Move Zara to frontrow", ["Zara"])
+        self.assertEqual(r3["action"], "set_front_row")
+        self.assertEqual((r3.get("target") or "").lower(), "zara")
+
     def test_tactical_phrasing_maps_to_formation_not_flee(self):
         self.assertEqual(_keyword_fallback("pull back", [])["action"], "set_back_row")
         result = _keyword_fallback("pull Zara back", [])

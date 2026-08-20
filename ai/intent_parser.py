@@ -862,11 +862,22 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # first and never reached this logic at all. Same "checked before
     # the loop" fix shape already used for the scroll/use_item checks
     # just above.
+    # "backrow"/"frontrow" as one word, no "the" (2026-08-20, live-caught
+    # via topic-activity monitoring: "Move Ravenloft to backrow" came
+    # back as plain "move" (travel) instead of a formation change).
+    # Root cause: every existing cut here required either "the" ("to
+    # the back row") or a two-word "back row"/"front row" -- "to
+    # backrow" (no "the", one word) matched none of them. Same real gap
+    # class as the "bare trailer"/"forward" fixes below, just a spacing
+    # variant neither of those covers either (_MOVE_BARE_TRAILERS only
+    # matches a trailing bare "back"/"up"/"forward", not "backrow").
     for trigger in ["move ", "put "]:
         if trigger in lowered:
             for row, cuts in (
-                ("back", (" to the back row", " to the back", " in the back row", " in the back", " behind")),
-                ("front", (" to the front row", " to the front", " in the front row", " in the front", " up front")),
+                ("back", (" to the back row", " to the back", " to backrow", " in the back row", " in the back",
+                           " in backrow", " behind")),
+                ("front", (" to the front row", " to the front", " to frontrow", " in the front row", " in the front",
+                            " in frontrow", " up front")),
             ):
                 for cut in cuts:
                     if cut in lowered:
@@ -895,7 +906,13 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # correctly-classified "Move elduinn to the backrow" -- the exact
     # same bare-trailer gap as "back"/"up" above, just a third natural
     # synonym ("forward" == "to the front") that was never added.
-    _MOVE_BARE_TRAILERS = {"back": "set_back_row", "up": "set_front_row", "forward": "set_front_row"}
+    # "backrow"/"frontrow" bare trailers (2026-08-20, same live report
+    # as the "to backrow" cut above): "move X backrow" with no "to"
+    # either -- same real gap, just without the preposition this time.
+    _MOVE_BARE_TRAILERS = {
+        "back": "set_back_row", "up": "set_front_row", "forward": "set_front_row",
+        "backrow": "set_back_row", "frontrow": "set_front_row",
+    }
     for trigger in ["move ", "put "]:
         if trigger not in lowered:
             continue
