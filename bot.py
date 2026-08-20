@@ -67,7 +67,7 @@ from ai.dm_agent import (
     narrate_action, narrate_welcome, narrate_skill_check, narrate_hourly_update,
     narrate_examine, narrate_branching_choice_outcome, narrate_boss_decision,
     narrate_story_so_far, narrate_chapter_climax, narrate_arc_opening, narrate_next_step_hint,
-    narrate_boss_intro, narrate_boss_defeat, narrate_boss_summon,
+    narrate_boss_intro, narrate_boss_defeat, narrate_boss_summon, narrate_remnant_summon,
     _fallback_hourly_update, _fallback_narration,
     is_narration_call_active,
 )
@@ -22815,7 +22815,43 @@ async def _do_summon_remnant(update: Update, text: str, forced_roll: int | None 
             return
 
         target = _pick_target(text, opposing)
-        roll = roll_damage(remnant["summon_damage_dice"], remnant["summon_damage_bonus"], forced_roll=forced_roll)
+
+        # Real live moment (2026-08-20, per Coffee: "include a narration
+        # from the Remnant to the current battle enemy it is facing,
+        # Then attack them with the ability and show the ability
+        # image") -- sent BEFORE the attack resolves, same "narrate the
+        # moment, then the mechanical result" order every other real
+        # narrated beat in this game already follows (never lets the
+        # narration invent the outcome itself).
+        flavor_line = await asyncio.to_thread(
+            narrate_remnant_summon, remnant["name"], remnant["lore"], target["name"],
+        )
+        await _safe_send(update, f"🔮 {flavor_line}")
+        # Real ability art (2026-08-20, per Coffee: "Show the attack or
+        # Ability and NOT the remnant") -- _maybe_send_ability_image
+        # already explicitly excludes any person/creature/monster from
+        # the generated image (see _ability_image_prompt's own real
+        # fix, 2026-08-10), grounded only in the Remnant's own real
+        # element -- never an invented visual detail.
+        await _maybe_send_ability_image(
+            update, remnant["name"], f"{remnant['element']} energy, ancient otherworldly power surging outward",
+            emoji="🔮",
+        )
+
+        # Real request (2026-08-20, per Coffee: "Use the remnants Bonus
+        # Damage as part of thier attack to make then much stronger
+        # than a normal attack, spell or ability") -- adds the SAME
+        # boss's own real damage_bonus (campaign.json, the exact number
+        # this session's chapter-band pass already tuned) on top of the
+        # summon's own dice+bonus, so a Remnant's summoned strike scales
+        # with how strong the real Unbound it came from actually was --
+        # never an invented number, the monster's own already-balanced
+        # stat.
+        source_template = cl.get_monster_template(CAMPAIGN, remnant["monster_key"])
+        source_bonus = source_template.get("damage_bonus", 0) if source_template else 0
+        roll = roll_damage(
+            remnant["summon_damage_dice"], remnant["summon_damage_bonus"] + source_bonus, forced_roll=forced_roll,
+        )
         damage = apply_damage_type_modifier(roll["total"], remnant["element"], target, caster)
         target["hp_current"] = max(target["hp_current"] - damage, 0)
         caster["summons_used_this_battle"] = used + 1

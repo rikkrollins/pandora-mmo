@@ -1263,6 +1263,61 @@ def narrate_boss_summon(boss_name: str, minion_names: str) -> str:
     return f"**{boss_name}**, badly wounded, calls for reinforcements!"
 
 
+def _remnant_summon_preamble() -> str:
+    return (
+        "You are the Dungeon Master narrating the exact moment a bound "
+        "Remnant -- a fragment of an ancient, boss-tier creature the "
+        "player's party once genuinely defeated -- is called into a "
+        "current battle and turns on the enemy it now faces. You are "
+        "given the Remnant's real name, its real lore, and the real "
+        "name of the enemy it's about to strike; narrate ONLY these "
+        f"facts ({scaled_sentences(1, 2)}), as a short, menacing line "
+        "the Remnant itself directs AT that enemy -- ancient, "
+        "otherworldly, never friendly banter -- without resolving the "
+        "attack's outcome (damage/hit/miss) or inventing a new plot "
+        f"detail, character, or twist beyond what's given. {_NAMING_INSTRUCTION} {style_directive()}"
+    )
+
+
+def _build_remnant_summon_prompt(remnant_name: str, remnant_lore: str, target_name: str) -> str:
+    return (
+        f"{_remnant_summon_preamble()}\n\n"
+        f"Real facts (narrate ONLY these, faithfully):\n"
+        f"The Remnant being summoned: {remnant_name}\n"
+        f"Its real lore: {remnant_lore}\n"
+        f"The enemy it now turns on: {target_name}\n\n"
+        f"Write the Remnant's line now:"
+    )
+
+
+def narrate_remnant_summon(remnant_name: str, remnant_lore: str, target_name: str) -> str:
+    """
+    Real feature request (2026-08-20, per Coffee: "when we use a
+    Remnant inclde a narration from the Remnant to the current battle
+    enemy it is facing"). Same real epic-moment pattern as
+    narrate_boss_summon right above -- grounded only in the Remnant's
+    own real name/lore (remnants.py) and the real target it's actually
+    facing this cast, never inventing a new detail. The plain damage
+    line bot.py already sends stays (reliable, always-present
+    information); this adds a real narrated line alongside it.
+    """
+    prompt = _build_remnant_summon_prompt(remnant_name, remnant_lore, target_name)
+    try:
+        response = requests.post(
+            f"{config.OLLAMA_BASE_URL}/api/generate",
+            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False, "options": _NARRATION_OPTIONS},
+            timeout=200,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
+        if text and not is_placeholder_text(text):
+            return text
+    except (requests.RequestException, ValueError) as e:
+        print(f"[dm_agent] remnant summon narration failed, falling back to template: {e}")
+    return f"**{remnant_name}** turns its full attention on **{target_name}**."
+
+
 def _arc_opening_preamble() -> str:
     return (
         "You are the Dungeon Master narrating the OPENING of a brand new "

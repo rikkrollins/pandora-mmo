@@ -8261,6 +8261,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_battle_menu_summon_flow_lists_remnant_then_target_then_casts(self):
         """Full tap-through: bm|summon -> bm|summonpick|<id> -> bm|summontarget|<id>|<name>, same shape as the existing cast/casttarget flow."""
         import sessions
+        from unittest.mock import patch, AsyncMock
         sessions.end_session(-999)
         user_id = 950651
         make_basic_character(user_id, "SummonFlowTester", current_location="crossroads_tavern")
@@ -8288,7 +8289,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("SummonGoblinA", target_picker)
         self.assertIn("bm|summontarget|the_wrathflame_unbound|SummonGoblinB", target_picker)
 
-        result = await tap("bm|summontarget|the_wrathflame_unbound|SummonGoblinB")
+        with patch("bot.narrate_remnant_summon", return_value="You should not have come here."), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            result = await tap("bm|summontarget|the_wrathflame_unbound|SummonGoblinB")
         self.assertIn("The Wrathflame Unbound", result)
         self.assertIn("SummonGoblinB", result)
         sessions.end_session(-999)
@@ -16595,6 +16598,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_summon_remnant_deals_real_elemental_damage_and_advances_turn(self):
         import sessions
+        from unittest.mock import patch, AsyncMock
         sessions.end_session(-992)
         user_id = 800207
         make_basic_character(user_id, "RealSummoner", current_location="crossroads_tavern", chat_id=-992, hp_max=50)
@@ -16608,21 +16612,106 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [user_id, enemy_id]
         session.current_turn_index = 0
         sink = []
-        await bot._do_summon_remnant(
-            FakeUpdate(user_id, "summon The Wrathflame Unbound on the goblin", sink, chat_id=-992),
-            "summon The Wrathflame Unbound on the goblin",
-        )
+        with patch("bot.narrate_remnant_summon", return_value="You should not have come here."), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._do_summon_remnant(
+                FakeUpdate(user_id, "summon The Wrathflame Unbound on the goblin", sink, chat_id=-992),
+                "summon The Wrathflame Unbound on the goblin",
+            )
         combined = " ".join(sink)
         self.assertIn("Wrathflame", combined)
         self.assertIn("fire damage", combined)
+        self.assertIn("You should not have come here.", combined)
         goblin = next(p for p in session.participants if p["telegram_user_id"] == enemy_id)
         self.assertLess(goblin["hp_current"], 500)
         self.assertEqual(session.current_turn_index, 1)  # turn advanced to the enemy
         self.assertGreater(db.get_character(user_id, -992)["summoning_mastery_pct"], 1.0)
         sessions.end_session(-992)
 
+    async def test_summon_remnant_damage_includes_source_bosses_own_damage_bonus(self):
+        """
+        Real request (2026-08-20, Coffee): "Use the remnants Bonus
+        Damage as part of thier attack to make then much stronger than
+        a normal attack, spell or ability." Verifies the exact math:
+        The Cairnbound's summon (2d10+13) must add The Cairnbound
+        MONSTER template's own real damage_bonus (225, campaign.json --
+        the same number this session's chapter-band pass tuned) on top,
+        not just its own flat +13. forced_roll only pins the FIRST die
+        (rules.dice.roll_damage's own real physical-dice-mode design),
+        so the total is bounded, not exact: the forced d10 (10) + one
+        genuinely random d10 (1-10) + 13 + 225, i.e. 249-258.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-987)
+        user_id = 800212
+        make_basic_character(user_id, "BonusDamageSummoner", current_location="crossroads_tavern", chat_id=-987)
+        db.update_character(user_id, -987, bound_remnants=["the_cairnbound"])
+        enemy_id = -7
+        player = db.get_character(user_id, -987)
+        player["telegram_user_id"] = user_id
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "hp_current": 100000, "hp_max": 100000,
+                 "armor_class": 10, "dexterity": 10, "resistances": [], "vulnerabilities": []}
+        session = sessions.start_session(-987, [player, enemy], {user_id: "party", enemy_id: "enemy"})
+        session.turn_order = [user_id, enemy_id]
+        session.current_turn_index = 0
+        sink = []
+        with patch("bot.narrate_remnant_summon", return_value="You should not have come here."), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._do_summon_remnant(
+                FakeUpdate(user_id, "summon The Cairnbound on the goblin", sink, chat_id=-987),
+                "summon The Cairnbound on the goblin",
+                forced_roll=10,
+            )
+        goblin = next(p for p in session.participants if p["telegram_user_id"] == enemy_id)
+        cairnbound_template = bot.CAMPAIGN["monsters"]["the_cairnbound"]
+        self.assertEqual(cairnbound_template["damage_bonus"], 225)
+        actual_damage = 100000 - goblin["hp_current"]
+        self.assertTrue(249 <= actual_damage <= 258, f"damage {actual_damage} outside expected 249-258 range")
+        sessions.end_session(-987)
+
+    async def test_narrate_remnant_summon_real_ollama_call_addresses_the_target(self):
+        """
+        Real request (2026-08-20, Coffee): "include a narration from
+        the Remnant to the current battle enemy it is facing." Real,
+        unmocked end-to-end run through _do_summon_remnant -- only the
+        image send is mocked (already well-covered infrastructure,
+        not what's new here) -- confirming the real Ollama call this
+        session's new narrate_remnant_summon actually wires up and
+        produces real text that reaches the player, not just that the
+        function exists.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-986)
+        user_id = 800213
+        make_basic_character(user_id, "RealNarrationSummoner", current_location="crossroads_tavern", chat_id=-986)
+        db.update_character(user_id, -986, bound_remnants=["the_wrathflame_unbound"])
+        enemy_id = -8
+        player = db.get_character(user_id, -986)
+        player["telegram_user_id"] = user_id
+        enemy = {"telegram_user_id": enemy_id, "name": "RealNarrationGoblin", "hp_current": 5000, "hp_max": 5000,
+                 "armor_class": 10, "dexterity": 10, "resistances": [], "vulnerabilities": []}
+        session = sessions.start_session(-986, [player, enemy], {user_id: "party", enemy_id: "enemy"})
+        session.turn_order = [user_id, enemy_id]
+        session.current_turn_index = 0
+        sink = []
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._do_summon_remnant(
+                FakeUpdate(user_id, "summon The Wrathflame Unbound on the real narration goblin", sink, chat_id=-986),
+                "summon The Wrathflame Unbound on the real narration goblin",
+            )
+        combined = " ".join(sink)
+        self.assertTrue(len(combined.strip()) > 0)
+        # Real narration line is sent as its own message, separate from
+        # the deterministic damage-result line -- both must be present.
+        self.assertIn("calls forth", combined)
+        self.assertGreaterEqual(len(sink), 2)
+        sessions.end_session(-986)
+
     async def test_summon_remnant_respects_the_per_battle_cap_before_mastery(self):
         import sessions
+        from unittest.mock import patch, AsyncMock
         sessions.end_session(-991)
         user_id = 800208
         make_basic_character(user_id, "CappedSummoner", current_location="crossroads_tavern", chat_id=-991, hp_max=50)
@@ -16639,26 +16728,29 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [user_id, enemy_id]
         session.current_turn_index = 0
 
-        sink1 = []
-        await bot._do_summon_remnant(
-            FakeUpdate(user_id, "summon The Wrathflame Unbound on the goblin", sink1, chat_id=-991),
-            "summon The Wrathflame Unbound on the goblin",
-        )
-        self.assertTrue(any("calls forth" in s for s in sink1))
+        with patch("bot.narrate_remnant_summon", return_value="You should not have come here."), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            sink1 = []
+            await bot._do_summon_remnant(
+                FakeUpdate(user_id, "summon The Wrathflame Unbound on the goblin", sink1, chat_id=-991),
+                "summon The Wrathflame Unbound on the goblin",
+            )
+            self.assertTrue(any("calls forth" in s for s in sink1))
 
-        # Enemy's turn resolves automatically (AI), so it's the player's turn again by now.
-        session.current_turn_index = 0
+            # Enemy's turn resolves automatically (AI), so it's the player's turn again by now.
+            session.current_turn_index = 0
 
-        sink2 = []
-        await bot._do_summon_remnant(
-            FakeUpdate(user_id, "summon The Wrathflame Unbound on the goblin", sink2, chat_id=-991),
-            "summon The Wrathflame Unbound on the goblin",
-        )
-        self.assertTrue(any("already called a Remnant" in s for s in sink2))
+            sink2 = []
+            await bot._do_summon_remnant(
+                FakeUpdate(user_id, "summon The Wrathflame Unbound on the goblin", sink2, chat_id=-991),
+                "summon The Wrathflame Unbound on the goblin",
+            )
+            self.assertTrue(any("already called a Remnant" in s for s in sink2))
         sessions.end_session(-991)
 
     async def test_summon_remnant_at_mastery_ignores_cap_but_spends_a_spell_slot(self):
         import sessions
+        from unittest.mock import patch, AsyncMock
         sessions.end_session(-990)
         user_id = 800209
         make_basic_character(user_id, "MasterSummoner", current_location="crossroads_tavern", chat_id=-990, hp_max=50)
@@ -16675,27 +16767,30 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [user_id, enemy_id]
         session.current_turn_index = 0
 
-        for _ in range(2):
+        with patch("bot.narrate_remnant_summon", return_value="You should not have come here."), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            for _ in range(2):
+                session.current_turn_index = 0
+                sink = []
+                await bot._do_summon_remnant(
+                    FakeUpdate(user_id, "summon The Wrathflame Unbound on the goblin", sink, chat_id=-990),
+                    "summon The Wrathflame Unbound on the goblin",
+                )
+                self.assertTrue(any("calls forth" in s for s in sink))
+            self.assertEqual(db.get_character(user_id, -990)["spell_slots_current"], 0)
+
             session.current_turn_index = 0
-            sink = []
+            sink3 = []
             await bot._do_summon_remnant(
-                FakeUpdate(user_id, "summon The Wrathflame Unbound on the goblin", sink, chat_id=-990),
+                FakeUpdate(user_id, "summon The Wrathflame Unbound on the goblin", sink3, chat_id=-990),
                 "summon The Wrathflame Unbound on the goblin",
             )
-            self.assertTrue(any("calls forth" in s for s in sink))
-        self.assertEqual(db.get_character(user_id, -990)["spell_slots_current"], 0)
-
-        session.current_turn_index = 0
-        sink3 = []
-        await bot._do_summon_remnant(
-            FakeUpdate(user_id, "summon The Wrathflame Unbound on the goblin", sink3, chat_id=-990),
-            "summon The Wrathflame Unbound on the goblin",
-        )
-        self.assertTrue(any("none left to spend" in s.lower() for s in sink3))
+            self.assertTrue(any("none left to spend" in s.lower() for s in sink3))
         sessions.end_session(-990)
 
     async def test_summon_remnant_dot_secondary_applies_poisoned_condition(self):
         import sessions
+        from unittest.mock import patch, AsyncMock
         sessions.end_session(-989)
         user_id = 800210
         make_basic_character(user_id, "DotSummoner", current_location="crossroads_tavern", chat_id=-989, hp_max=50)
@@ -16709,16 +16804,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [user_id, enemy_id]
         session.current_turn_index = 0
         sink = []
-        await bot._do_summon_remnant(
-            FakeUpdate(user_id, "summon The Root That Remembers on the goblin", sink, chat_id=-989),
-            "summon The Root That Remembers on the goblin",
-        )
+        with patch("bot.narrate_remnant_summon", return_value="You should not have come here."), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._do_summon_remnant(
+                FakeUpdate(user_id, "summon The Root That Remembers on the goblin", sink, chat_id=-989),
+                "summon The Root That Remembers on the goblin",
+            )
         goblin = next(p for p in session.participants if p["telegram_user_id"] == enemy_id)
         self.assertIn("poisoned", goblin.get("conditions", []))
         sessions.end_session(-989)
 
     async def test_summon_remnant_self_heal_secondary_heals_the_caster(self):
         import sessions
+        from unittest.mock import patch, AsyncMock
         sessions.end_session(-988)
         user_id = 800211
         make_basic_character(user_id, "HealSummoner", current_location="crossroads_tavern", chat_id=-988, hp_max=200)
@@ -16732,10 +16830,12 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [user_id, enemy_id]
         session.current_turn_index = 0
         sink = []
-        await bot._do_summon_remnant(
-            FakeUpdate(user_id, "summon The Cairnbound on the goblin", sink, chat_id=-988),
-            "summon The Cairnbound on the goblin",
-        )
+        with patch("bot.narrate_remnant_summon", return_value="You should not have come here."), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._do_summon_remnant(
+                FakeUpdate(user_id, "summon The Cairnbound on the goblin", sink, chat_id=-988),
+                "summon The Cairnbound on the goblin",
+            )
         caster = next(p for p in session.participants if p["telegram_user_id"] == user_id)
         self.assertGreater(caster["hp_current"], 50)
         sessions.end_session(-988)

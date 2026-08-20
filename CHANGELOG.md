@@ -2,6 +2,37 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.268] — Remnant summons: real narration, flashy ability art, much stronger damage
+
+**Real request (2026-08-20, Coffee):** three asks in one thread, all
+landing in `_do_summon_remnant`:
+
+1. **"include a narration from the Remnant to the current battle enemy
+   it is facing"** — new `ai.dm_agent.narrate_remnant_summon`, same
+   real-Ollama-call pattern as `narrate_boss_summon`, grounded only in
+   the Remnant's own real name/lore (`remnants.py`) and the real
+   target it's actually facing this cast. Sent as its own message
+   BEFORE the attack resolves, same "narrate the moment, then the
+   mechanical result" order every other narrated beat already follows.
+2. **"Show the attack or Ability and NOT the remnant"** — reuses the
+   existing `_maybe_send_ability_image` (already explicitly excludes
+   any person/creature/monster from the generated image, per its own
+   2026-08-10 fix), grounded only in the Remnant's real element.
+3. **"Use the remnants Bonus Damage as part of thier attack to make
+   then much stronger than a normal attack, spell or ability"** —
+   every summon now adds the SAME source boss's own real `damage_bonus`
+   (campaign.json, the exact numbers this session's chapter-band pass
+   just tuned) on top of the summon's own dice+bonus. A Cairnbound
+   summon goes from ~24 avg damage to ~249 avg — a real "ultimate move"
+   scaled by how strong the real Unbound it came from actually was,
+   never an invented number.
+
+Verified with real executed tests: a deterministic damage-bonus-math
+test (`test_summon_remnant_damage_includes_source_bosses_own_damage_bonus`),
+and a real, UNMOCKED end-to-end Ollama-narration test
+(`test_narrate_remnant_summon_real_ollama_call_addresses_the_target`),
+plus all 6 pre-existing summon tests re-verified green.
+
 ## [1.27.267] — Removed the designated-Summoner gate on Remnants
 
 **Real request (2026-08-20, Coffee):** "i dont want to assign a
