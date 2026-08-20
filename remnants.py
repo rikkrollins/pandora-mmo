@@ -11,13 +11,19 @@ fully fade. Those are the Unbound: real, single, boss-tier fights,
 each one hidden somewhere and found only by real exploration, never
 handed to a player.
 
-Defeating an Unbound doesn't destroy it -- it lets the party bind a
-real fragment of its essence. Once bound, any party member the party
-DESIGNATES as its Summoner (bot._do_assign_summoner) can call that
-fragment into a later fight as a Bound Remnant: a themed attack, not a
-second combatant, following the same real damage-type pipeline
-(rules.combat.apply_damage_type_modifier) every other attack in this
-game already uses -- never an invented mechanic bolted on the side.
+Defeating an Unbound doesn't destroy it -- it lets whoever helped
+defeat it each bind their own real fragment of its essence (every
+party member present when it falls, not just whoever landed the
+killing blow). Whoever bound a fragment can call it into a later fight
+themselves, no designated "Summoner" role needed (removed 2026-08-20,
+per Coffee: "i want players that have beaten the Remnant to be
+automatically bound to them. That is the incentive for them players
+to find them and beat them" -- a single-holder gate undercut that
+incentive for anyone but the one player holding the role) -- a themed
+attack, not a second combatant, following the same real damage-type
+pipeline (rules.combat.apply_damage_type_modifier) every other attack
+in this game already uses -- never an invented mechanic bolted on the
+side.
 
 This ties directly into real, already-existing content, not invented
 from nothing: campaigns/default/campaign.json's "choir_remnant"

@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.267] — Removed the designated-Summoner gate on Remnants
+
+**Real request (2026-08-20, Coffee):** "i dont want to assign a
+summoner i want players that have beaten the Remnant to be
+automatically bound to them. That is the incentive for them players to
+find them and beat them." Binding a Remnant was already automatic and
+per-character (every party member present when an Unbound falls binds
+their own fragment) — but actually CASTING a bound fragment was gated
+behind a single party-wide "designated Summoner" role, so only one
+player could ever use a Remnant they'd personally earned. Removed that
+role entirely: any character with a real bound Remnant can now summon
+it themselves, no assignment step. Removed `_do_assign_summoner`, the
+`assign_summoner` intent, and the gate in both the battle-menu Summon
+button and `_do_summon_remnant`. `is_designated_summoner` stays as an
+unused DB column (never read or written now) rather than risk a live
+schema DROP COLUMN. Verified with real executed tests (updated/removed
+the summoner-specific tests in `tests/test_regression.py`, all 11
+Remnant-related tests re-verified green).
+
 ## [1.27.266] — Confirmed 8-chapter level-band model, releveled chapters 1-8
 
 **Real design confirmation (2026-08-19, Coffee):** established an

@@ -813,14 +813,16 @@ def init_db() -> None:
         # docstring for the full design). `bound_remnants` is a JSON
         # list of remnant_ids this character has personally helped
         # defeat (every real party member present when an Unbound falls
-        # gets it, same "shared credit" shape as known_monsters).
-        # `is_designated_summoner` is a real, single-holder-at-a-time
-        # role the party assigns (bot._do_assign_summoner clears it on
-        # every other same-party member first) -- only the holder may
-        # actually cast a Remnant. `summoning_mastery_pct` is the same
-        # real 0-100 grindable proficiency shape as steal/lockpick/
-        # profession mastery elsewhere in this game, grown only on a
-        # successful summon cast.
+        # gets it, same "shared credit" shape as known_monsters) --
+        # whoever has one bound may cast it themselves, no other role
+        # needed. `is_designated_summoner` is a dead column (the real,
+        # single-holder-at-a-time Summoner role it backed was removed
+        # 2026-08-20 per Coffee -- see remnants.py's docstring -- kept
+        # here unread/unwritten rather than risk a live schema DROP
+        # COLUMN on production data). `summoning_mastery_pct` is the
+        # same real 0-100 grindable proficiency shape as steal/
+        # lockpick/profession mastery elsewhere in this game, grown
+        # only on a successful summon cast.
         if "bound_remnants" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN bound_remnants TEXT NOT NULL DEFAULT '[]'")
         if "is_designated_summoner" not in columns:

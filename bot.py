@@ -2628,12 +2628,23 @@ def _battle_menu_keyboard(session: sessions.Session) -> InlineKeyboardMarkup | N
     # Support Remnants-grounding fix): "make a 'summon' battle option
     # for characters with Remnants" -- _do_summon_remnant was only ever
     # reachable by typing "summon [name]" with no tappable button at
-    # all, unlike every other real battle action here. Only shown to
-    # the party's actual designated Summoner (bot._do_assign_summoner)
-    # with at least one real bound Remnant -- same "grounded in this
-    # specific character's own real data" convention Skills/Items above
-    # already follow, never a generic button everyone sees.
-    if character.get("is_designated_summoner") and character.get("bound_remnants"):
+    # all, unlike every other real battle action here. Shown to any
+    # character with at least one real bound Remnant of their own --
+    # same "grounded in this specific character's own real data"
+    # convention Skills/Items above already follow, never a generic
+    # button everyone sees.
+    #
+    # No "designated Summoner" gate (removed 2026-08-20, per Coffee:
+    # "i dont want to assign a summoner i want players that have
+    # beaten the Remnant to be automatically bound to them. That is
+    # the incentive for them players to find them and beat them.") --
+    # binding was ALREADY automatic and per-character (every party
+    # member present when an Unbound falls binds their own fragment,
+    # see the real comment in _award_victory_xp); the single-holder
+    # Summoner role only ever restricted WHO could actually cast a
+    # fragment they'd personally already earned, undercutting the
+    # exact incentive Coffee wants this system to run on.
+    if character.get("bound_remnants"):
         row.append(InlineKeyboardButton("🔮 Summon", callback_data="bm|summon"))
     # "More" submenu (2026-08-01, per Coffee: "instead of run make it
     # an other command... Run, Give, Formation, Equip and other things
@@ -14064,7 +14075,7 @@ async def _do_check_professions(update: Update) -> None:
 _SUMMON_SECONDARY_DESCRIPTIONS = {
     "none": "no secondary effect — pure damage",
     "dot": "leaves the target poisoned",
-    "self_heal": "heals the Summoner for a quarter of the damage dealt",
+    "self_heal": "heals you for a quarter of the damage dealt",
     "party_heal": "heals the whole party for a sixth of the damage dealt each",
 }
 
@@ -14077,11 +14088,11 @@ async def _do_check_remnants(update: Update) -> None:
     attack or ability" -- a real dev-bridge report the same day showed
     Support fabricating an entire fake summon ritual because it had
     nothing real to ground on, and even the real, correct mechanic
-    (assign a Summoner, "summon [name]" in combat) had no in-game
-    screen a player could just look at. Shows only THIS character's own
-    real bound_remnants (remnants.py) -- never the full REMNANTS table,
-    so it can't leak which of the 12 real Unbound exist or where they
-    are before a player has genuinely earned one.
+    ("summon [name]" in combat) had no in-game screen a player could
+    just look at. Shows only THIS character's own real bound_remnants
+    (remnants.py) -- never the full REMNANTS table, so it can't leak
+    which of the 12 real Unbound exist or where they are before a
+    player has genuinely earned one.
     """
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -14098,13 +14109,11 @@ async def _do_check_remnants(update: Update) -> None:
             speak=False,
         )
         return
-    summoner_note = (
-        "You're the party's designated Summoner — say \"summon [name]\" in battle to call one."
-        if character.get("is_designated_summoner") else
-        "You're not the party's designated Summoner right now — say \"assign [name] as summoner\" to "
-        "let someone actually call these into battle."
-    )
-    lines = [f"🔮 **{character['name']}**'s bound Remnants:", summoner_note, ""]
+    lines = [
+        f"🔮 **{character['name']}**'s bound Remnants:",
+        "Say \"summon [name]\" in battle (or tap the Summon button) to call one.",
+        "",
+    ]
     for remnant_id in bound:
         remnant = remnants_module.get_remnant(remnant_id)
         if not remnant:
@@ -22731,40 +22740,6 @@ def _summons_per_battle(character: dict) -> int | None:
     return min(1 + int(pct // 20), 5)
 
 
-async def _do_assign_summoner(update: Update, text: str) -> None:
-    """
-    The party's one real, single-holder-at-a-time Summoner role (per
-    Coffee: "the party can assign a summoner and they can cast that
-    Summon") -- only this character may ever cast a bound Remnant.
-    Reassigning simply moves the flag; it was never a permanent choice.
-    """
-    requester = db.get_character(update.effective_user.id, update.effective_chat.id)
-    if requester is None:
-        await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-        )
-        return
-    if requester.get("party_id"):
-        members = [p for p in _get_party_members(update.effective_chat.id) if p.get("party_id") == requester["party_id"]]
-    else:
-        members = [requester]
-
-    target = _match_member_by_name_or_username(text, members)
-    if target is None:
-        if len(members) == 1:
-            target = members[0]
-        else:
-            names = ", ".join(m["name"] for m in members)
-            await _safe_send(update, f"Assign who as Summoner? Party: {names}.")
-            return
-
-    for member in members:
-        if member["character_id"] != target["character_id"] and member.get("is_designated_summoner"):
-            db.update_character_by_id(member["character_id"], is_designated_summoner=0)
-    db.update_character_by_id(target["character_id"], is_designated_summoner=1)
-    await _safe_send(update, f"🔮 **{target['name']}** is now the party's Summoner.")
-
-
 async def _do_summon_remnant(update: Update, text: str, forced_roll: int | None = None) -> None:
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -22772,10 +22747,6 @@ async def _do_summon_remnant(update: Update, text: str, forced_roll: int | None 
             "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
-    if not character.get("is_designated_summoner"):
-        await _safe_send(update, "You're not the party's designated Summoner — say \"assign [name] as summoner\" first.")
-        return
-
     remnant_id = remnants_module.find_remnant_mentioned_in_text(text, candidate_ids=character["bound_remnants"])
     if remnant_id is None:
         if not character["bound_remnants"]:
@@ -23814,8 +23785,6 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_join_guild(update, text)
     elif action == "leave_guild":
         await _do_leave_guild(update, text)
-    elif action == "assign_summoner":
-        await _do_assign_summoner(update, text)
     elif action == "summon_remnant":
         await _do_summon_remnant(update, text)
     elif action == "pass_turn":

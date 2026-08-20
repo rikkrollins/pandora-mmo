@@ -135,7 +135,6 @@ recover real crafting materials from it (e.g. "dismantle my old sword", "salvage
 Set "item_name" to the item.
 - "join_guild" is for joining/asking to join a specific guild or order.
 - "leave_guild" is for leaving/quitting a guild the player is already a member of.
-- "assign_summoner" is for naming a party member as the party's Summoner (e.g. "assign Sarah as summoner", "make me the summoner").
 - "summon_remnant" is for calling forth a bound Remnant in combat (e.g. "summon The Wrathflame Unbound", "call forth my Remnant on the goblin").
 - "pass_turn" is for skipping, waiting, or passing.
 - "resolve_choice" is for declaring a decision on a moral choice/quest resolution (e.g. "I choose to...", "I'll go with...").
@@ -1056,14 +1055,12 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     )
     if mentions_a_real_remnant and re.search(r"\b(?:summon|call forth|invoke)\b", lowered):
         return {**base, "action": "summon_remnant"}
-    if re.search(r"\bassign\b.+\bsummoner\b", lowered) or re.search(r"\bmake\b.+\bsummoner\b", lowered):
-        return {**base, "action": "assign_summoner"}
     # Real feature request (2026-08-18, per Coffee: "make a menu for
     # 'Remnants' so players can see what the summons do... and their
-    # attack or ability"). Checked AFTER summon_remnant/assign_summoner
-    # above so an actual "summon [name]"/"assign X as summoner" command
-    # is never swallowed by this broader bare-word catch -- same
-    # ordering convention as the menu/formation/waypoints block above.
+    # attack or ability"). Checked AFTER summon_remnant above so an
+    # actual "summon [name]" command is never swallowed by this
+    # broader bare-word catch -- same ordering convention as the
+    # menu/formation/waypoints block above.
     if re.search(r"\bremnants?\b", lowered):
         return {**base, "action": "check_remnants"}
 
@@ -2310,7 +2307,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "attack", "pass_turn", "start_combat", "create_character",
                 "check_sheet", "check_inventory", "check_party", "talk_npc", "move", "look",
                 "buy", "sell", "steal", "cast_spell", "join_guild", "leave_guild",
-                "assign_summoner", "summon_remnant", "recruit_npc", "rest",
+                "summon_remnant", "recruit_npc", "rest",
                 "go_inactive", "skill_check", "shove", "show_map", "gather", "craft",
                 "list_characters", "switch_character", "delete_character",
                 "fast_travel", "accept_quest", "check_quests", "ask_clue",

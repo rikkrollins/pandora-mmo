@@ -8222,15 +8222,21 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Front:", text2)
         sessions.end_session(-999)
 
-    def test_battle_menu_summon_button_only_for_the_designated_summoner_with_a_bound_remnant(self):
+    def test_battle_menu_summon_button_only_for_a_character_with_a_bound_remnant(self):
         """
         Real feature request (2026-08-18, Coffee): "make a 'summon'
         battle option for characters with Remnants" -- _do_summon_remnant
         was only ever reachable by typing "summon [name]", no button at
         all, unlike every other real battle action. Grounded in the
-        SPECIFIC character's own real data (is_designated_summoner AND a
-        non-empty bound_remnants), same convention Skills/Items already
-        follow -- never a generic button shown to everyone.
+        SPECIFIC character's own real data (a non-empty bound_remnants),
+        same convention Skills/Items already follow -- never a generic
+        button shown to everyone.
+
+        2026-08-20: no longer also requires is_designated_summoner --
+        that single-holder role was removed per Coffee ("i want players
+        that have beaten the Remnant to be automatically bound to them.
+        That is the incentive for them players to find them and beat
+        them").
         """
         import sessions
         sessions.end_session(-999)
@@ -8246,7 +8252,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         labels_before = [btn.text for row in kb_before.inline_keyboard for btn in row]
         self.assertFalse(any("Summon" in l for l in labels_before))
 
-        db.update_character(summoner_id, -999, bound_remnants=["the_wrathflame_unbound"], is_designated_summoner=1)
+        db.update_character(summoner_id, -999, bound_remnants=["the_wrathflame_unbound"])
         kb_after = bot._battle_menu_keyboard(session)
         labels_after = [btn.text for row in kb_after.inline_keyboard for btn in row]
         self.assertTrue(any("Summon" in l for l in labels_after))
@@ -8258,7 +8264,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sessions.end_session(-999)
         user_id = 950651
         make_basic_character(user_id, "SummonFlowTester", current_location="crossroads_tavern")
-        db.update_character(user_id, -999, bound_remnants=["the_wrathflame_unbound"], is_designated_summoner=1)
+        db.update_character(user_id, -999, bound_remnants=["the_wrathflame_unbound"])
         enemy_a = {"telegram_user_id": -5100051, "name": "SummonGoblinA", "hp_current": 20, "hp_max": 20,
                    "is_ai": 1, "strength": 10, "dexterity": 10, "armor_class": 10}
         enemy_b = {"telegram_user_id": -5100052, "name": "SummonGoblinB", "hp_current": 20, "hp_max": 20,
@@ -8287,33 +8293,36 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("SummonGoblinB", result)
         sessions.end_session(-999)
 
-    async def test_do_check_remnants_shows_real_bound_remnant_and_summoner_status(self):
+    async def test_do_check_remnants_shows_real_bound_remnant(self):
         """
         Real feature request (2026-08-18, Coffee): "make a menu for
         'Remnants' so players can see what the summons do... and their
         attack or ability." Only ever shows THIS character's own real
         bound_remnants, never the full secret REMNANTS table.
+
+        2026-08-20: no longer mentions a designated-Summoner status --
+        that single-holder role was removed; whoever bound a Remnant
+        can just summon it themselves.
         """
         user_id = 950652
         make_basic_character(user_id, "RemnantMenuTester", current_location="crossroads_tavern")
-        db.update_character(user_id, -999, bound_remnants=["the_wrathflame_unbound"], is_designated_summoner=0)
+        db.update_character(user_id, -999, bound_remnants=["the_wrathflame_unbound"])
         sink = []
         await bot._do_check_remnants(FakeUpdate(user_id, "", sink))
         reply = sink[0]
         self.assertIn("The Wrathflame Unbound", reply)
         self.assertIn("fire damage", reply)
-        self.assertIn("assign", reply.lower())  # tells them they're not the Summoner yet
+        self.assertIn("summon", reply.lower())
 
     def test_remnants_keyword_classified_as_check_remnants(self):
         from ai.intent_parser import _keyword_fallback
         self.assertEqual(_keyword_fallback("show my remnants", [])["action"], "check_remnants")
         self.assertEqual(_keyword_fallback("remnants", [])["action"], "check_remnants")
-        # A real "summon [name]"/"assign X as summoner" command must NOT
-        # be swallowed by this broader bare-word catch.
+        # A real "summon [name]" command must NOT be swallowed by this
+        # broader bare-word catch.
         self.assertEqual(
             _keyword_fallback("summon The Wrathflame Unbound", [])["action"], "summon_remnant",
         )
-        self.assertEqual(_keyword_fallback("assign Sarah as summoner", [])["action"], "assign_summoner")
 
     def test_bare_party_keyword_classified_as_check_party(self):
         """
@@ -16577,35 +16586,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("binds a fragment" in s and "The Unopened" in s for s in sink))
         sessions.end_session(-996)
 
-    async def test_assign_summoner_sets_flag_and_clears_previous_holder(self):
-        leader_id, member_id = 800203, 800204
-        make_basic_character(leader_id, "AssignLeader", current_location="crossroads_tavern", chat_id=-995)
-        make_basic_character(member_id, "AssignMember", current_location="crossroads_tavern", chat_id=-995)
-        party_id = db.create_party(leader_id, -995)
-        db.update_character(member_id, -995, party_id=party_id)
-        db.update_character(leader_id, -995, is_designated_summoner=1)
-
-        sink = []
-        await bot._do_assign_summoner(
-            FakeUpdate(leader_id, "assign AssignMember as summoner", sink, chat_id=-995),
-            "assign AssignMember as summoner",
-        )
-        self.assertEqual(db.get_character(leader_id, -995)["is_designated_summoner"], 0)
-        self.assertEqual(db.get_character(member_id, -995)["is_designated_summoner"], 1)
-        self.assertTrue(any("AssignMember" in s and "Summoner" in s for s in sink))
-
-    async def test_summon_remnant_rejects_a_non_summoner(self):
-        user_id = 800205
-        make_basic_character(user_id, "NotASummoner", current_location="crossroads_tavern", chat_id=-994)
-        db.update_character(user_id, -994, bound_remnants=["the_unopened"])
-        sink = []
-        await bot._do_summon_remnant(FakeUpdate(user_id, "summon The Unopened", sink, chat_id=-994), "summon The Unopened")
-        self.assertTrue(any("not the party's designated Summoner" in s for s in sink))
-
     async def test_summon_remnant_rejects_an_unbound_remnant(self):
         user_id = 800206
         make_basic_character(user_id, "NoRemnantsBound", current_location="crossroads_tavern", chat_id=-993)
-        db.update_character(user_id, -993, is_designated_summoner=1)
         sink = []
         await bot._do_summon_remnant(FakeUpdate(user_id, "summon The Unopened", sink, chat_id=-993), "summon The Unopened")
         self.assertTrue(any("haven't bound any Remnants" in s for s in sink))
@@ -16615,7 +16598,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sessions.end_session(-992)
         user_id = 800207
         make_basic_character(user_id, "RealSummoner", current_location="crossroads_tavern", chat_id=-992, hp_max=50)
-        db.update_character(user_id, -992, is_designated_summoner=1, bound_remnants=["the_wrathflame_unbound"])
+        db.update_character(user_id, -992, bound_remnants=["the_wrathflame_unbound"])
         enemy_id = -2
         player = db.get_character(user_id, -992)
         player["telegram_user_id"] = user_id
@@ -16644,7 +16627,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         user_id = 800208
         make_basic_character(user_id, "CappedSummoner", current_location="crossroads_tavern", chat_id=-991, hp_max=50)
         db.update_character(
-            user_id, -991, is_designated_summoner=1, bound_remnants=["the_wrathflame_unbound"],
+            user_id, -991, bound_remnants=["the_wrathflame_unbound"],
             summoning_mastery_pct=1.0,  # base tier -- exactly 1 free use per battle
         )
         enemy_id = -3
@@ -16680,7 +16663,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         user_id = 800209
         make_basic_character(user_id, "MasterSummoner", current_location="crossroads_tavern", chat_id=-990, hp_max=50)
         db.update_character(
-            user_id, -990, is_designated_summoner=1, bound_remnants=["the_wrathflame_unbound"],
+            user_id, -990, bound_remnants=["the_wrathflame_unbound"],
             summoning_mastery_pct=100.0, spell_slots_current=2, spell_slots_max=2,
         )
         enemy_id = -4
@@ -16716,7 +16699,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sessions.end_session(-989)
         user_id = 800210
         make_basic_character(user_id, "DotSummoner", current_location="crossroads_tavern", chat_id=-989, hp_max=50)
-        db.update_character(user_id, -989, is_designated_summoner=1, bound_remnants=["the_root_that_remembers"])
+        db.update_character(user_id, -989, bound_remnants=["the_root_that_remembers"])
         enemy_id = -5
         player = db.get_character(user_id, -989)
         player["telegram_user_id"] = user_id
@@ -16739,7 +16722,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sessions.end_session(-988)
         user_id = 800211
         make_basic_character(user_id, "HealSummoner", current_location="crossroads_tavern", chat_id=-988, hp_max=200)
-        db.update_character(user_id, -988, is_designated_summoner=1, bound_remnants=["the_cairnbound"], hp_current=50)
+        db.update_character(user_id, -988, bound_remnants=["the_cairnbound"], hp_current=50)
         enemy_id = -6
         player = db.get_character(user_id, -988)
         player["telegram_user_id"] = user_id
@@ -16761,11 +16744,6 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         from ai.intent_parser import _keyword_fallback
         parsed = _keyword_fallback("summon The Wrathflame Unbound on the goblin", known_npc_names=[])
         self.assertEqual(parsed["action"], "summon_remnant")
-
-    def test_assign_summoner_intent_classified_correctly(self):
-        from ai.intent_parser import _keyword_fallback
-        parsed = _keyword_fallback("assign Sarah as summoner", known_npc_names=[])
-        self.assertEqual(parsed["action"], "assign_summoner")
 
     # -- Remnant story/secret split (2026-08-13, per Coffee: "make it so
     #    60% of the summons [Remnants] are tied to the storyline...
