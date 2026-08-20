@@ -2,6 +2,45 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.288] — Quest Menu: browsable list, real detail view, guild tasks, proactive accept/decline
+
+**Real live request (2026-08-20, Coffee, dev-bridge screenshots + live
+conversation):** "a list of our quests we can click on and it will
+tell us the full information and what we need to do to complete that
+quest... for guilds and the storyline, use a similar template with an
+image, description, reward, and accept or decline. That way the story
+can move forward on the player's command." Confirmed via conversation:
+build it broad (quests + guild tasks + story prompts together), guild
+curriculum tasks were a real gap (not listed as quests anywhere), and
+Decline is a soft pacing gate — "not right now," never a permanent skip.
+
+- **🗂️ My Quests**: a real, first-of-its-kind "list → tap → detail"
+  screen in this game (even the Bestiary/Remnants menus were flat
+  lists before this). One button per active story quest, accepted
+  board quest, and current guild curriculum step (every guild actually
+  held, primary + secondary/Promotion). Tapping shows the real
+  description/flavor, objective, and reward — and, for a branching
+  board quest already at full progress, real Accept-style choice
+  buttons (previously only resolvable by typing the exact label from
+  memory — the real root cause traced this session, v1.27.286, of a
+  player replying to an old "Ready to decide" prompt after its window
+  had passed).
+- **Proactive quest offers**: arriving somewhere with a newly-offerable
+  story quest now pushes a real image + card + Accept/"Not now"
+  buttons, instead of sitting passively until a player goes looking.
+  Fires once per quest per character (never re-pushed on a later
+  arrival at the same still-offered quest).
+- **Guild curriculum gets the same image treatment**: `_send_generated_
+  image` gained an optional `thread_id` override (previously hardcoded
+  to always post to Adventure) so a curriculum step's real illustration
+  can post to the guild's own topic, alongside its existing pinned
+  announcement.
+- **Decline = soft pacing gate**: a new `dismissed_quest_ids` character
+  field suppresses only the future *proactive* push for that one
+  quest_id — it stays fully visible and acceptable via the quest
+  board, My Quests, or plain text the whole time, and clears itself
+  the moment the quest is actually accepted.
+
 ## [1.27.287] — Mastery Overflow: every grindable proficiency keeps paying off past 100%
 
 **Real live request (2026-08-20, Coffee):** after asking how Summoning

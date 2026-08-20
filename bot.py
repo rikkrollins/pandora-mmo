@@ -748,6 +748,16 @@ MAX_CHARACTER_DESCRIPTION_LENGTH = 500
 _PENDING_PRONOUNS: dict[int, set] = {}
 MAX_PRONOUNS_LENGTH = 30
 
+# Quest Menu proactive push de-dup (2026-08-20, per Coffee: "let the
+# player know what the tasks are... give them the option to accept or
+# decline"). In-memory only (resets on restart, same tradeoff every
+# other _PENDING_*/de-dup set here already makes) -- keyed by (telegram_
+# user_id, quest_id), tracks which story-quest offers have already been
+# proactively pushed to a character this run, so arriving at the same
+# location twice never re-pushes the same still-offered quest. See
+# _maybe_push_quest_offer.
+_PUSHED_QUEST_OFFERS: dict[int, set] = {}
+
 # Market "Sell an Item" button flow (2026-08-20, per Coffee: "if
 # wanting to sell multiple of an item like Silverleaf Herbs, we shud be
 # able to type how many we want to sell") -- tapping an item in the
@@ -11113,6 +11123,54 @@ async def _maybe_send_arc_opening_image(update: Update, arc_id: str, arc: dict) 
     )
 
 
+def _quest_offer_image_prompt(quest: dict) -> str:
+    """Same shape as _arc_opening_image_prompt -- grounded only in the quest's own real title/description, no invented scene detail."""
+    return (
+        f"{quest['title']}, {quest['description']}, fantasy RPG quest offer illustration, "
+        f"atmospheric establishing shot, digital painting, dramatic lighting, no text or labels"
+    )
+
+
+async def _maybe_push_quest_offer(update: Update, character: dict, quest_id: str, quest: dict) -> None:
+    """
+    Real live request (2026-08-20, Coffee, dev-bridge screenshots): "let
+    the player know what the tasks are what the reward is and then give
+    them the option to accept or decline. That way the story can move
+    forward on the player's command." Before this, a newly-offerable
+    story quest sat passively available -- a player only ever discovered
+    it by manually checking quests/looking/talking to an NPC there.
+    Pushed once, the first time this exact quest_id is confirmed
+    offerable for this character (never re-pushed on a later arrival at
+    the same still-offered quest -- see the dismissed_quest_ids check
+    below, and _do_dismiss_quest_offer's own "soft gate" comment for why
+    a real Decline never removes it from the quest board/My Quests/
+    plain-text accept path, only from getting pushed again unprompted).
+    """
+    if quest_id in (character.get("dismissed_quest_ids") or []):
+        return
+    already_pushed = _chat_scoped_set(_PUSHED_QUEST_OFFERS, update.effective_chat.id)
+    push_key = (character["telegram_user_id"], quest_id)
+    if push_key in already_pushed:
+        return
+    already_pushed.add(push_key)
+
+    card = _format_quest_card(
+        "story", quest["title"], quest["description"], quest.get("reward_xp"), quest.get("reward_gold"),
+        f"🔍 **Clue:** {quest['clue']}" if quest.get("clue") else None,
+    )
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📜 Accept", callback_data=f"quest|accept|story|{quest_id}")],
+        [InlineKeyboardButton("Not now", callback_data=f"quest|dismiss|story|{quest_id}")],
+    ])
+    prompt = _quest_offer_image_prompt(quest)
+    sent = await _send_generated_image(
+        update, prompt, card, seed=_deterministic_image_seed(f"quest_offer:{quest_id}"),
+        log_key=quest_id, reply_markup=buttons,
+    )
+    if not sent:
+        await _safe_send(update, card, reply_markup=buttons, speak=False)
+
+
 async def _arc_opening_note(update: Update, character: dict, quest_id: str, quest: dict) -> str:
     """
     Cutscene bookend to _chapter_complete_note's closing beat, per
@@ -11611,6 +11669,16 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
         if not names_something_else:
             opening_note = await _arc_opening_note(update, character, quest_id, quest)
             db.accept_quest(telegram_user_id, update.effective_chat.id, quest_id)
+            # Quest Menu (2026-08-20): a real accept always clears any
+            # earlier "Not now" on this exact quest_id -- the soft
+            # pacing gate only ever suppresses a future PROACTIVE push
+            # for an offer still sitting unaccepted; once accepted
+            # there's nothing left to (not) push.
+            if quest_id in (character.get("dismissed_quest_ids") or []):
+                db.update_character(
+                    telegram_user_id, update.effective_chat.id,
+                    dismissed_quest_ids=[q for q in character["dismissed_quest_ids"] if q != quest_id],
+                )
             await _safe_send(update, f"{opening_note}📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}")
             await _notify_main_topic(update, f"📜 **{character['name']}** accepted a quest: {quest['title']}")
             # Real live bug (2026-08-06, Coffee via dev-topic screenshot:
@@ -11809,6 +11877,37 @@ async def _do_resolve_quest_choice(update: Update, text: str) -> None:
     )
 
 
+_QUEST_KIND_ICON = {"story": "📜", "board": "📋", "curriculum": "🎓"}
+
+
+def _format_quest_card(
+    kind: str, title: str, description: str,
+    reward_xp: int | None = None, reward_gold: int | None = None, extra_line: str | None = None,
+) -> str:
+    """
+    Real live request (2026-08-20, Coffee, dev-bridge screenshots + live
+    conversation): "give it a list of our quests we can click on and it
+    will tell us the full information and what we need to do... an
+    image a description or narration, let the player know what the
+    tasks are what the reward is." One consistent card shape shared by
+    the new "My Quests" detail view (_do_check_quests's quest|view),
+    the new arrival-time quest-offer push (_maybe_push_quest_offer),
+    and guild curriculum steps -- rather than three near-duplicate
+    formatters. Never invents anything: title/description/reward are
+    always the real campaign.json quest / board_quests row / guild_
+    curriculum.py step fields, verbatim.
+    """
+    icon = _QUEST_KIND_ICON.get(kind, "📜")
+    reward_bits = []
+    if reward_xp:
+        reward_bits.append(f"{reward_xp} XP")
+    if reward_gold:
+        reward_bits.append(f"{reward_gold} gold")
+    reward_line = f"\n💰 **Reward:** {', '.join(reward_bits)}" if reward_bits else ""
+    extra = f"\n{extra_line}" if extra_line else ""
+    return f"{icon} **{title}**\n{description}{extra}{reward_line}"
+
+
 def _format_story_quest_poster(quest: dict, location_id: str, chat_id: int | None = None) -> str:
     """
     A real "wanted poster" style display for an offerable story quest --
@@ -11853,7 +11952,7 @@ def _format_story_quest_poster(quest: dict, location_id: str, chat_id: int | Non
 
 def _quest_board_keyboard(
     story_offer: tuple[str, dict] | None, area_board_quests: list[dict],
-) -> InlineKeyboardMarkup | None:
+) -> InlineKeyboardMarkup:
     """
     Task #176: one "Accept" button per real quest actually postable here
     right now -- the same story_offer/area_board_quests _do_check_quests
@@ -11865,6 +11964,12 @@ def _quest_board_keyboard(
     quests use their own board_quest_id -- both are short, stable, and
     safe as callback_data (never the title text itself, which can be
     long/punctuated).
+
+    Always includes a "🗂️ My Quests" row now (2026-08-20, per Coffee's
+    dev-bridge screenshots) -- the drill-down list/detail view
+    (_do_show_my_quests) -- so this screen never returns None even with
+    nothing new to offer; a character with existing quests still has
+    somewhere real to go from here.
     """
     buttons = []
     if story_offer is not None:
@@ -11876,32 +11981,200 @@ def _quest_board_keyboard(
         buttons.append([InlineKeyboardButton(
             f"📋 Accept: {bq['title']}", callback_data=f"quest|accept|board|{bq['board_quest_id']}",
         )])
+    buttons.append([InlineKeyboardButton("🗂️ My Quests", callback_data="quest|list")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def _my_quests_keyboard(character: dict) -> InlineKeyboardMarkup | None:
+    """
+    One button per real thing this character actually holds right now
+    -- active story quests, accepted board quests, and (per Coffee's
+    explicit "guild tasks are a real gap today" call) the current guild
+    curriculum step for every guild actually held (guilds.held_guild_
+    ids, primary + any secondary/Promotion guild) -- never a static/
+    generic list, same "grounded in this character's own real data"
+    convention every other menu in this game already follows. Split
+    out from _do_show_my_quests so it's directly unit-testable (the
+    same real reason _market_keyboard/_bestiary-style builders in this
+    file are their own functions, not inlined).
+    """
+    buttons = []
+    for quest_id in character["active_quests"]:
+        quest = CAMPAIGN["quests"].get(quest_id)
+        if quest:
+            buttons.append([InlineKeyboardButton(f"📜 {quest['title']}", callback_data=f"quest|view|story|{quest_id}")])
+    for bq in db.get_accepted_board_quests_for_user(character["telegram_user_id"], character["chat_id"]):
+        buttons.append([InlineKeyboardButton(f"📋 {bq['title']}", callback_data=f"quest|view|board|{bq['board_quest_id']}")])
+    for guild_id in held_guild_ids(character):
+        step_index = _guild_curriculum_step_index(character, guild_id)
+        step = guild_curriculum_module.get_step(guild_id, step_index)
+        if step:
+            buttons.append([InlineKeyboardButton(f"🎓 {step['title']}", callback_data=f"quest|view|curriculum|{guild_id}")])
     return InlineKeyboardMarkup(buttons) if buttons else None
 
 
-async def quest_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles taps on _quest_board_keyboard -- see its docstring."""
-    query = update.callback_query
-    parts = (query.data or "").split("|")
-    kind = parts[2] if len(parts) > 2 else None
-    ident = parts[3] if len(parts) > 3 else None
-    await _safe_answer(query)
+async def _do_show_my_quests(update: Update) -> None:
+    """
+    Real live request (2026-08-20, Coffee, dev-bridge screenshots): "a
+    list of our quest that we can click on and it will tell us the full
+    information." See _my_quests_keyboard for what actually populates it.
+    """
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await _safe_send(update, "You don't have a character yet!")
+        return
 
-    title = None
+    keyboard = _my_quests_keyboard(character)
+    if keyboard is None:
+        await _safe_send(
+            update, "You don't have any quests right now — check the quest board for what's available.", speak=False,
+        )
+        return
+    await _safe_send(update, "🗂️ **My Quests** — tap one for the full details:", reply_markup=keyboard, speak=False)
+
+
+async def _do_view_quest_detail(update: Update, kind: str | None, ident: str | None) -> None:
+    """
+    Real detail screen for one quest/task (2026-08-20, Coffee: "tell us
+    the full information and what we need to do to complete that
+    quest") -- the drill-down target of both _do_show_my_quests'
+    buttons and the new arrival-time proactive push
+    (_maybe_push_quest_offer). A branching board quest already at full
+    progress also gets its real resolve-choice buttons here (previously
+    only reachable by typing the choice's exact label from memory --
+    the real live bug this session traced to a player replying to an
+    old prompt after its 24h window had already passed, v1.27.286).
+    """
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None or kind is None or ident is None:
+        return
+
     if kind == "story":
         quest = CAMPAIGN["quests"].get(ident)
-        title = quest["title"] if quest else None
-    elif kind == "board":
-        character = db.get_character(update.effective_user.id, update.effective_chat.id)
-        if character is not None:
-            location_id = character["current_location"]
-            for bq in board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, location_id, update.effective_chat.id):
-                if str(bq["board_quest_id"]) == ident:
-                    title = bq["title"]
-                    break
-    if title is None:
+        if quest is None:
+            return
+        extra = f"🔍 **Clue:** {quest['clue']}" if quest.get("clue") else None
+        card = _format_quest_card(
+            "story", quest["title"], quest["description"], quest.get("reward_xp"), quest.get("reward_gold"), extra,
+        )
+        await _safe_send(update, card, speak=False)
         return
-    await _do_accept_quest(update, title)
+
+    if kind == "board":
+        bq = next(
+            (q for q in db.get_accepted_board_quests_for_user(update.effective_user.id, update.effective_chat.id)
+             if str(q["board_quest_id"]) == str(ident)),
+            None,
+        )
+        if bq is None:
+            return
+        if bq.get("branch_data") and bq["progress_count"] >= bq["objective_count"]:
+            branch = bq["branch_data"]
+            card = _format_quest_card("board", bq["title"], branch["setup_narration"], extra_line="Ready to decide — tap your choice:")
+            buttons = [
+                [InlineKeyboardButton(c["label"].capitalize(), callback_data=f"quest|resolve|{bq['board_quest_id']}|{key}")]
+                for key, c in branch["choices"].items()
+            ]
+            await _safe_send(update, card, reply_markup=InlineKeyboardMarkup(buttons), speak=False)
+            return
+        progress = f"Progress: {bq['progress_count']}/{bq['objective_count']}"
+        card = _format_quest_card("board", bq["title"], bq["description"], bq.get("reward_xp"), bq.get("reward_gold"), progress)
+        await _safe_send(update, card, speak=False)
+        return
+
+    if kind == "curriculum":
+        guild_id = ident
+        step_index = _guild_curriculum_step_index(character, guild_id)
+        step = guild_curriculum_module.get_step(guild_id, step_index)
+        if step is None:
+            return
+        extra = f"🎯 {_format_guild_curriculum_step_objective(step)}"
+        card = _format_quest_card(
+            "curriculum", step["title"], step["flavor"], step.get("reward_xp"), step.get("reward_gold"), extra,
+        )
+        await _safe_send(update, card, speak=False)
+        return
+
+
+async def _do_dismiss_quest_offer(update: Update, kind: str | None, ident: str | None) -> None:
+    """
+    "Not now" on a proactively-pushed quest offer (2026-08-20, Coffee:
+    Decline should be a soft pacing gate, never a permanent skip) --
+    suppresses only the future PROACTIVE push for this exact quest_id
+    (see _maybe_push_quest_offer), never touches the quest board/My
+    Quests/plain-text accept path, which stay exactly as available as
+    before. Currently only story quests get a proactive push, so kind
+    is accepted but only "story" does anything real yet.
+    """
+    if kind != "story" or ident is None:
+        return
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        return
+    dismissed = character.get("dismissed_quest_ids") or []
+    if ident not in dismissed:
+        db.update_character(
+            update.effective_user.id, update.effective_chat.id, dismissed_quest_ids=dismissed + [ident],
+        )
+    await _safe_send(update, "No rush — it'll still be here whenever you're ready.", speak=False)
+
+
+async def quest_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles every tap on the quest system's buttons -- accept (offers/_quest_board_keyboard), list/view (My Quests), dismiss (soft decline), and resolve (a branching board quest's choice)."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else None
+    await _safe_answer(query)
+
+    if action == "list":
+        await _do_show_my_quests(update)
+        return
+
+    if action == "view":
+        kind = parts[2] if len(parts) > 2 else None
+        ident = parts[3] if len(parts) > 3 else None
+        await _do_view_quest_detail(update, kind, ident)
+        return
+
+    if action == "dismiss":
+        kind = parts[2] if len(parts) > 2 else None
+        ident = parts[3] if len(parts) > 3 else None
+        await _do_dismiss_quest_offer(update, kind, ident)
+        return
+
+    if action == "resolve":
+        board_quest_id = parts[2] if len(parts) > 2 else None
+        choice_key = parts[3] if len(parts) > 3 else None
+        if board_quest_id is None or choice_key is None:
+            return
+        bq = next(
+            (q for q in db.get_accepted_board_quests_for_user(update.effective_user.id, update.effective_chat.id)
+             if str(q["board_quest_id"]) == str(board_quest_id)),
+            None,
+        )
+        if bq is None or not bq.get("branch_data") or choice_key not in bq["branch_data"]["choices"]:
+            return
+        await _do_resolve_quest_choice(update, bq["branch_data"]["choices"][choice_key]["label"])
+        return
+
+    if action == "accept":
+        kind = parts[2] if len(parts) > 2 else None
+        ident = parts[3] if len(parts) > 3 else None
+        title = None
+        if kind == "story":
+            quest = CAMPAIGN["quests"].get(ident)
+            title = quest["title"] if quest else None
+        elif kind == "board":
+            character = db.get_character(update.effective_user.id, update.effective_chat.id)
+            if character is not None:
+                location_id = character["current_location"]
+                for bq in board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, location_id, update.effective_chat.id):
+                    if str(bq["board_quest_id"]) == ident:
+                        title = bq["title"]
+                        break
+        if title is None:
+            return
+        await _do_accept_quest(update, title)
 
 
 async def _do_check_quests(update: Update) -> None:
@@ -16529,6 +16802,7 @@ async def look_action_menu_callback(update: Update, context: ContextTypes.DEFAUL
 async def _send_generated_image(
     update: Update, prompt: str, caption: str, width: int = 512, height: int = 512,
     seed: int | None = None, log_key: str = "", reply_markup: InlineKeyboardMarkup | None = None,
+    thread_id: int | None = None,
 ) -> bool:
     """
     Shared low-level image sender (2026-08-03, per Coffee: "/reimage" --
@@ -16543,7 +16817,11 @@ async def _send_generated_image(
     grow unbounded; oldest tracked entry is dropped once the cap is hit.
     `reply_markup` (2026-08-03, per Coffee: item-view/equip/sell/market/
     give buttons on a looted item) is optional so every existing caller
-    that doesn't need buttons is unaffected.
+    that doesn't need buttons is unaffected. `thread_id` (2026-08-20,
+    guild curriculum step images) is optional too -- None keeps the
+    original hardcoded "always the Adventure topic" behavior every
+    existing caller already relies on; only a caller that genuinely
+    needs a DIFFERENT topic (a guild's own) passes one.
 
     Returns whether the photo genuinely sent (2026-08-05, real live bug,
     Coffee: "i clicked to view the item and its not processing" --
@@ -16583,7 +16861,7 @@ async def _send_generated_image(
         sent = await update.effective_chat.send_photo(
             photo=url,
             caption=caption,
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+            message_thread_id=thread_id if thread_id is not None else topics.thread_id_for(update.effective_chat.id, "adventure"),
             reply_markup=reply_markup,
         )
         message_id = getattr(sent, "message_id", None)
@@ -18908,7 +19186,9 @@ def _guild_curriculum_choice_keyboard(guild_id: str, step_index: int, step: dict
     return InlineKeyboardMarkup(buttons)
 
 
-async def _post_and_pin_guild_curriculum_step(update: Update, chat_id: int, guild_id: str, text: str) -> None:
+async def _post_and_pin_guild_curriculum_step(
+    update: Update, chat_id: int, guild_id: str, text: str, step: dict | None = None,
+) -> None:
     """
     Posts the next unlocked step into the guild's own real Telegram
     topic and pins it (per Coffee: "daily pinned per-guild quest
@@ -18921,7 +19201,28 @@ async def _post_and_pin_guild_curriculum_step(update: Update, chat_id: int, guil
     surfaces whichever member's step was most recently unlocked, keeping
     "the next thing to do" visible without pretending one pin can
     represent every member's own progress at once.
+
+    Real live request (2026-08-20, Coffee, dev-bridge screenshots): the
+    same image treatment story-arc openings and (now) individual quest
+    offers get (_maybe_send_arc_opening_image/_quest_offer_image_prompt)
+    extended to guild curriculum steps too. Sent as its own flavor
+    message ahead of the pinned announcement text -- never routed
+    through the pin/unpin bookkeeping itself, so a failed/slow image
+    generation can never affect whether the real announcement gets
+    posted and pinned.
     """
+    if step is not None:
+        prompt = (
+            f"{step['title']}, {step['flavor']}, fantasy RPG guild training illustration, "
+            f"atmospheric establishing shot, digital painting, dramatic lighting, no text or labels"
+        )
+        topic_id_for_image = config.GUILD_TOPIC_IDS.get(guild_id)
+        image_thread_id = topic_id_for_image if topic_id_for_image is not None else update.effective_message.message_thread_id
+        await _send_generated_image(
+            update, prompt, f"🎓 {step['title']}",
+            seed=_deterministic_image_seed(f"curriculum:{guild_id}:{step['id']}"), log_key=step["id"],
+            thread_id=image_thread_id,
+        )
     topic_id = config.GUILD_TOPIC_IDS.get(guild_id)
     reply_thread_id = topic_id if topic_id is not None else update.effective_message.message_thread_id
     clean_text = _truncate_for_telegram_limit(text)
@@ -19035,7 +19336,7 @@ async def _complete_guild_curriculum_step(
         )
         return
     announcement = _format_guild_curriculum_step_announcement(next_step)
-    await _post_and_pin_guild_curriculum_step(update_like, chat_id, guild_id, announcement)
+    await _post_and_pin_guild_curriculum_step(update_like, chat_id, guild_id, announcement, step=next_step)
 
 
 async def _check_guild_curriculum_progress(update_like, telegram_user_id: int, chat_id: int, event_type: str, **event_data) -> None:
@@ -19814,6 +20115,11 @@ async def _do_move(update: Update, text: str) -> None:
     await _maybe_trigger_npc_encounter(update, updated_character, destination)
     await _check_quest_completions_reach_location(update, update.effective_user.id, destination_id)
     await _check_board_quest_turnin(update, update.effective_user.id, destination_id)
+    if not updated_character.get("is_ai"):
+        story_offer = _offerable_quest_at_location(updated_character, destination_id)
+        if story_offer:
+            offer_quest_id, offer_quest = story_offer
+            await _maybe_push_quest_offer(update, updated_character, offer_quest_id, offer_quest)
 
 
 def _npc_id_for_companion_name(name: str) -> str | None:
@@ -20083,6 +20389,11 @@ async def _do_fast_travel(update: Update, text: str) -> None:
     await _maybe_trigger_npc_encounter(update, updated_character, destination)
     await _check_quest_completions_reach_location(update, update.effective_user.id, destination_id)
     await _check_board_quest_turnin(update, update.effective_user.id, destination_id)
+    if not updated_character.get("is_ai"):
+        story_offer = _offerable_quest_at_location(updated_character, destination_id)
+        if story_offer:
+            offer_quest_id, offer_quest = story_offer
+            await _maybe_push_quest_offer(update, updated_character, offer_quest_id, offer_quest)
 
 
 def _location_neighbors(location_id: str) -> list[str]:
@@ -23512,6 +23823,7 @@ async def _do_join_guild(update: Update, text: str) -> None:
     if first_step is not None:
         await _post_and_pin_guild_curriculum_step(
             update, update.effective_chat.id, guild_id, _format_guild_curriculum_step_announcement(first_step),
+            step=first_step,
         )
 
 

@@ -961,6 +961,227 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_check_quests(FakeUpdate(user_id, "check my quests", sink))
         self.assertTrue(any("Discovery" in msg for msg in sink))
 
+    # -- Quest Menu (2026-08-20, per Coffee's dev-bridge screenshots +
+    #    live conversation): a real browsable "My Quests" list+detail
+    #    view, guild curriculum surfaced as a real quest, and proactive
+    #    accept/decline prompts on a new story-quest offer. -------------
+    def test_format_quest_card_shape(self):
+        card = bot._format_quest_card("story", "A Favor for Grimsby", "Something's off.", 100, 50, "🔍 Clue: ask around.")
+        self.assertIn("📜 **A Favor for Grimsby**", card)
+        self.assertIn("Something's off.", card)
+        self.assertIn("💰 **Reward:** 100 XP, 50 gold", card)
+        self.assertIn("🔍 Clue: ask around.", card)
+        # No reward fields, no extra line -- must not leave stray labels/blank lines.
+        bare = bot._format_quest_card("board", "Bounty", "Do a thing.")
+        self.assertNotIn("Reward", bare)
+
+    async def test_my_quests_list_shows_story_board_and_curriculum_entries(self):
+        use_test_db("tests/tmp/quest_menu_list_test.db")
+        user_id = 900700
+        make_basic_character(user_id, "MyQuestsTester", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, active_quests={"welcome_to_the_crossroads": {"accepted_at": "2026-08-20T00:00:00+00:00"}})
+        bq = db.create_board_quest(
+            "crossroads_tavern", -999, "quest-menu-test-day", "A quiet request for wood", "...", None,
+            "gather_material", "wood", 3, 40, 20,
+        )
+        db.accept_board_quest(bq["board_quest_id"], user_id, -999)
+        db.update_character(user_id, -999, guild="adventurers_guild", guild_curriculum_step=0)
+
+        # quest|list callback: confirms the real screen actually sends
+        # (sink only ever captures message TEXT, never button labels --
+        # see _my_quests_keyboard's own direct-unit-test below for the
+        # real button contents).
+        sink = []
+        await bot.quest_menu_callback(FakeCallbackUpdate(user_id, "quest|list", sink), DummyContext())
+        self.assertTrue(any("My Quests" in s for s in sink))
+
+        character = db.get_character(user_id, -999)
+        kb = bot._my_quests_keyboard(character)
+        labels = [b.text for row in kb.inline_keyboard for b in row]
+        self.assertTrue(any("A Favor for Grimsby" in l for l in labels))
+        self.assertTrue(any("A quiet request for wood" in l for l in labels))
+        self.assertTrue(any("The Lay of the Land" in l for l in labels))  # adventurers_guild step 0's real title
+
+    async def test_view_story_quest_detail_shows_description_reward_and_clue(self):
+        use_test_db("tests/tmp/quest_menu_view_story_test.db")
+        user_id = 900701
+        make_basic_character(user_id, "ViewStoryTester", current_location="crossroads_tavern")
+        sink = []
+        await bot.quest_menu_callback(
+            FakeCallbackUpdate(user_id, "quest|view|story|welcome_to_the_crossroads", sink), DummyContext(),
+        )
+        combined = "\n".join(sink)
+        self.assertIn("A Favor for Grimsby", combined)
+        self.assertIn("100", combined)
+        self.assertIn("50 gold", combined)
+        self.assertIn("Grimsby says", combined)  # the real clue text
+
+    async def test_view_board_quest_detail_shows_progress(self):
+        use_test_db("tests/tmp/quest_menu_view_board_test.db")
+        user_id = 900702
+        make_basic_character(user_id, "ViewBoardTester", current_location="crossroads_tavern")
+        bq = db.create_board_quest(
+            "crossroads_tavern", -999, "quest-menu-test-day", "A quiet request for wood", "Bring 3 wood.", None,
+            "gather_material", "wood", 3, 40, 20,
+        )
+        db.accept_board_quest(bq["board_quest_id"], user_id, -999)
+        db.record_board_quest_progress(bq["board_quest_id"], 1)
+        sink = []
+        await bot.quest_menu_callback(
+            FakeCallbackUpdate(user_id, f"quest|view|board|{bq['board_quest_id']}", sink), DummyContext(),
+        )
+        combined = "\n".join(sink)
+        self.assertIn("A quiet request for wood", combined)
+        self.assertIn("1/3", combined)
+
+    async def test_view_branching_board_quest_at_full_progress_shows_real_choice_buttons(self):
+        """
+        Real live bug this session (v1.27.286): a branching board quest
+        that's already fully earned could only ever be resolved by
+        typing the choice's exact label from memory -- confirmed live
+        as the root cause of a real "You don't have a decision to make
+        right now" report when a player replied to an old prompt after
+        its window had passed. Real buttons here close that gap for
+        good, not just the expiry-window fix.
+        """
+        use_test_db("tests/tmp/quest_menu_branch_test.db")
+        user_id = 900703
+        make_basic_character(user_id, "ViewBranchTester", current_location="crossroads_tavern", inventory={"wood": 3})
+        bq = db.create_board_quest(
+            "crossroads_tavern", -999, "quest-menu-test-day", "A Quiet Request", "A satchel sits unclaimed.", None,
+            "gather_material", "wood", 3, 0, 0,
+        )
+        db.accept_board_quest(bq["board_quest_id"], user_id, -999)
+        db.record_board_quest_progress(bq["board_quest_id"], 3)
+        db.set_board_quest_branch_data(bq["board_quest_id"], {
+            "setup_narration": "The satchel just sits there, unclaimed.",
+            "choices": {
+                "keep_it": {"label": "keep it and say nothing", "reward_xp": 60, "reward_gold": 80, "outcome_facts": "kept"},
+                "turn_it_in": {"label": "turn it in", "reward_xp": 60, "reward_gold": 10, "outcome_facts": "turned in"},
+            },
+        })
+        sink = []
+        await bot.quest_menu_callback(
+            FakeCallbackUpdate(user_id, f"quest|view|board|{bq['board_quest_id']}", sink), DummyContext(),
+        )
+        combined = "\n".join(sink)
+        self.assertIn("Ready to decide", combined)
+        self.assertIn("The satchel just sits there", combined)
+        # Real functional proof the buttons actually work, not just that
+        # the prompt text appears -- see the sibling test below.
+
+    async def test_resolve_branching_quest_via_button_matches_free_text_flow(self):
+        from unittest.mock import patch
+        use_test_db("tests/tmp/quest_menu_resolve_button_test.db")
+        user_id = 900704
+        make_basic_character(user_id, "ResolveButtonTester", current_location="crossroads_tavern")
+        bq = db.create_board_quest(
+            "crossroads_tavern", -999, "quest-menu-test-day", "A Quiet Request", "A satchel sits unclaimed.", None,
+            "gather_material", "wood", 0, 0, 0,
+        )
+        db.accept_board_quest(bq["board_quest_id"], user_id, -999)
+        db.set_board_quest_branch_data(bq["board_quest_id"], {
+            "setup_narration": "The satchel just sits there, unclaimed.",
+            "choices": {
+                "keep_it": {"label": "keep it and say nothing", "reward_xp": 60, "reward_gold": 80, "outcome_facts": "kept"},
+                "turn_it_in": {"label": "turn it in", "reward_xp": 60, "reward_gold": 10, "outcome_facts": "turned in"},
+            },
+        })
+        sink = []
+        with patch("bot.narrate_branching_choice_outcome", return_value="You pocket it and walk on."):
+            await bot.quest_menu_callback(
+                FakeCallbackUpdate(user_id, f"quest|resolve|{bq['board_quest_id']}|keep_it", sink), DummyContext(),
+            )
+        combined = "\n".join(sink)
+        self.assertIn("resolved", combined)
+        self.assertEqual(db.get_character(user_id, -999)["gold"], 10 + 80)  # starting gold (10) + the "keep it" reward
+
+    async def test_maybe_push_quest_offer_fires_once_not_twice(self):
+        from unittest.mock import patch, AsyncMock
+        use_test_db("tests/tmp/quest_menu_push_test.db")
+        user_id = 900705
+        character = make_basic_character(user_id, "PushOfferTester", current_location="crossroads_tavern")
+        quest_id, quest = "welcome_to_the_crossroads", bot.CAMPAIGN["quests"]["welcome_to_the_crossroads"]
+        sink = []
+        update = FakeUpdate(user_id, "", sink, chat_id=-999)
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)) as mock_image:
+            await bot._maybe_push_quest_offer(update, character, quest_id, quest)
+            self.assertTrue(mock_image.called)
+            self.assertTrue(any("A Favor for Grimsby" in s for s in sink))
+            sink.clear()
+            mock_image.reset_mock()
+            await bot._maybe_push_quest_offer(update, character, quest_id, quest)
+            self.assertFalse(mock_image.called)
+            self.assertEqual(sink, [])
+
+    async def test_maybe_push_quest_offer_respects_a_prior_dismissal(self):
+        from unittest.mock import patch, AsyncMock
+        use_test_db("tests/tmp/quest_menu_push_dismiss_test.db")
+        user_id = 900706
+        character = make_basic_character(user_id, "PushDismissedTester", current_location="crossroads_tavern")
+        character["dismissed_quest_ids"] = ["welcome_to_the_crossroads"]
+        quest_id, quest = "welcome_to_the_crossroads", bot.CAMPAIGN["quests"]["welcome_to_the_crossroads"]
+        sink = []
+        update = FakeUpdate(user_id, "", sink, chat_id=-999)
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)) as mock_image:
+            await bot._maybe_push_quest_offer(update, character, quest_id, quest)
+        self.assertFalse(mock_image.called)
+        self.assertEqual(sink, [])
+
+    async def test_dismiss_quest_offer_is_a_soft_gate_not_a_real_skip(self):
+        """
+        Real live instruction (2026-08-20, Coffee): Decline is a soft
+        pacing gate -- "not right now," never a permanent skip. Tapping
+        "Not now" must suppress the next PROACTIVE push but never touch
+        plain-text acceptance or the passive quest board.
+        """
+        from unittest.mock import patch, AsyncMock
+        use_test_db("tests/tmp/quest_menu_dismiss_test.db")
+        user_id = 900707
+        make_basic_character(user_id, "DismissGateTester", current_location="crossroads_tavern")
+        sink = []
+        await bot.quest_menu_callback(
+            FakeCallbackUpdate(user_id, "quest|dismiss|story|welcome_to_the_crossroads", sink), DummyContext(),
+        )
+        self.assertIn("welcome_to_the_crossroads", db.get_character(user_id, -999)["dismissed_quest_ids"])
+
+        # Still fully acceptable via plain text despite the dismissal.
+        sink2 = []
+        with patch("bot.narrate_arc_opening", return_value="A quiet dread settles."), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._do_accept_quest(FakeUpdate(user_id, "I accept the quest", sink2), "I accept the quest")
+        self.assertIn("welcome_to_the_crossroads", db.get_character(user_id, -999)["active_quests"])
+        # A real accept clears the dismissal too (nothing left to suppress).
+        self.assertNotIn("welcome_to_the_crossroads", db.get_character(user_id, -999)["dismissed_quest_ids"])
+
+    async def test_arriving_somewhere_new_pushes_the_real_offerable_quest(self):
+        from unittest.mock import patch, AsyncMock
+        use_test_db("tests/tmp/quest_menu_arrival_test.db")
+        user_id = 900708
+        make_basic_character(user_id, "ArrivalPushTester", current_location="stonearch_bridge")
+        sink = []
+        with patch("bot._maybe_push_quest_offer", new=AsyncMock()) as mock_push:
+            await bot._do_move(FakeUpdate(user_id, "", sink), "go north")  # stonearch_bridge -> crossroads_tavern
+        self.assertEqual(db.get_character(user_id, -999)["current_location"], "crossroads_tavern")
+        self.assertTrue(mock_push.called)
+        pushed_quest_id = mock_push.call_args.args[2]
+        self.assertEqual(pushed_quest_id, "welcome_to_the_crossroads")
+
+    async def test_guild_curriculum_step_announcement_now_includes_a_real_image(self):
+        from unittest.mock import patch, AsyncMock
+        import guild_curriculum as gc
+        use_test_db("tests/tmp/quest_menu_curriculum_image_test.db")
+        user_id = 900709
+        make_basic_character(user_id, "CurriculumImageTester", current_location="crossroads_tavern")
+        step = gc.get_step("adventurers_guild", 0)
+        self.assertIsNotNone(step)
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)) as mock_image:
+            await bot._post_and_pin_guild_curriculum_step(
+                FakeUpdate(user_id, "", [], chat_id=-999), -999, "adventurers_guild", "text", step=step,
+            )
+        self.assertTrue(mock_image.called)
+        self.assertIn(step["title"], mock_image.call_args.args[2])
+
     # -- Player-to-player item trading (v1.10.7 backlog item) ----------
     def test_give_item_phrasing_classified_correctly(self):
         result = _keyword_fallback("give my healing potion to Sarah", [])
