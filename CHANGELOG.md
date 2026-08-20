@@ -2,6 +2,45 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.276] — Support item comparisons now use real numbers, two grounding gaps closed
+
+**Real dev-bridge follow-up (2026-08-20, Coffee):** "look into the
+Support answer too" — Charvenna asked Support to compare her Silvered
+Dagger against a real generated Tempered Dagger and got back pure
+vague flavor text ("aligning well with her role as a sorcerer...
+precise sustained magical precision") that never cited either
+weapon's real numbers. Two real bugs found:
+
+1. Her exact phrasing ("Which weapon is better for charvenna, the
+   silvered dagger or the tempered dagger") never even matched
+   `_ITEM_COMPARISON_RE` — the regex required "which is better"
+   immediately followed by the item list, with no room for an extra
+   noun after "which" or a "for &lt;name&gt;" clause before the comma.
+   Widened to tolerate both.
+2. Once both items resolve as real (no hallucinated name), the
+   question used to always fall through to the model with no forced
+   numeric grounding. Weapons and armor/shields now get a real,
+   computed answer instead — average damage via `rules.dice.
+   average_damage` (covering a generated item's separate `damage_bonus`
+   field the same way a static item's inline "+N" already worked),
+   calling out any real `damage_type` difference; armor/shields compare
+   by real total AC. Other item types (rings/amulets/wondrous) still
+   fall through to the model, unchanged.
+
+**Also found and fixed while investigating:** Charvenna separately
+asked Support "where do you train to wear different levels of armor"
+(she's a Sorcerer — zero base armor proficiency in this game) and got
+back "The Arcane Circle," a real guild with nothing to do with armor.
+The real answer is the Skill Tree's Weapon/Armor Mastery upgrades,
+which had no catalog section in `support_agent.py` at all — added
+`_skilltree_catalog_text()`. And: the Remnants catalog section still
+described the "assign a Summoner" mechanic removed in v1.27.267 — a
+real, self-inflicted staleness bug (Support would have told a player
+to do something that no longer works) — updated to the current
+self-service mechanic.
+
+Verified with real executed tests for all four fixes.
+
 ## [1.27.275] — Three real live-combat bugs: scrolls, mid-fight equips, Counterspell replies
 
 **Bug 1 — scrolls silently spending a real spell slot.** Dev-bridge

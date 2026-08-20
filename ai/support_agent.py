@@ -26,6 +26,7 @@ from ai.text_cleanup import strip_think_tags, is_placeholder_text
 from guilds import GUILDS
 from models import VALID_CLASSES
 from rules.crafting import RECIPES, ENCHANT_RECIPES
+from rules.dice import average_damage
 from rules.leveling import (
     XP_THRESHOLDS, level_for_xp, MAX_LEVEL, CLASS_SUBCLASSES, COMBAT_SUBCLASS_NAMES,
     COMBAT_SUBCLASS_DAMAGE_BONUS_PCT, THIEF_SUBCLASS_STEAL_BONUS, LIFE_SUBCLASS_HEAL_BONUS,
@@ -395,26 +396,86 @@ def _remnants_catalog_text() -> str:
     already forbids revealing plot/discovery content, and 5 of the 12
     real Remnants are intentionally pure secrets (remnants.py's own
     story_tied=False design), never to be hinted at here.
+
+    2026-08-20: the "designate one Summoner" mechanic this text used to
+    describe was removed in v1.27.267 (per Coffee: "i dont want to
+    assign a summoner i want players that have beaten the Remnant to
+    be automatically bound to them" -- the whole point being that
+    finding and beating one is its OWN reward, not gated behind a
+    second party-wide role). This text still described the removed
+    mechanic, which would have told a player to do something that no
+    longer works -- same grounding-staleness risk as any other catalog
+    section here, just self-inflicted this time by a later game change
+    rather than a gap that was never filled in.
     """
     return (
         "\nREAL REMNANTS SYSTEM IN THIS GAME: defeating a real 'Unbound' "
         "boss-tier monster binds a fragment of it (a 'Remnant') to every "
         "real party member present for the kill -- automatic, nothing to "
-        "equip or carry, tracked as bound_remnants on the character. To "
-        "actually USE a bound Remnant, the party must first designate ONE "
-        "member as its Summoner by saying \"assign [name] as summoner\" "
-        "(only one Summoner at a time, party-wide, reassignable anytime); "
-        "that Summoner can then, IN COMBAT ONLY, say \"summon [Remnant "
-        "name]\" to call it as a themed attack (a real damage roll through "
-        "this game's own damage-type pipeline, never a second combatant). "
-        "Before reaching 100% Summoning Mastery, each battle gives a "
-        "limited number of free summons (more banked Mastery = more free "
-        "uses per battle, capped at 5); at 100% Mastery, summoning is "
-        "unlimited per battle but costs one real spell slot per cast. "
-        "Never invent which specific bosses are Unbound or where they're "
-        "found -- that's real, deliberate discovery content, not a "
-        "how-to-play fact this catalog reveals."
+        "equip or carry, tracked as bound_remnants on the character. "
+        "Whoever has one bound can summon it themselves -- no assigning "
+        "a Summoner, no extra role needed. IN COMBAT ONLY, say \"summon "
+        "[Remnant name]\" (or tap the battle menu's Summon button) to "
+        "call it as a themed attack: a real narrated line aimed at "
+        "whatever enemy is being fought, a generated image of the "
+        "attack's effect, and a real damage roll (the summon's own dice "
+        "PLUS the source boss's own real damage_bonus stacked on top, "
+        "through this game's own damage-type pipeline) -- never a "
+        "second combatant. Before reaching 100% Summoning Mastery, each "
+        "battle gives a limited number of free summons (more banked "
+        "Mastery = more free uses per battle, capped at 5); at 100% "
+        "Mastery, summoning is unlimited per battle but costs one real "
+        "spell slot per cast. Never invent which specific bosses are "
+        "Unbound or where they're found -- that's real, deliberate "
+        "discovery content, not a how-to-play fact this catalog reveals."
     )
+
+
+def _skilltree_catalog_text() -> str:
+    """
+    Real live bug (2026-08-20, dev-bridge, Coffee): Charvenna (a
+    Sorcerer, zero base armor proficiency in this game's rules) asked
+    Support "Where do you train to wear different levels of armor" and
+    got back "The Arcane Circle" -- a real guild, but one with nothing
+    to do with armor at all (guilds.py). The real answer is the Skill
+    Tree's weapon/armor Mastery upgrades (bot.py's UNIVERSAL_
+    MANIPULATION_PROFICIENCIES) -- this catalog section never existed
+    at all, so Support had nothing real to ground on and guessed a
+    plausible-sounding guild name instead, the exact CRITICAL_
+    GROUNDING_RULE failure this whole file exists to prevent.
+
+    Deferred `import bot` (not a top-level import): bot.py imports
+    FROM ai.support_agent (answer_support_question/is_support_call_
+    active) at its own module-load time, so a top-level `import bot`
+    here would be circular -- same deferred-import pattern items.py's
+    own get_item() already uses for db.py, for the identical reason.
+    """
+    import bot
+    lines = ["\nREAL SKILL TREE (Universal Manipulation) IN THIS GAME:"]
+    lines.append(
+        "Banked skill points (earned via leveling/rebirth) can be spent on real, "
+        "persistent upgrades -- say \"skill tree\" in-game to see your own real "
+        "banked points and purchase options."
+    )
+    prof_lines = [
+        f"{data['name']} ({data['cost']} pts): grants real {data['category']} "
+        f"{data['kind']} proficiency, for a class that doesn't already have it"
+        for data in bot.UNIVERSAL_MANIPULATION_PROFICIENCIES.values()
+    ]
+    lines.append("Weapon/Armor Mastery (one-time unlock per category): " + "; ".join(prof_lines) + ".")
+    class_lines = [
+        f"{cls}: {data['name']} ({data['cost']} pts) — {data['description']}"
+        for cls, data in bot.UNIVERSAL_MANIPULATION_CLASS_SKILLS.items()
+    ]
+    lines.append("Class Signature upgrades (repeatable, one per class): " + "; ".join(class_lines) + ".")
+    pool_lines = [f"{data['name']} ({data['cost']} pts): {data['description']}"
+                  for data in bot.UNIVERSAL_MANIPULATION_POOLS.values()]
+    lines.append("Growth pools (repeatable): " + "; ".join(pool_lines) + ".")
+    lines.append(
+        "Professions (repeatable, +1 flat bonus to that profession's ability check per point): "
+        + ", ".join(f"{p} (1 pt)" for p in bot.UNIVERSAL_MANIPULATION_PROFESSIONS) + "."
+    )
+    return "\n".join(lines)
 
 
 # Real live bug (2026-08-10, found via topic-activity monitoring): both
@@ -454,6 +515,11 @@ _CATALOG_SECTION_KEYWORDS = {
         _subclass_catalog_text,
     ),
     "remnants": (["remnant", "unbound", "summoner", "summon"], _remnants_catalog_text),
+    "skilltree": (
+        ["skill tree", "skill point", "proficiency", "proficient", "mastery",
+         "train", "universal manipulation"],
+        _skilltree_catalog_text,
+    ),
 }
 
 
@@ -927,7 +993,18 @@ def _deterministic_location_connections_answer(character: dict, question: str) -
 
 
 _ITEM_COMPARISON_RE = re.compile(
-    r"(?:which(?:'s| is) better,?\s+(.+?)\s+or\s+(.+?)\??$)"
+    # Real live gap (2026-08-20, dev-bridge, Coffee: "look into the
+    # Support answer too"): Charvenna's real question, "Which weapon is
+    # better for charvenna, the silvered dagger or the tempered
+    # dagger", never matched this regex at all -- the original pattern
+    # required "which is better" immediately followed by the item list,
+    # with no room for an extra noun ("weapon") after "which" or a "for
+    # <name>" clause before the comma, both completely ordinary
+    # phrasing. Widened to tolerate both, so the real deterministic
+    # comparison below actually gets a chance to fire instead of this
+    # exact live question skipping the regex and going straight to the
+    # model ungrounded.
+    r"(?:which(?:\s+\w+)?(?:'s| is)\s+better(?:\s+for\s+\S+)?,?\s+(.+?)\s+or\s+(.+?)\??$)"
     r"|(?:(.+?)\s+or\s+(.+?),?\s+which(?:'s| is) better\??$)"
     r"|(?:is\s+(.+?)\s+or\s+(.+?)\s+better\??$)"
     r"|(?:(.+?)\s+(?:vs\.?|versus)\s+(.+?)\??$)",
@@ -939,6 +1016,57 @@ _ITEM_PHRASE_STOPWORDS = {"a", "an", "the", "my", "your", "our"}
 def _strip_item_phrase(phrase: str) -> str:
     words = [w for w in phrase.strip().split() if w.lower() not in _ITEM_PHRASE_STOPWORDS]
     return " ".join(words)
+
+
+def _compare_two_items(item_a: dict, item_b: dict) -> str | None:
+    """
+    Real, computed comparison grounded only in each item's own real
+    fields -- never an opinion. Weapons compare by real average damage
+    (rules.dice.average_damage against damage_dice+damage_bonus,
+    covering both a static item's inline "+N" and a generated item's
+    separate damage_bonus field the same way), calling out a real
+    damage_type difference (a real mechanical edge against a
+    vulnerable target, e.g. silver/fire, not flavor). Armor/shields
+    compare by real total AC contribution. Returns None for any other
+    item type (rings/amulets/wondrous, or a weapon-vs-armor
+    mismatch) -- those still fall through to the model, unchanged.
+    """
+    type_a, type_b = item_a.get("type"), item_b.get("type")
+    if type_a != type_b:
+        return None
+    if type_a == "weapon":
+        avg_a = average_damage(item_a["damage_dice"], item_a.get("damage_bonus", 0))
+        avg_b = average_damage(item_b["damage_dice"], item_b.get("damage_bonus", 0))
+        dtype_a, dtype_b = item_a.get("damage_type", "physical"), item_b.get("damage_type", "physical")
+        lines = [
+            f"**{item_a['name']}**: {item_a['damage_dice']}"
+            + (f"+{item_a['damage_bonus']}" if item_a.get("damage_bonus") else "")
+            + f" {dtype_a} damage (~{avg_a:.1f} avg)",
+            f"**{item_b['name']}**: {item_b['damage_dice']}"
+            + (f"+{item_b['damage_bonus']}" if item_b.get("damage_bonus") else "")
+            + f" {dtype_b} damage (~{avg_b:.1f} avg)",
+        ]
+        if abs(avg_a - avg_b) < 0.01:
+            lines.append(f"Same average damage. Only real difference: {dtype_a} vs {dtype_b} damage type"
+                         + (" — pick whichever type matters against what you're fighting." if dtype_a != dtype_b else "."))
+        else:
+            higher, lower = (item_a, avg_a) if avg_a > avg_b else (item_b, avg_b)
+            lines.append(f"**{higher['name']}** hits harder on average.")
+        return "\n".join(lines)
+    if type_a in ("armor", "shield"):
+        ac_a = item_a.get("ac_base", 0) + item_a.get("ac_bonus", 0)
+        ac_b = item_b.get("ac_base", 0) + item_b.get("ac_bonus", 0)
+        lines = [
+            f"**{item_a['name']}**: AC {ac_a}",
+            f"**{item_b['name']}**: AC {ac_b}",
+        ]
+        if ac_a == ac_b:
+            lines.append("Same AC — no real mechanical difference between them.")
+        else:
+            higher = item_a if ac_a > ac_b else item_b
+            lines.append(f"**{higher['name']}** gives more AC.")
+        return "\n".join(lines)
+    return None
 
 
 def _deterministic_item_comparison_answer(question: str, character: dict | None = None) -> str | None:
@@ -994,6 +1122,27 @@ def _deterministic_item_comparison_answer(question: str, character: dict | None 
     item_a = items_module.find_item_mentioned_in_text(phrase_a, candidate_ids=candidate_ids)
     item_b = items_module.find_item_mentioned_in_text(phrase_b, candidate_ids=candidate_ids)
     if item_a and item_b:
+        # Real live gap (2026-08-20, dev-bridge, Coffee: "look into the
+        # Support answer too" -- Charvenna asked Support to compare her
+        # Silvered Dagger against a real generated Tempered Dagger, got
+        # back pure vague flavor reasoning ("aligning well with her
+        # role as a sorcerer... precise sustained magical precision")
+        # that never once cited either weapon's real numbers). Both
+        # sides already resolve to real items at this point (the
+        # existence-hallucination guard above already handles a FAKE
+        # name) -- but handing the model two confirmed-real names with
+        # no forced numeric grounding left it free to reason from
+        # vibes instead of stats, the exact CRITICAL_GROUNDING_RULE
+        # failure this whole file exists to prevent. Weapons/armor/
+        # shields get a real, computed answer here (average damage via
+        # rules.dice.average_damage for weapons, ac_base/ac_bonus for
+        # armor/shields) instead of ever reaching the model -- other
+        # item types (rings/amulets/wondrous, more varied stat shapes)
+        # still fall through to the LLM as before.
+        template_a, template_b = items_module.get_item(item_a), items_module.get_item(item_b)
+        comparison = _compare_two_items(template_a, template_b)
+        if comparison:
+            return comparison
         return None
     real_names = [items_module.get_item(i)["name"] for i in (item_a, item_b) if i]
     missing = [p for p, i in ((phrase_a, item_a), (phrase_b, item_b)) if not i]

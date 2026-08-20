@@ -1784,7 +1784,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         answer = support_agent_module._deterministic_item_comparison_answer(
             "Which is better serviceable dagger or silvered dagger?", character,
         )
-        self.assertIsNone(answer)
+        # 2026-08-20: since both sides are now real, this no longer falls
+        # through to the model at all -- a separate later fix, same
+        # dev-bridge thread ("look into the Support answer too"), makes a
+        # real weapon-vs-weapon comparison fully deterministic instead.
+        self.assertIsNotNone(answer)
+        self.assertIn("Serviceable Dagger", answer)
+        self.assertIn("Silvered Dagger", answer)
 
     def test_support_item_comparison_lets_two_real_items_through_to_the_model(self):
         """Both sides real (grounded) -- must fall through to the normal LLM path, not short-circuit."""
@@ -1796,6 +1802,53 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         from ai.support_agent import _deterministic_item_comparison_answer
         self.assertIsNone(_deterministic_item_comparison_answer("How do I check my inventory or my quests?"))
         self.assertIsNone(_deterministic_item_comparison_answer("How do I attack?"))
+
+    def test_support_weapon_comparison_uses_real_numbers_not_vague_flavor(self):
+        """
+        Real dev-bridge report (2026-08-20, Coffee): Charvenna asked
+        Support "Which weapon is better for charvenna, the silvered
+        dagger or the tempered dagger" and got back pure vague flavor
+        text ("aligning well with her role as a sorcerer... precise
+        sustained magical precision") that never cited either weapon's
+        real numbers. Both Silvered Dagger (1d4+1 silver) and a real
+        generated Tempered Dagger (1d4 physical + damage_bonus 1, same
+        average) must now get a real, computed answer -- same average
+        damage, differing only in real damage_type.
+        """
+        import ai.support_agent as support_agent_module
+        gi_id = db.create_item_instance(
+            item_type="weapon", name="Tempered Dagger", rarity="uncommon", price=8,
+            base_stats={"type": "weapon", "damage_dice": "1d4", "damage_bonus": 1, "ability": "dexterity", "weapon_category": "simple"},
+        )
+        character = {"inventory": {gi_id: 1, "silvered_dagger": 1}}
+        answer = support_agent_module._deterministic_item_comparison_answer(
+            "Which weapon is better for charvenna, the silvered dagger or the tempered dagger", character,
+        )
+        self.assertIsNotNone(answer)
+        self.assertIn("Silvered Dagger", answer)
+        self.assertIn("Tempered Dagger", answer)
+        self.assertIn("3.5", answer)
+        self.assertIn("silver", answer.lower())
+        self.assertNotIn("sorcerer", answer.lower())  # no invented flavor reasoning
+
+    def test_support_armor_comparison_uses_real_ac_numbers(self):
+        from ai.support_agent import _compare_two_items
+        chain_shirt = {"name": "Chain Shirt", "type": "armor", "ac_base": 13}
+        leather = {"name": "Leather Armor", "type": "armor", "ac_base": 11}
+        answer = _compare_two_items(chain_shirt, leather)
+        self.assertIn("AC 13", answer)
+        self.assertIn("AC 11", answer)
+        self.assertIn("Chain Shirt", answer.split("\n")[-1])
+
+    def test_support_comparison_falls_through_for_mismatched_or_non_gear_types(self):
+        """A weapon-vs-armor mismatch, or non-weapon/armor types (rings/consumables), still fall through to the model unchanged."""
+        from ai.support_agent import _compare_two_items
+        weapon = {"name": "Silvered Dagger", "type": "weapon", "damage_dice": "1d4+1"}
+        armor = {"name": "Chain Shirt", "type": "armor", "ac_base": 13}
+        self.assertIsNone(_compare_two_items(weapon, armor))
+        ring_a = {"name": "Ring of Protection", "type": "ring"}
+        ring_b = {"name": "Ring of the Undertow", "type": "ring"}
+        self.assertIsNone(_compare_two_items(ring_a, ring_b))
 
     def test_support_prompt_shrinks_for_a_topic_specific_question(self):
         """
@@ -7559,20 +7612,45 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         provided data") and invented one anyway -- Remnants
         (remnants.py, real since 2026-08-13) were never grounded in
         support_agent.py at all. New catalog states the real mechanic
-        (bind on defeat, assign a Summoner, "summon [name]" in combat,
-        spell-slot cost at Mastery) but deliberately never names which
-        real bosses are Unbound or where -- 5 of 12 are intentional pure
-        secrets.
+        (bind on defeat, "summon [name]" in combat, spell-slot cost at
+        Mastery) but deliberately never names which real bosses are
+        Unbound or where -- 5 of 12 are intentional pure secrets.
+
+        2026-08-20: the "assign a Summoner" role this catalog used to
+        describe was itself removed from the game (v1.27.267) -- this
+        catalog text had gone stale, still telling players to do
+        something that no longer works. Now grounds the CURRENT real
+        mechanic: whoever bound a Remnant can summon it themselves.
         """
         from ai.support_agent import _remnants_catalog_text, _build_catalog_reference
         catalog = _remnants_catalog_text()
-        self.assertIn("Summoner", catalog)
-        self.assertIn("assign", catalog)
         self.assertIn("summon", catalog.lower())
         self.assertIn("spell slot", catalog)
+        self.assertIn("no assigning a Summoner", catalog)
+        self.assertNotIn("say \"assign", catalog)
         self.assertNotIn("Grask", catalog)
         result = _build_catalog_reference("How do we summon a Remnant?")
         self.assertIn("REAL REMNANTS SYSTEM", result)
+
+    def test_support_skilltree_catalog_grounds_real_armor_proficiency_training(self):
+        """
+        Real live bug (2026-08-20, dev-bridge, Coffee): Charvenna (a
+        Sorcerer, zero base armor proficiency) asked Support "Where do
+        you train to wear different levels of armor" and got back "The
+        Arcane Circle" -- a real guild, but one with nothing to do with
+        armor. The real answer is the Skill Tree's Weapon/Armor Mastery
+        upgrades, which had no catalog section in support_agent.py at
+        all until now.
+        """
+        from ai.support_agent import _skilltree_catalog_text, _build_catalog_reference
+        catalog = _skilltree_catalog_text()
+        self.assertIn("Light Armor Mastery", catalog)
+        self.assertIn("Heavy Armor Mastery", catalog)
+        self.assertIn("Shield Mastery", catalog)
+        self.assertIn("skill tree", catalog.lower())
+        result = _build_catalog_reference("Where do you train to wear different levels of armor")
+        self.assertIn("SKILL TREE", result)
+        self.assertIn("Armor Mastery", result)
 
     def test_equipable_worth_shown_in_stats_line(self):
         """Real live request (2026-08-03): "in the description of the items can u show what it is worth? do this for equipables"."""
