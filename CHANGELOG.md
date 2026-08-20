@@ -2,6 +2,59 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.275] — Three real live-combat bugs: scrolls, mid-fight equips, Counterspell replies
+
+**Bug 1 — scrolls silently spending a real spell slot.** Dev-bridge
+report (Coffee): "make sure using scrolls doesnt use spell slots,
+Charvenna is reporting that it does." Root cause: `_do_cast_spell`'s
+matching always checked `known_spells` FIRST, regardless of intent —
+a character who both knew a spell AND carried its scroll (Charvenna
+knew magic_missile/shield/fireball/lightning_bolt and carried scrolls
+of all four) could never actually reach the scroll branch, silently
+spending a real spell slot every time a scroll button was tapped,
+draining her to 0/4. Fixed at BOTH real scroll entry points (the
+in-battle Items→scroll flow AND the inventory/character-sheet scroll
+button) with an explicit `force_scroll_item_id`, plus an explicit
+"scroll" mention in free text ("use scroll of fireball") now also
+bypasses the known-spell check. Plain "cast X" with no scroll mention
+keeps the original sensible default (use your own known spell first).
+
+**Bug 2 — a mid-fight "equip X" was silently ignored.** Dev-bridge
+reports (Charvenna, twice): "I equipped the shortsword so why did it
+use the tempered dagger" / "My silvered dagger is equipped so why is
+it using the tempered dagger." ("Tempered Dagger" is itself a real,
+procedurally-generated per-instance magic item — `rules/item_
+generator.py` — not a bug on its own.) Root cause: `_do_equip_item`/
+`_do_unequip_item` only ever wrote the new equipment to the DATABASE —
+the live combat session's own in-memory participant dict (a separate
+copy `_weapon_for_attacker`/`armor_class` read directly) never got
+told, so a real mid-fight equip/unequip was silently ignored by every
+subsequent attack until the fight ended, same "combat mutates
+in-memory, DB write alone isn't enough" bug class spell slots already
+had once (`_refresh_real_player_spell_slots`). New
+`_sync_live_combat_equipment` pushes the change into the live session
+immediately, called right after a successful `db.equip_item`/
+`db.unequip_accessory`.
+
+**Bug 3 — the new Counterspell prompt (v1.27.274) only understood a
+button tap.** Live, same session: Coffee typed "Counter it" instead of
+tapping the Yes/No button, and it went nowhere (classified as silent
+"chat"). This game's whole design is plain English, no forced
+button-only flows — a reaction prompt that only understood a tap was a
+real regression of that promise. `_maybe_resolve_pending_reaction_
+from_text`, checked before ordinary intent classification in
+`adventure_master_handler`, now lets a pending reaction's very next
+message answer it in plain English too (matched against the prompt's
+own real yes/no labels plus generic yes/no words, word-boundary safe
+so short words like "n" can't false-positive inside unrelated text
+like "counter" or "moonpetal").
+
+Verified with real executed tests for all three (scroll: 4 tests
+covering both entry points and both free-text cases; equip-sync: a
+real mid-combat equip→attack test; Counterspell reply: a real
+plain-text-answers-the-prompt test plus an ambiguous-text-falls-
+through test).
+
 ## [1.27.274] — Counterspell now asks before spending your spell slot
 
 **Real dev-bridge report (2026-08-20, Coffee, live, with screenshot):**

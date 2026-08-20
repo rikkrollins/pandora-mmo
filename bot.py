@@ -3136,7 +3136,16 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 await _safe_edit_markup(query, InlineKeyboardMarkup(buttons))
                 return
         await _safe_edit_markup(query)
-        await _do_cast_spell(update, f"cast {spell_name}")
+        # Real live bug (2026-08-20, dev-bridge, Charvenna: "make sure
+        # using scrolls doesnt use spell slots... it does") -- same root
+        # cause as the inventory-screen scroll buttons (spell_menu_
+        # callback's castscroll fix): reconstructing plain "cast X" text
+        # here let _do_cast_spell's own known_spells-first matching pick
+        # the wrong resource whenever the caster ALSO knew this spell
+        # (Charvenna knew magic_missile/shield/fireball/lightning_bolt
+        # AND carried scrolls of all four). force_scroll_item_id makes
+        # this button's real intent explicit and unambiguous.
+        await _do_cast_spell(update, f"cast {spell_name}", force_scroll_item_id=value)
         return
 
     if action == "scrolltarget":
@@ -3144,7 +3153,7 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         spell = spells_module.get_spell(item.get("spell")) if item else None
         spell_name = spell["name"] if spell else (item["name"] if item else value)
         await _safe_edit_markup(query)
-        await _do_cast_spell(update, f"cast {spell_name} on {target_name}")
+        await _do_cast_spell(update, f"cast {spell_name} on {target_name}", force_scroll_item_id=value)
         return
 
     if action == "more":
@@ -4079,6 +4088,37 @@ def _refresh_real_player_spell_slots(character: dict) -> None:
     fresh = db.get_character(character["telegram_user_id"], character["chat_id"])
     if fresh:
         character["spell_slots_current"] = fresh["spell_slots_current"]
+
+
+def _sync_live_combat_equipment(telegram_user_id: int, chat_id: int, updated_character: dict) -> None:
+    """
+    Real live bug (2026-08-20, dev-bridge, Charvenna -- "I equipped the
+    shortsword so why did it use the tempered dagger", then again "My
+    silvered dagger is equipped so why is it using the tempered
+    dagger"): _do_equip_item/_do_unequip_item only ever wrote the new
+    equipment to the DATABASE (db.equip_item/db.unequip_accessory) --
+    if the character was already mid-combat, the live session
+    participant dict (a separate in-memory copy _weapon_for_attacker
+    and armor_class checks read directly, same "combat mutates in-
+    memory, never re-reads the DB mid-fight" shape spell slots already
+    had this exact bug for once, see _refresh_real_player_spell_slots)
+    kept its OLD equipped_weapon/armor_class forever, silently ignoring
+    every mid-fight equip/unequip. _do_attack's own existing "name a
+    weapon inline" branch (line ~8440) already had to work around this
+    by writing straight to the live participant dict -- this generalizes
+    that same fix to the real equip/unequip commands themselves, so
+    it's fixed at the source instead of needing a workaround at every
+    read site.
+    """
+    session = sessions.get_session_for_user(chat_id, telegram_user_id)
+    if session is None:
+        return
+    participant = next((p for p in session.participants if p["telegram_user_id"] == telegram_user_id), None)
+    if participant is None:
+        return
+    for field in ("equipped_weapon", "equipped_armor", "equipped_shield", "equipped_accessories", "armor_class"):
+        if field in updated_character:
+            participant[field] = updated_character[field]
 
 
 def _sync_player_to_db(character: dict) -> None:
@@ -7949,7 +7989,10 @@ async def _prompt_reaction_choice(
 ) -> bool:
     reaction_id = f"{random.getrandbits(64):x}"
     event = asyncio.Event()
-    _PENDING_REACTIONS[reaction_id] = {"event": event, "choice": False, "telegram_user_id": telegram_user_id}
+    _PENDING_REACTIONS[reaction_id] = {
+        "event": event, "choice": False, "telegram_user_id": telegram_user_id,
+        "yes_label": yes_label, "no_label": no_label,
+    }
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton(f"✅ {yes_label}", callback_data=f"reaction|{reaction_id}|yes"),
         InlineKeyboardButton(f"❌ {no_label}", callback_data=f"reaction|{reaction_id}|no"),
@@ -7964,6 +8007,65 @@ async def _prompt_reaction_choice(
         pass
     pending = _PENDING_REACTIONS.pop(reaction_id, None)
     return bool(pending["choice"]) if pending else False
+
+
+def _find_pending_reaction_for_user(telegram_user_id: int) -> tuple[str, dict] | None:
+    """Reverse lookup: is this specific user the one real reaction prompt is waiting on right now?"""
+    for reaction_id, pending in _PENDING_REACTIONS.items():
+        if pending["telegram_user_id"] == telegram_user_id:
+            return reaction_id, pending
+    return None
+
+
+async def _maybe_resolve_pending_reaction_from_text(update: Update, text: str) -> bool:
+    """
+    Real live gap (2026-08-20, dev-bridge, Coffee, mid-fight): after
+    Counterspell's new opt-in prompt (_prompt_reaction_choice) went
+    live, he typed "Counter it" in plain English instead of tapping the
+    button -- this game's whole design is "everything happens in plain
+    English, no slash commands or forced button-only flows required"
+    (CLAUDE.md), so a reaction prompt that ONLY understood a tap was a
+    real, immediate regression of that promise, not a hypothetical.
+    Checked first in adventure_master_handler, before ordinary intent
+    classification -- if this specific player has a real reaction
+    pending, their very next message answers it (matched against the
+    prompt's own real yes_label/no_label words, plus a small set of
+    generic yes/no words), rather than falling through to ordinary
+    intent parsing (which would have classified "Counter it" as
+    unclassifiable small talk and silently done nothing, exactly what
+    was reported). Returns True if this message was consumed as the
+    answer (caller should stop processing it any further); False if
+    this player has no pending reaction, or the text doesn't clearly
+    read as yes/no (left for ordinary intent classification instead,
+    never silently swallowed).
+    """
+    found = _find_pending_reaction_for_user(update.effective_user.id)
+    if found is None:
+        return False
+    reaction_id, pending = found
+    lowered = text.lower()
+    words = set(lowered.split())
+
+    def _matches(phrases: set[str]) -> bool:
+        # Real bug caught in testing (2026-08-20): single-letter/short
+        # words ("y", "n", "no") checked via bare substring matched
+        # false positives inside unrelated text ("n" inside "counter",
+        # inside "gather moonpetal flower"'s "moon") -- multi-word
+        # phrases stay substring-matched (safe, specific enough), but
+        # anything without a space must match a whole WORD, never a
+        # fragment of one.
+        return any((phrase in lowered) if " " in phrase else (phrase in words) for phrase in phrases)
+
+    yes_words = {"yes", "y", "yeah", "yep", "do it", "confirm"} | {pending["yes_label"].lower()}
+    no_words = {"no", "n", "nope", "skip", "decline", "don't", "dont"} | {pending["no_label"].lower()}
+    is_yes = _matches(yes_words)
+    is_no = _matches(no_words)
+    if is_yes == is_no:  # neither matched, or (pathologically) both did -- stay ambiguous, don't guess
+        return False
+    pending["choice"] = is_yes
+    pending["event"].set()
+    await _safe_send(update, f"{'✅' if is_yes else '❌'} Got it.")
+    return True
 
 
 async def reaction_prompt_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -20615,10 +20717,14 @@ async def _do_equip_item(update: Update, text: str) -> None:
     lines = []
     equipped_item_ids = []
     for item_id, _quantity in items_wanted:
-        success, message, _ = db.equip_item(target["telegram_user_id"], update.effective_chat.id, item_id)
+        success, message, updated = db.equip_item(target["telegram_user_id"], update.effective_chat.id, item_id)
         lines.append(f"⚔️ {prefix}{message}" if success else message)
         if success:
             equipped_item_ids.append(item_id)
+            # Real live bug fix (2026-08-20, Charvenna) -- see
+            # _sync_live_combat_equipment's own docstring.
+            if updated:
+                _sync_live_combat_equipment(target["telegram_user_id"], update.effective_chat.id, updated)
     await _safe_send(update, "\n".join(lines))
     for item_id in equipped_item_ids:
         item_data = items_module.get_item(item_id)
@@ -20657,8 +20763,12 @@ async def _do_unequip_item(update: Update, text: str) -> None:
 
     lines = []
     for item_id, _quantity in items_wanted:
-        success, message, _ = db.unequip_accessory(update.effective_user.id, update.effective_chat.id, item_id)
+        success, message, updated = db.unequip_accessory(update.effective_user.id, update.effective_chat.id, item_id)
         lines.append(f"🎽 {message}" if success else message)
+        # Real live bug fix (2026-08-20, Charvenna) -- see
+        # _sync_live_combat_equipment's own docstring.
+        if success and updated:
+            _sync_live_combat_equipment(update.effective_user.id, update.effective_chat.id, updated)
     await _safe_send(update, "\n".join(lines))
 
 
@@ -21808,11 +21918,21 @@ def _scroll_spell_buttons(character: dict, exclude_spell_ids: set[str] = frozens
             continue
         spell = spells_module.get_spell(spell_id)
         if spell:
-            buttons.append([InlineKeyboardButton(f"📜 {spell['name']} (scroll)", callback_data=f"spell|cast|{spell_id}")])
+            buttons.append([InlineKeyboardButton(f"📜 {spell['name']} (scroll)", callback_data=f"spell|castscroll|{spell_id}")])
     return buttons
 
 
-def _target_picker_keyboard(prefix: str, action_id: str, requester: dict) -> InlineKeyboardMarkup | None:
+def _scroll_item_id_for_spell(spell_id: str) -> str | None:
+    """Reverse lookup: the one real scroll item_id that grants this spell, if any (confirmed 1:1, never more than one scroll per spell in items.py)."""
+    for item_id, item_data in items_module.ITEMS.items():
+        if item_data.get("type") == "scroll" and item_data.get("spell") == spell_id:
+            return item_id
+    return None
+
+
+def _target_picker_keyboard(
+    prefix: str, action_id: str, requester: dict, target_action: str = "target",
+) -> InlineKeyboardMarkup | None:
     """
     Shared second-step target picker for _spell_keyboard/_item_keyboard
     (task #176 revision, per Coffee): "Self" plus every other REAL party
@@ -21822,14 +21942,19 @@ def _target_picker_keyboard(prefix: str, action_id: str, requester: dict) -> Inl
     built when there's actually someone else here to pick -- callers
     skip straight to a self-cast/self-use otherwise, so this never adds
     an empty, pointless extra tap.
+
+    `target_action` (2026-08-20, scroll fix): lets a scroll cast's
+    target picker route back through "targetscroll" instead of the
+    default "target", so the scroll intent survives this second tap
+    too -- see spell_menu_callback's castscroll/targetscroll handling.
     """
     eligible = _get_combat_eligible_party_members(requester["current_location"], requester["chat_id"])
     others = [p for p in eligible if p["telegram_user_id"] != requester["telegram_user_id"]]
     if not others:
         return None
-    buttons = [[InlineKeyboardButton("🧍 Self", callback_data=f"{prefix}|target|{action_id}|self")]]
+    buttons = [[InlineKeyboardButton("🧍 Self", callback_data=f"{prefix}|{target_action}|{action_id}|self")]]
     buttons += [
-        [InlineKeyboardButton(p["name"], callback_data=f"{prefix}|target|{action_id}|{p['telegram_user_id']}")]
+        [InlineKeyboardButton(p["name"], callback_data=f"{prefix}|{target_action}|{action_id}|{p['telegram_user_id']}")]
         for p in others
     ]
     return InlineKeyboardMarkup(buttons)
@@ -21871,6 +21996,53 @@ async def spell_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         if target_character is None:
             return
         await _do_cast_spell(update, f"cast {spell['name']} on {target_character['name']}")
+        return
+
+    # Real live bug (2026-08-20, dev-bridge, Charvenna): the scroll
+    # button reused the exact same "spell|cast|<id>" callback_data as a
+    # known-spell button, with no way for _do_cast_spell to tell which
+    # one was actually tapped -- if the character ALSO knew that spell
+    # (Charvenna knew magic_missile/shield/fireball/lightning_bolt AND
+    # carried scrolls of all four), _do_cast_spell's own text-matching
+    # always checked known_spells first and silently spent a real spell
+    # slot instead of the scroll, draining her to 0/4. castscroll/
+    # targetscroll are a real, explicit, separate action name so the
+    # scroll button's own intent can never be reinterpreted as a
+    # known-spell cast -- see _do_cast_spell's force_scroll_item_id.
+    if action == "castscroll":
+        spell_id = parts[2] if len(parts) > 2 else None
+        spell = spells_module.get_spell(spell_id) if spell_id else None
+        character = db.get_character(update.effective_user.id, update.effective_chat.id)
+        if spell is None or character is None:
+            return
+        item_id = _scroll_item_id_for_spell(spell_id)
+        if item_id is None:
+            return
+        picker = _target_picker_keyboard("spell", spell_id, character, target_action="targetscroll")
+        if picker is None:
+            await _do_cast_spell(update, f"cast {spell['name']}", force_scroll_item_id=item_id)
+            return
+        await _safe_edit_markup(query, picker)
+        return
+
+    if action == "targetscroll":
+        spell_id = parts[2] if len(parts) > 2 else None
+        target_token = parts[3] if len(parts) > 3 else None
+        spell = spells_module.get_spell(spell_id) if spell_id else None
+        if spell is None or target_token is None:
+            return
+        item_id = _scroll_item_id_for_spell(spell_id)
+        if item_id is None:
+            return
+        if target_token == "self":
+            await _do_cast_spell(update, f"cast {spell['name']}", force_scroll_item_id=item_id)
+            return
+        target_character = db.get_character(int(target_token), update.effective_chat.id)
+        if target_character is None:
+            return
+        await _do_cast_spell(
+            update, f"cast {spell['name']} on {target_character['name']}", force_scroll_item_id=item_id,
+        )
 
 
 # Revivify/scroll_revivify's revival amount (2026-07-25, per Coffee's
@@ -21990,7 +22162,7 @@ def _text_mentions_spell(spell_id: str, spell_name: str, lowered_text: str) -> b
     return difflib.SequenceMatcher(None, squashed_text, squashed_name).ratio() >= 0.82
 
 
-async def _do_cast_spell(update: Update, text: str) -> None:
+async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | None = None) -> None:
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
         await update.effective_chat.send_message(
@@ -22000,18 +22172,42 @@ async def _do_cast_spell(update: Update, text: str) -> None:
 
     spell_id = None
     lowered = text.lower()
-    for candidate in character["known_spells"]:
-        spell = spells_module.get_spell(candidate)
-        if spell and _text_mentions_spell(candidate, spell["name"], lowered):
-            spell_id = candidate
-            break
-
-    # Not a spell this character knows — but a scroll in their own
-    # backpack lets anyone use its one spell regardless, same as real
-    # 5E scrolls. Consumed on a successful cast, no spell slot spent
-    # (the scroll IS the resource being spent).
     via_scroll = False
     scroll_item_id = None
+
+    # Real live bug (2026-08-20, dev-bridge, Charvenna: "make sure using
+    # scrolls doesnt use spell slots... it does"). Root cause: this
+    # match always checked known_spells FIRST regardless of intent, so
+    # a character who both knew a spell AND carried its scroll (exactly
+    # Charvenna's case -- magic_missile/shield/fireball/lightning_bolt,
+    # all four known AND scrolled) could never actually reach the
+    # scroll branch below, silently spending a real spell slot every
+    # time, draining her to 0/4. `force_scroll_item_id` (set by the
+    # scroll button's own real castscroll/targetscroll callback action,
+    # spell_menu_callback) makes the tap's intent explicit and
+    # unambiguous, skipping known_spells matching entirely. For typed
+    # free text, an explicit "scroll" mention is the same strong signal
+    # -- checked before known_spells for the same reason.
+    if force_scroll_item_id is not None:
+        item_data = items_module.get_item(force_scroll_item_id)
+        candidate = item_data.get("spell") if item_data else None
+        spell = spells_module.get_spell(candidate) if candidate else None
+        if spell and (character.get("inventory") or {}).get(force_scroll_item_id, 0) > 0:
+            spell_id, via_scroll, scroll_item_id = candidate, True, force_scroll_item_id
+
+    mentions_scroll = "scroll" in lowered
+    if spell_id is None and not mentions_scroll:
+        for candidate in character["known_spells"]:
+            spell = spells_module.get_spell(candidate)
+            if spell and _text_mentions_spell(candidate, spell["name"], lowered):
+                spell_id = candidate
+                break
+
+    # Not a spell this character knows (or the text explicitly named a
+    # scroll) — a scroll in their own backpack lets anyone use its one
+    # spell regardless, same as real 5E scrolls. Consumed on a
+    # successful cast, no spell slot spent (the scroll IS the resource
+    # being spent).
     if spell_id is None:
         for item_id, qty in character["inventory"].items():
             if qty <= 0:
@@ -22023,6 +22219,17 @@ async def _do_cast_spell(update: Update, text: str) -> None:
             spell = spells_module.get_spell(candidate) if candidate else None
             if spell and _text_mentions_spell(candidate, spell["name"], lowered):
                 spell_id, via_scroll, scroll_item_id = candidate, True, item_id
+                break
+
+    # A "scroll" mention that didn't actually match anything above (no
+    # such scroll carried) still falls back to a known spell of the
+    # same name, rather than a flat refusal when the character could
+    # have just cast it normally.
+    if spell_id is None and mentions_scroll:
+        for candidate in character["known_spells"]:
+            spell = spells_module.get_spell(candidate)
+            if spell and _text_mentions_spell(candidate, spell["name"], lowered):
+                spell_id = candidate
                 break
 
     # Phase 3 of the magic item system (2026-08-02): a third fallback --
@@ -23576,6 +23783,14 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # other processing, including touch_last_active, so a ban is a real
     # dead end, not just a quieter version of playing.
     if await asyncio.to_thread(db.is_banned, update.effective_user.id):
+        return
+
+    # Real live gap (2026-08-20, Coffee, mid-fight: typed "Counter it"
+    # instead of tapping the new reaction-prompt button) -- see
+    # _maybe_resolve_pending_reaction_from_text's own docstring. Checked
+    # before ordinary intent classification so a pending reaction's
+    # answer is never misread as unrelated chat.
+    if await _maybe_resolve_pending_reaction_from_text(update, update.message.text):
         return
 
     global _LAST_KNOWN_CHAT_ID

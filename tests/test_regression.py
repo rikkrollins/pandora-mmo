@@ -3362,7 +3362,6 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(live.get("equipped_weapon"), "silvered_dagger")
         self.assertEqual(db.get_character(user_id, -999).get("equipped_weapon"), "silvered_dagger")
         self.assertTrue(any("silvered dagger" in line.lower() for line in sink))
-        sessions.end_session(-999)
 
         # No regression: attacking with no weapon named, or already
         # holding the named one, changes nothing and equips nothing new.
@@ -3380,6 +3379,57 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session2.turn_order = [user_id2, -2_500_055]
         await bot._do_attack(FakeUpdate(user_id2, "I attack the dummy", []), "I attack the dummy", forced_roll=1)
         self.assertEqual(db.get_character(user_id2, -999).get("equipped_weapon"), equipped_before)
+        sessions.end_session(-999)
+
+    async def test_equip_command_mid_combat_updates_the_live_session_not_just_the_db(self):
+        """
+        Real live bug (2026-08-20, dev-bridge, Charvenna, two separate
+        reports): "I equipped the shortsword so why did it use the
+        tempered dagger" / "My silvered dagger is equipped so why is it
+        using the tempered dagger." Different shape than the sibling
+        test above (which covers naming a weapon INLINE inside the
+        attack text itself, e.g. "attack X with Y") -- this is the
+        SEPARATE real "equip X" command, said on its own mid-fight, not
+        as part of an attack. _do_equip_item only ever wrote the new
+        equipped_weapon to the database (db.equip_item) -- the live
+        combat session's own participant dict (a separate in-memory
+        copy _weapon_for_attacker reads directly) never got told, so a
+        mid-fight equip was silently ignored by every subsequent plain
+        "attack" until the fight ended. ("Tempered Dagger" itself is a
+        real, procedurally-generated per-instance magic item --
+        rules/item_generator.py -- not a hallucination; the bug is that
+        combat kept using WHATEVER weapon was equipped at the live
+        session's own start, ignoring a real mid-fight re-equip.) Fixed
+        via _sync_live_combat_equipment, called right after a
+        successful db.equip_item.
+        """
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900485
+        make_basic_character(user_id, "MidFightEquipper", current_location="crossroads_tavern",
+                              inventory={"shortsword": 1, "silvered_dagger": 1})
+        db.equip_item(user_id, -999, "shortsword")
+        enemy_id = -2_500_056
+        enemy = {
+            "telegram_user_id": enemy_id, "name": "Spider 5", "strength": 10, "dexterity": 10,
+            "armor_class": 5, "hp_current": 50, "hp_max": 50, "is_ai": 1, "monster_key": "goblin",
+        }
+        player = db.get_character(user_id, -999)
+        self.assertEqual(player.get("equipped_weapon"), "shortsword")
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", enemy_id: "enemy"})
+        session.turn_order = [user_id, enemy_id]
+        session.current_turn_index = 0
+
+        sink = []
+        await bot._do_equip_item(FakeUpdate(user_id, "equip silvered dagger", sink), "equip silvered dagger")
+        live = next(p for p in session.participants if p["telegram_user_id"] == user_id)
+        self.assertEqual(live.get("equipped_weapon"), "silvered_dagger")
+
+        sink2 = []
+        await bot._do_attack(FakeUpdate(user_id, "attack spider 5", sink2), "attack spider 5", forced_roll=20)
+        self.assertTrue(any("silvered dagger" in line.lower() for line in sink2), sink2)
+        self.assertFalse(any("shortsword" in line.lower() for line in sink2), sink2)
         sessions.end_session(-999)
 
     # -- Assassin Backstab + universal Throw (2026-08-08, per Coffee) --
@@ -6830,6 +6880,56 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(timeout_result)
         self.assertEqual(len(bot._PENDING_REACTIONS), 0)
 
+    async def test_pending_reaction_answered_by_plain_text_not_just_a_button_tap(self):
+        """
+        Real live gap (2026-08-20, dev-bridge, Coffee, mid-fight): typed
+        "Counter it" in plain English instead of tapping the new
+        reaction-prompt button -- this game's whole design is "no slash
+        commands or forced button-only flows, everything happens in
+        plain English" (CLAUDE.md), so a reaction prompt that only
+        understood a tap was a real, immediate regression of that
+        promise. _maybe_resolve_pending_reaction_from_text is checked
+        in adventure_master_handler before ordinary intent
+        classification -- this test drives it directly.
+        """
+        import asyncio
+        sink = []
+        update = FakeUpdate(996101, "look", sink)
+        task = asyncio.create_task(
+            bot._prompt_reaction_choice(update, 996101, "Counter it?", "Counter it", "Let it land"),
+        )
+        await asyncio.sleep(0.05)
+        self.assertEqual(len(bot._PENDING_REACTIONS), 1)
+
+        reply_sink = []
+        reply_update = FakeUpdate(996101, "Counter it", reply_sink)
+        consumed = await bot._maybe_resolve_pending_reaction_from_text(reply_update, "Counter it")
+        self.assertTrue(consumed)
+        result = await asyncio.wait_for(task, timeout=5)
+        self.assertTrue(result)
+        self.assertEqual(len(bot._PENDING_REACTIONS), 0)
+
+    async def test_pending_reaction_no_answer_falls_back_to_ordinary_text(self):
+        """A message that doesn't clearly read as yes/no is left for ordinary intent classification -- never silently swallowed as a guess."""
+        import asyncio
+        sink = []
+        update = FakeUpdate(996102, "look", sink)
+        task = asyncio.create_task(
+            bot._prompt_reaction_choice(update, 996102, "Counter it?", "Counter it", "Let it land"),
+        )
+        await asyncio.sleep(0.05)
+
+        unrelated_update = FakeUpdate(996102, "gather moonpetal flower", [])
+        consumed = await bot._maybe_resolve_pending_reaction_from_text(unrelated_update, "gather moonpetal flower")
+        self.assertFalse(consumed)
+        self.assertEqual(len(bot._PENDING_REACTIONS), 1)  # still pending -- not consumed
+
+        yes_update = FakeUpdate(996102, "yes", [])
+        consumed2 = await bot._maybe_resolve_pending_reaction_from_text(yes_update, "yes")
+        self.assertTrue(consumed2)
+        result = await asyncio.wait_for(task, timeout=5)
+        self.assertTrue(result)
+
     async def test_shield_reaction_announcement_states_slots_remaining(self):
         """
         Same real dev-bridge report as the Counterspell test above --
@@ -8754,6 +8854,128 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         caster_p = next(p for p in session.participants if p["telegram_user_id"] == caster_id)
         self.assertIn("shield_active", ally_p.get("conditions", []))
         self.assertNotIn("shield_active", caster_p.get("conditions", []))
+        sessions.end_session(-999)
+
+    # -- Real live bug (2026-08-20, dev-bridge, Coffee: "make sure using
+    #    scrolls doesnt use spell slots, Charvenna is reporting that it
+    #    does"). Root cause: a caster who ALSO knew the scrolled spell
+    #    (Charvenna knew magic_missile/shield/fireball/lightning_bolt AND
+    #    carried scrolls of all four) always matched known_spells FIRST
+    #    in _do_cast_spell, so tapping a scroll button silently spent a
+    #    real spell slot instead of the scroll -- confirmed live, drained
+    #    her to 0/4. Fixed via an explicit force_scroll_item_id (button
+    #    taps) and an explicit "scroll" text mention (free text) that
+    #    both now bypass the known_spells check entirely. -------------
+    async def test_battle_menu_scroll_never_spends_a_slot_even_when_the_spell_is_also_known(self):
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        caster_id = 950943
+        make_basic_character(
+            caster_id, "KnownAndScrolledCaster", char_class="Wizard", current_location="crossroads_tavern",
+            known_spells=["fireball"], inventory={"scroll_fireball": 3},
+        )
+        db.update_character(caster_id, -999, spell_slots_current=4, spell_slots_max=4)
+        enemy = {"telegram_user_id": -5200913, "name": "ScrollFireballGoblin", "dexterity": 10,
+                 "strength": 10, "hp_current": 200, "hp_max": 200, "conditions": [], "resistances": [], "vulnerabilities": [], "is_ai": 1}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        session = sessions.start_session(-999, [caster, enemy], {caster_id: "party", -5200913: "enemy"})
+        session.turn_order = [caster_id, -5200913]
+
+        sink = []
+        with patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            await bot.battle_menu_callback(FakeCallbackUpdate(caster_id, "bm|scroll|scroll_fireball", sink), DummyContext())
+        # A single enemy skips the target picker and casts immediately.
+        after = db.get_character(caster_id, -999)
+        self.assertEqual(after["spell_slots_current"], 4)  # untouched -- the SCROLL was spent, not a slot
+        self.assertEqual(after["inventory"].get("scroll_fireball", 0), 2)  # scroll consumed
+        sessions.end_session(-999)
+
+    async def test_inventory_scroll_button_never_spends_a_slot_even_when_the_spell_is_also_known(self):
+        """Same real bug, the OTHER scroll entry point (the inventory/character-sheet 'castscroll' button, not the in-battle Items one)."""
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        caster_id = 950944
+        make_basic_character(
+            caster_id, "InventoryScrollCaster", char_class="Wizard", current_location="crossroads_tavern",
+            known_spells=["magic_missile"], inventory={"scroll_magic_missile": 3},
+        )
+        db.update_character(caster_id, -999, spell_slots_current=4, spell_slots_max=4)
+        enemy = {"telegram_user_id": -5200914, "name": "InvScrollGoblin", "dexterity": 10,
+                 "strength": 10, "hp_current": 200, "hp_max": 200, "conditions": [], "resistances": [], "vulnerabilities": [], "is_ai": 1}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        session = sessions.start_session(-999, [caster, enemy], {caster_id: "party", -5200914: "enemy"})
+        session.turn_order = [caster_id, -5200914]
+
+        buttons = bot._scroll_spell_buttons(caster)
+        callback_datas = [btn.callback_data for row in buttons for btn in row]
+        self.assertIn("spell|castscroll|magic_missile", callback_datas)
+
+        sink = []
+        with patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            await bot.spell_menu_callback(
+                FakeCallbackUpdate(caster_id, "spell|castscroll|magic_missile", sink), DummyContext(),
+            )
+        after = db.get_character(caster_id, -999)
+        self.assertEqual(after["spell_slots_current"], 4)  # untouched
+        self.assertEqual(after["inventory"].get("scroll_magic_missile", 0), 2)  # scroll consumed
+        sessions.end_session(-999)
+
+    async def test_plain_cast_text_still_prefers_the_known_spell_over_a_carried_scroll(self):
+        """Regression guard: plain 'cast X' text with no 'scroll' mention keeps the ORIGINAL sensible default -- use your own known spell, leave the scroll alone."""
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        caster_id = 950945
+        make_basic_character(
+            caster_id, "PlainCastCaster", char_class="Wizard", current_location="crossroads_tavern",
+            known_spells=["fireball"], inventory={"scroll_fireball": 3},
+        )
+        db.update_character(caster_id, -999, spell_slots_current=4, spell_slots_max=4)
+        enemy = {"telegram_user_id": -5200915, "name": "PlainCastGoblin", "dexterity": 10,
+                 "strength": 10, "hp_current": 200, "hp_max": 200, "conditions": [], "resistances": [], "vulnerabilities": [], "is_ai": 1}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        session = sessions.start_session(-999, [caster, enemy], {caster_id: "party", -5200915: "enemy"})
+        session.turn_order = [caster_id, -5200915]
+
+        sink = []
+        with patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            await bot._do_cast_spell(FakeUpdate(caster_id, "cast fireball", sink, chat_id=-999), "cast fireball")
+        after = db.get_character(caster_id, -999)
+        self.assertEqual(after["spell_slots_current"], 3)  # a real slot WAS spent -- the known spell was used
+        self.assertEqual(after["inventory"].get("scroll_fireball", 0), 3)  # scroll untouched
+        sessions.end_session(-999)
+
+    async def test_explicit_scroll_mention_in_free_text_uses_the_scroll_not_the_known_spell(self):
+        """The other half of the fix: typed 'use scroll of X' (not just a button tap) must also skip the known-spell slot-spend."""
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        caster_id = 950946
+        make_basic_character(
+            caster_id, "FreeTextScrollCaster", char_class="Wizard", current_location="crossroads_tavern",
+            known_spells=["fireball"], inventory={"scroll_fireball": 3},
+        )
+        db.update_character(caster_id, -999, spell_slots_current=4, spell_slots_max=4)
+        enemy = {"telegram_user_id": -5200916, "name": "FreeTextScrollGoblin", "dexterity": 10,
+                 "strength": 10, "hp_current": 200, "hp_max": 200, "conditions": [], "resistances": [], "vulnerabilities": [], "is_ai": 1}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        session = sessions.start_session(-999, [caster, enemy], {caster_id: "party", -5200916: "enemy"})
+        session.turn_order = [caster_id, -5200916]
+
+        sink = []
+        with patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            await bot._do_cast_spell(
+                FakeUpdate(caster_id, "use scroll of fireball", sink, chat_id=-999), "use scroll of fireball",
+            )
+        after = db.get_character(caster_id, -999)
+        self.assertEqual(after["spell_slots_current"], 4)  # untouched -- the SCROLL was used
+        self.assertEqual(after["inventory"].get("scroll_fireball", 0), 2)  # scroll consumed
         sessions.end_session(-999)
 
     async def test_scroll_of_shield_via_battle_menu_offers_an_ally_target_picker(self):
