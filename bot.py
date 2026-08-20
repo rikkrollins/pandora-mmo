@@ -22401,10 +22401,23 @@ async def _do_show_story_so_far(update: Update) -> None:
     # just not repeated N times.
     locked_count = 0
     for arc_id, arc in CAMPAIGN.get("story_arcs", {}).items():
-        arc_quests = set(arc.get("quests", []))
+        arc_quest_ids = arc.get("quests", [])
+        arc_quests = set(arc_quest_ids)
         if arc_quests and arc_quests.issubset(completed_ids):
             completed_arcs.append((arc["title"], arc["description"]))
             chapter_lines.append(f"✅ {arc['title']}")
+            # Real live request (2026-08-20, Coffee: "in the story so
+            # far show the completed quests related to the story-arc.
+            # places those quests in chronological order"). arc["quests"]
+            # is already the chapter's own real, hand-authored quest
+            # sequence (campaign.json), so iterating it directly -- not
+            # the `arc_quests` set above, which loses that order -- is
+            # already the real chronological order within this chapter,
+            # no separate sort/timestamp needed.
+            for quest_id in arc_quest_ids:
+                quest = CAMPAIGN["quests"].get(quest_id)
+                if quest:
+                    chapter_lines.append(f"    • {quest['title']}")
         elif arc_id == current_arc_id:
             chapter_lines.append(f"▶️ {arc['title']} *(current)*")
         else:

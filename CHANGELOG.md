@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.289] — Story So Far lists each completed chapter's real quests in order
+
+**Real live request (2026-08-20, Coffee):** "in the story so far show
+the completed quests related to the story-arc. places those quests in
+chronological order in the story so far." `_do_show_story_so_far`'s
+structured chapter list previously showed only "✅ {chapter title}"
+with no breakdown of what was actually done in it. Each completed
+chapter now lists its own real quest titles underneath, in the
+chapter's own hand-authored order (`story_arcs[...]["quests"]`,
+campaign.json's real chronological sequence — not a re-sort, not
+invented) — e.g. Discovery now shows "A Favor for Grimsby," "The
+Hollow Stump," "Clear the Goblin Warrens" beneath it, in that order.
+
 ## [1.27.288] — Quest Menu: browsable list, real detail view, guild tasks, proactive accept/decline
 
 **Real live request (2026-08-20, Coffee, dev-bridge screenshots + live

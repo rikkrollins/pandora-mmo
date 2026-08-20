@@ -18526,6 +18526,36 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         rumor_ids = [rid for rid, _data in remnants_module.rumors_for_character(character)]
         self.assertNotIn(secret_id, rumor_ids)
 
+    async def test_story_so_far_lists_a_completed_chapters_real_quests_in_order(self):
+        """
+        Real live request (2026-08-20, Coffee): "in the story so far
+        show the completed quests related to the story-arc. places
+        those quests in chronological order in the story so far." Uses
+        arc_1_discovery's own real, hand-authored quest order
+        (campaign.json) -- welcome_to_the_crossroads, then
+        the_hollow_stump, then clear_the_warrens -- never a re-sorted
+        or invented order.
+        """
+        from unittest.mock import patch
+        user_id = 996100
+        make_basic_character(user_id, "ChapterQuestLister", current_location="crossroads_tavern")
+        arc = bot.CAMPAIGN["story_arcs"]["arc_1_discovery"]
+        self.assertEqual(arc["quests"], ["welcome_to_the_crossroads", "the_hollow_stump", "clear_the_warrens"])
+        db.update_character(user_id, -999, completed_quests=list(arc["quests"]))
+        sink = []
+        with patch("bot.narrate_story_so_far", return_value="Their tale so far."), \
+             patch("bot.narrate_next_step_hint", return_value="Onward."), \
+             patch("bot._send_generated_image", return_value=None):
+            await bot._do_show_story_so_far(FakeUpdate(user_id, "story so far", sink))
+        combined = "\n".join(sink)
+        self.assertIn("✅ Discovery", combined)
+        grimsby_idx = combined.find("A Favor for Grimsby")
+        stump_idx = combined.find("The Hollow Stump")
+        warrens_idx = combined.find("Clear the Goblin Warrens")
+        self.assertTrue(grimsby_idx != -1 and stump_idx != -1 and warrens_idx != -1, combined)
+        self.assertLess(grimsby_idx, stump_idx)
+        self.assertLess(stump_idx, warrens_idx)
+
     async def test_story_so_far_shows_a_real_whisper_for_a_visited_unbound_remnant(self):
         from unittest.mock import patch
         story_tied_id, story_tied_data = next(
