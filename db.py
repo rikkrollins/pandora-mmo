@@ -3148,12 +3148,27 @@ def expire_stale_board_quests() -> list[dict]:
     window has passed, back to the board for someone else. Returns the
     rows that were just expired (for narration/logging), not deleted --
     the location simply gets a fresh one generated next time it's checked.
+
+    Real live bug (2026-08-20, Coffee, screenshot: "This didnt work" --
+    replying "Keep it and collect the reward" to a real "Ready to
+    decide" prompt got "You don't have a decision to make right now").
+    A plain quest auto-turns in and sets completed_at the moment its
+    progress reaches objective_count, so this query already correctly
+    left those alone. A BRANCHING quest deliberately does NOT set
+    completed_at at that point -- it waits at full progress for the
+    player's choice, which is the entire point of "Ready to decide."
+    This query never accounted for that: a player who finished every
+    objective but hadn't replied yet still had their real, earned
+    quest silently expired and reset to progress_count=0 by this same
+    24h-from-ACCEPTANCE window, discarding real work with no warning.
+    progress_count < objective_count now excludes any quest that's
+    already fully earned and just waiting on a choice.
     """
     now_iso = datetime.now(timezone.utc).isoformat()
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT * FROM board_quests WHERE accepted_by IS NOT NULL AND completed_at IS NULL "
-            "AND expires_at IS NOT NULL AND expires_at < ?",
+            "AND expires_at IS NOT NULL AND expires_at < ? AND progress_count < objective_count",
             (now_iso,),
         ).fetchall()
         expired = [_board_quest_row_to_dict(r) for r in rows]
@@ -3161,7 +3176,7 @@ def expire_stale_board_quests() -> list[dict]:
             conn.execute(
                 "UPDATE board_quests SET accepted_by = NULL, accepted_at = NULL, expires_at = NULL, "
                 "progress_count = 0 WHERE accepted_by IS NOT NULL AND completed_at IS NULL "
-                "AND expires_at IS NOT NULL AND expires_at < ?",
+                "AND expires_at IS NOT NULL AND expires_at < ? AND progress_count < objective_count",
                 (now_iso,),
             )
     return expired

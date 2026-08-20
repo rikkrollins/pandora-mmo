@@ -1331,10 +1331,11 @@ def _arc_opening_preamble() -> str:
     )
 
 
-def _build_arc_opening_prompt(arc_title: str, arc_description: str, quest_title: str) -> str:
+def _build_arc_opening_prompt(arc_title: str, arc_description: str, quest_title: str, character_name: str) -> str:
     return (
         f"{_arc_opening_preamble()}\n\n"
         f"Real facts (narrate ONLY these, faithfully):\n"
+        f"Character: {character_name}\n"
         f"New chapter beginning: {arc_title}\n"
         f"What this chapter is about: {arc_description}\n"
         f"The quest that opens it: {quest_title}\n\n"
@@ -1342,7 +1343,7 @@ def _build_arc_opening_prompt(arc_title: str, arc_description: str, quest_title:
     )
 
 
-def narrate_arc_opening(arc_title: str, arc_description: str, quest_title: str) -> str:
+def narrate_arc_opening(arc_title: str, arc_description: str, quest_title: str, character_name: str) -> str:
     """
     Cutscene-style bookend to narrate_chapter_climax's ending flourish:
     fires once, the moment a character accepts the FIRST quest of a new
@@ -1352,8 +1353,17 @@ def narrate_arc_opening(arc_title: str, arc_description: str, quest_title: str) 
     20). Same rules-decide/AI-narrates split as every other narration
     call: the arc's title/description and the quest's title are already-
     decided real facts, never invented here.
+
+    Real live bug (2026-08-20, Coffee, screenshot: "I think the
+    narration made a mistake"): this prompt told the model, via
+    _NAMING_INSTRUCTION, to always use "whatever is given on the
+    Character: line" -- but never actually included a Character: line
+    at all, unlike every other narration call in this file. With no
+    real name to anchor to, the model invented one ("Aria") instead of
+    the real player's character. character_name is now a required real
+    fact here too, same as everywhere else.
     """
-    prompt = _build_arc_opening_prompt(arc_title, arc_description, quest_title)
+    prompt = _build_arc_opening_prompt(arc_title, arc_description, quest_title, character_name)
     try:
         response = requests.post(
             f"{config.OLLAMA_BASE_URL}/api/generate",

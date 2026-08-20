@@ -916,6 +916,27 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # story line and side line content also" -- a real chapter-
         # opening image call must fire alongside the narration.
         self.assertTrue(mock_image.called)
+        # Real live bug (2026-08-20, Coffee, screenshot: "I think the
+        # narration made a mistake" -- the model invented a name,
+        # "Aria," because the real character's name was never passed
+        # into this prompt at all). The real character's actual name
+        # must now be a real positional arg every call.
+        self.assertIn("Cutscenetester", mock_narrate.call_args.args)
+
+    def test_arc_opening_prompt_includes_a_real_character_line(self):
+        """
+        Real live bug (2026-08-20, Coffee, screenshot: "I think the
+        narration made a mistake") -- _build_arc_opening_prompt told
+        the model (via _NAMING_INSTRUCTION) to use "whatever is given
+        on the Character: line above," but never actually included one,
+        so the model invented a name ("Aria") that belongs to no real
+        character in this game. A real Character: line is now always
+        present, same convention every other dm_agent prompt builder
+        already follows.
+        """
+        from ai.dm_agent import _build_arc_opening_prompt
+        prompt = _build_arc_opening_prompt("Discovery", "Small, strange things.", "A Favor for Grimsby", "Ravenloft")
+        self.assertIn("Character: Ravenloft", prompt)
 
     async def test_arc_opening_cutscene_does_not_repeat_mid_chapter(self):
         """Sibling to the test above: a LATER quest in the same arc (not arc["quests"][0]) must not re-trigger the opening cutscene."""
@@ -11335,6 +11356,58 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(active), board_quests_module.DAILY_BOARD_QUEST_COUNT)
         self.assertTrue(all(not q.get("completed_at") for q in active),
                          "a completed quest should never be returned for display")
+
+    def test_expire_stale_board_quests_never_discards_a_ready_to_resolve_branching_quest(self):
+        """
+        Real live bug (2026-08-20, Coffee, screenshot: "This didnt
+        work" -- replying "Keep it and collect the reward" to a real
+        "Ready to decide" prompt got "You don't have a decision to
+        make right now"). A branching board quest deliberately holds
+        at full progress with completed_at still NULL until the player
+        actually picks -- that's the whole point of "Ready to decide."
+        expire_stale_board_quests() never accounted for that: once its
+        24h-from-acceptance window passed, a quest the player had
+        ALREADY fully earned got silently reset to progress_count=0
+        and unaccepted, discarding real work with zero warning. A
+        genuinely still-incomplete quest past its window must still
+        expire normally (no regression).
+        """
+        location_id = "stonearch_bridge"
+        user_id = 900491
+        make_basic_character(user_id, "BranchQuestExpiryTester", chat_id=-999)
+
+        ready = db.create_board_quest(
+            location_id, -999, "expiry-test-ready", "Ready bounty", "...", None,
+            "defeat_monster", "goblin", 2, 50, 20,
+        )
+        db.accept_board_quest(ready["board_quest_id"], user_id, -999)
+        db.record_board_quest_progress(ready["board_quest_id"], 2)  # fully earned, awaiting a choice
+
+        incomplete = db.create_board_quest(
+            location_id, -999, "expiry-test-incomplete", "Incomplete bounty", "...", None,
+            "defeat_monster", "goblin", 5, 50, 20,
+        )
+        db.accept_board_quest(incomplete["board_quest_id"], user_id, -999)
+        db.record_board_quest_progress(incomplete["board_quest_id"], 1)  # still short of objective_count
+
+        past = "2020-01-01T00:00:00+00:00"
+        with db.get_connection() as conn:
+            conn.execute(
+                "UPDATE board_quests SET expires_at = ? WHERE board_quest_id IN (?, ?)",
+                (past, ready["board_quest_id"], incomplete["board_quest_id"]),
+            )
+
+        expired = db.expire_stale_board_quests()
+        expired_ids = {q["board_quest_id"] for q in expired}
+        self.assertNotIn(ready["board_quest_id"], expired_ids)
+        self.assertIn(incomplete["board_quest_id"], expired_ids)
+
+        still_ready = next(q for q in db.get_accepted_board_quests_for_user(user_id, -999) if q["board_quest_id"] == ready["board_quest_id"])
+        self.assertEqual(still_ready["progress_count"], 2)
+        self.assertEqual(still_ready["accepted_by"], user_id)
+
+        now_unaccepted = [q for q in db.get_accepted_board_quests_for_user(user_id, -999) if q["board_quest_id"] == incomplete["board_quest_id"]]
+        self.assertEqual(now_unaccepted, [])
 
     def test_board_quests_completed_counter_increments(self):
         user_id = 900490

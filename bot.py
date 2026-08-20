@@ -11074,7 +11074,7 @@ async def _arc_opening_note(update: Update, character: dict, quest_id: str, ques
     if already_touched & set(arc_quests):
         return ""
     opening_text = await asyncio.to_thread(
-        narrate_arc_opening, arc["title"], arc["description"], quest["title"],
+        narrate_arc_opening, arc["title"], arc["description"], quest["title"], character["name"],
     )
     await _maybe_send_arc_opening_image(update, arc_id, arc)
     return f"🎬 **{arc['title']}**\n{opening_text}\n\n"
@@ -11145,7 +11145,7 @@ async def _do_replay_chapter_intro(update: Update, arc_id: str | None = None) ->
     arc_quests = arc.get("quests", [])
     first_quest = CAMPAIGN["quests"].get(arc_quests[0]) if arc_quests else None
     quest_title = first_quest["title"] if first_quest else arc["title"]
-    opening_text = await asyncio.to_thread(narrate_arc_opening, arc["title"], arc["description"], quest_title)
+    opening_text = await asyncio.to_thread(narrate_arc_opening, arc["title"], arc["description"], quest_title, character["name"])
     await _safe_send(update, f"🎬 **{arc['title']}**\n{opening_text}")
 
 

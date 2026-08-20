@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.286] — Two real live bugs: chapter-intro invented names, branching board quests silently expiring
+
+**Real live report #1 (2026-08-20, Coffee, screenshot: "I think the
+narration made a mistake")**: a chapter-opening cutscene narrated
+"Aria" doing things instead of the real player's own character.
+Root cause: `ai/dm_agent.py`'s `_build_arc_opening_prompt` told the
+model (via `_NAMING_INSTRUCTION`) to always use "whatever is given on
+the Character: line above" -- but never actually included a Character:
+line, unlike every other narration prompt in this file. With nothing
+real to anchor to, the model invented a name. `narrate_arc_opening`
+now takes the real character name as a required argument, wired
+through both real call sites (`_arc_opening_note`, `_do_replay_
+chapter_intro`).
+
+**Real live report #2 (2026-08-20, Coffee, screenshot: "This didnt
+work")**: replying "Keep it and collect the reward" to a real "Ready
+to decide" prompt got "You don't have a decision to make right now."
+Root cause: `db.expire_stale_board_quests()` releases any accepted
+board quest whose 24h-from-acceptance window has passed and isn't
+`completed_at`-marked -- but a BRANCHING quest deliberately stays
+uncompleted at full progress while it waits on the player's choice,
+which is the entire point of "Ready to decide." A player who finished
+every objective but hadn't replied yet could have their real, earned
+quest silently expired and reset to progress_count=0, discarding the
+work with zero warning. Now excludes any quest whose progress_count
+has already reached objective_count from the expiry sweep -- a
+genuinely still-incomplete quest past its window still expires
+normally.
+
 ## [1.27.285] — "Scroll of Summoning" renamed to clear up Remnant confusion
 
 **Real live question (2026-08-20, Coffee): "do summoning scrolls have
