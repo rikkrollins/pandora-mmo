@@ -63,19 +63,15 @@ MAX_LEVEL = 99
 # but we go to lv one to exponentially level up our character again...
 # maybe making for another rebirth." A rebirth only resets level/XP
 # (see bot.py's _do_rebirth) -- ability scores, gear, gold, and every
-# other stat stay exactly as they are, so the reward for going through
-# it again has to come from somewhere else: each rebirth permanently
-# raises this character's personal ability-score cap above the normal
-# 20 (real "godly" territory over multiple rebirths) and grants a
-# stacking XP-gain bonus, so the climb back to MAX_LEVEL is genuinely
-# faster each time -- the actual "exponential" part Coffee asked for.
-REBIRTH_ABILITY_CAP_BONUS_PER_REBIRTH = 2
+# other stat stay exactly as they are. The reward is a stacking XP-gain
+# bonus, so the climb back to MAX_LEVEL is genuinely faster each time --
+# the actual "exponential" part Coffee asked for. Rebirth used to also
+# raise this character's personal ability-score cap above the normal 20,
+# but ability scores have no cap at all anymore (2026-08-20, per Coffee:
+# "I want the cap removed so we can increase it via points - we earned
+# the points we shud be able to use it") -- see bot.py's
+# _apply_asi_choice.
 REBIRTH_XP_BONUS_PER_REBIRTH = 0.25
-
-
-def ability_score_cap(rebirth_count: int) -> int:
-    """A character's personal ability-score ceiling -- 20 normally, +2 per rebirth."""
-    return 20 + REBIRTH_ABILITY_CAP_BONUS_PER_REBIRTH * max(rebirth_count, 0)
 
 
 def xp_gain_multiplier(rebirth_count: int) -> float:
@@ -645,7 +641,7 @@ def full_hp_max_for(char_class: str, constitution: int, level: int, rebirth_coun
     deterministically from only real, current facts (class,
     constitution, level, rebirth_count) -- no stored history needed,
     same "recompute from real current data, never trust a stale stored
-    derivation" discipline as ability_score_cap/xp_gain_multiplier.
+    derivation" discipline as xp_gain_multiplier.
 
     _do_rebirth only allows rebirthing at MAX_LEVEL, so every COMPLETED
     rebirth cycle is known to have leveled 1 -> MAX_LEVEL in that life

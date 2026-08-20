@@ -23,7 +23,7 @@ import class_features as class_features_module
 from rules.dice import ability_modifier, average_damage
 from rules.leveling import (
     level_for_xp, proficiency_bonus_for_level,
-    hp_gain_for_level, ASI_LEVELS, xp_gain_multiplier, EVOLUTION_HP_MULTIPLIER, ability_score_cap,
+    hp_gain_for_level, ASI_LEVELS, xp_gain_multiplier, EVOLUTION_HP_MULTIPLIER,
 )
 from rules.item_sets import active_set_bonus_affixes
 from rules.item_generator import TIERS, TIER_BONUS, TIER_PRICE_MULT
@@ -2377,16 +2377,18 @@ def _compute_xp_updates(character: dict, amount: int) -> dict:
         # "did we cross ANY threshold", so a big multi-level XP award
         # still grants every point it should in one pass): +1 to that
         # guild's own guilds.GUILDS[...]['permanent_stat'] (ability
-        # score, capped at ability_score_cap) AND +1% to that guild's
-        # own guilds.GUILD_PERMANENT_PROFESSION[...] profession's
-        # profession_mastery_pct (capped at PROFICIENCY_MAX_PCT via
-        # bot.py's own constant -- inlined as 100.0 here rather than
-        # importing bot.py, which itself imports db.py). Once applied
-        # both are ordinary, permanent character values like any other
-        # -- leaving a guild (db.leave_guild) never reverts either,
-        # which is the entire point of this system.
+        # score, uncapped -- 2026-08-20 per Coffee: "that's the whole
+        # point of having guild and being able to increase the status
+        # points for level ups", the old ability_score_cap clamp here was
+        # removed entirely, same as every other cap-check site) AND +1%
+        # to that guild's own guilds.GUILD_PERMANENT_PROFESSION[...]
+        # profession's profession_mastery_pct (capped at
+        # PROFICIENCY_MAX_PCT via bot.py's own constant -- inlined as
+        # 100.0 here rather than importing bot.py, which itself imports
+        # db.py). Once applied both are ordinary, permanent character
+        # values like any other -- leaving a guild (db.leave_guild) never
+        # reverts either, which is the entire point of this system.
         import guilds as guilds_module
-        cap = ability_score_cap(character.get("rebirth_count", 0))
         PROFICIENCY_MAX_PCT = 100.0
 
         def _bonus_tiers(join_level: int | None, at_level: int) -> int:
@@ -2403,7 +2405,7 @@ def _compute_xp_updates(character: dict, amount: int) -> dict:
             stat = guilds_module.permanent_stat_for(guild_id, character)
             if stat:
                 current_value = updates.get(stat, character[stat])
-                updates[stat] = min(current_value + gained, cap)
+                updates[stat] = current_value + gained
             professions = guilds_module.GUILD_PERMANENT_PROFESSION.get(guild_id) or []
             if professions:
                 mastery = dict(updates.get("profession_mastery_pct", character["profession_mastery_pct"]))

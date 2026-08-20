@@ -12055,6 +12055,46 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(after["pending_asi_points"], 2)
         self.assertTrue(any("still have 2" in m for m in sink))
 
+    async def test_level_up_auto_keeps_stacking_primary_ability_past_the_old_cap(self):
+        """
+        Real live report (2026-08-20, Coffee, dev-bridge screenshot):
+        "Auto" on a Warlock whose Charisma was already at 20 -- the old
+        rebirth-scaled cap -- refused outright ("Charisma is already at
+        its cap of 20 — choose a different ability to raise instead"),
+        never touching the character at all. Direct live follow-up from
+        Coffee overrode a smaller "add a fallback ability" fix in favor
+        of removing the cap entirely: "I want the cap removed so we can
+        increase it via points - we earned the points we shud be able to
+        use it." Auto now keeps piling points onto the class's real
+        primary ability with no ceiling at all.
+        """
+        user_id = 900497
+        make_basic_character(
+            user_id, "AutoUncappedTester", char_class="Warlock",
+            ability_scores={"strength": 10, "dexterity": 14, "constitution": 13, "intelligence": 9, "wisdom": 10, "charisma": 20},
+        )
+        db.update_character(user_id, -999, pending_asi_points=2)
+        sink = []
+        await bot._do_level_up(FakeUpdate(user_id, "level up, auto", sink), "level up, auto")
+        after = db.get_character(user_id, -999)
+        self.assertEqual(after["charisma"], 22)  # past the old cap, no refusal
+        self.assertEqual(after["pending_asi_points"], 0)
+        self.assertFalse(any("already at its cap" in m for m in sink), sink)
+
+    async def test_level_up_named_ability_choice_has_no_cap_even_at_high_values(self):
+        user_id = 900498
+        make_basic_character(
+            user_id, "AllHighStatTester", char_class="Warlock",
+            ability_scores={"strength": 20, "dexterity": 20, "constitution": 20, "intelligence": 20, "wisdom": 20, "charisma": 20},
+        )
+        db.update_character(user_id, -999, pending_asi_points=2)
+        sink = []
+        await bot._do_level_up(FakeUpdate(user_id, "charisma", sink), "charisma")
+        after = db.get_character(user_id, -999)
+        self.assertEqual(after["charisma"], 22)
+        self.assertEqual(after["pending_asi_points"], 0)
+        self.assertFalse(any("already at its cap" in m for m in sink), sink)
+
     async def test_check_sheet_shows_pending_asi_points(self):
         user_id = 900497
         make_basic_character(user_id, "Leveler6")
@@ -12062,6 +12102,20 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink = []
         await bot._do_check_sheet(FakeUpdate(user_id, "check my sheet", sink))
         self.assertTrue(any("ability point(s) waiting" in m for m in sink))
+
+    async def test_check_sheet_reborn_line_no_longer_mentions_an_ability_cap(self):
+        """
+        2026-08-20, per Coffee: the ability-score cap is gone entirely,
+        including the reward framing that used to advertise a rebirth-
+        scaled cap on a reborn character's own sheet.
+        """
+        user_id = 900499
+        make_basic_character(user_id, "RebornSheetTester")
+        db.update_character(user_id, -999, rebirth_count=2)
+        sink = []
+        await bot._do_check_sheet(FakeUpdate(user_id, "check my sheet", sink))
+        self.assertTrue(any("Reborn 2x" in m for m in sink), sink)
+        self.assertFalse(any("ability cap" in m for m in sink), sink)
 
     # -- Auto-assign ability scores at character creation (2026-07-16, per Coffee) --
     def test_auto_assign_ability_scores_uses_each_rolled_value_once(self):
@@ -17855,17 +17909,22 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         covered_stats = {g.get("permanent_stat") for g in guilds_module.GUILDS.values() if g.get("permanent_stat")}
         self.assertEqual(covered_stats, {"strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"})
 
-    def test_permanent_guild_stat_growth_respects_ability_score_cap(self):
+    def test_permanent_guild_stat_growth_is_uncapped(self):
+        """
+        2026-08-20, per Coffee: "I want the cap removed so we can
+        increase it via points - we earned the points we shud be able to
+        use it". The old ability_score_cap clamp on this system is gone
+        -- a character starting right at the old base-20 cap should
+        still keep growing past it from real guild-level bonus tiers.
+        """
         import guilds as guilds_module
-        from rules.leveling import ability_score_cap
         user_id = 700202
         make_basic_character(user_id, "StatCapTester", char_class="Fighter")
-        db.update_character(user_id, -999, strength=ability_score_cap(0) - 1, level=1)
+        db.update_character(user_id, -999, strength=19, level=1)
         db.join_guild(user_id, -999, "silver_wardens")
         db.add_xp(user_id, -999, 100_000)  # far more than enough to cross several bonus tiers
         after = db.get_character(user_id, -999)
-        self.assertLessEqual(after["strength"], ability_score_cap(0))
-        self.assertEqual(after["strength"], ability_score_cap(0))
+        self.assertGreater(after["strength"], 20)
 
     async def test_leave_guild_keeps_permanent_stat_but_clears_everything_else(self):
         """

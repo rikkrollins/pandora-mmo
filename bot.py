@@ -110,7 +110,7 @@ from rules.leveling import (
     UNDERTUNED_DAMAGE_SCALE_EXPONENT, breath_weapon_dice_count,
     CLASS_PRIMARY_ABILITY, CLASS_SAVE_PROFICIENCIES, is_proficient_in_skill, is_proficient_in_save,
     skill_check_proficiency_bonus, wild_shape_temp_hp, XP_THRESHOLDS,
-    MAX_LEVEL, ability_score_cap, xp_gain_multiplier, hybrid_tier, HYBRID_MAX_TIER,
+    MAX_LEVEL, xp_gain_multiplier, hybrid_tier, HYBRID_MAX_TIER,
     magic_penetration_pct, CLASS_SUBCLASSES, COMBAT_SUBCLASS_NAMES, COMBAT_SUBCLASS_DAMAGE_BONUS_PCT,
     THIEF_SUBCLASS_STEAL_BONUS, TOTEM_WARRIOR_SUBCLASS_NAME, LIFE_SUBCLASS_HEAL_BONUS,
     UTILITY_SUBCLASS_ABILITY_CHECK_BONUS, UTILITY_SUBCLASS_CHECK_BONUS_VALUE,
@@ -4931,34 +4931,26 @@ def _apply_asi_choice(character: dict, text: str) -> str | None:
             return None
         spend = min(pending, 2)  # real 5E: at most +2 into a single ability per ASI
 
-    # Rebirth (2026-07-22, per Coffee): each rebirth raises this
-    # character's own ability-score ceiling above the normal 20 (see
-    # rules/leveling.py's ability_score_cap) -- real "godly" growth for
-    # a character that's gone through the rebirth loop, while a
-    # never-reborn character keeps the exact same 20 cap as before.
+    # No ability-score cap (2026-08-20, per Coffee, dev-bridge screenshot
+    # + direct live follow-up: "I want the cap removed so we can
+    # increase it via points - we earned the points we shud be able to
+    # use it"). This USED to reject spending on a stat already at its
+    # real, rebirth-scaled cap (rules.leveling.ability_score_cap) -- a
+    # deliberate mechanic at the time, not a bug, but Coffee's explicit
+    # call is that an earned ASI point should always be spendable,
+    # full stop, on any real ability, with no ceiling at all. Every
+    # downstream consumer of an ability score (ability_modifier and
+    # everything built on it) already handles arbitrarily high scores
+    # correctly -- rebirth's own "godly" stat growth already exercised
+    # scores well past 20 in production before this change, so removing
+    # the ceiling entirely introduces no new math this game hasn't
+    # already relied on.
     before_value = character[ability]
-    cap = ability_score_cap(character.get("rebirth_count", 0))
-    # Real live bug (2026-08-14, dev-bridge screenshot: "Strength
-    # increased from 20 to 20" -- confirmed against the real character,
-    # a level-18, never-reborn Fighter whose Strength was already at its
-    # un-rebirthed cap of 20): a stat already at its cap silently
-    # consumed the full ASI spend for a genuine ZERO real increase, both
-    # for a named ability ("put it into constitution" on an already-
-    # capped stat) and the auto path (which always targets the class's
-    # fixed primary ability with no cap check at all). Reject up front
-    # instead -- the point stays banked, spendable on a real ability.
-    if before_value >= cap:
-        return f"❌ {ability.capitalize()} is already at its cap of {cap} — choose a different ability to raise instead."
-    after_value = min(before_value + spend, cap)
-    # Real fix, same incident: only ever deduct the ability score's ACTUAL
-    # increase, not the flat requested `spend` -- a stat 1 point below its
-    # cap with a 2-point spend requested would otherwise still burn both
-    # points for only 1 real point of increase.
-    actual_spend = after_value - before_value
+    after_value = before_value + spend
     updated = db.update_character(
         character["telegram_user_id"], character["chat_id"],
         **{ability: after_value},
-        pending_asi_points=pending - actual_spend,
+        pending_asi_points=pending - spend,
     )
     note = f"📈 {ability.capitalize()} increased from {before_value} to {after_value}."
     if updated["pending_asi_points"] > 0:
@@ -4973,13 +4965,19 @@ async def _do_rebirth(update: Update) -> None:
     maybe making for another rebirth"). Only level and xp reset --
     ability scores, HP, gear, gold, skill points, achievements, and
     every other stat stay exactly as they are, so this is never a
-    power loss. The reward: a permanently higher ability-score cap
-    (rules/leveling.py's ability_score_cap) and a stacking XP-gain
-    bonus (xp_gain_multiplier) that make the climb back to MAX_LEVEL
-    genuinely faster each time, plus (after the first rebirth) access
-    to a freely-chosen hybrid class flavor -- see _do_choose_hybrid.
-    Only available at MAX_LEVEL: a real endgame choice, not something
-    to stumble into early and lose your level progress by accident.
+    power loss. The reward: a stacking XP-gain bonus (xp_gain_
+    multiplier) that makes the climb back to MAX_LEVEL genuinely
+    faster each time, plus (after the first rebirth) access to a
+    freely-chosen hybrid class flavor -- see _do_choose_hybrid. Only
+    available at MAX_LEVEL: a real endgame choice, not something to
+    stumble into early and lose your level progress by accident.
+
+    No longer grants a higher ability-score cap (2026-08-20, per
+    Coffee: "I want the cap removed so we can increase it via points -
+    we earned the points we shud be able to use it") -- ability scores
+    have no ceiling for ANY character now, reborn or not (see
+    _apply_asi_choice's own comment); rebirth's real rewards are the
+    XP bonus, the HP doubling below, and hybrid classes.
     """
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -5023,7 +5021,6 @@ async def _do_rebirth(update: Update) -> None:
         level=1, xp=0, rebirth_count=new_rebirth_count, hp_max=new_hp_max, hp_current=new_hp_max,
         backstab_base_multiplier=new_backstab_base,
     )
-    new_cap = ability_score_cap(new_rebirth_count)
     new_xp_bonus = int(round((xp_gain_multiplier(new_rebirth_count) - 1.0) * 100))
     lines = [
         f"✨ **{updated['name']}** is reborn — level and XP reset to 1, but every stat, every "
@@ -5060,9 +5057,8 @@ async def _do_rebirth(update: Update) -> None:
     if mythic_beat:
         lines.append(mythic_beat)
     lines.append(
-        f"This is rebirth #{new_rebirth_count}: ability scores can now climb as high as {new_cap} "
-        f"(instead of the usual 20), XP gains are permanently boosted by {new_xp_bonus}%, and "
-        f"maximum HP has doubled to {new_hp_max} (fully healed)."
+        f"This is rebirth #{new_rebirth_count}: XP gains are permanently boosted by {new_xp_bonus}%, "
+        f"and maximum HP has doubled to {new_hp_max} (fully healed)."
     )
     if new_rebirth_count == 1:
         lines.append("A hybrid class is now available — say \"become a hybrid [class]\" to pick one.")
@@ -5354,9 +5350,8 @@ async def _do_auto_level_up_party(update: Update) -> None:
         pending = member.get("pending_asi_points", 0)
         if pending > 0:
             ability = CLASS_PRIMARY_ABILITY.get(member["char_class"].lower(), "strength")
-            cap = ability_score_cap(member.get("rebirth_count", 0))
             before_value = member[ability]
-            after_value = min(before_value + pending, cap)
+            after_value = before_value + pending  # no ability-score cap -- see _apply_asi_choice's own comment
             db.update_character_by_id(
                 member["character_id"], **{ability: after_value}, pending_asi_points=0,
             )
@@ -13574,9 +13569,8 @@ async def member_level_callback(update: Update, context: ContextTypes.DEFAULT_TY
         if pending <= 0:
             return
         spend = min(pending, 2)  # real 5E: at most +2 into a single ability per ASI
-        cap = ability_score_cap(member.get("rebirth_count", 0))
         before_value = member[ability]
-        after_value = min(before_value + spend, cap)
+        after_value = before_value + spend  # no ability-score cap -- see _apply_asi_choice's own comment
         db.update_character_by_id(
             character_id, **{ability: after_value}, pending_asi_points=pending - spend,
         )
@@ -14181,7 +14175,7 @@ def _format_character_sheet(character: dict) -> str:
     # reborn character's sheet looks exactly as it always has.
     rebirth_line = ""
     if character.get("rebirth_count"):
-        rebirth_line = f"✨ Reborn {character['rebirth_count']}x (ability cap {ability_score_cap(character['rebirth_count'])})\n"
+        rebirth_line = f"✨ Reborn {character['rebirth_count']}x\n"
         if character.get("hybrid_class"):
             rebirth_line += (
                 f"🌟 Hybrid: {character['hybrid_class']} "

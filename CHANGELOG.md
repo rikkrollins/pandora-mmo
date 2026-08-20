@@ -2,6 +2,47 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.290] — Ability-score cap removed entirely
+
+**Real live report (2026-08-20, Coffee, dev-bridge screenshot):** a
+Warlock's "Auto" level-up refused to spend a banked ASI point because
+Charisma was already at 20, the old rebirth-scaled cap
+(`rules.leveling.ability_score_cap`, base 20 + 2 per rebirth) — "I
+didn't realize there's a cap this needs to be removed. That's the
+whole point of having guild and being able to increase the status
+points for level ups." A live, read-only audit of all 5 real player
+characters' `pending_asi_points` against the expected ASI-level formula
+found no evidence of lost or missing points anywhere — the pre-existing
+2026-08-14 fix already banks a point instead of burning it when a spend
+would've hit the cap, so no retroactive point credit was needed. A
+smaller "give Auto a fallback ability" fix was drafted first, but
+Coffee's direct follow-up overrode it: "ok but i want the cap removed
+so we can increase it via points - we earned the points we shud be
+able to use it." The cap is now gone completely, not just relaxed:
+
+- `_apply_asi_choice` (bot.py) spends every banked point onto the
+  chosen ability with no ceiling at all — the old
+  "already at its cap" refusal is gone.
+- The party-wide Auto Level-Up flow and the `memberlvl|asiapply` button
+  callback both dropped the same clamp.
+- The guild permanent-stat-bonus system (db.py) — the exact mechanic
+  Coffee cited — no longer clamps its own +1-per-bonus-tier ability
+  growth either.
+- Rebirth's completion message and a reborn character's sheet no
+  longer advertise a raised ability cap as a rebirth reward (rebirth's
+  real rewards — the stacking XP bonus and doubled max HP — are
+  unchanged).
+- `rules/leveling.py`'s now-fully-dead `ability_score_cap` function and
+  its `REBIRTH_ABILITY_CAP_BONUS_PER_REBIRTH` constant were deleted
+  outright rather than left unused.
+
+Every downstream consumer of an ability score (`ability_modifier` and
+everything built on it) already handled arbitrarily high scores
+correctly before this change — rebirth's own HP scaling already
+exercised numbers well past what a capped ability score ever produced
+— so removing the ceiling introduces no new math this game hasn't
+already relied on.
+
 ## [1.27.289] — Story So Far lists each completed chapter's real quests in order
 
 **Real live request (2026-08-20, Coffee):** "in the story so far show
