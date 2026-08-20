@@ -10811,7 +10811,35 @@ def _chapter_complete_note(telegram_user_id: int, chat_id: int, quest_id: str) -
     return f"\n\n🌟 **Chapter complete: \"{arc['title']}\"** — {arc['description']}"
 
 
-async def _arc_opening_note(character: dict, quest_id: str, quest: dict) -> str:
+def _arc_opening_image_prompt(arc: dict) -> str:
+    """Grounded only in the story arc's own real title/description -- no invented scene detail."""
+    return (
+        f"{arc['title']}, {arc['description']}, fantasy RPG chapter title card, "
+        f"epic cinematic establishing shot, digital painting, dramatic lighting, no text or labels"
+    )
+
+
+async def _maybe_send_arc_opening_image(update: Update, arc_id: str, arc: dict) -> None:
+    """
+    Real request (2026-08-20, per Coffee: "create images for the story
+    line and side line content also, make sure they are accurate").
+    _send_generated_image's own docstring already lists "story-arc art"
+    among what this game generates images for, but no real call site
+    for it existed anywhere in bot.py -- confirmed by grep, a genuine
+    gap between the aspirational docstring and the real code. Sent
+    once, alongside the real AI-narrated arc opening (_arc_opening_note)
+    the first time a character reaches a story arc -- same
+    deterministic-per-arc convention as every other generated image
+    here, grounded only in the arc's own real title/description.
+    """
+    prompt = _arc_opening_image_prompt(arc)
+    await _send_generated_image(
+        update, prompt, f"🎬 {arc['title']}",
+        seed=_deterministic_image_seed(f"arc:{arc_id}"), log_key=arc_id,
+    )
+
+
+async def _arc_opening_note(update: Update, character: dict, quest_id: str, quest: dict) -> str:
     """
     Cutscene bookend to _chapter_complete_note's closing beat, per
     Coffee's request for RPG-style cutscenes on story/character quests
@@ -10825,7 +10853,7 @@ async def _arc_opening_note(character: dict, quest_id: str, quest: dict) -> str:
     arc_info = _story_arc_for_quest(quest_id)
     if arc_info is None:
         return ""
-    _, arc = arc_info
+    arc_id, arc = arc_info
     arc_quests = arc.get("quests", [])
     if not arc_quests or arc_quests[0] != quest_id:
         return ""
@@ -10835,6 +10863,7 @@ async def _arc_opening_note(character: dict, quest_id: str, quest: dict) -> str:
     opening_text = await asyncio.to_thread(
         narrate_arc_opening, arc["title"], arc["description"], quest["title"],
     )
+    await _maybe_send_arc_opening_image(update, arc_id, arc)
     return f"🎬 **{arc['title']}**\n{opening_text}\n\n"
 
 
@@ -11261,6 +11290,7 @@ async def _check_quest_completions_defeat_monster(update_like, session: sessions
                     f"_{remnant_data['lore']}_\n\n"
                     f"Say \"summon {remnant_data['name']}\" in a later battle to call it.",
                 )
+                await _maybe_send_remnant_lore_image(update_like, remnant_id, remnant_data)
                 await _check_and_award_achievements(
                     update_like, db.get_character(telegram_user_id, session.chat_id),
                 )
@@ -11305,7 +11335,7 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
             or any(q["title"].lower() in text.lower() for q in available)
         )
         if not names_something_else:
-            opening_note = await _arc_opening_note(character, quest_id, quest)
+            opening_note = await _arc_opening_note(update, character, quest_id, quest)
             db.accept_quest(telegram_user_id, update.effective_chat.id, quest_id)
             await _safe_send(update, f"{opening_note}📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}")
             await _notify_main_topic(update, f"📜 **{character['name']}** accepted a quest: {quest['title']}")
@@ -11343,7 +11373,7 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
         quest_id, quest = companion_offer
         names_something_else = any(q["title"].lower() in text.lower() for q in available)
         if not names_something_else:
-            opening_note = await _arc_opening_note(character, quest_id, quest)
+            opening_note = await _arc_opening_note(update, character, quest_id, quest)
             db.accept_quest(telegram_user_id, update.effective_chat.id, quest_id)
             await _safe_send(update, f"{opening_note}📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}")
             await _notify_main_topic(update, f"📜 **{character['name']}** accepted a quest: {quest['title']}")
@@ -16230,6 +16260,40 @@ async def _maybe_send_monster_image(update: Update, monster_key: str, template: 
     await _send_generated_image(
         update, prompt, f"⚔️ {template['name']}",
         seed=_deterministic_image_seed(f"monster:{monster_key}"), log_key=monster_key,
+    )
+
+
+def _remnant_lore_image_prompt(remnant_data: dict) -> str:
+    """
+    Grounded only in the Remnant's own real name and its own real lore
+    line (remnants.py) -- no invented physical detail beyond that,
+    same "name first, generic framing after" convention _monster_
+    image_prompt's own 2026-08-06 fix established. Unlike
+    _ability_image_prompt (which deliberately excludes any creature,
+    since that one depicts a SUMMONED ATTACK EFFECT), this one is
+    meant to actually show the ancient fragment itself -- the ONE
+    moment in this whole system where seeing the Unbound depicted is
+    the point.
+    """
+    return (
+        f"{remnant_data['name']}, an ancient, otherworldly fragment of Pandora's Box given form, "
+        f"{remnant_data['lore']}, fantasy RPG, digital painting, dramatic lighting, no text or labels"
+    )
+
+
+async def _maybe_send_remnant_lore_image(update: Update, remnant_id: str, remnant_data: dict) -> None:
+    """
+    Real request (2026-08-20, per Coffee: "include images for the
+    remnant story lore that can be shown"). Sent once, alongside the
+    real monumental bind message (_check_quest_completions_defeat_
+    monster) the first time a character binds this specific Remnant --
+    same deterministic-per-key convention as monsters/items/spells, so
+    the same Remnant always shows the same generated depiction.
+    """
+    prompt = _remnant_lore_image_prompt(remnant_data)
+    await _send_generated_image(
+        update, prompt, f"🌟 {remnant_data['name']}",
+        seed=_deterministic_image_seed(f"remnant:{remnant_id}"), log_key=remnant_id,
     )
 
 

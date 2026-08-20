@@ -900,17 +900,22 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         AI-narrated opening beat (_arc_opening_note), the opening bookend
         to the existing chapter-complete closing beat above.
         """
-        from unittest.mock import patch
+        from unittest.mock import patch, AsyncMock
         use_test_db("tests/tmp/arc_opening_test.db")
         user_id = 888901
         make_basic_character(user_id, "Cutscenetester", current_location="crossroads_tavern")
         sink = []
-        with patch("bot.narrate_arc_opening", return_value="A quiet dread settles over the crossroads.") as mock_narrate:
+        with patch("bot.narrate_arc_opening", return_value="A quiet dread settles over the crossroads.") as mock_narrate, \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)) as mock_image:
             await bot._do_accept_quest(FakeUpdate(user_id, "I accept the quest", sink), "I accept the quest")
         combined = " ".join(sink)
         self.assertTrue(mock_narrate.called)
         self.assertIn("🎬", combined)
         self.assertIn("Discovery", combined)
+        # Real request (2026-08-20, Coffee): "create images for the
+        # story line and side line content also" -- a real chapter-
+        # opening image call must fire alongside the narration.
+        self.assertTrue(mock_image.called)
 
     async def test_arc_opening_cutscene_does_not_repeat_mid_chapter(self):
         """Sibling to the test above: a LATER quest in the same arc (not arc["quests"][0]) must not re-trigger the opening cutscene."""
@@ -16607,6 +16612,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_defeating_an_unbound_binds_it_to_every_real_party_member_present(self):
         import sessions
+        from unittest.mock import patch, AsyncMock
         sessions.end_session(-996)
         leader_id, member_id = 800201, 800202
         make_basic_character(leader_id, "SummonLeader", current_location="crossroads_tavern", chat_id=-996)
@@ -16625,10 +16631,15 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             session_id=1,
         )
         sink = []
-        await bot._check_quest_completions_defeat_monster(FakeUpdate(leader_id, "", sink, chat_id=-996), session)
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)) as mock_image:
+            await bot._check_quest_completions_defeat_monster(FakeUpdate(leader_id, "", sink, chat_id=-996), session)
         self.assertIn("the_unopened", db.get_character(leader_id, -996)["bound_remnants"])
         self.assertIn("the_unopened", db.get_character(member_id, -996)["bound_remnants"])
         self.assertTrue(any("binds to" in s and "The Unopened" in s for s in sink))
+        # Real request (2026-08-20, Coffee): "include images for the
+        # remnant story lore that can be shown" -- one real image call
+        # per party member who newly bound it (2 here: leader + member).
+        self.assertEqual(mock_image.call_count, 2)
         # Real request (2026-08-20, Coffee): "give a cool little
         # story/background about that remnant adding to the lore. do
         # not fabricate, use the story of the game" -- then, same

@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.271] — Remnant lore art, and a real gap closed: story-arc opening art
+
+**Real request (2026-08-20, Coffee):** "include images for the remnant
+story lore that can be shown." Every Remnant now gets a real generated
+image (grounded only in its own real name + lore, deterministic per
+Remnant) alongside the monumental bind message from v1.27.270.
+
+**Second real request, same thread:** "create images for the story
+line and side line content also, make sure they are accurate." Found
+a genuine gap while looking into this: `_send_generated_image`'s own
+docstring already listed "story-arc art" among what this game
+generates images for, but no real call site for it existed anywhere
+in `bot.py` — a real chapter/story-arc OPENING (the "🎬 title" cutscene
+that already gets real AI narration via `narrate_arc_opening`) never
+had an accompanying image. Added `_maybe_send_arc_opening_image`,
+grounded only in the arc's own real title/description, fired
+alongside the existing narration the first time a character reaches
+each story arc.
+
+Verified with real executed tests: the existing arc-opening cutscene
+test now also asserts the image call fires, and the Remnant-bind test
+asserts one real image call per party member who newly bound it.
+
 ## [1.27.270] — Binding a Remnant now feels monumental, real lore included
 
 **Real request (2026-08-20, Coffee):** "After we beat a remnant show
