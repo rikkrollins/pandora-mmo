@@ -6670,7 +6670,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(result["damage_dealt"], 999)
 
     async def test_counterspell_negates_a_monster_spell_and_spends_a_slot(self):
-        from unittest.mock import patch
+        from unittest.mock import patch, AsyncMock
         import sessions
         shaman = {
             "telegram_user_id": -700912, "name": "Goblin Shaman", "hp_current": 57, "hp_max": 57,
@@ -6694,7 +6694,12 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.round_number = 1
         sink = []
         update = FakeUpdate(996092, "look", sink)
-        with patch("random.random", return_value=0.0):
+        # 2026-08-20, per Coffee: Counterspell no longer auto-fires for a
+        # real (non-AI) player -- it now asks first (_prompt_reaction_choice).
+        # Patched to simulate the player tapping "Counter it" so this test
+        # still verifies the real mechanical effect once that choice is made.
+        with patch("random.random", return_value=0.0), \
+             patch("bot._prompt_reaction_choice", new=AsyncMock(return_value=True)):
             result = await bot._maybe_monster_cast_spell(update, session, shaman, target)
         self.assertIsNotNone(result)
         self.assertTrue(result["counterspelled"])
@@ -6709,6 +6714,121 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # slot silently spent by a reaction isn't mistaken for a bug.
         self.assertTrue(any("2/3 left" in msg for msg in sink), sink)
         sessions.end_session(-999)
+
+    async def test_counterspell_asks_a_real_player_and_skips_when_declined(self):
+        """
+        Real request (2026-08-20, Coffee, after Counterspell auto-fired
+        without asking and cost a real spell slot): "give an option
+        like a pop-up button so when this happens, the characters can
+        choose." Declining (or timing out, same default per Coffee's
+        own choice) must leave the spell slot untouched and let the
+        enemy's spell resolve normally.
+        """
+        from unittest.mock import patch, AsyncMock
+        import sessions
+        shaman = {
+            "telegram_user_id": -700913, "name": "Goblin Shaman", "hp_current": 57, "hp_max": 57,
+            "known_spells": ["produce_flame"], "resistances": [], "vulnerabilities": [], "immunities": [],
+            "dexterity": 13, "strength": 8,
+        }
+        make_basic_character(996095, "SpellTargetD", current_location="crossroads_tavern")
+        db.update_character(996095, -999, hp_current=30)
+        target = db.get_character(996095, -999)
+        target["telegram_user_id"] = 996095
+        make_basic_character(996096, "DecliningCounterspeller", char_class="Wizard", current_location="crossroads_tavern")
+        db.update_character(996096, -999, known_spells=["counterspell"], spell_slots_current=3, spell_slots_max=3)
+        counterspeller = db.get_character(996096, -999)
+        counterspeller["telegram_user_id"] = 996096
+        session = sessions.start_session(
+            -999, [target, counterspeller, shaman],
+            {996095: "party", 996096: "party", -700913: "enemy"},
+        )
+        session.round_number = 1
+        sink = []
+        update = FakeUpdate(996095, "look", sink)
+        with patch("random.random", return_value=0.0), \
+             patch("rules.dice.random.randint", return_value=6), \
+             patch("bot._prompt_reaction_choice", new=AsyncMock(return_value=False)) as mock_prompt:
+            result = await bot._maybe_monster_cast_spell(update, session, shaman, target)
+        self.assertTrue(mock_prompt.called)
+        self.assertFalse(result.get("counterspelled", False))
+        self.assertGreater(result["damage_dealt"], 0)
+        after = db.get_character(996096, -999)
+        self.assertEqual(after["spell_slots_current"], 3)  # untouched -- declined
+        sessions.end_session(-999)
+
+    async def test_counterspell_still_auto_fires_for_an_ai_only_party(self):
+        """
+        Sibling to the two tests above: an AI companion has no human to
+        tap a button for it, so it must keep the original instant
+        auto-counter behavior -- _prompt_reaction_choice must never be
+        called for a counterspeller with is_ai set.
+        """
+        from unittest.mock import patch, AsyncMock
+        import sessions
+        shaman = {
+            "telegram_user_id": -700914, "name": "Goblin Shaman", "hp_current": 57, "hp_max": 57,
+            "known_spells": ["produce_flame"], "resistances": [], "vulnerabilities": [], "immunities": [],
+            "dexterity": 13, "strength": 8,
+        }
+        make_basic_character(996097, "SpellTargetE", current_location="crossroads_tavern")
+        db.update_character(996097, -999, hp_current=30)
+        target = db.get_character(996097, -999)
+        target["telegram_user_id"] = 996097
+        ai_counterspeller = {
+            "telegram_user_id": 996099, "name": "AI Counterspeller", "is_ai": True,
+            "known_spells": ["counterspell"], "spell_slots_current": 3, "spell_slots_max": 3,
+            "hp_current": 20, "hp_max": 20, "dexterity": 10, "strength": 10,
+        }
+        session = sessions.start_session(
+            -999, [target, ai_counterspeller, shaman],
+            {996097: "party", 996099: "party", -700914: "enemy"},
+        )
+        session.round_number = 1
+        sink = []
+        update = FakeUpdate(996097, "look", sink)
+        with patch("random.random", return_value=0.0), \
+             patch("bot._prompt_reaction_choice", new=AsyncMock(return_value=False)) as mock_prompt:
+            result = await bot._maybe_monster_cast_spell(update, session, shaman, target)
+        self.assertFalse(mock_prompt.called)
+        self.assertTrue(result["counterspelled"])
+        self.assertEqual(ai_counterspeller["spell_slots_current"], 2)
+        sessions.end_session(-999)
+
+    async def test_prompt_reaction_choice_real_asyncio_tap_and_timeout(self):
+        """
+        Real, unmocked end-to-end test of the actual asyncio pause/
+        resume mechanism (2026-08-20) -- not just mocking around it.
+        Fires _prompt_reaction_choice as a background task (it awaits a
+        real asyncio.Event), then, from this SAME test, invokes the
+        real reaction_prompt_callback (simulating the real button tap a
+        separate handler invocation would deliver) to resolve it. A
+        second run lets the real 30s-default window elapse (patched
+        short for test speed) with no tap at all, confirming the real
+        documented default: decline.
+        """
+        import asyncio
+        from unittest.mock import patch
+        sink = []
+        update = FakeUpdate(996100, "look", sink)
+        task = asyncio.create_task(
+            bot._prompt_reaction_choice(update, 996100, "Counter it?", "Yes", "No")
+        )
+        await asyncio.sleep(0.05)  # let the prompt send and registration happen
+        self.assertEqual(len(bot._PENDING_REACTIONS), 1)
+        reaction_id = next(iter(bot._PENDING_REACTIONS))
+        tap_sink = []
+        await bot.reaction_prompt_callback(
+            FakeCallbackUpdate(996100, f"reaction|{reaction_id}|yes", tap_sink), DummyContext(),
+        )
+        result = await asyncio.wait_for(task, timeout=5)
+        self.assertTrue(result)
+        self.assertEqual(len(bot._PENDING_REACTIONS), 0)
+
+        with patch("bot.REACTION_PROMPT_TIMEOUT_SECONDS", 0.05):
+            timeout_result = await bot._prompt_reaction_choice(update, 996100, "Counter it?", "Yes", "No")
+        self.assertFalse(timeout_result)
+        self.assertEqual(len(bot._PENDING_REACTIONS), 0)
 
     async def test_shield_reaction_announcement_states_slots_remaining(self):
         """

@@ -7921,6 +7921,70 @@ def _decide_monster_spell(caster: dict) -> str | None:
     return random.choice(known_spells)
 
 
+
+# Real reaction opt-in (2026-08-20, per Coffee, live dev-bridge report
+# with screenshot: Counterspell auto-fired and spent a spell slot with
+# no warning -- "why is it doing that we didn't use this... maybe give
+# an option like a pop-up button so when this happens, the characters
+# can choose"). In-memory only (same "resets on restart" convention as
+# _SENT_IMAGE_PROMPTS above) -- keyed by a random reaction_id so a
+# stale button from before a restart can never collide with a fresh
+# one. Genuinely pauses the awaiting coroutine (asyncio.Event, not a
+# rewrite of the combat-turn engine into a resumable state machine --
+# Telegram already sends messages progressively as combat resolves, so
+# a real `await` here just shows up as the game going quiet for a
+# moment, exactly like a real reaction window would) while a SEPARATE
+# handler invocation (reaction_prompt_callback, a real button tap)
+# resolves it concurrently. Per Coffee's own choice (2026-08-20):
+# 30-second window, defaults to declining the reaction if nobody
+# answers in time -- never worse than a plain "no", while auto-using
+# it by default would just repeat the exact complaint this exists to
+# fix.
+_PENDING_REACTIONS: dict[str, dict] = {}
+REACTION_PROMPT_TIMEOUT_SECONDS = 30
+
+
+async def _prompt_reaction_choice(
+    update: Update, telegram_user_id: int, prompt_text: str, yes_label: str, no_label: str,
+) -> bool:
+    reaction_id = f"{random.getrandbits(64):x}"
+    event = asyncio.Event()
+    _PENDING_REACTIONS[reaction_id] = {"event": event, "choice": False, "telegram_user_id": telegram_user_id}
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton(f"✅ {yes_label}", callback_data=f"reaction|{reaction_id}|yes"),
+        InlineKeyboardButton(f"❌ {no_label}", callback_data=f"reaction|{reaction_id}|no"),
+    ]])
+    await update.effective_chat.send_message(
+        prompt_text, reply_markup=keyboard,
+        message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+    )
+    try:
+        await asyncio.wait_for(event.wait(), timeout=REACTION_PROMPT_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        pass
+    pending = _PENDING_REACTIONS.pop(reaction_id, None)
+    return bool(pending["choice"]) if pending else False
+
+
+async def reaction_prompt_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _prompt_reaction_choice's Yes/No buttons -- gated to the one real eligible player, never anyone else in the shared group chat."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    reaction_id = parts[1] if len(parts) > 1 else ""
+    choice = parts[2] if len(parts) > 2 else ""
+    pending = _PENDING_REACTIONS.get(reaction_id)
+    if pending is None:
+        await _safe_answer(query, "That reaction window has already closed.", show_alert=True)
+        return
+    if update.effective_user.id != pending["telegram_user_id"]:
+        await _safe_answer(query, "This isn't your reaction to make.", show_alert=True)
+        return
+    pending["choice"] = choice == "yes"
+    pending["event"].set()
+    await _safe_answer(query)
+    await _safe_edit_markup(query)
+
+
 async def _maybe_monster_cast_spell(
     update: Update, session: sessions.Session, caster: dict, target: dict, spell_id: str | None = None,
 ) -> dict | None:
@@ -7975,13 +8039,30 @@ async def _maybe_monster_cast_spell(
     # own spell the moment party-side casting became real, which it now
     # is (any combatant with real known_spells can cast here, not just
     # enemy monsters).
-    counterspeller = next(
-        (p for p in session.living_on_side(session.opposing_side(caster["telegram_user_id"]))
-         if "counterspell" in (p.get("known_spells") or [])
-         and p.get("spell_slots_current", 0) > 0
-         and p.get("reaction_used_round") != session.round_number),
-        None,
-    )
+    eligible_counterspellers = [
+        p for p in session.living_on_side(session.opposing_side(caster["telegram_user_id"]))
+        if "counterspell" in (p.get("known_spells") or [])
+        and p.get("spell_slots_current", 0) > 0
+        and p.get("reaction_used_round") != session.round_number
+    ]
+    # Real opt-in (2026-08-20, per Coffee): only a REAL human player gets
+    # asked -- an AI companion has no one to tap the button for it, so it
+    # keeps the original instant auto-counter behavior (never worse for
+    # AI-only parties than before this change). Only the FIRST eligible
+    # real player is asked, same "one real reaction, not a whole-party
+    # poll" shape 5E itself uses.
+    real_counterspeller = next((p for p in eligible_counterspellers if not p.get("is_ai")), None)
+    counterspeller = None
+    if real_counterspeller is not None:
+        wants_to_counter = await _prompt_reaction_choice(
+            update, real_counterspeller["telegram_user_id"],
+            f"🔵 **{real_counterspeller['name']}** — **{caster['name']}** is casting {spell['name']}. Counter it?",
+            "Counter it", "Let it land",
+        )
+        if wants_to_counter:
+            counterspeller = real_counterspeller
+    elif eligible_counterspellers:
+        counterspeller = eligible_counterspellers[0]
     if counterspeller:
         counterspeller["spell_slots_current"] -= 1
         counterspeller["reaction_used_round"] = session.round_number
@@ -27502,6 +27583,7 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(hybrid_menu_callback, pattern=r"^hybrid\|"))
     application.add_handler(CallbackQueryHandler(title_menu_callback, pattern=r"^title\|"))
     application.add_handler(CallbackQueryHandler(map_menu_callback, pattern=r"^map\|"))
+    application.add_handler(CallbackQueryHandler(reaction_prompt_callback, pattern=r"^reaction\|"))
 
     application.add_error_handler(_log_unhandled_error)
 

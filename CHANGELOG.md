@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.274] — Counterspell now asks before spending your spell slot
+
+**Real dev-bridge report (2026-08-20, Coffee, live, with screenshot):**
+Ravenloft's Counterspell auto-fired against a Wrathflame Unbound
+Fireball and spent a real spell slot with no warning: "why is it doing
+that we didn't use this and we just lost spell points because of it
+are you able to give our spell points back and maybe give an option
+like a pop-up button so when this happens, the characters can choose."
+Refunded the spent slot live. Then built the real thing: a REAL human
+player eligible to Counterspell now gets a genuine Yes/No button
+prompt first (`_prompt_reaction_choice`) — combat actually pauses via
+a real `asyncio.Event` (no combat-engine rearchitecture needed;
+Telegram already sends messages progressively as combat resolves, so
+the wait just shows up as the game going quiet for a moment). 30-second
+window, per Coffee's own choice; defaults to declining (not
+countering) if nobody answers in time — never worse than a plain "no."
+An AI companion (no human to tap for it) keeps the original instant
+auto-counter behavior unchanged. Shield is NOT touched by this pass —
+same auto-trigger pattern, but it lives inside `rules/combat.py`'s
+pure, synchronous `resolve_attack` (used by literally every attack in
+the game), a meaningfully bigger and riskier lift; noted as a real
+follow-up, not done here.
+
+Verified with real executed tests, including a genuinely unmocked
+end-to-end test of the actual asyncio pause/tap/timeout mechanism
+(`test_prompt_reaction_choice_real_asyncio_tap_and_timeout`), plus
+declined/AI-companion/original-behavior cases all re-verified.
+
 ## [1.27.273] — Character sheet gets a real visual overhaul
 
 **Real request (2026-08-20, Coffee):** "can u make the player sheets
