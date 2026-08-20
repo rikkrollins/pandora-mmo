@@ -2,6 +2,24 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.273] — Character sheet gets a real visual overhaul
+
+**Real request (2026-08-20, Coffee):** "can u make the player sheets
+more visually stimulating? clean up some of the long tests and make
+it look more appealing." `_format_character_sheet` was one dense,
+ungrouped wall of ~25 lines. Restructured into real labeled sections
+(Vitals, Gear & Gold, Magic, Traits & Features, Location) separated by
+the same "━━━" divider convention this session already established for
+Bestiary/Remnants. Racial traits and Class features — the two fields
+that could genuinely run long — are now real bulleted sub-lists
+instead of one long semicolon-joined line. Every existing label/value
+phrase (Equipped, Carried but not equipped, AC/HP/STR-DEX-etc.,
+pending ASI points pinned at the very bottom) is preserved verbatim,
+only regrouped, so nothing already relied on (including Support's own
+sheet-grounding) goes missing. Verified with all pre-existing sheet
+tests re-run green, including a real, unmocked Support/Ollama
+end-to-end test.
+
 ## [1.27.272] — Shops now show your own gold
 
 **Real request (2026-08-20, Coffee):** "when we visit shops show how

@@ -13506,12 +13506,36 @@ def _format_character_sheet(character: dict) -> str:
     resistance_line = f"🌡️ {'; '.join(resist_bits)}\n" if resist_bits else ""
     penetration = magic_penetration_pct(character.get("rebirth_count", 0))
     magic_penetration_line = f"🔮 Magic penetration: {penetration:.0f}% (counters enemy resistances)\n" if penetration > 0 else ""
-    return (
+
+    # Real request (2026-08-20, per Coffee: "make the player sheets
+    # more visually stimulating? clean up some of the long tests and
+    # make it look more appealing") -- this screen was one dense,
+    # ungrouped wall of ~25 lines. Restructured into real labeled
+    # sections with the same "━━━" divider convention this session
+    # already established for Bestiary/Remnants, and the two fields
+    # that could grow genuinely long (Racial traits, Class features)
+    # are now real bulleted sub-lists instead of one long semicolon-
+    # joined line. Every existing label/value phrase is preserved
+    # verbatim (only regrouped) so nothing a player or Support already
+    # looks for on this sheet goes missing.
+    divider = "\n━━━━━━━━━━━━━━━\n"
+    traits_block = (
+        "Racial traits:\n" + "\n".join(f"• {t}" for t in race_data["traits"])
+        if race_data and race_data.get("traits") else "Racial traits: None"
+    )
+    features_block = (
+        "Class features:\n" + "\n".join(f"• {f}" for f in features)
+        if features else "Class features: None"
+    )
+    header_section = (
         f"{name_line} — {character['race']} {character['char_class']}\n"
         f"{pronouns_line}"
         f"{presence_line}"
         f"{streak_line}"
         f"{description_line}"
+    ).rstrip("\n")
+    vitals_section = (
+        f"📊 **Vitals**\n"
         f"Level {character['level']} | XP {character['xp']}{xp_remaining_line}\n"
         f"{rebirth_line}"
         f"{subclass_line}"
@@ -13519,25 +13543,40 @@ def _format_character_sheet(character: dict) -> str:
         f"{echo_trial_line}"
         f"HP {character['hp_current']}/{character['hp_max']} | AC {character['armor_class']}\n"
         f"{ability_line}"
-        f"Alignment: {_alignment_label(character.get('alignment_law_chaos', 0), character.get('alignment_good_evil', 0))}\n"
+        f"Alignment: {_alignment_label(character.get('alignment_law_chaos', 0), character.get('alignment_good_evil', 0))}"
+    ).rstrip("\n")
+    gear_section = (
+        f"🎒 **Gear & Gold**\n"
         f"Gold: {character['gold']} | Guild: {character.get('guild') or 'None'}\n"
         f"{equipped_line}"
         f"{carried_gear_line}"
+    ).rstrip("\n")
+    magic_section = (
+        f"✨ **Magic**\n"
         f"Spells known: {', '.join(spell_names) if spell_names else 'None'}\n"
         f"{slot_line}"
-        f"Racial traits: {'; '.join(race_data['traits']) if race_data else 'None'}\n"
         f"{resistance_line}"
         f"{magic_penetration_line}"
-        f"Class features: {'; '.join(features) if features else 'None'}\n"
+    ).rstrip("\n")
+    traits_section = (
+        f"🧬 **Traits & Features**\n"
+        f"{traits_block}\n"
+        f"{features_block}\n"
         f"{feature_use_line}"
         f"{skills_line}"
-        f"Location: {cl.get_location(CAMPAIGN, character['current_location'])['name']}\n"
-        # Per Coffee (2026-07-16): pending ASI points shown last, so a
-        # player who missed the level-up prompt still sees it waiting
-        # every time they check their sheet, not just buried mid-sheet.
-        f"{asi_line}"
-        f"{skill_points_line}"
     ).rstrip("\n")
+    location_section = f"📍 Location: {cl.get_location(CAMPAIGN, character['current_location'])['name']}"
+    # Per Coffee (2026-07-16): pending ASI points shown last, so a
+    # player who missed the level-up prompt still sees it waiting every
+    # time they check their sheet, not just buried mid-sheet.
+    pending_section = (f"{asi_line}{skill_points_line}").rstrip("\n")
+
+    sections = [
+        header_section, vitals_section, gear_section, magic_section, traits_section, location_section,
+    ]
+    if pending_section:
+        sections.append(pending_section)
+    return divider.join(sections)
 
 
 async def _do_check_sheet(update: Update, target_name: str | None = None) -> None:
