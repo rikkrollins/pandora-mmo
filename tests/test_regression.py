@@ -6773,6 +6773,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(result["damage_dealt"], 999)
 
     async def test_counterspell_negates_a_monster_spell_and_spends_a_slot(self):
+        """
+        2026-08-20, per Coffee (live dev-bridge report on a 70+-round
+        fight): "I am finding this counter very repetitive... I also
+        don't think it should consume spell slot points if they do
+        have the chance to defend, they should be able to counter."
+        Redesigned: no more spell-slot cost, and a real DEX check
+        (d20+DEX vs SKILL_CHECK_DC) must succeed before the prompt even
+        fires -- forced here via a mocked roll_d20 so this test still
+        verifies the real mechanical effect once that chance succeeds
+        and the player accepts.
+        """
         from unittest.mock import patch, AsyncMock
         import sessions
         shaman = {
@@ -6797,11 +6808,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.round_number = 1
         sink = []
         update = FakeUpdate(996092, "look", sink)
-        # 2026-08-20, per Coffee: Counterspell no longer auto-fires for a
-        # real (non-AI) player -- it now asks first (_prompt_reaction_choice).
-        # Patched to simulate the player tapping "Counter it" so this test
-        # still verifies the real mechanical effect once that choice is made.
         with patch("random.random", return_value=0.0), \
+             patch("bot.roll_d20", return_value=20), \
              patch("bot._prompt_reaction_choice", new=AsyncMock(return_value=True)):
             result = await bot._maybe_monster_cast_spell(update, session, shaman, target)
         self.assertIsNotNone(result)
@@ -6809,13 +6817,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["damage_dealt"], 0)
         self.assertEqual(target["hp_current"], 30)  # untouched
         after = db.get_character(996093, -999)
-        self.assertEqual(after["spell_slots_current"], 2)  # one spell slot spent
+        self.assertEqual(after["spell_slots_current"], 3)  # untouched -- countering is free now
         self.assertTrue(any("counters it" in msg for msg in sink), sink)
-        # Real dev-bridge report (2026-08-18): "cast two spell slots...
-        # why did they have none left after only using two?" -- the
-        # reaction message now states the real remaining count so a
-        # slot silently spent by a reaction isn't mistaken for a bug.
-        self.assertTrue(any("2/3 left" in msg for msg in sink), sink)
         sessions.end_session(-999)
 
     async def test_counterspell_asks_a_real_player_and_skips_when_declined(self):
@@ -6851,13 +6854,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         update = FakeUpdate(996095, "look", sink)
         with patch("random.random", return_value=0.0), \
              patch("rules.dice.random.randint", return_value=6), \
+             patch("bot.roll_d20", return_value=20), \
              patch("bot._prompt_reaction_choice", new=AsyncMock(return_value=False)) as mock_prompt:
             result = await bot._maybe_monster_cast_spell(update, session, shaman, target)
         self.assertTrue(mock_prompt.called)
         self.assertFalse(result.get("counterspelled", False))
         self.assertGreater(result["damage_dealt"], 0)
         after = db.get_character(996096, -999)
-        self.assertEqual(after["spell_slots_current"], 3)  # untouched -- declined
+        self.assertEqual(after["spell_slots_current"], 3)  # untouched -- declined (and free either way now)
         sessions.end_session(-999)
 
     async def test_counterspell_still_auto_fires_for_an_ai_only_party(self):
@@ -6891,11 +6895,52 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink = []
         update = FakeUpdate(996097, "look", sink)
         with patch("random.random", return_value=0.0), \
+             patch("bot.roll_d20", return_value=20), \
              patch("bot._prompt_reaction_choice", new=AsyncMock(return_value=False)) as mock_prompt:
             result = await bot._maybe_monster_cast_spell(update, session, shaman, target)
         self.assertFalse(mock_prompt.called)
         self.assertTrue(result["counterspelled"])
-        self.assertEqual(ai_counterspeller["spell_slots_current"], 2)
+        self.assertEqual(ai_counterspeller["spell_slots_current"], 3)  # untouched -- countering is free now
+        sessions.end_session(-999)
+
+    async def test_counterspell_dex_check_failure_never_prompts_at_all(self):
+        """
+        The core of the 2026-08-20 redesign (Coffee: "I am finding this
+        counter very repetitive"): a failed DEX check must skip the
+        prompt entirely (not just auto-decline it) -- the whole point
+        is fewer interruptions, not the same interruption with a
+        different default answer.
+        """
+        from unittest.mock import patch, AsyncMock
+        import sessions
+        shaman = {
+            "telegram_user_id": -700915, "name": "Goblin Shaman", "hp_current": 57, "hp_max": 57,
+            "known_spells": ["produce_flame"], "resistances": [], "vulnerabilities": [], "immunities": [],
+            "dexterity": 13, "strength": 8,
+        }
+        make_basic_character(996117, "SpellTargetF", current_location="crossroads_tavern")
+        db.update_character(996117, -999, hp_current=30)
+        target = db.get_character(996117, -999)
+        target["telegram_user_id"] = 996117
+        make_basic_character(996118, "SlowCounterspeller", char_class="Wizard", current_location="crossroads_tavern")
+        db.update_character(996118, -999, known_spells=["counterspell"], dexterity=8)
+        counterspeller = db.get_character(996118, -999)
+        counterspeller["telegram_user_id"] = 996118
+        session = sessions.start_session(
+            -999, [target, counterspeller, shaman],
+            {996117: "party", 996118: "party", -700915: "enemy"},
+        )
+        session.round_number = 1
+        sink = []
+        update = FakeUpdate(996117, "look", sink)
+        with patch("random.random", return_value=0.0), \
+             patch("rules.dice.random.randint", return_value=6), \
+             patch("bot.roll_d20", return_value=1), \
+             patch("bot._prompt_reaction_choice", new=AsyncMock(return_value=True)) as mock_prompt:
+            result = await bot._maybe_monster_cast_spell(update, session, shaman, target)
+        self.assertFalse(mock_prompt.called)
+        self.assertFalse(result.get("counterspelled", False))
+        self.assertGreater(result["damage_dealt"], 0)
         sessions.end_session(-999)
 
     async def test_prompt_reaction_choice_real_asyncio_tap_and_timeout(self):

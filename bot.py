@@ -8141,38 +8141,48 @@ async def _maybe_monster_cast_spell(
     # own spell the moment party-side casting became real, which it now
     # is (any combatant with real known_spells can cast here, not just
     # enemy monsters).
+    # Real redesign (2026-08-20, per Coffee, live dev-bridge report on a
+    # 70+-round Wrathflame Unbound fight: "I am finding this counter
+    # very repetitive. I think it needs to be handled by some
+    # percentage of the character maybe their defence or their speed,
+    # but I also don't think it should consume spell slot points if
+    # they do have the chance to defend, they should be able to
+    # counter"). No more spell-slot cost, and no more prompt on every
+    # single eligible cast -- a real DEX check (d20 + DEX modifier vs
+    # this game's own existing fixed SKILL_CHECK_DC, same convention
+    # every other skill check already uses) rolls FIRST, silently; the
+    # Yes/No prompt (or an AI's instant auto-use) only ever fires on a
+    # real success, so a slow/low-DEX character simply doesn't get
+    # asked most of the time instead of being asked every time and
+    # (before this) paying a slot for it.
     eligible_counterspellers = [
         p for p in session.living_on_side(session.opposing_side(caster["telegram_user_id"]))
         if "counterspell" in (p.get("known_spells") or [])
-        and p.get("spell_slots_current", 0) > 0
         and p.get("reaction_used_round") != session.round_number
     ]
-    # Real opt-in (2026-08-20, per Coffee): only a REAL human player gets
-    # asked -- an AI companion has no one to tap the button for it, so it
-    # keeps the original instant auto-counter behavior (never worse for
-    # AI-only parties than before this change). Only the FIRST eligible
-    # real player is asked, same "one real reaction, not a whole-party
-    # poll" shape 5E itself uses.
     real_counterspeller = next((p for p in eligible_counterspellers if not p.get("is_ai")), None)
     counterspeller = None
     if real_counterspeller is not None:
-        wants_to_counter = await _prompt_reaction_choice(
-            update, real_counterspeller["telegram_user_id"],
-            f"🔵 **{real_counterspeller['name']}** — **{caster['name']}** is casting {spell['name']}. Counter it?",
-            "Counter it", "Let it land",
-        )
-        if wants_to_counter:
-            counterspeller = real_counterspeller
+        reacts_in_time = roll_d20() + ability_modifier(real_counterspeller.get("dexterity", 10)) >= SKILL_CHECK_DC
+        if reacts_in_time:
+            wants_to_counter = await _prompt_reaction_choice(
+                update, real_counterspeller["telegram_user_id"],
+                f"🔵 **{real_counterspeller['name']}** — **{caster['name']}** is casting {spell['name']}. Counter it?",
+                "Counter it", "Let it land",
+            )
+            if wants_to_counter:
+                counterspeller = real_counterspeller
     elif eligible_counterspellers:
-        counterspeller = eligible_counterspellers[0]
+        ai_counterspeller = eligible_counterspellers[0]
+        if roll_d20() + ability_modifier(ai_counterspeller.get("dexterity", 10)) >= SKILL_CHECK_DC:
+            counterspeller = ai_counterspeller
     if counterspeller:
-        counterspeller["spell_slots_current"] -= 1
         counterspeller["reaction_used_round"] = session.round_number
         _sync_player_to_db(counterspeller)
         await _safe_send(
             update,
-            f"🔵 **{counterspeller['name']}** counters it! **{caster['name']}**'s {spell['name']} fizzles with no effect. "
-            f"(spell slot used — {counterspeller['spell_slots_current']}/{counterspeller.get('spell_slots_max', counterspeller['spell_slots_current'])} left)",
+            f"🔵 **{counterspeller['name']}** reacts in time and counters it! **{caster['name']}**'s {spell['name']} "
+            f"fizzles with no effect.",
         )
         return {
             "attacker": caster["name"], "defender": target["name"], "hit": False,

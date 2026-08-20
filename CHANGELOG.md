@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.277] — Counterspell redesigned: free, DEX-gated, no more spam
+
+**Real dev-bridge follow-up (2026-08-20, Coffee, live report on a
+70+-round Wrathflame Unbound fight):** "I am finding this counter very
+repetitive. I think it needs to be handled by some percentage of the
+character maybe their defence or their speed, but I also don't think
+it should consume spell slot points if they do have the chance to
+defend, they should be able to counter." Redesigned per Coffee's own
+confirmed choice (DEX check vs this game's existing fixed
+`SKILL_CHECK_DC`, same convention every other skill check already
+uses):
+
+- A real d20 + DEX modifier roll fires FIRST, silently, before any
+  prompt — only a real success shows the Yes/No button. A slow/low-DEX
+  character simply isn't asked most of the time, instead of being
+  asked on every single eligible cast (the actual "repetitive" cause
+  across a long fight).
+- No more spell-slot cost — countering is now free once the DEX check
+  succeeds and the player accepts.
+- AI companions get the same DEX-gated chance (no prompt, auto-uses on
+  a real success) — consistent with the real player path, not a free
+  pass.
+
+Verified with real executed tests, including a dedicated test that a
+failed DEX check skips the prompt ENTIRELY (not just auto-declines
+it) — the actual fix for "repetitive," not just "free."
+
 ## [1.27.276] — Support item comparisons now use real numbers, two grounding gaps closed
 
 **Real dev-bridge follow-up (2026-08-20, Coffee):** "look into the
