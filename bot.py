@@ -719,6 +719,18 @@ MAX_CHARACTER_DESCRIPTION_LENGTH = 500
 _PENDING_PRONOUNS: dict[int, set] = {}
 MAX_PRONOUNS_LENGTH = 30
 
+# Market "Sell an Item" button flow (2026-08-20, per Coffee: "if
+# wanting to sell multiple of an item like Silverleaf Herbs, we shud be
+# able to type how many we want to sell") -- tapping an item in the
+# sell picker (market|sellpick|<id>) used to dead-end at itemview_
+# callback's fixed qty=1 "List on Market" action with no way to choose
+# a quantity or price at all. Same chat-scoped pending-prompt pattern
+# as description/pronouns above: the picker stores WHICH item was
+# picked, then the player's next real message (parsed the exact same
+# way _do_sell_market_intent's free-text "sell 3 X for 50 gold"
+# already is) supplies quantity + price.
+_PENDING_MARKET_SELL: dict[int, dict[int, str]] = {}
+
 # Presence/status note (task #144) -- unlike description/pronouns this
 # is always slash-command-driven (/note <text>), so it needs no pending-
 # prompt set: a bare /note with no args just shows the current note
@@ -2624,6 +2636,7 @@ def _battle_menu_keyboard(session: sessions.Session) -> InlineKeyboardMarkup | N
     usable_ids = _battle_usable_item_ids(character)
     if usable_ids:
         row.append(InlineKeyboardButton("🎒 Items", callback_data="bm|items"))
+    row2: list[InlineKeyboardButton] = []
     # Real feature request (2026-08-18, Coffee, same session as the
     # Support Remnants-grounding fix): "make a 'summon' battle option
     # for characters with Remnants" -- _do_summon_remnant was only ever
@@ -2645,7 +2658,7 @@ def _battle_menu_keyboard(session: sessions.Session) -> InlineKeyboardMarkup | N
     # fragment they'd personally already earned, undercutting the
     # exact incentive Coffee wants this system to run on.
     if character.get("bound_remnants"):
-        row.append(InlineKeyboardButton("🔮 Summon", callback_data="bm|summon"))
+        row2.append(InlineKeyboardButton("🔮 Summon", callback_data="bm|summon"))
     # "More" submenu (2026-08-01, per Coffee: "instead of run make it
     # an other command... Run, Give, Formation, Equip and other things
     # useful for battle that doesnt require a turn"): Run shares this
@@ -2654,8 +2667,15 @@ def _battle_menu_keyboard(session: sessions.Session) -> InlineKeyboardMarkup | N
     # by reading each: none of them ever check whose turn it is or
     # call advance_turn) -- decluttering the primary row down to just
     # the real turn-consuming choices.
-    row.append(InlineKeyboardButton("⚙️ More", callback_data="bm|more"))
-    return InlineKeyboardMarkup([row])
+    row2.append(InlineKeyboardButton("⚙️ More", callback_data="bm|more"))
+    # Real live report (2026-08-20, Coffee, screenshot): with Skills,
+    # Items, and Summon all present for one character, 5 buttons packed
+    # into a single Telegram row left each one too narrow to show
+    # anything but its emoji + "..." -- illegible on a phone. Summon and
+    # More now sit on their own second row so every button (2-3 per row,
+    # never more) keeps enough width for its real label.
+    rows = [row, row2] if row2 else [row]
+    return InlineKeyboardMarkup(rows)
 
 
 async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -12048,7 +12068,41 @@ async def _do_sell_market(update: Update, args: list[str]) -> None:
     await _safe_send(update, message)
 
 
-def _market_keyboard(listings: list[dict]) -> InlineKeyboardMarkup | None:
+_MARKET_TYPE_FILTER_LABELS = {
+    "weapon": "⚔️ Weapons", "armor": "🛡️ Armor", "shield": "🛡️ Shields",
+    "consumable": "🧪 Consumables", "material": "🪵 Materials", "scroll": "📜 Scrolls",
+    "ring": "💍 Rings", "amulet": "📿 Amulets", "wondrous": "🌟 Wondrous",
+    "book": "📖 Books", "tool": "🔧 Tools", "map": "🗺️ Maps", "quest_item": "❔ Quest Items",
+}
+
+# Free-text equivalent of the market's type-filter buttons (2026-08-20,
+# per Coffee's screenshot request for real search buttons) -- "show
+# weapons on the market"/"search the market for armor" hits the same
+# _do_check_market(filter_type=...) real filtering the buttons use, so
+# AI companions (always plain-text, see ai/autonomous_player.py) get
+# the same search capability, not just a human tapping a button.
+_MARKET_FILTER_KEYWORDS = {
+    "weapon": ("weapons", "weapon"), "armor": ("armour", "armor"), "shield": ("shields", "shield"),
+    "consumable": ("consumables", "consumable", "potions", "potion"),
+    "material": ("materials", "material", "ingredients", "ingredient"),
+    "scroll": ("scrolls", "scroll"), "ring": ("rings", "ring"), "amulet": ("amulets", "amulet"),
+    "wondrous": ("wondrous",), "book": ("books", "book"), "tool": ("tools", "tool"), "map": ("maps", "map"),
+    "quest_item": ("quest items", "quest item"),
+}
+
+
+def _infer_market_filter_type(text: str) -> str | None:
+    lowered = text.lower()
+    for item_type, keywords in _MARKET_FILTER_KEYWORDS.items():
+        if any(kw in lowered for kw in keywords):
+            return item_type
+    return None
+
+
+def _market_keyboard(
+    listings: list[dict], viewer_id: int | None = None, all_listings: list[dict] | None = None,
+    active_filter: str | None = None,
+) -> InlineKeyboardMarkup | None:
     """
     Per Coffee (2026-07-22): "make buttons on market and tell players
     how to use market" -- the player marketplace was slash-command-only
@@ -12057,30 +12111,87 @@ def _market_keyboard(listings: list[dict]) -> InlineKeyboardMarkup | None:
     design. One Buy button per real listing, same reuse-the-existing-
     handler pattern as _shop_keyboard -- tapping dispatches through the
     SAME _do_buy_market a typed "/buy_market <#>" already uses.
+
+    Extended 2026-08-20, per Coffee (screenshot): "give us push buttons
+    for the market so we can buy, sell, unlist, and search." Buy was
+    already real; this adds the other three -- a listing the VIEWER
+    themselves posted now shows an Unlist button instead of Buy (they
+    could never buy their own listing anyway, _do_buy_market already
+    refuses it), a "Sell an Item" row opens the same real inventory-
+    item picker as the existing 🎒 Items -> item -> "List on Market"
+    flow (reuses itemview_callback's own "market" action verbatim, not
+    a second listing code path), and type-filter buttons are grounded
+    in whatever item types are ACTUALLY on the board right now (never a
+    static "browse everything" list of categories nothing's listed
+    under) -- same "grounded in real data" convention Skills/Items on
+    the battle menu already follow.
     """
     buttons = []
     for listing in listings:
         item = items_module.get_item(listing["item_id"])
         item_name = item["name"] if item else listing["item_id"]
-        buttons.append([InlineKeyboardButton(
-            f"Buy {listing['quantity']}x {item_name} — {listing['price']}g",
-            callback_data=f"market|buy|{listing['listing_id']}",
-        )])
+        if viewer_id is not None and listing["seller_id"] == viewer_id:
+            buttons.append([InlineKeyboardButton(
+                f"🗑️ Unlist {listing['quantity']}x {item_name} — {listing['price']}g",
+                callback_data=f"market|unlist|{listing['listing_id']}",
+            )])
+        else:
+            buttons.append([InlineKeyboardButton(
+                f"Buy {listing['quantity']}x {item_name} — {listing['price']}g",
+                callback_data=f"market|buy|{listing['listing_id']}",
+            )])
+
+    filter_source = all_listings if all_listings is not None else listings
+    present_types = {
+        items_module.get_item(l["item_id"]).get("type")
+        for l in filter_source if items_module.get_item(l["item_id"])
+    }
+    present_types.discard(None)
+    if len(present_types) > 1:
+        filter_row = []
+        if active_filter:
+            filter_row.append(InlineKeyboardButton("🔄 Show All", callback_data="market|filter|all"))
+        for item_type in sorted(present_types):
+            if item_type == active_filter:
+                continue
+            label = _MARKET_TYPE_FILTER_LABELS.get(item_type, item_type.title())
+            filter_row.append(InlineKeyboardButton(label, callback_data=f"market|filter|{item_type}"))
+        for i in range(0, len(filter_row), 3):
+            buttons.append(filter_row[i:i + 3])
+
+    buttons.append([InlineKeyboardButton("💰 Sell an Item", callback_data="market|sell")])
     return InlineKeyboardMarkup(buttons) if buttons else None
 
 
-async def _do_check_market(update: Update) -> None:
-    listings = db.get_market_listings(update.effective_chat.id)
-    if not listings:
+async def _do_check_market(update: Update, filter_type: str | None = None) -> None:
+    """
+    2026-08-20 update, per Coffee's screenshot request for real buy/
+    sell/unlist/search buttons: filter_type narrows the shown listings
+    down to one real item type (grounded in _market_keyboard's own
+    present_types set, tapped via a market|filter|<type> button) --
+    None shows the whole board, same as before.
+    """
+    all_listings = db.get_market_listings(update.effective_chat.id)
+    if not all_listings:
         await _safe_send(
             update,
             "The marketplace is empty right now — nobody's listed anything for sale.\n\n"
             "Want to sell something yourself? Just say \"sell 3 Silverleaf Herb for 50 gold on the market\" "
-            "(or \"/sell_market 3 50 Silverleaf Herb\") to list it for other players to buy.",
+            "(or \"/sell_market 3 50 Silverleaf Herb\"), or tap the button below.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💰 Sell an Item", callback_data="market|sell")]]),
             speak=False,
         )
         return
-    lines = ["🏛️ **Player Marketplace:**"]
+    listings = (
+        [l for l in all_listings if (items_module.get_item(l["item_id"]) or {}).get("type") == filter_type]
+        if filter_type else all_listings
+    )
+    header = "🏛️ **Player Marketplace:**"
+    if filter_type:
+        header += f" (filtered: {_MARKET_TYPE_FILTER_LABELS.get(filter_type, filter_type.title())})"
+    lines = [header]
+    if not listings:
+        lines.append("Nothing of that type is listed right now.")
     for listing in listings:
         item = items_module.get_item(listing["item_id"])
         item_name = item["name"] if item else listing["item_id"]
@@ -12098,12 +12209,15 @@ async def _do_check_market(update: Update) -> None:
             line += f"\n     📊 {stats_line}"
         lines.append(line)
     lines.append(
-        "\nTap a listing below to buy it, or just say \"buy listing <#>\" (or \"/buy_market <#>\").\n"
-        "Selling something yourself? Say \"sell 3 Silverleaf Herb for 50 gold on the market\" "
-        "(or \"/sell_market 3 50 Silverleaf Herb\").\n"
-        "Listed something by mistake? Say \"cancel my listing\" (or \"/cancel_market <#>\") to pull it back."
+        "\nTap a listing below to buy it (or Unlist your own), or just say \"buy listing <#>\" "
+        "(or \"/buy_market <#>\").\n"
+        "Selling something yourself? Tap 💰 Sell an Item below, or say \"sell 3 Silverleaf Herb for 50 "
+        "gold on the market\" (or \"/sell_market 3 50 Silverleaf Herb\").\n"
+        "Listed something by mistake? Tap Unlist, or say \"cancel my listing\" (or \"/cancel_market <#>\")."
     )
-    await _safe_send(update, "\n".join(lines), reply_markup=_market_keyboard(listings), speak=False)
+    viewer_id = update.effective_user.id if update.effective_user else None
+    keyboard = _market_keyboard(listings, viewer_id=viewer_id, all_listings=all_listings, active_filter=filter_type)
+    await _safe_send(update, "\n".join(lines), reply_markup=keyboard, speak=False)
 
 
 async def _do_buy_market(update: Update, args: list[str]) -> None:
@@ -12348,6 +12462,52 @@ async def _do_buy_market_intent(update: Update, text: str) -> None:
     await _safe_send(
         update,
         "Buy which listing? Say \"buy listing <#>\", or check \"the market\" to see what's up for sale.",
+        speak=False,
+    )
+
+
+async def _do_view_market_listing_intent(update: Update, text: str) -> None:
+    """
+    Real live request (2026-08-20, Coffee): "we also need to be able to
+    full view the items on market too -- all stats, buffs, elements, +
+    to stats, seller, cost of the item, and requirements to equip."
+    The 🔍 View button (market_menu_callback's "view" action) covers
+    the tap path; this is the same real natural-language equivalent
+    _do_buy_market_intent already has for buying, so AI companions
+    (whose own actions are always plain-text, never button taps -- see
+    ai/autonomous_player.py) can reach the exact same full detail view,
+    not just human players with a Telegram keyboard in front of them.
+    Same "listing number is unambiguous, otherwise match by real item
+    name, zero/many matches ask rather than assume" resolution shape
+    as buy/cancel already use.
+    """
+    match = re.search(r"#?(\d+)", text)
+    if match:
+        listing = db.get_market_listing(int(match.group(1)), update.effective_chat.id)
+        if listing is None:
+            await _safe_send(update, "That listing doesn't exist — it may have already been bought or cancelled.", speak=False)
+            return
+        await _safe_send(update, _format_market_listing_detail(listing) or "That item no longer exists.", speak=False)
+        return
+
+    listings = db.get_market_listings(update.effective_chat.id)
+    if not listings:
+        await _safe_send(update, "The marketplace is empty right now — nobody's listed anything for sale.", speak=False)
+        return
+    matched = [l for l in listings if items_module.find_item_mentioned_in_text(text, candidate_ids=[l["item_id"]])]
+    if len(matched) == 1:
+        await _safe_send(update, _format_market_listing_detail(matched[0]) or "That item no longer exists.", speak=False)
+        return
+    if len(matched) > 1:
+        lines = ["More than one listing matches that — which one? Say \"view listing <#>\":"]
+        for listing in matched:
+            item = items_module.get_item(listing["item_id"])
+            item_name = item["name"] if item else listing["item_id"]
+            lines.append(f"#{listing['listing_id']}: {listing['quantity']}x {item_name} — {listing['price']} gold")
+        await _safe_send(update, "\n".join(lines), speak=False)
+        return
+    await _safe_send(
+        update, "View which listing? Say \"view listing <#>\", or check \"the market\" to see what's up for sale.",
         speak=False,
     )
 
@@ -20974,15 +21134,106 @@ async def shop_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await _do_buy(update, f"buy {qty} {item['name']}")
 
 
+def _market_sell_picker_keyboard(character: dict) -> InlineKeyboardMarkup | None:
+    """
+    One button per carried item. Routes to market|sellpick|<id> (NOT
+    itemview_callback's fixed qty=1 "market" action) so a stackable
+    item (Silverleaf Herb, etc.) can actually be sold as more than a
+    single unit -- see market_menu_callback's "sellpick" branch and
+    _PENDING_MARKET_SELL's own comment for the real quantity+price
+    prompt this leads into.
+    """
+    if not character.get("inventory"):
+        return None
+    buttons = [
+        [InlineKeyboardButton(f"💰 {items_module.get_item(item_id)['name']} (have {qty})", callback_data=f"market|sellpick|{item_id}")]
+        for item_id, qty in character["inventory"].items() if qty > 0 and items_module.get_item(item_id)
+    ]
+    return InlineKeyboardMarkup(buttons) if buttons else None
+
+
+def _format_market_listing_detail(listing: dict) -> str | None:
+    """
+    Full item-detail view for a market listing (2026-08-20, per Coffee:
+    "we also need to be able to full view the items on market too --
+    all stats, buffs, elements, + to stats, seller, cost of the item,
+    and requirements to equip"). Reuses _format_item_detail_block
+    verbatim for the item's own real stats/bonuses/requirements (same
+    grounded data the 🎒 Items "show" view already renders -- never a
+    second, drifting item-description path), then appends the two
+    facts that are genuinely listing-specific, not item-specific:
+    who's selling it and what it costs.
+    """
+    item = items_module.get_item(listing["item_id"])
+    if item is None:
+        return None
+    detail = _format_item_detail_block(item)
+    header = f"🔍 **{listing['quantity']}x {item['name']}**"
+    footer = f"\n\n🏷️ **{listing['price']} gold** total — seller: **{listing['seller_name']}** (listing #{listing['listing_id']})"
+    return f"{header}\n{detail}{footer}" if detail else f"{header}{footer}"
+
+
 async def market_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles taps on _market_keyboard -- dispatches through the same _do_buy_market a typed "/buy_market <#>" already uses."""
+    """
+    Handles taps on _market_keyboard -- dispatches through the same
+    _do_buy_market/_do_cancel_market a typed "/buy_market <#>"/
+    "/cancel_market <#>" already use. Extended 2026-08-20 (per Coffee's
+    real buy/sell/unlist/search/full-view button request) with unlist,
+    sell (item picker -> reuses itemview_callback's existing real
+    "market" action, not a second listing code path), filter, and view.
+    """
     query = update.callback_query
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
     await _safe_answer(query)
-    if action != "buy" or len(parts) < 3:
+
+    if action == "buy" and len(parts) >= 3:
+        await _do_buy_market(update, [parts[2]])
         return
-    await _do_buy_market(update, [parts[2]])
+
+    if action == "unlist" and len(parts) >= 3:
+        await _do_cancel_market(update, [parts[2]])
+        return
+
+    if action == "filter":
+        filter_type = parts[2] if len(parts) > 2 else "all"
+        await _do_check_market(update, filter_type=None if filter_type == "all" else filter_type)
+        return
+
+    if action == "view" and len(parts) >= 3:
+        listing = db.get_market_listing(int(parts[2]), update.effective_chat.id)
+        if listing is None:
+            await _safe_send(update, "That listing doesn't exist — it may have already been bought or cancelled.")
+            return
+        detail = _format_market_listing_detail(listing)
+        await _safe_send(update, detail or "That item no longer exists.", speak=False)
+        return
+
+    if action == "sell":
+        character = db.get_character(update.effective_user.id, update.effective_chat.id)
+        keyboard = _market_sell_picker_keyboard(character) if character else None
+        if keyboard is None:
+            await _safe_send(update, "You don't have anything in your backpack to list right now.")
+            return
+        await _safe_send(
+            update, "Which item would you like to list on the market?", reply_markup=keyboard,
+        )
+        return
+
+    if action == "sellpick" and len(parts) >= 3:
+        item_id = parts[2]
+        item = items_module.get_item(item_id)
+        character = db.get_character(update.effective_user.id, update.effective_chat.id)
+        held = character["inventory"].get(item_id, 0) if character else 0
+        if item is None or held <= 0:
+            await _safe_send(update, "You don't have that item anymore.")
+            return
+        _chat_scoped_dict(_PENDING_MARKET_SELL, update.effective_chat.id)[update.effective_user.id] = item_id
+        await _safe_send(
+            update,
+            f"How many **{item['name']}** (you have {held}), and for how much total gold? Reply like "
+            f"\"3 for 50 gold\" to sell 3 for 50g total, or \"50 gold\" to sell 1 for 50g.",
+        )
 
 
 async def _do_list_shop(update: Update) -> None:
@@ -24004,6 +24255,24 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         await _do_set_pronouns(update, update.message.text, from_prompt=True)
         return
 
+    # Resume the market "Sell an Item" picker (2026-08-20, per Coffee:
+    # "if wanting to sell multiple... we shud be able to type how
+    # many"). item_id was already picked via button; this reply only
+    # ever needs to supply quantity+price, so it's synthesized into the
+    # exact free-text shape _do_sell_market_intent's own regex already
+    # parses ("sell <reply> <item name>"), rather than a second,
+    # divergent quantity/price parser.
+    pending_sell_item_id = _chat_scoped_dict(_PENDING_MARKET_SELL, update.effective_chat.id).pop(
+        update.effective_user.id, None
+    )
+    if pending_sell_item_id is not None:
+        pending_item = items_module.get_item(pending_sell_item_id)
+        if pending_item is None:
+            await _safe_send(update, "That item no longer exists.")
+            return
+        await _do_sell_market_intent(update, f"sell {update.message.text.strip()} {pending_item['name']}")
+        return
+
     text = update.message.text.strip()
     _LAST_TOPIC_MESSAGE[(update.effective_chat.id, update.effective_message.message_thread_id)] = {
         "kind": "adventure",
@@ -24401,13 +24670,15 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     elif action == "accept_duel":
         await _do_accept_duel(update)
     elif action == "check_market":
-        await _do_check_market(update)
+        await _do_check_market(update, filter_type=_infer_market_filter_type(text))
     elif action == "cancel_market":
         await _do_cancel_market_intent(update, text)
     elif action == "sell_market":
         await _do_sell_market_intent(update, text)
     elif action == "buy_market":
         await _do_buy_market_intent(update, text)
+    elif action == "view_market_listing":
+        await _do_view_market_listing_intent(update, text)
     elif action == "join_battle":
         await _do_join_battle(update)
     elif action == "replay_intro":

@@ -8631,6 +8631,39 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("Summon" in l for l in labels_after))
         sessions.end_session(-999)
 
+    def test_battle_menu_never_crams_more_than_three_buttons_in_one_row(self):
+        """
+        Real live report (2026-08-20, Coffee, screenshot): a character
+        with known_spells, usable items, AND a bound Remnant got Fight/
+        Skills/Items/Summon/More all packed into one Telegram row --
+        each button too narrow to show anything but its emoji + "...".
+        _battle_menu_keyboard now spreads Summon/More onto a second row
+        so no single row ever exceeds 3 buttons, and every label stays
+        fully readable.
+        """
+        import sessions
+        sessions.end_session(-999)
+        leader_id = 950651
+        make_basic_character(leader_id, "MenuRowTester", current_location="crossroads_tavern")
+        db.update_character(
+            leader_id, -999,
+            known_spells=["firebolt"], inventory={"healing_potion": 1},
+            bound_remnants=["the_wrathflame_unbound"],
+        )
+        enemy = {"telegram_user_id": -5100051, "name": "MenuRowGoblin", "dexterity": 10, "hp_current": 20, "hp_max": 20}
+        leader = db.get_character(leader_id, -999)
+        leader["telegram_user_id"] = leader_id
+        session = sessions.start_session(-999, [leader, enemy], {leader_id: "party", -5100051: "enemy"})
+        session.turn_order = [leader_id, -5100051]
+
+        kb = bot._battle_menu_keyboard(session)
+        for row in kb.inline_keyboard:
+            self.assertLessEqual(len(row), 3, f"row too crowded to read: {[b.text for b in row]}")
+        all_labels = [btn.text for row in kb.inline_keyboard for btn in row]
+        for expected in ("Fight", "Skills", "Items", "Summon", "More"):
+            self.assertTrue(any(expected in l for l in all_labels), f"missing {expected} button entirely")
+        sessions.end_session(-999)
+
     async def test_battle_menu_summon_flow_lists_remnant_then_target_then_casts(self):
         """Full tap-through: bm|summon -> bm|summonpick|<id> -> bm|summontarget|<id>|<name>, same shape as the existing cast/casttarget flow."""
         import sessions
@@ -13660,6 +13693,192 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seller_after["inventory"].get("rusty_dagger", 0), 1)
         self.assertEqual(seller_after["gold"], seller_before["gold"])
 
+    MARKET_BUTTONS_CHAT = -998810  # dedicated chat_id: keeps this whole button-feature suite isolated from -999's shared listings
+
+    async def test_market_keyboard_shows_unlist_for_own_listing_buy_for_others(self):
+        """
+        Real live request (2026-08-20, Coffee, screenshot): "give us
+        push buttons for the market so we can buy, sell, unlist, and
+        search." A listing the viewer posted themselves now shows
+        Unlist (they could never Buy their own listing anyway); every
+        other listing still shows the real, pre-existing Buy button.
+        """
+        chat_id = self.MARKET_BUTTONS_CHAT
+        seller_id, viewer_id = 900580, 900581
+        make_basic_character(seller_id, "MarketOwnLister", inventory={"rusty_dagger": 1}, chat_id=chat_id)
+        make_basic_character(viewer_id, "MarketOtherViewer", gold=1000, chat_id=chat_id)
+        sink = []
+        await bot._do_sell_market(FakeUpdate(seller_id, "", sink, chat_id=chat_id), ["1", "50", "rusty dagger"])
+        listings = db.get_market_listings(chat_id)
+
+        kb_owner = bot._market_keyboard(listings, viewer_id=seller_id)
+        owner_labels = [b.text for row in kb_owner.inline_keyboard for b in row]
+        self.assertTrue(any("Unlist" in l for l in owner_labels))
+        self.assertFalse(any(l.startswith("Buy") for l in owner_labels))
+
+        kb_other = bot._market_keyboard(listings, viewer_id=viewer_id)
+        other_labels = [b.text for row in kb_other.inline_keyboard for b in row]
+        self.assertTrue(any(l.startswith("Buy") for l in other_labels))
+        self.assertFalse(any("Unlist" in l for l in other_labels))
+
+    async def test_market_menu_callback_unlist_button_cancels_own_listing(self):
+        chat_id = self.MARKET_BUTTONS_CHAT
+        seller_id = 900582
+        make_basic_character(seller_id, "MarketUnlistTapper", inventory={"rusty_dagger": 1}, chat_id=chat_id)
+        sink = []
+        await bot._do_sell_market(FakeUpdate(seller_id, "", sink, chat_id=chat_id), ["1", "50", "rusty dagger"])
+        listing_id = db.get_market_listings(chat_id)[-1]["listing_id"]
+
+        sink2 = []
+        await bot.market_menu_callback(
+            FakeCallbackUpdate(seller_id, f"market|unlist|{listing_id}", sink2, chat_id=chat_id), DummyContext(),
+        )
+        self.assertTrue(any("Cancelled listing" in msg for msg in sink2), sink2)
+        self.assertIsNone(db.get_market_listing(listing_id, chat_id))
+        self.assertEqual(db.get_character(seller_id, chat_id)["inventory"].get("rusty_dagger", 0), 1)
+
+    def test_market_sell_picker_keyboard_shows_held_quantity_and_routes_to_sellpick(self):
+        """
+        The Sell button opens a picker of the tapping player's REAL
+        carried items -- each button shows how many are held and
+        routes to market|sellpick|<id> (NOT itemview_callback's fixed
+        qty=1 action), so a stackable item can actually be sold as
+        more than a single unit (see the sellpick+free-text tests
+        below).
+        """
+        chat_id = self.MARKET_BUTTONS_CHAT
+        make_basic_character(900583, "MarketSellTapper", inventory={"rusty_dagger": 1, "silverleaf_herb": 5}, chat_id=chat_id)
+        kb = bot._market_sell_picker_keyboard(db.get_character(900583, chat_id))
+        labels = {b.text: b.callback_data for row in kb.inline_keyboard for b in row}
+        self.assertTrue(any("Silverleaf" in l and "(have 5)" in l for l in labels))
+        self.assertTrue(any(cb == "market|sellpick|silverleaf_herb" for cb in labels.values()))
+        self.assertTrue(any(cb == "market|sellpick|rusty_dagger" for cb in labels.values()))
+
+    async def test_market_sellpick_then_free_text_lists_a_custom_quantity_and_price(self):
+        """
+        Real live request (2026-08-20, Coffee): "if wanting to sell
+        multiple of an item like Silverleaf Herbs, we shud be able to
+        type how many we want to sell." Tapping an item in the Sell
+        picker now prompts for quantity+price instead of dead-ending at
+        a fixed qty=1 listing; the player's next real message supplies
+        both, parsed through the same real _do_sell_market_intent
+        regex "sell 3 X for 50 gold" already uses.
+        """
+        chat_id = self.MARKET_BUTTONS_CHAT
+        seller_id = 900586
+        make_basic_character(seller_id, "MarketSellPicker", inventory={"silverleaf_herb": 5}, chat_id=chat_id)
+        sink = []
+        await bot.market_menu_callback(
+            FakeCallbackUpdate(seller_id, "market|sellpick|silverleaf_herb", sink, chat_id=chat_id), DummyContext(),
+        )
+        self.assertTrue(any("How many" in msg and "Silverleaf" in msg for msg in sink), sink)
+        self.assertEqual(
+            bot._chat_scoped_dict(bot._PENDING_MARKET_SELL, chat_id).get(seller_id), "silverleaf_herb",
+        )
+
+        sink2 = []
+        await bot.adventure_master_handler(FakeUpdate(seller_id, "3 for 60 gold", sink2, chat_id=chat_id), DummyContext())
+        self.assertTrue(any("lists" in msg and "60 gold" in msg for msg in sink2), sink2)
+        listing = next(l for l in db.get_market_listings(chat_id) if l["seller_id"] == seller_id)
+        self.assertEqual(listing["item_id"], "silverleaf_herb")
+        self.assertEqual(listing["quantity"], 3)
+        self.assertEqual(listing["price"], 60)
+        self.assertEqual(db.get_character(seller_id, chat_id)["inventory"].get("silverleaf_herb", 0), 2)
+        # Pending state is consumed, not left dangling for the next unrelated message.
+        self.assertNotIn(seller_id, bot._chat_scoped_dict(bot._PENDING_MARKET_SELL, chat_id))
+
+    async def test_market_view_button_shows_full_detail_including_seller_and_cost(self):
+        """
+        Real live request (2026-08-20, Coffee): "we also need to be
+        able to full view the items on market too -- all stats, buffs,
+        elements, + to stats, seller, cost of the item, and
+        requirements to equip." Reuses _format_item_detail_block (the
+        same real breakdown the 🎒 Items "show" view already renders)
+        and appends the two listing-specific facts that aren't part of
+        the item template itself: who's selling it and what it costs.
+        """
+        chat_id = self.MARKET_BUTTONS_CHAT
+        seller_id, viewer_id = 900587, 900588
+        make_basic_character(seller_id, "MarketViewSeller", inventory={"longsword": 1}, chat_id=chat_id)
+        make_basic_character(viewer_id, "MarketViewer", chat_id=chat_id)
+        sink = []
+        await bot._do_sell_market(FakeUpdate(seller_id, "", sink, chat_id=chat_id), ["1", "75", "longsword"])
+        listing_id = db.get_market_listings(chat_id)[-1]["listing_id"]
+
+        sink2 = []
+        await bot.market_menu_callback(
+            FakeCallbackUpdate(viewer_id, f"market|view|{listing_id}", sink2, chat_id=chat_id), DummyContext(),
+        )
+        combined = "\n".join(sink2)
+        self.assertIn("Longsword", combined)
+        self.assertIn("75 gold", combined)
+        self.assertIn("MarketViewSeller", combined)
+        self.assertIn("1d8", combined)  # real base stat from _format_item_detail_block
+
+    async def test_view_market_listing_intent_natural_language_matches_buy_market_intents_style(self):
+        """
+        AI-companion parity (2026-08-20, per Coffee: "make sure the
+        market has what the players need, including AI players") -- AI
+        companions never tap buttons (ai/autonomous_player.py's own
+        actions are always plain-text sentences), so the full-view
+        feature needs a real natural-language path too, not just the
+        🔍 View button. Same "listing # is unambiguous, else match by
+        real item name" resolution _do_buy_market_intent already uses.
+        """
+        chat_id = self.MARKET_BUTTONS_CHAT
+        seller_id, viewer_id = 900589, 900590
+        make_basic_character(seller_id, "MarketViewNLSeller", inventory={"longsword": 1}, chat_id=chat_id)
+        make_basic_character(viewer_id, "MarketViewNLViewer", chat_id=chat_id)
+        sink = []
+        await bot._do_sell_market(FakeUpdate(seller_id, "", sink, chat_id=chat_id), ["1", "75", "longsword"])
+        listing_id = db.get_market_listings(chat_id)[-1]["listing_id"]
+
+        sink2 = []
+        await bot._do_view_market_listing_intent(
+            FakeUpdate(viewer_id, "", sink2, chat_id=chat_id), f"examine listing {listing_id} on the market",
+        )
+        self.assertTrue(any("Longsword" in msg and "MarketViewNLSeller" in msg for msg in sink2), sink2)
+
+        sink3 = []
+        await bot._do_view_market_listing_intent(
+            FakeUpdate(viewer_id, "", sink3, chat_id=chat_id), "look at the longsword on the market",
+        )
+        self.assertTrue(any("Longsword" in msg and "75 gold" in msg for msg in sink3), sink3)
+
+    def test_infer_market_filter_type_matches_real_item_types_only(self):
+        self.assertEqual(bot._infer_market_filter_type("show weapons on the market"), "weapon")
+        self.assertEqual(bot._infer_market_filter_type("search the market for armour"), "armor")
+        self.assertEqual(bot._infer_market_filter_type("what potions are on the market"), "consumable")
+        self.assertIsNone(bot._infer_market_filter_type("what's on the market"))
+
+    def test_view_market_listing_intent_routes_correctly(self):
+        self.assertEqual(_keyword_fallback("examine listing 3 on the market", [])["action"], "view_market_listing")
+        self.assertEqual(_keyword_fallback("look at the rusty dagger on the market", [])["action"], "view_market_listing")
+        # No regression: a bare "the market" with no view/examine/buy/sell/cancel word still just checks it.
+        self.assertEqual(_keyword_fallback("what's on the market", [])["action"], "check_market")
+
+    async def test_market_menu_callback_filter_button_narrows_to_real_type(self):
+        chat_id = self.MARKET_BUTTONS_CHAT
+        seller_id, buyer_id = 900584, 900585
+        make_basic_character(seller_id, "MarketFilterSeller", inventory={"rusty_dagger": 1, "silverleaf_herb": 3}, chat_id=chat_id)
+        make_basic_character(buyer_id, "MarketFilterBuyer", gold=1000, chat_id=chat_id)
+        sink = []
+        await bot._do_sell_market(FakeUpdate(seller_id, "", sink, chat_id=chat_id), ["1", "10", "rusty dagger"])
+        await bot._do_sell_market(FakeUpdate(seller_id, "", sink, chat_id=chat_id), ["3", "10", "silverleaf herb"])
+
+        sink2 = []
+        await bot.market_menu_callback(
+            FakeCallbackUpdate(buyer_id, "market|filter|weapon", sink2, chat_id=chat_id), DummyContext(),
+        )
+        combined = "\n".join(sink2)
+        self.assertIn("Rusty Dagger", combined)
+        # The fixed sell-hint boilerplate example mentions "Silverleaf Herb" by
+        # name regardless of filter -- only the actual listing lines matter here.
+        listing_lines = [line for line in combined.splitlines() if line.startswith("#")]
+        self.assertTrue(listing_lines, combined)
+        self.assertTrue(all("Silverleaf" not in line for line in listing_lines), listing_lines)
+        self.assertIn("filtered", combined.lower())
+
     def test_cancel_market_natural_language_routes_correctly(self):
         """
         Real live gap (2026-08-03, Coffee): typed "Cancel my listing in
@@ -13906,10 +14125,15 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         with_market = _action_style_prompt("The player marketplace has: 1x Rusty Dagger for 60 gold\nYou're carrying: Rusty Dagger")
         self.assertIn("from the market", with_market)
         self.assertIn("on the market for", with_market)
+        # 2026-08-20, per Coffee ("make sure the market has what the
+        # players need, including AI players"): the new full-view
+        # feature gets an example hint too, same fact-gating.
+        self.assertIn("examine", with_market)
 
         without_market = _action_style_prompt("Location: The Crossroads Tavern")
         self.assertNotIn("from the market", without_market)
         self.assertNotIn("on the market for", without_market)
+        self.assertNotIn("examine [something listed under The player marketplace has]", without_market)
 
     # -- Task #265, per Coffee ("i wasted a turn ... u said it was
     #    complete"): 27 spells whose effect type (buff/negate/ac_bonus)

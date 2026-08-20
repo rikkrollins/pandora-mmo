@@ -171,9 +171,9 @@ class FakeCallbackQuery:
 
 class FakeCallbackUpdate:
     """A FakeUpdate-equivalent for a button tap (callback_query), not a typed message."""
-    def __init__(self, user_id, data, sink):
+    def __init__(self, user_id, data, sink, chat_id=None):
         self.effective_user = FakeUser(user_id)
-        self.effective_chat = FakeChat(sink)
+        self.effective_chat = FakeChat(sink, chat_id=chat_id if chat_id is not None else -999)
         self.callback_query = FakeCallbackQuery(data, sink)
         self.message = None
         self.effective_message = None

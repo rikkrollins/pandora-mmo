@@ -2,6 +2,50 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.281] — Battle menu legibility fix + real market buy/sell/unlist/search/view buttons
+
+**Real live reports (2026-08-20, Coffee, two screenshots):** (1) "The
+menu isn't legible — can u fix this?" — Fight/Skills/Items/Summon/More
+were all packed into one Telegram row, each button too narrow to show
+anything but its emoji + "...". `_battle_menu_keyboard` now spreads
+Summon/More onto a second row so no row ever exceeds 3 buttons.
+(2) "Can you give us push buttons for the market so we can buy, sell,
+unlist, and search (items, sellers, damage types... anything that
+would help with searching or organizing many items in the market."
+
+Market extended with real, tested functionality:
+- **Unlist**: a listing the viewer posted themselves now shows an
+  Unlist button instead of Buy (they could never buy their own listing
+  anyway).
+- **Sell**: a "💰 Sell an Item" entry point on the market screen itself
+  opens a real inventory picker; per Coffee's live follow-up ("if
+  wanting to sell multiple of an item like Silverleaf Herbs, we shud
+  be able to type how many we want to sell"), picking an item now
+  prompts for a real quantity + price via free text instead of a fixed
+  qty=1 listing, parsed through the existing `_do_sell_market_intent`
+  regex.
+- **Search/filter**: type-filter buttons (Weapons/Armor/Consumables/
+  etc.) grounded in whatever's actually listed right now, never a
+  static "browse everything" category list.
+- **Full view**: per Coffee's live follow-up ("we also need to be able
+  to full view the items on market too — all stats, buffs, elements, +
+  to stats, seller, cost of the item, and requirements to equip"), a
+  🔍 View button per listing reuses the existing `_format_item_detail_
+  block` (same real breakdown the 🎒 Items "show" view already renders)
+  plus the two listing-specific facts that aren't part of the item
+  template: seller and cost.
+- **AI-companion parity**: per Coffee's live follow-up ("make sure the
+  market has what the players need, including AI players") — every
+  new capability has a real natural-language equivalent too (AI
+  companions' own actions are always plain-text, never button taps):
+  `view_market_listing` intent ("examine listing 3 on the market"),
+  free-text type filtering ("show weapons on the market"), and an
+  added `ai/autonomous_player.py` example hint nudging AI companions
+  to examine an item before buying it.
+
+Seller-name filtering and a "My Listings" quick view were flagged as
+possible next steps but not built this pass — held for Coffee's call.
+
 ## [1.27.280] — Encounter Ledger refreshed to match live campaign.json
 
 **Real request (2026-08-20, Coffee): "can u update the encounter

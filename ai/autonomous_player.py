@@ -93,6 +93,15 @@ _EXAMPLE_LINES = [
     # real behind it" convention every other line here already follows.
     ("The player marketplace has", "buy [something listed under The player marketplace has] from the market"),
     ("You're carrying", "sell my [something listed under You're carrying] on the market for [a real number, e.g. 30] gold"),
+    # Real live request (2026-08-20, Coffee: "make sure the market has
+    # what the players need, including AI players") -- the market's new
+    # full item-detail view (real stats/buffs/requirements/seller/cost)
+    # has a real natural-language path (_do_view_market_listing_intent)
+    # same as buy/sell/cancel already do, but with no example hint here
+    # an AI companion would rarely think to check an item's real stats
+    # before buying it, unlike a human with a 🔍 View button in front
+    # of them. Same fact-gating as the buy hint just above.
+    ("The player marketplace has", "examine [something listed under The player marketplace has] on the market"),
     ("Guilds you could join", "I want to join the [a guild listed under Guilds you could join]"),
     ("Spells you know", "I cast [something listed under Spells you know]"),
     ("Resources here", "I gather [something listed under Resources here]"),

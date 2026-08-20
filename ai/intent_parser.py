@@ -498,6 +498,16 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
         # never fires on "market listings" itself.
         if any(w in lowered for w in ["sell", "list "]):
             return {**base, "action": "sell_market"}
+        # Checked before the generic "buy" below (2026-08-20, per
+        # Coffee: "we also need to be able to full view the items on
+        # market too -- all stats, buffs, elements... requirements to
+        # equip") -- the same real natural-language equivalent of the
+        # market's new 🔍 View button, so an AI companion (always
+        # plain-text, never a button tap) can reach the full detail
+        # view too, e.g. "examine listing 3 on the market" / "look at
+        # the rusty dagger on the market".
+        if any(w in lowered for w in ["examine", "inspect", "look at", "view", "details", "details of"]):
+            return {**base, "action": "view_market_listing"}
         if any(w in lowered for w in ["buy", "purchase"]):
             return {**base, "action": "buy_market"}
         return {**base, "action": "check_market"}
@@ -2340,7 +2350,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "bestiary", "list_shop", "leaderboard", "check_achievements", "set_title", "check_weather",
                 "check_guild_quest", "dice_game", "fortunes_wheel", "set_alignment", "message_ai",
                 "skill_tree", "challenge_duel", "accept_duel", "check_market", "cancel_market",
-                "sell_market", "buy_market", "join_battle",
+                "sell_market", "buy_market", "view_market_listing", "join_battle",
                 "replay_intro", "visual_map", "rebirth", "choose_hybrid", "give_offering",
                 "drink_water", "choose_subclass", "start_echo_trial", "check_professions",
                 "talk_party", "use_environment", "throw_weapon",
