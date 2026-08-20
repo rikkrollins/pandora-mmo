@@ -14093,6 +14093,18 @@ async def _do_check_remnants(update: Update) -> None:
     (remnants.py) -- never the full REMNANTS table, so it can't leak
     which of the 12 real Unbound exist or where they are before a
     player has genuinely earned one.
+
+    Real request (2026-08-20, per Coffee: "i would like a Remnant menu
+    in the player menu... make it like the Bestiary but only show
+    Remnants and what they offer the player") -- added as a real
+    "🔮 Remnants" row on the main menu (_main_menu_keyboard, routed via
+    menu|remnants), and restyled to match _do_bestiary's own real
+    visual convention (a real known-count header, a real "━━━" divider
+    between entries) instead of this screen's older plain-blank-line
+    layout. The shown avg damage now also folds in the source boss's
+    own real damage_bonus (v1.27.268's "much stronger than a normal
+    attack" buff) -- previously this screen quoted the summon's raw
+    dice+bonus alone, understating what a cast actually does in combat.
     """
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -14109,24 +14121,28 @@ async def _do_check_remnants(update: Update) -> None:
             speak=False,
         )
         return
-    lines = [
-        f"🔮 **{character['name']}**'s bound Remnants:",
-        "Say \"summon [name]\" in battle (or tap the Summon button) to call one.",
-        "",
-    ]
+    entries = []
     for remnant_id in bound:
         remnant = remnants_module.get_remnant(remnant_id)
         if not remnant:
             continue
-        avg_dmg = average_damage(remnant["summon_damage_dice"], remnant["summon_damage_bonus"])
+        source_template = cl.get_monster_template(CAMPAIGN, remnant["monster_key"])
+        source_bonus = source_template.get("damage_bonus", 0) if source_template else 0
+        avg_dmg = average_damage(remnant["summon_damage_dice"], remnant["summon_damage_bonus"] + source_bonus)
         secondary_text = _SUMMON_SECONDARY_DESCRIPTIONS.get(remnant["summon_secondary"], "no secondary effect")
-        lines.append(
-            f"**{remnant['name']}** — {remnant['summon_damage_dice']}+{remnant['summon_damage_bonus']} "
-            f"{remnant['element']} damage (~{avg_dmg:.1f} avg); {secondary_text}."
+        entries.append(
+            f"**{remnant['name']}**\n"
+            f"⚔️ {remnant['summon_damage_dice']}+{remnant['summon_damage_bonus']+source_bonus} "
+            f"{remnant['element']} damage (~{avg_dmg:.1f} avg)\n"
+            f"✨ {secondary_text}\n"
+            f"_{remnant['lore']}_"
         )
-        lines.append(f"_{remnant['lore']}_")
-        lines.append("")
-    await _safe_send(update, "\n".join(lines).strip(), speak=False)
+    lines = [
+        f"🔮 **{character['name']}**'s Remnants — {len(entries)} bound",
+        "Say \"summon [name]\" in battle (or tap the Summon button) to call one.\n",
+    ]
+    lines.append("\n━━━━━━━━━━━━━━━\n".join(entries))
+    await _safe_send(update, "\n\n".join(lines), speak=False)
 
 
 async def _do_read_recipe_book(update: Update, item: dict) -> None:
@@ -21124,6 +21140,7 @@ def _main_menu_keyboard(character: dict) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🏅 Achievements", callback_data="menu|achievements")],
         [InlineKeyboardButton("🏛️ Market", callback_data="menu|market")],
         [InlineKeyboardButton("📚 Bestiary", callback_data="menu|bestiary")],
+        [InlineKeyboardButton("🔮 Remnants", callback_data="menu|remnants")],
         [InlineKeyboardButton("🌤️ Weather", callback_data="menu|weather")],
         [InlineKeyboardButton("🏆 Leaderboard", callback_data="menu|leaderboard")],
         [InlineKeyboardButton("🗺️ Visual Map", callback_data="menu|visualmap")],
@@ -21251,6 +21268,8 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await _do_check_market(update)
     elif section == "bestiary":
         await _do_bestiary(update)
+    elif section == "remnants":
+        await _do_check_remnants(update)
     elif section == "weather":
         await _do_check_weather(update)
     elif section == "leaderboard":

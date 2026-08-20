@@ -8306,6 +8306,15 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         2026-08-20: no longer mentions a designated-Summoner status --
         that single-holder role was removed; whoever bound a Remnant
         can just summon it themselves.
+
+        2026-08-20: restyled to match _do_bestiary's real visual
+        convention (a known-count header, "---" divider between
+        entries) per Coffee: "make it like the Bestiary but only show
+        Remnants and what they offer the player." The quoted avg
+        damage now also folds in the source boss's own real
+        damage_bonus (The Wrathflame Unbound: 50, campaign.json) on
+        top of the summon's own +16, matching what a real cast
+        actually deals since v1.27.268.
         """
         user_id = 950652
         make_basic_character(user_id, "RemnantMenuTester", current_location="crossroads_tavern")
@@ -8316,6 +8325,39 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("The Wrathflame Unbound", reply)
         self.assertIn("fire damage", reply)
         self.assertIn("summon", reply.lower())
+        self.assertIn("1 bound", reply)
+        wrathflame_bonus = bot.CAMPAIGN["monsters"]["the_wrathflame_unbound"]["damage_bonus"]
+        self.assertEqual(wrathflame_bonus, 50)
+        self.assertIn(f"3d8+{16 + wrathflame_bonus}", reply)
+
+    async def test_do_check_remnants_dividers_between_multiple_bound(self):
+        """Same real '---' divider _do_bestiary uses between entries, once there's more than one bound Remnant to separate."""
+        user_id = 950653
+        make_basic_character(user_id, "MultiRemnantTester", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, bound_remnants=["the_wrathflame_unbound", "the_cairnbound"])
+        sink = []
+        await bot._do_check_remnants(FakeUpdate(user_id, "", sink))
+        reply = sink[0]
+        self.assertIn("2 bound", reply)
+        self.assertIn("The Wrathflame Unbound", reply)
+        self.assertIn("The Cairnbound", reply)
+        self.assertIn("━━━━━━━━━━━━━━━", reply)
+
+    def test_menu_root_has_remnants_button(self):
+        """Real request (2026-08-20, Coffee): "i would like a Remnant menu in the player menu"."""
+        character = {"name": "MenuTester", "pending_asi_points": 0, "level": 1, "rebirth_count": 0}
+        kb = bot._main_menu_keyboard(character)
+        labels = [btn.text for row in kb.inline_keyboard for btn in row]
+        self.assertTrue(any("Remnants" in l for l in labels))
+
+    async def test_menu_remnants_callback_routes_to_check_remnants(self):
+        user_id = 950654
+        make_basic_character(user_id, "MenuRouteTester", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, bound_remnants=["the_cairnbound"])
+        sink = []
+        await bot.menu_callback(FakeCallbackUpdate(user_id, "menu|remnants", sink), DummyContext())
+        reply = "\n".join(sink)
+        self.assertIn("The Cairnbound", reply)
 
     def test_remnants_keyword_classified_as_check_remnants(self):
         from ai.intent_parser import _keyword_fallback

@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.269] — Remnants added to the player menu, Bestiary-style
+
+**Real request (2026-08-20, Coffee):** "i would like a Remnant menu in
+the player menu... make it like the Bestiary but only show Remnants
+and what they offer the player." Added a real "🔮 Remnants" row to the
+main menu (`_main_menu_keyboard`, routed via `menu|remnants` to the
+existing `_do_check_remnants`), and restyled that screen to match
+`_do_bestiary`'s own real visual convention: a known-count header
+("X bound") and a real "━━━" divider between entries instead of the
+older plain-blank-line layout. Also fixed a real accuracy gap found
+while doing this: the screen's quoted average damage only ever showed
+the summon's own raw dice+bonus, never the source boss's own real
+`damage_bonus` v1.27.268 now stacks on top in actual combat — so it was
+understating what a real cast does. Verified with real executed tests
+(`test_do_check_remnants_dividers_between_multiple_bound`,
+`test_menu_root_has_remnants_button`,
+`test_menu_remnants_callback_routes_to_check_remnants`, plus the
+existing bound-Remnant test updated for the new format/damage math).
+
 ## [1.27.268] — Remnant summons: real narration, flashy ability art, much stronger damage
 
 **Real request (2026-08-20, Coffee):** three asks in one thread, all
