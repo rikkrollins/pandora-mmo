@@ -11233,10 +11233,33 @@ async def _check_quest_completions_defeat_monster(update_like, session: sessions
             already_bound = remnant_id in character["bound_remnants"]
             db.bind_remnant(telegram_user_id, session.chat_id, remnant_id)
             if not already_bound:
+                # Real request (2026-08-20, per Coffee: "show message
+                # saying something like the remnant binds to you and
+                # give a cool little story/background about that
+                # remnant adding to the lore. do not fabricate, use the
+                # story of the game" -- then, same thread: "Getting a
+                # remnant is a real achievement and should feel
+                # monumental for the player so work that in"). Leans on
+                # the game's own real, already-established Pandora's
+                # Box origin story (remnants.py's own module docstring)
+                # for the "why this matters" framing, and the
+                # Remnant's own real per-entry lore -- never invented
+                # here. The real "Remnant Keeper"/"Remnant Master"
+                # achievement unlock (achievements.py) already fires
+                # right after this via _check_and_award_achievements
+                # below, giving a first bind two real, weighty beats
+                # back to back rather than one flat notification. Also
+                # drops the stale "once the party assigns a Summoner"
+                # line -- that role was removed in v1.27.267; whoever
+                # binds a fragment can summon it themselves now.
                 await _safe_send(
                     update_like,
-                    f"✨ **{character['name']}** binds a fragment of **{remnant_data['name']}** — "
-                    f"once the party assigns a Summoner, they can call it into a later battle.",
+                    f"🌟 **A fragment of Pandora's Box binds to {character['name']}!** 🌟\n\n"
+                    f"**{character['name']}** has done what few ever will — bound a real, undying fragment "
+                    f"of **{remnant_data['name']}**, one of the Unbound that has endured, whole, since "
+                    f"Pandora's Box first scattered across the world.\n\n"
+                    f"_{remnant_data['lore']}_\n\n"
+                    f"Say \"summon {remnant_data['name']}\" in a later battle to call it.",
                 )
                 await _check_and_award_achievements(
                     update_like, db.get_character(telegram_user_id, session.chat_id),

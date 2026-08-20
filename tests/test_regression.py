@@ -16628,7 +16628,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._check_quest_completions_defeat_monster(FakeUpdate(leader_id, "", sink, chat_id=-996), session)
         self.assertIn("the_unopened", db.get_character(leader_id, -996)["bound_remnants"])
         self.assertIn("the_unopened", db.get_character(member_id, -996)["bound_remnants"])
-        self.assertTrue(any("binds a fragment" in s and "The Unopened" in s for s in sink))
+        self.assertTrue(any("binds to" in s and "The Unopened" in s for s in sink))
+        # Real request (2026-08-20, Coffee): "give a cool little
+        # story/background about that remnant adding to the lore. do
+        # not fabricate, use the story of the game" -- then, same
+        # thread: "Getting a remnant is a real achievement and should
+        # feel monumental". The Unopened's own real, already-authored
+        # lore (remnants.py) and the game's own real Pandora's Box
+        # origin framing must both be in the bind message, and the
+        # stale pre-v1.27.267 "assigns a Summoner" line must be gone.
+        combined = " ".join(sink)
+        self.assertIn(remnants_module.get_remnant("the_unopened")["lore"], combined)
+        self.assertIn("Pandora's Box", combined)
+        self.assertNotIn("assigns a Summoner", combined)
         sessions.end_session(-996)
 
     async def test_summon_remnant_rejects_an_unbound_remnant(self):

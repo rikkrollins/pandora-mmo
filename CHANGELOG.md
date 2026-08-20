@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.270] — Binding a Remnant now feels monumental, real lore included
+
+**Real request (2026-08-20, Coffee):** "After we beat a remnant show
+message saying something like the remnant binds to you and give a
+cool little story/background about that remnant adding to the lore.
+do not fabricate, use the story of the game" — then, same thread:
+"Getting a remnant is a real achievement and should feel monumental
+for the player so work that in." The bind message (`bot.py`'s
+`_check_quest_completions_defeat_monster`) still said "once the party
+assigns a Summoner" — stale since that role was removed in v1.27.267
+and never caught. Replaced with a real, bigger moment: the game's own
+already-established Pandora's Box origin story (remnants.py's own
+module docstring — "a rare few endured whole, too old and too strong
+to ever fully fade") plus the specific Remnant's own real per-entry
+lore, never invented. The real "Remnant Keeper"/"Remnant Master"
+achievement unlock already fires right after this via
+`_check_and_award_achievements` — a first bind now lands two real,
+weighty beats back to back instead of one flat line. Verified with a
+real executed test (updated
+`test_defeating_an_unbound_binds_it_to_every_real_party_member_present`).
+
 ## [1.27.269] — Remnants added to the player menu, Bestiary-style
 
 **Real request (2026-08-20, Coffee):** "i would like a Remnant menu in
