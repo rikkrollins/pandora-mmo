@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.285] — "Scroll of Summoning" renamed to clear up Remnant confusion
+
+**Real live question (2026-08-20, Coffee): "do summoning scrolls have
+anything to do with the remnants? if not we should remove them so it
+doesnt confuse the players."** Investigated: `scroll_summon_spirit` is
+real, working content — the item form of "Summon Lesser Spirit," a
+genuine level-2 conjuration spell (`spells.py`, `effect: "summon"`)
+that calls a temporary AI-controlled spirit ally into the current
+fight. Completely unrelated to Remnants, and `ai/intent_parser.py`
+already disambiguates a real bound Remnant's name from this spell
+correctly — no code-level collision. The real problem was the item's
+old generic display name, "Scroll of Summoning," which gave zero hint
+it's a different mechanic now that Remnant summoning exists. Renamed
+to "Scroll of the Lesser Spirit" and gave it a real description
+("Calls a lesser spirit to fight at your side...") instead of removing
+working content. Also checked for other summon-flavored mechanics that
+could confuse players the same way: a boss reinforcement-calling
+ability (`goblin_boss`'s own `summons` field) is enemy-side only, never
+player-triggered, and already narrated as clearly the boss's own
+action — no change needed there.
+
 ## [1.27.284] — Charisma now scales Remnant summon damage (a real bonus, never a penalty)
 
 **Real live request (2026-08-20, Coffee): "let's build charisma

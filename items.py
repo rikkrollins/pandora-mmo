@@ -225,9 +225,23 @@ ITEMS = {
         "description": "Deals 8d6 lightning damage (Dexterity save for half). It crackles faintly against your fingers, like it hasn't fully settled since it was written.",
     },
     "scroll_summon_spirit": {
-        "name": "Scroll of Summoning", "type": "scroll", "rarity": "rare",
+        # Real live question (2026-08-20, Coffee: "do summoning scrolls
+        # have anything to do with the remnants? if not we should
+        # remove them so it doesnt confuse the players") -- confirmed
+        # NOT related: this is the item form of the real, separate
+        # "Summon Lesser Spirit" spell (spells.py, effect="summon"),
+        # which calls a temporary spirit ally into the current fight --
+        # a genuine, working 5E-style conjuration spell, not dead
+        # content. ai/intent_parser.py already disambiguates a real
+        # bound Remnant's name from this spell correctly, so there was
+        # never a code-level collision -- but the old generic name
+        # "Scroll of Summoning" gave a player zero hint it's a
+        # completely different mechanic from Remnant summoning, so
+        # renamed/re-described to make that clear rather than removing
+        # a real, functioning item.
+        "name": "Scroll of the Lesser Spirit", "type": "scroll", "rarity": "rare",
         "price": 200, "weight": 0.1, "spell": "summon_lesser_spirit",
-        "description": "The final line of the ritual text is written smaller, like the scribe wasn't sure they should include it.",
+        "description": "Calls a lesser spirit to fight at your side for the rest of the battle. The final line of the ritual text is written smaller, like the scribe wasn't sure they should include it.",
     },
 
     # --- Rings, Amulets, Wondrous Items ---

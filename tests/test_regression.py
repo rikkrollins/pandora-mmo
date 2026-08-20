@@ -6261,6 +6261,26 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("Pressed leaves still mark", transcript, "must not fall back to the generic flavor description")
 
+    def test_summon_spirit_scroll_renamed_away_from_remnant_confusion(self):
+        """
+        Real live question (2026-08-20, Coffee: "do summoning scrolls
+        have anything to do with the remnants? if not we should remove
+        them so it doesnt confuse the players"). Confirmed the item is
+        real, working, and unrelated -- casts the real "Summon Lesser
+        Spirit" spell (a temporary AI ally, not a Remnant); the intent
+        parser already disambiguates a real bound Remnant's name from
+        this spell correctly, so the actual fix is a clearer name/
+        description, not removal of working content.
+        """
+        item = items_module.ITEMS["scroll_summon_spirit"]
+        self.assertEqual(item["name"], "Scroll of the Lesser Spirit")
+        self.assertNotIn("Scroll of Summoning", item["name"])
+        self.assertIn("spirit", item["description"].lower())
+        self.assertEqual(item["spell"], "summon_lesser_spirit")
+        spell = spells.SPELLS["summon_lesser_spirit"]
+        self.assertEqual(spell["effect"], "summon")
+        self.assertIn("summon_stats", spell)
+
     async def test_generated_items_can_be_sold_and_market_shows_real_stats(self):
         """
         Real live bugs (2026-08-02, Development topic): (1)
