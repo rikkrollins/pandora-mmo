@@ -229,12 +229,27 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         keyword checks, so "view X" always won first.
         """
         self.assertEqual(_keyword_fallback("View the bestiary", [])["action"], "bestiary")
-        self.assertEqual(_keyword_fallback("View my map", [])["action"], "show_map")
+        # 2026-08-20, per Coffee: "when we say show the map, view the
+        # map, or open the map, thats the map we want to see" -- now
+        # routes to the real visual grid map, not the old text listing.
+        self.assertEqual(_keyword_fallback("View my map", [])["action"], "visual_map")
         self.assertEqual(_keyword_fallback("View the leaderboard", [])["action"], "leaderboard")
         self.assertEqual(_keyword_fallback("View my achievements", [])["action"], "check_achievements")
         # No regression: "view" still reaches a real inventory item (the
         # original 2026-08-12 reason this verb was added at all).
         self.assertEqual(_keyword_fallback("View the herbalism guide", [])["action"], "examine")
+
+    def test_ordinary_map_phrasing_opens_the_real_visual_map(self):
+        """
+        Real live instruction (2026-08-20, Coffee): "when we say show
+        the map, view the map, or open the map, thats the map we want
+        to see" -- after the visual map's grid/fog-of-war rewrite, it's
+        the default result of ordinary map phrasing, not a separate
+        opt-in that needed special wording ("visual map", "draw the
+        map"...).
+        """
+        for phrase in ["show the map", "view the map", "open the map", "my map", "the map"]:
+            self.assertEqual(_keyword_fallback(phrase, [])["action"], "visual_map", phrase)
 
     def test_feel_as_an_emotion_verb_doesnt_misfire(self):
         # "feel" is overwhelmingly an EMOTION verb in ordinary English --
@@ -13725,13 +13740,25 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.get_character(user_id, -999)["current_location"], "whispering_wood_deep_glade")
 
     async def test_compass_word_with_no_directions_field_falls_through_harmlessly(self):
+        """
+        2026-08-20: market_row (this test's original location) now has
+        a real `directions` entry itself, now that
+        scripts/build_location_grid.py fully populates every reachable
+        location -- sunken_root_caverns_side_pool is the one real
+        remaining location with zero directions (it's the single
+        location that couldn't fit a 4th cardinal slot on its own
+        4-neighbor hub, see build_location_grid.py's own
+        VERTICAL_OVERRIDES/overflow-note handling), so it's the real
+        location to test this fallback against now.
+        """
         user_id = 900551
-        make_basic_character(user_id, "Compasstest2", current_location="market_row")
+        make_basic_character(user_id, "Compasstest2", current_location="sunken_root_caverns_side_pool")
         sink = []
         await bot._do_move(FakeUpdate(user_id, "", sink), "go north")
-        # market_row has no "directions" field -- must not crash, and must
-        # not move the character anywhere (no location name matched either).
-        self.assertEqual(db.get_character(user_id, -999)["current_location"], "market_row")
+        # sunken_root_caverns_side_pool has no "directions" field -- must
+        # not crash, and must not move the character anywhere (no
+        # location name matched either).
+        self.assertEqual(db.get_character(user_id, -999)["current_location"], "sunken_root_caverns_side_pool")
 
     async def test_look_shows_compass_labels_for_directed_connections(self):
         user_id = 900552
@@ -15184,7 +15211,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         Real live report (2026-08-20, Coffee, dev-bridge): "shudnt
         there be a proficiency or skill for summoning ? i dont see it
         on the skills level up options. they shud be able to use skill
-        points to lvl +1 to Summoning."
+        points to lvl +1 to Summoning" -- then a direct follow-up
+        raised the rate: "for summoning investment make it +5%".
         """
         uid = 800204
         make_basic_character(uid, "SummonBuyer", char_class="Wizard")
@@ -15194,7 +15222,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             FakeCallbackUpdate(uid, "skilltree|buy|prof_summoning", sink), DummyContext(),
         )
         after = db.get_character(uid, -999)
-        self.assertEqual(after["summoning_mastery_pct"], 6.0)
+        self.assertEqual(after["summoning_mastery_pct"], 10.0)
         self.assertEqual(after["skill_points"], 9)  # 10 - 1
         self.assertIn("prof_summoning", after["skill_tree_upgrades"])
 
@@ -17288,6 +17316,53 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(session, "the real joiner should now be a genuine combat participant")
         sessions.end_session(-987)
 
+    # -- Real live report (2026-08-20, Coffee, dev-bridge screenshots):
+    #    "make sure all the north south east and west locations on all
+    #    the different layers are correct. I don't want any locations
+    #    conflicting." scripts/build_location_grid.py re-derives a
+    #    fully self-consistent `directions` + `grid_position` for every
+    #    location from `connections` (the one authoritative reachability
+    #    list). This is the ongoing guard against it ever drifting back
+    #    out of sync -- checks the REAL live campaign.json, not a fixture.
+    def test_campaign_directions_have_zero_reciprocity_conflicts(self):
+        OPPOSITE = {
+            "north": "south", "south": "north", "east": "west", "west": "east", "up": "down", "down": "up",
+        }
+        conflicts = []
+        for layer_name, places in bot.CAMPAIGN["locations"].items():
+            for lid, info in places.items():
+                for word, dest in (info.get("directions") or {}).items():
+                    dest_info = places.get(dest)
+                    if dest_info is None:
+                        conflicts.append(f"[{layer_name}] {lid}.{word}={dest}: destination not in layer")
+                        continue
+                    back = (dest_info.get("directions") or {}).get(OPPOSITE[word])
+                    if back != lid:
+                        conflicts.append(f"[{layer_name}] {lid}.{word}={dest}: dest.{OPPOSITE[word]}={back!r}, expected {lid!r}")
+        self.assertEqual(conflicts, [], "\n".join(conflicts))
+
+    def test_campaign_grid_positions_agree_with_their_own_directions(self):
+        """Every directed edge's two grid_position values must actually be adjacent in the direction claimed -- not just reciprocal, but geometrically consistent."""
+        DELTA = {"north": (0, 1), "south": (0, -1), "east": (1, 0), "west": (-1, 0)}
+        mismatches = []
+        for layer_name, places in bot.CAMPAIGN["locations"].items():
+            for lid, info in places.items():
+                pos = info.get("grid_position")
+                if pos is None:
+                    continue
+                for word, dest in (info.get("directions") or {}).items():
+                    if word not in DELTA:
+                        continue  # up/down share their parent's (x, y) by design
+                    dest_pos = (places.get(dest) or {}).get("grid_position")
+                    if dest_pos is None:
+                        continue
+                    dx, dy = DELTA[word]
+                    expected = (pos["x"] + dx, pos["y"] + dy)
+                    actual = (dest_pos["x"], dest_pos["y"])
+                    if actual != expected:
+                        mismatches.append(f"[{layer_name}] {lid}.{word}={dest}: expected grid_position {expected}, got {actual}")
+        self.assertEqual(mismatches, [], "\n".join(mismatches))
+
     # -- Task #11, real live request (2026-08-09, Coffee, Development-
     #    topic screenshot): "This does not look like a map. I want an
     #    accurate map... use circles and names with labels" -- the old
@@ -17335,197 +17410,169 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("market_row", revealed_here)
 
     def test_render_layer_map_produces_a_valid_png(self):
+        """
+        No network dependency in the regular suite (2026-08-20): a real
+        end-to-end render including live Pollinations fetches was
+        already done and visually inspected once by hand (per this
+        project's testing convention) -- _fetch_location_tile's own
+        content isn't what this test is about, so it's mocked here to
+        keep the suite fast and deterministic on a cold cache/no
+        network, same as this codebase's usual "mock the external
+        service, verify the real logic" discipline for Ollama-touching
+        code elsewhere.
+        """
         import io
+        from unittest.mock import patch
         import map_render
         from PIL import Image
         surface = bot.CAMPAIGN["locations"]["surface"]
-        png = map_render.render_layer_map(
-            "surface", surface, {"crossroads_tavern", "market_row"}, {"the_weeping_well"}, "crossroads_tavern",
-        )
+        with patch("map_render._fetch_location_tile", return_value=None):
+            png = map_render.render_layer_map(
+                "surface", surface, {"crossroads_tavern", "market_row"}, {"the_weeping_well"}, "crossroads_tavern",
+            )
         image = Image.open(io.BytesIO(png))
         self.assertEqual(image.format, "PNG")
-        self.assertEqual(image.size, (map_render.CANVAS_WIDTH, map_render.CANVAS_HEIGHT))
+        self.assertGreaterEqual(image.size[0], map_render._MIN_CANVAS_WIDTH)
 
     def test_render_layer_map_handles_a_single_visited_location(self):
         """Real edge case: a brand-new character has visited exactly one place (their start) -- must not crash with no edges at all."""
+        from unittest.mock import patch
         import map_render
         surface = bot.CAMPAIGN["locations"]["surface"]
-        png = map_render.render_layer_map("surface", surface, {"crossroads_tavern"}, set(), "crossroads_tavern")
+        with patch("map_render._fetch_location_tile", return_value=None):
+            png = map_render.render_layer_map("surface", surface, {"crossroads_tavern"}, set(), "crossroads_tavern")
         self.assertTrue(png)
 
     def test_render_layer_map_grows_the_canvas_for_a_heavily_explored_layer(self):
         """
-        Confirmed visually (2026-08-09): rendering every real location in
-        the underground layer (43 total) on the fixed base canvas
-        crammed labels into unreadable overlap. The canvas now scales up
-        with node count -- this locks that fix in as a real regression
-        test rather than something only ever re-caught by eyeballing a
-        screenshot again.
+        The canvas is now sized directly from the real grid bounding
+        box (not a node-count heuristic) -- the full underground layer
+        (a wider real grid than a 1-2 location surface visit) must
+        render a wider canvas, capped at _MAX_CANVAS_WIDTH. Tile fetch
+        mocked -- this test is about canvas geometry, not image
+        content; a real, all-43-locations render was already run once
+        by hand against live Pollinations and visually inspected
+        (~18 real minutes on a cold cache, confirmed the "fetch once,
+        cache forever" design actually holds) -- not worth paying that
+        cost on every future test run.
         """
         import io
+        from unittest.mock import patch
         import map_render
         from PIL import Image
         underground = bot.CAMPAIGN["locations"]["underground"]
         all_ids = set(underground.keys())
-        png = map_render.render_layer_map("underground", underground, all_ids, set(), next(iter(all_ids)))
-        image = Image.open(io.BytesIO(png))
-        self.assertGreater(image.size[0], map_render.CANVAS_WIDTH)
-        self.assertLessEqual(image.size[0], map_render._MAX_CANVAS_WIDTH)
+        with patch("map_render._fetch_location_tile", return_value=None):
+            small_png = map_render.render_layer_map("surface", bot.CAMPAIGN["locations"]["surface"], {"crossroads_tavern"}, set(), "crossroads_tavern")
+            big_png = map_render.render_layer_map("underground", underground, all_ids, set(), next(iter(all_ids)))
+        small_image = Image.open(io.BytesIO(small_png))
+        big_image = Image.open(io.BytesIO(big_png))
+        self.assertGreater(big_image.size[0] * big_image.size[1], small_image.size[0] * small_image.size[1])
+        self.assertLessEqual(big_image.size[0], map_render._MAX_CANVAS_WIDTH)
+        self.assertLessEqual(big_image.size[1], map_render._MAX_CANVAS_HEIGHT)
 
-    def test_assign_label_sides_alternates_within_the_same_horizontal_band(self):
-        """
-        The actual overlap-reduction logic, tested directly on plain
-        coordinates rather than through rendered pixels: three nodes on
-        the same row (y within the ~30px band tolerance) must not all
-        get the same label side, or their labels would still collide
-        same as before this fix.
-        """
+    def test_grid_cell_owners_reads_real_grid_position(self):
+        """The actual placement logic, tested directly against real campaign.json data: a visited location's cell is exactly its own real grid_position, no layout guessing involved."""
         import map_render
-        positions = {"a": (100, 200), "b": (200, 202), "c": (300, 198)}
-        sides = map_render._assign_label_sides(positions)
-        self.assertEqual(set(sides.keys()), {"a", "b", "c"})
-        self.assertIn("above", sides.values())
-        self.assertIn("below", sides.values())
+        surface = bot.CAMPAIGN["locations"]["surface"]
+        visited_here = ["crossroads_tavern", "whispering_wood"]
+        owners = map_render._grid_cell_owners(surface, visited_here)
+        crossroads_pos = surface["crossroads_tavern"]["grid_position"]
+        whispering_pos = surface["whispering_wood"]["grid_position"]
+        self.assertEqual(owners[(crossroads_pos["x"], crossroads_pos["y"])], ["crossroads_tavern"])
+        self.assertEqual(owners[(whispering_pos["x"], whispering_pos["y"])], ["whispering_wood"])
 
     def test_stonearch_bridge_to_weeping_well_renders_south(self):
         """
         Real live bug (2026-08-09, Coffee, Development-topic screenshot
         + follow-up): standing at Stonearch Bridge, "to the south of me
         is supposed to be the weeping well but on the map it doesn't
-        show that." Root cause: campaign.json's real, structured
-        `directions` field ({"south": "the_weeping_well", ...}, present
-        on 73/82 real locations) was never read at all -- the layout
-        was pure undirected physics. Now seeded from real compass data;
-        this asserts the exact reported relationship actually holds in
-        the rendered pixel layout, not just that the two nodes exist.
+        show that." Real grid_position is now the single source of
+        truth (see scripts/build_location_grid.py + the whole-campaign
+        reciprocity/geometry regression tests) -- south must mean a
+        strictly lower grid y, checked directly against the real data.
         """
-        import map_render
         surface = bot.CAMPAIGN["locations"]["surface"]
-        visited = {"crossroads_tavern", "stonearch_bridge", "the_weeping_well", "greymoor_downs"}
-        visited_here, revealed_here, edges, unexplored = map_render._visible_nodes_and_edges(surface, visited, set())
-        bidi = map_render._bidirectional_directions(surface, set(visited_here))
-        raw = map_render._compute_layout(visited_here, edges, bidi)
-        bridge_y = raw["stonearch_bridge"][1]
-        well_y = raw["the_weeping_well"][1]
-        self.assertGreater(well_y, bridge_y, "the Weeping Well must render BELOW (south of) Stonearch Bridge on the canvas y-axis")
+        bridge_pos = surface["stonearch_bridge"]["grid_position"]
+        well_pos = surface["the_weeping_well"]["grid_position"]
+        self.assertEqual(well_pos["x"], bridge_pos["x"])
+        self.assertLess(well_pos["y"], bridge_pos["y"], "the Weeping Well must sit at a lower grid y (south) than Stonearch Bridge")
 
-    def test_bidirectional_directions_infers_the_logical_reverse(self):
+    def test_island_sub_dungeon_gets_its_own_real_grid_position_offset_from_the_main_cluster(self):
         """
-        Real campaign.json data often only declares a direction from
-        ONE side (stonearch_bridge says south is the_weeping_well, but
-        the_weeping_well doesn't necessarily declare north back) --
-        this must fill in the real, logically-implied reverse rather
-        than leaving the graph only half-navigable by the BFS seed.
+        Real campaign.json shape: several sub-dungeon areas (e.g.
+        whispering_wood_root_hollow) are only reachable from ANOTHER
+        layer via descends_to, never a same-layer `connections` edge --
+        a real, genuinely separate island within this one layer's own
+        connection graph. scripts/build_location_grid.py gives each
+        such island its own local BFS, offset below whatever's already
+        placed, rather than leaving it without a grid_position at all.
         """
-        import map_render
-        surface = bot.CAMPAIGN["locations"]["surface"]
-        bidi = map_render._bidirectional_directions(surface, {"stonearch_bridge", "the_weeping_well"})
-        self.assertEqual(bidi["stonearch_bridge"].get("south"), "the_weeping_well")
-        self.assertEqual(bidi["the_weeping_well"].get("north"), "stonearch_bridge")
-
-    def test_disconnected_components_never_collapse_onto_the_same_point(self):
-        """
-        Real bug found while testing the directional layout: a node
-        the directional BFS never reaches (real campaign.json shape --
-        e.g. a sub-dungeon area only linked in via descends_to, a
-        separate field this module never treats as an in-layer
-        connection) used to fall back to a hardcoded (0.0, 0.0), and
-        with MULTIPLE such disconnected components all landing on that
-        exact same point, the repulsion force between them is
-        mathematically zero (dx=dy=0 makes the push direction
-        undefined) -- they could never separate for the rest of the
-        relaxation. Confirmed against a real worst case: every location
-        in the underground layer at once, which includes several real,
-        genuinely disconnected-within-this-layer sub-clusters.
-        """
-        import map_render
         underground = bot.CAMPAIGN["locations"]["underground"]
-        visited = set(underground.keys())
-        visited_here, revealed_here, edges, unexplored = map_render._visible_nodes_and_edges(underground, visited, set())
-        bidi = map_render._bidirectional_directions(underground, set(visited_here))
-        raw = map_render._compute_layout(visited_here, edges, bidi)
-        import itertools
-        collapsed = [
-            (a, b) for a, b in itertools.combinations(visited_here, 2)
-            if ((raw[a][0] - raw[b][0]) ** 2 + (raw[a][1] - raw[b][1]) ** 2) ** 0.5 < 1.0
-        ]
-        self.assertEqual(collapsed, [], f"nodes landed on the exact same point: {collapsed}")
-
-    def test_disconnected_components_stay_near_the_main_cluster(self):
-        """
-        Real bug (2026-08-09, found visually re-rendering a small layer
-        right after fixing the (0,0)-collapse bug above): removing the
-        old hard position clamp let a genuinely disconnected node (no
-        real connections/directions to anything else visited) drift
-        arbitrarily far from the rest of the graph over 400 relaxation
-        iterations -- nothing bounded it but a mild centroid pull. That
-        blew up _normalize_to_canvas's bounding box and squeezed the
-        real, connected chain into a sliver of the rendered map.
-        _contain_disconnected_components rigidly translates (never
-        reshapes) any non-main component back within a bounded distance
-        of the main component's centroid -- confirm it actually holds
-        on a small, sparse graph shaped like the real one that exposed
-        this (a 5-room chain plus one real, truly isolated room).
-        """
-        import map_render
-        node_ids = ["room_1", "room_2", "room_3", "room_4", "room_5", "loner"]
-        edges = [("room_1", "room_2"), ("room_2", "room_3"), ("room_3", "room_4"), ("room_4", "room_5")]
-        bidi = {
-            "room_1": {"south": "room_2"}, "room_2": {"north": "room_1", "south": "room_3"},
-            "room_3": {"north": "room_2", "south": "room_4"}, "room_4": {"north": "room_3", "south": "room_5"},
-            "room_5": {"north": "room_4"}, "loner": {},
-        }
-        raw = map_render._compute_layout(node_ids, edges, bidi)
-        main_ids = ["room_1", "room_2", "room_3", "room_4", "room_5"]
-        main_cx = sum(raw[nid][0] for nid in main_ids) / len(main_ids)
-        main_cy = sum(raw[nid][1] for nid in main_ids) / len(main_ids)
-        dist = ((raw["loner"][0] - main_cx) ** 2 + (raw["loner"][1] - main_cy) ** 2) ** 0.5
-        k = (map_render._LAYOUT_AREA ** 2 / len(node_ids)) ** 0.5
-        self.assertLessEqual(dist, k * 6.0 + 1.0, f"isolated node drifted too far from the main cluster: {dist}")
+        island_pos = underground["whispering_wood_root_hollow"]["grid_position"]
+        main_pos = underground["sunken_root_caverns"]["grid_position"]
+        self.assertIsNotNone(island_pos)
+        self.assertNotEqual((island_pos["x"], island_pos["y"]), (main_pos["x"], main_pos["y"]))
 
     def test_floor_levels_reflects_real_up_down_chains(self):
         """
         Real live request (2026-08-09, Coffee: "F3 - F2 - F1 - B1 - B2
         - B3 for floors and basements in dungeons"). Grounded entirely
-        in real "up"/"down" entries -- a chain of 3 real rooms each one
-        real step below the last must read as levels 0, -1, -2 (i.e.
-        the map would label them B1 and B2), never invented for a
-        location with no real up/down relationship to anything else.
+        in real "up"/"down" `directions` entries, scoped to VISITED
+        locations only (same fog-of-war boundary as everywhere else) --
+        a chain of 3 real rooms each one real step below the last must
+        read as levels 0, -1, -2, never invented for an unrelated room.
         """
         import map_render
-        bidi = {
-            "room_a": {"down": "room_b"},
-            "room_b": {"up": "room_a", "down": "room_c"},
-            "room_c": {"up": "room_b"},
-            "unrelated_room": {},
+        layer_locations = {
+            "room_a": {"directions": {"down": "room_b"}},
+            "room_b": {"directions": {"up": "room_a", "down": "room_c"}},
+            "room_c": {"directions": {"up": "room_b"}},
+            "unrelated_room": {"directions": {}},
         }
-        levels = map_render._floor_levels(bidi)
+        visited = {"room_a", "room_b", "room_c", "unrelated_room"}
+        levels = map_render._floor_levels(layer_locations, visited)
         self.assertEqual(levels["room_a"], 0)
         self.assertEqual(levels["room_b"], -1)
         self.assertEqual(levels["room_c"], -2)
         self.assertNotIn("unrelated_room", levels)
 
-    def test_legend_lines_each_fit_the_narrow_canvas_width(self):
+    def test_floor_levels_never_crosses_the_fog_of_war_boundary(self):
+        """An up/down relationship to an UNVISITED location must never contribute a floor level -- same fog-of-war rule every other real fact in this game follows."""
+        import map_render
+        layer_locations = {
+            "room_a": {"directions": {"down": "room_b"}},
+            "room_b": {"directions": {"up": "room_a"}},
+        }
+        levels = map_render._floor_levels(layer_locations, {"room_a"})  # room_b never visited
+        self.assertNotIn("room_b", levels)
+
+    def test_legend_lines_fit_a_narrow_canvas_width(self):
         """
-        Real bug (2026-08-09, found visually re-rendering a small layer
-        right after adding the F1-B3 floor badges): the base legend
-        line and the new floor-badge clause used to be concatenated
-        into ONE draw.text() call with no width check at all (only the
-        separate "revealed but not visited" line ever checked width) --
-        on a narrow, un-scaled 900px canvas the combined text ran well
-        past the edge and got clipped mid-word. They're now separate,
-        independently width-checked lines; confirm each one (with a
-        real floor-badge clause AND a real "revealed" clause both
-        present, the worst case) actually fits under the same
-        int(width / 8.5) character budget render_layer_map itself uses.
+        Real risk in the grid layout (confirmed live: the sky layer's
+        real bounding box is only 2 columns wide): a fixed _MIN_CANVAS_
+        WIDTH floor keeps the icon-legend line from being squeezed, and
+        any longer line (e.g. many revealed-but-unvisited names) is
+        truncated to the real available width rather than clipped
+        mid-word by PIL or drawn past the canvas edge.
         """
         import map_render
-        width = map_render.CANVAS_WIDTH
-        line_limit = int(width / 8.5)
-        base_line = "red ring = where you are  •  dot = visited  •  gold +N = unexplored paths from there"
-        floor_line = "blue F/B = floor above/below the chain's entry point"
-        self.assertLessEqual(len(base_line), line_limit)
-        self.assertLessEqual(len(floor_line), line_limit)
+        from PIL import Image, ImageDraw
+        draw = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+        font = map_render._load_font(13)
+        long_line = "Marked but not yet visited: " + ", ".join(f"Location {i}" for i in range(20))
+        fitted = map_render._fit_label_to_width(draw, long_line, font, map_render._MIN_CANVAS_WIDTH - 60)
+        self.assertLessEqual(draw.textlength(fitted, font=font), map_render._MIN_CANVAS_WIDTH - 60)
+
+    def test_location_icons_only_reflect_real_campaign_fields(self):
+        """The colored icon-swatch categories are grounded ONLY in real fields already in campaign.json -- checked against The Colosseum (a real boss location) and Market Row (a real shop location)."""
+        import map_render
+        surface = bot.CAMPAIGN["locations"]["surface"]
+        colosseum_icons = map_render._location_icons(surface["the_colosseum"], bot.CAMPAIGN["monsters"], bot.CAMPAIGN["quests"], "the_colosseum")
+        self.assertIn("boss", colosseum_icons)
+        market_icons = map_render._location_icons(surface["market_row"], bot.CAMPAIGN["monsters"], bot.CAMPAIGN["quests"], "market_row")
+        self.assertIn("shop", market_icons)
+        self.assertIn("npc", market_icons)
 
     def test_character_layer_content_groups_by_layer_and_skips_empty_ones(self):
         import sessions

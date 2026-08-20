@@ -13228,17 +13228,20 @@ UNIVERSAL_MANIPULATION_POOLS = {
 # report: "shudnt there be a proficiency or skill for summoning ? i
 # dont see it on the skills level up options. they shud be able to use
 # skill points to lvl +1 to Summoning"). Mutates summoning_mastery_pct
-# directly and permanently at purchase time, a flat +1% per point --
-# the SAME +1 a real successful summon itself grants (see
-# _do_summon_remnant's own `new_pct = character["summoning_mastery_pct"]
-# + 1.0`), just bought instead of earned. Not folded into
-# UNIVERSAL_MANIPULATION_POOLS above since that section's 10%-
-# compounding step doesn't apply here -- summoning_mastery_pct is
-# already a flat-per-point stat everywhere else it grows. Gated to
-# characters who've actually bound at least one Remnant, the same real
-# requirement _do_summon_remnant itself checks -- pointless to offer
-# this to a character who can't summon anything yet.
-UNIVERSAL_MANIPULATION_SUMMONING = {"id": "prof_summoning", "cost": 1, "description": "+1% Summoning mastery per point invested."}
+# directly and permanently at purchase time -- a flat +5% per point
+# (2026-08-20 follow-up, per Coffee: "for summoning investment make it
+# +5%"), a deliberately bigger jump than the +1% a real successful
+# summon itself grants (see _do_summon_remnant's own `new_pct =
+# character["summoning_mastery_pct"] + 1.0`), since this one costs a
+# real skill point instead of being free from ordinary play. Not
+# folded into UNIVERSAL_MANIPULATION_POOLS above since that section's
+# 10%-compounding step doesn't apply here -- summoning_mastery_pct is
+# a flat-per-point stat everywhere else it grows, just at a different
+# rate depending on how it was earned. Gated to characters who've
+# actually bound at least one Remnant, the same real requirement
+# _do_summon_remnant itself checks -- pointless to offer this to a
+# character who can't summon anything yet.
+UNIVERSAL_MANIPULATION_SUMMONING = {"id": "prof_summoning", "cost": 1, "gain": 5.0, "description": "+5% Summoning mastery per point invested."}
 
 # The 7 real gathering/crafting professions this game already tracks
 # (see ALL_PROFESSIONS) -- one repeatable investment id each, +1 flat
@@ -13468,7 +13471,7 @@ async def skilltree_menu_callback(update: Update, context: ContextTypes.DEFAULT_
         cost = UNIVERSAL_MANIPULATION_SUMMONING["cost"]
         if points < cost or not character.get("bound_remnants"):
             return
-        new_pct = character.get("summoning_mastery_pct", 1.0) + 1.0
+        new_pct = character.get("summoning_mastery_pct", 1.0) + UNIVERSAL_MANIPULATION_SUMMONING["gain"]
         db.update_character(
             update.effective_user.id, update.effective_chat.id,
             skill_points=points - cost,
@@ -18614,6 +18617,7 @@ async def _send_layer_map(update: Update, character: dict, layer_name: str) -> N
     try:
         png_bytes = await asyncio.to_thread(
             map_render.render_layer_map, layer_name, layer_locations, visited, revealed, character.get("current_location"),
+            CAMPAIGN["monsters"], CAMPAIGN["quests"],
         )
     except Exception as e:
         logger.warning(f"[map_render] layer map failed: {e!r}")

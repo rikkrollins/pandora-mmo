@@ -28,3 +28,6 @@ voice_models/
 # narrations, quests") -- real generated combat-narration text, never
 # belongs in a public repo. See ai/narration_cache.py.
 .pdrx8k2f/
+# Same convention, for the visual-map's real per-location image tile
+# cache (2026-08-20). See map_render.py's own _TILE_CACHE_DIR.
+.mtc7v2qk/

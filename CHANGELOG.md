@@ -2,6 +2,61 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.292] — Real grid-based world map: fixed compass directions, RPGClassics-style rendering
+
+**Real live reports (2026-08-20, Coffee, two Development-topic
+screenshots) plus chat follow-ups:** a plain lettered/numbered grid
+("make sure all the north south east and west locations on all the
+different layers are correct... I don't want any locations
+conflicting") and an RPGClassics dungeon-map reference (black =
+non-travel, white-outlined = a real room, red = the player's current
+room), plus "the circle map is confusing," "when we say show the map,
+view the map, or open the map, thats the map we want to see," "jus
+make sure i can see the names of the locations that we have vistited,
+and dont show locations we havent been too, use the fog of war," and
+"u can show events and sub bosses, and bosses, and anything else with
+an [emoji] maybe? make a legend."
+
+- **Real compass data fixed at the source.** `campaigns/default/
+  campaign.json` already had a `directions` field on 73/82 locations
+  from an earlier pass, but a full reciprocity check found dozens of
+  real conflicts and gaps across all three layers (e.g. two different
+  locations both claiming to be north of the same third one). New
+  `scripts/build_location_grid.py` re-derives a fully self-consistent
+  `directions` + real `grid_position: {x, y}` for all 82 locations
+  from `connections` (the one 100%-complete reachability list) via
+  BFS — zero conflicts, verified by a new permanent regression test
+  that checks the real live campaign data on every future test run.
+- **`map_render.py` layout rewritten.** The previous Fruchterman-
+  Reingold force-directed physics layout (only ever *seeded* by
+  compass data, then relaxed by simulated forces) is gone — that's
+  structurally why it read as loose circles no matter how accurate the
+  data was. It now reads each visited location's real `grid_position`
+  directly and draws a literal square-cell grid: solid black for
+  anywhere unvisited or nonexistent (fog-of-war preserved exactly,
+  same as before), white-outlined for a real visited location (its
+  real name always shown), red-outlined for the character's current
+  location.
+- **Real per-location images, not a new image-gen dependency.** Each
+  cell's art reuses bot.py's own existing location-image generation
+  (same prompt/seed, same real Pollinations image), fetched at most
+  once per location ever and cached locally afterward — turns N live
+  network calls per map view into at most N one-time fetches, then
+  instant local reads forever after. Directly answers "we are having
+  issues with the image generator... for now we could even use them in
+  each block."
+- **Real per-location icons + legend.** Small colored dots mark a
+  real boss, monster encounter, shop, NPC, or quest at a visited
+  location — grounded only in real campaign.json fields (22 real
+  bosses, 3 real shops, etc.), nothing invented. A drawn legend spells
+  out what each color means.
+- **Ordinary map phrasing now opens this map by default** — "show the
+  map," "view the map," "open the map," "my map" all route to the real
+  visual grid image instead of the old plain-text listing (still
+  reachable via `/map` for anyone who wants it).
+- Floor badges (F1/B1/etc. for vertical up/down chains) and the gold
+  "+N unexplored paths" badge are preserved from the previous version.
+
 ## [1.27.291] — Level-up now shows real stats + true +1-per-tap buttons; Summoning is investable
 
 **Real live report (2026-08-20, Coffee, dev-bridge screenshot):** "I

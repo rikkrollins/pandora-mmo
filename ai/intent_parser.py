@@ -350,8 +350,15 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
         return {**base, "action": "leaderboard"}
     if any(w in lowered for w in ["my achievements", "my titles", "unlocked achievements"]):
         return {**base, "action": "check_achievements"}
+    # Real live instruction (2026-08-20, Coffee, after the visual map's
+    # grid/fog-of-war rewrite): "when we say show the map, view the
+    # map, or open the map, thats the map we want to see" -- ordinary
+    # map phrasing now opens the real visual grid image by default,
+    # not the old plain-text listing. The text version stays reachable
+    # via the /map slash command (map_command -> _do_show_map directly,
+    # unaffected by this classifier).
     if any(w in lowered for w in ["the map", "my map"]):
-        return {**base, "action": "show_map"}
+        return {**base, "action": "visual_map"}
 
     # Checked BEFORE check_quests below: "Accept the quest on the quest
     # board" and "Accept the quest 'a quiet request for Silverleaf Herb'"
