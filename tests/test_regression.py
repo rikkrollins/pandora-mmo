@@ -8701,7 +8701,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("1 bound", reply)
         wrathflame_bonus = bot.CAMPAIGN["monsters"]["the_wrathflame_unbound"]["damage_bonus"]
         self.assertEqual(wrathflame_bonus, 50)
-        self.assertIn(f"3d8+{16 + wrathflame_bonus}", reply)
+        # 2026-08-20, per Coffee (live-tested, "the remnants damage was
+        # abit low"): the previewed total must include the real
+        # REMNANT_SUMMON_POWER_BONUS on top of the summon's own +16 and
+        # the source boss's own +50, not just the older two-term sum.
+        self.assertIn(f"3d8+{16 + wrathflame_bonus + remnants_module.REMNANT_SUMMON_POWER_BONUS}", reply)
 
     async def test_do_check_remnants_dividers_between_multiple_bound(self):
         """Same real '---' divider _do_bestiary uses between entries, once there's more than one bound Remnant to separate."""
@@ -17198,7 +17202,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         not just its own flat +13. forced_roll only pins the FIRST die
         (rules.dice.roll_damage's own real physical-dice-mode design),
         so the total is bounded, not exact: the forced d10 (10) + one
-        genuinely random d10 (1-10) + 13 + 225, i.e. 249-258.
+        genuinely random d10 (1-10) + 13 + 225 +
+        remnants.REMNANT_SUMMON_POWER_BONUS (90, added 2026-08-20 per
+        Coffee's live "damage was abit low" report), i.e. 339-348.
         """
         import sessions
         from unittest.mock import patch, AsyncMock
@@ -17226,7 +17232,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         cairnbound_template = bot.CAMPAIGN["monsters"]["the_cairnbound"]
         self.assertEqual(cairnbound_template["damage_bonus"], 225)
         actual_damage = 100000 - goblin["hp_current"]
-        self.assertTrue(249 <= actual_damage <= 258, f"damage {actual_damage} outside expected 249-258 range")
+        self.assertTrue(339 <= actual_damage <= 348, f"damage {actual_damage} outside expected 339-348 range")
         sessions.end_session(-987)
 
     async def test_narrate_remnant_summon_real_ollama_call_addresses_the_target(self):
@@ -17408,6 +17414,38 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     #    60% of the summons [Remnants] are tied to the storyline...
     #    the others (really good ones) shud be findable... make some
     #    secrets") -----------------------------------------------------
+    def test_all_remnants_clear_the_real_damage_floor_per_coffee(self):
+        """
+        Real live report (2026-08-20, Coffee, tested against a real
+        Giant Spider): "i feel the remnants damage was abit low? i was
+        thinking a remnant shud be doing about 150-300 damage against a
+        lower lv enemy... Remnants are supposed to be a strong attack
+        or ability. stronger than an attack or spell." Verifies every
+        one of the 12 real Remnants' full real average (summon dice +
+        summon bonus + source boss's own damage_bonus +
+        REMNANT_SUMMON_POWER_BONUS) clears a real floor -- including
+        The Wrathflame Unbound specifically, the one he actually tested
+        live (confirmed here it was previously only ~79.5 avg, well
+        under the floor).
+        """
+        from rules.dice import average_damage
+        wrathflame_template = bot.CAMPAIGN["monsters"]["the_wrathflame_unbound"]
+        wrathflame_remnant = remnants_module.get_remnant("the_wrathflame_unbound")
+        old_avg = average_damage(
+            wrathflame_remnant["summon_damage_dice"],
+            wrathflame_remnant["summon_damage_bonus"] + wrathflame_template["damage_bonus"],
+        )
+        self.assertLess(old_avg, 100)  # confirms the real gap this fixes
+
+        for remnant_id, remnant in remnants_module.REMNANTS.items():
+            source_template = bot.CAMPAIGN["monsters"][remnant["monster_key"]]
+            total_bonus = (
+                remnant["summon_damage_bonus"] + source_template.get("damage_bonus", 0)
+                + remnants_module.REMNANT_SUMMON_POWER_BONUS
+            )
+            avg = average_damage(remnant["summon_damage_dice"], total_bonus)
+            self.assertGreaterEqual(avg, 150, f"{remnant_id} avg {avg} is under Coffee's requested 150 floor")
+
     def test_remnant_story_tied_split_is_seven_story_five_secret(self):
         story_tied = [rid for rid, r in remnants_module.REMNANTS.items() if r["story_tied"]]
         secret = [rid for rid, r in remnants_module.REMNANTS.items() if not r["story_tied"]]

@@ -14413,11 +14413,18 @@ async def _do_check_remnants(update: Update) -> None:
             continue
         source_template = cl.get_monster_template(CAMPAIGN, remnant["monster_key"])
         source_bonus = source_template.get("damage_bonus", 0) if source_template else 0
-        avg_dmg = average_damage(remnant["summon_damage_dice"], remnant["summon_damage_bonus"] + source_bonus)
+        # Real live report (2026-08-20, per Coffee): the previewed avg
+        # here must include the same REMNANT_SUMMON_POWER_BONUS
+        # _do_summon_remnant's own real roll now does, or this screen
+        # would understate what a cast actually deals again -- the
+        # exact "screen says X, combat does Y" gap v1.27.269 already
+        # had to fix once for the source-boss bonus alone.
+        total_bonus = remnant["summon_damage_bonus"] + source_bonus + remnants_module.REMNANT_SUMMON_POWER_BONUS
+        avg_dmg = average_damage(remnant["summon_damage_dice"], total_bonus)
         secondary_text = _SUMMON_SECONDARY_DESCRIPTIONS.get(remnant["summon_secondary"], "no secondary effect")
         entries.append(
             f"**{remnant['name']}**\n"
-            f"⚔️ {remnant['summon_damage_dice']}+{remnant['summon_damage_bonus']+source_bonus} "
+            f"⚔️ {remnant['summon_damage_dice']}+{total_bonus} "
             f"{remnant['element']} damage (~{avg_dmg:.1f} avg)\n"
             f"✨ {secondary_text}\n"
             f"_{remnant['lore']}_"
@@ -23299,8 +23306,17 @@ async def _do_summon_remnant(update: Update, text: str, forced_roll: int | None 
         # stat.
         source_template = cl.get_monster_template(CAMPAIGN, remnant["monster_key"])
         source_bonus = source_template.get("damage_bonus", 0) if source_template else 0
+        # Real live report (2026-08-20, per Coffee, tested live against
+        # a real Giant Spider): "the remnants damage was abit low... a
+        # remnant shud be doing about 150-300 damage against a lower lv
+        # enemy... stronger than an attack or spell" -- see
+        # remnants.REMNANT_SUMMON_POWER_BONUS's own docstring for the
+        # exact real numbers this closes the gap on, including The
+        # Wrathflame Unbound (the one he actually tested).
         roll = roll_damage(
-            remnant["summon_damage_dice"], remnant["summon_damage_bonus"] + source_bonus, forced_roll=forced_roll,
+            remnant["summon_damage_dice"],
+            remnant["summon_damage_bonus"] + source_bonus + remnants_module.REMNANT_SUMMON_POWER_BONUS,
+            forced_roll=forced_roll,
         )
         damage = apply_damage_type_modifier(roll["total"], remnant["element"], target, caster)
         target["hp_current"] = max(target["hp_current"] - damage, 0)

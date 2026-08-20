@@ -60,6 +60,29 @@ REAL_DAMAGE_TYPES = ("cold", "fire", "force", "lightning", "necrotic", "physical
 # some Remnants are just the hardest-hitting option, no secondary.
 SUMMON_SECONDARY_EFFECTS = ("none", "dot", "self_heal", "party_heal")
 
+# Real live report (2026-08-20, per Coffee, live-tested against a real
+# Giant Spider: "i feel the remnants damage was abit low? i was
+# thinking a remnant shud be doing about 150-300 damage against a
+# lower lv enemy... Remnants are supposed to be a strong attack or
+# ability. stronger than an attack or spell which is why its capped to
+# 1 use until mastery. can u make sure all the remnants damage gets
+# inscreased including the first one we already achieved"). Confirmed:
+# The Wrathflame Unbound's real summon averaged only ~79.5 damage (3d8
+# +16 own bonus +50 source damage_bonus) -- well under his own stated
+# floor. A single flat bonus, applied on top of the existing summon_
+# damage_bonus + source-boss damage_bonus stack (v1.27.268) at the one
+# real calculation site (bot._do_summon_remnant), lands the weakest
+# Remnant (The Root That Remembers, was ~71 avg) at ~161 and the
+# strongest (The Unopened, was ~259.5 avg) at ~349.5 -- every one of
+# the 12 now clears the requested floor, including Wrathflame Unbound
+# itself (~79.5 -> ~169.5), and the already-strongest ones scale even
+# further past 300 rather than being compressed down to it, matching
+# "stronger source = stronger Remnant" (v1.27.268's own design intent)
+# instead of flattening that gap. One tunable constant, not 12
+# hand-edited dict entries, so a future adjustment never risks drifting
+# the 12 out of relative sync with each other again.
+REMNANT_SUMMON_POWER_BONUS = 90
+
 # Every Remnant here is grounded in a REAL location already in
 # campaigns/default/campaign.json (never a new zone invented for this
 # system) -- each was previously an empty room with no monster, chosen

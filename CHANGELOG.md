@@ -2,6 +2,28 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.279] — Remnant summon damage raised across all 12
+
+**Real live report (2026-08-20, Coffee, tested against a real Giant
+Spider):** "i feel the remnants damage was abit low? i was thinking a
+remnant shud be doing about 150-300 damage against a lower lv enemy...
+Remnants are supposed to be a strong attack or ability. stronger than
+an attack or spell which is why its capped to 1 use until mastery. can
+u make sure all the remnants damage gets inscreased including the
+first one we already achieved." Confirmed: The Wrathflame Unbound (the
+one he actually tested) averaged only ~79.5 damage. Added one new
+tunable constant, `remnants.REMNANT_SUMMON_POWER_BONUS` (90), applied
+on top of the existing summon dice+bonus and source-boss damage_bonus
+stack (v1.27.268) at the real calculation site — every one of the 12
+Remnants now clears his requested 150 floor (weakest, The Root That
+Remembers: ~71 → ~161; Wrathflame Unbound: ~79.5 → ~169.5), and the
+already-strongest ones scale naturally past 300 rather than being
+compressed down to it (The Unopened: ~259.5 → ~349.5), matching
+"stronger source = stronger Remnant." Also fixed the Remnants menu
+screen's own previewed average, which would have understated the real
+combat number again otherwise. Verified with real executed tests,
+including one asserting every single Remnant clears the real floor.
+
 ## [1.27.278] — Fixed "move X to backrow" (one word, no "the") misclassification
 
 **Found via self-improvement topic-activity monitoring:** "Move
