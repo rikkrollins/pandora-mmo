@@ -17540,6 +17540,110 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(339 <= actual_damage <= 348, f"damage {actual_damage} outside expected 339-348 range")
         sessions.end_session(-987)
 
+    async def test_summon_remnant_damage_gets_a_real_charisma_bonus(self):
+        """
+        Real live request (2026-08-20, Coffee): "let's build charisma
+        scaling summon damage - have it add onto the damage it does
+        now tho... it should be a bonus stat." A real 5E ability
+        modifier (charisma 20 -> +5) is added on top of the existing
+        stack, same forced_roll bounding as
+        test_summon_remnant_damage_includes_source_bosses_own_damage_bonus
+        (339-348 there for charisma 10/+0) -- here shifted by exactly
+        +5 to 344-353.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-985)
+        user_id = 800214
+        make_basic_character(
+            user_id, "CharismaSummoner", current_location="crossroads_tavern", chat_id=-985,
+            ability_scores={"strength": 15, "dexterity": 14, "constitution": 13, "intelligence": 10, "wisdom": 10, "charisma": 20},
+        )
+        db.update_character(user_id, -985, bound_remnants=["the_cairnbound"])
+        enemy_id = -8
+        player = db.get_character(user_id, -985)
+        player["telegram_user_id"] = user_id
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "hp_current": 100000, "hp_max": 100000,
+                 "armor_class": 10, "dexterity": 10, "resistances": [], "vulnerabilities": []}
+        session = sessions.start_session(-985, [player, enemy], {user_id: "party", enemy_id: "enemy"})
+        session.turn_order = [user_id, enemy_id]
+        session.current_turn_index = 0
+        sink = []
+        with patch("bot.narrate_remnant_summon", return_value="You should not have come here."), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._do_summon_remnant(
+                FakeUpdate(user_id, "summon The Cairnbound on the goblin", sink, chat_id=-985),
+                "summon The Cairnbound on the goblin",
+                forced_roll=10,
+            )
+        goblin = next(p for p in session.participants if p["telegram_user_id"] == enemy_id)
+        actual_damage = 100000 - goblin["hp_current"]
+        self.assertTrue(344 <= actual_damage <= 353, f"damage {actual_damage} outside expected 344-353 range (charisma +5 bonus)")
+        sessions.end_session(-985)
+
+    async def test_summon_remnant_low_charisma_never_weaker_than_baseline(self):
+        """
+        Real live instruction (2026-08-20, Coffee): "make sure it
+        doesnt make the summon weaker than we already have, it should
+        be a bonus stat." A below-average Charisma (8, a real -1
+        modifier under the normal 5E formula) must NOT subtract
+        anything -- the bonus is floored at 0, so this still lands in
+        the exact same 339-348 range the charisma-10/+0 baseline does.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-984)
+        user_id = 800215
+        make_basic_character(
+            user_id, "LowCharismaSummoner", current_location="crossroads_tavern", chat_id=-984,
+            ability_scores={"strength": 15, "dexterity": 14, "constitution": 13, "intelligence": 10, "wisdom": 10, "charisma": 8},
+        )
+        db.update_character(user_id, -984, bound_remnants=["the_cairnbound"])
+        enemy_id = -9
+        player = db.get_character(user_id, -984)
+        player["telegram_user_id"] = user_id
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "hp_current": 100000, "hp_max": 100000,
+                 "armor_class": 10, "dexterity": 10, "resistances": [], "vulnerabilities": []}
+        session = sessions.start_session(-984, [player, enemy], {user_id: "party", enemy_id: "enemy"})
+        session.turn_order = [user_id, enemy_id]
+        session.current_turn_index = 0
+        sink = []
+        with patch("bot.narrate_remnant_summon", return_value="You should not have come here."), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._do_summon_remnant(
+                FakeUpdate(user_id, "summon The Cairnbound on the goblin", sink, chat_id=-984),
+                "summon The Cairnbound on the goblin",
+                forced_roll=10,
+            )
+        goblin = next(p for p in session.participants if p["telegram_user_id"] == enemy_id)
+        actual_damage = 100000 - goblin["hp_current"]
+        self.assertTrue(339 <= actual_damage <= 348, f"damage {actual_damage} outside expected 339-348 baseline range (no penalty)")
+        sessions.end_session(-984)
+
+    async def test_check_remnants_preview_reflects_the_viewers_own_charisma_bonus(self):
+        """
+        The Remnants menu preview must quote the SAME total a real
+        cast would deal, including the caster's own Charisma bonus --
+        same "screen says X, combat does Y" gap this preview has
+        already been fixed for twice before (source-boss bonus,
+        REMNANT_SUMMON_POWER_BONUS).
+        """
+        user_id = 800216
+        make_basic_character(
+            user_id, "PreviewCharismaSummoner", chat_id=-983,
+            ability_scores={"strength": 15, "dexterity": 14, "constitution": 13, "intelligence": 10, "wisdom": 10, "charisma": 20},
+        )
+        db.update_character(user_id, -983, bound_remnants=["the_wrathflame_unbound"])
+        wrathflame = remnants_module.get_remnant("the_wrathflame_unbound")
+        source_template = bot.cl.get_monster_template(bot.CAMPAIGN, wrathflame["monster_key"])
+        source_bonus = source_template.get("damage_bonus", 0)
+        expected_bonus = wrathflame["summon_damage_bonus"] + source_bonus + remnants_module.REMNANT_SUMMON_POWER_BONUS + 5
+
+        sink = []
+        await bot._do_check_remnants(FakeUpdate(user_id, "", sink, chat_id=-983))
+        reply = sink[0]
+        self.assertIn(f"3d8+{expected_bonus}", reply)
+
     async def test_narrate_remnant_summon_real_ollama_call_addresses_the_target(self):
         """
         Real request (2026-08-20, Coffee): "include a narration from

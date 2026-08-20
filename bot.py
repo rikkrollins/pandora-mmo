@@ -14647,8 +14647,14 @@ async def _do_check_remnants(update: Update) -> None:
         # _do_summon_remnant's own real roll now does, or this screen
         # would understate what a cast actually deals again -- the
         # exact "screen says X, combat does Y" gap v1.27.269 already
-        # had to fix once for the source-boss bonus alone.
-        total_bonus = remnant["summon_damage_bonus"] + source_bonus + remnants_module.REMNANT_SUMMON_POWER_BONUS
+        # had to fix once for the source-boss bonus alone. Same reason
+        # this now also folds in the viewer's own real Charisma bonus
+        # (see _do_summon_remnant's own comment for the floored-at-0
+        # "bonus, never a penalty" reasoning) -- this screen previews
+        # what THIS character's own cast actually does, not a generic
+        # number.
+        charisma_bonus = max(ability_modifier(character.get("charisma", 10)), 0)
+        total_bonus = remnant["summon_damage_bonus"] + source_bonus + remnants_module.REMNANT_SUMMON_POWER_BONUS + charisma_bonus
         avg_dmg = average_damage(remnant["summon_damage_dice"], total_bonus)
         secondary_text = _SUMMON_SECONDARY_DESCRIPTIONS.get(remnant["summon_secondary"], "no secondary effect")
         entries.append(
@@ -23656,9 +23662,20 @@ async def _do_summon_remnant(update: Update, text: str, forced_roll: int | None 
         # remnants.REMNANT_SUMMON_POWER_BONUS's own docstring for the
         # exact real numbers this closes the gap on, including The
         # Wrathflame Unbound (the one he actually tested).
+        # Charisma-scaling summon damage (2026-08-20, per Coffee: "let's
+        # build charisma scaling summon damage - have it add onto the
+        # damage it does now tho, make sure it doesnt make the summon
+        # weaker than we already have, it should be a bonus stat"). A
+        # real 5E ability modifier, but floored at 0 rather than the
+        # usual negative-modifier-for-a-low-score rule every other
+        # ability check in this game follows -- deliberately, since
+        # Coffee's own ask was explicitly "a bonus," never a penalty; a
+        # low-Charisma caster's summon simply gets +0 here, same as
+        # before this feature existed, never less.
+        charisma_bonus = max(ability_modifier(caster.get("charisma", 10)), 0)
         roll = roll_damage(
             remnant["summon_damage_dice"],
-            remnant["summon_damage_bonus"] + source_bonus + remnants_module.REMNANT_SUMMON_POWER_BONUS,
+            remnant["summon_damage_bonus"] + source_bonus + remnants_module.REMNANT_SUMMON_POWER_BONUS + charisma_bonus,
             forced_roll=forced_roll,
         )
         damage = apply_damage_type_modifier(roll["total"], remnant["element"], target, caster)

@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.284] — Charisma now scales Remnant summon damage (a real bonus, never a penalty)
+
+**Real live request (2026-08-20, Coffee): "let's build charisma
+scaling summon damage - have it add onto the damage it does now tho,
+make sure it doesnt make the summon weaker than we already have, it
+should be a bonus stat."** Followed a conversation about what actually
+makes a "summoner" build stronger — the honest answer was "nothing
+does, stats never touched summon damage at all." Fixed: a real 5E
+ability modifier (`ability_modifier(caster["charisma"])`) is now added
+on top of the existing summon-damage stack (own dice+bonus + source
+boss's damage_bonus + `REMNANT_SUMMON_POWER_BONUS`), floored at 0 —
+deliberately never negative, since Coffee's own ask was explicitly "a
+bonus," not a penalty for a low-Charisma caster. A Charisma 20 caster
+gets +5; a Charisma 8 caster still gets +0, never less than before
+this existed. Applied consistently in both the real combat roll
+(`_do_summon_remnant`) and the Remnants menu's damage preview
+(`_do_check_remnants`), so the screen never understates what a real
+cast deals.
+
 ## [1.27.283] — Sell picker button labels no longer truncate long item names
 
 **Real live report (2026-08-20, Coffee, screenshot): "It's really
