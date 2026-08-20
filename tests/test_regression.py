@@ -12055,6 +12055,93 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(after["pending_asi_points"], 2)
         self.assertTrue(any("still have 2" in m for m in sink))
 
+    async def test_level_up_prompt_shows_current_ability_scores(self):
+        """
+        2026-08-20, per Coffee's dev-bridge report: "I need to be able
+        to see the players stats so we know what we want to level."
+        """
+        user_id = 900590
+        make_basic_character(user_id, "StatVisibilityTester")
+        db.update_character(user_id, -999, pending_asi_points=2, strength=13)
+        sink = []
+        await bot._do_level_up(FakeUpdate(user_id, "level up", sink), "level up")
+        self.assertTrue(any("STR 13" in m for m in sink), sink)
+
+    async def test_level_up_splits_points_across_two_named_abilities_in_one_message(self):
+        """
+        Real live bug (2026-08-20, Coffee, dev-bridge screenshot): "1
+        point into Strength and 1 point into Dexterity" put both points
+        into Strength -- the old free-text parser only ever found the
+        FIRST ability name anywhere in the message. Now splits by each
+        explicit "<N> point(s) into <ability>" phrase.
+        """
+        user_id = 900591
+        make_basic_character(user_id, "MultiSplitTester")
+        db.update_character(user_id, -999, pending_asi_points=2)
+        before = db.get_character(user_id, -999)
+        sink = []
+        await bot._do_level_up(
+            FakeUpdate(user_id, "1 point into Strength and 1 point into Dexterity", sink),
+            "1 point into Strength and 1 point into Dexterity",
+        )
+        after = db.get_character(user_id, -999)
+        self.assertEqual(after["strength"], before["strength"] + 1)
+        self.assertEqual(after["dexterity"], before["dexterity"] + 1)
+        self.assertEqual(after["pending_asi_points"], 0)
+
+    async def test_level_up_multi_split_clamps_to_available_points(self):
+        user_id = 900592
+        make_basic_character(user_id, "MultiSplitClampTester")
+        db.update_character(user_id, -999, pending_asi_points=2)
+        before = db.get_character(user_id, -999)
+        sink = []
+        await bot._do_level_up(
+            FakeUpdate(user_id, "3 points into Strength and 3 points into Dexterity", sink),
+            "3 points into Strength and 3 points into Dexterity",
+        )
+        after = db.get_character(user_id, -999)
+        self.assertEqual(after["pending_asi_points"], 0)
+        self.assertEqual(
+            (after["strength"] - before["strength"]) + (after["dexterity"] - before["dexterity"]), 2,
+        )
+
+    async def test_level_up_buttons_spend_one_point_per_tap_and_reprompt_with_stats(self):
+        """
+        2026-08-20, per Coffee: "adding buttons, and when the player
+        hits the button, it adds a plus one and if they have more
+        remaining points, it asks them again, showing their current
+        stats."
+        """
+        user_id = 900593
+        make_basic_character(user_id, "ButtonTapTester")
+        db.update_character(user_id, -999, pending_asi_points=2)
+        before = db.get_character(user_id, -999)
+        sink = []
+        await bot.level_menu_callback(FakeCallbackUpdate(user_id, "level|asi|strength", sink), DummyContext())
+        mid = db.get_character(user_id, -999)
+        self.assertEqual(mid["strength"], before["strength"] + 1)  # exactly +1, not +2
+        self.assertEqual(mid["pending_asi_points"], 1)
+        self.assertTrue(any("Which ability next" in m for m in sink), sink)
+        self.assertTrue(any(f"STR {mid['strength']}" in m for m in sink), sink)
+
+        sink2 = []
+        await bot.level_menu_callback(FakeCallbackUpdate(user_id, "level|asi|dexterity", sink2), DummyContext())
+        after = db.get_character(user_id, -999)
+        self.assertEqual(after["dexterity"], before["dexterity"] + 1)
+        self.assertEqual(after["pending_asi_points"], 0)
+        self.assertFalse(any("Which ability next" in m for m in sink2), sink2)
+
+    async def test_level_up_button_auto_spends_all_pending_at_once(self):
+        user_id = 900594
+        make_basic_character(user_id, "ButtonAutoTester", char_class="Fighter")
+        db.update_character(user_id, -999, pending_asi_points=3)
+        before = db.get_character(user_id, -999)["strength"]
+        sink = []
+        await bot.level_menu_callback(FakeCallbackUpdate(user_id, "level|asi|auto", sink), DummyContext())
+        after = db.get_character(user_id, -999)
+        self.assertEqual(after["strength"], before + 3)
+        self.assertEqual(after["pending_asi_points"], 0)
+
     async def test_level_up_auto_keeps_stacking_primary_ability_past_the_old_cap(self):
         """
         Real live report (2026-08-20, Coffee, dev-bridge screenshot):
@@ -15091,6 +15178,55 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         after = db.get_character(uid, -999)
         self.assertEqual(after["spell_slots_max"], 3)  # min +1 floor
         self.assertEqual(after["spell_slots_current"], 2)
+
+    async def test_summoning_purchase_raises_summoning_mastery_pct(self):
+        """
+        Real live report (2026-08-20, Coffee, dev-bridge): "shudnt
+        there be a proficiency or skill for summoning ? i dont see it
+        on the skills level up options. they shud be able to use skill
+        points to lvl +1 to Summoning."
+        """
+        uid = 800204
+        make_basic_character(uid, "SummonBuyer", char_class="Wizard")
+        db.update_character(uid, -999, skill_points=10, bound_remnants=["the_unopened"], summoning_mastery_pct=5.0)
+        sink = []
+        await bot.skilltree_menu_callback(
+            FakeCallbackUpdate(uid, "skilltree|buy|prof_summoning", sink), DummyContext(),
+        )
+        after = db.get_character(uid, -999)
+        self.assertEqual(after["summoning_mastery_pct"], 6.0)
+        self.assertEqual(after["skill_points"], 9)  # 10 - 1
+        self.assertIn("prof_summoning", after["skill_tree_upgrades"])
+
+    async def test_summoning_purchase_refused_with_no_bound_remnants(self):
+        uid = 800205
+        make_basic_character(uid, "NoRemnantBuyer", char_class="Wizard")
+        db.update_character(uid, -999, skill_points=10, bound_remnants=[])
+        sink = []
+        await bot.skilltree_menu_callback(
+            FakeCallbackUpdate(uid, "skilltree|buy|prof_summoning", sink), DummyContext(),
+        )
+        after = db.get_character(uid, -999)
+        self.assertEqual(after["skill_points"], 10)  # refused, nothing spent
+        self.assertNotIn("prof_summoning", after["skill_tree_upgrades"])
+
+    async def test_summoning_button_hidden_with_no_bound_remnants(self):
+        uid = 800206
+        make_basic_character(uid, "NoRemnantKeyboardTester", char_class="Wizard")
+        db.update_character(uid, -999, skill_points=10, bound_remnants=[])
+        character = db.get_character(uid, -999)
+        kb = bot._skill_tree_keyboard(character)
+        labels = [b.text for row in kb.inline_keyboard for b in row]
+        self.assertFalse(any("Summoning" in label for label in labels), labels)
+
+    async def test_summoning_button_shown_with_a_bound_remnant(self):
+        uid = 800207
+        make_basic_character(uid, "RemnantKeyboardTester", char_class="Wizard")
+        db.update_character(uid, -999, skill_points=10, bound_remnants=["the_unopened"])
+        character = db.get_character(uid, -999)
+        kb = bot._skill_tree_keyboard(character)
+        labels = [b.text for row in kb.inline_keyboard for b in row]
+        self.assertTrue(any("Summoning" in label for label in labels), labels)
 
     async def test_weapon_mastery_purchase_is_one_time_and_widens_proficiency(self):
         uid = 800203

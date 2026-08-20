@@ -4908,19 +4908,81 @@ async def _award_victory_xp(update: Update, session: sessions.Session) -> tuple[
     return summary, level_up_notes
 
 
+def _ability_score_line(character: dict) -> str:
+    """Same STR/DEX/.../CHA display line _format_character_sheet already uses, reused so a player can see their real current stats while choosing where to spend ASI points."""
+    return (
+        f"STR {character['strength']} DEX {character['dexterity']} "
+        f"CON {character['constitution']} INT {character['intelligence']} "
+        f"WIS {character['wisdom']} CHA {character['charisma']}\n"
+    )
+
+
+def _spend_asi_points(character: dict, spends: dict) -> str:
+    """
+    Applies a real ASI spend across one or more abilities in a single DB
+    update, given {ability: amount}. No ability-score cap (2026-08-20)
+    -- see _apply_asi_choice's own comment for why.
+    """
+    pending = character.get("pending_asi_points", 0)
+    before_values = {ability: character[ability] for ability in spends}
+    total_spend = sum(spends.values())
+    updated = db.update_character(
+        character["telegram_user_id"], character["chat_id"],
+        **{ability: before_values[ability] + amount for ability, amount in spends.items()},
+        pending_asi_points=pending - total_spend,
+    )
+    note = " ".join(
+        f"📈 {ability.capitalize()} increased from {before_values[ability]} to {updated[ability]}."
+        for ability in spends
+    )
+    if updated["pending_asi_points"] > 0:
+        note += f" You still have {updated['pending_asi_points']} point(s) left to spend — say \"level up\" again."
+    return note
+
+
+# Real live bug (2026-08-20, Coffee, dev-bridge screenshot): "1 point
+# into Strength and 1 point into Dexterity" put both points into
+# Strength -- the old free-text path only ever looked for ONE ability
+# name anywhere in the message. Matches every explicit "<N> point(s)
+# into/in/to/for <ability>" phrase in the text, in the order they
+# appear, so a single message can split points across multiple
+# abilities the same way real 5E's "+1/+1 to two different abilities"
+# ASI option works.
+_ASI_MULTI_SPEND_RE = re.compile(
+    r"(\d+)\s*(?:point|pt)s?\s*(?:in(?:to)?|to|for)\s*"
+    r"(strength|dexterity|constitution|intelligence|wisdom|charisma)"
+)
+
+
 def _apply_asi_choice(character: dict, text: str) -> str | None:
     """
     Tries to resolve character's pending_asi_points from free text --
-    either a named ability ("put it into constitution") or an auto/
-    "do it for me" phrase (falls back to the class's old fixed primary
-    ability, same stat the pre-2026-07-16 silent system always used).
-    Returns the confirmation message, or None if the text named
-    neither, so the caller knows to prompt and wait instead.
+    an explicit multi-ability split ("1 point into strength and 1 into
+    dexterity"), a single named ability ("put it into constitution"),
+    or an auto/"do it for me" phrase (falls back to the class's old
+    fixed primary ability, same stat the pre-2026-07-16 silent system
+    always used). Returns the confirmation message, or None if the text
+    named neither, so the caller knows to prompt and wait instead.
     """
     pending = character.get("pending_asi_points", 0)
     if pending <= 0:
         return None
     lowered = text.lower()
+
+    multi_matches = _ASI_MULTI_SPEND_RE.findall(lowered)
+    if len({ability for _, ability in multi_matches}) >= 2:
+        remaining = pending
+        spends: dict = {}
+        for amount_str, ability in multi_matches:
+            if remaining <= 0:
+                break
+            amount = min(int(amount_str), remaining)
+            if amount <= 0:
+                continue
+            spends[ability] = spends.get(ability, 0) + amount
+            remaining -= amount
+        if spends:
+            return _spend_asi_points(character, spends)
 
     if any(w in lowered for w in _ASI_AUTO_WORDS):
         ability = CLASS_PRIMARY_ABILITY.get(character["char_class"].lower(), "strength")
@@ -4945,17 +5007,7 @@ def _apply_asi_choice(character: dict, text: str) -> str | None:
     # scores well past 20 in production before this change, so removing
     # the ceiling entirely introduces no new math this game hasn't
     # already relied on.
-    before_value = character[ability]
-    after_value = before_value + spend
-    updated = db.update_character(
-        character["telegram_user_id"], character["chat_id"],
-        **{ability: after_value},
-        pending_asi_points=pending - spend,
-    )
-    note = f"📈 {ability.capitalize()} increased from {before_value} to {after_value}."
-    if updated["pending_asi_points"] > 0:
-        note += f" You still have {updated['pending_asi_points']} point(s) left to spend — say \"level up\" again."
-    return note
+    return _spend_asi_points(character, {ability: spend})
 
 
 async def _do_rebirth(update: Update) -> None:
@@ -5305,11 +5357,19 @@ async def _do_level_up(update: Update, text: str) -> None:
         return
 
     _chat_scoped_set(_PENDING_ASI_CHOICE, update.effective_chat.id).add(user_id)
+    # 2026-08-20, per Coffee's dev-bridge report: "I need to be able to
+    # see the players stats so we know what we want to level" -- the
+    # prompt now shows the character's real current ability scores
+    # right alongside the choice, and offers the same tap-to-choose
+    # buttons _do_show_level_menu already has (_do_asi_button_pick),
+    # instead of free text being the only option.
     await _safe_send(
         update,
-        f"You have {character['pending_asi_points']} ability point(s) to spend. Which ability would you "
-        f"like to raise — Strength, Dexterity, Constitution, Intelligence, Wisdom, or Charisma? "
-        f"(Say \"auto\" or \"do it for me\" to let the game choose.)",
+        f"You have {character['pending_asi_points']} ability point(s) to spend.\n"
+        f"{_ability_score_line(character)}"
+        f"Which ability would you like to raise — Strength, Dexterity, Constitution, Intelligence, Wisdom, or Charisma? "
+        f"(Say \"auto\" or \"do it for me\" to let the game choose, or tap a button below.)",
+        reply_markup=_with_menu_button(_level_keyboard()),
     )
 
 
@@ -13164,6 +13224,22 @@ UNIVERSAL_MANIPULATION_POOLS = {
     "arcane_reserve": {"name": "Arcane Reserve", "cost": 3, "description": "Max spell slots grow (at least +1) per point invested."},
 }
 
+# Summoning Mastery investment (2026-08-20, per Coffee dev-bridge
+# report: "shudnt there be a proficiency or skill for summoning ? i
+# dont see it on the skills level up options. they shud be able to use
+# skill points to lvl +1 to Summoning"). Mutates summoning_mastery_pct
+# directly and permanently at purchase time, a flat +1% per point --
+# the SAME +1 a real successful summon itself grants (see
+# _do_summon_remnant's own `new_pct = character["summoning_mastery_pct"]
+# + 1.0`), just bought instead of earned. Not folded into
+# UNIVERSAL_MANIPULATION_POOLS above since that section's 10%-
+# compounding step doesn't apply here -- summoning_mastery_pct is
+# already a flat-per-point stat everywhere else it grows. Gated to
+# characters who've actually bound at least one Remnant, the same real
+# requirement _do_summon_remnant itself checks -- pointless to offer
+# this to a character who can't summon anything yet.
+UNIVERSAL_MANIPULATION_SUMMONING = {"id": "prof_summoning", "cost": 1, "description": "+1% Summoning mastery per point invested."}
+
 # The 7 real gathering/crafting professions this game already tracks
 # (see ALL_PROFESSIONS) -- one repeatable investment id each, +1 flat
 # bonus to that profession's own ability-check roll per point invested,
@@ -13259,6 +13335,11 @@ def _skill_tree_keyboard(character: dict) -> InlineKeyboardMarkup:
         buttons.append([InlineKeyboardButton(
             f"🔮 Arcane Reserve ({UNIVERSAL_MANIPULATION_POOLS['arcane_reserve']['cost']} pts)", callback_data="skilltree|buy|arcane_reserve",
         )])
+    if character.get("bound_remnants") and points >= UNIVERSAL_MANIPULATION_SUMMONING["cost"]:
+        buttons.append([InlineKeyboardButton(
+            f"🌀 Summoning ({UNIVERSAL_MANIPULATION_SUMMONING['cost']} pts)",
+            callback_data=f"skilltree|buy|{UNIVERSAL_MANIPULATION_SUMMONING['id']}",
+        )])
     for prof_name, info in UNIVERSAL_MANIPULATION_PROFESSIONS.items():
         if points >= info["cost"]:
             buttons.append([InlineKeyboardButton(
@@ -13304,6 +13385,14 @@ async def _do_show_skill_tree(update: Update) -> None:
     if character.get("spell_slots_max", 0) > 0:
         arcane_pts = _skill_points(character, "arcane_reserve")
         lines.append(f"🔮 **Arcane Reserve** ({arcane_pts} point(s) invested, {UNIVERSAL_MANIPULATION_POOLS['arcane_reserve']['cost']}/pt) — {UNIVERSAL_MANIPULATION_POOLS['arcane_reserve']['description']}")
+
+    if character.get("bound_remnants"):
+        summoning_pts = _skill_points(character, UNIVERSAL_MANIPULATION_SUMMONING["id"])
+        current_mastery = character.get("summoning_mastery_pct", 1.0)
+        lines.append(
+            f"🌀 **Summoning** ({summoning_pts} point(s) invested, {UNIVERSAL_MANIPULATION_SUMMONING['cost']}/pt, "
+            f"current mastery {current_mastery:.0f}%) — {UNIVERSAL_MANIPULATION_SUMMONING['description']}"
+        )
 
     prof_lines = []
     for prof_name, info in UNIVERSAL_MANIPULATION_PROFESSIONS.items():
@@ -13373,6 +13462,21 @@ async def skilltree_menu_callback(update: Update, context: ContextTypes.DEFAULT_
         db.update_character(update.effective_user.id, update.effective_chat.id, **updates)
         await _safe_send(update, f"🌌 **{character['name']}** channels **{label}**!")
         await _notify_main_topic(update, f"🌌 **{character['name']}** invested a point in {label}!")
+        return
+
+    if mechanic_id == UNIVERSAL_MANIPULATION_SUMMONING["id"]:
+        cost = UNIVERSAL_MANIPULATION_SUMMONING["cost"]
+        if points < cost or not character.get("bound_remnants"):
+            return
+        new_pct = character.get("summoning_mastery_pct", 1.0) + 1.0
+        db.update_character(
+            update.effective_user.id, update.effective_chat.id,
+            skill_points=points - cost,
+            skill_tree_upgrades=character["skill_tree_upgrades"] + [mechanic_id],
+            summoning_mastery_pct=new_pct,
+        )
+        await _safe_send(update, f"🌀 **{character['name']}** channels more **Summoning** mastery (now {new_pct:.0f}%)!")
+        await _notify_main_topic(update, f"🌌 **{character['name']}** invested a point in Summoning!")
         return
 
     prof_match = next((p for p, info in UNIVERSAL_MANIPULATION_PROFESSIONS.items() if info["id"] == mechanic_id), None)
@@ -22592,14 +22696,55 @@ async def _do_show_level_menu(update: Update) -> None:
     pending = character.get("pending_asi_points", 0)
     if pending:
         lines.append(f"\nYou have {pending} ability point(s) to spend:")
+        lines.append(_ability_score_line(character).rstrip("\n"))
         await _safe_send(update, "\n".join(lines), reply_markup=_with_menu_button(_level_keyboard()), speak=False)
     else:
         lines.append("\nNo ability score improvements waiting to be spent right now.")
         await _safe_send(update, "\n".join(lines), reply_markup=_with_menu_button(None), speak=False)
 
 
+async def _do_asi_button_pick(update: Update, ability: str) -> None:
+    """
+    Real button-driven ASI spend (2026-08-20, per Coffee's dev-bridge
+    report: natural language couldn't reliably split points across two
+    different abilities in one message, and the player couldn't see
+    their own stats while choosing -- "I would suggest adding buttons,
+    and when the player hits the button, it adds a plus one and if they
+    have more remaining points, it asks them again, showing their
+    current stats and asking them what stat they want to level"). Each
+    tap spends exactly ONE point (unlike free text, which can still
+    spend up to 2 into one ability in a single message) so a player can
+    freely mix +1/+1 across two abilities across taps, always seeing
+    the result and their live stats before the next one. "auto" still
+    spends every pending point at once onto the class's primary
+    ability, same as the free-text "auto" path.
+    """
+    user_id = update.effective_user.id
+    character = db.get_character(user_id, update.effective_chat.id)
+    if character is None or character.get("pending_asi_points", 0) <= 0:
+        return
+    if ability == "auto":
+        resolved = _apply_asi_choice(character, "auto")
+        _chat_scoped_set(_PENDING_ASI_CHOICE, update.effective_chat.id).discard(user_id)
+        await _safe_send(update, resolved)
+        return
+    if ability not in _ABILITY_NAMES:
+        return
+    resolved = _spend_asi_points(character, {ability: 1})
+    updated = db.get_character(user_id, update.effective_chat.id)
+    if updated["pending_asi_points"] > 0:
+        await _safe_send(
+            update,
+            f"{resolved}\n{_ability_score_line(updated)}Which ability next?",
+            reply_markup=_with_menu_button(_level_keyboard()),
+        )
+    else:
+        _chat_scoped_set(_PENDING_ASI_CHOICE, update.effective_chat.id).discard(user_id)
+        await _safe_send(update, resolved)
+
+
 async def level_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles taps on _level_keyboard -- dispatches through the same real _do_level_up free text already uses."""
+    """Handles taps on _level_keyboard -- dispatches to _do_asi_button_pick, the +1-per-tap flow."""
     query = update.callback_query
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
@@ -22609,7 +22754,7 @@ async def level_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     choice = parts[2] if len(parts) > 2 else None
     if choice is None:
         return
-    await _do_level_up(update, choice)
+    await _do_asi_button_pick(update, choice)
 
 
 def _spell_keyboard(character: dict) -> InlineKeyboardMarkup | None:

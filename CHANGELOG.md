@@ -2,6 +2,41 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.291] — Level-up now shows real stats + true +1-per-tap buttons; Summoning is investable
+
+**Real live report (2026-08-20, Coffee, dev-bridge screenshot):** "I
+need to be able to see the players stats so we know what we want to
+level, also when I use natural language, it didn't distinguish that I
+wanted one point into strength at one point into dexterity, they put
+them both into strength. I would suggest adding buttons, and when the
+player hits the button, it adds a plus one and if they have more
+remaining points, it asks them again, showing their current stats."
+
+- `_do_level_up`'s prompt (both the free-text path and the "Level Up"
+  menu screen) now shows the character's real current STR/DEX/CON/
+  INT/WIS/CHA line right alongside the ability-choice prompt.
+- Free text now splits points across multiple named abilities in one
+  message — "1 point into Strength and 1 point into Dexterity" puts
+  exactly one point into each instead of dumping both into whichever
+  ability the old parser found first.
+- The level-up buttons (`_level_keyboard`) now spend exactly +1 per
+  tap and re-prompt with live stats + buttons if points remain,
+  instead of spending up to 2 in one tap — a player can freely mix
+  +1/+1 across two abilities or +2 into one by tapping the same button
+  twice, matching real 5E's own ASI options. "Auto" is unchanged
+  (still spends everything at once onto the class's primary ability).
+
+**Real live follow-up (2026-08-20, Coffee):** "shudnt there be a
+proficiency or skill for summoning ? i dont see it on the skills level
+up options. they shud be able to use skill points to lvl +1 to
+Summoning" — Universal Manipulation ("skill tree") now offers a real
+Summoning investment for any character with at least one bound
+Remnant: 1 skill point permanently raises `summoning_mastery_pct` by
++1%, the same +1 a real successful summon itself grants, just bought
+instead of earned. Feeds both the per-battle free-summon count
+(`_summons_per_battle`) and the Mastery Overflow damage multiplier the
+same way earned mastery already does.
+
 ## [1.27.290] — Ability-score cap removed entirely
 
 **Real live report (2026-08-20, Coffee, dev-bridge screenshot):** a
