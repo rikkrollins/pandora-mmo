@@ -21211,11 +21211,29 @@ def _market_sell_picker_keyboard(character: dict) -> InlineKeyboardMarkup | None
     single unit -- see market_menu_callback's "sellpick" branch and
     _PENDING_MARKET_SELL's own comment for the real quantity+price
     prompt this leads into.
+
+    Real live report (2026-08-20, Coffee, screenshot): a long generated
+    item name (e.g. "Frostwoven Chain Mail Armor of the Tempest") plus
+    the "💰 " emoji plus a "(have 1)" suffix on EVERY row overflowed
+    Telegram's button width and got truncated mid-word ("Frostwoven
+    Ch...Tempest"), hiding the exact name a player needs to pick the
+    right item. Dropped the emoji and only show "(have N)" when N > 1
+    -- the common case is a single unique piece of gear, where "(have
+    1)" was pure redundant padding, not real information; a genuinely
+    stacked item (Silverleaf Herb x5) still shows its real count, since
+    that IS decision-relevant there. Every character byte given back
+    to the real item name reduces truncation risk on real device
+    widths -- there's no way to guarantee zero truncation for an
+    arbitrarily long generated name inside a fixed-width Telegram
+    button, so this is a real, meaningful reduction, not a full fix.
     """
     if not character.get("inventory"):
         return None
     buttons = [
-        [InlineKeyboardButton(f"💰 {items_module.get_item(item_id)['name']} (have {qty})", callback_data=f"market|sellpick|{item_id}")]
+        [InlineKeyboardButton(
+            f"{items_module.get_item(item_id)['name']}" + (f" (have {qty})" if qty > 1 else ""),
+            callback_data=f"market|sellpick|{item_id}",
+        )]
         for item_id, qty in character["inventory"].items() if qty > 0 and items_module.get_item(item_id)
     ]
     return InlineKeyboardMarkup(buttons) if buttons else None

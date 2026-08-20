@@ -13745,6 +13745,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         qty=1 action), so a stackable item can actually be sold as
         more than a single unit (see the sellpick+free-text tests
         below).
+
+        Real live report (2026-08-20, Coffee, screenshot): a long
+        generated item name plus a "💰 " emoji plus "(have 1)" on
+        EVERY row overflowed Telegram's button width and got truncated
+        mid-word, hiding the real item name. "(have N)" now only
+        appears for an actually-stacked item (N > 1) -- real single
+        gear (qty=1, the common case) gets that space back for its own
+        name instead.
         """
         chat_id = self.MARKET_BUTTONS_CHAT - 3
         make_basic_character(900583, "MarketSellTapper", inventory={"rusty_dagger": 1, "silverleaf_herb": 5}, chat_id=chat_id)
@@ -13752,6 +13760,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         labels = {b.text: b.callback_data for row in kb.inline_keyboard for b in row}
         self.assertTrue(any("Silverleaf" in l and "(have 5)" in l for l in labels))
         self.assertTrue(any(cb == "market|sellpick|silverleaf_herb" for cb in labels.values()))
+        dagger_label = next(l for l in labels if "Rusty Dagger" in l)
+        self.assertNotIn("(have 1)", dagger_label)
+        self.assertNotIn("💰", dagger_label)
         self.assertTrue(any(cb == "market|sellpick|rusty_dagger" for cb in labels.values()))
 
     async def test_market_sellpick_then_free_text_lists_a_custom_quantity_and_price(self):

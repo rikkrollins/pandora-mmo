@@ -2,6 +2,24 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.283] — Sell picker button labels no longer truncate long item names
+
+**Real live report (2026-08-20, Coffee, screenshot): "It's really
+hard to read the last two selections. Is there a way so we can see
+the whole text?!"** The market's Sell-an-Item picker (`_market_sell_
+picker_keyboard`, shipped in v1.27.281) built each button as `"💰
+{item name} (have {qty})"` — for a long generated item name
+("Frostwoven Chain Mail Armor of the Tempest", "Ashforged Chain Shirt
+Armor of the Deep") that overflowed Telegram's button width and got
+truncated mid-word ("Frostwoven Ch...Tempest"), hiding the exact name
+a player needs to tell items apart. Dropped the "💰 " emoji, and
+"(have N)" now only shows for an actually-stacked item (N > 1) — the
+common case is a single unique piece of gear, where "(have 1)" was
+pure padding, not real information. There's no way to guarantee zero
+truncation for an arbitrarily long generated name inside a fixed-width
+Telegram button, so this is a real, meaningful reduction, not a
+full fix.
+
 ## [1.27.282] — Market seller-name filtering + My Listings view
 
 **Real live follow-up (2026-08-20, Coffee): "add seller name filtering
