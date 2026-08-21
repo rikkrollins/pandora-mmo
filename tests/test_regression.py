@@ -3328,9 +3328,25 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # (1/20 chance, an automatic miss in 5E regardless of AC) made
         # this test genuinely flaky (confirmed live 2026-07-16: failed
         # under real random rolls in an otherwise-clean full suite run).
-        await bot._do_attack(
-            FakeUpdate(user_id, "I attack the dummy", sink2), "I attack the dummy", forced_roll=20
-        )
+        #
+        # Real test-infrastructure gap found 2026-08-21 (previously
+        # believed a "pre-existing, unrelated hang" -- actually caused
+        # by the ATB "active battle flow" rewrite, v1.27.295): a crit's
+        # real flavor narration is deferred to a background
+        # asyncio.to_thread(narrate_action, ...) job so _do_attack
+        # itself returns instantly in production -- but
+        # unittest.IsolatedAsyncioTestCase's per-test event loop still
+        # waits for that background thread to finish at teardown
+        # (confirmed: this is real, documented asyncio.run() executor-
+        # shutdown behavior, not a bug in this test or in production,
+        # where the bot's event loop runs continuously and never tears
+        # down per-request). Mocking narrate_action avoids the real
+        # 200s Ollama timeout at teardown.
+        from unittest.mock import patch
+        with patch("bot.narrate_action", return_value="A blow lands."):
+            await bot._do_attack(
+                FakeUpdate(user_id, "I attack the dummy", sink2), "I attack the dummy", forced_roll=20
+            )
 
         self.assertLess(enemy["hp_current"], 200)
         self.assertEqual(db.get_character(user_id, -999)["spell_slots_current"], 1)
@@ -4389,7 +4405,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # dummy still needs a real "strength" score of its own -- after
         # the player's forced miss, _resolve_ai_turns takes the dummy's
         # own turn and resolves its unarmed attack back, which needs it.
-        await bot._do_attack(FakeUpdate(user_id, "I attack the dummy", sink), "I attack the dummy", forced_roll=1)
+        #
+        # narrate_action mocked (2026-08-21) -- real test-infrastructure
+        # gap, not a hang in this test itself: the ATB rewrite
+        # (v1.27.295) defers real flavor narration to a background
+        # asyncio.to_thread job, and unittest.IsolatedAsyncioTestCase's
+        # per-test event loop waits for that thread at teardown (real,
+        # documented asyncio.run() executor-shutdown behavior -- never
+        # happens in production, where the bot's own event loop runs
+        # continuously). Confirmed via git stash this "hang" pre-dates
+        # today's session but is real and reproducible either way.
+        from unittest.mock import patch
+        with patch("bot.narrate_action", return_value="The attack goes wide."):
+            await bot._do_attack(FakeUpdate(user_id, "I attack the dummy", sink), "I attack the dummy", forced_roll=1)
         self.assertEqual(enemy["hp_current"], 100, "a forced natural 1 should never hit")
         sessions.end_session(-999)
 
@@ -4737,10 +4765,18 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.current_turn_index = session.turn_order.index(user_id)
 
         before_hp = enemy["hp_current"]
-        await bot._do_throw_weapon(
-            FakeUpdate(user_id, "throw silvered dagger at ImpossibleDodge", []),
-            "throw silvered dagger at ImpossibleDodge",
-        )
+        # narrate_action mocked (2026-08-21) -- real test-infrastructure
+        # gap (ATB rewrite defers real flavor narration to a background
+        # thread; unittest.IsolatedAsyncioTestCase's per-test event loop
+        # waits for it at teardown -- real asyncio.run() behavior, never
+        # happens in production). See the identical fix/comment on
+        # test_attack_forced_roll_determines_hit_or_miss above.
+        from unittest.mock import patch
+        with patch("bot.narrate_action", return_value="The dagger flies true."):
+            await bot._do_throw_weapon(
+                FakeUpdate(user_id, "throw silvered dagger at ImpossibleDodge", []),
+                "throw silvered dagger at ImpossibleDodge",
+            )
         live_enemy = next((p for p in session.participants if p["telegram_user_id"] == -2_500_062), None)
         after_hp = live_enemy["hp_current"] if live_enemy else 0
         self.assertLess(after_hp, before_hp, "Assassin's Throw must guarantee a hit even against impossible AC")
