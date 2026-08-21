@@ -18677,6 +18677,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(char["alignment_good_evil"], good_evil_before + 5)
 
     async def test_secondary_guild_solve_puzzle_step_credits_correctly(self):
+        """
+        Real regression found 2026-08-21 (while investigating a
+        different puzzle-answer bug): this test was still sending "a
+        map" -- the ANSWER TO THE OLD RIDDLE that step used before
+        2026-08-14's real, deliberate swap (per Coffee: "NEVER give
+        spoilers again" -- the original "I have cities, but no
+        houses..." riddle's answer had leaked in a support reply, see
+        guild_curriculum.py's own comment on "arc_2_the_first_riddle").
+        The new riddle's real accepted answer ("an echo"/"echo") was
+        never backported into this test, so it silently stopped passing
+        the moment the swap shipped -- a stale test, not a live product
+        bug.
+        """
         user_id = 700304
         make_basic_character(user_id, "SecondaryRiddleTester", char_class="Fighter")
         db.update_character(
@@ -18685,7 +18698,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         sink = []
         await bot.guild_topic_handler(
-            FakeUpdate(user_id, "a map", sink, thread_id=config.GUILD_TOPIC_IDS["arcane_circle"]),
+            FakeUpdate(user_id, "an echo", sink, thread_id=config.GUILD_TOPIC_IDS["arcane_circle"]),
             DummyContext(), "arcane_circle",
         )
         char = db.get_character(user_id, -999)
@@ -19670,7 +19683,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 # Step 1 is the riddle -- must clear it before step 2 (gather_material) is even current.
                 sink = []
                 await bot.guild_topic_handler(
-                    FakeUpdate(user_id, "a map", sink, thread_id=config.GUILD_TOPIC_IDS["arcane_circle"]),
+                    FakeUpdate(user_id, "an echo", sink, thread_id=config.GUILD_TOPIC_IDS["arcane_circle"]),
                     DummyContext(), "arcane_circle",
                 )
                 char = db.get_character(user_id, -999)
@@ -19724,7 +19737,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
                 sink = []
                 await bot.guild_topic_handler(
-                    FakeUpdate(user_id, "a map", sink, thread_id=config.GUILD_TOPIC_IDS["arcane_circle"]),
+                    FakeUpdate(user_id, "an echo", sink, thread_id=config.GUILD_TOPIC_IDS["arcane_circle"]),
                     DummyContext(), "arcane_circle",
                 )
                 char = db.get_character(user_id, -999)
@@ -19760,14 +19773,21 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         text already classified as an "answer_puzzle" attempt) -- a
         plain substring check against every message sent while a
         solve_puzzle step is current meant an unrelated question just
-        mentioning the answer word ("Does anyone have a map of the outer
-        ward we could look at later?") instantly finished the riddle and
+        mentioning the answer word instantly finished the riddle and
         skipped the member to the next lesson. Fixed via
         bot._guild_curriculum_riddle_answer_matches (exact match after
         stripping a short natural lead-in, see its own docstring for why
         a word-count cap alone wasn't enough) -- this test locks in both
         halves: ordinary chat must NOT complete it, and a real short
         answer still must.
+
+        Real regression found 2026-08-21 (same stale-answer class as
+        test_secondary_guild_solve_puzzle_step_credits_correctly): this
+        test originally used "a map" -- the answer to this step's OLD
+        riddle before 2026-08-14's real, deliberate swap (a leaked
+        answer forced a new riddle; see guild_curriculum.py's own
+        comment on "arc_2_the_first_riddle"). Updated to the real
+        current riddle's own accepted answer ("an echo"/"echo").
         """
         from unittest.mock import patch
         user_id = 700104
@@ -19783,7 +19803,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         sink = []
         update = FakeUpdate(
-            user_id, "Does anyone have a map of the outer ward we could look at later?", sink,
+            user_id, "Does anyone know if there's an echo in these old tunnels?", sink,
             thread_id=config.GUILD_TOPIC_IDS["arcane_circle"],
         )
         await bot.guild_topic_handler(update, DummyContext(), "arcane_circle")
@@ -19791,7 +19811,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(char["guild_curriculum_step"], 1, "ordinary chat mentioning the answer word must not complete the riddle")
 
         sink = []
-        update = FakeUpdate(user_id, "I think it's a map", sink, thread_id=config.GUILD_TOPIC_IDS["arcane_circle"])
+        update = FakeUpdate(user_id, "I think it's an echo", sink, thread_id=config.GUILD_TOPIC_IDS["arcane_circle"])
         await bot.guild_topic_handler(update, DummyContext(), "arcane_circle")
         char = db.get_character(user_id, -999)
         self.assertEqual(char["guild_curriculum_step"], 2, "a real short answer attempt must still be credited")
