@@ -2,6 +2,41 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.304] — Spirit summons: RNG variance, real abilities, healable-while-alive; urgent fix for a stuck "dead" character
+
+**Urgent live fix (Coffee: "it is saying im dead.."):** a genuinely
+new failure mode exposed by yesterday's natural-attack proficiency fix
+-- with monsters finally hitting correctly, a character could die in
+combat for real. The natural-healing/wake-up block (triggered by
+explicit phrasing like "I'm back" after going inactive) never checked
+`is_dead` at all, only `is_inactive` -- so a dead-and-inactive
+character got silently healed to full HP while `is_dead` stayed set
+forever (only a real Revivify clears it), leaving them stuck exactly
+as reported: correctly refused from acting, but their sheet showing
+full HP. Fixed: dead is dead until Revivify, never passively healed by
+resting/waking. Pan's own live record (`is_dead=1`, full HP) was
+corrected directly.
+
+**Spirit summons, three follow-up requests:**
+- **RNG variance**: a summon's HP/damage now get a real 0.85x-1.15x
+  roll each time, so they're not always identical. Higher Summoning
+  proficiency (`summoning_mastery_pct`) biases the roll toward the
+  high end -- better odds, never a guarantee.
+- **Real abilities**: each tier now has 2 real damage-dealing
+  abilities with their own magic school and damage type (Lesser:
+  force/conjuration, Spirit: radiant/evocation, Greater: necrotic/
+  necromancy, Elder: psychic/evocation), picked up automatically by
+  the existing monster-spellcasting mechanic already backing 21 real
+  monsters/bosses -- no new AI-decision code needed.
+- **Healable, never revivable**: a live, damaged summon can now be
+  targeted by name for healing mid-combat (a real gap -- healing
+  previously always defaulted to the caster, since a summon has no DB
+  row to be found by the normal party-lookup). Death removal was
+  already correct (a summon is `is_ai=1`, already removed outright on
+  0 HP, no death saves) -- confirmed with a real test rather than
+  assumed. A dead (removed) summon structurally can't be found for
+  heal or resurrect, so "no revive" holds without any extra code.
+
 ## [1.27.303] — Fix: natural attacks (every monster, and spirit summons) silently lost their proficiency bonus
 
 **Real live bug (2026-08-21, Coffee, dev-bridge screenshot: "the lesser

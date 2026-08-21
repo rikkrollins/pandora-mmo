@@ -3663,12 +3663,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # Casting summon now correctly advances the turn (2026-08-21
         # fix, see the turn-advance test below) -- mocked here so the
         # enemy's own resolved AI turn doesn't wait on a real Ollama call.
+        # RNG variance (2026-08-21, a separate later feature) is also
+        # mocked to a no-op (1.0) -- this test is specifically about the
+        # deterministic level/cap formula, not the RNG layered on top of it.
         with patch("bot.narrate_action", return_value="The blow lands."), \
-                patch("bot._get_combat_throttle_seconds", return_value=0.0):
+                patch("bot._get_combat_throttle_seconds", return_value=0.0), \
+                patch("bot._summon_rng_variance", return_value=1.0):
             await bot._do_cast_spell(FakeUpdate(caster_id, "cast summon lesser spirit", sink), "cast summon lesser spirit")
         spirit = next(p for p in session.participants if p.get("name") == "A Lesser Spirit")
         self.assertEqual(spirit["hp_max"], expected_hp_max)
-        self.assertEqual(spirit["hp_current"], expected_hp_max)
+        # <= not ==: the turn-advance fix (2026-08-21) means the enemy's
+        # own turn resolves before this assertion runs, and may have
+        # already landed a real hit on the freshly-summoned spirit.
+        self.assertLessEqual(spirit["hp_current"], expected_hp_max)
         self.assertEqual(spirit["level"], 8)
         self.assertEqual(spirit["proficiency_bonus"], bot.proficiency_bonus_for_level(8))
         self.assertEqual(spirit["damage_dice"], caster_weapon["damage_dice"])
@@ -3709,8 +3716,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         sink = []
         from unittest.mock import patch
+        # RNG variance (a separate later feature) mocked to a no-op --
+        # this test is about the level-cap formula, not the RNG on top.
         with patch("bot.narrate_action", return_value="The blow lands."), \
-                patch("bot._get_combat_throttle_seconds", return_value=0.0):
+                patch("bot._get_combat_throttle_seconds", return_value=0.0), \
+                patch("bot._summon_rng_variance", return_value=1.0):
             await bot._do_cast_spell(FakeUpdate(caster_id, "cast summon lesser spirit", sink), "cast summon lesser spirit")
         spirit = next(p for p in session.participants if p.get("name") == "A Lesser Spirit")
         self.assertEqual(spirit["level"], 25, "must cap at the scroll's own max_summon_level, not the caster's real level 90")
@@ -3745,6 +3755,105 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot._do_cast_spell(FakeUpdate(caster_id, "cast summon elder spirit", sink), "cast summon elder spirit")
         spirit = next(p for p in session.participants if p.get("name") == "An Elder Spirit")
         self.assertEqual(spirit["level"], 10)
+        sessions.end_session(-999)
+
+    def test_summon_rng_variance_stays_in_band_and_biases_upward_with_mastery(self):
+        """
+        Real live request (2026-08-21, Coffee: "use RNG so they dont
+        always have the same stats... higher the proficience the higher
+        the odds of RNG"). A statistical check over many rolls (not a
+        single flaky sample): every roll stays inside the real 0.85-1.15
+        band, and a high-mastery caster's AVERAGE roll is measurably
+        higher than a fresh (1%) caster's -- better odds, not a wider
+        range or a guarantee.
+        """
+        low_rolls = [bot._summon_rng_variance(1.0) for _ in range(500)]
+        high_rolls = [bot._summon_rng_variance(100.0) for _ in range(500)]
+        self.assertTrue(all(bot.SUMMON_RNG_MIN_VARIANCE <= r <= bot.SUMMON_RNG_MAX_VARIANCE for r in low_rolls + high_rolls))
+        self.assertGreater(sum(high_rolls) / len(high_rolls), sum(low_rolls) / len(low_rolls))
+
+    async def test_each_spirit_tier_has_2_real_abilities_with_a_magic_and_damage_type(self):
+        """Real live request (2026-08-21, Coffee: "2 for each tier, a magic type, and a damage type") -- each tier's own known_spells resolve to 2 real, distinct damage spells."""
+        for spell_id, ability_ids in bot.SPIRIT_TIER_KNOWN_SPELLS.items():
+            self.assertEqual(len(ability_ids), 2, spell_id)
+            for aid in ability_ids:
+                ability = spells.get_spell(aid)
+                self.assertIsNotNone(ability, aid)
+                self.assertEqual(ability["effect"], "damage")
+                self.assertTrue(ability["school"])
+                self.assertTrue(ability["damage_type"])
+
+    async def test_summoned_spirit_gets_its_tiers_real_known_spells(self):
+        """A real cast actually sets known_spells on the live summon dict, not just the spells.py catalog."""
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        caster_id = 900488
+        make_basic_character(
+            caster_id, "AbilitySummoner", char_class="Wizard",
+            known_spells=["summon_greater_spirit"], spell_slots_max=3, current_location="crossroads_tavern",
+        )
+        db.update_character(caster_id, -999, level=60, spell_slots_current=3)
+        enemy = {"telegram_user_id": -5200913, "name": "AbilityDummy2", "dexterity": 10, "strength": 10,
+                 "armor_class": 5, "hp_current": 500, "hp_max": 500, "conditions": [], "is_ai": 1, "monster_key": "goblin"}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        session = sessions.start_session(-999, [caster, enemy], {caster_id: "party", -5200913: "enemy"})
+        session.turn_order = [caster_id, -5200913]
+        sink = []
+        with patch("bot.narrate_action", return_value="The blow lands."), \
+                patch("bot._get_combat_throttle_seconds", return_value=0.0):
+            await bot._do_cast_spell(FakeUpdate(caster_id, "cast summon greater spirit", sink), "cast summon greater spirit")
+        spirit = next(p for p in session.participants if p.get("name") == "A Greater Spirit")
+        self.assertEqual(spirit["known_spells"], ["spirit_rend", "spirit_wail"])
+        sessions.end_session(-999)
+
+    def test_summon_removed_from_battle_outright_on_death_no_death_save(self):
+        """
+        Real live request (2026-08-21, Coffee: "When they die remove
+        then from battle, we shud not be able to 'revive' them").
+        Confirms the EXISTING sessions.remove_defeated() mechanic
+        (is_ai + hp_current<=0 removed outright, no death saves)
+        already covers a summon -- it's is_ai=1 same as any monster.
+        """
+        import sessions
+        sessions.end_session(-999)
+        caster = {"telegram_user_id": 900489, "name": "Owner", "dexterity": 10, "hp_current": 50, "hp_max": 50}
+        enemy = {"telegram_user_id": -5200914, "name": "DeathDummy", "dexterity": 10, "hp_current": 500, "hp_max": 500, "is_ai": 1}
+        summon = {"telegram_user_id": -4099999, "name": "A Lesser Spirit", "dexterity": 14, "hp_current": 0, "hp_max": 50, "is_ai": 1, "xp_reward": 0}
+        session = sessions.start_session(
+            -999, [caster, enemy, summon], {900489: "party", -5200914: "enemy", -4099999: "party"},
+        )
+        session.turn_order = [900489, -4099999, -5200914]
+        removed = session.remove_defeated()
+        self.assertIn("A Lesser Spirit", [r["name"] for r in removed])
+        self.assertNotIn(-4099999, session.turn_order)
+        sessions.end_session(-999)
+
+    async def test_live_summon_can_be_healed_by_name_mid_combat(self):
+        """Real live request (2026-08-21, Coffee: "we can heal them") -- a damaged, LIVE summon can now be targeted by name for healing, with the in-memory session state actually updated."""
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        uid = 900490
+        make_basic_character(uid, "SpiritHealer", char_class="Cleric", known_spells=["cure_wounds"], spell_slots_max=3)
+        db.update_character(uid, -999, spell_slots_current=3, hp_current=50, hp_max=50)
+        enemy = {"telegram_user_id": -5200915, "name": "HealSummonDummy", "dexterity": 10, "strength": 10,
+                 "armor_class": 5, "hp_current": 500, "hp_max": 500, "is_ai": 1}
+        summon = {"telegram_user_id": -4088888, "name": "A Lesser Spirit", "dexterity": 14, "strength": 10,
+                  "armor_class": 12, "hp_current": 20, "hp_max": 100, "is_ai": 1, "xp_reward": 0}
+        character = db.get_character(uid, -999)
+        character["telegram_user_id"] = uid
+        session = sessions.start_session(
+            -999, [character, enemy, summon], {uid: "party", -5200915: "enemy", -4088888: "party"},
+        )
+        session.turn_order = [uid, -4088888, -5200915]
+        session.current_turn_index = 0
+        sink = []
+        with patch("bot.narrate_action", return_value="hit"), patch("bot._get_combat_throttle_seconds", return_value=0.0):
+            await bot._do_cast_spell(FakeUpdate(uid, "cast cure wounds on A Lesser Spirit", sink), "cast cure wounds on A Lesser Spirit")
+        live_summon = next(p for p in session.participants if p["telegram_user_id"] == -4088888)
+        self.assertGreater(live_summon["hp_current"], 20, "the live summon's own in-memory HP must have actually increased")
         sessions.end_session(-999)
 
     async def test_summon_spirit_scroll_actually_advances_the_turn(self):
@@ -3836,6 +3945,41 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         monster = {"dexterity": 10, "strength": 18, "damage_dice": "2d8", "damage_bonus": 90, "damage_type": "lightning"}
         weapon = bot._weapon_for_attacker(monster)
         self.assertEqual(weapon["ability"], "strength")
+
+    async def test_dead_and_inactive_character_never_gets_natural_healing(self):
+        """
+        Real live bug (2026-08-21, Coffee: "it is saying im dead.." --
+        confirmed via his own live record: is_dead=1 but hp_current at a
+        full 472/472). The natural-healing/wake-up block only ever
+        checked is_inactive, never is_dead -- a dead-AND-inactive
+        character sending explicit wake phrasing ("I'm back") got
+        silently healed to full HP while is_dead stayed 1 forever
+        (only a real Revivify clears it), leaving them stuck exactly as
+        reported: correctly still refused from acting, but their sheet
+        showing full HP. Dead must never be passively healed away by
+        resting/waking.
+        """
+        import datetime
+        from unittest.mock import patch
+        uid = 900487
+        make_basic_character(uid, "DeadAndInactive", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(
+            uid, -999, is_dead=1, hp_current=0, is_inactive=1,
+            rest_started_at=(datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=5)).isoformat(),
+        )
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "ok"}
+
+        sink = []
+        with patch("bot.narrate_action", return_value="ok"), patch("ai.dm_agent.requests.post", return_value=FakeResponse()):
+            await bot.adventure_master_handler(FakeUpdate(uid, "I'm back", sink), DummyContext())
+        after = db.get_character(uid, -999)
+        self.assertEqual(after["is_dead"], 1, "must still be dead -- only a real Revivify clears this")
+        self.assertEqual(after["hp_current"], 0, "must NOT be passively healed while dead")
 
     async def test_heal_spell_still_works_outside_combat_with_no_session(self):
         """The turn-advance fix ("fix them also", 2026-08-21) must never break healing outside combat -- a resting party member with no active session has nothing to advance, and casting must behave exactly as before."""

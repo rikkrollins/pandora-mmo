@@ -2024,6 +2024,26 @@ def _find_party_target_by_name(text: str, chat_id: int) -> dict | None:
     return _match_member_by_name_or_username(text, _get_party_members(chat_id))
 
 
+def _find_live_summon_by_name(text: str, session: sessions.Session, caster_side: str) -> dict | None:
+    """
+    A synthetic (no-DB) party-side summon in the CURRENT combat session,
+    matched by name -- real live gap (2026-08-21, per Coffee: "we can
+    heal them"). _find_party_target_by_name is a pure `characters` table
+    query, so a summon (negative telegram_user_id, never written to the
+    DB at all) can never be found by it. Only ever matches a LIVE
+    (hp_current > 0) summon on the caster's own side -- a defeated one
+    is already gone from session.participants entirely (sessions.
+    remove_defeated), so "can't revive them" holds structurally: there's
+    simply nothing left here to find.
+    """
+    candidates = [
+        p for p in session.participants
+        if session.sides.get(p["telegram_user_id"]) == caster_side
+        and p.get("is_ai") and p["telegram_user_id"] < 0 and p.get("hp_current", 0) > 0
+    ]
+    return _match_member_by_name_or_username(text, candidates)
+
+
 async def _send_welcome_narration(update: Update, character: dict) -> None:
     """
     Sends a one-time, auto-generated welcome narration right after
@@ -23200,6 +23220,45 @@ def _text_mentions_spell(spell_id: str, spell_name: str, lowered_text: str) -> b
     return difflib.SequenceMatcher(None, squashed_text, squashed_name).ratio() >= 0.82
 
 
+# Real spirit-summon abilities (2026-08-21, per Coffee: "2 for each
+# tier, a magic type, and a damage type") -- each tier's own known_
+# spells (spells.py), picked up automatically by the existing side-
+# agnostic monster-spellcasting mechanic (_decide_monster_spell/
+# _maybe_monster_cast_spell) the moment they're set on the summon dict.
+SPIRIT_TIER_KNOWN_SPELLS = {
+    "summon_lesser_spirit": ["spirit_lash", "spirit_bolt"],
+    "summon_spirit": ["spirit_flare", "spirit_ray"],
+    "summon_greater_spirit": ["spirit_rend", "spirit_wail"],
+    "summon_elder_spirit": ["spirit_dread", "spirit_collapse"],
+}
+
+# Real RNG variance on a summon's HP/damage (2026-08-21, per Coffee:
+# "use RNG so they dont always have the same stats... higher the
+# proficience the higher the odds of RNG"). Scoped to hp_max/damage_
+# bonus only -- armor_class/dexterity/strength stay each tier's fixed
+# authored baseline (spells.py's summon_stats), so this never also
+# swings to-hit odds (this session's separate natural-attack
+# proficiency fix) or lets a low tier's roll cross into a higher tier's
+# territory.
+SUMMON_RNG_MIN_VARIANCE = 0.85
+SUMMON_RNG_MAX_VARIANCE = 1.15
+
+
+def _summon_rng_variance(summoning_mastery_pct: float) -> float:
+    """
+    A real 0.85x-1.15x roll on a summon's HP/damage. Higher Summoning
+    proficiency biases the roll toward the high end (better ODDS, never
+    a guarantee -- still a real roll every time) rather than widening
+    the range: exponent < 1 as mastery climbs skews random()'s uniform
+    distribution toward 1.0 before it's mapped onto the real variance
+    band. At 0% mastery this is a plain uniform 0.85-1.15 roll.
+    """
+    roll = random.random()
+    exponent = 1.0 / (1.0 + max(summoning_mastery_pct, 0) / 100.0)
+    biased = roll ** exponent
+    return SUMMON_RNG_MIN_VARIANCE + biased * (SUMMON_RNG_MAX_VARIANCE - SUMMON_RNG_MIN_VARIANCE)
+
+
 async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | None = None) -> None:
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -23532,18 +23591,6 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
             await _advance_turn_and_resolve_ai_turns(update, session)
 
     elif spell["effect"] == "heal":
-        # Support spells (heal/cure) can target ANY party member by name,
-        # including one currently resting/inactive — per design, an
-        # inactive character can't act but can still be helped. Defaults
-        # to self if no other party member is named in the text.
-        target_character = _find_party_target_by_name(text, update.effective_chat.id) or character
-        if target_character.get("is_dead"):
-            await update.effective_chat.send_message(
-                f"**{target_character['name']}** is dead, not just hurt — {spell['name']} won't bring them back. "
-                f"Revivify (or a Scroll of Revivify) is what's needed.",
-                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-            )
-            return
         # Real live bug (2026-08-21, Coffee: same class as the spirit-
         # scroll turn-stuck fix, "fix them also") -- healing mid-combat
         # never advanced the turn, leaving the caster stuck until the
@@ -23560,11 +23607,39 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
                 message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
+        # Support spells (heal/cure) can target ANY party member by name,
+        # including one currently resting/inactive — per design, an
+        # inactive character can't act but can still be helped. Real
+        # live gap (2026-08-21, per Coffee: "we can heal them") -- a
+        # LIVE spirit summon (synthetic, no DB row at all) is checked
+        # FIRST while mid-combat, since _find_party_target_by_name is a
+        # pure DB query that can never see one. Defaults to self if no
+        # other party member/summon is named in the text.
+        is_summon_target = False
+        target_character = None
+        if mid_combat:
+            target_character = _find_live_summon_by_name(text, combat_session, combat_session.sides.get(update.effective_user.id))
+            is_summon_target = target_character is not None
+        if target_character is None:
+            target_character = _find_party_target_by_name(text, update.effective_chat.id) or character
+        if not is_summon_target and target_character.get("is_dead"):
+            await update.effective_chat.send_message(
+                f"**{target_character['name']}** is dead, not just hurt — {spell['name']} won't bring them back. "
+                f"Revivify (or a Scroll of Revivify) is what's needed.",
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+            )
+            return
         if not await _spend_cast_resource(update, character, spell, via_scroll, via_gear, gear_instance_id, gear_spell_uses):
             return
         _consume_scroll_if_any()
         result = spells_module.resolve_heal_spell(spell_id, character, target_character)
-        db.update_character(target_character["telegram_user_id"], update.effective_chat.id, hp_current=target_character["hp_current"])
+        # A summon has no DB row to write -- resolve_heal_spell already
+        # mutated the real session.participants dict in place (the same
+        # object reference _find_live_summon_by_name returned), so the
+        # live combat state is already correct; a real character still
+        # needs its own DB row updated the normal way.
+        if not is_summon_target:
+            db.update_character(target_character["telegram_user_id"], update.effective_chat.id, hp_current=target_character["hp_current"])
         is_self = target_character["telegram_user_id"] == character["telegram_user_id"]
         target_note = "" if is_self else f" on **{target_character['name']}**"
         inactive_note = " (resting)" if target_character.get("is_inactive") else ""
@@ -23685,6 +23760,14 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
             capped_ratio = power_scale_ratio(effective_level, rebirth_count)
             cap_factor = min(1.0, capped_ratio / real_ratio) if real_ratio else 1.0
             damage_bonus = int(caster_weapon.get("damage_bonus", 0) * cap_factor)
+            # RNG variance (2026-08-21, per Coffee) -- one real roll per
+            # summon, applied to both HP and damage together (one
+            # "how this particular summoning turned out" roll, not two
+            # independent ones), biased by the caster's own real
+            # Summoning proficiency.
+            variance = _summon_rng_variance(character.get("summoning_mastery_pct", PROFICIENCY_STARTING_PCT))
+            hp_max = round(hp_max * variance)
+            damage_bonus = round(damage_bonus * variance)
             summon = {
                 "telegram_user_id": synthetic_id, "name": stats["name"].title(),
                 "dexterity": stats["dexterity"], "strength": stats["strength"],
@@ -23693,6 +23776,7 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
                 "level": effective_level,
                 "damage_dice": caster_weapon["damage_dice"], "damage_bonus": damage_bonus,
                 "damage_type": caster_weapon.get("damage_type", "physical"),
+                "known_spells": SPIRIT_TIER_KNOWN_SPELLS.get(spell_id, []),
                 "is_ai": 1, "xp_reward": 0,
             }
             summon["initiative"] = roll_d20() + ability_modifier(stats["dexterity"])
@@ -25310,7 +25394,23 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
             )
             return
 
-    if character and character.get("is_inactive"):
+    # Real live bug (2026-08-21, Coffee: "it is saying im dead.." --
+    # confirmed via his own live character record: is_dead=1 but
+    # hp_current at a full 472/472). Root cause: this whole natural-
+    # healing/wake-up block never checked is_dead at all, only is_
+    # inactive -- a dead-AND-inactive character (this session's real
+    # natural-attack proficiency fix made monsters hit hard enough that
+    # dying became genuinely possible for the first time) who sends ANY
+    # message with explicit wake phrasing ("I'm back", etc.) -- which IS
+    # reachable even while dead, since "chat"/switch_character/etc. are
+    # allowlisted past the is_dead gate just above -- got silently
+    # healed to full HP by _apply_natural_healing while is_dead stayed
+    # 1 forever, since nothing here ever clears it (only a real
+    # Revivify does). Left them stuck exactly as reported: the game
+    # correctly still refuses to let them act ("is dead, can't act"),
+    # but their sheet shows full HP, totally confusing. Dead is dead
+    # until Revivify -- never passively healed away by resting/waking.
+    if character and character.get("is_inactive") and not character.get("is_dead"):
         is_status_check = action in (
             "check_sheet", "check_inventory", "check_party", "check_quests",
             "show_map", "ask_clue", "list_characters", "go_inactive", "rest", "chat",
