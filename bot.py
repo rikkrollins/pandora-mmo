@@ -23529,6 +23529,22 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
                 message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
+        # Real live bug (2026-08-21, Coffee: same class as the spirit-
+        # scroll turn-stuck fix, "fix them also") -- healing mid-combat
+        # never advanced the turn, leaving the caster stuck until the
+        # inactivity timeout eventually caught it. Heal is also legally
+        # castable OUTSIDE combat (a resting party member with no active
+        # session) -- same "outside combat = no turn to advance, inside
+        # combat = confirm it's genuinely your turn first" shape
+        # _do_cast_spell's other combat-capable branches already use.
+        combat_session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
+        mid_combat = combat_session is not None and update.effective_user.id in combat_session.turn_order
+        if mid_combat and combat_session.current_participant_id() != update.effective_user.id:
+            await update.effective_chat.send_message(
+                f"It's not your turn — it's **{combat_session.current_participant()['name']}**'s turn.",
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+            )
+            return
         if not await _spend_cast_resource(update, character, spell, via_scroll, via_gear, gear_instance_id, gear_spell_uses):
             return
         _consume_scroll_if_any()
@@ -23542,6 +23558,8 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
             f"✨ **{character['name']}** casts {spell['name']}{target_note}{inactive_note} and heals {result['healing_done']} HP "
             f"({result['hp_current']}/{result['hp_max']}).",
         )
+        if mid_combat:
+            await _advance_turn_and_resolve_ai_turns(update, combat_session)
 
     elif spell["effect"] == "resurrect":
         # Revivify (2026-07-14, per Coffee): the real way a dead
@@ -23569,6 +23587,19 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
                 message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
+        # Same real fix as heal just above ("fix them also", 2026-08-21)
+        # -- this is documented as an "after the fight, not mid-round"
+        # spell, but nothing actually stopped it from being cast mid-
+        # combat, so it needs the same turn-ownership guard/advance,
+        # not just an assumption it'll never happen mid-fight.
+        combat_session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
+        mid_combat = combat_session is not None and update.effective_user.id in combat_session.turn_order
+        if mid_combat and combat_session.current_participant_id() != update.effective_user.id:
+            await update.effective_chat.send_message(
+                f"It's not your turn — it's **{combat_session.current_participant()['name']}**'s turn.",
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+            )
+            return
         if not await _spend_cast_resource(update, character, spell, via_scroll, via_gear, gear_instance_id, gear_spell_uses):
             return
         _consume_scroll_if_any()
@@ -23582,6 +23613,8 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
             f"✨ **{character['name']}** casts {spell['name']} on **{target_character['name']}** — "
             f"breath returns, and they gasp back to life at {revive_hp}/{target_character['hp_max']} HP.",
         )
+        if mid_combat:
+            await _advance_turn_and_resolve_ai_turns(update, combat_session)
 
     elif spell["effect"] == "summon":
         async with _held_session(chat_id, update.effective_user.id) as session:
@@ -23821,6 +23854,24 @@ async def _cast_utility_spell(
             )
             return
 
+        # Real live bug (2026-08-21, Coffee, found while fixing the same
+        # gap for spirit-summon scrolls: "when players use the scrolls
+        # of spirits... it jus said my character is about to timeout but
+        # i alrady selected my ability"). Every branch below spends a
+        # real resource and takes a real combat action, but -- unlike
+        # the "damage" spell effect branch -- never actually advanced
+        # the turn, leaving the caster stuck until the unrelated
+        # inactivity timeout eventually caught it. misty_step/dimension_
+        # door/longstrider are unaffected (they redirect into
+        # _resolve_flee_attempt, which already advances the turn on
+        # every one of its own real exit paths); every other real,
+        # resource-spending branch below now routes its final message
+        # through this shared helper instead of a bare _safe_send so the
+        # fix lives in one place, not copy-pasted a dozen times.
+        async def _finish(msg: str) -> None:
+            await _safe_send(update, msg)
+            await _advance_turn_and_resolve_ai_turns(update, session)
+
         if spell_id == "spare_the_dying":
             target_character = _find_party_target_by_name(text, chat_id) or character
             target_p = next((p for p in session.participants if p["telegram_user_id"] == target_character["telegram_user_id"]), None)
@@ -23833,7 +23884,7 @@ async def _cast_utility_spell(
             if not await spend():
                 return
             session.stabilized_ids.add(target_p["telegram_user_id"])
-            await _safe_send(update, f"✨ **{character['name']}** casts {spell['name']} on **{target_p['name']}** — they're stable, no longer at risk of dying.")
+            await _finish(f"✨ **{character['name']}** casts {spell['name']} on **{target_p['name']}** — they're stable, no longer at risk of dying.")
             return
 
         # Self or named-ally targeted buffs
@@ -23848,7 +23899,7 @@ async def _cast_utility_spell(
                 for p in session.participants:
                     if session.sides.get(p["telegram_user_id"]) == session.sides.get(user_id) and p["hp_current"] > 0:
                         _apply_timed_condition(p, "blessed", duration, session)
-                await _safe_send(update, f"🌟 **{character['name']}** casts {spell['name']} — the whole party fights truer for {duration} rounds.")
+                await _finish(f"🌟 **{character['name']}** casts {spell['name']} — the whole party fights truer for {duration} rounds.")
                 return
 
             target_character = _find_party_target_by_name(text, chat_id) or character
@@ -23878,7 +23929,7 @@ async def _cast_utility_spell(
             actual_duration = 1 if spell_id == "shield" else duration
             _apply_timed_condition(target_p, condition_for_spell, actual_duration, session)
             note = f" on **{target_p['name']}**" if target_p["telegram_user_id"] != user_id else ""
-            await _safe_send(update, f"✨ **{character['name']}** casts {spell['name']}{note} — real effect for {actual_duration} round(s).")
+            await _finish(f"✨ **{character['name']}** casts {spell['name']}{note} — real effect for {actual_duration} round(s).")
             return
 
         if spell_id in ("misty_step", "dimension_door"):
@@ -23902,28 +23953,28 @@ async def _cast_utility_spell(
                 return
             caster["marked_target_id"] = target["telegram_user_id"]
             _apply_timed_condition(caster, "hex_mark" if spell_id == "hex" else "hunters_mark", duration, session)
-            await _safe_send(update, f"🎯 **{character['name']}** casts {spell['name']} on **{target['name']}** — every weapon hit against them now bites deeper.")
+            await _finish(f"🎯 **{character['name']}** casts {spell['name']} on **{target['name']}** — every weapon hit against them now bites deeper.")
             return
 
         if spell_id == "faerie_fire":
             if not await spend():
                 return
             _apply_timed_condition(target, "faerie_fire", duration, session)
-            await _safe_send(update, f"✨ **{character['name']}** casts {spell['name']} — **{target['name']}** is outlined in light, unable to hide from attacks.")
+            await _finish(f"✨ **{character['name']}** casts {spell['name']} — **{target['name']}** is outlined in light, unable to hide from attacks.")
             return
 
         if spell_id in ("hold_person", "hold_monster"):
             if not await spend():
                 return
             _apply_timed_condition(target, "paralyzed", duration, session)
-            await _safe_send(update, f"⛓️ **{character['name']}** casts {spell['name']} — **{target['name']}** locks up, paralyzed!")
+            await _finish(f"⛓️ **{character['name']}** casts {spell['name']} — **{target['name']}** locks up, paralyzed!")
             return
 
         if spell_id in ("charm_person", "animal_friendship"):
             if not await spend():
                 return
             _apply_timed_condition(target, "charmed", duration, session)
-            await _safe_send(update, f"💞 **{character['name']}** casts {spell['name']} — **{target['name']}** won't raise a hand against them for now.")
+            await _finish(f"💞 **{character['name']}** casts {spell['name']} — **{target['name']}** won't raise a hand against them for now.")
             return
 
         if spell_id == "command":
@@ -23932,13 +23983,13 @@ async def _cast_utility_spell(
                 if not await spend():
                     return
                 _apply_timed_condition(target, "frightened", 1, session)
-                await _safe_send(update, f"📢 **{character['name']}** commands **{target['name']}**: \"Flee!\" — real fear takes hold for a round.")
+                await _finish(f"📢 **{character['name']}** commands **{target['name']}**: \"Flee!\" — real fear takes hold for a round.")
                 return
             if "drop" in lowered:
                 if not await spend():
                     return
                 _apply_timed_condition(target, "disarmed", 1, session)
-                await _safe_send(update, f"📢 **{character['name']}** commands **{target['name']}**: \"Drop!\" — their weapon clatters away for a round.")
+                await _finish(f"📢 **{character['name']}** commands **{target['name']}**: \"Drop!\" — their weapon clatters away for a round.")
                 return
             await update.effective_chat.send_message(
                 f"Command needs a real command word to have an effect — try \"flee\" or \"drop\". Nothing was spent.",
@@ -23950,7 +24001,7 @@ async def _cast_utility_spell(
             if not await spend():
                 return
             _apply_timed_condition(target, "banished", duration, session)
-            await _safe_send(update, f"🌀 **{character['name']}** casts {spell['name']} — **{target['name']}** vanishes from the fight for {duration} rounds (no reward if the fight ends while they're away).")
+            await _finish(f"🌀 **{character['name']}** casts {spell['name']} — **{target['name']}** vanishes from the fight for {duration} rounds (no reward if the fight ends while they're away).")
             return
 
         if spell_id == "polymorph":
@@ -23969,7 +24020,7 @@ async def _cast_utility_spell(
             target["hp_max"] = new_hp_max
             target["hp_current"] = min(target["hp_current"], new_hp_max)
             _apply_timed_condition(target, "polymorphed", duration, session)
-            await _safe_send(update, f"🐺 **{character['name']}** casts {spell['name']} — **{target['name']}** is transformed into a {beast_template.get('name', beast_key)} for {duration} rounds, real stats and all.")
+            await _finish(f"🐺 **{character['name']}** casts {spell['name']} — **{target['name']}** is transformed into a {beast_template.get('name', beast_key)} for {duration} rounds, real stats and all.")
             return
 
         if spell_id == "dispel_magic":
@@ -23991,7 +24042,7 @@ async def _cast_utility_spell(
                 target.get("condition_expires_round", {}).pop(c, None)
             if "hex_mark" in removed or "hunters_mark" in removed:
                 target.pop("marked_target_id", None)
-            await _safe_send(update, f"🌀 **{character['name']}** casts {spell['name']} on **{target['name']}** — real magical effects ({', '.join(removed)}) unravel.")
+            await _finish(f"🌀 **{character['name']}** casts {spell['name']} on **{target['name']}** — real magical effects ({', '.join(removed)}) unravel.")
             return
 
         # Any spell_id not explicitly handled above -- should not

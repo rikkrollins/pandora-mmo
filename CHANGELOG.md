@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.302] — Fix: heal/resurrect/buff spells also never used up the turn
+
+**Follow-up to v1.27.301 (Coffee: "fix them also").** The same
+turn-stuck bug also affected the "heal", "resurrect", and every real
+buff/negate/ac_bonus spell (Shield, Bless, Hex, Faerie Fire, Hold
+Person, Charm Person, Command, Banishment, Polymorph, Dispel Magic,
+Spare the Dying) -- none of them called `_advance_turn_and_resolve_
+ai_turns` after a real cast, only "damage" (and now "summon") did.
+
+- **Heal/Resurrect**: both are legitimately castable OUTSIDE combat
+  too (healing a resting party member, reviving after a fight) -- now
+  correctly detect whether the caster is genuinely mid-combat first:
+  outside combat, behavior is unchanged (no turn to advance); mid-
+  combat, it now gains the same turn-ownership check every other
+  combat action already has ("it's not your turn") and properly
+  advances afterward.
+- **Buff/negate/ac_bonus** (`_cast_utility_spell`): its shared session
+  block already correctly checked turn ownership -- it just never
+  advanced the turn on a successful cast. All dozen real, resource-
+  spending branches now route their closing message through one new
+  shared `_finish` helper instead of a bare send, so the fix lives in
+  one place. `misty_step`/`dimension_door`/`longstrider` were already
+  correct (they resolve through `_resolve_flee_attempt`, which already
+  advances the turn on every real exit path) -- untouched.
+
+Five new regression tests confirm: healing still works with no active
+session (unchanged), healing/casting a utility spell mid-combat now
+advances the turn, and the existing turn-ownership/target-picker/
+reaction test suites still pass unchanged.
+
 ## [1.27.301] — Fix: casting a spirit-summon scroll never used up the turn
 
 **Real live bug (2026-08-21, Coffee: "when players use the scrolls of

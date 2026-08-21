@@ -3796,6 +3796,89 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(stuck_on_caster, "the caster's turn never advanced -- this is the exact reported stuck-timeout bug")
         sessions.end_session(-999)
 
+    async def test_heal_spell_still_works_outside_combat_with_no_session(self):
+        """The turn-advance fix ("fix them also", 2026-08-21) must never break healing outside combat -- a resting party member with no active session has nothing to advance, and casting must behave exactly as before."""
+        uid = 900484
+        make_basic_character(
+            uid, "OutsideHealer", char_class="Cleric", known_spells=["cure_wounds"], spell_slots_max=3,
+            current_location="crossroads_tavern",
+        )
+        db.update_character(uid, -999, spell_slots_current=3, hp_current=20, hp_max=50)
+        sink = []
+        await bot._do_cast_spell(FakeUpdate(uid, "cast cure wounds", sink), "cast cure wounds")
+        after = db.get_character(uid, -999)
+        self.assertGreater(after["hp_current"], 20)
+
+    async def test_heal_spell_advances_the_turn_when_cast_mid_combat(self):
+        """
+        Same real bug class as the spirit-scroll fix, applied to "heal"
+        (Coffee: "fix them also"): casting a heal spell mid-combat used
+        to leave the caster's own turn stuck in place, same as summon
+        did before its own fix.
+        """
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        uid = 900485
+        make_basic_character(
+            uid, "InCombatHealer", char_class="Cleric", known_spells=["cure_wounds"], spell_slots_max=3,
+            current_location="crossroads_tavern",
+        )
+        db.update_character(uid, -999, spell_slots_current=3, hp_current=20, hp_max=50)
+        enemy = {"telegram_user_id": -5200920, "name": "HealTurnDummy", "dexterity": 10, "strength": 10,
+                 "armor_class": 5, "hp_current": 100, "hp_max": 100, "conditions": [], "is_ai": 1, "monster_key": "goblin"}
+        character = db.get_character(uid, -999)
+        character["telegram_user_id"] = uid
+        session = sessions.start_session(-999, [character, enemy], {uid: "party", -5200920: "enemy"})
+        session.turn_order = [uid, -5200920]
+        session.current_turn_index = 0
+
+        sink = []
+        with patch("bot.narrate_action", return_value="The blow lands."), \
+                patch("bot._get_combat_throttle_seconds", return_value=0.0):
+            await bot._do_cast_spell(FakeUpdate(uid, "cast cure wounds", sink), "cast cure wounds")
+        live_session = sessions.get_session_by_id(session.session_id)
+        self.assertIsNotNone(live_session)
+        stuck_on_caster = live_session.round_number == 1 and live_session.current_participant_id() == uid
+        self.assertFalse(stuck_on_caster, "healing mid-combat must advance the turn, not leave the caster stuck")
+        sessions.end_session(-999)
+
+    async def test_utility_spell_advances_the_turn_when_cast_mid_combat(self):
+        """
+        Same real bug class, applied to buff/negate/ac_bonus spells
+        (Coffee: "fix them also") -- _cast_utility_spell's shared
+        session block already correctly gated turn OWNERSHIP but never
+        actually advanced the turn on a real cast. Bless is a
+        representative real example (party-wide buff, no target
+        needed).
+        """
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        uid = 900486
+        make_basic_character(
+            uid, "InCombatBuffer", char_class="Cleric", known_spells=["bless"], spell_slots_max=3,
+            current_location="crossroads_tavern",
+        )
+        db.update_character(uid, -999, spell_slots_current=3)
+        enemy = {"telegram_user_id": -5200921, "name": "BuffTurnDummy", "dexterity": 10, "strength": 10,
+                 "armor_class": 5, "hp_current": 100, "hp_max": 100, "conditions": [], "is_ai": 1, "monster_key": "goblin"}
+        character = db.get_character(uid, -999)
+        character["telegram_user_id"] = uid
+        session = sessions.start_session(-999, [character, enemy], {uid: "party", -5200921: "enemy"})
+        session.turn_order = [uid, -5200921]
+        session.current_turn_index = 0
+
+        sink = []
+        with patch("bot.narrate_action", return_value="The blow lands."), \
+                patch("bot._get_combat_throttle_seconds", return_value=0.0):
+            await bot._do_cast_spell(FakeUpdate(uid, "cast bless", sink), "cast bless")
+        live_session = sessions.get_session_by_id(session.session_id)
+        self.assertIsNotNone(live_session)
+        stuck_on_caster = live_session.round_number == 1 and live_session.current_participant_id() == uid
+        self.assertFalse(stuck_on_caster, "casting a utility spell mid-combat must advance the turn, not leave the caster stuck")
+        sessions.end_session(-999)
+
     async def test_eldritch_smite_never_spends_the_warlocks_last_slot(self):
         """Regression guard: the bonus must never fire when it would leave the Warlock with zero slots."""
         from unittest.mock import patch
