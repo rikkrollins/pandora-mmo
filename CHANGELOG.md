@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.300] — Fix: bare quest-riddle answers ("A Map") never resolved
+
+**Real live bug (2026-08-21, dev-bridge, Coffee: "I don't know how to
+complete this quest... we have been trying").** Traced to Maren's
+Locked Ledger: a campaign-quest riddle's own accepted-answer check
+(`_do_answer_puzzle`) only ever ran once the AI/keyword classification
+layer had already decided a message meant "answer_puzzle" — but a
+bare, unadorned guess like "A Map" (no "the answer is"/"I think it's"
+wrapper) had no deterministic trigger in `ai/intent_parser.py`'s
+keyword fallback, and the AI classifier's own prompt has no idea a
+`solve_puzzle` quest is even active, so it was left guessing blind.
+
+`adventure_master_handler` now checks directly, before classification,
+whether the player has an active `solve_puzzle` quest and whether
+their raw message exactly matches one of its accepted answers — same
+real bug class already found and fixed for GUILD curriculum riddles on
+2026-08-12 (`_guild_curriculum_riddle_answer_matches`, reused here
+verbatim, already hardened against real false positives like "Does
+anyone have a map of the outer ward?"). A correct guess now resolves
+instantly and deterministically, never dependent on an AI model's
+guess or a 30-160s wait for something this simple. Also tightened
+`_do_answer_puzzle`'s own matching from a plain substring check to the
+same exact-match rule, closing the identical false-positive risk the
+guild fix already closed but was never backported here.
+
+(Separately found while regression-sweeping this: two existing GUILD
+curriculum riddle tests are currently failing on a clean checkout,
+unrelated to this fix — a real, pre-existing regression worth a
+follow-up look.)
+
 ## [1.27.299] — Draconic Resilience rework: now adds onto armor, not just unarmored (cost 2->3)
 
 **Real live finding (2026-08-21):** refunding Pan's `draconic_hide`

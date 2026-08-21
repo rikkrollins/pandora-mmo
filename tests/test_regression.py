@@ -366,6 +366,54 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id, -999)
         self.assertNotEqual(character["current_location"], "tavern_upstairs")
 
+    async def test_bare_riddle_answer_completes_the_quest_via_adventure_handler(self):
+        """
+        Real live bug (2026-08-21, dev-bridge, Coffee: "I don't know how
+        to complete this quest... we have been trying"). A bare, unadorned
+        guess ("A Map", no "the answer is"/"I think it's" wrapper) has no
+        deterministic keyword trigger and no active-puzzle context fed to
+        the AI classifier, so it was never reaching _do_answer_puzzle at
+        all. adventure_master_handler now checks this directly, before
+        classification, so it resolves instantly and deterministically.
+        """
+        uid = 800300
+        make_basic_character(uid, "RiddleSolver", current_location="market_row")
+        db.accept_quest(uid, -999, "marens_locked_ledger")
+        sink = []
+        await bot.adventure_master_handler(FakeUpdate(uid, "A Map", sink), DummyContext())
+        character = db.get_character(uid, -999)
+        self.assertNotIn("marens_locked_ledger", character["active_quests"])
+        self.assertIn("marens_locked_ledger", character.get("completed_quests") or [])
+
+    async def test_unrelated_message_mentioning_the_answer_word_does_not_falsely_complete_the_puzzle(self):
+        """
+        Regression guard, same real bug class as the 2026-08-12 guild
+        curriculum riddle fix: an ordinary sentence that happens to
+        CONTAIN a short, common answer word ("map") must never falsely
+        complete the puzzle just because a plain substring check would
+        match -- only an exact answer (optionally behind a short natural
+        lead-in) does.
+        """
+        uid = 800301
+        make_basic_character(uid, "NotAnAnswer", current_location="market_row")
+        db.accept_quest(uid, -999, "marens_locked_ledger")
+        sink = []
+        await bot.adventure_master_handler(
+            FakeUpdate(uid, "Does anyone have a map of the outer ward we could look at later?", sink), DummyContext(),
+        )
+        character = db.get_character(uid, -999)
+        self.assertIn("marens_locked_ledger", character["active_quests"], "an unrelated sentence must not falsely complete the riddle")
+
+    async def test_do_answer_puzzle_still_completes_on_a_wrapped_answer_phrasing(self):
+        """The tightened exact-match check (2026-08-21) must still accept the real, already-working phrasings ("the answer is X")."""
+        uid = 800302
+        make_basic_character(uid, "WrappedAnswer", current_location="market_row")
+        db.accept_quest(uid, -999, "marens_locked_ledger")
+        sink = []
+        await bot._do_answer_puzzle(FakeUpdate(uid, "", sink), "the answer is a map")
+        character = db.get_character(uid, -999)
+        self.assertIn("marens_locked_ledger", character.get("completed_quests") or [])
+
     async def test_stray_space_slash_menu_still_opens_the_menu(self):
         """
         Real live bug (2026-08-11, topic-monitor report): a player typed

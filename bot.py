@@ -12451,7 +12451,15 @@ async def _do_answer_puzzle(update: Update, text: str) -> None:
         )
         return
 
-    lowered = text.lower()
+    # Real hardening (2026-08-21) -- same real bug class already found
+    # and fixed for GUILD curriculum riddles on 2026-08-12: a plain
+    # substring check ("does the answer appear anywhere in the message")
+    # let an unrelated sentence that happens to CONTAIN a short, common
+    # answer word (e.g. "map", "steps") falsely complete a riddle. Reuses
+    # _guild_curriculum_riddle_answer_matches's already-hardened exact-
+    # match check (strip a natural lead-in like "I think it's ", then
+    # require an EXACT match against an accepted answer) instead of
+    # duplicating that same fix a second time here.
     for quest_id in list(character["active_quests"].keys()):
         quest = CAMPAIGN["quests"].get(quest_id)
         if not quest or quest.get("trigger", {}).get("type") != "solve_puzzle":
@@ -12460,7 +12468,7 @@ async def _do_answer_puzzle(update: Update, text: str) -> None:
         puzzle = CAMPAIGN.get("puzzles", {}).get(puzzle_id)
         if not puzzle:
             continue
-        if any(answer in lowered for answer in puzzle["accepted_answers"]):
+        if _guild_curriculum_riddle_answer_matches(text, puzzle["accepted_answers"]):
             await _complete_quest_and_announce(update, telegram_user_id, quest_id)
             return
 
@@ -25109,6 +25117,38 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
         "user_id": update.effective_user.id,
         "timestamp": datetime.now(timezone.utc),
     }
+    # Real live bug (2026-08-21, dev-bridge, Coffee: "I don't know how to
+    # complete this quest... we have been trying"): a campaign quest
+    # puzzle's own accepted-answer check (_do_answer_puzzle) only ever
+    # runs once the AI/keyword classification layer has already decided
+    # this message means "answer_puzzle" -- but a bare, unadorned guess
+    # like "A Map" (no "the answer is"/"I think it's" wrapper) has no
+    # deterministic trigger in ai/intent_parser.py's own keyword
+    # fallback, and nothing in that model's prompt tells it a solve_
+    # puzzle quest is even active, so it was left guessing blind (and,
+    # confirmed live, the resulting classification call queued behind a
+    # real 30-160s Ollama wait with nothing to show for it). Same real
+    # bug class already found and fixed for GUILD curriculum riddles on
+    # 2026-08-12 (_guild_curriculum_riddle_answer_matches, reused here
+    # verbatim -- it's already hardened against two real false-positive
+    # incidents, e.g. "Does anyone have a map" must NOT complete a map
+    # riddle). Checked here, directly against the raw text, BEFORE
+    # classification -- the same "checked before ordinary intent
+    # classification" pattern this handler already uses above for a
+    # pending reaction/dice roll -- so a correct guess resolves
+    # instantly and reliably, never dependent on an AI model's guess for
+    # something this deterministic.
+    puzzle_character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if puzzle_character is not None:
+        for quest_id in list(puzzle_character.get("active_quests", {}).keys()):
+            quest = CAMPAIGN["quests"].get(quest_id)
+            if not quest or quest.get("trigger", {}).get("type") != "solve_puzzle":
+                continue
+            puzzle = CAMPAIGN.get("puzzles", {}).get(quest["trigger"]["puzzle_id"])
+            if puzzle and _guild_curriculum_riddle_answer_matches(text, puzzle["accepted_answers"]):
+                await _do_answer_puzzle(update, text)
+                return
+
     known_npcs = [data["name"] for data in CAMPAIGN["npcs"].values()]
     # Real design fix (2026-07-27, per Coffee: "use the environment"
     # sounds too vague -- players should attack/target the actual named
