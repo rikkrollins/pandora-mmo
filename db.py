@@ -1365,6 +1365,28 @@ def enchant_item_instance(item_id: str, affix: dict) -> tuple[bool, str, dict | 
     return True, f"The {enchanted_item['name']} hums with newly-worked power.", enchanted_item
 
 
+def non_class_armor_bonus(character: dict) -> int:
+    """
+    Combined AC bonus from shield + rings + any active set bonus --
+    everything EXCEPT the class/armor foundation itself (BASE_ARMOR_
+    CLASS, an Unarmored Defense formula, or an equipped armor item's
+    own ac_base). Public (2026-08-21, Draconic Resilience rework) so a
+    caller that already knows the real foundation value for some OTHER
+    reason (e.g. bot.py's own draconic_hide investment handler, which
+    needs BASE_ARMOR_CLASS -- something db.py deliberately never
+    duplicates, see unequip_accessory's own docstring) can combine it
+    with this module's shield/ring/set lookups without re-deriving
+    them.
+    """
+    shield_bonus = 0
+    shield_id = character.get("equipped_shield")
+    if shield_id:
+        shield_item = items_module.get_item(shield_id)
+        if shield_item:
+            shield_bonus = shield_item.get("ac_bonus", 0)
+    return shield_bonus + _equipped_ring_ac_bonus(character) + _equipped_set_ac_bonus(character)
+
+
 def _equipped_ring_ac_bonus(character: dict) -> int:
     """Sum of ac_bonus from every currently-equipped ring (e.g. Ring of Protection)."""
     total = 0
@@ -1598,7 +1620,33 @@ def equip_item(telegram_user_id: int, chat_id: int, item_id: str) -> tuple[bool,
         character["equipped_armor"] = item_id
         set_delta = _equipped_set_ac_bonus(character) - old_set_bonus
         dex_mod = ability_modifier(character["dexterity"])
-        new_ac = item["ac_base"] + dex_mod + current_shield_bonus + ring_bonus + set_delta
+        foundation = item["ac_base"] + dex_mod
+        # Draconic Resilience rework (2026-08-21, per Coffee: "have it
+        # add onto their armor" instead of only working unarmored) --
+        # equipping armor used to silently discard 100% of whatever
+        # draconic_hide compounding had accumulated (confirmed live:
+        # Pan's 2 invested points were producing zero real AC once he
+        # equipped real armor). This applies the same +10%-per-point
+        # compounding to the NEW armor's own foundation instead, so the
+        # bonus survives an armor equip/swap rather than vanishing. Safe
+        # to compute entirely here (no BASE_ARMOR_CLASS needed) since
+        # `item["ac_base"]` is the new item's own real, known field, not
+        # a reconstruction of anything.
+        draconic_points = (
+            (character.get("skill_tree_upgrades") or []).count("draconic_hide")
+            if character.get("char_class") == "Sorcerer" else 0
+        )
+        # Same iterative "+10%, floored at +1" step bot.py's _um_pool_step
+        # already uses for every Universal Manipulation pool (Vitality,
+        # Arcane Reserve, and this one) -- matched exactly (not a clean
+        # x * 1.1**n closed form) so a Sorcerer's real AC here is
+        # identical to what it always would have been, not a stealth
+        # rebalance from switching formulas. A generic compounding-math
+        # step, not class-specific knowledge, so it's safe to mirror
+        # here without duplicating BASE_ARMOR_CLASS.
+        for _ in range(draconic_points):
+            foundation += max(1, round(foundation * 0.10))
+        new_ac = foundation + current_shield_bonus + ring_bonus + set_delta
         updated = update_character(telegram_user_id, chat_id, equipped_armor=item_id, armor_class=new_ac)
         return True, f"You put on the {item['name']} (AC {new_ac}).", updated
 

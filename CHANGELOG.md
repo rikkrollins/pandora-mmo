@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.299] — Draconic Resilience rework: now adds onto armor, not just unarmored (cost 2->3)
+
+**Real live finding (2026-08-21):** refunding Pan's `draconic_hide`
+points revealed the mechanic was producing ZERO real AC once he had
+armor equipped -- `db.equip_item`'s armor branch was completely
+overwriting `armor_class`, discarding any Draconic Resilience/
+`draconic_hide` bonus the instant any armor was worn. Per Coffee:
+"rework Draconic Resilience so it has value... instead of it working
+on unarmored, let's have it add onto their armor" + "make it take 3
+points to Lv up."
+
+Draconic Hide's real +10%-compounding-per-point bonus now applies to
+whichever AC foundation is actually live -- the currently equipped
+armor's own `ac_base`, or (nothing worn) the real unarmored Draconic
+Resilience baseline (13 + DEX mod) exactly as before. Equipping or
+swapping armor after investing points now **preserves** the bonus on
+the new armor's own base instead of silently discarding it. Shield/
+ring/set bonuses still stack flat on top, unaffected by the
+compounding. Cost raised from 2 to 3 skill points per point invested.
+
+Respects a real constraint already learned the hard way in this
+codebase (`db.py`'s own `unequip_accessory` docstring, 2026-08-02): a
+from-scratch AC reconstruction inside `db.py` was already tried once
+and reverted as buggy, since `db.py` has no access to `BASE_ARMOR_
+CLASS`/the Unarmored Defense formulas. This rework never repeats that
+mistake -- the unarmored-baseline case is only ever computed in
+`bot.py` (which already owns those formulas); `db.py`'s own armor-equip
+branch only ever multiplies the NEW armor item's own known `ac_base`,
+never reconstructs anything.
+
 ## [1.27.298] — Fix: bare "switch my player" silently ignored
 
 Caught by the autonomous monitoring pass's topic_activity scan

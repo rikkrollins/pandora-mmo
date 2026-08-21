@@ -13256,8 +13256,18 @@ UNIVERSAL_MANIPULATION_CLASS_SKILLS = {
               "description": "Sneak Attack deals one extra d6 per point invested."},
     "Warlock": {"id": "darker_bargain", "name": "Darker Bargain", "cost": 2,
                 "description": "Dark One's Blessing grants +2 temporary HP per point invested."},
-    "Sorcerer": {"id": "draconic_hide", "name": "Draconic Hide", "cost": 2,
-                 "description": "Draconic Resilience's unarmored AC grows +10% (compounding) per point invested."},
+    # Real rework (2026-08-21, per Coffee: refunding Pan's points
+    # revealed the mechanic was worthless the moment real armor was
+    # equipped -- "have it add onto their armor" instead of only
+    # unarmored; cost raised 2->3 per point, "make it take 3 points to
+    # Lv up Draconic Resiliance"). Now compounds whatever AC foundation
+    # is actually live -- an equipped armor's own ac_base, or the real
+    # unarmored Draconic Resilience baseline if none is worn -- see
+    # _sorcerer_armor_class_with_draconic_hide and db.equip_item's
+    # armor branch, both updated together so the bonus survives an
+    # armor equip/swap instead of vanishing.
+    "Sorcerer": {"id": "draconic_hide", "name": "Draconic Hide", "cost": 3,
+                 "description": "Draconic Resilience's AC (armored or not) grows +10% (compounding) per point invested."},
     "Cleric": {"id": "disciples_grace", "name": "Disciple's Grace", "cost": 2,
                "description": "Disciple of Life's healing bonus is multiplied by (1 + points invested)."},
     "Bard": {"id": "greater_inspiration", "name": "Greater Inspiration", "cost": 2,
@@ -13377,7 +13387,8 @@ def _apply_class_skill_investment(member: dict) -> str | None:
         "skill_tree_upgrades": member["skill_tree_upgrades"] + [upgrade["id"]],
     }
     if upgrade["id"] == "draconic_hide":
-        updates["armor_class"] = _um_pool_step(member["armor_class"])
+        new_points = _skill_points(member, "draconic_hide") + 1
+        updates["armor_class"] = _sorcerer_armor_class_with_draconic_hide(member, new_points)
     db.update_character_by_id(member["character_id"], **updates)
     points_after = _skill_points({**member, "skill_tree_upgrades": updates["skill_tree_upgrades"]}, upgrade["id"])
     return f"🌳 **{member['name']}** invests in **{upgrade['name']}** ({points_after} point(s) invested)"
@@ -13392,6 +13403,42 @@ def _um_pool_step(current_value: int) -> int:
     slots), never a silent no-op purchase.
     """
     return current_value + max(1, round(current_value * 0.10))
+
+
+def _sorcerer_armor_class_with_draconic_hide(character: dict, points: int) -> int:
+    """
+    A Sorcerer's real armor_class for a GIVEN draconic_hide point count
+    (2026-08-21 rework, per Coffee: "have it add onto their armor"
+    instead of only working unarmored -- refunding Pan's points
+    revealed the mechanic was worthless the instant he equipped real
+    armor, since armor_class used to just be overwritten by db.equip_
+    item's armor branch, discarding it). Foundation is whichever is
+    actually live right now -- the currently equipped armor's own
+    ac_base, or (nothing equipped) the real unarmored Draconic
+    Resilience baseline (13 + DEX mod), mirroring the exact formula
+    character creation already uses for a fresh Sorcerer -- then
+    _um_pool_step is applied `points` times (same shape db.equip_item's
+    own armor branch now mirrors, so a Sorcerer's AC is identical
+    whether the bonus was invested before or after equipping gear), and
+    db.non_class_armor_bonus adds back shield/ring/set bonuses.
+
+    Lives in bot.py, not db.py, because only bot.py owns BASE_ARMOR_
+    CLASS/the Unarmored Defense formulas -- db.py's own unequip_
+    accessory docstring (2026-08-02) documents a real bug from an
+    earlier attempt to reconstruct armor_class from scratch inside
+    db.py without that knowledge; this never repeats that mistake since
+    the unarmored-baseline branch below only ever runs here.
+    """
+    dex_mod = ability_modifier(character["dexterity"])
+    equipped_armor_id = character.get("equipped_armor")
+    if equipped_armor_id:
+        armor_item = items_module.get_item(equipped_armor_id)
+        foundation = (armor_item.get("ac_base", 10) if armor_item else 10) + dex_mod
+    else:
+        foundation = 13 + dex_mod  # Draconic Resilience, unarmored
+    for _ in range(max(points, 0)):
+        foundation = _um_pool_step(foundation)
+    return foundation + db.non_class_armor_bonus(character)
 
 
 def _skill_tree_keyboard(character: dict) -> InlineKeyboardMarkup:
@@ -13511,7 +13558,8 @@ async def skilltree_menu_callback(update: Update, context: ContextTypes.DEFAULT_
             "skill_tree_upgrades": character["skill_tree_upgrades"] + [mechanic_id],
         }
         if mechanic_id == "draconic_hide":
-            updates["armor_class"] = _um_pool_step(character["armor_class"])
+            new_points = _skill_points(character, "draconic_hide") + 1
+            updates["armor_class"] = _sorcerer_armor_class_with_draconic_hide(character, new_points)
         db.update_character(update.effective_user.id, update.effective_chat.id, **updates)
         invested = _skill_points({**character, "skill_tree_upgrades": updates["skill_tree_upgrades"]}, mechanic_id)
         await _safe_send(update, f"🌌 **{character['name']}** invests in **{class_upgrade['name']}** ({invested} point(s) invested)!")

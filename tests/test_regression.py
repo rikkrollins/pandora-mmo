@@ -15784,6 +15784,116 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(after["spell_slots_max"], 3)  # min +1 floor
         self.assertEqual(after["spell_slots_current"], 2)
 
+    async def test_draconic_hide_now_costs_3_skill_points(self):
+        """
+        Real live change (2026-08-21, per Coffee: "make it take 3
+        points to Lv up Draconic Resiliance"). A character with only 2
+        skill_points (the OLD cost) can no longer afford it at all.
+        """
+        uid = 800210
+        make_basic_character(uid, "PoorSorc", char_class="Sorcerer")
+        db.update_character(uid, -999, skill_points=2)
+        await bot.skilltree_menu_callback(
+            FakeCallbackUpdate(uid, "skilltree|buy|draconic_hide", []), DummyContext(),
+        )
+        after = db.get_character(uid, -999)
+        self.assertEqual(after["skill_points"], 2, "must not have been able to afford it at only 2 points")
+        self.assertEqual(after["skill_tree_upgrades"].count("draconic_hide"), 0)
+
+    async def test_draconic_hide_unarmored_still_compounds_the_same_way_as_before(self):
+        """
+        Regression guard for the 2026-08-21 rework (Coffee: "have it add
+        onto their armor" instead of only working unarmored) -- the
+        UNARMORED case (a Sorcerer who never equips real armor) must
+        still grow exactly the same way it always did: 13 + DEX mod
+        (dex_mod=2 for make_basic_character's default dexterity 14) =
+        15, then _um_pool_step's own +10%-floored-at-+1 compounding per
+        point invested, same as Vitality/Arcane Reserve already use.
+        """
+        uid = 800211
+        make_basic_character(uid, "UnarmoredSorc", char_class="Sorcerer")
+        db.update_character(uid, -999, skill_points=10)
+        character = db.get_character(uid, -999)
+        self.assertEqual(character["armor_class"], 15)
+        await bot.skilltree_menu_callback(
+            FakeCallbackUpdate(uid, "skilltree|buy|draconic_hide", []), DummyContext(),
+        )
+        after1 = db.get_character(uid, -999)
+        self.assertEqual(after1["armor_class"], bot._um_pool_step(15))
+        await bot.skilltree_menu_callback(
+            FakeCallbackUpdate(uid, "skilltree|buy|draconic_hide", []), DummyContext(),
+        )
+        after2 = db.get_character(uid, -999)
+        self.assertEqual(after2["armor_class"], bot._um_pool_step(bot._um_pool_step(15)))
+
+    async def test_draconic_hide_now_adds_real_value_while_wearing_armor(self):
+        """
+        Real live bug this closes (2026-08-21) -- refunding Pan's
+        draconic_hide points revealed the mechanic was producing ZERO
+        actual AC while he had real armor equipped, because db.equip_
+        item's armor branch used to completely overwrite armor_class,
+        discarding any Draconic Resilience/draconic_hide contribution.
+        Confirmed via real Chain Mail (ac_base 16): equipped AC is
+        16 + 2 (DEX) = 18 with no points invested; investing 1 point
+        must now measurably raise it, matching _um_pool_step(18) exactly.
+        """
+        uid = 800212
+        make_basic_character(uid, "ArmoredSorc", char_class="Sorcerer", inventory={"chain_mail": 1})
+        db.update_character(uid, -999, skill_tree_upgrades=["prof_heavy_armor"], skill_points=10)
+        ok, msg, equipped = db.equip_item(uid, -999, "chain_mail")
+        self.assertTrue(ok, msg)
+        self.assertEqual(equipped["armor_class"], 18)
+        await bot.skilltree_menu_callback(
+            FakeCallbackUpdate(uid, "skilltree|buy|draconic_hide", []), DummyContext(),
+        )
+        after = db.get_character(uid, -999)
+        self.assertEqual(after["armor_class"], bot._um_pool_step(18))
+        self.assertGreater(after["armor_class"], 18, "draconic_hide must add real value while armored, not zero")
+
+    async def test_draconic_hide_bonus_survives_an_armor_swap(self):
+        """
+        The actual real-world scenario (Pan) this rework targets: a
+        Sorcerer with draconic_hide points ALREADY invested equips a
+        DIFFERENT armor piece afterward. The compounding bonus must
+        apply to the NEW armor's own foundation (ac_base + DEX), not be
+        silently discarded the way it always used to be.
+        """
+        uid = 800213
+        make_basic_character(uid, "SwapSorc", char_class="Sorcerer", inventory={"chain_mail": 1, "chain_shirt": 1})
+        db.update_character(
+            uid, -999, skill_tree_upgrades=["prof_heavy_armor", "prof_medium_armor"], skill_points=10,
+        )
+        db.equip_item(uid, -999, "chain_mail")
+        await bot.skilltree_menu_callback(
+            FakeCallbackUpdate(uid, "skilltree|buy|draconic_hide", []), DummyContext(),
+        )
+        with_chain_mail = db.get_character(uid, -999)
+        self.assertEqual(with_chain_mail["armor_class"], bot._um_pool_step(18))
+
+        ok, msg, swapped = db.equip_item(uid, -999, "chain_shirt")
+        self.assertTrue(ok, msg)
+        # chain_shirt's own foundation (13 ac_base + 2 DEX = 15), still
+        # compounded by the 1 already-invested point -- never reset to
+        # the plain, un-bonused 15.
+        self.assertEqual(swapped["armor_class"], bot._um_pool_step(15))
+        self.assertGreater(swapped["armor_class"], 15, "the draconic_hide bonus must not vanish on an armor swap")
+
+    async def test_shield_bonus_stacks_flat_on_top_of_draconic_hide_unmultiplied(self):
+        """A shield's own flat ac_bonus must add on top of an already-compounded draconic_hide AC exactly, never itself get multiplied by the compounding."""
+        uid = 800214
+        make_basic_character(uid, "ShieldSorc", char_class="Sorcerer", inventory={"chain_mail": 1, "wooden_shield": 1})
+        db.update_character(
+            uid, -999, skill_tree_upgrades=["prof_heavy_armor", "prof_shield_armor"], skill_points=10,
+        )
+        db.equip_item(uid, -999, "chain_mail")
+        await bot.skilltree_menu_callback(
+            FakeCallbackUpdate(uid, "skilltree|buy|draconic_hide", []), DummyContext(),
+        )
+        before_shield = db.get_character(uid, -999)["armor_class"]
+        ok, msg, updated = db.equip_item(uid, -999, "wooden_shield")
+        self.assertTrue(ok, msg)
+        self.assertEqual(updated["armor_class"], before_shield + 2)  # wooden_shield's real, flat ac_bonus
+
     async def test_summoning_purchase_raises_summoning_mastery_pct(self):
         """
         Real live report (2026-08-20, Coffee, dev-bridge): "shudnt
