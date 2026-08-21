@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.294] — Hotfix: victory-XP crash when a summon fought alongside the party
+
+**Real live production crash (2026-08-21).** Coffee: "What happened to
+the battle?" and, from Charvenna's account: "Battle ended but there
+was no xo given and no loot for the party." Traced through
+`bot_live_tmp.log`'s real traceback to `_award_victory_xp` crashing
+with `TypeError: 'NoneType' object is not subscriptable` right after
+Ravenloft's `eldritch_blast` defeated Shadow Wisp 2. Root cause: the
+`summon` spell effect (e.g. casting for "a lesser spirit") adds a
+party-side combat participant with a synthetic negative
+`telegram_user_id` and no real row in the `characters` table.
+`_award_victory_xp`'s XP-awarding loop included that synthetic id in
+`real_party_ids`, called `db.add_xp` on it (which correctly returns
+`None` for a nonexistent character), then crashed subscripting that
+`None` — silently aborting the entire victory-resolution path,
+including the real party's own XP, loot, and quest/board-quest
+progress. Fixed at the source: `real_party_ids_all` now filters to
+`pid > 0` (every synthetic combat-only id in this codebase — monsters,
+hostile NPCs, spell summons — is negative by convention; every real
+Telegram user id is positive), matching a filter already used
+elsewhere in this same function. New regression test
+(`test_victory_xp_survives_a_synthetic_party_side_summon`) reproduces
+the exact live crash shape and confirms the real party still gets its
+XP.
+
 ## [1.27.293] — Symmetric exponential rebirth scaling (Noita NG+ style)
 
 **Real live request (2026-08-20, Coffee, Noita wiki NG+ reference):**

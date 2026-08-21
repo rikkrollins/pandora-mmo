@@ -4641,9 +4641,24 @@ async def _award_victory_xp(update: Update, session: sessions.Session) -> tuple[
     # (test_ai_companions_never_get_the_absent_party_bonus) -- that
     # rule is untouched; this only fixes AI companions who were
     # actually IN this fight.
+    # Real live crash (2026-08-21, Coffee: "What happened to the
+    # battle?"; Charvenna: "Battle ended but there was no xo given and
+    # no loot for the party") -- a temporary combat-only summon (e.g.
+    # the "summon" spell effect's synthetic party-side participant,
+    # bot.py's synthetic_id in the -4_000_000 range) has no real
+    # characters-table row, so db.get_character/add_xp legitimately
+    # return None for it further down; subscripting that None
+    # (`after["level"]`) crashed the whole victory-resolution path,
+    # silently eating the real party's XP/loot too. Every synthetic
+    # combat-only id in this codebase is a negative number by
+    # convention (see the -2_000_000/-3_000_000/-4_000_000 ranges
+    # documented at each one's own assignment site) while every real
+    # Telegram user id is always positive, so filtering to `pid > 0`
+    # here is the real, permanent fix, not a symptom patch on one
+    # downstream loop.
     real_party_ids_all = [
         pid for pid in session.turn_order
-        if session.sides.get(pid) == "party"
+        if session.sides.get(pid) == "party" and pid > 0
     ]
 
     # Task #170, per Coffee: guild membership now requires proving

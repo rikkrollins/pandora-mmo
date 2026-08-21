@@ -4504,6 +4504,50 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(companion_xp_after, companion_xp_before)
         sessions.end_session(-999)
 
+    async def test_victory_xp_survives_a_synthetic_party_side_summon(self):
+        """
+        Real live crash (2026-08-21, Coffee: "What happened to the
+        battle?"; Charvenna: "Battle ended but there was no xo given and
+        no loot for the party"). Root cause: the "summon" spell effect
+        (e.g. "a lesser spirit") adds a party-side participant with a
+        synthetic negative telegram_user_id and no real characters-table
+        row. _award_victory_xp's XP loop used to include that synthetic
+        id in real_party_ids, then crashed on `after["level"]` once
+        db.add_xp legitimately returned None for it -- silently eating
+        the whole victory-resolution path, including the real party's
+        own XP and loot. Fixed by filtering real_party_ids_all to
+        pid > 0 (every synthetic combat-only id in this codebase is
+        negative by convention; every real Telegram user id is
+        positive).
+        """
+        import sessions
+        sessions.end_session(-999)
+
+        fighter_id = 900486
+        make_basic_character(fighter_id, "Fighter", current_location="crossroads_tavern")
+
+        enemy_id = -2_500_056
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "dexterity": 10, "xp_reward": 60, "hp_current": 0}
+        fighter = db.get_character(fighter_id, -999)
+        fighter["telegram_user_id"] = fighter_id
+        summon_id = -4_012_345
+        summon = {
+            "telegram_user_id": summon_id, "name": "A Lesser Spirit", "dexterity": 10,
+            "hp_current": 9, "hp_max": 9, "is_ai": 1, "xp_reward": 0,
+        }
+        session = sessions.start_session(
+            -999, [fighter, enemy, summon],
+            {enemy_id: "enemy", fighter_id: "party", summon_id: "party"},
+        )
+        session.turn_order = [fighter_id, summon_id, enemy_id]
+
+        before_fighter_xp = db.get_character(fighter_id, -999)["xp"]
+        # Must not raise -- this reproduces the exact live crash.
+        summary, _level_up_notes = await bot._award_victory_xp(FakeUpdate(fighter_id, "", []), session)
+        after_fighter_xp = db.get_character(fighter_id, -999)["xp"]
+        self.assertEqual(after_fighter_xp - before_fighter_xp, 60)
+        sessions.end_session(-999)
+
     def test_generated_item_can_be_kept_equipped_and_affects_combat(self):
         """
         Real Phase 1 deliverable of the magic item system (2026-08-02,
