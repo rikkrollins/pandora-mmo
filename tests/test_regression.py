@@ -14441,6 +14441,53 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     #    class's does -- reachable right now by a real level 2 Rogue
     #    already playing, unlike most of this game's remaining level
     #    5+ class-feature gaps. -------------------------------------------
+    async def test_can_flee_a_remnant_source_boss_but_not_a_hard_story_boss(self):
+        """
+        Real live request (2026-08-21, Coffee: "I thought it is a
+        Remnant?... they are considered side content... if players cant
+        beat them they shud be able to run so they can try again when
+        stronger"). A Remnant-source Unbound (any boss whose monster_key
+        unlocks a real Remnant, remnants.remnant_for_monster_key) is
+        genuinely optional side content and can now be fled from, same
+        real DEX-check mechanic as any regular monster -- but a "hard"
+        story boss with no Remnant tied to it (e.g. goblin_boss) must
+        still refuse outright.
+        """
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        player_id = 900491
+        make_basic_character(
+            player_id, "Runner", char_class="Fighter", current_location="crossroads_tavern",
+            hp_max=50, armor_class=15,
+        )
+        player = db.get_character(player_id, -999)
+        player["telegram_user_id"] = player_id
+
+        wrathflame = {"telegram_user_id": -2061999, "name": "The Wrathflame Unbound", "dexterity": 16,
+                      "strength": 18, "armor_class": 21, "hp_current": 7000, "hp_max": 7000,
+                      "is_ai": 1, "is_boss": True, "monster_key": "the_wrathflame_unbound"}
+        session = sessions.start_session(-999, [player, wrathflame], {player_id: "party", -2061999: "enemy"})
+        session.turn_order = [player_id, -2061999]
+        session.current_turn_index = 0
+        sink = []
+        with patch("bot.narrate_skill_check", return_value="ok"):
+            await bot._do_flee(FakeUpdate(player_id, "I flee", sink), "I flee", forced_roll=20)
+        reply = "\n".join(sink)
+        self.assertNotIn("no fleeing this fight", reply.lower(), "a Remnant-source boss must allow a real flee attempt")
+        sessions.end_session(-999)
+
+        goblin_boss = {"telegram_user_id": -2061998, "name": "Goblin Boss", "dexterity": 14, "strength": 16,
+                       "armor_class": 15, "hp_current": 200, "hp_max": 200, "is_ai": 1, "is_boss": True,
+                       "monster_key": "goblin_boss"}
+        session2 = sessions.start_session(-999, [player, goblin_boss], {player_id: "party", -2061998: "enemy"})
+        session2.turn_order = [player_id, -2061998]
+        session2.current_turn_index = 0
+        sink2 = []
+        await bot._do_flee(FakeUpdate(player_id, "I flee", sink2), "I flee", forced_roll=20)
+        self.assertTrue(any("no fleeing this fight" in s.lower() for s in sink2), "a real story boss with no Remnant must still refuse outright")
+        sessions.end_session(-999)
+
     async def test_level_2_rogue_flee_skips_opportunity_attacks(self):
         from unittest.mock import patch
         import sessions

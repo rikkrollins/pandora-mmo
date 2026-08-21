@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.305] — Remnant-source bosses (side content) can now be fled from
+
+**Real live request (2026-08-21, Coffee: "I thought it is a Remnant?...
+they are considered side content, yes they are a boss-type, but if
+players cant beat them they shud be able to run so they can try again
+when stronger").** Every `is_boss` monster used to refuse fleeing
+outright, no exceptions -- correct for the handful of real, chapter-
+critical story bosses (`goblin_boss`, `colosseum_champion`,
+`the_unbegun`, `the_unasked`, etc.), but The Wrathflame Unbound and
+every other Remnant-source Unbound (confirmed: 12 of them, each tied
+to its own optional `remnant_*` quest rewarding a summonable Remnant,
+not a required story beat) got caught by the same blanket rule.
+
+Both real flee-block checkpoints (`_resolve_flee_attempt`'s own gate,
+and the AI-companion "act on human guidance to retreat" pre-check)
+now allow a real flee attempt (the same DEX-check mechanic any regular
+monster already uses) against a boss whose `monster_key` unlocks a
+real Remnant (`remnants.remnant_for_monster_key`) -- a "hard" story
+boss with no Remnant tied to it still refuses outright, unchanged.
+
 ## [1.27.304] — Spirit summons: RNG variance, real abilities, healable-while-alive; urgent fix for a stuck "dead" character
 
 **Urgent live fix (Coffee: "it is saying im dead.."):** a genuinely

@@ -6093,13 +6093,20 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
         # have it actually act on real guidance to retreat, right on
         # its own turn, instead of always just attacking every turn as
         # this loop otherwise unconditionally does. One-shot (popped,
-        # not peeked) so it's only ever acted on once. Bosses can't be
-        # fled from at all (same rule _do_flee already enforces for a
-        # human), so guidance to run from one is silently ignored here
-        # rather than attempted and failing oddly.
+        # not peeked) so it's only ever acted on once. A "hard" boss
+        # (no Remnant tied to it) can't be fled from at all (same rule
+        # _do_flee/_resolve_flee_attempt already enforces for a human,
+        # 2026-08-21 Remnant-boss exception included), so guidance to
+        # run from one of THOSE is silently ignored here rather than
+        # attempted and failing oddly -- a Remnant-source boss now
+        # correctly lets the guidance through instead.
         ai_context = _chat_scoped_dict(_AI_PLAYER_CONTEXTS, session.chat_id).get(current["telegram_user_id"])
         guidance = ai_context.user_data.pop("human_guidance", None) if ai_context else None
-        if guidance and not any(e.get("is_boss") for e in opposing) and any(
+        unfleeable_boss_present = any(
+            e.get("is_boss") and not remnants_module.remnant_for_monster_key(e.get("monster_key"))
+            for e in opposing
+        )
+        if guidance and not unfleeable_boss_present and any(
             w in guidance.lower() for w in ("run", "retreat", "flee", "fall back", "escape")
         ):
             await _safe_send(update, f"🗣️ **{current['name']}** hears you and breaks for it!")
@@ -10168,8 +10175,23 @@ async def _resolve_flee_attempt(update, session: sessions.Session, action_text: 
         )
         return
 
+    # Real live request (2026-08-21, per Coffee: "I thought it is a
+    # Remnant?... they are considered side content, yes they are a
+    # boss-type, but if players cant beat them they shud be able to
+    # run so they can try again when stronger"). A Remnant-source
+    # Unbound (any boss whose monster_key unlocks a real Remnant --
+    # remnants.remnant_for_monster_key, the same reverse lookup
+    # _award_victory_xp's own Remnant-binding check already uses) is
+    # genuinely optional side content, not a required story beat --
+    # only a "hard" boss with NO Remnant tied to it (the handful of
+    # real chapter-critical fights: goblin_boss, colosseum_champion,
+    # the_unbegun, the_unasked, etc.) still refuses fleeing outright.
     opposing = session.living_on_side(session.opposing_side(user_id))
-    if any(e.get("is_boss") for e in opposing):
+    unfleeable_boss_present = any(
+        e.get("is_boss") and not remnants_module.remnant_for_monster_key(e.get("monster_key"))
+        for e in opposing
+    )
+    if unfleeable_boss_present:
         await update.effective_chat.send_message(
             "🚫 There's no fleeing this fight — whatever you're facing won't let you leave.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
