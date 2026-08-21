@@ -3796,6 +3796,47 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(stuck_on_caster, "the caster's turn never advanced -- this is the exact reported stuck-timeout bug")
         sessions.end_session(-999)
 
+    def test_natural_attacks_are_always_weapon_proficient(self):
+        """
+        Real live bug (2026-08-21, Coffee, dev-bridge: "the lesser
+        spirit had a really good role and still wasn't able to hit").
+        Root cause: rules.combat's own "natural" weapon_category (used
+        by every monster with a real damage_dice field, and now every
+        spirit summon) was never a member of class_features.
+        _ALL_WEAPON_CATEGORIES ({"simple", "martial"} only) nor of any
+        single class's own WEAPON_PROFICIENCIES set -- so EVERY natural
+        attack (not just summons) has been silently rolling to-hit with
+        proficiency_bonus zeroed out this whole time. Confirmed live:
+        roll 19 + str_mod 0 + prof 0 = 19, short of AC 21; with the real
+        prof +5 already stored for that participant, 19+0+5=24 clears
+        it easily. Real 5E rule: every creature (and a wild-shaped
+        Druid) is always proficient with its own natural weapons.
+        """
+        import class_features
+        self.assertTrue(class_features.is_weapon_proficient(None, "natural"), "a monster/summon with no char_class")
+        self.assertTrue(class_features.is_weapon_proficient("Wizard", "natural"), "a real player class too (e.g. a wild-shaped Druid)")
+        # Real classes must still be correctly gated for simple/martial --
+        # this fix must not accidentally make everything proficient in everything.
+        self.assertFalse(class_features.is_weapon_proficient("Wizard", "martial"))
+
+    def test_lesser_spirit_attack_at_the_exact_reported_roll_now_hits(self):
+        """Direct real reproduction of the live incident: A Lesser Spirit (dex14/str10/prof5) rolling a 19 against The Wrathflame Unbound (AC 21) must now hit."""
+        from rules.combat import resolve_attack
+        attacker = {"telegram_user_id": -1, "name": "A Lesser Spirit", "dexterity": 14, "strength": 10,
+                    "proficiency_bonus": 5, "damage_dice": "1d8", "damage_bonus": 0, "is_ai": 1}
+        defender = {"telegram_user_id": -2, "name": "The Wrathflame Unbound", "armor_class": 21,
+                    "hp_current": 6584, "hp_max": 7000}
+        weapon = bot._weapon_for_attacker(attacker)
+        self.assertEqual(weapon["ability"], "dexterity", "a DEX-forward summon must attack off its real, better modifier")
+        result = resolve_attack(attacker, defender, weapon, forced_roll=19)
+        self.assertTrue(result["hit"], "roll 19 + dex_mod +2 + prof +5 = 26 must clear AC 21")
+
+    def test_natural_attack_ability_pick_never_regresses_a_strength_forward_monster(self):
+        """A monster whose real stats favor strength (the overwhelming majority) must be completely unaffected by the finesse-style natural-attack ability pick."""
+        monster = {"dexterity": 10, "strength": 18, "damage_dice": "2d8", "damage_bonus": 90, "damage_type": "lightning"}
+        weapon = bot._weapon_for_attacker(monster)
+        self.assertEqual(weapon["ability"], "strength")
+
     async def test_heal_spell_still_works_outside_combat_with_no_session(self):
         """The turn-advance fix ("fix them also", 2026-08-21) must never break healing outside combat -- a resting party member with no active session has nothing to advance, and casting must behave exactly as before."""
         uid = 900484

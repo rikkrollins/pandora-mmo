@@ -2,6 +2,42 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.303] — Fix: natural attacks (every monster, and spirit summons) silently lost their proficiency bonus
+
+**Real live bug (2026-08-21, Coffee, dev-bridge screenshot: "the lesser
+spirit had a really good role and still wasn't able to hit... rolled a
+19 against The Wrathflame Unbound and missed").** Root-caused, not
+guessed: `rules.combat.resolve_attack` computes `weapon_proficient` from
+`class_features.is_weapon_proficient(attacker.get("char_class"),
+weapon_category)`. `"natural"` -- the `weapon_category` every monster
+with a real `damage_dice` field (and now every spirit summon) attacks
+with -- was never a member of `_ALL_WEAPON_CATEGORIES` (`{"simple",
+"martial"}` only) nor of any single class's own `WEAPON_PROFICIENCIES`
+set. So **every natural attack in the entire game, not just this
+session's new summons, has been rolling to-hit with its proficiency
+bonus silently zeroed out.** Confirmed against the live numbers: A
+Lesser Spirit (dex 14, prof +5) rolling a 19 against The Wrathflame
+Unbound (AC 21) came out to 19+0+0=19 (a miss) instead of the correct
+19+2+5=26 (a clean hit). This was already the code's own stated intent
+(a comment at the call site claims "a monster/NPC with no char_class
+always reads as proficient") -- just never actually true for this one
+category. Fixed: `is_weapon_proficient` now treats `"natural"` as
+always proficient, for anyone (monsters, summons, and a wild-shaped
+Druid too), matching real 5E rules.
+
+Also fixed alongside it: spirit summons' natural attack always used a
+hardcoded Strength modifier, wasting their deliberately DEX-forward
+stat blocks. `_weapon_for_attacker` now picks whichever of the
+attacker's own Strength/Dexterity modifiers is actually higher
+(finesse-style) -- a strength-forward monster (the overwhelming
+majority of the bestiary) is completely unaffected.
+
+**This is a real, game-wide combat-balance change**, not a narrow
+summon fix: every monster and boss now hits noticeably more often
+(gaining back the proficiency bonus their own stored `proficiency_
+bonus` field always had, just never applied) -- expect fights to run
+meaningfully harder across the board, not just for spirit summons.
+
 ## [1.27.302] — Fix: heal/resurrect/buff spells also never used up the turn
 
 **Follow-up to v1.27.301 (Coffee: "fix them also").** The same

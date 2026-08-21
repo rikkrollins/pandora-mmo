@@ -198,8 +198,23 @@ def _weapon_for_attacker(attacker: dict) -> dict:
     # back to DEFAULT_WEAPON so a monster with no such data (e.g.
     # the_unasked, deliberately left off the normal curve) is unaffected.
     if attacker.get("damage_dice"):
+        # Finesse-style ability pick (2026-08-21, found alongside the
+        # is_weapon_proficient "natural" fix above): a hardcoded
+        # "strength" left the new spirit-summon tiers (deliberately
+        # DEX-forward stat blocks, spells.py's summon_stats) landing
+        # their to-hit off a modifier that was never their real, better
+        # one. Real 5E monster stat blocks already pick whichever
+        # ability a creature is actually built around per-monster; this
+        # generalizes that with the higher of the attacker's own STR/DEX
+        # modifiers, same "use whichever's actually better" spirit as a
+        # real Finesse weapon. Strength-forward monsters (the overwhelming
+        # majority) are completely unaffected -- max() only ever changes
+        # anything for an attacker whose dexterity modifier is genuinely
+        # higher.
+        str_mod = ability_modifier(attacker.get("strength", 10))
+        dex_mod = ability_modifier(attacker.get("dexterity", 10))
         return {
-            "ability": "strength",
+            "ability": "dexterity" if dex_mod > str_mod else "strength",
             "damage_dice": attacker["damage_dice"],
             "damage_bonus": attacker.get("damage_bonus", 0),
             "weapon_category": "natural",

@@ -244,6 +244,28 @@ _ALL_ARMOR_CATEGORIES = {"light", "medium", "heavy", "shield"}
 
 
 def is_weapon_proficient(char_class: str | None, weapon_category: str) -> bool:
+    # Real live bug (2026-08-21, Coffee, dev-bridge screenshot: "the
+    # lesser spirit had a really good role and still wasn't able to
+    # hit... rolled a 19 against The Wrathflame Unbound (AC 21) and
+    # missed"). "natural" (rules.combat's own weapon_category for any
+    # attacker whose damage comes from a raw damage_dice field --
+    # _weapon_for_attacker's monster/echo/summon branch, bot.py) was
+    # never a member of _ALL_WEAPON_CATEGORIES ({"simple", "martial"}
+    # only), nor of any single class's own WEAPON_PROFICIENCIES set --
+    # so EVERY attacker using a natural attack, not just this session's
+    # new spirit summons, has been rolling to-hit with proficiency_
+    # bonus silently zeroed out this whole time (confirmed live: roll
+    # 19 + str_mod 0 + prof 0 = 19, short of AC 21 -- with the real
+    # prof +5 this game's own data already has stored for that
+    # participant, 19+0+5=24 clears it easily). Real 5E rule, not a
+    # house deviation: every creature (and a wild-shaped Druid) is
+    # always proficient with its own natural weapons -- this was
+    # already the code's own STATED intent (see the "a monster/NPC
+    # with no char_class always reads as proficient" comment at this
+    # function's call site in rules/combat.py), just never actually
+    # implemented for this one category.
+    if weapon_category == "natural":
+        return True
     return weapon_category in WEAPON_PROFICIENCIES.get(char_class, _ALL_WEAPON_CATEGORIES)
 
 
