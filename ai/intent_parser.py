@@ -1589,6 +1589,24 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
             name = text[lowered.index(trigger) + len(trigger):].strip()
             return {**base, "action": "switch_character", "target": name or None}
 
+    # Real live gap (2026-08-21, topic-activity monitoring): Coffee typed
+    # the bare "Switch my player" -- no target name at all -- which
+    # doesn't match any trigger above (every one of those requires a
+    # name to follow "to "/"switch to "/"play as "), so it fell all the
+    # way through to the default "chat" classification and got silently
+    # ignored, the exact same silent-failure shape CLAUDE.md's own
+    # "Resolved investigations" already documents for the earlier
+    # talk_npc bug (and the 2026-08-14 fix just above for the SAME
+    # phrasing but WITH a name). Routed to switch_character with target
+    # None -- bot._do_switch_character has its own real guard for a
+    # blank target (added alongside this fix) that shows the roster
+    # instead of trying to match a fragment, so this can't accidentally
+    # silently switch to whichever character happens to be first in the
+    # player's own roster.
+    if lowered.strip() in ("switch my player", "switch my character", "switch player",
+                             "switch character", "switch characters"):
+        return {**base, "action": "switch_character", "target": None}
+
     # "delete " alone (no literal word "character" required) is trusted —
     # nothing else in this game is described as "deleting" something, so
     # "delete Nyssa" is just as unambiguous as "delete my character Nyssa".

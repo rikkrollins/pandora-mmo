@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.298] — Fix: bare "switch my player" silently ignored
+
+Caught by the autonomous monitoring pass's topic_activity scan
+(2026-08-21): Coffee typed "Switch my player" (no character name) and
+it silently fell through to the "chat" classification -- every
+existing `switch_character` trigger in `ai/intent_parser.py`'s
+keyword fallback required a name after "to "/"switch to "/"play as ",
+same silent-failure shape as the 2026-08-14 fix for "Switch my player
+to ravenloft" (which DID include a name). Bare "switch my
+player"/"switch my character"/"switch player"/"switch character" now
+classify as `switch_character` with `target: None`; confirmed real
+(not just reasoned about) that `bot.py`'s existing dispatch (`intent
+.get("target") or text`) safely falls back to the full raw message
+text in that case, so `_do_switch_character` already shows the real
+roster and asks for a name instead of matching the first character in
+it -- no separate bot.py change needed. Two new tests.
+
 ## [1.27.297] — New self-improvement check: real unhandled-exception scanner; fixes a 13-day-old silent private-chat DM bug it found
 
 **New tool, `scripts/check_error_log.py`:** the existing self-improvement

@@ -14549,6 +14549,51 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             _keyword_fallback("Switch to my character Elduinn", [])["target"], "Elduinn"
         )
 
+    def test_bare_switch_my_player_with_no_name_classifies_as_switch_character(self):
+        """
+        Real live gap (2026-08-21, topic-activity monitoring): Coffee
+        typed the bare "Switch my player" -- no target name -- which
+        silently fell through to "chat" (every existing trigger requires
+        a name after "to "/"switch to "/"play as "), the same silent-
+        failure shape as the 2026-08-14 "Switch my player to ravenloft"
+        bug fixed just above in the real code, but for the nameless
+        phrasing specifically.
+        """
+        for phrasing in ("Switch my player", "switch my character", "Switch character", "SWITCH PLAYER"):
+            intent = _keyword_fallback(phrasing, [])
+            self.assertEqual(intent["action"], "switch_character", phrasing)
+            self.assertIsNone(intent["target"], phrasing)
+
+    async def test_bare_switch_my_player_shows_the_roster_never_silently_switches(self):
+        """
+        A blank/no-match target must show the real roster and ask for a
+        name, never silently switch to whichever character happens to
+        be first in db.list_characters -- confirmed via the exact real
+        dispatch shape (bot.py's `intent.get("target") or text`, which
+        falls back to the full RAW message text when target is None,
+        not an empty string) so this can't accidentally hit
+        _find_own_character_by_name_fragment's own empty-string-matches-
+        everything substring quirk.
+        """
+        user_id = 900554
+        make_basic_character(user_id, "FirstRoster", char_class="Fighter", current_location="crossroads_tavern")
+        db.create_character(
+            telegram_user_id=user_id, chat_id=-999, name="SecondRoster", race="Human", char_class="Wizard",
+            ability_scores={"strength": 10, "dexterity": 10, "constitution": 10,
+                             "intelligence": 10, "wisdom": 10, "charisma": 10},
+            hp_max=10, armor_class=10, gold=0, inventory={},
+        )
+        active_before = db.get_character(user_id, -999)["name"]
+        sink = []
+        # Real dispatch shape: intent.get("target") or text, target=None -> falls back to the raw text.
+        await bot._do_switch_character(FakeUpdate(user_id, "", sink), "Switch my player")
+        combined = " ".join(sink)
+        self.assertIn("Couldn't find", combined)
+        self.assertIn("FirstRoster", combined)
+        self.assertIn("SecondRoster", combined)
+        # Must NOT have silently switched active characters at all.
+        self.assertEqual(db.get_character(user_id, -999)["name"], active_before)
+
     async def test_switch_character_matches_despite_my_character_filler(self):
         user_id = 900553
         make_basic_character(user_id, "Elduinn")
