@@ -129,10 +129,28 @@ def _pronoun_line(character: dict) -> str:
     data, can guess wrong"). The subject itself is already covered by
     _NAMING_INSTRUCTION's real-name rule; this only matters for a
     follow-up pronoun later in the same sentence/paragraph. Falls back
-    to they/them when the player never set one -- never guessed.
+    to they/them when the player never set one (true for every real
+    monster/spirit participant too, which never has a pronouns field
+    at all) -- never guessed.
+
+    Strengthened wording (2026-08-21, real live report, Coffee: "The
+    narration is mistaking gender again" -- caught live against a
+    genderless Shadow Wisp, which the model called "she" anyway despite
+    the old, softer "if a pronoun is needed, use X" phrasing). The
+    they/them fallback case now gets an explicit "never guess a gender"
+    call-out rather than relying on the model to infer that they/them
+    means no gender is known -- same "make the constraint impossible to
+    miss" fix shape _NAMING_INSTRUCTION/target_line already use for
+    their own real live reports.
     """
-    pronouns = character.get("pronouns") or "they/them"
-    return f"If a pronoun is needed for {character.get('name')}, use: {pronouns}."
+    pronouns = character.get("pronouns")
+    if pronouns:
+        return f"If a pronoun is needed for {character.get('name')}, use: {pronouns}."
+    return (
+        f"{character.get('name')}'s gender is unknown -- if a pronoun is needed, use "
+        f"they/them ONLY. Never guess or assume he/him or she/her for {character.get('name')}, "
+        f"even if the name, role, or a taunt/line of dialogue might suggest one."
+    )
 
 
 def _skill_check_preamble() -> str:

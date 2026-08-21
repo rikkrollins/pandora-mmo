@@ -59,6 +59,35 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls):
         use_test_db("tests/tmp/regression_fast.db")
+        # Real live behavior change (2026-08-21, "active battle flow"):
+        # _post_narrated now sleeps for a real, admin-tunable throttle
+        # after every combat message it sends (default 2s in
+        # production). This class's whole contract is "no Ollama calls
+        # -- safe to run before every deploy," and a mandatory 2s sleep
+        # per narrated action would silently violate that for every
+        # combat test in this file -- forced to 0 here, class-wide, so
+        # only a test that specifically wants to exercise the throttle
+        # (which mocks _get_combat_throttle_seconds directly) ever sees
+        # a non-zero value.
+        db.set_setting("combat_throttle_seconds", "0")
+
+    def setUp(self):
+        # Real test-isolation fix (2026-08-21, "active battle flow"):
+        # _CHAT_NARRATION_QUEUES/_CHAT_NARRATION_WORKERS are module-level
+        # dicts, keyed by chat_id, holding a real asyncio.Queue + a real
+        # asyncio.Task worker bound to whichever event loop created it.
+        # unittest.IsolatedAsyncioTestCase gives every test method its
+        # OWN fresh event loop -- a worker task created in one test's
+        # loop is dead/unusable once that loop closes, but without this,
+        # the NEXT test reusing the same chat_id (many tests share -999)
+        # would find the OLD entry already present and try to enqueue
+        # onto a queue whose worker belongs to a closed loop, producing
+        # confusing cross-test failures that have nothing to do with
+        # whatever that test is actually checking. Production never hits
+        # this: the real bot process has exactly one persistent event
+        # loop for its whole lifetime.
+        bot._CHAT_NARRATION_QUEUES.clear()
+        bot._CHAT_NARRATION_WORKERS.clear()
 
     # -- NPC-name stopword bug (v1.7.3) --------------------------------
     def test_npc_name_filler_words_dont_hijack_unrelated_messages(self):
@@ -3547,6 +3576,47 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.get_feature_uses(caster_id, -999, "eldritch_smite"), 1)
         sessions.end_session(-999)
 
+    async def test_summon_lesser_spirit_scales_to_the_casters_own_hp_level_and_damage(self):
+        """
+        Real live request (2026-08-21, Coffee: "can u make them our HP,
+        Lv, and Damage Bonus/Power Lv?") -- the spell's old fixed 9 HP/
+        no-damage-output stat block is dead weight past the earliest
+        levels. The summoned spirit's HP now matches the caster's own
+        real hp_max, its proficiency bonus derives from the caster's
+        own real level, and its damage_dice/damage_bonus/damage_type
+        reuse the caster's own real weapon (_weapon_for_attacker) --
+        never the fixed placeholder from spells.py.
+        """
+        import sessions
+        sessions.end_session(-999)
+        caster_id = 900480
+        make_basic_character(
+            caster_id, "SpiritSummoner", char_class="Wizard",
+            known_spells=["summon_lesser_spirit"], spell_slots_max=3, current_location="crossroads_tavern",
+            hp_max=180,
+        )
+        db.update_character(caster_id, -999, level=8, spell_slots_current=3, hp_current=180)
+        enemy = {"telegram_user_id": -5200910, "name": "SpiritDummy", "dexterity": 10, "strength": 10,
+                 "armor_class": 5, "hp_current": 200, "hp_max": 200, "conditions": [],
+                 "is_ai": 1, "monster_key": "goblin"}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        caster_weapon = bot._weapon_for_attacker(caster)
+        session = sessions.start_session(-999, [caster, enemy], {caster_id: "party", -5200910: "enemy"})
+        session.turn_order = [caster_id, -5200910]
+
+        sink = []
+        await bot._do_cast_spell(FakeUpdate(caster_id, "cast summon lesser spirit", sink), "cast summon lesser spirit")
+        spirit = next(p for p in session.participants if p.get("name") == "A Lesser Spirit")
+        self.assertEqual(spirit["hp_max"], 180)
+        self.assertEqual(spirit["hp_current"], 180)
+        self.assertEqual(spirit["proficiency_bonus"], bot.proficiency_bonus_for_level(8))
+        self.assertEqual(spirit["damage_dice"], caster_weapon["damage_dice"])
+        self.assertEqual(spirit["damage_bonus"], caster_weapon.get("damage_bonus", 0))
+        # Real spell-authored flavor stats stay untouched -- only HP/level/damage scale.
+        self.assertEqual(spirit["armor_class"], spells.SPELLS["summon_lesser_spirit"]["summon_stats"]["armor_class"])
+        sessions.end_session(-999)
+
     async def test_eldritch_smite_never_spends_the_warlocks_last_slot(self):
         """Regression guard: the bonus must never fire when it would leave the Warlock with zero slots."""
         from unittest.mock import patch
@@ -5411,8 +5481,143 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             sessions.end_session(-999)
         self.assertGreater(results[reborn_id], results[baseline_id], results)
 
+    # -- Active battle flow (2026-08-21, per Coffee, generalizing the
+    #    Remnant summon fix): "similar to what u are doing with the
+    #    summoning... making an active battle system to be able to
+    #    handle the flow of battle" / "make a way for admins to
+    #    increase or decrease the speed of the ATB" / "slower would be
+    #    better... use it like a throttle for smooth combat." -------
+
+    async def test_do_attack_shows_the_deterministic_result_without_waiting_on_real_narration(self):
+        """A real player's own attack now sends the deterministic combat result immediately -- the mocked real flavor line arrives separately, not folded into this same immediate message."""
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        user_id = 900810
+        make_basic_character(user_id, "InstantResultTester", char_class="Fighter", current_location="crossroads_tavern")
+        enemy = {
+            "telegram_user_id": -700840, "name": "InstantDummy", "dexterity": 8, "strength": 10,
+            "armor_class": 1, "hp_current": 100000, "hp_max": 100000, "is_ai": 1,
+        }
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", -700840: "enemy"})
+        session.turn_order = [user_id, -700840]
+        session.current_turn_index = 0
+        # A threading.Event, not a fixed sleep -- narrate_action blocks
+        # inside asyncio.to_thread (a real OS thread, safe to block)
+        # until this test explicitly releases it AFTER checking the
+        # immediate result. This deterministically proves _do_attack's
+        # own await never waits on it, with no timing race: a fixed
+        # sleep duration can't reliably outlast this test's own real
+        # DB/session overhead (a sibling attempt at 0.3s still lost the
+        # race), while this can't ever resolve early no matter how slow
+        # or fast the rest of the test runs.
+        import threading
+        flavor_event = threading.Event()
+
+        def blocking_narrate_action(*args, **kwargs):
+            flavor_event.wait(timeout=5)
+            return "A uniquely-phrased real flavor line."
+
+        sink = []
+        with patch("bot.narrate_action", blocking_narrate_action), \
+             patch("bot._get_combat_throttle_seconds", return_value=0.0):
+            await bot._do_attack(FakeUpdate(user_id, "I attack the dummy", sink), "I attack the dummy", forced_roll=15)
+        combined = " ".join(sink)
+        self.assertTrue(any("damage" in s.lower() or "misses" in s.lower() for s in sink), sink)
+        self.assertNotIn("A uniquely-phrased real flavor line.", combined)
+        flavor_event.set()
+        sessions.end_session(-999)
+
+    async def test_real_flavor_line_arrives_as_a_separate_later_message(self):
+        """The real (mocked) flavor line delivered through the background narration queue shows up as its own sink entry once the queue actually runs."""
+        import asyncio
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        user_id = 900811
+        make_basic_character(user_id, "DeferredFlavorTester", char_class="Fighter", current_location="crossroads_tavern")
+        enemy = {
+            "telegram_user_id": -700841, "name": "DeferredDummy", "dexterity": 8, "strength": 10,
+            "armor_class": 1, "hp_current": 100000, "hp_max": 100000, "is_ai": 1,
+        }
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", -700841: "enemy"})
+        session.turn_order = [user_id, -700841]
+        session.current_turn_index = 0
+        sink = []
+        with patch("bot.narrate_action", return_value="A distinctly later flavor line."), \
+             patch("bot._get_combat_throttle_seconds", return_value=0.0):
+            await bot._do_attack(FakeUpdate(user_id, "I attack the dummy", sink), "I attack the dummy", forced_roll=15)
+            await asyncio.sleep(0.3)
+        combined = " ".join(sink)
+        self.assertIn("A distinctly later flavor line.", combined)
+        sessions.end_session(-999)
+
+    async def test_narration_queue_delivers_multiple_jobs_in_enqueue_order(self):
+        """The per-chat narration queue (_enqueue_narration/_chat_narration_worker) is a real single-consumer queue -- jobs are delivered strictly in the order they were enqueued, even when a LATER job would individually finish faster than an earlier, slower one."""
+        import asyncio
+        chat_id = -700899
+        results = []
+
+        async def slow_first_job() -> None:
+            await asyncio.sleep(0.15)
+            results.append("first")
+
+        async def fast_second_job() -> None:
+            await asyncio.sleep(0.01)
+            results.append("second")
+
+        bot._enqueue_narration(chat_id, slow_first_job)
+        bot._enqueue_narration(chat_id, fast_second_job)
+        await asyncio.sleep(0.4)
+        self.assertEqual(results, ["first", "second"])
+
+    async def test_combat_speed_dev_command_sets_and_reads_the_real_throttle(self):
+        """The real 'set combat speed to N' Development-topic command persists through db.game_settings, same live-override pattern story_mode already uses -- _get_combat_throttle_seconds reads it back immediately, no redeploy."""
+        from unittest.mock import patch, AsyncMock
+        db.set_setting("combat_throttle_seconds", str(bot.COMBAT_THROTTLE_SECONDS_DEFAULT))
+        sink = []
+        with patch("bot._is_dev_topic_authorized", new=AsyncMock(return_value=True)):
+            await bot.development_topic_handler(
+                FakeUpdate(7052163553, "set combat speed to 3.5", sink), DummyContext(),
+            )
+        self.assertTrue(any("3.5" in s for s in sink), sink)
+        self.assertEqual(bot._get_combat_throttle_seconds(), 3.5)
+        # A typo/out-of-range value is clamped, never left unbounded.
+        db.set_setting("combat_throttle_seconds", "9999")
+        self.assertEqual(bot._get_combat_throttle_seconds(), bot.COMBAT_THROTTLE_SECONDS_CAP)
+        db.set_setting("combat_throttle_seconds", str(bot.COMBAT_THROTTLE_SECONDS_DEFAULT))
+
+    async def test_post_narrated_actually_sleeps_for_the_configured_throttle(self):
+        """A real, direct call to _post_narrated awaits asyncio.sleep with exactly the configured throttle value -- confirms the pacing delay is real, not just documented."""
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        user_id = 900812
+        make_basic_character(user_id, "ThrottleTester", char_class="Fighter", current_location="crossroads_tavern")
+        character = db.get_character(user_id, -999)
+        character["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [character], {user_id: "party"})
+        mechanical_result = {
+            "attacker": "ThrottleTester", "defender": "Dummy", "hit": True,
+            "critical_hit": False, "critical_fail": False, "raw_roll": 15, "damage_dealt": 10,
+        }
+        sleep_mock = AsyncMock()
+        with patch("bot._get_combat_throttle_seconds", return_value=4.0), \
+             patch("bot.asyncio.sleep", new=sleep_mock), \
+             patch("bot.narrate_action", return_value="flavor"):
+            await bot._post_narrated(
+                FakeUpdate(user_id, "attack", []), character, "attack", mechanical_result, session,
+            )
+        sleep_mock.assert_awaited_with(4.0)
+        sessions.end_session(-999)
+
     async def test_remnant_summon_damage_also_scales_with_rebirth(self):
         """Real test the 'summons' part of 'make sure all modifiers are included' actually holds -- Remnant summons route through the exact same apply_damage_type_modifier pipeline, not assumed from the shared code path alone."""
+        import asyncio
         import sessions
         from unittest.mock import patch, AsyncMock
         sessions.end_session(-999)
@@ -5437,6 +5642,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 FakeUpdate(user_id, "summon the wrathflame unbound on the dummy", sink),
                 "summon the wrathflame unbound on the dummy", forced_roll=15,
             )
+            # The flavor line now fires as a real background task (2026-08-21,
+            # per Coffee: combat shouldn't wait on it) -- let it actually
+            # run before the event loop tears down, or teardown hangs on
+            # the still-pending task.
+            await asyncio.sleep(0.2)
         after_enemy = next(p for p in session.participants if p["telegram_user_id"] == -700831)
         reborn_damage = enemy["hp_max"] - after_enemy["hp_current"]
         self.assertGreater(reborn_damage, 0)
@@ -12552,6 +12762,24 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         result = _keyword_fallback("set my pronouns to she/her", known_npc_names=[])
         self.assertEqual(result["action"], "set_pronouns")
 
+    def test_pronoun_line_fallback_explicitly_forbids_guessing_a_gender(self):
+        """
+        Real live report (2026-08-21, Coffee: "The narration is
+        mistaking gender again") -- caught live against a genderless
+        Shadow Wisp the model called "she" despite the old, softer
+        wording. The no-pronouns-set fallback now explicitly says
+        "never guess" rather than just naming they/them and hoping
+        that's read as a hard constraint. A real character.pronouns
+        value (the common player-set case) is untouched.
+        """
+        from ai.dm_agent import _pronoun_line
+        monster = {"name": "Shadow Wisp 1"}  # no "pronouns" key at all, same as every real monster
+        line = _pronoun_line(monster)
+        self.assertIn("they/them", line)
+        self.assertIn("never guess", line.lower())
+        character = {"name": "Nyx", "pronouns": "she/her"}
+        self.assertEqual(_pronoun_line(character), "If a pronoun is needed for Nyx, use: she/her.")
+
     def test_character_sheet_shows_pronouns_when_present(self):
         user_id = 900533
         make_basic_character(user_id, "Told")
@@ -16491,6 +16719,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         (always below ENEMY_BANTER_CHANCE) so this tests the actual side
         check, not dice luck.
         """
+        import asyncio
         from unittest.mock import patch
         import sessions
         sessions.end_session(-997)
@@ -16514,12 +16743,31 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink = []
         update = FakeUpdate(enemy_id, "n/a", sink)
 
-        with patch("bot.narrate_action", fake_narrate_action), patch("bot.random.random", return_value=0.0):
+        # Real flavor delivery is now a background job (2026-08-21,
+        # "active battle flow") -- narrate_action isn't called inline
+        # anymore, so a brief real sleep lets the queued job actually
+        # run before checking what it was called with. narration_cache
+        # is also forced to always miss here: it's a real, persisted
+        # store (.pdrx8k2f/n.db, not reset between test runs) that a
+        # long testing history can easily have warmed up past
+        # MIN_VARIANTS_BEFORE_REUSE for this exact routine "hit/low
+        # damage" bucket -- with random.random() also mocked to 0.0,
+        # lookup()'s own CACHE_HIT_RATE roll would then always return a
+        # real cached line instead of None, skipping narrate_action
+        # entirely and leaving `captured` stale. This test's actual
+        # target is the include_banter argument passed through, not
+        # cache-hit behavior (covered elsewhere), so a forced miss is
+        # the correct isolation, not a workaround.
+        with patch("bot.narrate_action", fake_narrate_action), patch("bot.random.random", return_value=0.0), \
+                patch("bot.narration_cache.lookup", return_value=None):
             await bot._post_narrated(update, monster, "attacks FriendlyAI", mechanical_result, session)
+            await asyncio.sleep(0.2)
         self.assertTrue(captured["include_banter"], "enemy-side attacker with a below-threshold roll should get banter")
 
-        with patch("bot.narrate_action", fake_narrate_action), patch("bot.random.random", return_value=0.0):
+        with patch("bot.narrate_action", fake_narrate_action), patch("bot.random.random", return_value=0.0), \
+                patch("bot.narration_cache.lookup", return_value=None):
             await bot._post_narrated(update, companion, "attacks BanterGoblin", mechanical_result, session)
+            await asyncio.sleep(0.2)
         self.assertFalse(captured["include_banter"], "party-side (friendly AI companion) attacker must never get banter")
 
         sessions.end_session(-997)
@@ -16531,6 +16779,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         roll must NOT request banter, confirming this isn't accidentally
         wired to fire on every single enemy attack.
         """
+        import asyncio
         from unittest.mock import patch
         import sessions
         sessions.end_session(-996)
@@ -16552,37 +16801,33 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         update = FakeUpdate(enemy_id, "n/a", sink)
         with patch("bot.narrate_action", fake_narrate_action), patch("bot.random.random", return_value=0.999):
             await bot._post_narrated(update, monster, "attacks Someone", mechanical_result, session)
+            await asyncio.sleep(0.2)
         self.assertFalse(captured["include_banter"])
         sessions.end_session(-996)
 
     async def test_ai_turn_narration_budget_does_not_starve_banter_after_one_real_call(self):
         """
         Real live report (2026-08-12, Coffee: "i am also not seeing
-        banter still in battles"). Root cause: AI_TURN_NARRATION_BUDGET_
-        SECONDS was set to 45.0 back in v1.27.9 (2026-07-24), well before
-        real per-call Ollama latency was ever measured on this hardware.
-        CLAUDE.md's own documented post-migration baseline is ~46-73s
-        typical, up to 160s+ -- meaning a SINGLE real narration call
-        almost always exceeds a 45s budget by itself. Since turns_started_
-        at is one wall-clock deadline for the ENTIRE _resolve_ai_turns_
-        inner invocation (every AI-controlled turn until a real player is
-        up again -- see that function's own docstring), this meant only
-        the FIRST AI-narrated attack of a whole round could ever reach
-        the include_banter roll; every subsequent enemy attack in the
-        same round (a 2nd enemy, a boss's 2nd Multiattack swing, any turn
-        after a friendly AI companion went first) was guaranteed
-        skip_narration=True and fell back to the plain template, with
-        zero chance of banter, regardless of dice luck.
-
-        Simulates real narration latency by advancing a fake wall clock
-        only when narrate_action is actually "called" (not merely
-        queried), matching how real elapsed time only advances once the
-        actual network call returns -- confirms two enemies, each taking
-        one real ~60s-latency narration call, both still get a real
-        narrate_action call (and therefore a real shot at banter) within
-        one AI-turn-resolution, which the old 45s budget could not do.
+        banter still in battles"). Original root cause: AI_TURN_
+        NARRATION_BUDGET_SECONDS was 45.0 back in v1.27.9 (2026-07-24),
+        well under real per-call Ollama latency (46-160s+, see
+        CLAUDE.md) -- turns_started_at's wall-clock deadline meant only
+        the FIRST AI-narrated attack of a round could reach the
+        include_banter roll; every later enemy that same round was
+        guaranteed skip_narration=True. Since bumped to 180s (a real,
+        separate fix), and -- as of the 2026-08-21 "active battle flow"
+        redesign -- structurally can't recur at all anymore: narrate_
+        action is never awaited inline inside _resolve_ai_turns_inner's
+        own loop (see _post_narrated), so one enemy's real narration
+        call no longer eats into wall-clock time the NEXT enemy's own
+        skip_narration check reads. This test now confirms that
+        real-world guarantee directly: both enemies' real (mocked)
+        narrate_action calls actually run -- delivered through the
+        background narration queue, same as any other combat message --
+        and both get a real shot at banter.
         """
         from unittest.mock import patch
+        import asyncio
         import sessions
         sessions.end_session(-995)
         enemy1_id, enemy2_id, player_id = -2_500_090, -2_500_091, 555095
@@ -16603,24 +16848,22 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [enemy1_id, enemy2_id, player_id]
         session.current_turn_index = 0
 
-        clock = {"t": 0.0}
         calls = []
-
-        def fake_monotonic():
-            return clock["t"]
 
         def fake_narrate_action(character, action_text, mech_result, recent_events=None,
                                  actor_personality=None, location_description=None, include_banter=False):
             calls.append({"attacker": character["name"], "include_banter": include_banter})
-            clock["t"] += 60.0  # real documented typical latency, see CLAUDE.md
             return "The goblin swings."
 
         sink = []
         update = FakeUpdate(enemy1_id, "n/a", sink)
-        with patch("bot.time.monotonic", fake_monotonic), \
-             patch("bot.narrate_action", fake_narrate_action), \
+        with patch("bot.narrate_action", fake_narrate_action), \
              patch("bot.random.random", return_value=0.0):
             await bot._resolve_ai_turns(update, session)
+            # Real flavor delivery is a background job now -- let the
+            # per-chat narration queue actually drain both enqueued jobs
+            # before checking what they were called with.
+            await asyncio.sleep(0.3)
 
         self.assertEqual(
             [c["attacker"] for c in calls], ["FirstGoblin", "SecondGoblin"],
@@ -18483,6 +18726,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("haven't bound any Remnants" in s for s in sink))
 
     async def test_summon_remnant_deals_real_elemental_damage_and_advances_turn(self):
+        import asyncio
         import sessions
         from unittest.mock import patch, AsyncMock
         sessions.end_session(-992)
@@ -18504,6 +18748,16 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 FakeUpdate(user_id, "summon The Wrathflame Unbound on the goblin", sink, chat_id=-992),
                 "summon The Wrathflame Unbound on the goblin",
             )
+            # Real live fix (2026-08-21, per Coffee: "continue with the
+            # battle so that things don't slow down and then kick the
+            # narration in before the players next turn") -- the flavor
+            # line is now fired as a real background asyncio.create_task,
+            # not awaited inline, so combat itself never waits on it. A
+            # brief real sleep lets that background task actually run
+            # before checking sink -- asyncio.create_task doesn't start
+            # executing until the event loop gets a chance to, which a
+            # bare `await` on the caller alone doesn't guarantee.
+            await asyncio.sleep(0.2)
         combined = " ".join(sink)
         self.assertIn("Wrathflame", combined)
         self.assertIn("fire damage", combined)

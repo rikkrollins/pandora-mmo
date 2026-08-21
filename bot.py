@@ -4048,6 +4048,31 @@ async def _announce_reaction(update: Update, defender: dict, result: dict) -> No
         await _safe_send(update, f"🌀 **{defender['name']}** uses Uncanny Dodge, halving the damage!")
 
 
+COMBAT_THROTTLE_SECONDS_DEFAULT = 2.0
+COMBAT_THROTTLE_SECONDS_CAP = 10.0
+
+
+def _get_combat_throttle_seconds() -> float:
+    """
+    Live db.game_settings override (2026-08-21, via the Development-
+    topic "set combat speed/throttle to N" command -- see development_
+    topic_handler) -- same "no redeploy needed" pattern as ai/story_
+    mode.py's own story_mode override. The real pacing delay
+    _post_narrated waits after sending each combat message, giving the
+    background narration queue real breathing room (Coffee: "slower
+    would be better... use it like a throttle for smooth combat").
+    Non-zero by default, capped so a typo can't accidentally freeze combat.
+    """
+    override = db.get_setting("combat_throttle_seconds")
+    if override is None:
+        return COMBAT_THROTTLE_SECONDS_DEFAULT
+    try:
+        value = float(override)
+    except ValueError:
+        return COMBAT_THROTTLE_SECONDS_DEFAULT
+    return max(0.0, min(COMBAT_THROTTLE_SECONDS_CAP, value))
+
+
 async def _post_narrated(update: Update, character: dict, action_text: str,
                           mechanical_result: dict, session: sessions.Session,
                           action_label: str | None = None, skip_narration: bool = False,
@@ -4062,73 +4087,76 @@ async def _post_narrated(update: Update, character: dict, action_text: str,
     slot and zero retry ceiling, sustained demand can stack these into
     HOURS. `skip_narration` (set by _resolve_ai_turns once its own
     per-invocation wall-clock narration budget is spent -- see
-    AI_TURN_NARRATION_BUDGET_SECONDS) is the reliable fix: load average
-    alone (_ollama_congested) turned out NOT to catch this specific case
-    live (load sat at ~7, under its 12.0 threshold, even while the one
-    shared generation slot was fully monopolized) -- a single slot being
-    busy doesn't show up as host-wide load the way many competing
-    processes would. A real wall-clock deadline bounds the worst case
-    regardless of what load average happens to read. Never set for a
-    real player's own action (only _resolve_ai_turns's AI-turn loop
-    passes it) -- a real player's own attack is always fully narrated
-    regardless of load or time spent, matching _ollama_congested's own
-    stated scope of never gating "a real player's own direct action".
+    AI_TURN_NARRATION_BUDGET_SECONDS) is a real backstop that stays as-is.
+
+    "Active battle flow" (2026-08-21, per Coffee, generalizing the same
+    fix already shipped for Remnant summons: "continue with the battle
+    so that things don't slow down and then kick the narration in
+    before the players next turn"): a real player's own action used to
+    ALWAYS block here on the real Ollama call, no exception -- now,
+    like every AI turn already could, the mechanical result is sent
+    immediately using the existing deterministic _fallback_narration
+    (the exact same text a busy AI turn already shows today, no new
+    message format). The real flavor line -- when one is actually
+    needed (not cached, not skipped) -- is generated and delivered as a
+    separate follow-up message through the per-chat ordered queue
+    (_enqueue_narration), so it never blocks this function's caller,
+    and multiple queued flavor lines for the same chat always post in
+    the order their actions happened, never Ollama's completion order.
+    A real, admin-tunable pacing delay (_get_combat_throttle_seconds,
+    "set combat speed to N" in the Development topic) runs after every
+    message this function sends, giving that background queue real
+    breathing room -- Coffee: "slower would be better... use it like a
+    throttle for smooth combat."
     """
     actor_personality = _personality_for_character_name(character.get("name", ""))
     location = cl.get_location(CAMPAIGN, character.get("current_location"))
     location_description = location["description"] if location else None
-    if skip_narration or (character.get("is_ai") and _ollama_congested()):
-        flavor = _fallback_narration(mechanical_result)
-    else:
-        # Enemy battle banter (2026-08-09, per Coffee): "in battle give
-        # the enemies small talk banter, teasing, coaxing type
-        # narrations to keep the fights entertaining, enjoyable, funny."
-        # session.sides is "party"/"enemy" per telegram_user_id -- this
-        # is true for a plain monster, a hostile hand-authored NPC, AND
-        # a world boss alike, and false for a real player or a
-        # friendly AI companion (who also take turns through this same
-        # function, see _resolve_ai_turns), so it's the one check that
-        # correctly scopes "enemies" without special-casing per caller.
-        # Only a fraction of enemy turns roll it (ENEMY_BANTER_CHANCE)
-        # rather than every single attack, both so it stays a fun
-        # surprise rather than noise, and because this session's own
-        # monitoring has repeatedly observed severe single-Ollama-slot
-        # contention -- folded into this EXISTING narration call rather
-        # than adding a second one, per that same cost tradeoff.
-        include_banter = (
-            session.sides.get(character.get("telegram_user_id")) == "enemy"
-            and random.random() < ENEMY_BANTER_CHANCE
-        )
-        # Real live speed request (2026-08-13, per Coffee: "make this
-        # run as fast as it can so prompts execute very fast... save
-        # pregenerated narrations or text for common actions or
-        # scenarios"). A routine "hit/miss/crit for N damage" combat
-        # line is the single highest-frequency real Ollama call in the
-        # game (every attack, every turn) -- narration_cache.cache_key
-        # deliberately returns None (never cached) for anything
-        # narratively special: banter, a boss's own turn, or any real
-        # reaction trigger, so this only ever shortcuts the routine
-        # case, never the "long and entertaining" moments.
-        narration_key = narration_cache.cache_key(character, mechanical_result, include_banter)
-        actor_name = character.get("name")
-        defender_name = mechanical_result.get("defender")
-        flavor = narration_cache.lookup(narration_key, actor_name, defender_name)
-        if flavor is None:
-            flavor = await asyncio.to_thread(
-                narrate_action, character, action_text, mechanical_result, session.recent_events(),
-                actor_personality, location_description, include_banter,
-            )
-            narration_cache.remember(narration_key, flavor, actor_name, defender_name)
+
+    skip_real_narration = skip_narration or (character.get("is_ai") and _ollama_congested())
+    include_banter = (
+        not skip_real_narration
+        and session.sides.get(character.get("telegram_user_id")) == "enemy"
+        and random.random() < ENEMY_BANTER_CHANCE
+    )
+    narration_key = None if skip_real_narration else narration_cache.cache_key(character, mechanical_result, include_banter)
+    actor_name = character.get("name")
+    defender_name = mechanical_result.get("defender")
+    cached_flavor = None if narration_key is None else narration_cache.lookup(narration_key, actor_name, defender_name)
+
+    # Already have a real flavor line (cached, or narration is skipped
+    # for this action entirely) -- send it as the one real message right
+    # now, exactly like this always worked before. Only a genuine cache
+    # MISS needing an actual Ollama call gets the "fallback now, real
+    # flavor later" treatment below.
+    immediate_flavor = cached_flavor if cached_flavor is not None else _fallback_narration(mechanical_result)
     message = _format_combat_result(
-        flavor, mechanical_result,
+        immediate_flavor, mechanical_result,
         actor_label=mechanical_result.get("attacker", character.get("name", "?")),
         defender_label=mechanical_result.get("defender", "?"),
         action_label=action_label,
         weapon_name=None if action_label else _weapon_for_attacker(character).get("name"),
         verb=verb,
     )
-    session.log_event(f"{mechanical_result.get('attacker')} vs {mechanical_result.get('defender')}: {flavor}")
+    session.log_event(f"{mechanical_result.get('attacker')} vs {mechanical_result.get('defender')}: {immediate_flavor}")
     await _safe_send(update, message)
+
+    if not skip_real_narration and cached_flavor is None:
+        chat_id = update.effective_chat.id
+
+        async def _deliver_real_flavor() -> None:
+            flavor = await asyncio.to_thread(
+                narrate_action, character, action_text, mechanical_result, session.recent_events(),
+                actor_personality, location_description, include_banter,
+            )
+            narration_cache.remember(narration_key, flavor, actor_name, defender_name)
+            await _safe_send(update, f"📖 {flavor}")
+
+        _enqueue_narration(chat_id, _deliver_real_flavor)
+
+    throttle = _get_combat_throttle_seconds()
+    if throttle:
+        await asyncio.sleep(throttle)
 
 
 def _refresh_real_player_spell_slots(character: dict) -> None:
@@ -8123,7 +8151,14 @@ def _decide_monster_spell(caster: dict) -> str | None:
 # it by default would just repeat the exact complaint this exists to
 # fix.
 _PENDING_REACTIONS: dict[str, dict] = {}
-REACTION_PROMPT_TIMEOUT_SECONDS = 30
+# 10s (was 30s) -- per Coffee, dev-bridge (2026-08-21): "to keep the
+# battle moving fast, make these timers only 10 seconds." Only real
+# call site is Counterspell's opt-in prompt (Shield/Uncanny Dodge stay
+# fully automatic, no prompt at all) -- confirmed already spell-slot-
+# free and gated behind a real DEX check before this ever fires (see
+# _maybe_monster_cast_spell's own 2026-08-20 redesign), so this change
+# is scoped to just the wait window, nothing else about the mechanic.
+REACTION_PROMPT_TIMEOUT_SECONDS = 10
 
 
 async def _prompt_reaction_choice(
@@ -23510,11 +23545,30 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
             # NPCs, so a summon's synthetic id can never collide with
             # either inside the same session's participant list.
             synthetic_id = -4_000_000 - (abs(hash((chat_id, character["name"], session.round_number))) % 100_000)
+            # Real live request (2026-08-21, per Coffee: "can u make them
+            # our HP, Lv, and Damage Bonus/Power Lv?") -- the spell's own
+            # authored AC/dexterity/strength stay exactly as written (real
+            # flavor stats for "a lesser spirit"), but a fixed 9 HP with no
+            # real damage output was dead weight past the earliest levels.
+            # HP and striking power now scale with the CASTER's own real
+            # progression instead: hp_max matches the caster's own hp_max
+            # outright, and damage reuses the caster's own real weapon
+            # (_weapon_for_attacker -- the same function every other
+            # attacker in this game already resolves its own damage_dice/
+            # damage_bonus/damage_type through) via the same natural-attack
+            # mechanism monster damage_bonus already uses (see _weapon_
+            # for_attacker's own damage_dice branch) -- no new combat math,
+            # just real numbers instead of the spell's old fixed baseline.
+            caster_weapon = _weapon_for_attacker(character)
+            caster_level = character.get("level", 1)
             summon = {
                 "telegram_user_id": synthetic_id, "name": stats["name"].title(),
                 "dexterity": stats["dexterity"], "strength": stats["strength"],
-                "armor_class": stats["armor_class"], "hp_current": stats["hp_max"],
-                "hp_max": stats["hp_max"], "proficiency_bonus": stats["proficiency_bonus"],
+                "armor_class": stats["armor_class"], "hp_current": character["hp_max"],
+                "hp_max": character["hp_max"], "proficiency_bonus": proficiency_bonus_for_level(caster_level),
+                "level": caster_level,
+                "damage_dice": caster_weapon["damage_dice"], "damage_bonus": caster_weapon.get("damage_bonus", 0),
+                "damage_type": caster_weapon.get("damage_type", "physical"),
                 "is_ai": 1, "xp_reward": 0,
             }
             summon["initiative"] = roll_d20() + ability_modifier(stats["dexterity"])
@@ -24192,14 +24246,29 @@ async def _do_summon_remnant(update: Update, text: str, forced_roll: int | None 
         # Real live moment (2026-08-20, per Coffee: "include a narration
         # from the Remnant to the current battle enemy it is facing,
         # Then attack them with the ability and show the ability
-        # image") -- sent BEFORE the attack resolves, same "narrate the
-        # moment, then the mechanical result" order every other real
-        # narrated beat in this game already follows (never lets the
-        # narration invent the outcome itself).
-        flavor_line = await asyncio.to_thread(
-            narrate_remnant_summon, remnant["name"], remnant["lore"], target["name"],
-        )
-        await _safe_send(update, f"🔮 {flavor_line}")
+        # image"). Follow-up (2026-08-21, per Coffee: "the narration
+        # seems to take a moment... continue with the battle so that
+        # things don't slow down and then kick the narration in before
+        # the players next turn") -- the flavor line is a real Ollama
+        # call, genuinely tens of seconds on this hardware (see
+        # CLAUDE.md), and used to be awaited here, blocking the whole
+        # rest of this summon (ability image, damage resolution, turn
+        # advance) on it. Now fired as a real background task instead
+        # -- combat keeps moving immediately (the deterministic "calls
+        # forth... strikes for N damage" message below already covers
+        # the instant, no-AI-needed summary), and the flavor text
+        # arrives in chat whenever Ollama actually finishes, same
+        # single-slot queueing as any other narration, never blocking
+        # the mechanical outcome on it.
+        async def _send_summon_flavor_when_ready() -> None:
+            try:
+                flavor_line = await asyncio.to_thread(
+                    narrate_remnant_summon, remnant["name"], remnant["lore"], target["name"],
+                )
+                await _safe_send(update, f"🔮 {flavor_line}")
+            except Exception as e:
+                logger.warning(f"[summon] flavor narration failed: {e!r}")
+        asyncio.create_task(_send_summon_flavor_when_ready())
         # Real ability art (2026-08-20, per Coffee: "Show the attack or
         # Ability and NOT the remnant") -- _maybe_send_ability_image
         # already explicitly excludes any person/creature/monster from
@@ -26889,6 +26958,26 @@ async def development_topic_handler(update: Update, context: ContextTypes.DEFAUL
         )
         return
 
+    # Live combat pacing override (2026-08-21, per Coffee, "active
+    # battle flow": "make a way for admins to increase or decrease the
+    # speed of the ATB" -- see _get_combat_throttle_seconds, checked
+    # live the same "no redeploy" way story_mode is above). "speed" and
+    # "throttle" are both real words he used across the same
+    # conversation for the same knob -- both covered here, same value.
+    combat_speed_match = re.search(
+        r"(?:set )?(?:combat|atb) ?(?:speed|throttle)(?: to| =)?\s*(\d+(?:\.\d+)?)", lowered_question
+    )
+    if combat_speed_match:
+        seconds = max(0.0, min(COMBAT_THROTTLE_SECONDS_CAP, float(combat_speed_match.group(1))))
+        db.set_setting("combat_throttle_seconds", str(seconds))
+        await _safe_send(
+            update,
+            f"⚔️ Combat pacing set to **{seconds:g}s** between messages "
+            f"(0 = no throttle, capped at {COMBAT_THROTTLE_SECONDS_CAP:g}s).",
+            thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
+        )
+        return
+
     # Live pause/resume for the two background autonomous loops (2026-07-14)
     # -- previously required a code edit + redeploy (AI_PARTY_ENABLED) or
     # wasn't pausable at all (Moltbook social).
@@ -27418,6 +27507,45 @@ async def _run_in_user_order(user_id: int, coro_fn) -> None:
     future = asyncio.get_event_loop().create_future()
     await queue.put((coro_fn, future))
     await future
+
+
+# Per-chat ordered narration delivery queues -- same shape as
+# _USER_QUEUES/_USER_WORKERS/_user_queue_worker above (one dedicated
+# worker per key, draining its own queue strictly one job at a time),
+# but a SEPARATE pair keyed by chat_id rather than user_id: this is for
+# ordering real-flavor narration deliveries across an entire shared
+# combat (every actor's turn), not one individual player's own message
+# sequence, so overloading the existing per-user pair would conflate
+# two different real ordering guarantees. See _post_narrated (2026-08-21,
+# "active battle flow" -- per Coffee: "make a way for admins to increase
+# or decrease the speed of the ATB... use it like a throttle for smooth
+# combat") for why this exists: the real Ollama flavor call for a
+# combat action no longer blocks the action itself, but with only one
+# shared Ollama generation slot, two flavor jobs queued back-to-back can
+# finish in EITHER order -- this queue guarantees they're still posted
+# to chat in the order their actions actually happened.
+_CHAT_NARRATION_QUEUES: dict[int, asyncio.Queue] = {}
+_CHAT_NARRATION_WORKERS: dict[int, asyncio.Task] = {}
+
+
+async def _chat_narration_worker(queue: asyncio.Queue, chat_id: int) -> None:
+    while True:
+        coro_fn = await queue.get()
+        try:
+            await coro_fn()
+        except Exception as e:  # noqa: BLE001 -- a failed flavor delivery must never kill the worker
+            logger.warning(f"[narration_queue] chat={chat_id} delivery failed: {e!r}")
+        finally:
+            queue.task_done()
+
+
+def _enqueue_narration(chat_id: int, coro_fn) -> None:
+    """Schedules a real-flavor narration delivery job for this chat, guaranteed to post in the same order it was enqueued relative to every other job for this same chat."""
+    if chat_id not in _CHAT_NARRATION_QUEUES:
+        queue: asyncio.Queue = asyncio.Queue()
+        _CHAT_NARRATION_QUEUES[chat_id] = queue
+        _CHAT_NARRATION_WORKERS[chat_id] = asyncio.create_task(_chat_narration_worker(queue, chat_id))
+    _CHAT_NARRATION_QUEUES[chat_id].put_nowait(coro_fn)
 
 
 class _TranscribedMessageProxy:

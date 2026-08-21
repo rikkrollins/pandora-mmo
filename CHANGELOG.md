@@ -2,6 +2,48 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.295] — Active battle flow: non-blocking combat narration + admin-tunable throttle
+
+**Real live request (2026-08-21, Coffee), generalizing the fix already
+shipped for Remnant summon flavor text:** "similar to what u are doing
+with the summoning, i think making an active battle system to be able
+to handle the flow of battle would be a good idea" → "make a way for
+admins to increase or decrease the speed of the ATB" → "slower would
+be better to allow processing i think, use it like a throttle for
+smooth combat."
+
+Every real combat action (a human's own attack/throw/spell-cast, and
+every AI/monster turn) routes through one shared function,
+`_post_narrated`. It now sends the deterministic mechanical result
+(hit/miss/crit/damage — the same `_fallback_narration` text a busy AI
+turn already showed) immediately, every time, for every actor —
+instead of always blocking on a real Ollama call that genuinely takes
+tens of seconds on this CPU-only VPS. The real flavor line (when one
+is actually needed — not cached, not skipped) is generated in the
+background and delivered as a separate follow-up message through a new
+per-chat ordered queue (`_enqueue_narration`/`_chat_narration_worker`),
+so flavor messages for one chat always land in the order their actions
+happened, never Ollama's completion order. A new admin-tunable pacing
+delay (`combat_throttle_seconds`, "set combat speed to N" in the
+Development topic, default 2s, live-tunable via `db.game_settings`
+same as `story_mode`) runs after every message this function sends,
+giving that background queue real breathing room.
+
+Also bundled in this deploy:
+- **Gender/pronoun narration fix** (Coffee: "The narration is
+  mistaking gender again") — `_pronoun_line`'s fallback now explicitly
+  instructs the model to use they/them and never guess he/him or
+  she/her, instead of just noting the gender is unknown.
+- **Lesser Spirit summon scaling** (Coffee: "can u make them our HP,
+  Lv, and Damage Bonus/Power Lv?") — the "summon" spell effect's
+  participant now scales hp_max/proficiency_bonus/level and real
+  weapon damage to the caster's own current stats, instead of a fixed
+  9 HP baseline.
+- `REACTION_PROMPT_TIMEOUT_SECONDS` reduced from 30 to 10 (Coffee: "To
+  keep the battle moving fast, make these timers only 10 seconds").
+- Remnant summon flavor narration now fires as a background task
+  instead of blocking the rest of the summon on it.
+
 ## [1.27.294] — Hotfix: victory-XP crash when a summon fought alongside the party
 
 **Real live production crash (2026-08-21).** Coffee: "What happened to
