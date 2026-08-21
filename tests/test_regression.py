@@ -10662,26 +10662,39 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
     def test_dm_getting_started_text_has_no_unescaped_markdown_entities(self):
         """
-        Real live bug (2026-08-10 to 2026-08-11): _DM_GETTING_STARTED_TEXT
-        contained a bare, unescaped underscore in "@PandoraMMO_Bot".
-        Telegram's legacy parse_mode="Markdown" treats a lone '_' as an
-        unclosed italic delimiter, so every real private-chat DM to the
-        bot got a 400 "can't find end of the entity" from sendMessage and
-        silently fell through to the generic unhandled-error reply --
-        confirmed live via bot_live_tmp.log (byte offset 299 landed
-        exactly on that underscore) and reproduced/fixed live against the
-        real Bot API. The existing test above stubs send_message and
-        can't catch this class of bug (it never touches Telegram's real
-        entity parser), so this checks the actual string content instead:
-        every literal '_' must be backslash-escaped, and every run of
-        literal (non-escaped, non-double) '*' must be balanced.
+        Real live bug -- two real incidents, same root cause, 13 days
+        apart. The FIRST fix attempt (v1.27.97, 2026-08-08) added a
+        backslash before the underscore in "@PandoraMMO\\_Bot", believing
+        that escaped it -- but Telegram's LEGACY parse_mode="Markdown"
+        (this whole codebase's only parse_mode) has NO backslash-escape
+        mechanism at all (that's a MarkdownV2-only feature); a `\\_` there
+        is just a literal backslash character immediately followed by a
+        real, still-unclosed italic-opening underscore. That first "fix"
+        never actually worked -- confirmed by finding real
+        "Can't parse entities" crashes in bot_live_tmp.log from
+        2026-08-10, two full days AFTER the v1.27.97 commit, meaning
+        every real private-chat DM silently got only the generic
+        unhandled-error fallback instead of this text, undetected, for
+        13 days until scripts/check_error_log.py (built 2026-08-21
+        specifically to catch this class of silent regression) surfaced
+        it. Real fix this time: the username is wrapped in a code span
+        (`@PandoraMMO_Bot`) instead -- Telegram does not parse entities
+        inside a code span, so the real underscore in the actual
+        username is just literal text there, no escaping possible or
+        needed. This checks the actual string content (a stubbed
+        send_message can't catch this class of bug -- it never touches
+        Telegram's real entity parser): no bare underscore outside a
+        code span, and every run of literal (non-double) '*' outside a
+        code span is balanced.
         """
         text = bot._DM_GETTING_STARTED_TEXT
-        unescaped_underscores = re.findall(r"(?<!\\)_", text)
-        self.assertEqual(unescaped_underscores, [],
-                          "found a bare, unescaped '_' -- Telegram's legacy Markdown parser "
-                          "treats it as an unclosed italic delimiter and rejects the whole message")
-        single_asterisks = re.findall(r"(?<!\*)\*(?!\*)", text)
+        outside_code_spans = re.sub(r"`[^`]*`", "", text)
+        bare_underscores = re.findall(r"_", outside_code_spans)
+        self.assertEqual(bare_underscores, [],
+                          "found a bare '_' outside a code span -- Telegram's legacy Markdown "
+                          "parser has no escape mechanism and treats it as an unclosed italic "
+                          "delimiter, rejecting the whole message")
+        single_asterisks = re.findall(r"(?<!\*)\*(?!\*)", outside_code_spans)
         self.assertEqual(len(single_asterisks) % 2, 0,
                           "odd number of single '*' markers -- Telegram's legacy Markdown parser "
                           "will fail to find a matching close for an unpaired one")

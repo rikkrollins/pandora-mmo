@@ -26175,12 +26175,27 @@ _PUBLIC_WORLD_INVITE_LINK = "t.me/PandoraMMO"
 # "does this group have a pending onboarding question" flag.
 _PENDING_ONBOARDING: dict[int, str] = {}  # chat_id -> "awaiting_setup_choice" | "awaiting_world_choice"
 
+# Real live bug (found 2026-08-21 via scripts/check_error_log.py, a
+# brand-new unhandled-exception scanner -- 4 real occurrences on
+# 2026-08-10 alone): sent with parse_mode="Markdown" (Telegram's
+# LEGACY V1 mode, this whole codebase's only parse_mode), which has no
+# backslash-escape mechanism at all (that's a MarkdownV2-only feature)
+# -- so the old "\_Bot" here was never actually escaped in Telegram's
+# eyes, just a literal backslash followed by a real, entity-opening
+# underscore with no matching close, crashing every private-chat
+# message and every /start with "Can't parse entities: can't find end
+# of the entity" -- silently defeating the entire point of this text
+# (originally built 2026-08-08 specifically because a new user's first
+# DM was going unanswered). Fixed by wrapping the username in a code
+# span (`@PandoraMMO_Bot`) instead -- Telegram doesn't parse
+# entities inside a code span, so the real underscore in the actual
+# username is just literal text there, no escaping needed at all.
 _DM_GETTING_STARTED_TEXT = (
     "👋 Hey, I'm Pandora MMO! I only play inside a Telegram *group*, not here in a private chat "
     "with me — but here's how to get started either way:\n\n"
     f"*Join the main group* — jump straight into our shared Public World with other players: "
     f"{_PUBLIC_WORLD_INVITE_LINK}\n\n"
-    "*Or run your own* — add me (@PandoraMMO\\_Bot) to your own Telegram group instead. The moment "
+    "*Or run your own* — add me (`@PandoraMMO_Bot`) to your own Telegram group instead. The moment "
     "I'm added, I'll message that group and walk an admin through a one-time setup (topics, and "
     "whether that group wants its own Private World or to join the Public World above)."
 )

@@ -2,6 +2,52 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.297] — New self-improvement check: real unhandled-exception scanner; fixes a 13-day-old silent private-chat DM bug it found
+
+**New tool, `scripts/check_error_log.py`:** the existing self-improvement
+monitoring pipeline only ever caught a real crash if a human noticed a
+symptom and reported it (dev_bridge) or it showed up as a misclassified
+player action (topic_activity). Neither one would catch a crash that
+fails *completely* silently to the affected player. This new script
+reads directly from bot.py's own global `_log_unhandled_error` handler's
+log output, grouping every real occurrence by its exact exception text
+(so a burst of identical crashes surfaces once, with a count, not N
+duplicate findings) and reporting the innermost real-code frame
+(`bot.py`/`ai/*.py`/`rules/*.py`/`db.py`) still on the stack -- exactly
+where to start reading. Same cursor-file convention as the other two
+checks; now wired into the recurring self-improvement cron alongside
+them.
+
+**First real catch, immediately:** running it against the live log for
+the first time surfaced a genuine, still-broken bug -- every private
+DM to @PandoraMMO_Bot (including the `/start` message) crashed with
+Telegram's "Can't parse entities" the whole time, silently falling back
+to the generic "something went wrong" reply instead of the real
+getting-started text. Root cause: the getting-started text's real bot
+username contains a literal underscore, and it was "escaped" as
+`\_Bot` -- but Telegram's legacy `parse_mode="Markdown"` (this whole
+codebase's only parse_mode) has **no backslash-escape mechanism at
+all** (that's MarkdownV2-only), so the backslash was just a literal
+character and the underscore still opened an unclosed italic entity.
+This first fix attempt shipped 2026-08-08 (v1.27.97) and never actually
+worked -- confirmed via the log itself, which shows real crashes from
+2026-08-10, two days later. Real fix this time: the username is
+wrapped in a code span (`` `@PandoraMMO_Bot` ``) instead -- Telegram
+does not parse entities inside a code span at all, so the real
+underscore is just literal text there, nothing to escape. The existing
+test for this (`test_dm_getting_started_text_has_no_unescaped_markdown_entities`)
+was checking the wrong invariant (that a backslash was present, not
+that the message would actually parse) -- rewritten to check the real
+rule instead.
+
+Separately confirmed harmless: the other 6 distinct exception groups
+the scanner found across the whole historical log are either known
+Telegram-side transient network blips (NetworkError/RetryAfter/"query
+too old", nothing to fix on our side) or already-fixed historical
+incidents whose real fix commit postdates every logged occurrence
+(the 2026-08-12 formation-targeting overheal crash, v1.27.166; the
+2026-08-21 victory-XP summon crash, v1.27.294, fixed earlier today).
+
 ## [1.27.296] — Tiered spirit-summon scrolls (Lesser / Spirit / Greater / Elder)
 
 **Real request (2026-08-21, Coffee):** "create caps so each scroll can
