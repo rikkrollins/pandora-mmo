@@ -3061,6 +3061,7 @@
         "lantern_of_true_sight",
         "ring_of_the_undertow",
         "scroll_summon_spirit",
+        "scroll_summon_spirit_ii",
         "scroll_revivify",
         "scroll_fireball",
         "weathered_surface_map",
@@ -4792,6 +4793,10 @@
           "weight": 90
         },
         {
+          "item_id": "scroll_summon_spirit_ii",
+          "weight": 10
+        },
+        {
           "item_id": "longsword",
           "weight": 5
         }
@@ -6237,6 +6242,20 @@
       ],
       "vulnerabilities": [
         "poison"
+      ],
+      "stealable_items": [
+        {
+          "item_id": "greater_healing_potion",
+          "weight": 85
+        },
+        {
+          "item_id": "scroll_summon_greater_spirit",
+          "weight": 10
+        },
+        {
+          "item_id": "longbow",
+          "weight": 5
+        }
       ]
     },
     "the_buried_current": {
@@ -6262,6 +6281,20 @@
       ],
       "vulnerabilities": [
         "fire"
+      ],
+      "stealable_items": [
+        {
+          "item_id": "greater_healing_potion",
+          "weight": 85
+        },
+        {
+          "item_id": "scroll_summon_greater_spirit",
+          "weight": 10
+        },
+        {
+          "item_id": "longsword",
+          "weight": 5
+        }
       ]
     },
     "the_spires_grace": {
@@ -6286,6 +6319,20 @@
       ],
       "vulnerabilities": [
         "necrotic"
+      ],
+      "stealable_items": [
+        {
+          "item_id": "greater_healing_potion",
+          "weight": 85
+        },
+        {
+          "item_id": "scroll_summon_elder_spirit",
+          "weight": 10
+        },
+        {
+          "item_id": "greataxe",
+          "weight": 5
+        }
       ]
     },
     "the_archives_keeper": {
@@ -6336,6 +6383,20 @@
       ],
       "vulnerabilities": [
         "psychic"
+      ],
+      "stealable_items": [
+        {
+          "item_id": "greater_healing_potion",
+          "weight": 85
+        },
+        {
+          "item_id": "scroll_summon_elder_spirit",
+          "weight": 10
+        },
+        {
+          "item_id": "longsword",
+          "weight": 5
+        }
       ]
     }
   },

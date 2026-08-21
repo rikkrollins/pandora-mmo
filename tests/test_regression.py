@@ -3581,11 +3581,16 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         Real live request (2026-08-21, Coffee: "can u make them our HP,
         Lv, and Damage Bonus/Power Lv?") -- the spell's old fixed 9 HP/
         no-damage-output stat block is dead weight past the earliest
-        levels. The summoned spirit's HP now matches the caster's own
-        real hp_max, its proficiency bonus derives from the caster's
-        own real level, and its damage_dice/damage_bonus/damage_type
-        reuse the caster's own real weapon (_weapon_for_attacker) --
-        never the fixed placeholder from spells.py.
+        levels. The summoned spirit's HP is reconstructed via
+        rules.leveling.full_hp_max_for at the caster's own real level
+        (the same "what would this character's HP be at level N" tool
+        the 2026-07-26 rebalance built, so it stays consistent with the
+        caster's own real hp_max rather than drifting from it), its
+        proficiency bonus/level derive from the caster's own real
+        level, and its damage_dice/damage_type reuse the caster's own
+        real weapon (_weapon_for_attacker) with an unscaled damage_bonus
+        (real level == this scroll's own cap, so the level-cap ratio is
+        exactly 1.0) -- never the fixed placeholder from spells.py.
         """
         import sessions
         sessions.end_session(-999)
@@ -3593,28 +3598,93 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         make_basic_character(
             caster_id, "SpiritSummoner", char_class="Wizard",
             known_spells=["summon_lesser_spirit"], spell_slots_max=3, current_location="crossroads_tavern",
-            hp_max=180,
         )
-        db.update_character(caster_id, -999, level=8, spell_slots_current=3, hp_current=180)
+        db.update_character(caster_id, -999, level=8, spell_slots_current=3)
         enemy = {"telegram_user_id": -5200910, "name": "SpiritDummy", "dexterity": 10, "strength": 10,
                  "armor_class": 5, "hp_current": 200, "hp_max": 200, "conditions": [],
                  "is_ai": 1, "monster_key": "goblin"}
         caster = db.get_character(caster_id, -999)
         caster["telegram_user_id"] = caster_id
         caster_weapon = bot._weapon_for_attacker(caster)
+        expected_hp_max = bot.full_hp_max_for(caster["char_class"], caster["constitution"], 8, 0)
         session = sessions.start_session(-999, [caster, enemy], {caster_id: "party", -5200910: "enemy"})
         session.turn_order = [caster_id, -5200910]
 
         sink = []
         await bot._do_cast_spell(FakeUpdate(caster_id, "cast summon lesser spirit", sink), "cast summon lesser spirit")
         spirit = next(p for p in session.participants if p.get("name") == "A Lesser Spirit")
-        self.assertEqual(spirit["hp_max"], 180)
-        self.assertEqual(spirit["hp_current"], 180)
+        self.assertEqual(spirit["hp_max"], expected_hp_max)
+        self.assertEqual(spirit["hp_current"], expected_hp_max)
+        self.assertEqual(spirit["level"], 8)
         self.assertEqual(spirit["proficiency_bonus"], bot.proficiency_bonus_for_level(8))
         self.assertEqual(spirit["damage_dice"], caster_weapon["damage_dice"])
         self.assertEqual(spirit["damage_bonus"], caster_weapon.get("damage_bonus", 0))
         # Real spell-authored flavor stats stay untouched -- only HP/level/damage scale.
         self.assertEqual(spirit["armor_class"], spells.SPELLS["summon_lesser_spirit"]["summon_stats"]["armor_class"])
+        sessions.end_session(-999)
+
+    async def test_summon_scroll_soft_caps_the_spirit_below_a_much_higher_caster(self):
+        """
+        Real live follow-up (2026-08-21, Coffee: "create caps so each
+        scroll can only summon up to a certain level... summon the
+        spirit the same level as the player OR the MAX lv it can be
+        spawned at via applicable scroll, whichever is lower") -- a
+        level-90 caster using the Lesser Spirit scroll (cap 25) must
+        get a spirit built at level 25, not their real level, with
+        proportionally lower HP and damage than an uncapped summon
+        would give -- but never higher than what a real level-25
+        caster's own summon would produce, and the scroll must still
+        work (never a hard refusal).
+        """
+        import sessions
+        sessions.end_session(-999)
+        caster_id = 900481
+        make_basic_character(
+            caster_id, "OvergrownSummoner", char_class="Wizard",
+            known_spells=["summon_lesser_spirit"], spell_slots_max=3, current_location="crossroads_tavern",
+        )
+        db.update_character(caster_id, -999, level=90, spell_slots_current=3)
+        enemy = {"telegram_user_id": -5200911, "name": "CapDummy", "dexterity": 10, "strength": 10,
+                 "armor_class": 5, "hp_current": 999999, "hp_max": 999999, "conditions": [],
+                 "is_ai": 1, "monster_key": "goblin"}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        expected_hp_max = bot.full_hp_max_for(caster["char_class"], caster["constitution"], 25, 0)
+        session = sessions.start_session(-999, [caster, enemy], {caster_id: "party", -5200911: "enemy"})
+        session.turn_order = [caster_id, -5200911]
+
+        sink = []
+        await bot._do_cast_spell(FakeUpdate(caster_id, "cast summon lesser spirit", sink), "cast summon lesser spirit")
+        spirit = next(p for p in session.participants if p.get("name") == "A Lesser Spirit")
+        self.assertEqual(spirit["level"], 25, "must cap at the scroll's own max_summon_level, not the caster's real level 90")
+        self.assertEqual(spirit["hp_max"], expected_hp_max)
+        self.assertEqual(spirit["proficiency_bonus"], bot.proficiency_bonus_for_level(25))
+        # A real, working summon -- never a hard refusal for outgrowing the scroll.
+        self.assertGreater(spirit["hp_max"], 0)
+        sessions.end_session(-999)
+
+    async def test_summon_scroll_never_caps_above_the_casters_own_real_level(self):
+        """A level-10 caster using the Elder Spirit scroll (cap 99) gets summoned at their own real level 10, not the scroll's higher ceiling -- the cap is a ceiling, never a floor."""
+        import sessions
+        sessions.end_session(-999)
+        caster_id = 900482
+        make_basic_character(
+            caster_id, "LowLevelElderCaster", char_class="Wizard",
+            known_spells=["summon_elder_spirit"], spell_slots_max=3, current_location="crossroads_tavern",
+        )
+        db.update_character(caster_id, -999, level=10, spell_slots_current=3)
+        enemy = {"telegram_user_id": -5200912, "name": "FloorDummy", "dexterity": 10, "strength": 10,
+                 "armor_class": 5, "hp_current": 200, "hp_max": 200, "conditions": [],
+                 "is_ai": 1, "monster_key": "goblin"}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        session = sessions.start_session(-999, [caster, enemy], {caster_id: "party", -5200912: "enemy"})
+        session.turn_order = [caster_id, -5200912]
+
+        sink = []
+        await bot._do_cast_spell(FakeUpdate(caster_id, "cast summon elder spirit", sink), "cast summon elder spirit")
+        spirit = next(p for p in session.participants if p.get("name") == "An Elder Spirit")
+        self.assertEqual(spirit["level"], 10)
         sessions.end_session(-999)
 
     async def test_eldritch_smite_never_spends_the_warlocks_last_slot(self):
@@ -13477,6 +13547,49 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_buy(FakeUpdate(user_id, "", sink), "buy a healing potion")
         char = db.get_character(user_id, -999)
         self.assertEqual(char["inventory"].get("healing_potion"), 1)
+
+    async def test_rebirth_scaled_price_item_costs_more_for_a_reborn_buyer(self):
+        """
+        Real live request (2026-08-21, Coffee, tiered spirit-summon
+        scrolls: "when we evolve let them evolve too and make them more
+        expensive") -- an item flagged rebirth_scales_price (e.g.
+        scroll_summon_spirit_ii) costs base_price * rebirth_power_
+        multiplier(rebirth_count) for a reborn buyer, via shop.buy_item,
+        while an ordinary (non-flagged) item's price is completely
+        unaffected by rebirth_count.
+        """
+        import shop as shop_module
+        from rules.leveling import rebirth_power_multiplier
+
+        fresh_id = 900525
+        reborn_id = 900526
+        make_basic_character(fresh_id, "FreshBuyer", current_location="crossroads_tavern", gold=100000)
+        make_basic_character(reborn_id, "RebornBuyer", current_location="crossroads_tavern", gold=100000)
+        db.update_character(reborn_id, -999, rebirth_count=3)
+
+        shop_data = {"inventory": ["scroll_summon_spirit_ii"], "owner_npc": None}
+        base_price = items_module.get_item("scroll_summon_spirit_ii")["price"]
+
+        ok, msg = shop_module.buy_item(fresh_id, -999, shop_data, "scroll_summon_spirit_ii", 1)
+        self.assertTrue(ok, msg)
+        fresh_spent = 100000 - db.get_character(fresh_id, -999)["gold"]
+        self.assertEqual(fresh_spent, base_price)
+
+        ok, msg = shop_module.buy_item(reborn_id, -999, shop_data, "scroll_summon_spirit_ii", 1)
+        self.assertTrue(ok, msg)
+        reborn_spent = 100000 - db.get_character(reborn_id, -999)["gold"]
+        self.assertEqual(reborn_spent, int(base_price * rebirth_power_multiplier(3)))
+        self.assertGreater(reborn_spent, fresh_spent)
+
+        # A plain, non-flagged item must be completely unaffected by the
+        # same reborn buyer's rebirth_count.
+        plain_shop = {"inventory": ["torch"], "owner_npc": None}
+        plain_price = items_module.get_item("torch")["price"]
+        gold_before_plain = db.get_character(reborn_id, -999)["gold"]
+        ok, msg = shop_module.buy_item(reborn_id, -999, plain_shop, "torch", 1)
+        self.assertTrue(ok, msg)
+        gold_after_plain = db.get_character(reborn_id, -999)["gold"]
+        self.assertEqual(gold_before_plain - gold_after_plain, plain_price)
 
     async def test_multi_item_give_hands_over_every_named_item(self):
         giver_id, recipient_id = 900523, 900524

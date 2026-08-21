@@ -100,12 +100,53 @@ SPELLS = {
         "name": "Thaumaturgy", "level": 0, "school": "transmutation",
         "effect": "buff", "duration_rounds": 1,
     },
+    # Tiered spirit-summon family (2026-08-21, per Coffee: "create caps
+    # so each scroll can only summon up to a certain level... players
+    # dont have access to the higher/better scroll unless we find,
+    # steal, or buy them at higher level areas"). Each tier's own
+    # max_summon_level is a real, enforced SOFT cap (bot.py's "summon"
+    # effect handler): the summon is built at
+    # min(caster's real level, max_summon_level), never higher, even
+    # for a caster who's long since outgrown this scroll -- so a
+    # Lesser Spirit scroll stays usable (just weaker) instead of
+    # becoming dead weight, matching Coffee's own "same level as the
+    # player OR the max level the scroll allows, whichever is lower."
+    # None of these four are added to any class's known-spell list --
+    # scroll-only by design, so real access genuinely is gated behind
+    # finding/stealing/buying the scroll itself (see items.py).
     "summon_lesser_spirit": {
         "name": "Summon Lesser Spirit", "level": 2, "school": "conjuration",
-        "effect": "summon",
+        "effect": "summon", "max_summon_level": 25,
         "summon_stats": {
             "name": "a lesser spirit",
             "dexterity": 14, "strength": 10, "armor_class": 12,
+            "hp_max": 9, "proficiency_bonus": 2,
+        },
+    },
+    "summon_spirit": {
+        "name": "Summon Spirit", "level": 4, "school": "conjuration",
+        "effect": "summon", "max_summon_level": 50,
+        "summon_stats": {
+            "name": "a spirit",
+            "dexterity": 15, "strength": 13, "armor_class": 14,
+            "hp_max": 9, "proficiency_bonus": 2,
+        },
+    },
+    "summon_greater_spirit": {
+        "name": "Summon Greater Spirit", "level": 6, "school": "conjuration",
+        "effect": "summon", "max_summon_level": 75,
+        "summon_stats": {
+            "name": "a greater spirit",
+            "dexterity": 16, "strength": 15, "armor_class": 16,
+            "hp_max": 9, "proficiency_bonus": 2,
+        },
+    },
+    "summon_elder_spirit": {
+        "name": "Summon Elder Spirit", "level": 8, "school": "conjuration",
+        "effect": "summon", "max_summon_level": 99,
+        "summon_stats": {
+            "name": "an elder spirit",
+            "dexterity": 18, "strength": 18, "armor_class": 18,
             "hp_max": 9, "proficiency_bonus": 2,
         },
     },

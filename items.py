@@ -241,7 +241,34 @@ ITEMS = {
         # a real, functioning item.
         "name": "Scroll of the Lesser Spirit", "type": "scroll", "rarity": "rare",
         "price": 200, "weight": 0.1, "spell": "summon_lesser_spirit",
-        "description": "Calls a lesser spirit to fight at your side for the rest of the battle. The final line of the ritual text is written smaller, like the scribe wasn't sure they should include it.",
+        "rebirth_scales_price": True,
+        "description": "Calls a lesser spirit to fight at your side for the rest of the battle. The final line of the ritual text is written smaller, like the scribe wasn't sure they should include it. The spirit answering this particular ritual is never much stronger than a level-25 fighter, whoever reads it.",
+    },
+    # Tiers II-IV of the same family (2026-08-21, per Coffee: "create
+    # caps so each scroll can only summon up to a certain level... make
+    # it so players dont have access to the higher/better scroll unless
+    # we find, steal, or buy them at higher level areas"). Each one's
+    # own spell (spells.py) carries the real max_summon_level cap this
+    # description promises. rebirth_scales_price (shop.buy_item) means
+    # the gold cost itself climbs with the buyer's own rebirth_count --
+    # the "let them evolve too, more expensive" half of the request.
+    "scroll_summon_spirit_ii": {
+        "name": "Scroll of the Spirit", "type": "scroll", "rarity": "rare",
+        "price": 800, "weight": 0.1, "spell": "summon_spirit",
+        "rebirth_scales_price": True,
+        "description": "A more complete ritual than the lesser version -- the ink is darker, the folds more deliberate. Calls a real spirit ally, capable up to roughly a level-50 fighter's own strength.",
+    },
+    "scroll_summon_greater_spirit": {
+        "name": "Scroll of the Greater Spirit", "type": "scroll", "rarity": "epic",
+        "price": 2500, "weight": 0.1, "spell": "summon_greater_spirit",
+        "rebirth_scales_price": True,
+        "description": "Not something Ossian Vane's shelves ever carried -- this one turned up on something that used to be dangerous. Calls a genuinely powerful spirit ally, capable up to roughly a level-75 fighter's own strength.",
+    },
+    "scroll_summon_elder_spirit": {
+        "name": "Scroll of the Elder Spirit", "type": "scroll", "rarity": "legendary",
+        "price": 6000, "weight": 0.1, "spell": "summon_elder_spirit",
+        "rebirth_scales_price": True,
+        "description": "The ritual text doesn't read like it was written for a mortal hand. Calls an elder spirit ally at nearly the full strength this kind of summoning allows.",
     },
 
     # --- Rings, Amulets, Wondrous Items ---

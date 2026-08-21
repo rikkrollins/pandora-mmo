@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.296] — Tiered spirit-summon scrolls (Lesser / Spirit / Greater / Elder)
+
+**Real request (2026-08-21, Coffee):** "create caps so each scroll can
+only summon up to a certain level... make it so players dont have
+access to the higher/better scroll unless we find, steal, or buy them
+at higher level areas... when we evolve let them evolve too and make
+them more expensive." The single existing "Scroll of the Lesser
+Spirit" is now a real 4-tier family:
+
+| Scroll | Cap | Price | Where |
+|---|---|---|---|
+| Lesser Spirit | level 25 | 200g | Vane's Curiosities |
+| Spirit | level 50 | 800g | Vane's Curiosities, or stolen from The Waiting Shape (lvl 45) |
+| Greater Spirit | level 75 | 2500g | Stolen from The Farthest Span (lvl 60) / The Buried Current (lvl 70) only |
+| Elder Spirit | level 99 | 6000g | Stolen from The Spire's Grace (lvl 80) / The Deepest Record (lvl 100) only |
+
+Each tier's cap is a real **soft** ceiling, not a refusal: "summon the
+spirit the same level as the player OR the MAX level the applicable
+scroll allows, whichever is lower." A high-level caster using a
+low-tier scroll still gets a working summon, built at the scroll's own
+capped level via `rules.leveling.full_hp_max_for`/`power_scale_ratio`
+(the same level-hypothetical reconstruction tools the 2026-07-26
+rebalance already built) -- just weaker than their real power, never
+useless. Using a scroll within your own level is completely unchanged
+from before. All four scrolls also carry a new `rebirth_scales_price`
+flag (`shop.py`) -- gold cost now climbs with the buyer's own
+`rebirth_count` via the same `1.5^rebirth` curve every other
+rebirth-scaled number in this game already follows, the "let them
+evolve too, more expensive" half of the request.
+
 ## [1.27.295] — Active battle flow: non-blocking combat narration + admin-tunable throttle
 
 **Real live request (2026-08-21, Coffee), generalizing the fix already

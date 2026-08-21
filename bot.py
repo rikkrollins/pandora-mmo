@@ -23548,26 +23548,46 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
             # Real live request (2026-08-21, per Coffee: "can u make them
             # our HP, Lv, and Damage Bonus/Power Lv?") -- the spell's own
             # authored AC/dexterity/strength stay exactly as written (real
-            # flavor stats for "a lesser spirit"), but a fixed 9 HP with no
-            # real damage output was dead weight past the earliest levels.
-            # HP and striking power now scale with the CASTER's own real
-            # progression instead: hp_max matches the caster's own hp_max
-            # outright, and damage reuses the caster's own real weapon
-            # (_weapon_for_attacker -- the same function every other
-            # attacker in this game already resolves its own damage_dice/
-            # damage_bonus/damage_type through) via the same natural-attack
-            # mechanism monster damage_bonus already uses (see _weapon_
-            # for_attacker's own damage_dice branch) -- no new combat math,
-            # just real numbers instead of the spell's old fixed baseline.
+            # flavor stats per tier), but HP and striking power scale with
+            # the CASTER's own real progression instead of a fixed
+            # baseline. Follow-up (2026-08-21, per Coffee: "create caps so
+            # each scroll can only summon up to a certain level... summon
+            # the spirit the same level as the player OR the MAX lv it can
+            # be spawned at via applicable scroll, whichever is lower") --
+            # each tier's own max_summon_level (spells.py) is a real SOFT
+            # cap: effective_level never exceeds it even for a caster who
+            # has long since outgrown this scroll, so a low tier stays
+            # usable, just weaker, rather than becoming a hard refusal.
+            # hp_max is reconstructed at effective_level via
+            # full_hp_max_for -- the same "what would this caster's HP be
+            # at level N" tool the 2026-07-26 rebalance already built and
+            # every other level-hypothetical stat in this game reuses,
+            # rather than trusting the caster's real (possibly much
+            # higher) current hp_max outright. damage_bonus keeps the
+            # caster's own real weapon's DIE (the shape of what they're
+            # empowering) but its bonus is scaled down by the same ratio
+            # power_scale_ratio gives between the capped and real level --
+            # exactly 1.0 (no change from the caster's real weapon) when
+            # the scroll's cap is at or above the caster's own real level.
             caster_weapon = _weapon_for_attacker(character)
-            caster_level = character.get("level", 1)
+            real_level = character.get("level", 1)
+            rebirth_count = character.get("rebirth_count", 0)
+            effective_level = min(real_level, spell.get("max_summon_level", MAX_LEVEL))
+            hp_max = full_hp_max_for(
+                character.get("char_class", "Fighter"), character.get("constitution", 10),
+                effective_level, rebirth_count,
+            )
+            real_ratio = power_scale_ratio(real_level, rebirth_count)
+            capped_ratio = power_scale_ratio(effective_level, rebirth_count)
+            cap_factor = min(1.0, capped_ratio / real_ratio) if real_ratio else 1.0
+            damage_bonus = int(caster_weapon.get("damage_bonus", 0) * cap_factor)
             summon = {
                 "telegram_user_id": synthetic_id, "name": stats["name"].title(),
                 "dexterity": stats["dexterity"], "strength": stats["strength"],
-                "armor_class": stats["armor_class"], "hp_current": character["hp_max"],
-                "hp_max": character["hp_max"], "proficiency_bonus": proficiency_bonus_for_level(caster_level),
-                "level": caster_level,
-                "damage_dice": caster_weapon["damage_dice"], "damage_bonus": caster_weapon.get("damage_bonus", 0),
+                "armor_class": stats["armor_class"], "hp_current": hp_max,
+                "hp_max": hp_max, "proficiency_bonus": proficiency_bonus_for_level(effective_level),
+                "level": effective_level,
+                "damage_dice": caster_weapon["damage_dice"], "damage_bonus": damage_bonus,
                 "damage_type": caster_weapon.get("damage_type", "physical"),
                 "is_ai": 1, "xp_reward": 0,
             }

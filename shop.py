@@ -7,6 +7,7 @@ there's no separate in-memory shop state to get out of sync.
 import db
 import items
 from guilds import shop_discount_for_guild
+from rules.leveling import rebirth_power_multiplier
 
 
 def buy_item(telegram_user_id: int, chat_id: int, shop_data: dict, item_id: str, quantity: int = 1) -> tuple[bool, str]:
@@ -33,6 +34,15 @@ def buy_item(telegram_user_id: int, chat_id: int, shop_data: dict, item_id: str,
 
     discount = shop_discount_for_guild(character.get("guild"))
     unit_price = item.get("price", 0)
+    # Real request (2026-08-21, per Coffee, tiered spirit-summon
+    # scrolls: "when we evolve let them evolve too and make them more
+    # expensive") -- only items explicitly flagged rebirth_scales_price
+    # get pricier as the buyer's own rebirth_count climbs, via the same
+    # 1.5^rebirth_count curve (rebirth_power_multiplier) every other
+    # rebirth-scaled number in this game already follows. Everything
+    # else keeps its flat authored price, unchanged.
+    if item.get("rebirth_scales_price"):
+        unit_price = int(unit_price * rebirth_power_multiplier(character.get("rebirth_count", 0)))
     total_price = round(unit_price * quantity * (1 - discount))
 
     if character["gold"] < total_price:
