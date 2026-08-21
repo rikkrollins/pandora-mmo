@@ -3659,7 +3659,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [caster_id, -5200910]
 
         sink = []
-        await bot._do_cast_spell(FakeUpdate(caster_id, "cast summon lesser spirit", sink), "cast summon lesser spirit")
+        from unittest.mock import patch
+        # Casting summon now correctly advances the turn (2026-08-21
+        # fix, see the turn-advance test below) -- mocked here so the
+        # enemy's own resolved AI turn doesn't wait on a real Ollama call.
+        with patch("bot.narrate_action", return_value="The blow lands."), \
+                patch("bot._get_combat_throttle_seconds", return_value=0.0):
+            await bot._do_cast_spell(FakeUpdate(caster_id, "cast summon lesser spirit", sink), "cast summon lesser spirit")
         spirit = next(p for p in session.participants if p.get("name") == "A Lesser Spirit")
         self.assertEqual(spirit["hp_max"], expected_hp_max)
         self.assertEqual(spirit["hp_current"], expected_hp_max)
@@ -3702,7 +3708,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [caster_id, -5200911]
 
         sink = []
-        await bot._do_cast_spell(FakeUpdate(caster_id, "cast summon lesser spirit", sink), "cast summon lesser spirit")
+        from unittest.mock import patch
+        with patch("bot.narrate_action", return_value="The blow lands."), \
+                patch("bot._get_combat_throttle_seconds", return_value=0.0):
+            await bot._do_cast_spell(FakeUpdate(caster_id, "cast summon lesser spirit", sink), "cast summon lesser spirit")
         spirit = next(p for p in session.participants if p.get("name") == "A Lesser Spirit")
         self.assertEqual(spirit["level"], 25, "must cap at the scroll's own max_summon_level, not the caster's real level 90")
         self.assertEqual(spirit["hp_max"], expected_hp_max)
@@ -3730,9 +3739,61 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [caster_id, -5200912]
 
         sink = []
-        await bot._do_cast_spell(FakeUpdate(caster_id, "cast summon elder spirit", sink), "cast summon elder spirit")
+        from unittest.mock import patch
+        with patch("bot.narrate_action", return_value="The blow lands."), \
+                patch("bot._get_combat_throttle_seconds", return_value=0.0):
+            await bot._do_cast_spell(FakeUpdate(caster_id, "cast summon elder spirit", sink), "cast summon elder spirit")
         spirit = next(p for p in session.participants if p.get("name") == "An Elder Spirit")
         self.assertEqual(spirit["level"], 10)
+        sessions.end_session(-999)
+
+    async def test_summon_spirit_scroll_actually_advances_the_turn(self):
+        """
+        Real live bug (2026-08-21, Coffee: "when players use the scrolls
+        of spirits... it jus said my character is about to timeout but i
+        alrady selected my ability"). Unlike the "damage" spell effect
+        branch (which already calls _advance_turn_and_resolve_ai_turns),
+        the "summon" branch never advanced the turn at all -- casting a
+        spirit scroll left the caster's own turn just sitting there
+        until the inactivity timeout eventually caught it, even though
+        they'd genuinely already acted. Confirms the turn actually moves
+        past the caster after a summon: the enemy takes its own turn,
+        and the round comes back around to the caster again.
+        """
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        caster_id = 900483
+        make_basic_character(
+            caster_id, "TurnAdvanceCaster", char_class="Wizard",
+            known_spells=["summon_lesser_spirit"], spell_slots_max=3, current_location="crossroads_tavern",
+        )
+        db.update_character(caster_id, -999, level=5, spell_slots_current=3, hp_current=50, hp_max=50)
+        enemy = {"telegram_user_id": -5200913, "name": "TurnAdvanceDummy", "dexterity": 10, "strength": 10,
+                 "armor_class": 5, "hp_current": 200, "hp_max": 200, "conditions": [],
+                 "is_ai": 1, "monster_key": "goblin"}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        session = sessions.start_session(-999, [caster, enemy], {caster_id: "party", -5200913: "enemy"})
+        session.turn_order = [caster_id, -5200913]
+        session.current_turn_index = 0
+
+        sink = []
+        with patch("bot.narrate_action", return_value="The blow lands."), \
+                patch("bot._get_combat_throttle_seconds", return_value=0.0):
+            await bot._do_cast_spell(FakeUpdate(caster_id, "cast summon lesser spirit", sink), "cast summon lesser spirit")
+
+        live_session = sessions.get_session_by_id(session.session_id)
+        self.assertIsNotNone(live_session, "combat should still be active, not stuck")
+        # The turn genuinely moved: either it's already wrapped back
+        # around to the caster (round 2+), or it's currently someone
+        # else's turn -- either way, NOT still sitting on the caster at
+        # the same round it was cast in (the exact stuck-timeout bug).
+        stuck_on_caster = (
+            live_session.round_number == 1
+            and live_session.current_participant_id() == caster_id
+        )
+        self.assertFalse(stuck_on_caster, "the caster's turn never advanced -- this is the exact reported stuck-timeout bug")
         sessions.end_session(-999)
 
     async def test_eldritch_smite_never_spends_the_warlocks_last_slot(self):

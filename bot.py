@@ -23652,6 +23652,17 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
             session.turn_order.append(synthetic_id)
             session.sides[synthetic_id] = "party"
             session.log_event(f"{character['name']} summons {summon['name']} to fight alongside the party!")
+            # Real live bug (2026-08-21, Coffee: "when players use the
+            # scrolls of spirits... it jus said my character is about to
+            # timeout but i alrady selected my ability") -- unlike every
+            # other spell effect branch that actually ends combat action
+            # ("damage" above), this one never advanced the turn at all,
+            # so the caster's turn just sat there until the inactivity
+            # timeout eventually kicked in. Same real call the "damage"
+            # branch already makes, in the same place (still holding the
+            # session) -- summoning an ally is a real action and should
+            # cost the turn like any other.
+            await _advance_turn_and_resolve_ai_turns(update, session)
 
         await _safe_send(
             update,

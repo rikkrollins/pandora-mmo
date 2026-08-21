@@ -2,6 +2,28 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.301] — Fix: casting a spirit-summon scroll never used up the turn
+
+**Real live bug (2026-08-21, Coffee: "when players use the scrolls of
+'spirits' make sure it uses a turn for them. it jus said my character
+is about to timeout but i alrady selected my ability").** Confirmed by
+direct testing: unlike the "damage" spell effect branch (which already
+calls `_advance_turn_and_resolve_ai_turns` after resolving), the
+"summon" branch in `_do_cast_spell` never advanced the turn at all --
+casting any spirit scroll (Lesser/Spirit/Greater/Elder) left the
+caster's own turn just sitting there, with nothing moving combat
+forward, until the unrelated inactivity-timeout warning eventually
+fired on someone who'd genuinely already acted. Fixed with the exact
+same call the "damage" branch already makes, in the same place (still
+holding the session) -- summoning an ally is a real action and now
+costs the turn like any other. New regression test confirms the turn
+genuinely moves past the caster after a summon.
+
+(Found while fixing this: the "heal", "resurrect", and buff/negate/
+ac_bonus utility spell effects have the same gap -- never confirmed
+whether that's a real live-reported issue too, flagged separately
+rather than freehanding a larger fix.)
+
 ## [1.27.300] — Fix: bare quest-riddle answers ("A Map") never resolved
 
 **Real live bug (2026-08-21, dev-bridge, Coffee: "I don't know how to
