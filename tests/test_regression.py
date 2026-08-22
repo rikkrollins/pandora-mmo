@@ -14461,6 +14461,36 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sheet = bot._format_character_sheet(character)
         self.assertNotIn('""', sheet)
 
+    def test_character_sheet_shows_real_practiced_proficiency_percentages(self):
+        """
+        Real request (2026-08-22, Coffee): "under our character sheets
+        can u show our % to mastery or next lvl on proficiencies?"
+        Covers both a dict-keyed mastery (weapon) and a scalar one
+        (backstab), and confirms the label reads the real spell name
+        for spell_mastery_pct, not the bare spell_id.
+        """
+        user_id = 900513
+        character = make_basic_character(user_id, "Proficient", char_class="Sorcerer", known_spells=["fireball"])
+        db.update_character(
+            user_id, -999,
+            weapon_proficiency_pct={"martial": 62.0}, backstab_proficiency_pct=140.0,
+            spell_mastery_pct={"fireball": 155.0}, element_mastery_pct={"fire": 30.0},
+        )
+        character = db.get_character(user_id, -999)
+        sheet = bot._format_character_sheet(character)
+        self.assertIn("Martial Weapon 62%", sheet)
+        self.assertIn("Backstab 140%", sheet)
+        self.assertIn("Fireball 155%", sheet)
+        self.assertIn("Fire Magic 30%", sheet)
+        self.assertIn("100% = Mastery", sheet)
+
+    def test_character_sheet_omits_proficiency_line_for_a_fresh_character(self):
+        """Same 'only show what's actually been used' discipline as the Skills line -- a fresh character has nothing to show."""
+        user_id = 900514
+        character = make_basic_character(user_id, "FreshCharacter")
+        sheet = bot._format_character_sheet(character)
+        self.assertNotIn("Proficiencies", sheet)
+
     # -- Pronouns (2026-07-17, per Coffee, task #117): "no gender/pronoun
     #    field -- narration guesses pronouns with no real data, can guess
     #    wrong". Same settable-at-creation-or-anytime pattern as

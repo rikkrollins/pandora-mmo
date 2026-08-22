@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.319] — Character sheet shows real proficiency/mastery percentages
+
+**Real request (2026-08-22, Coffee): "under our character sheets can
+u show our % to mastery or next lvl on proficiencies?"**
+
+The character sheet now has a real "🎯 Proficiencies (100% = Mastery)"
+line listing every grindable proficiency/mastery this character has
+actually practiced at least once — weapon/armor proficiency, spell
+mastery (by real spell name, not the bare id), element mastery,
+profession mastery, and the scalar ones (Backstab, Throw, Steal,
+Lockpick, Summoning). Same "only show what's actually been used, never
+a wall of untouched baseline entries" discipline the existing Skills
+line already follows — a fresh character's sheet shows nothing new.
+Percentages past 100% (this game's own uncapped overflow) show the
+real number rather than clamping it. Verified with 2 new tests plus
+collateral checks, all green.
+
 ## [1.27.318] — Diagnostic logging for a real, unconfirmed Remnant-summon cap report
 
 **Real dev-bridge report (2026-08-22, Coffee): summoned the Wrathflame

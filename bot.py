@@ -14936,6 +14936,49 @@ def _format_carried_gear_line(character: dict) -> str:
     return f"Carried but not equipped: {', '.join(sorted(carried_names))}\n"
 
 
+def _format_proficiency_line(character: dict) -> str:
+    """
+    Real request (2026-08-22, per Coffee: "under our character sheets
+    can u show our % to mastery or next lvl on proficiencies?"). Every
+    real grindable proficiency/mastery this character has actually
+    practiced at least once -- same "only show what's actually been
+    used, never a wall of untouched baseline entries" discipline the
+    Skills line right above this already follows (skill_uses > 0
+    only). 100% is real Mastery for every one of these; a % past 100
+    (this game's own uncapped overflow, e.g. Backstab/Spell Mastery)
+    still shows the real number rather than clamping it, matching how
+    every other mastery display in this game (the Magic menu, battle
+    narration) already reads.
+    """
+    entries = []
+    dict_fields = (
+        ("weapon_proficiency_pct", lambda k: f"{k.replace('_', ' ').capitalize()} Weapon"),
+        ("armor_proficiency_pct", lambda k: f"{k.replace('_', ' ').capitalize()} Armor"),
+        ("profession_mastery_pct", lambda k: k.replace("_", " ").capitalize()),
+        ("spell_mastery_pct", lambda k: (spells_module.get_spell(k) or {}).get("name", k)),
+        ("element_mastery_pct", lambda k: f"{k.capitalize()} Magic"),
+    )
+    for field, label_fn in dict_fields:
+        for key, pct in sorted((character.get(field) or {}).items()):
+            if pct > PROFICIENCY_STARTING_PCT:
+                entries.append((label_fn(key), pct))
+    scalar_fields = (
+        ("backstab_proficiency_pct", "Backstab"),
+        ("throw_proficiency_pct", "Throw"),
+        ("steal_proficiency_pct", "Steal"),
+        ("lockpick_proficiency_pct", "Lockpick"),
+        ("summoning_mastery_pct", "Summoning"),
+    )
+    for field, label in scalar_fields:
+        pct = character.get(field, PROFICIENCY_STARTING_PCT)
+        if pct > PROFICIENCY_STARTING_PCT:
+            entries.append((label, pct))
+    if not entries:
+        return ""
+    formatted = ", ".join(f"{label} {pct:.0f}%" for label, pct in entries)
+    return f"🎯 Proficiencies (100% = Mastery): {formatted}\n"
+
+
 def _format_character_sheet(character: dict) -> str:
     """
     Full sheet text for one character -- shared by _do_check_sheet (the
@@ -14965,6 +15008,7 @@ def _format_character_sheet(character: dict) -> str:
         if uses > 0
     ]
     skills_line = f"Skills: {', '.join(skill_lines) if skill_lines else 'None practiced yet'}\n"
+    proficiency_line = _format_proficiency_line(character)
     asi_line = ""
     if character.get("pending_asi_points"):
         asi_line = (
@@ -15123,6 +15167,7 @@ def _format_character_sheet(character: dict) -> str:
         f"{features_block}\n"
         f"{feature_use_line}"
         f"{skills_line}"
+        f"{proficiency_line}"
     ).rstrip("\n")
     location_section = f"📍 Location: {cl.get_location(CAMPAIGN, character['current_location'])['name']}"
     # Per Coffee (2026-07-16): pending ASI points shown last, so a
