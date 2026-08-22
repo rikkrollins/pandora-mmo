@@ -1213,6 +1213,71 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("resolved", combined)
         self.assertEqual(db.get_character(user_id, -999)["gold"], 10 + 80)  # starting gold (10) + the "keep it" reward
 
+    async def test_resolve_quest_choice_confirms_before_the_real_narration_call(self):
+        """
+        Real dev-bridge report (2026-08-22, Coffee, screenshot: "This
+        isnt working. It didn't work when I clicked the buttons
+        either"). Traced via the live DB: the choice HAD actually
+        resolved (completed_at + resolved_choice both correctly set),
+        but the ONLY confirmation used to send AFTER awaiting a real,
+        blocking Ollama call with nothing shown first -- a player
+        seeing no response for over a minute reasonably assumed
+        failure and retried, hitting the correct-but-confusing "no
+        decision to make" message on the second attempt. The
+        deterministic "resolved" + reward line must now be the FIRST
+        message sent, before narrate_branching_choice_outcome is ever
+        awaited -- proven here by making the mocked narration call
+        itself record when it ran relative to the sink's own state.
+        """
+        from unittest.mock import patch
+        use_test_db("tests/tmp/quest_resolve_ordering_test.db")
+        user_id = 900706
+        make_basic_character(user_id, "OrderingTester", current_location="crossroads_tavern")
+        bq = db.create_board_quest(
+            "crossroads_tavern", -999, "quest-ordering-test-day", "A Quiet Request", "A satchel sits unclaimed.", None,
+            "gather_material", "wood", 0, 0, 0,
+        )
+        db.accept_board_quest(bq["board_quest_id"], user_id, -999)
+        db.set_board_quest_branch_data(bq["board_quest_id"], {
+            "setup_narration": "The satchel just sits there, unclaimed.",
+            "choices": {
+                "keep_it": {"label": "keep it and say nothing", "reward_xp": 60, "reward_gold": 80, "outcome_facts": "kept"},
+                "turn_it_in": {"label": "turn it in", "reward_xp": 60, "reward_gold": 10, "outcome_facts": "turned in"},
+            },
+        })
+        sink = []
+        sink_length_when_narration_ran = None
+
+        def fake_narrate(*args, **kwargs):
+            nonlocal sink_length_when_narration_ran
+            sink_length_when_narration_ran = len(sink)
+            return "You pocket it and walk on."
+
+        with patch("bot.narrate_branching_choice_outcome", side_effect=fake_narrate):
+            await bot.quest_menu_callback(
+                FakeCallbackUpdate(user_id, f"quest|resolve|{bq['board_quest_id']}|keep_it", sink), DummyContext(),
+            )
+        # sink[0] is FakeCallbackUpdate's own "<answer:<ack>>" spinner-
+        # dismissal entry (unrelated to narration ordering) -- the real
+        # "resolved" confirmation must appear somewhere in sink BEFORE
+        # the narration mock ran, proving it was sent first.
+        pre_narration_sink = sink[:sink_length_when_narration_ran]
+        resolved_messages = [m for m in pre_narration_sink if "resolved" in m]
+        self.assertTrue(
+            resolved_messages,
+            f"the deterministic 'resolved' confirmation must be sent BEFORE the real narration call, got: {sink}",
+        )
+        self.assertIn("60 XP", resolved_messages[0])
+        # The real DB state must ALSO reflect success immediately (matching
+        # the live report: the choice DID resolve, the player just never saw it).
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM board_quests WHERE board_quest_id = ?", (bq["board_quest_id"],)
+            ).fetchone()
+        after = db._board_quest_row_to_dict(row)
+        self.assertIsNotNone(after["completed_at"])
+        self.assertEqual(after["branch_data"]["resolved_choice"], "keep_it")
+
     async def test_maybe_push_quest_offer_fires_once_not_twice(self):
         from unittest.mock import patch, AsyncMock
         use_test_db("tests/tmp/quest_menu_push_test.db")

@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.309] — Quest-choice resolution confirms before the slow narration call
+
+**Real dev-bridge report (2026-08-22, Coffee, screenshot): "This isnt
+working. It didn't work when I clicked the buttons either."** A
+branching board-quest choice (the Wrathflame Unbound quest,
+board_quest_id 636) looked broken after tapping a resolution button.
+A direct, read-only live-DB check proved the choice HAD actually
+resolved correctly on the first tap (`completed_at` and
+`resolved_choice` both set) — the real bug was pure UX: `_do_resolve_
+quest_choice` sent its only confirmation message AFTER `await`ing a
+real, blocking Ollama narration call
+(`narrate_branching_choice_outcome`, 30-160s+ per this project's
+documented latency), so the player saw nothing for over a minute,
+assumed it had failed, and retried — landing on "you don't have a
+decision to make right now" the second time, since it had already
+resolved. Fixed in `bot.py`: the deterministic "resolved" + rewards
+confirmation now sends immediately after the real DB writes (quest
+completion, XP, gold, faction) go through; the AI flavor narration
+follows as a separate message once it's ready, mirroring the same
+"deterministic fallback now, real narration later" shape `_post_
+narrated` already uses for combat. New test `test_resolve_quest_
+choice_confirms_before_the_real_narration_call` proves the ordering
+via a mock that records message-send order relative to the narration
+call, and confirms the real DB state resolves immediately regardless.
+Found and fixed by an autonomous monitoring pass; verified via 6
+collateral quest-system tests, all green.
+
 ## [1.27.308] — Spell Mastery: AOE magic, tiered leveling, and Remnant-taught spells
 
 **Three linked real requests (2026-08-22, Coffee): "give enemies/bosses

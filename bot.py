@@ -12270,16 +12270,33 @@ async def _do_resolve_quest_choice(update: Update, text: str) -> None:
     if chosen.get("faction_id") and chosen.get("faction_delta"):
         _adjust_faction_standing(telegram_user_id, update.effective_chat.id, chosen["faction_id"], chosen["faction_delta"])
 
+    # Real dev-bridge report (2026-08-22, Coffee, screenshot: "This
+    # isnt working. It didn't work when I clicked the buttons either")
+    # -- traced via the live DB: the choice HAD actually resolved
+    # (completed_at + resolved_choice both correctly set), but this
+    # function used to send its ONLY confirmation message AFTER
+    # awaiting a real, blocking Ollama call (narrate_branching_choice_
+    # outcome, 30-160s+ per CLAUDE.md's documented latency) with
+    # nothing sent before it -- a player with no visible response for
+    # over a minute reasonably assumed it failed and retried, and the
+    # SECOND attempt correctly (but confusingly) found nothing left to
+    # resolve. The real, deterministic confirmation (rewards already
+    # applied above) now sends immediately; the AI flavor narration
+    # follows as a separate message once it's ready, same "fallback
+    # now, real narration later" shape _post_narrated already uses for
+    # combat, just as two sequential real messages here rather than
+    # the full background-queue machinery (this path isn't per-turn
+    # hot enough to need it).
+    await _safe_send(
+        update,
+        f"📜 **{quest['title']} — resolved**\nYou gain {chosen['reward_xp']} XP, {chosen['reward_gold']} gold.",
+    )
     location = cl.get_location(CAMPAIGN, quest["location_id"])
     location_name = location["name"] if location else quest["location_id"]
     outcome_narration = await asyncio.to_thread(
         narrate_branching_choice_outcome, location_name, chosen["label"], chosen["outcome_facts"]
     )
-    await _safe_send(
-        update,
-        f"📜 **{quest['title']} — resolved**\n{outcome_narration}\n\n"
-        f"You gain {chosen['reward_xp']} XP, {chosen['reward_gold']} gold.",
-    )
+    await _safe_send(update, f"📖 {outcome_narration}")
 
 
 _QUEST_KIND_ICON = {"story": "📜", "board": "📋", "curriculum": "🎓"}
