@@ -4296,6 +4296,19 @@ async def _post_narrated(update: Update, character: dict, action_text: str,
                 actor_personality, location_description, include_banter,
             )
             narration_cache.remember(narration_key, flavor, actor_name, defender_name)
+            # Real dev-bridge report (2026-08-22, Coffee: "The battle
+            # is over why is it still giving narrations?"). Ollama is
+            # single-slot and can take 30-160s+ per call; a long fight
+            # can enqueue many of these onto this per-CHAT (not
+            # per-fight) queue, and by the time one is actually ready
+            # the fight it describes may have already ended. The
+            # mechanical result already posted immediately above (this
+            # is purely atmospheric flavor, no game fact rides on it),
+            # so once ITS OWN fight has genuinely ended, delivering it
+            # late would just read as confusing narration for combat
+            # that's already over -- dropped instead of sent stale.
+            if sessions.get_session_by_id(session.session_id) is None:
+                return
             await _safe_send(update, f"📖 {flavor}")
 
         _enqueue_narration(chat_id, _deliver_real_flavor)

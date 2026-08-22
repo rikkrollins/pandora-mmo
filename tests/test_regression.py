@@ -3662,6 +3662,52 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.get_character(user_id, -999)["spell_slots_current"], 1)
         sessions.end_session(-999)
 
+    async def test_stale_narration_dropped_once_its_own_fight_has_ended(self):
+        """
+        Real dev-bridge report (2026-08-22, Coffee, screenshot): "The
+        battle is over why is it still giving narrations?" Ollama is
+        single-slot and can take 30-160s+ per call; _post_narrated's
+        real flavor line is enqueued onto a per-CHAT (not per-fight)
+        queue, so a long fight can leave real flavor lines still
+        pending well after the fight's own mechanical resolution has
+        already finished. The deterministic mechanical result already
+        posted immediately (no game fact rides on the flavor line), so
+        once the fight an action belonged to has genuinely ended by
+        the time its flavor line is ready, it's dropped instead of
+        delivered late and confusing.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        user_id = 900479
+        make_basic_character(user_id, "StaleNarrationTester", current_location="crossroads_tavern")
+        enemy_id = -2_500_052
+        enemy = {
+            "telegram_user_id": enemy_id, "name": "Dummy", "dexterity": 10, "strength": 10,
+            "armor_class": 1, "proficiency_bonus": 2, "hp_current": 200, "hp_max": 200,
+            "is_ai": 1, "monster_key": "goblin",
+        }
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", enemy_id: "enemy"})
+        session.turn_order = [user_id, enemy_id]
+        session.current_turn_index = 0
+
+        sink = []
+        with patch("bot.narrate_action", return_value="A vivid, real flavor line."), \
+             patch("bot.narration_cache.lookup", return_value=None), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            await bot._do_attack(
+                FakeUpdate(user_id, "I attack the dummy", sink), "I attack the dummy", forced_roll=15,
+            )
+            # The real fight ends BEFORE the queued flavor line is
+            # actually delivered -- exactly the real timing gap this
+            # fix closes.
+            sessions.end_session(-999, session)
+            await _drain_narration_queue()
+
+        self.assertFalse(any("A vivid, real flavor line." in m for m in sink), sink)
+
     async def test_weapon_mastery_overflow_scales_the_bonus_strike(self):
         """
         Real live request (2026-08-20, Coffee): "add the extra % to the

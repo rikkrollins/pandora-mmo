@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.320] — Stale post-combat narration no longer delivered
+
+**Real dev-bridge report (2026-08-22, Coffee): "The battle is over
+why is it still giving narrations?" — followed by, once traced:
+"Make sure when the combat is completed any narrations from the
+battle doesn't continue."**
+
+Root cause: `_post_narrated`'s real flavor line is delivered through a
+per-CHAT (not per-fight) background queue, and Ollama is genuinely
+single-slot and can take 30-160s+ per call — a long fight can leave
+several flavor lines still queued well after the fight's own
+mechanical resolution has already finished. The deterministic
+mechanical result always posts immediately (no game fact ever rode on
+the flavor line), so once the specific fight a queued line belonged to
+has genuinely ended by the time Ollama actually finishes it, it's now
+dropped instead of delivered late and confusing. Verified with a real
+test that fails without the fix and passes with it, plus 3 collateral
+tests, all green.
+
 ## [1.27.319] — Character sheet shows real proficiency/mastery percentages
 
 **Real request (2026-08-22, Coffee): "under our character sheets can
