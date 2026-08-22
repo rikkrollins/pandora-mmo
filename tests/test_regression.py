@@ -6182,10 +6182,20 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [user_id, -700841]
         session.current_turn_index = 0
         sink = []
+        # await _drain_narration_queue() (2026-08-22), not a fixed
+        # asyncio.sleep -- the enemy's own real counter-turn (this test
+        # doesn't mock _advance_turn_and_resolve_ai_turns, deliberately,
+        # since testing deferred delivery IS the point) also queues its
+        # own flavor line, and a fixed 0.3s isn't always enough for BOTH
+        # jobs to finish before the `with patch(...)` block exits --
+        # when it isn't, the enemy's own delivery runs later against
+        # the REAL, un-mocked narrate_action, producing real Ollama
+        # text that (harmlessly) doesn't match this assertion at all,
+        # a real ~1/6 flaky-failure rate confirmed via direct sampling.
         with patch("bot.narrate_action", return_value="A distinctly later flavor line."), \
              patch("bot._get_combat_throttle_seconds", return_value=0.0):
             await bot._do_attack(FakeUpdate(user_id, "I attack the dummy", sink), "I attack the dummy", forced_roll=15)
-            await asyncio.sleep(0.3)
+            await _drain_narration_queue()
         combined = " ".join(sink)
         self.assertIn("A distinctly later flavor line.", combined)
         sessions.end_session(-999)
@@ -8946,6 +8956,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         with patch("random.random", return_value=0.0), patch("rules.dice.random.randint", return_value=4), \
              patch("bot.narrate_action", return_value="The shaman conjures fire."):
             await bot._resolve_ai_turns(FakeUpdate(996094, "combat", sink), session)
+            await _drain_narration_queue()
         self.assertFalse(any("SILENCED" in msg for msg in sink), sink)
         sessions.end_session(-999)
 
@@ -8993,6 +9004,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
              patch("bot.narrate_action", return_value="Fire roars."), \
              patch("bot.narrate_boss_decision", return_value="It readies a spell.") as mock_decision:
             await bot._resolve_ai_turns(FakeUpdate(996095, "combat", sink), session)
+            await _drain_narration_queue()
         self.assertEqual(mock_decision.call_args.args[2], "Fireball")
         sessions.end_session(-999)
 
@@ -13609,11 +13621,26 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         import sessions
         user_id = 900522
         character = make_basic_character(user_id, "ExplicitTester", current_location="goblin_warrens")
+        # hp_current/hp_max forced high, written to the DB (not just the
+        # in-memory dict -- _do_start_combat re-fetches the character
+        # itself, so mutating the local `character` dict alone silently
+        # does nothing) -- with the narration hang now fixed
+        # (2026-08-22), 5 real goblin shamans can genuinely resolve a
+        # real counter-turn against a fresh level-1 character's default
+        # 12 HP before this assertion runs, reliably knocking them out
+        # (confirmed via direct sampling: unconscious or outright dead
+        # in 3/6 runs), ending the fight -- and the session along with
+        # it -- before this test even gets to check monster_keys. A
+        # second, real, newly-exposed bug this test never used to reach
+        # while it was still hanging on the narration race instead.
+        db.update_character(user_id, -999, hp_current=999999, hp_max=999999)
+        character["hp_current"] = character["hp_max"] = 999999
         sessions.end_session(-999)
         sink = []
         with patch("bot._get_combat_eligible_party_members", return_value=[character]), \
              patch("bot.narrate_action", return_value="The goblins attack."):
             await bot._do_start_combat(FakeUpdate(user_id, "attack a shaman", sink), monster_key="goblin_shaman", count=5)
+            await _drain_narration_queue()
         session = sessions.get_session(-999)
         monster_keys = {p["monster_key"] for p in session.participants if p.get("is_ai") and p.get("monster_key")}
         self.assertEqual(monster_keys, {"goblin_shaman"})
@@ -13625,11 +13652,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         import sessions
         user_id = 900523
         character = make_basic_character(user_id, "SingleTypeTester", current_location="crossroads_tavern")
+        # hp_current/hp_max forced high, written to the DB -- see the
+        # same note on
+        # test_explicitly_named_monster_stays_single_type_even_at_a_mixed_location above.
+        db.update_character(user_id, -999, hp_current=999999, hp_max=999999)
+        character["hp_current"] = character["hp_max"] = 999999
         sessions.end_session(-999)
         sink = []
         with patch("bot._get_combat_eligible_party_members", return_value=[character]), \
              patch("bot.narrate_action", return_value="The goblins attack."):
             await bot._do_start_combat(FakeUpdate(user_id, "fight", sink), count=4)
+            await _drain_narration_queue()
         session = sessions.get_session(-999)
         monster_keys = {p["monster_key"] for p in session.participants if p.get("is_ai") and p.get("monster_key")}
         self.assertEqual(monster_keys, {"goblin"})
@@ -13647,6 +13680,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot._get_combat_eligible_party_members", return_value=[character]), \
              patch("bot.narrate_action", return_value="The goblins attack."):
             await bot._do_start_combat(FakeUpdate(user_id, "look for a fight", sink), count=20)
+            await _drain_narration_queue()
         combined = " ".join(sink)
         self.assertIn("Goblin", combined)
         self.assertIn("Goblin Shaman", combined)
@@ -18439,6 +18473,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot.requests.get", side_effect=fake_get), \
              patch("bot.narrate_action", return_value="The spider strikes."):
             await bot._resolve_ai_turns(update, session)
+            await _drain_narration_queue(-992)
 
         self.assertEqual(session.round_number, round_before, "test setup assumption broke: round shouldn't have advanced")
         formation_markers = [line for line in sink if line.startswith("<photo:") and "formation" in line.lower()]
@@ -18471,6 +18506,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot.requests.get", side_effect=fake_get), \
              patch("bot.narrate_action", return_value="The echo lashes out."):
             await bot._do_start_echo_trial(FakeUpdate(user_id, "start an echo trial", sink, chat_id=-991), "start an echo trial")
+            await _drain_narration_queue(-991)
 
         formation_markers = [line for line in sink if line.startswith("<photo:") and "formation" in line.lower()]
         self.assertEqual(len(formation_markers), 1, f"battle formation image missing on echo-trial start: {sink}")
@@ -18599,6 +18635,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
              patch("bot.narrate_action", return_value="Kess lunges in."), \
              patch("bot.narrate_boss_decision", new=Mock(return_value="Kess sizes you up.")):
             await bot._maybe_trigger_npc_encounter(update, character, location)
+            await _drain_narration_queue(-990)
 
         formation_markers = [line for line in sink if line.startswith("<photo:") and "formation" in line.lower()]
         self.assertEqual(len(formation_markers), 1, f"battle formation image missing on ambush start: {sink}")

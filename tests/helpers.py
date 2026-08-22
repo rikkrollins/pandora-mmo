@@ -18,6 +18,7 @@ import os
 import config
 import db
 import sessions
+from ai import narration_cache
 
 
 def use_test_db(path: str) -> None:
@@ -40,6 +41,19 @@ def use_test_db(path: str) -> None:
     Redirecting SNAPSHOT_PATH here and resetting the in-memory session
     dicts makes tests that touch sessions.py safe by default, the same
     way config.DB_PATH already protects db.py.
+
+    Also isolates ai.narration_cache's own SQLite file (found live,
+    2026-08-22): CACHE_DB_PATH is a fixed path relative to ai/narration_
+    cache.py's own __file__, entirely independent of config.DB_PATH --
+    NOT redirected by the two fixes above. Any test exercising real
+    combat narration (mocked or not) writes its own mocked flavor text
+    ("A blow lands.", "The goblins attack.", etc.) into this SAME file
+    the live bot reads from for real players' narration, since
+    cache_key() buckets only on {actor class}:{outcome}:{damage tier} --
+    coarse enough that a mocked test string and a real player's next
+    matching hit collide. Confirmed live: 138 of 373 real cache rows
+    were exactly this kind of test-mock contamination before this fix
+    (cleaned up separately, this only prevents new contamination).
     """
     if os.path.exists(path):
         os.remove(path)
@@ -49,6 +63,7 @@ def use_test_db(path: str) -> None:
     config.DB_PATH = path
     db.init_db()
     sessions.SNAPSHOT_PATH = path + ".sessions_snapshot.json"
+    narration_cache.CACHE_DB_PATH = path + ".narration_cache.db"
     # 2026-08-01 multi-fight rewrite: sessions.py replaced the old single
     # _ACTIVE_SESSIONS (chat_id-keyed)/_CHAT_LOCKS pair with a real
     # session_id-based index (_ACTIVE_SESSIONS is now session_id-keyed,
