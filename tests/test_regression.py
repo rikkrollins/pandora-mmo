@@ -7719,6 +7719,16 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                  "damage_dice": "1d4", "damage_bonus": 0, "damage_type": "physical", "proficiency_bonus": 2}
         session_b = sessions.start_session(-999502, [db.get_character(b_player_id, -999502), foe_b],
                                             sides={b_player_id: "party", -700004: "enemy"})
+        # turn_order forced to put the human first -- start_session's own
+        # real (unmocked) initiative roll otherwise decides this, and
+        # _check_combat_timeouts skips a session outright whenever its
+        # CURRENT participant is_ai (nothing to time out on an AI turn).
+        # Left to real chance, DummyB winning initiative silently skips
+        # session B's whole timeout check, making "attack on instinct"
+        # never fire -- a real, pre-existing ~1/3 flaky-failure rate
+        # found via direct repeated sampling, 2026-08-22, unrelated to
+        # this test's own actual subject (lock-contention skipping).
+        session_b.turn_order = [b_player_id, -700004]
         session_b.timeout_escalated.add(b_player_id)
         session_b.turn_started_at[b_player_id] = time.time() - (bot.COMBAT_TIMEOUT_ESCALATED_ACTION_SECONDS + 5)
 
@@ -7734,11 +7744,23 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         # Session A's lock is ONLY ever released by this test (release_a.set()
         # below) -- a true regression back to blocking would hang forever,
-        # not just run long, so a generous timeout still reliably catches
-        # it without false-failing on session B's own legitimate real
-        # narration time (documented 30-160s+ under real Ollama load).
+        # not just run long, so a generous timeout still reliably catches it.
+        # bot.narrate_action mocked, and its own background queue drained
+        # for session B's chat_id afterward (2026-08-22) -- session B's
+        # forced attack (real, since this test is about lock contention,
+        # not narration content) otherwise queues a real background
+        # Ollama narration call that asyncio.run()'s executor shutdown
+        # waits on at teardown, same root cause fixed elsewhere this
+        # session (see _drain_narration_queue's own docstring); this
+        # test used to tolerate that by design (real Ollama latency,
+        # 30-160s+) before the ATB rewrite made _post_narrated return
+        # near-instantly regardless, deferring the real call to exactly
+        # that background queue instead of blocking this coroutine.
+        from unittest.mock import patch
         try:
-            await asyncio.wait_for(bot._check_combat_timeouts(fake_bot), timeout=280)
+            with patch("bot.narrate_action", return_value="The attack lands."):
+                await asyncio.wait_for(bot._check_combat_timeouts(fake_bot), timeout=280)
+                await _drain_narration_queue(session_b.chat_id)
         except asyncio.TimeoutError:
             self.fail(
                 "_check_combat_timeouts blocked on session A's contended lock instead of skipping "
@@ -12884,9 +12906,20 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         db.update_character(user_id, -999, hp_current=100, level=10)
         player = db.get_character(user_id, -999)
         player["telegram_user_id"] = user_id
+        # hp_current=60 (not 25): ENRAGE_HP_THRESHOLD is 0.3 of hp_max=93
+        # (27.9), and this test's own real crit deals a deterministic 35
+        # damage under these mocks -- starting at 25 was already BELOW
+        # that threshold before the hit even landed, so the 35-damage
+        # crit overkilled the boss outright (hp_current clamped to 0,
+        # failing the "still alive" half of the real summon-trigger
+        # check) instead of actually exercising "drops a boss below
+        # threshold" as the test's own name promises. 60-35=25, which
+        # IS below 27.9 and still alive -- the real scenario this test
+        # was always meant to cover (found stale 2026-08-22, likely
+        # predating one of this session's own damage-scaling changes).
         boss = {
             "telegram_user_id": -700805, "name": "Goblin Boss", "dexterity": 8, "strength": 12,
-            "armor_class": 1, "hp_current": 25, "hp_max": 93, "proficiency_bonus": 2,
+            "armor_class": 1, "hp_current": 60, "hp_max": 93, "proficiency_bonus": 2,
             "is_ai": 1, "monster_key": "goblin_boss", "is_boss": True,
             "summons": {"monster_key": "goblin", "count": 2},
         }
@@ -12895,10 +12928,25 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.current_turn_index = 0
         random.seed(2)
         sink = []
+        # bot._advance_turn_and_resolve_ai_turns mocked to a no-op
+        # (2026-08-22) -- now that the boss correctly survives the hit
+        # (see the hp_current fix above), its own AI turn would
+        # otherwise resolve for real and call ai.dm_agent.narrate_boss_
+        # decision (a THIRD real narration path, distinct from
+        # narrate_action/narrate_boss_summon, neither of which cover
+        # it) -- confirmed via a real faulthandler stack trace showing
+        # a background thread stuck mid-request in narrate_boss_
+        # decision. This test only asserts on the summon itself, which
+        # happens synchronously inside _do_attack before any turn
+        # advance, so skipping the boss's own subsequent turn changes
+        # nothing this test actually checks.
+        from unittest.mock import AsyncMock
         with patch("rules.dice.random.randint", return_value=4), \
              patch("bot.narrate_action", return_value="The blow lands."), \
-             patch("bot.narrate_boss_summon", return_value="They arrive."):
+             patch("bot.narrate_boss_summon", return_value="They arrive."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
             await bot._do_attack(FakeUpdate(user_id, "I attack the goblin boss", sink), "I attack the goblin boss", forced_roll=20)
+            await _drain_narration_queue()
         goblin_minions = [p for p in session.participants if p.get("monster_key") == "goblin" and p["telegram_user_id"] != -700805]
         self.assertEqual(len(goblin_minions), 2, sink)
         self.assertTrue(any("reinforcements" in line for line in sink), sink)
@@ -14039,7 +14087,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         template = {"name": "Goblin Boss", "hp_max": 21, "armor_class": 15, "strength": 12,
                     "dexterity": 15, "xp_reward": 200, "is_boss": True, "on_hit_condition": "paralyzed"}
         entry = bot._format_bestiary_entry("goblin_boss", template)
-        self.assertIn("boss", entry)
+        # The 2026-08-14 bestiary redesign marks a boss with a real 👑
+        # emoji tag, not the literal word "boss" (stale assertion found
+        # 2026-08-22 -- bot._format_bestiary_entry's own boss_tag).
+        self.assertIn("👑", entry)
         self.assertIn("paralyzed", entry)
         self.assertIn("HP 21", entry)
 

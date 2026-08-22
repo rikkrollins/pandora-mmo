@@ -4713,15 +4713,23 @@ async def _award_victory_xp(update: Update, session: sessions.Session) -> tuple[
     # return None for it further down; subscripting that None
     # (`after["level"]`) crashed the whole victory-resolution path,
     # silently eating the real party's XP/loot too. Every synthetic
-    # combat-only id in this codebase is a negative number by
-    # convention (see the -2_000_000/-3_000_000/-4_000_000 ranges
-    # documented at each one's own assignment site) while every real
-    # Telegram user id is always positive, so filtering to `pid > 0`
-    # here is the real, permanent fix, not a symptom patch on one
-    # downstream loop.
+    # COMBAT-ONLY id lives in the -2_000_000/-3_000_000/-4_000_000
+    # ranges (documented at each one's own assignment site), while a
+    # PERMANENT AI companion (db.create_ai_companion) gets a real,
+    # persistent characters-table row with a much smaller-magnitude
+    # negative id (counts down from -1000, one per companion ever
+    # created -- reaching -2_000_000 would need two million of them).
+    # `pid > 0` originally shipped here (2026-08-21) accidentally
+    # excluded THOSE too, silently re-breaking the original 2026-08-01
+    # "AI companions get real combat XP" fix this function's own
+    # docstring describes -- found 2026-08-22 via
+    # test_ai_companion_actually_fighting_gets_real_combat_xp going
+    # from a real pass to a real, reproducible 0-XP failure. `pid >
+    # -1_000_000` excludes only the genuinely synthetic combat-only
+    # ranges while keeping every permanent party member, human or AI.
     real_party_ids_all = [
         pid for pid in session.turn_order
-        if session.sides.get(pid) == "party" and pid > 0
+        if session.sides.get(pid) == "party" and pid > -1_000_000
     ]
 
     # Task #170, per Coffee: guild membership now requires proving

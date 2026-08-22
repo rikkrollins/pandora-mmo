@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.306] — AI companions silently stopped earning combat XP again
+
+**Real regression, found via a stale test going from a real pass to a
+real failure (2026-08-22).** `_award_victory_xp`'s own 2026-08-21 fix
+(`pid > 0`, meant only to exclude temporary combat-only summons in the
+-2,000,000/-3,000,000/-4,000,000 id ranges) accidentally also excluded
+every *permanent* AI companion (`db.create_ai_companion`, ids counting
+down from -1000) — silently re-breaking the original 2026-08-01 "AI
+companions get real combat XP" fix this same function's own docstring
+describes. `pid > -1_000_000` now excludes only the genuinely
+synthetic combat-only ranges while keeping every permanent party
+member, human or AI. Confirmed both the original synthetic-summon
+crash-protection test and the AI-companion XP test pass together.
+
 ## [1.27.305] — Remnant-source bosses (side content) can now be fled from
 
 **Real live request (2026-08-21, Coffee: "I thought it is a Remnant?...
