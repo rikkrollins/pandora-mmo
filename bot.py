@@ -14141,40 +14141,22 @@ def _party_keyboard(character: dict) -> InlineKeyboardMarkup | None:
     this exact location not already in this same party -- a real
     player, an AI companion, or a not-yet-recruited NPC all show up the
     same way, since _get_party_members already returns all of them.
+
+    Real request (2026-08-22, per Coffee: "the party menu looks
+    confusing can you split the party formation and party sheets into
+    a seperate push button so its not all cluttered together, have two
+    sub menus under party for Formation and Party Sheets"). Formation
+    row toggles and View Sheet buttons -- previously inlined right
+    here, three extra rows per party member -- now live on their own
+    two screens (_formation_keyboard/_party_sheets_keyboard, reached
+    via the two nav buttons below), leaving this screen to just
+    membership management (bench/unbench, invite, leave, auto-equip).
     """
-    rows = []
+    rows = [
+        [InlineKeyboardButton("🔮 Formation", callback_data="party|showformation")],
+        [InlineKeyboardButton("📄 Party Sheets", callback_data="party|showsheets")],
+    ]
     party_id = character.get("party_id")
-
-    # Formation row toggle (2026-08-01, per Coffee: "allow us to
-    # customize the formations") -- offered for yourself regardless of
-    # party status (unlike bench, which never applies to yourself),
-    # since your own row matters the moment you're in ANY fight, solo
-    # or partied.
-    self_row = character.get("formation_row", "front")
-    if self_row == "back":
-        rows.append([InlineKeyboardButton(
-            "🔮 You: Back row (tap for Front)",
-            callback_data=f"party|setrow|{character['telegram_user_id']}|front",
-        )])
-    else:
-        rows.append([InlineKeyboardButton(
-            "🛡️ You: Front row (tap for Back)",
-            callback_data=f"party|setrow|{character['telegram_user_id']}|back",
-        )])
-
-    # Real feature request (2026-08-17, Coffee): "make one menu for the
-    # party and the party sheets like have them under the same push
-    # button and then when they click party sheets instead of showing
-    # all of the party sheets can you show the buttons so that we can
-    # select the play player so we can view their sheet." Merges the
-    # old separate "Party Sheets" top-level menu button (which always
-    # dumped every member's full sheet as a wall of separate messages)
-    # into this same Party screen -- one real "View Sheet" tap per
-    # member instead, reusing the exact _format_character_sheet output
-    # each sheet button always has.
-    rows.append([InlineKeyboardButton(
-        "📄 View Your Sheet", callback_data=f"party|viewsheet|{character['telegram_user_id']}",
-    )])
 
     if party_id:
         # Per Coffee (2026-07-24: "buttons in equip for that?" -- asked
@@ -14204,20 +14186,6 @@ def _party_keyboard(character: dict) -> InlineKeyboardMarkup | None:
                     f"✅ {m['name']} (active — tap to bench)",
                     callback_data=f"party|bench|{m['telegram_user_id']}",
                 )])
-            m_row = m.get("formation_row", "front")
-            if m_row == "back":
-                rows.append([InlineKeyboardButton(
-                    f"🔮 {m['name']}: Back row (tap for Front)",
-                    callback_data=f"party|setrow|{m['telegram_user_id']}|front",
-                )])
-            else:
-                rows.append([InlineKeyboardButton(
-                    f"🛡️ {m['name']}: Front row (tap for Back)",
-                    callback_data=f"party|setrow|{m['telegram_user_id']}|back",
-                )])
-            rows.append([InlineKeyboardButton(
-                f"📄 View {m['name']}'s Sheet", callback_data=f"party|viewsheet|{m['telegram_user_id']}",
-            )])
     elif character.get("pending_party_invite"):
         rows.append([InlineKeyboardButton("✅ Accept Invite", callback_data="party|accept")])
 
@@ -14232,6 +14200,104 @@ def _party_keyboard(character: dict) -> InlineKeyboardMarkup | None:
     return InlineKeyboardMarkup(rows) if rows else None
 
 
+def _formation_keyboard(character: dict) -> InlineKeyboardMarkup:
+    """
+    Front/back row toggles -- split out of the old combined Party
+    screen (2026-08-22, per Coffee) into their own dedicated screen.
+    Same real _do_set_formation_row-backed toggle every button here
+    always used (2026-08-01), just relocated. Offered for yourself
+    regardless of party status, since your own row matters the moment
+    you're in ANY fight, solo or partied.
+    """
+    self_row = character.get("formation_row", "front")
+    if self_row == "back":
+        rows = [[InlineKeyboardButton(
+            "🔮 You: Back row (tap for Front)",
+            callback_data=f"party|setrow|{character['telegram_user_id']}|front",
+        )]]
+    else:
+        rows = [[InlineKeyboardButton(
+            "🛡️ You: Front row (tap for Back)",
+            callback_data=f"party|setrow|{character['telegram_user_id']}|back",
+        )]]
+
+    party_id = character.get("party_id")
+    if party_id:
+        members = [
+            m for m in db.get_party_members_by_id(party_id)
+            if m["telegram_user_id"] != character["telegram_user_id"]
+        ]
+        for m in members:
+            m_row = m.get("formation_row", "front")
+            if m_row == "back":
+                rows.append([InlineKeyboardButton(
+                    f"🔮 {m['name']}: Back row (tap for Front)",
+                    callback_data=f"party|setrow|{m['telegram_user_id']}|front",
+                )])
+            else:
+                rows.append([InlineKeyboardButton(
+                    f"🛡️ {m['name']}: Front row (tap for Back)",
+                    callback_data=f"party|setrow|{m['telegram_user_id']}|back",
+                )])
+    return InlineKeyboardMarkup(rows)
+
+
+def _party_sheets_keyboard(character: dict) -> InlineKeyboardMarkup:
+    """
+    View Sheet buttons -- split out of the old combined Party screen
+    (2026-08-22, per Coffee) into their own dedicated screen. Same real
+    _format_character_sheet output each button always sent (2026-08-17
+    merge), just relocated -- see party_menu_callback's "viewsheet"
+    handler, unchanged.
+    """
+    rows = [[InlineKeyboardButton(
+        "📄 View Your Sheet", callback_data=f"party|viewsheet|{character['telegram_user_id']}",
+    )]]
+    party_id = character.get("party_id")
+    if party_id:
+        members = [
+            m for m in db.get_party_members_by_id(party_id)
+            if m["telegram_user_id"] != character["telegram_user_id"]
+        ]
+        for m in members:
+            rows.append([InlineKeyboardButton(
+                f"📄 View {m['name']}'s Sheet", callback_data=f"party|viewsheet|{m['telegram_user_id']}",
+            )])
+    return InlineKeyboardMarkup(rows)
+
+
+async def _do_show_party_formation(update: Update) -> None:
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    lines = [f"🔮 **Formation** — tap a name to swap its row.\n", f"You: {character.get('formation_row', 'front').capitalize()} row"]
+    party_id = character.get("party_id")
+    if party_id:
+        for m in db.get_party_members_by_id(party_id):
+            if m["telegram_user_id"] == character["telegram_user_id"]:
+                continue
+            lines.append(f"{m['name']}: {m.get('formation_row', 'front').capitalize()} row")
+    await _safe_send(
+        update, "\n".join(lines), reply_markup=_with_menu_button(_formation_keyboard(character)), speak=False,
+    )
+
+
+async def _do_show_party_sheets_menu(update: Update) -> None:
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    await _safe_send(
+        update, "📄 **Party Sheets** — tap a name to view their real sheet.",
+        reply_markup=_with_menu_button(_party_sheets_keyboard(character)), speak=False,
+    )
+
+
 async def party_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles taps on _party_keyboard -- dispatches through the exact same real invite/accept/leave handlers free text already uses."""
     query = update.callback_query
@@ -14244,6 +14310,10 @@ async def party_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         await _do_accept_party_invite(update)
     elif action == "auto_equip":
         await _do_auto_equip_gear(update, "auto equip the party")
+    elif action == "showformation":
+        await _do_show_party_formation(update)
+    elif action == "showsheets":
+        await _do_show_party_sheets_menu(update)
     elif action == "invite" and len(parts) > 2:
         try:
             target_id = int(parts[2])

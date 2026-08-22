@@ -11065,6 +11065,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         can view their sheet." A real tap-per-member picker instead of
         the old always-dump-everyone behavior (still reachable via
         typed "check my party sheets", unchanged).
+
+        Updated 2026-08-22 (Coffee: "split the party formation and
+        party sheets into a seperate push button so its not all
+        cluttered together") -- the per-member View Sheet buttons now
+        live on their own _party_sheets_keyboard screen, reached via a
+        "Party Sheets" nav button on the main Party screen, instead of
+        being inlined directly into _party_keyboard.
         """
         leader_id, member_id = 950661, 950662
         make_basic_character(leader_id, "SheetPickerLeader", current_location="crossroads_tavern")
@@ -11073,7 +11080,16 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         db.update_character(member_id, -999, party_id=party_id)
         leader = db.get_character(leader_id, -999)
 
-        kb = bot._party_keyboard(leader)
+        # Main Party screen: just a nav button to the sheets screen, no
+        # per-member sheet buttons cluttering it directly.
+        main_kb = bot._party_keyboard(leader)
+        main_buttons_by_data = {btn.callback_data: btn.text for row in main_kb.inline_keyboard for btn in row}
+        self.assertIn("party|showsheets", main_buttons_by_data)
+        self.assertNotIn(f"party|viewsheet|{leader_id}", main_buttons_by_data)
+        self.assertNotIn(f"party|viewsheet|{member_id}", main_buttons_by_data)
+
+        # The dedicated Party Sheets screen carries the real per-member picker.
+        kb = bot._party_sheets_keyboard(leader)
         buttons_by_data = {btn.callback_data: btn.text for row in kb.inline_keyboard for btn in row}
         self.assertIn(f"party|viewsheet|{leader_id}", buttons_by_data)
         self.assertIn(f"party|viewsheet|{member_id}", buttons_by_data)
@@ -11084,6 +11100,54 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot.party_menu_callback(FakeCallbackUpdate(leader_id, f"party|viewsheet|{member_id}", sink), DummyContext())
         reply = "\n".join(sink)
         self.assertIn("SheetPickerMember", reply)
+
+    async def test_party_screen_showsheets_button_routes_to_the_real_sheets_screen(self):
+        leader_id = 950663
+        make_basic_character(leader_id, "SheetsNavTester", current_location="crossroads_tavern")
+        sink = []
+        await bot.party_menu_callback(FakeCallbackUpdate(leader_id, "party|showsheets", sink), DummyContext())
+        reply = "\n".join(sink)
+        self.assertIn("Party Sheets", reply)
+
+    async def test_party_screen_showformation_button_routes_to_the_real_formation_screen(self):
+        """
+        Real request (2026-08-22, Coffee): "split the party formation
+        and party sheets into a seperate push button... have two sub
+        menus under party for Formation and Party Sheets."
+        """
+        leader_id, member_id = 950664, 950665
+        make_basic_character(leader_id, "FormationNavTester", current_location="crossroads_tavern")
+        make_basic_character(member_id, "FormationNavMember", current_location="crossroads_tavern")
+        party_id = db.create_party(leader_id, -999)
+        db.update_character(member_id, -999, party_id=party_id)
+        db.update_character(member_id, -999, formation_row="back")
+
+        sink = []
+        await bot.party_menu_callback(FakeCallbackUpdate(leader_id, "party|showformation", sink), DummyContext())
+        reply = "\n".join(sink)
+        self.assertIn("Formation", reply)
+        self.assertIn("FormationNavMember", reply)
+        self.assertIn("Back row", reply)
+
+    def test_party_keyboard_no_longer_inlines_formation_toggles(self):
+        """Main Party screen should route to Formation via a nav button, not inline per-member row toggles."""
+        leader_id, member_id = 950666, 950667
+        make_basic_character(leader_id, "NoInlineFormationLeader", current_location="crossroads_tavern")
+        make_basic_character(member_id, "NoInlineFormationMember", current_location="crossroads_tavern")
+        party_id = db.create_party(leader_id, -999)
+        db.update_character(member_id, -999, party_id=party_id)
+        leader = db.get_character(leader_id, -999)
+
+        kb = bot._party_keyboard(leader)
+        buttons_by_data = {btn.callback_data: btn.text for row in kb.inline_keyboard for btn in row}
+        self.assertIn("party|showformation", buttons_by_data)
+        self.assertNotIn(f"party|setrow|{leader_id}|back", buttons_by_data)
+        self.assertNotIn(f"party|setrow|{member_id}|back", buttons_by_data)
+
+        formation_kb = bot._formation_keyboard(leader)
+        formation_buttons = {btn.callback_data: btn.text for row in formation_kb.inline_keyboard for btn in row}
+        self.assertIn(f"party|setrow|{leader_id}|back", formation_buttons)
+        self.assertIn(f"party|setrow|{member_id}|back", formation_buttons)
 
     def test_battle_menu_shows_more_button_not_a_bare_run_button(self):
         import sessions

@@ -2,6 +2,24 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.312] — Party menu split into Formation and Party Sheets
+
+**Real request (2026-08-22, Coffee): "the party menu looks confusing
+can you split the party formation and party sheets into a seperate
+push button so its not all cluttered together, have two sub menus
+under party for Formation and Party Sheets."**
+
+The main Party screen used to cram three rows per member (bench
+toggle, front/back row toggle, View Sheet) into one list alongside
+invite/leave/auto-equip — genuinely cluttered with more than a couple
+of members. Now it carries just two nav buttons, "🔮 Formation" and
+"📄 Party Sheets", each opening its own dedicated screen with the real
+per-member toggles/sheet buttons that used to be inlined directly.
+Membership management (bench/unbench, invite, leave, auto-equip) stays
+on the main screen. Same real underlying handlers throughout — this is
+purely a layout split, not new mechanics. Verified with 4 new tests
+plus an updated existing test, all green.
+
 ## [1.27.311] — Redundant lower-power spells auto-prune on learn
 
 **Real dev-bridge report (2026-08-22, Coffee, screenshot of the new
