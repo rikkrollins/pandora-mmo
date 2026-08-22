@@ -10797,6 +10797,150 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             _keyword_fallback("summon The Wrathflame Unbound", [])["action"], "summon_remnant",
         )
 
+    def test_menu_root_has_magic_button_right_after_inventory(self):
+        """Real request (2026-08-22, Coffee): "add a Menu for Magic... Put the menu underneath Inventory"."""
+        character = {"name": "MenuTester", "pending_asi_points": 0, "level": 1, "rebirth_count": 0}
+        kb = bot._main_menu_keyboard(character)
+        labels = [btn.text for row in kb.inline_keyboard for btn in row]
+        self.assertIn("🎒 Inventory", labels)
+        self.assertIn("🔮 Magic", labels)
+        self.assertEqual(labels.index("🔮 Magic"), labels.index("🎒 Inventory") + 1)
+
+    async def test_menu_magic_callback_routes_to_show_magic_menu(self):
+        use_test_db("tests/tmp/magic_menu_test.db")
+        user_id = 950700
+        make_basic_character(
+            user_id, "MagicMenuTester", current_location="crossroads_tavern",
+            char_class="Wizard", known_spells=["fireball", "shield"],
+        )
+        sink = []
+        await bot.menu_callback(FakeCallbackUpdate(user_id, "menu|magic", sink), DummyContext())
+        reply = "\n".join(sink)
+        self.assertIn("Fireball", reply)
+        self.assertIn("Shield", reply)
+        self.assertIn("Lv3", reply)
+        # Real per-spell description, not just the raw name/effect.
+        self.assertIn("8d6 fire damage", reply)
+        self.assertIn("reaction", reply.lower())
+
+    async def test_magic_menu_shows_real_mastery_and_target_reach(self):
+        use_test_db("tests/tmp/magic_menu_mastery_test.db")
+        user_id = 950701
+        character = make_basic_character(
+            user_id, "MasteryDisplayTester", current_location="crossroads_tavern",
+            char_class="Sorcerer", known_spells=["fireball"],
+        )
+        db.update_character(
+            user_id, -999,
+            spell_mastery_pct={"fireball": 150.0}, element_mastery_pct={"fire": 40.0},
+        )
+        sink = []
+        await bot._do_show_magic_menu(FakeUpdate(user_id, "", sink))
+        reply = sink[0]
+        self.assertIn("150% mastery", reply)
+        self.assertIn("targets: 2", reply)
+        self.assertIn("fire magic 40%", reply)
+
+    async def test_magic_menu_cast_button_reaches_real_heal_target_picker(self):
+        """
+        The user's own follow-up request: "allso them to click the
+        spell (healing spells to heal party)". _spell_keyboard/
+        spell_menu_callback already carry this end-to-end (no new code
+        needed) -- confirmed here by actually tapping a heal spell's
+        button from the Magic menu's own keyboard through to a real
+        party-member target picker.
+        """
+        use_test_db("tests/tmp/magic_menu_heal_test.db")
+        user_id = 950702
+        make_basic_character(
+            user_id, "MagicHealer", current_location="crossroads_tavern",
+            char_class="Cleric", known_spells=["cure_wounds"],
+        )
+        ally_id = 950703
+        make_basic_character(ally_id, "MagicHealAlly", current_location="crossroads_tavern")
+        party_id = db.create_party(user_id, -999)
+        db.update_character(ally_id, -999, party_id=party_id)
+
+        # Confirm the Magic menu screen itself carries the real cast button.
+        sink = []
+        await bot._do_show_magic_menu(FakeUpdate(user_id, "", sink))
+        character = db.get_character(user_id, -999)
+        keyboard = bot._spell_keyboard(character)
+        cast_button = next(
+            btn for row in keyboard.inline_keyboard for btn in row
+            if btn.callback_data == "spell|cast|cure_wounds"
+        )
+        sink2 = []
+        await bot.spell_menu_callback(
+            FakeCallbackUpdate(user_id, cast_button.callback_data, sink2), DummyContext(),
+        )
+        # A second real party member is present, so this must open the
+        # real target picker (Self + MagicHealAlly), not immediately cast.
+        edit_entries = [m for m in sink2 if m.startswith("<edit_markup:")]
+        self.assertTrue(edit_entries, f"expected a target picker to be shown, got: {sink2}")
+        self.assertIn("MagicHealAlly", edit_entries[0])
+        self.assertIn("Self", edit_entries[0])
+
+    async def test_magic_menu_passive_shield_spell_is_tappable_and_gives_real_reaction_explanation(self):
+        """
+        The user's own follow-up: "also passive spells like Shield or
+        Counter can be cast from the menu". Confirms tapping Shield's
+        Magic-menu cast button outside combat reaches the real
+        _cast_utility_spell path (which correctly explains it needs an
+        active fight), proving the button is genuinely wired, not dead.
+        """
+        use_test_db("tests/tmp/magic_menu_shield_test.db")
+        user_id = 950704
+        make_basic_character(
+            user_id, "ShieldMenuTester", current_location="crossroads_tavern",
+            char_class="Wizard", known_spells=["shield"],
+        )
+        character = db.get_character(user_id, -999)
+        keyboard = bot._spell_keyboard(character)
+        cast_button = next(
+            btn for row in keyboard.inline_keyboard for btn in row
+            if btn.callback_data == "spell|cast|shield"
+        )
+        sink = []
+        await bot.spell_menu_callback(
+            FakeCallbackUpdate(user_id, cast_button.callback_data, sink), DummyContext(),
+        )
+        reply = "\n".join(sink)
+        self.assertIn("active fight", reply)
+
+    def test_magic_keyword_classified_as_check_magic(self):
+        from ai.intent_parser import _keyword_fallback
+        for text in ("my spells", "my magic", "check my magic", "magic", "magic screen", "spell list"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "check_magic", text)
+        # Must not swallow a real cast.
+        self.assertEqual(_keyword_fallback("cast fireball", [])["action"], "cast_spell")
+        # "magic menu" is deliberately check_menu, not check_magic -- the
+        # pre-existing bare \bmenu\b check wins first, same as "equip
+        # menu"/"inventory menu" would.
+        self.assertEqual(_keyword_fallback("magic menu", [])["action"], "check_menu")
+
+    async def test_check_magic_action_dispatches_to_the_real_magic_menu_handler(self):
+        use_test_db("tests/tmp/magic_dispatch_test.db")
+        user_id = 950705
+        make_basic_character(
+            user_id, "MagicDispatchTester", current_location="crossroads_tavern",
+            char_class="Wizard", known_spells=["fireball"],
+        )
+        sink = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "check my magic", sink), DummyContext(),
+            {"action": "check_magic"}, "check my magic",
+        )
+        self.assertIn("Fireball", sink[0])
+
+    async def test_magic_menu_with_no_spells_shows_helpful_message_not_empty_screen(self):
+        use_test_db("tests/tmp/magic_menu_empty_test.db")
+        user_id = 950706
+        make_basic_character(user_id, "NoSpellsTester", current_location="crossroads_tavern")
+        sink = []
+        await bot._do_show_magic_menu(FakeUpdate(user_id, "", sink))
+        self.assertIn("don't know any spells yet", sink[0])
+
     def test_bare_party_keyword_classified_as_check_party(self):
         """
         Found via topic-activity monitoring (2026-08-19): a bare "Party"

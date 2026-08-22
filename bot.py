@@ -14961,6 +14961,129 @@ async def _do_check_inventory(update: Update) -> None:
     )
 
 
+_SPELL_MENU_MECHANIC_NOTES = {
+    # Real per-spell mechanics that don't reduce to a plain damage_dice/
+    # heal_dice read -- same "ground it in what _cast_utility_spell
+    # actually does, never invented flavor" discipline
+    # ai/support_agent.py's own _SPELL_REAL_MECHANIC_OVERRIDES already
+    # follows for these same four cantrips (2026-08-11 grounding fix).
+    "counterspell": "Reaction-only -- automatically negates a monster's spell cast, can't be cast on your own turn.",
+    "shield": f"+{spells_module.SPELLS['shield']['amount']} AC for 1 round -- also auto-triggers as a real reaction against an attack that would've hit.",
+    "guidance": "Gives a real +2 bonus to your own next skill/ability check.",
+    "thaumaturgy": "Gives a real +2 bonus to your own next skill/ability check.",
+    "mage_hand": "Gives a real +2 bonus to your own next skill/ability check.",
+    "prestidigitation": "Gives a real +2 bonus to your own next skill/ability check.",
+    "detect_magic": "Reveals which of your carried items are genuinely magical.",
+    "revivify": "Revives a dead party member.",
+    "spare_the_dying": "Stabilizes an ally at 0 HP so they stop making death saves.",
+    "bless": "Buffs the whole present party for the spell's duration.",
+    "misty_step": "A guaranteed escape from combat.",
+    "dimension_door": "A guaranteed escape from combat.",
+    "longstrider": "A guaranteed escape from combat.",
+    "dispel_magic": "Strips an active buff/condition from a target.",
+}
+
+
+def _spell_menu_description(spell_id: str, spell: dict) -> str:
+    """
+    One real, grounded line per spell for the Magic menu -- built from
+    the spell's own actual data fields (damage_dice/heal_dice/
+    save_ability/amount/duration_rounds) or a hand-written note for the
+    handful of spells whose real mechanic isn't just "roll this dice,"
+    never invented flavor text (same grounding discipline
+    ai/support_agent.py's catalog already follows).
+    """
+    if spell_id in _SPELL_MENU_MECHANIC_NOTES:
+        return _SPELL_MENU_MECHANIC_NOTES[spell_id]
+    effect = spell.get("effect")
+    if effect == "damage":
+        line = f"Deals {spell['damage_dice']} {spell.get('damage_type', '')} damage".replace("  ", " ")
+        if spell.get("save_ability"):
+            line += f" ({spell['save_ability']} save)"
+        return line + "."
+    if effect == "heal":
+        return f"Heals {spell['heal_dice']} HP."
+    if effect == "resurrect":
+        return "Revives a dead party member."
+    if effect == "summon":
+        return "Summons a spirit ally to fight alongside you for the rest of combat."
+    if effect == "ac_bonus":
+        return f"+{spell.get('amount', 0)} AC for {spell.get('duration_rounds', 1)} round(s)."
+    if effect == "negate":
+        return "Negates a hostile effect on a target."
+    if effect == "buff":
+        return f"A real combat buff lasting {spell.get('duration_rounds', 10)} rounds."
+    return "Utility spell."
+
+
+async def _do_show_magic_menu(update: Update) -> None:
+    """
+    Real request (2026-08-22, per Coffee: "can you add a Menu for
+    Magic? Once users get new magic it can be added into there in the
+    menu. Put the menu underneath Inventory" -- then: "show the current
+    lv of the spell and give a brief description of the spell, also
+    allso them to click the spell (healing spells to heal party) and
+    also passive spells like Shield or Counter can be cast from the
+    menu"). A dedicated, always-current view of a character's own real
+    known_spells -- the same cast buttons already exist buried at the
+    bottom of the much longer Character Sheet screen (_spell_keyboard,
+    reused here unchanged -- it already includes EVERY known spell
+    regardless of effect type, and spell_menu_callback's "cast" action
+    already routes any of them through the real _do_cast_spell/
+    _cast_utility_spell pipeline, heal target-picking and Shield/
+    Counterspell's own real reaction rules included, so no new casting
+    logic was needed here), but a freshly Remnant-taught or newly
+    learned spell was easy to miss there. Shows each spell's real
+    level, a grounded one-line description (_spell_menu_description),
+    and its real Spell Mastery %/Element Mastery % and current AOE
+    target reach (_spell_target_count) -- read-only display, never
+    grinds mastery itself (grinding only ever happens on a real cast,
+    via _grind_spell_mastery).
+    """
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    known = character.get("known_spells") or []
+    if not known:
+        await _safe_send(
+            update,
+            "🔮 You don't know any spells yet. Defeating a Remnant, or playing a "
+            "spellcasting class/subclass, can teach you real magic.",
+            reply_markup=_with_menu_button(None), speak=False,
+        )
+        return
+    spell_mastery = character.get("spell_mastery_pct", {})
+    element_mastery = character.get("element_mastery_pct", {})
+    lines = []
+    for spell_id in known:
+        spell = spells_module.get_spell(spell_id)
+        if not spell:
+            continue
+        spell_pct = spell_mastery.get(spell_id, PROFICIENCY_STARTING_PCT)
+        damage_type = spell.get("damage_type")
+        mastery_bits = [f"{spell_pct:.0f}% mastery"]
+        if spell.get("aoe"):
+            count = _spell_target_count(spell_pct)
+            mastery_bits.append(f"targets: {'All' if count is None else count}")
+        if damage_type:
+            element_pct = element_mastery.get(damage_type, PROFICIENCY_STARTING_PCT)
+            mastery_bits.append(f"{damage_type} magic {element_pct:.0f}%")
+        lines.append(
+            f"**{spell['name']}** (Lv{spell['level']}) — {', '.join(mastery_bits)}\n"
+            f"  _{_spell_menu_description(spell_id, spell)}_"
+        )
+    slot_line = ""
+    if character.get("spell_slots_max", 0) > 0:
+        slot_line = f"\n\nSpell slots: {character['spell_slots_current']}/{character['spell_slots_max']}"
+    text = "🔮 **Your Magic**\n\n" + "\n\n".join(lines) + slot_line
+    await _safe_send(
+        update, text, reply_markup=_with_menu_button(_spell_keyboard(character)), speak=False,
+    )
+
+
 def _craft_keyboard(character: dict) -> InlineKeyboardMarkup | None:
     """
     Per Coffee (2026-07-24, right after the new named-professions split:
@@ -22718,6 +22841,7 @@ def _main_menu_keyboard(character: dict) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📖 Story So Far", callback_data="menu|story")],
         [InlineKeyboardButton("📋 Quests", callback_data="menu|quests")],
         [InlineKeyboardButton("🎒 Inventory", callback_data="menu|inventory")],
+        [InlineKeyboardButton("🔮 Magic", callback_data="menu|magic")],
         [InlineKeyboardButton("⚔️ Equip Gear", callback_data="menu|equip")],
         [InlineKeyboardButton("👥 Party", callback_data="menu|party")],
         [InlineKeyboardButton("🛠️ Professions", callback_data="menu|professions")],
@@ -22839,6 +22963,8 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await _do_check_quests(update)
     elif section == "inventory":
         await _do_check_inventory(update)
+    elif section == "magic":
+        await _do_show_magic_menu(update)
     elif section == "equip":
         await _do_show_equip_menu(update)
     elif section == "level":
@@ -25677,7 +25803,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # explicit direction.
     if character and character.get("is_dead"):
         is_status_check = action in (
-            "check_sheet", "check_inventory", "check_party", "check_quests",
+            "check_sheet", "check_inventory", "check_magic", "check_party", "check_quests",
             "show_map", "ask_clue", "list_characters", "switch_character",
             "create_character", "delete_character", "chat",
         )
@@ -25713,7 +25839,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # until Revivify -- never passively healed away by resting/waking.
     if character and character.get("is_inactive") and not character.get("is_dead"):
         is_status_check = action in (
-            "check_sheet", "check_inventory", "check_party", "check_quests",
+            "check_sheet", "check_inventory", "check_magic", "check_party", "check_quests",
             "show_map", "ask_clue", "list_characters", "go_inactive", "rest", "chat",
         )
         explicit_wake = any(
@@ -25893,6 +26019,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_show_waypoints(update)
     elif action == "check_equip_menu":
         await _do_show_equip_menu(update)
+    elif action == "check_magic":
+        await _do_show_magic_menu(update)
     elif action == "check_remnants":
         await _do_check_remnants(update)
     elif action == "buy":

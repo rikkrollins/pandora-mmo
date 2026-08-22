@@ -2,6 +2,37 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.310] — Magic menu
+
+**Real request (2026-08-22, Coffee): "can you add a Menu for Magic ?
+Once users get new magic it can be added into there in the menu. Put
+the menu underneath Inventory" — followed by: "show the current lv of
+the spell and give a brief description of the spell, also allso them
+to click the spell (healing spells to heal party) and also passive
+spells like Shield or Counter can be cast from the menu."**
+
+A new "🔮 Magic" button sits directly under "🎒 Inventory" in the root
+menu (also reachable by free text: "my spells", "my magic", "check my
+magic", bare "magic", "magic screen", "spell list"). Previously the
+only way to see a freshly Remnant-taught or newly learned spell was to
+scroll to the bottom of the much longer Character Sheet screen — this
+gives it a dedicated, always-current home. Each spell shows its real
+level, a grounded one-line description built from the spell's own
+actual data (`_spell_menu_description` — damage dice/heal dice/save
+ability read straight off the spell, plus hand-written real-mechanic
+notes for the handful of spells that don't reduce to a dice roll, e.g.
+Counterspell's reaction-only rule, Shield's real AC bonus, the four
+check-bonus cantrips — same grounding discipline the Support agent's
+own spell catalog already follows, never invented flavor text), and
+its live Spell Mastery %/Element Mastery % plus current AOE target
+reach from last version's Spell Mastery system. Tapping any spell —
+including heal spells (opens the real Self/ally target picker) and
+"passive" ones like Shield/Counterspell — reuses the exact same
+`_spell_keyboard`/`spell_menu_callback` cast pipeline the Character
+Sheet's own spell buttons already use, so no new casting logic was
+needed; only the missing menu entry, keyword routing, and description
+text were.
+
 ## [1.27.309] — Quest-choice resolution confirms before the slow narration call
 
 **Real dev-bridge report (2026-08-22, Coffee, screenshot): "This isnt

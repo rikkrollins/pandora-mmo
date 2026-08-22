@@ -1365,6 +1365,22 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
             and not ("auto" in lowered and "equip" in lowered)):
         return {**base, "action": "check_inventory"}
 
+    # check_magic (2026-08-22, per Coffee: "add a Menu for Magic" --
+    # same shape as check_equip_menu above, a dedicated read-only
+    # listing rather than casting anything). Checked before cast_spell's
+    # own "cast "/"use " triggers above never fire for these phrasings
+    # anyway (no "cast"/"use" verb here), but kept explicit and narrow
+    # ("my spells"/"my magic"/bare "magic") so it can't shadow a real
+    # "cast fireball" or "use eldritch blast". "magic menu" is NOT
+    # listed here on purpose -- the bare \bmenu\b check much earlier in
+    # this function already claims anything containing "menu" as
+    # check_menu (the root menu screen), by deliberate, pre-existing
+    # design (2026-08-16), so that phrasing never reaches this block.
+    if any(w in lowered for w in ["my spells", "my magic", "what spells do i know", "show my spells",
+                                    "check my spells", "check my magic", "view my spells", "spell list"]) \
+            or re.fullmatch(r"magic(\s+screen)?", lowered.strip(" .!?")):
+        return {**base, "action": "check_magic"}
+
     # Confirmed live 2026-07-14 (Coffee): "Who is in my current party?"
     # fell through to plain chat entirely -- "my party" was a required
     # exact substring, but "current" inserted between "my" and "party"
@@ -2396,7 +2412,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "drink_water", "choose_subclass", "start_echo_trial", "check_professions",
                 "talk_party", "use_environment", "throw_weapon",
                 "check_menu", "check_formation", "check_waypoints", "check_equip_menu",
-                "check_remnants", "check_story",
+                "check_remnants", "check_story", "check_magic",
             )
             if parsed["action"] not in valid_actions:
                 return fallback
