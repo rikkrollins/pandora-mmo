@@ -44,6 +44,31 @@ from tests.helpers import (
 )
 
 
+async def _drain_narration_queue(chat_id: int = -999) -> None:
+    """
+    Real fix (2026-08-22): mocking bot.narrate_action around an
+    `await bot._do_attack(...)`-style call is NOT enough on its own --
+    _post_narrated's real flavor line is only ever *enqueued*
+    (_enqueue_narration, bot.py ~27864) for a SEPARATE background
+    asyncio.Task (_chat_narration_worker) to actually pull and execute
+    later; there's no guarantee that worker gets a turn on the event
+    loop before the calling test's own `with patch(...)` block exits
+    and un-mocks narrate_action, so the worker can end up calling the
+    REAL function, hitting real Ollama, and hanging at
+    asyncio.run()'s executor-shutdown wait (confirmed via a real
+    faulthandler stack trace: a background thread stuck in
+    ai/dm_agent.py's own requests.post call). _chat_narration_worker
+    calls queue.task_done() after every item (bot.py ~27861), so
+    queue.join() is a real, reliable way to wait for the worker to
+    finish everything enqueued so far -- call this INSIDE the same
+    `with patch("bot.narrate_action", ...)` block, right after the
+    action, before the block exits.
+    """
+    queue = bot._CHAT_NARRATION_QUEUES.get(chat_id)
+    if queue is not None:
+        await queue.join()
+
+
 class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     """
     No Ollama calls -- safe to run before every deploy. DB is
@@ -3341,12 +3366,22 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # shutdown behavior, not a bug in this test or in production,
         # where the bot's event loop runs continuously and never tears
         # down per-request). Mocking narrate_action avoids the real
-        # 200s Ollama timeout at teardown.
-        from unittest.mock import patch
-        with patch("bot.narrate_action", return_value="A blow lands."):
+        # 200s Ollama timeout at teardown. bot._advance_turn_and_resolve_
+        # ai_turns also mocked (2026-08-22) -- this is_ai goblin dummy
+        # would otherwise take its own real counter-turn, which can
+        # itself queue a real background narration task that
+        # occasionally hasn't finished by the time the narrate_action
+        # mock above goes out of scope, still hanging at teardown
+        # (confirmed real via direct stress-testing, ~1/8 runs).
+        # await _drain_narration_queue() (2026-08-22) -- mocking
+        # narrate_action alone isn't enough; see its own docstring.
+        from unittest.mock import patch, AsyncMock
+        with patch("bot.narrate_action", return_value="A blow lands."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
             await bot._do_attack(
                 FakeUpdate(user_id, "I attack the dummy", sink2), "I attack the dummy", forced_roll=20
             )
+            await _drain_narration_queue()
 
         self.assertLess(enemy["hp_current"], 200)
         self.assertEqual(db.get_character(user_id, -999)["spell_slots_current"], 1)
@@ -3363,7 +3398,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         multiplier as the only variable between the two runs.
         """
         import sessions
-        from unittest.mock import patch
+        from unittest.mock import patch, AsyncMock
         sessions.end_session(-999)
         user_id = 960030
         make_basic_character(user_id, "WeaponOverflowTester", char_class="Fighter", current_location="crossroads_tavern", inventory={"rusty_dagger": 1})
@@ -3388,16 +3423,31 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # the base hit's damage is exactly as deterministic as the mastery
         # bonus roll, isolating the overflow multiplier as the ONLY
         # variable between the two runs.
+        # bot._advance_turn_and_resolve_ai_turns mocked to a no-op --
+        # this is_ai goblin dummy would otherwise take a REAL counter-
+        # attack after each hit (unrelated to what this test measures),
+        # which can (a) drop a fresh level-1 Fighter's ~12 HP to 0,
+        # corrupting the SECOND run's own measurement, and (b) queue its
+        # own real background Ollama narration task that may not finish
+        # executing before bot.narrate_action's own mock scope below
+        # exits, occasionally still hanging at teardown even with that
+        # mock in place (both confirmed real via direct sampling,
+        # 2026-08-22). bot.narrate_action is still mocked too, for the
+        # player's own action narration.
         with patch("bot.roll_percentage_check", return_value=True), \
              patch("bot.roll_damage", return_value={"total": 20}), \
-             patch("rules.combat.roll_damage", return_value={"total": 20}):
+             patch("rules.combat.roll_damage", return_value={"total": 20}), \
+             patch("bot.narrate_action", return_value="A blow lands."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
             enemy_at_100 = run(100.0)
             await bot._do_attack(FakeUpdate(user_id, "attack the dummy", []), "attack the dummy", forced_roll=20)
+            await _drain_narration_queue()
             damage_at_100 = 100000 - enemy_at_100["hp_current"]
             sessions.end_session(-999)
 
             enemy_at_200 = run(200.0)
             await bot._do_attack(FakeUpdate(user_id, "attack the dummy", []), "attack the dummy", forced_roll=20)
+            await _drain_narration_queue()
             damage_at_200 = 100000 - enemy_at_200["hp_current"]
             sessions.end_session(-999)
 
@@ -3465,16 +3515,21 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # the same patch, so mastery_strike_dmg also fires. That's fine:
         # it's identical (deterministic, mocked to 100) in both runs, so
         # it cancels out of the hp_after delta entirely.
+        # bot.narrate_action mocked -- see the same note on
+        # test_weapon_mastery_overflow_scales_the_bonus_strike above.
         with patch("bot.roll_percentage_check", return_value=True), \
              patch("bot.roll_damage", return_value={"total": 100}), \
-             patch("rules.combat.roll_damage", return_value={"total": 100}):
+             patch("rules.combat.roll_damage", return_value={"total": 100}), \
+             patch("bot.narrate_action", return_value="A blow lands."):
             run(100.0)
             await bot._do_attack(FakeUpdate(attacker_id, "attack ArmorOverflowDefender", []), "attack ArmorOverflowDefender", forced_roll=20)
+            await _drain_narration_queue()
             hp_after_100 = db.get_character(defender_id, -999)["hp_current"]
             sessions.end_session(-999)
 
             run(200.0)
             await bot._do_attack(FakeUpdate(attacker_id, "attack ArmorOverflowDefender", []), "attack ArmorOverflowDefender", forced_roll=20)
+            await _drain_narration_queue()
             hp_after_200 = db.get_character(defender_id, -999)["hp_current"]
             sessions.end_session(-999)
 
@@ -3494,7 +3549,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         pct=200 it's 2*2.0=4 -- damage should roughly double.
         """
         import sessions
-        from unittest.mock import patch
+        from unittest.mock import patch, AsyncMock
         sessions.end_session(-999)
         attacker_id = 960034
         make_basic_character(
@@ -3517,16 +3572,23 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             session.current_turn_index = 0
             return enemy
 
+        # bot._advance_turn_and_resolve_ai_turns mocked to a no-op, and
+        # bot.narrate_action mocked -- see the same note on
+        # test_weapon_mastery_overflow_scales_the_bonus_strike above.
         with patch("bot.roll_percentage_check", return_value=True), \
              patch("bot.roll_damage", return_value={"total": 100}), \
-             patch("rules.combat.roll_damage", return_value={"total": 100}):
+             patch("rules.combat.roll_damage", return_value={"total": 100}), \
+             patch("bot.narrate_action", return_value="A blow lands."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
             enemy_at_100 = run(100.0)
             await bot._do_attack(FakeUpdate(attacker_id, "attack the dummy", []), "attack the dummy", forced_roll=20)
+            await _drain_narration_queue()
             damage_at_100 = 1000000 - enemy_at_100["hp_current"]
             sessions.end_session(-999)
 
             enemy_at_200 = run(200.0)
             await bot._do_attack(FakeUpdate(attacker_id, "attack the dummy", []), "attack the dummy", forced_roll=20)
+            await _drain_narration_queue()
             damage_at_200 = 1000000 - enemy_at_200["hp_current"]
             sessions.end_session(-999)
 
@@ -3555,7 +3617,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         own mastery bonus is entirely separate from Backstab's.
         """
         import sessions
-        from unittest.mock import patch
+        from unittest.mock import patch, AsyncMock
         sessions.end_session(-999)
         attacker_id = 960035
         make_basic_character(
@@ -3579,16 +3641,23 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             session.current_turn_index = 0
             return enemy
 
+        # bot._advance_turn_and_resolve_ai_turns mocked to a no-op, and
+        # bot.narrate_action mocked -- see the same note on
+        # test_weapon_mastery_overflow_scales_the_bonus_strike above.
         with patch("bot.roll_percentage_check", return_value=True), \
              patch("bot.roll_damage", return_value={"total": 20}), \
-             patch("rules.combat.roll_damage", return_value={"total": 20}):
+             patch("rules.combat.roll_damage", return_value={"total": 20}), \
+             patch("bot.narrate_action", return_value="The dagger flies true."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
             enemy_at_100 = run(100.0)
             await bot._do_throw_weapon(FakeUpdate(attacker_id, "throw shortsword at the dummy", []), "throw shortsword at the dummy")
+            await _drain_narration_queue()
             damage_at_100 = 1000000 - enemy_at_100["hp_current"]
             sessions.end_session(-999)
 
             enemy_at_200 = run(200.0)
             await bot._do_throw_weapon(FakeUpdate(attacker_id, "throw shortsword at the dummy", []), "throw shortsword at the dummy")
+            await _drain_narration_queue()
             damage_at_200 = 1000000 - enemy_at_200["hp_current"]
             sessions.end_session(-999)
 
@@ -4402,9 +4471,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         sink = []
         # A forced natural 1 should always miss (critical fail). The
-        # dummy still needs a real "strength" score of its own -- after
-        # the player's forced miss, _resolve_ai_turns takes the dummy's
-        # own turn and resolves its unarmed attack back, which needs it.
+        # dummy still needs a real "strength" score of its own in case
+        # its own turn is resolved.
         #
         # narrate_action mocked (2026-08-21) -- real test-infrastructure
         # gap, not a hang in this test itself: the ATB rewrite
@@ -4415,9 +4483,20 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # happens in production, where the bot's own event loop runs
         # continuously). Confirmed via git stash this "hang" pre-dates
         # today's session but is real and reproducible either way.
-        from unittest.mock import patch
-        with patch("bot.narrate_action", return_value="The attack goes wide."):
+        # bot._advance_turn_and_resolve_ai_turns also mocked (2026-08-22)
+        # -- this test's own assertion only checks the enemy's hp stayed
+        # unchanged by the player's own miss, never the outcome of the
+        # dummy's own counter-turn, so skipping it changes nothing this
+        # test actually verifies, while also removing a second real
+        # background-narration race (the dummy's own counter-turn can
+        # itself queue a real Ollama call that doesn't always finish
+        # before the mock above goes out of scope -- confirmed real via
+        # direct stress-testing, ~1/8 runs).
+        from unittest.mock import patch, AsyncMock
+        with patch("bot.narrate_action", return_value="The attack goes wide."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
             await bot._do_attack(FakeUpdate(user_id, "I attack the dummy", sink), "I attack the dummy", forced_roll=1)
+            await _drain_narration_queue()
         self.assertEqual(enemy["hp_current"], 100, "a forced natural 1 should never hit")
         sessions.end_session(-999)
 
@@ -4452,11 +4531,24 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [user_id, enemy_id]
         session.current_turn_index = 0
 
+        # bot.narrate_action mocked -- otherwise this forced hit queues a
+        # real background Ollama narration call that asyncio.run()'s
+        # executor shutdown waits on at teardown (same root cause as
+        # test_attack_forced_roll_determines_hit_or_miss above).
+        # bot._advance_turn_and_resolve_ai_turns also mocked -- neither
+        # assertion below depends on the enemy's own counter-turn, and
+        # skipping it removes a second real background-narration race
+        # (see the same note on test_attack_forced_roll_determines_hit_
+        # or_miss above).
+        from unittest.mock import patch, AsyncMock
         sink = []
-        await bot._do_attack(
-            FakeUpdate(user_id, "Attack spider 4 with silvered dagger", sink),
-            "Attack spider 4 with silvered dagger", forced_roll=20,
-        )
+        with patch("bot.narrate_action", return_value="A blow lands."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            await bot._do_attack(
+                FakeUpdate(user_id, "Attack spider 4 with silvered dagger", sink),
+                "Attack spider 4 with silvered dagger", forced_roll=20,
+            )
+            await _drain_narration_queue()
         live = next(p for p in session.participants if p["telegram_user_id"] == user_id)
         self.assertEqual(live.get("equipped_weapon"), "silvered_dagger")
         self.assertEqual(db.get_character(user_id, -999).get("equipped_weapon"), "silvered_dagger")
@@ -4476,7 +4568,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         player2["telegram_user_id"] = user_id2
         session2 = sessions.start_session(-999, [player2, enemy2], {user_id2: "party", -2_500_055: "enemy"})
         session2.turn_order = [user_id2, -2_500_055]
-        await bot._do_attack(FakeUpdate(user_id2, "I attack the dummy", []), "I attack the dummy", forced_roll=1)
+        with patch("bot.narrate_action", return_value="The attack goes wide."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            await bot._do_attack(FakeUpdate(user_id2, "I attack the dummy", []), "I attack the dummy", forced_roll=1)
+            await _drain_narration_queue()
         self.assertEqual(db.get_character(user_id2, -999).get("equipped_weapon"), equipped_before)
         sessions.end_session(-999)
 
@@ -4525,8 +4620,15 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         live = next(p for p in session.participants if p["telegram_user_id"] == user_id)
         self.assertEqual(live.get("equipped_weapon"), "silvered_dagger")
 
+        # bot.narrate_action and bot._advance_turn_and_resolve_ai_turns
+        # mocked -- see the note on
+        # test_attack_with_a_named_owned_weapon_auto_equips_it above.
+        from unittest.mock import patch, AsyncMock
         sink2 = []
-        await bot._do_attack(FakeUpdate(user_id, "attack spider 5", sink2), "attack spider 5", forced_roll=20)
+        with patch("bot.narrate_action", return_value="A blow lands."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            await bot._do_attack(FakeUpdate(user_id, "attack spider 5", sink2), "attack spider 5", forced_roll=20)
+            await _drain_narration_queue()
         self.assertTrue(any("silvered dagger" in line.lower() for line in sink2), sink2)
         self.assertFalse(any("shortsword" in line.lower() for line in sink2), sink2)
         sessions.end_session(-999)
@@ -4585,8 +4687,15 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session = sessions.start_session(-999, [player, enemy], {user_id: "party", -2_500_060: "enemy"})
         session.turn_order = [user_id, -2_500_060]
 
+        # bot.narrate_action and bot._advance_turn_and_resolve_ai_turns
+        # mocked -- see the note on
+        # test_attack_with_a_named_owned_weapon_auto_equips_it above.
+        from unittest.mock import patch, AsyncMock
         sink = []
-        await bot._do_attack(FakeUpdate(user_id, "I attack the dummy", sink), "I attack the dummy", forced_roll=20)
+        with patch("bot.narrate_action", return_value="A blow lands."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            await bot._do_attack(FakeUpdate(user_id, "I attack the dummy", sink), "I attack the dummy", forced_roll=20)
+            await _drain_narration_queue()
         combined = "\n".join(sink)
         self.assertIn("Backstab", combined)
         # forced_roll=20 is a critical hit -- damage_dice doubles AND the
@@ -4684,11 +4793,18 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [user_id, -2_500_061]
         session.current_turn_index = session.turn_order.index(user_id)
 
+        # bot.narrate_action and bot._advance_turn_and_resolve_ai_turns
+        # mocked -- see the note on
+        # test_attack_with_a_named_owned_weapon_auto_equips_it above.
+        from unittest.mock import patch, AsyncMock
         sink = []
-        await bot._do_throw_weapon(
-            FakeUpdate(user_id, "throw silvered dagger at ThrowDummy", sink),
-            "throw silvered dagger at ThrowDummy",
-        )
+        with patch("bot.narrate_action", return_value="The dagger flies true."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            await bot._do_throw_weapon(
+                FakeUpdate(user_id, "throw silvered dagger at ThrowDummy", sink),
+                "throw silvered dagger at ThrowDummy",
+            )
+            await _drain_narration_queue()
         combined = "\n".join(sink)
         self.assertIn("throws", combined)
         self.assertNotIn("casts", combined)
@@ -4771,12 +4887,20 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # waits for it at teardown -- real asyncio.run() behavior, never
         # happens in production). See the identical fix/comment on
         # test_attack_forced_roll_determines_hit_or_miss above.
-        from unittest.mock import patch
-        with patch("bot.narrate_action", return_value="The dagger flies true."):
+        # bot._advance_turn_and_resolve_ai_turns also mocked (2026-08-22)
+        # -- this test's own assertion only checks the enemy's own hp
+        # dropped from the player's throw, never the outcome of any
+        # counter-turn, so skipping it removes a second real
+        # background-narration race for free (see the same note on
+        # test_attack_forced_roll_determines_hit_or_miss above).
+        from unittest.mock import patch, AsyncMock
+        with patch("bot.narrate_action", return_value="The dagger flies true."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
             await bot._do_throw_weapon(
                 FakeUpdate(user_id, "throw silvered dagger at ImpossibleDodge", []),
                 "throw silvered dagger at ImpossibleDodge",
             )
+            await _drain_narration_queue()
         live_enemy = next((p for p in session.participants if p["telegram_user_id"] == -2_500_062), None)
         after_hp = live_enemy["hp_current"] if live_enemy else 0
         self.assertLess(after_hp, before_hp, "Assassin's Throw must guarantee a hit even against impossible AC")
@@ -4982,15 +5106,42 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session = sessions.start_session(-999, [player, enemy], {user_id: "party", -2_500_065: "enemy"})
         session.turn_order = [user_id, -2_500_065]
 
+        # bot.narrate_action mocked -- see the note on
+        # test_attack_with_a_named_owned_weapon_auto_equips_it above.
+        # bot.roll_percentage_check forced False -- this level-75
+        # Rogue's own SEPARATE weapon-mastery bonus roll (unrelated to
+        # backstab, confirmed real by test_weapon_mastery_overflow_
+        # scales_the_bonus_strike above) was previously left un-mocked
+        # and real/random here, occasionally stacking extra damage onto
+        # the plain crit and pushing it past this test's own assumed
+        # ceiling -- a real, pre-existing flaky-failure confound
+        # (reproduced 2/3 standalone runs, 2026-08-22), unrelated to
+        # backstab itself. Forcing it off isolates the test to exactly
+        # what it's meant to check: the backstab multiplier alone.
+        # bot._advance_turn_and_resolve_ai_turns also mocked -- see the
+        # note on test_attack_with_a_named_owned_weapon_auto_equips_it
+        # above.
+        from unittest.mock import patch, AsyncMock
         sink = []
-        await bot._do_attack(FakeUpdate(user_id, "I attack the dummy", sink), "I attack the dummy", forced_roll=20)
+        with patch("bot.narrate_action", return_value="A blow lands."), \
+             patch("bot.roll_percentage_check", return_value=False), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            await bot._do_attack(FakeUpdate(user_id, "I attack the dummy", sink), "I attack the dummy", forced_roll=20)
+            await _drain_narration_queue()
         combined = "\n".join(sink)
         # Still labeled Backstab (that's automatic for an Assassin's
         # attack), but the x10 multiplier (level 75) must NOT have
-        # applied -- a plain crit on this weak weapon can't plausibly
-        # exceed 30 damage, while a x10 multiplied crit would dwarf it.
+        # applied. No roll_damage mock here, so this is a real dice
+        # roll (doubled for the crit) plus this level-75 character's
+        # own real ability modifier -- confirmed by direct sampling
+        # (2026-08-22) to legitimately land anywhere from the 20s into
+        # the 70s on a genuine x1 hit, so the old "< 40 damage" ceiling
+        # was inside that real noise band and failed ~50% of the time
+        # even with the separate weapon-mastery roll forced off above.
+        # A x10 multiplier would land 10x higher (200s-700s), so 150
+        # leaves wide, real separation from both without being flaky.
         dummy_hp = next(p for p in session.participants if p["telegram_user_id"] == -2_500_065)["hp_current"]
-        self.assertGreater(dummy_hp, 500 - 40, "0% proficiency must fall back to a normal x1 attack, not x10")
+        self.assertGreater(dummy_hp, 500 - 150, "0% proficiency must fall back to a normal x1 attack, not x10")
         sessions.end_session(-999)
         # Grinding still happened despite the failed roll.
         after = db.get_character(user_id, -999)
@@ -10559,9 +10710,15 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session = sessions.start_session(-999, [caster, enemy], {caster_id: "party", -5200915: "enemy"})
         session.turn_order = [caster_id, -5200915]
 
+        # bot.narrate_action mocked -- the caster's own damage-spell cast
+        # narrates through the real background-thread ATB path before
+        # _advance_turn_and_resolve_ai_turns is even reached, so mocking
+        # only that turn-advance call (already in place) wasn't enough.
         sink = []
-        with patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+        with patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()), \
+             patch("bot.narrate_action", return_value="Flames erupt."):
             await bot._do_cast_spell(FakeUpdate(caster_id, "cast fireball", sink, chat_id=-999), "cast fireball")
+            await _drain_narration_queue()
         after = db.get_character(caster_id, -999)
         self.assertEqual(after["spell_slots_current"], 3)  # a real slot WAS spent -- the known spell was used
         self.assertEqual(after["inventory"].get("scroll_fireball", 0), 3)  # scroll untouched
@@ -10585,11 +10742,15 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session = sessions.start_session(-999, [caster, enemy], {caster_id: "party", -5200916: "enemy"})
         session.turn_order = [caster_id, -5200916]
 
+        # bot.narrate_action mocked -- see the note on
+        # test_plain_cast_text_still_prefers_the_known_spell_over_a_carried_scroll above.
         sink = []
-        with patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+        with patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()), \
+             patch("bot.narrate_action", return_value="Flames erupt."):
             await bot._do_cast_spell(
                 FakeUpdate(caster_id, "use scroll of fireball", sink, chat_id=-999), "use scroll of fireball",
             )
+            await _drain_narration_queue()
         after = db.get_character(caster_id, -999)
         self.assertEqual(after["spell_slots_current"], 4)  # untouched -- the SCROLL was used
         self.assertEqual(after["inventory"].get("scroll_fireball", 0), 2)  # scroll consumed
@@ -13773,13 +13934,31 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 raise RuntimeError("simulated transient DB failure")
             return real_sync(char)
 
-        with patch("bot._sync_player_to_db", side_effect=flaky_sync):
+        # bot.narrate_action mocked -- these two real (unforced-roll)
+        # attacks would otherwise each queue a real background Ollama
+        # narration call that asyncio.run()'s executor shutdown waits
+        # on at teardown (same root cause as
+        # test_attack_forced_roll_determines_hit_or_miss elsewhere).
+        # bot._advance_turn_and_resolve_ai_turns also mocked -- the
+        # assertion only ever counts "has 2 attacks" lines (the
+        # player's own multiattack announcement), never anything from
+        # the goblin's own counter-turn, so skipping it removes a
+        # second real background-narration race for free (see the same
+        # note on test_attack_forced_roll_determines_hit_or_miss).
+        from unittest.mock import AsyncMock
+        with patch("bot._sync_player_to_db", side_effect=flaky_sync), \
+             patch("bot.narrate_action", return_value="A blow lands."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
             with self.assertRaises(RuntimeError):
                 await bot._do_attack(update, "I attack")
+            await _drain_narration_queue()
 
         self.assertEqual(sum(1 for line in sink if "has 2 attacks" in line), 1)
 
-        await bot._do_attack(update, "I attack")
+        with patch("bot.narrate_action", return_value="A blow lands."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            await bot._do_attack(update, "I attack")
+            await _drain_narration_queue()
         self.assertEqual(
             sum(1 for line in sink if "has 2 attacks" in line), 1,
             f"multiattack announcement should appear exactly once total across the crash+retry, got: {sink}",
@@ -16883,11 +17062,21 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session = sessions.start_session(-999, [caster, goblin], {caster_id: "party", -5200900: "enemy"})
         session.turn_order = [caster_id, -5200900]
 
+        # bot.narrate_action and bot._advance_turn_and_resolve_ai_turns
+        # mocked -- a real damage-spell cast otherwise queues a real
+        # background Ollama narration call (from either the caster's
+        # own action or the goblin's own counter-turn) that
+        # asyncio.run()'s executor shutdown waits on at teardown; the
+        # assertions below only check the caster's own state.
+        from unittest.mock import patch, AsyncMock
         sink = []
-        await bot._do_cast_spell(
-            FakeUpdate(caster_id, "Attack the goblin with fire ball", sink),
-            "Attack the goblin with fire ball",
-        )
+        with patch("bot.narrate_action", return_value="Flames erupt."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            await bot._do_cast_spell(
+                FakeUpdate(caster_id, "Attack the goblin with fire ball", sink),
+                "Attack the goblin with fire ball",
+            )
+            await _drain_narration_queue()
         after = db.get_character(caster_id, -999)
         self.assertEqual(after["spell_slots_current"], 2)
         self.assertTrue(any("Fireball" in m for m in sink))
