@@ -2540,6 +2540,22 @@ def _format_combat_result(flavor_text: str, result: dict, actor_label: str, defe
         lines.append(f"💀 **NATURAL 1 — FUMBLE!** 💀{roll_suffix}")
     elif result.get("hit", True):
         lines.append(f"✨ **Success!** ✨{roll_suffix}")
+    elif result.get("shield_reaction_triggered"):
+        # Real dev-bridge report (2026-08-22, Coffee, screenshot: "Why
+        # did it take my spell slots?! Why did it cast Shield?"):
+        # Shield only ever auto-triggers on a roll that WOULD have hit
+        # (rules/combat.py's own trigger condition requires attack_
+        # result["hit"] to already be True before Shield retroactively
+        # flips it to a miss), so the mechanic itself was firing
+        # correctly -- but by the time this line is built, "hit" is
+        # already the POST-shield value, so it read as a plain natural
+        # miss with zero indication Shield was ever relevant. A
+        # separate _announce_reaction follow-up message DOES explain
+        # the slot spend, but nothing here connected the two -- a
+        # player had to mentally correlate a "Misses!" line with a
+        # LATER, separately-worded message to understand why a slot
+        # was gone. Now self-explanatory in the one line that matters.
+        lines.append(f"🛡️ **Would have hit — deflected by Shield!**{roll_suffix}")
     else:
         lines.append(f"💨 **The attack goes wide...**{roll_suffix}")
 
@@ -2568,6 +2584,8 @@ def _format_combat_result(flavor_text: str, result: dict, actor_label: str, defe
     type_suffix = f" **{damage_type}**" if damage_type and damage_type != "physical" else ""
     if result.get("hit", True):
         lines.append(f"- 🗡️ **{actor_label}** {resolved_verb} **{defender_label}**{weapon_suffix} → **Hits for {dmg}{type_suffix} damage!**")
+    elif result.get("shield_reaction_triggered"):
+        lines.append(f"- 🗡️ **{actor_label}** {resolved_verb} **{defender_label}**{weapon_suffix} → **Deflected by Shield!**")
     else:
         lines.append(f"- 🗡️ **{actor_label}** {resolved_verb} **{defender_label}**{weapon_suffix} → **Misses!**")
 

@@ -4838,6 +4838,36 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("performs **Backstab (x8)** at", message)
         self.assertNotIn("casts", message)
 
+    def test_shield_deflected_attack_reads_differently_from_a_plain_miss(self):
+        """
+        Real dev-bridge report (2026-08-22, Coffee, screenshot: "Why
+        did it take my spell slots?! Why did it cast Shield?"). Shield
+        only ever auto-triggers on a roll that WOULD have hit
+        (rules/combat.py's own gate requires hit=True before flipping
+        it to a miss), so the mechanic was firing correctly -- but by
+        the time _format_combat_result builds its text, "hit" is
+        already the post-Shield value, so a Shield-saved attack read
+        exactly like an ordinary natural miss, with the ONLY
+        explanation living in a separate, later _announce_reaction
+        message a player had to mentally correlate back to this one.
+        Pure-function check against _format_combat_result directly, no
+        Ollama call -- same deterministic line the live bug lived in.
+        """
+        plain_miss = bot._format_combat_result(
+            "", {"hit": False, "damage_dealt": 0, "critical_hit": False, "critical_fail": False},
+            actor_label="Wrathflame Unbound", defender_label="Pan",
+        )
+        shield_deflected = bot._format_combat_result(
+            "", {"hit": False, "damage_dealt": 0, "critical_hit": False, "critical_fail": False,
+                 "shield_reaction_triggered": True},
+            actor_label="Wrathflame Unbound", defender_label="Pan",
+        )
+        self.assertIn("Misses", plain_miss)
+        self.assertNotIn("Shield", plain_miss)
+        self.assertNotIn("Misses", shield_deflected)
+        self.assertIn("Shield", shield_deflected)
+        self.assertNotEqual(plain_miss, shield_deflected)
+
     def test_throw_damage_now_adds_the_weapons_own_ability_modifier(self):
         """
         Real live bug (2026-08-10, Coffee, dev-bridge screenshot): a

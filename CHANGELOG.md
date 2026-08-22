@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.307] — A Shield-deflected attack no longer reads exactly like a plain miss
+
+**Real dev-bridge report (2026-08-22, Coffee, screenshot mid-fight
+against The Wrathflame Unbound): "Why did it take my spell slots?!
+Why did it cast Shield?"** Traced the mechanic itself: Shield only
+ever auto-triggers on a roll that WOULD have hit
+(`rules/combat.py`'s own gate requires `hit=True` before retroactively
+flipping it to a miss), so it was firing correctly — but
+`_format_combat_result` builds its text from the POST-Shield `hit`
+value, so the attack read as an ordinary natural miss with zero
+indication Shield was ever relevant. The only explanation lived in a
+separate, later `_announce_reaction` message the player had to
+mentally correlate back to the first one. Both the top banner and the
+resolution line now say "Deflected by Shield!" directly, in the same
+message, when `shield_reaction_triggered` is set — no more piecing two
+messages together to understand why a slot is gone.
+
 ## [1.27.306] — AI companions silently stopped earning combat XP again
 
 **Real regression, found via a stale test going from a real pass to a
