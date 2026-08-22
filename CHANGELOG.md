@@ -2,6 +2,52 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.308] — Spell Mastery: AOE magic, tiered leveling, and Remnant-taught spells
+
+**Three linked real requests (2026-08-22, Coffee): "give enemies/bosses
+the ability to hit multiple players with magic type attacks or
+abilities," "let the players level up thier magic, create tiers of
+magic that can get stronger and target multiple enemies, and players
+if its cure or revive type spells," and "find out what Remnants
+Elements or Damage types are and find spells... so when a non magic
+user get the Wrathflame Unbound they get a fire type magic spell...
+if players dont have the spell that the remnant has they can learn it
+by getting the remnant."**
+
+**Spell Mastery** is a new dual-tier grindable proficiency (same
+overflow-past-100% shape as Weapon/Backstab/Throw/Armor/Summoning
+Mastery): every real damage/heal cast grows both this spell's own
+mastery (`spell_mastery_pct`, per spell_id) and a smaller, shared
+per-element mastery (`element_mastery_pct`, per damage_type) that
+helps every spell of that element. Damage/healing scale with a
+combined multiplier (full weight for the spell's own practice, half
+weight for the shared elemental bonus).
+
+**Multi-target reach** unlocks progressively with a spell's own
+mastery tier — 1 target under 100%, 2 at 100%+, 3 at 200%+, every
+living target on the relevant side at 300%+ — for five spells flagged
+`aoe`: Fireball, Lightning Bolt, Ice Storm, Cone of Cold (damage, hits
+the opposing side) and Mass Cure Wounds (heal, hits the caster's own
+side). Every other spell is completely unaffected, always resolving
+against exactly the one chosen target, same as before this system
+existed.
+
+**Monsters and bosses never grind proficiency** (same rule as every
+other mastery type) — any AOE-flagged spell they know simply always
+hits every living target on the opposing/own side the moment they
+cast it, no gating needed, giving enemies a real reason to fear (or
+players a real reason to want) an AOE-capable caster on the other side
+of the fight.
+
+**Binding a Remnant** (defeating one of the 12 real Unbound) now also
+checks whether the binder already knows a real spell matching that
+Remnant's own element — if not, it teaches them the strongest real
+spell of that element (Fireball for fire, Lightning Bolt for
+lightning, Cone of Cold for cold, etc.), and grants a real spell slot
+if they had zero (any non-caster class). No new UI needed: the battle
+menu's "✨ Skills" section and the whole cast flow were already 100%
+class-agnostic, driven purely by `known_spells`/`spell_slots_current`.
+
 ## [1.27.307] — A Shield-deflected attack no longer reads exactly like a plain miss
 
 **Real dev-bridge report (2026-08-22, Coffee, screenshot mid-fight

@@ -55,10 +55,16 @@ SPELLS = {
     "fireball": {
         "name": "Fireball", "level": 3, "school": "evocation",
         "effect": "damage", "damage_dice": "8d6", "save_ability": "dexterity", "damage_type": "fire",
+        # Spell Mastery multi-target (2026-08-22) -- real 5E Fireball
+        # always hits everyone in the blast; here it's gated behind the
+        # caster's own per-spell mastery instead (see bot._spell_target_
+        # count), starting single-target like every other spell.
+        "aoe": True,
     },
     "lightning_bolt": {
         "name": "Lightning Bolt", "level": 3, "school": "evocation",
         "effect": "damage", "damage_dice": "8d6", "save_ability": "dexterity", "damage_type": "lightning",
+        "aoe": True,
     },
     "counterspell": {
         "name": "Counterspell", "level": 3, "school": "abjuration",
@@ -297,6 +303,7 @@ SPELLS = {
     "ice_storm": {
         "name": "Ice Storm", "level": 4, "school": "evocation",
         "effect": "damage", "damage_dice": "6d8", "save_ability": "dexterity", "damage_type": "cold",
+        "aoe": True,
     },
     "polymorph": {
         "name": "Polymorph", "level": 4, "school": "transmutation",
@@ -321,10 +328,11 @@ SPELLS = {
     "cone_of_cold": {
         "name": "Cone of Cold", "level": 5, "school": "evocation",
         "effect": "damage", "damage_dice": "8d8", "save_ability": "dexterity", "damage_type": "cold",
+        "aoe": True,
     },
     "mass_cure_wounds": {
         "name": "Mass Cure Wounds", "level": 5, "school": "evocation",
-        "effect": "heal", "heal_dice": "3d8+5",
+        "effect": "heal", "heal_dice": "3d8+5", "aoe": True,
     },
     "flame_strike": {
         "name": "Flame Strike", "level": 5, "school": "evocation",

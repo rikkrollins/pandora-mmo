@@ -350,6 +350,22 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
         return {**base, "action": "leaderboard"}
     if any(w in lowered for w in ["my achievements", "my titles", "unlocked achievements"]):
         return {**base, "action": "check_achievements"}
+    # Real live gap found via topic-activity monitoring (2026-08-22,
+    # Coffee: "What is the story so far") -- bot._do_show_story_so_far
+    # is a real, fully-implemented recap feature (real AI narration
+    # grounded in completed_arcs/current_arc_pair/completed_quests,
+    # menu_callback's own "story" section), but it had NO real action
+    # in valid_actions at all -- reachable only by tapping the menu
+    # button, never by typing it, directly contradicting this game's
+    # own "everything happens in plain English" design (CLAUDE.md).
+    # "story so far"/"recap" are exactly as distinctive as bestiary/
+    # leaderboard just above -- no other real meaning in this game's
+    # vocabulary -- so placed at this same early position for the same
+    # reason (avoids the generic "view/check/read" examine-verb match
+    # shadowing it further down, the same bug already fixed once for
+    # bestiary/leaderboard themselves, per the comment above).
+    if any(w in lowered for w in ["story so far", "recap my story", "story recap", "whats the story", "what's the story"]):
+        return {**base, "action": "check_story"}
     # Real live instruction (2026-08-20, Coffee, after the visual map's
     # grid/fog-of-war rewrite): "when we say show the map, view the
     # map, or open the map, thats the map we want to see" -- ordinary
@@ -2380,7 +2396,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "drink_water", "choose_subclass", "start_echo_trial", "check_professions",
                 "talk_party", "use_environment", "throw_weapon",
                 "check_menu", "check_formation", "check_waypoints", "check_equip_menu",
-                "check_remnants",
+                "check_remnants", "check_story",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

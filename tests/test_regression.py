@@ -3665,6 +3665,288 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # changes: 20*1.0=20 at pct=100, 20*2.0=40 at pct=200 -- exact +20.
         self.assertEqual(damage_at_200 - damage_at_100, 20)
 
+    # -- Spell Mastery: AOE targeting + Remnant-taught spells (2026-08-22,
+    #    per Coffee: "let the players level up thier magic... tiers of
+    #    magic that can get stronger and target multiple enemies... give
+    #    enemies/bosses the ability to hit multiple players... if
+    #    players dont have the spell that the remnant has they can
+    #    learn it by getting the remnant") -----------------------------
+
+    def test_spell_target_count_matches_the_confirmed_mastery_tiers(self):
+        self.assertEqual(bot._spell_target_count(0.0), 1)
+        self.assertEqual(bot._spell_target_count(99.9), 1)
+        self.assertEqual(bot._spell_target_count(100.0), 2)
+        self.assertEqual(bot._spell_target_count(199.9), 2)
+        self.assertEqual(bot._spell_target_count(200.0), 3)
+        self.assertEqual(bot._spell_target_count(299.9), 3)
+        self.assertIsNone(bot._spell_target_count(300.0))
+        self.assertIsNone(bot._spell_target_count(9999.0))
+
+    def test_non_aoe_spell_always_resolves_to_exactly_the_primary_target(self):
+        """A regular (non-aoe) spell must never expand past one target, no matter how high mastery climbs -- regression guard for every existing single-target spell."""
+        spell = spells.get_spell("fire_bolt")
+        primary = {"telegram_user_id": 1, "name": "Primary"}
+        candidates = [primary, {"telegram_user_id": 2, "name": "Other1"}, {"telegram_user_id": 3, "name": "Other2"}]
+        for pct in (0.0, 150.0, 500.0):
+            self.assertEqual(bot._resolve_spell_target_list(spell, pct, candidates, primary), [primary])
+
+    def test_aoe_spell_target_list_expands_with_mastery_tier(self):
+        spell = spells.get_spell("fireball")
+        primary = {"telegram_user_id": 1, "name": "Primary"}
+        others = [{"telegram_user_id": i, "name": f"Other{i}"} for i in range(2, 6)]
+        candidates = [primary] + others
+        self.assertEqual(bot._resolve_spell_target_list(spell, 0.0, candidates, primary), [primary])
+        two = bot._resolve_spell_target_list(spell, 150.0, candidates, primary)
+        self.assertEqual(len(two), 2)
+        self.assertEqual(two[0], primary)
+        three = bot._resolve_spell_target_list(spell, 250.0, candidates, primary)
+        self.assertEqual(len(three), 3)
+        all_targets = bot._resolve_spell_target_list(spell, 300.0, candidates, primary)
+        self.assertEqual(len(all_targets), len(candidates))
+
+    def test_spell_mastery_power_multiplier_stacks_full_spell_plus_half_element(self):
+        """Confirmed dual-tier stacking: full weight for the spell's own mastery, HALF weight for the shared elemental bonus. spell=150% (+50%), element=140% (+40%) -> +50% + 20% = +70% total, i.e. a 1.70x multiplier."""
+        self.assertAlmostEqual(bot._spell_mastery_power_multiplier(150.0, 140.0), 1.70, places=6)
+        self.assertEqual(bot._spell_mastery_power_multiplier(100.0, 100.0), 1.0)
+        self.assertEqual(bot._spell_mastery_power_multiplier(50.0, 50.0), 1.0)
+
+    async def test_casting_an_aoe_spell_grows_both_its_own_and_its_elements_mastery(self):
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        caster_id = 950960
+        make_basic_character(
+            caster_id, "MasteryGrinder", char_class="Wizard", current_location="crossroads_tavern",
+            known_spells=["fireball"], spell_slots_max=5,
+        )
+        db.update_character(caster_id, -999, spell_slots_current=5)
+        enemy = {"telegram_user_id": -5200960, "name": "MasteryGoblin", "dexterity": 10, "strength": 10,
+                 "hp_current": 500, "hp_max": 500, "conditions": [], "resistances": [], "vulnerabilities": [],
+                 "is_ai": 1, "monster_key": "goblin"}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        session = sessions.start_session(-999, [caster, enemy], {caster_id: "party", -5200960: "enemy"})
+        session.turn_order = [caster_id, -5200960]
+
+        before = db.get_character(caster_id, -999)
+        self.assertEqual(before["spell_mastery_pct"], {})
+        self.assertEqual(before["element_mastery_pct"], {})
+        with patch("bot.narrate_action", return_value="Flames erupt."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            await bot._do_cast_spell(FakeUpdate(caster_id, "cast fireball", []), "cast fireball")
+            await _drain_narration_queue()
+        after = db.get_character(caster_id, -999)
+        self.assertIn("fireball", after["spell_mastery_pct"])
+        self.assertGreater(after["spell_mastery_pct"]["fireball"], before["spell_mastery_pct"].get("fireball", 1.0))
+        self.assertIn("fire", after["element_mastery_pct"])
+        self.assertGreater(after["element_mastery_pct"]["fire"], before["element_mastery_pct"].get("fire", 1.0))
+        sessions.end_session(-999)
+
+    async def test_high_mastery_fireball_hits_multiple_real_enemies_in_one_cast(self):
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        caster_id = 950961
+        make_basic_character(
+            caster_id, "AOECaster", char_class="Wizard", current_location="crossroads_tavern",
+            known_spells=["fireball"], spell_slots_max=5,
+        )
+        # 300%+ mastery -- confirmed top tier, hits every living enemy.
+        db.update_character(
+            caster_id, -999, spell_slots_current=5,
+            spell_mastery_pct={"fireball": 300.0}, element_mastery_pct={"fire": 1.0},
+        )
+        goblins = [
+            {"telegram_user_id": -5200961 - i, "name": f"AOEGoblin{i}", "dexterity": 10, "strength": 10,
+             "hp_current": 500, "hp_max": 500, "conditions": [], "resistances": [], "vulnerabilities": [],
+             "is_ai": 1, "monster_key": "goblin"}
+            for i in range(3)
+        ]
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        session = sessions.start_session(
+            -999, [caster] + goblins,
+            {caster_id: "party", **{g["telegram_user_id"]: "enemy" for g in goblins}},
+        )
+        session.turn_order = [caster_id] + [g["telegram_user_id"] for g in goblins]
+
+        # bot._post_narrated mocked directly (2026-08-22), not just
+        # narrate_action -- this test only asserts on real game state
+        # (each goblin's own hp_current), never narration content, and
+        # the multi-target loop calls _post_narrated once per target
+        # hit; a real, reproducible race (confirmed via faulthandler:
+        # a background thread genuinely stuck in ai.dm_agent.
+        # narrate_action's own requests.post, only when several OTHER
+        # tests' own event-loop teardowns had already run earlier in
+        # the same process) meant narrate_action's own mock scope
+        # wasn't always enough here even with _drain_narration_queue --
+        # mocking the whole per-target narration call removes any
+        # possible real-Ollama path entirely, same "mock the function
+        # that actually matters for what this test checks" approach
+        # already used elsewhere in this file (e.g. narrate_boss_
+        # decision-focused tests mocking that directly).
+        with patch("bot.narrate_action", return_value="Flames erupt."), \
+             patch("bot._post_narrated", new=AsyncMock()), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            await bot._do_cast_spell(FakeUpdate(caster_id, f"attack {goblins[0]['name']} with fireball", []), f"attack {goblins[0]['name']} with fireball")
+        for g in goblins:
+            self.assertLess(g["hp_current"], 500, f"{g['name']} should have taken real fireball damage")
+        sessions.end_session(-999)
+
+    async def test_high_mastery_mass_cure_wounds_heals_multiple_real_allies(self):
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        caster_id = 950962
+        ally1_id = 950963
+        ally2_id = 950964
+        make_basic_character(
+            caster_id, "MassHealer", char_class="Cleric", current_location="crossroads_tavern",
+            known_spells=["mass_cure_wounds"], spell_slots_max=5,
+        )
+        db.update_character(
+            caster_id, -999, spell_slots_current=5,
+            spell_mastery_pct={"mass_cure_wounds": 300.0}, element_mastery_pct={"heal": 1.0},
+        )
+        make_basic_character(ally1_id, "WoundedAlly1", chat_id=-999, hp_max=100)
+        db.update_character(ally1_id, -999, hp_current=20)
+        make_basic_character(ally2_id, "WoundedAlly2", chat_id=-999, hp_max=100)
+        db.update_character(ally2_id, -999, hp_current=15)
+        enemy = {"telegram_user_id": -5200962, "name": "HealTestGoblin", "dexterity": 10, "strength": 10,
+                 "hp_current": 200, "hp_max": 200, "is_ai": 1, "monster_key": "goblin"}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        ally1 = db.get_character(ally1_id, -999)
+        ally1["telegram_user_id"] = ally1_id
+        ally2 = db.get_character(ally2_id, -999)
+        ally2["telegram_user_id"] = ally2_id
+        session = sessions.start_session(
+            -999, [caster, ally1, ally2, enemy],
+            {caster_id: "party", ally1_id: "party", ally2_id: "party", -5200962: "enemy"},
+        )
+        session.turn_order = [caster_id, ally1_id, ally2_id, -5200962]
+
+        with patch("bot.narrate_action", return_value="Warm light spreads."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            await bot._do_cast_spell(FakeUpdate(caster_id, f"cast mass cure wounds on {ally1['name']}", []), f"cast mass cure wounds on {ally1['name']}")
+            await _drain_narration_queue()
+        after_ally1 = db.get_character(ally1_id, -999)
+        after_ally2 = db.get_character(ally2_id, -999)
+        self.assertGreater(after_ally1["hp_current"], 20, "the named primary target must be healed")
+        self.assertGreater(after_ally2["hp_current"], 15, "a real, uninjured-by-name second party member must also be healed by the AOE heal")
+        sessions.end_session(-999)
+
+    async def test_boss_with_aoe_spell_always_hits_every_real_player_no_mastery_needed(self):
+        """Monsters/bosses never grind proficiency (same rule as every other mastery type) -- an AOE-flagged spell they know always hits everyone, unconditionally, the moment they cast it."""
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        p1_id = 950965
+        p2_id = 950966
+        make_basic_character(p1_id, "AshTarget1", chat_id=-999, hp_max=200)
+        make_basic_character(p2_id, "AshTarget2", chat_id=-999, hp_max=200)
+        p1 = db.get_character(p1_id, -999)
+        p1["telegram_user_id"] = p1_id
+        p2 = db.get_character(p2_id, -999)
+        p2["telegram_user_id"] = p2_id
+        boss = {
+            "telegram_user_id": -5200965, "name": "AOEBoss", "dexterity": 14, "strength": 16,
+            "armor_class": 16, "hp_current": 300, "hp_max": 300, "proficiency_bonus": 4,
+            "is_ai": 1, "is_boss": True, "monster_key": "the_waking_ember",
+            "known_spells": ["fireball"], "resistances": [], "vulnerabilities": [], "immunities": [],
+        }
+        session = sessions.start_session(-999, [p1, p2, boss], {p1_id: "party", p2_id: "party", -5200965: "enemy"})
+        session.turn_order = [-5200965, p1_id, p2_id]
+
+        sink = []
+        with patch("random.random", return_value=0.0), patch("rules.dice.random.randint", return_value=4), \
+             patch("bot.narrate_action", return_value="Fire roars."):
+            result = await bot._maybe_monster_cast_spell(FakeUpdate(p1_id, "combat", sink), session, boss, p1, spell_id="fireball")
+        self.assertIsNotNone(result, "boss must actually have cast the spell")
+        self.assertLess(p1["hp_current"], 200, "the primary target must take real damage")
+        self.assertLess(p2["hp_current"], 200, "the second real player must ALSO take real damage from the same AOE cast, unconditionally")
+        sessions.end_session(-999)
+
+    async def test_binding_a_new_element_remnant_teaches_the_matching_spell_and_grants_a_slot(self):
+        """A non-caster (zero known spells, zero slots) binding the_wrathflame_unbound (fire) for the first time learns real Fireball and gets a real, usable spell slot."""
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        user_id = 950970
+        make_basic_character(user_id, "NonCasterFighter", char_class="Fighter", current_location="hollow_stump_shrine")
+        before = db.get_character(user_id, -999)
+        self.assertEqual(before["known_spells"], [])
+        self.assertEqual(before["spell_slots_max"], 0)
+        enemy = {
+            "telegram_user_id": -5200970, "name": "The Wrathflame Unbound", "dexterity": 10, "strength": 10,
+            "hp_current": 0, "hp_max": 100, "is_ai": 1, "monster_key": "the_wrathflame_unbound",
+        }
+        session = sessions.start_session(-999, [db.get_character(user_id, -999), enemy], {user_id: "party", -5200970: "enemy"})
+        session.turn_order = [user_id, -5200970]
+        from unittest.mock import AsyncMock as _AsyncMock
+        with patch("bot._maybe_send_remnant_lore_image", new=_AsyncMock()), \
+             patch("bot._check_and_award_achievements", new=_AsyncMock()):
+            await bot._check_quest_completions_defeat_monster(FakeUpdate(user_id, "", []), session)
+        after = db.get_character(user_id, -999)
+        self.assertIn("the_wrathflame_unbound", after["bound_remnants"])
+        self.assertIn("fireball", after["known_spells"])
+        self.assertEqual(after["spell_slots_max"], 1)
+        self.assertEqual(after["spell_slots_current"], 1)
+        sessions.end_session(-999)
+
+    async def test_binding_a_second_remnant_of_an_already_known_element_teaches_nothing_new(self):
+        import sessions
+        from unittest.mock import patch, AsyncMock as _AsyncMock
+        sessions.end_session(-999)
+        user_id = 950971
+        make_basic_character(
+            user_id, "AlreadyKnowsFire", char_class="Wizard", current_location="hollow_stump_shrine",
+            known_spells=["fireball"], spell_slots_max=3,
+        )
+        db.update_character(user_id, -999, spell_slots_current=3)
+        enemy = {
+            "telegram_user_id": -5200971, "name": "The Wrathflame Unbound", "dexterity": 10, "strength": 10,
+            "hp_current": 0, "hp_max": 100, "is_ai": 1, "monster_key": "the_wrathflame_unbound",
+        }
+        session = sessions.start_session(-999, [db.get_character(user_id, -999), enemy], {user_id: "party", -5200971: "enemy"})
+        session.turn_order = [user_id, -5200971]
+        with patch("bot._maybe_send_remnant_lore_image", new=_AsyncMock()), \
+             patch("bot._check_and_award_achievements", new=_AsyncMock()):
+            await bot._check_quest_completions_defeat_monster(FakeUpdate(user_id, "", []), session)
+        after = db.get_character(user_id, -999)
+        self.assertIn("the_wrathflame_unbound", after["bound_remnants"])
+        self.assertEqual(after["known_spells"], ["fireball"], "must not add a duplicate/second fire spell")
+        self.assertEqual(after["spell_slots_max"], 3, "an already-real caster's slots must be untouched")
+        sessions.end_session(-999)
+
+    async def test_freshly_taught_fighter_can_actually_cast_the_taught_spell_end_to_end(self):
+        """End-to-end through the real battle-menu-eligible path: a Fighter granted Fireball via Remnant binding can genuinely cast it through _do_cast_spell, no special-casing needed since known_spells/spell_slots_current already drive the real UI+cast flow class-agnostically."""
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        user_id = 950972
+        make_basic_character(user_id, "TaughtFighter", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, known_spells=["fireball"], spell_slots_max=1, spell_slots_current=1)
+        character = db.get_character(user_id, -999)
+        # The real battle-menu gate: "✨ Skills" only appears if known_spells is non-empty.
+        self.assertTrue(character.get("known_spells"))
+        enemy = {"telegram_user_id": -5200972, "name": "TaughtSpellGoblin", "dexterity": 10, "strength": 10,
+                 "hp_current": 100, "hp_max": 100, "conditions": [], "resistances": [], "vulnerabilities": [],
+                 "is_ai": 1, "monster_key": "goblin"}
+        character["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [character, enemy], {user_id: "party", -5200972: "enemy"})
+        session.turn_order = [user_id, -5200972]
+
+        sink = []
+        with patch("bot.narrate_action", return_value="Flames erupt."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            await bot._do_cast_spell(FakeUpdate(user_id, "cast fireball", sink), "cast fireball")
+            await _drain_narration_queue()
+        after = db.get_character(user_id, -999)
+        self.assertEqual(after["spell_slots_current"], 0, "the real slot must actually have been spent")
+        self.assertLess(enemy["hp_current"], 100, "the cast must have actually resolved real damage")
+        sessions.end_session(-999)
+
     async def test_eldritch_smite_adds_bonus_damage_and_spends_a_slot(self):
         """
         Real gap (2026-08-13, per Coffee, dev-bridge: "shud [ethers]
@@ -4452,6 +4734,30 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     def test_genuine_sheet_requests_still_work(self):
         self.assertEqual(bot._wants_sheet_names("show me my character sheet"), ["my"])
         self.assertEqual(bot._wants_sheet_names("Sarah's character sheet"), ["sarah"])
+
+    def test_story_so_far_now_classifies_instead_of_falling_to_silent_chat(self):
+        """
+        Real live gap found via topic-activity monitoring (2026-08-22,
+        Coffee: "What is the story so far"). bot._do_show_story_so_far
+        was a real, fully-implemented feature reachable only by tapping
+        the menu button -- there was no real action for it at all, so
+        this exact phrase fell through to the silent "chat" fallback,
+        no reply of any kind. "check_story" is now a real valid_actions
+        entry (ai/intent_parser.py) that _keyword_fallback matches.
+        """
+        result = _keyword_fallback("What is the story so far", [])
+        self.assertEqual(result["action"], "check_story")
+        self.assertNotEqual(result["action"], "chat")
+        self.assertEqual(_keyword_fallback("give me a story recap", [])["action"], "check_story")
+
+    async def test_check_story_action_dispatches_to_the_real_story_so_far_handler(self):
+        from unittest.mock import patch, AsyncMock
+        with patch("bot._do_show_story_so_far", new=AsyncMock()) as mock_story:
+            await bot._dispatch_intent(
+                FakeUpdate(900940, "What is the story so far", []), DummyContext(),
+                {"action": "check_story"}, "What is the story so far",
+            )
+        mock_story.assert_awaited_once()
 
     async def test_attack_forced_roll_determines_hit_or_miss(self):
         import sessions

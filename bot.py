@@ -331,6 +331,94 @@ def _grind_dict_proficiency(telegram_user_id: int, chat_id: int, field_name: str
     return current_value
 
 
+def _grind_spell_mastery(character: dict, spell_id: str, damage_type: str) -> tuple[float, float]:
+    """
+    Spell Mastery (2026-08-22, per Coffee: "let the players level up
+    thier magic... tiers of magic that can get stronger and target
+    multiple enemies"). Grinds BOTH tiers on a real cast -- this
+    spell's own mastery (spell_mastery_pct, keyed by spell_id) AND a
+    smaller, shared per-element mastery (element_mastery_pct, keyed by
+    the spell's own damage_type) that helps every spell of that
+    element, even ones not personally practiced -- and returns the
+    PRE-grind (spell_pct, element_pct) pair THIS cast's own damage/
+    healing/targeting should be computed from, same "returns the value
+    as it stood before this use" contract _grind_flat_proficiency/
+    _grind_dict_proficiency already follow.
+
+    Real players only -- monsters/AI never grind proficiency, same
+    rule every other mastery type in this game already follows (see
+    _roll_weapon_proficiency's own "Real players only" comment) -- a
+    monster/boss's own AOE reach is a flat capability of knowing the
+    spell at all (see _maybe_monster_cast_spell), not something it
+    grinds toward.
+    """
+    spell_dict = character.get("spell_mastery_pct", {})
+    element_dict = character.get("element_mastery_pct", {})
+    if character.get("is_ai") or not character.get("char_class"):
+        return (
+            spell_dict.get(spell_id, PROFICIENCY_STARTING_PCT),
+            element_dict.get(damage_type, PROFICIENCY_STARTING_PCT),
+        )
+    spell_pct = _grind_dict_proficiency(
+        character["telegram_user_id"], character["chat_id"], "spell_mastery_pct", spell_dict, spell_id,
+    )
+    element_pct = _grind_dict_proficiency(
+        character["telegram_user_id"], character["chat_id"], "element_mastery_pct", element_dict, damage_type,
+    )
+    return spell_pct, element_pct
+
+
+def _spell_mastery_power_multiplier(spell_pct: float, element_pct: float) -> float:
+    """
+    Real damage/healing bonus from Spell Mastery -- full weight for
+    this spell's own practice, HALF weight for the shared elemental
+    bonus (per the confirmed dual-tier design: the element track is a
+    smaller, universal bonus, not equal to personally mastering a
+    spell). 1.0 (no-op) when both are at or under 100%, same "a bonus,
+    never a penalty" rule _mastery_overflow_multiplier itself follows.
+    """
+    spell_bonus = _mastery_overflow_multiplier(spell_pct) - 1.0
+    element_bonus = (_mastery_overflow_multiplier(element_pct) - 1.0) / 2.0
+    return 1.0 + spell_bonus + element_bonus
+
+
+SPELL_MASTERY_TARGET_TIERS = ((300.0, None), (200.0, 3), (100.0, 2))
+
+
+def _spell_target_count(spell_pct: float) -> int | None:
+    """
+    How many targets this spell's own mastery has unlocked -- None
+    means every living target on the relevant side ("All", the
+    confirmed top tier, no fixed numeric cap). Driven by the PER-SPELL
+    mastery only; element_mastery_pct affects damage/healing power,
+    never target count.
+    """
+    for threshold, count in SPELL_MASTERY_TARGET_TIERS:
+        if spell_pct >= threshold:
+            return count
+    return 1
+
+
+def _resolve_spell_target_list(spell: dict, spell_pct: float, candidates: list[dict], primary_target: dict) -> list[dict]:
+    """
+    Real multi-target Spell Mastery reach. Only spells flagged
+    spell["aoe"] can ever expand past the one hand-picked target --
+    every other spell (the overwhelming majority) always returns
+    exactly [primary_target], byte-identical to every cast before this
+    system existed. `primary_target` is always first in the returned
+    list (the one the caster actually named/chose); `candidates` is
+    every OTHER living participant on the relevant side (the opposing
+    side for a damage spell, the caster's own side for a heal spell).
+    """
+    if not spell.get("aoe"):
+        return [primary_target]
+    count = _spell_target_count(spell_pct)
+    others = [c for c in candidates if c is not primary_target]
+    if count is None:
+        return [primary_target, *others]
+    return [primary_target, *others[:max(count - 1, 0)]]
+
+
 def _roll_backstab_proficiency(character: dict) -> bool:
     """
     Grinds and rolls Backstab's own landing chance (2026-08-08, per
@@ -8449,6 +8537,39 @@ async def _maybe_monster_cast_spell(
         caster["hp_current"] = min(caster["hp_current"] + elemental_heal_gained, caster_hp_max)
     target["hp_current"] = max(target["hp_current"] - pre_elemental_dmg, 0)
 
+    # Spell Mastery for monsters/bosses (2026-08-22, per Coffee: "give
+    # enemies/bosses the ability to hit multiple players with magic
+    # type attacks"): unlike a player, a monster never grinds
+    # proficiency (same "real players only" rule every mastery type in
+    # this game already follows -- see _roll_weapon_proficiency), so an
+    # AOE-flagged spell it knows is simply always cast against every
+    # living target on the opposing side, no gating. Handled entirely
+    # here (not by widening the CALLER's own huge post-attack
+    # processing block) since almost every field that block checks
+    # (relentless_endurance/shield/uncanny_dodge/life_drain/echo_
+    # backlash) is already hardcoded False/0 for a spell-cast result
+    # above -- there's genuinely nothing there for an extra target to
+    # need, just its own damage + narration.
+    if spell.get("aoe"):
+        for extra in session.living_on_side(session.opposing_side(caster["telegram_user_id"])):
+            if extra is target:
+                continue
+            extra_result = spells_module.resolve_damage_spell(spell_id, caster, extra)
+            extra_dmg = apply_damage_type_modifier(
+                extra_result["damage_dealt"], spell.get("damage_type", "physical"), extra, caster
+            )
+            extra_heal_gained = elemental_overflow_heal(extra_dmg, spell.get("damage_type", "physical"), extra, caster)
+            if extra_heal_gained:
+                caster["hp_current"] = min(caster["hp_current"] + extra_heal_gained, caster.get("hp_max", caster["hp_current"]))
+            extra["hp_current"] = max(extra["hp_current"] - extra_dmg, 0)
+            _sync_player_to_db(extra)
+            await _safe_send(
+                update,
+                f"🔥 **{caster['name']}**'s {spell['name']} also strikes **{extra['name']}** for "
+                f"**{extra_dmg}** {spell.get('damage_type', 'physical')} damage! "
+                f"(HP {extra['hp_current']}/{extra.get('hp_max', extra['hp_current'])})",
+            )
+
     return {
         "attacker": caster["name"], "defender": target["name"], "hit": True,
         "critical_hit": False, "critical_fail": False, "raw_roll": None, "attack_roll": None,
@@ -8520,6 +8641,24 @@ async def _maybe_monster_cast_heal(update: Update, session: sessions.Session, ca
         f"✨ **{caster['name']}** casts {spell['name']} on {target_note} — heals "
         f"{result['healing_done']} HP ({result['hp_current']}/{result['hp_max']}).",
     )
+    # Spell Mastery for monsters (2026-08-22) -- same "always AOE when
+    # the spell is flagged, no grind/gate" rule as _maybe_monster_cast_
+    # spell's own damage-side AOE handling above; heals every OTHER
+    # wounded ally too, not just the single most-critical pick
+    # _decide_monster_heal already chose as the primary target.
+    if spell.get("aoe"):
+        for extra in allies:
+            if extra is heal_target or extra.get("hp_current", 0) <= 0:
+                continue
+            if extra.get("hp_current", 0) >= extra.get("hp_max", extra.get("hp_current", 0)):
+                continue
+            extra_result = spells_module.resolve_heal_spell(spell_id, caster, extra)
+            extra_note = "itself" if extra is caster else f"**{extra['name']}**"
+            await _safe_send(
+                update,
+                f"✨ **{caster['name']}**'s {spell['name']} also heals {extra_note} — heals "
+                f"{extra_result['healing_done']} HP ({extra_result['hp_current']}/{extra_result['hp_max']}).",
+            )
     return True
 
 
@@ -11756,6 +11895,31 @@ async def _check_board_quest_turnin(update_like, telegram_user_id: int, location
         await _check_and_award_achievements(update_like, db.get_character(telegram_user_id, update_like.effective_chat.id))
 
 
+# Remnant-taught spells (2026-08-22, per Coffee: "find out what
+# Remnants Elements or Damage types are and find spells... so when a
+# non magic user get the Wrathflame Unbound they get a fire type
+# magic spell that is close to the damage they do... if players dont
+# have the spell that the remnant has they can learn it by getting
+# the remnant"). One real spell per element -- the strongest real,
+# player-eligible damage spell of that damage_type in spells.SPELLS
+# (never the AI-only spirit_* summon-ability spells), preferring one
+# already flagged spell["aoe"] where a real option exists (fireball/
+# cone_of_cold/lightning_bolt) so a taught spell also grows through
+# the same new Spell Mastery system, not a coincidence -- confirmed
+# every one of the 12 real Remnants' own `element` values (remnants.
+# REMNANTS) maps to a real entry here, no gaps.
+REMNANT_ELEMENT_TAUGHT_SPELL = {
+    "fire": "fireball",
+    "cold": "cone_of_cold",
+    "force": "spiritual_weapon",
+    "lightning": "lightning_bolt",
+    "necrotic": "voidcall",
+    "poison": "insect_plague",
+    "psychic": "vicious_mockery",
+    "radiant": "starfall_lance",
+}
+
+
 async def _check_quest_completions_defeat_monster(update_like, session: sessions.Session) -> None:
     """
     Called only when the party won — checks every defeated enemy's
@@ -11834,6 +11998,36 @@ async def _check_quest_completions_defeat_monster(update_like, session: sessions
                     f"Say \"summon {remnant_data['name']}\" in a later battle to call it.",
                 )
                 await _maybe_send_remnant_lore_image(update_like, remnant_id, remnant_data)
+                # Remnant-taught spells (2026-08-22) -- if this character
+                # has no real spell of the Remnant's own element yet,
+                # binding it teaches the strongest matching one
+                # (REMNANT_ELEMENT_TAUGHT_SPELL). A character with zero
+                # spell slots (any non-caster) also gets a real slot to
+                # actually cast it with -- the battle menu's own "✨
+                # Skills" button and spell-cast flow are already 100%
+                # class-agnostic (only ever checks known_spells/spell_
+                # slots_current, never char_class), so nothing else here
+                # needs to change for a Fighter to get a genuinely
+                # working cast button the moment this fires.
+                element = remnant_data["element"]
+                fresh_character = db.get_character(telegram_user_id, session.chat_id)
+                already_knows_element = any(
+                    spells_module.get_spell(sid) and spells_module.get_spell(sid).get("damage_type") == element
+                    for sid in fresh_character.get("known_spells", [])
+                )
+                if not already_knows_element and element in REMNANT_ELEMENT_TAUGHT_SPELL:
+                    taught_spell_id = REMNANT_ELEMENT_TAUGHT_SPELL[element]
+                    taught_spell = spells_module.get_spell(taught_spell_id)
+                    updates = {"known_spells": fresh_character["known_spells"] + [taught_spell_id]}
+                    if fresh_character.get("spell_slots_max", 0) < 1:
+                        updates["spell_slots_max"] = 1
+                        updates["spell_slots_current"] = fresh_character.get("spell_slots_current", 0) + 1
+                    db.update_character(telegram_user_id, session.chat_id, **updates)
+                    await _safe_send(
+                        update_like,
+                        f"✨ Binding {remnant_data['name']} awakens something in **{character['name']}** — "
+                        f"they've learned **{taught_spell['name']}**! Open the battle menu's ✨ Skills to cast it.",
+                    )
                 await _check_and_award_achievements(
                     update_like, db.get_character(telegram_user_id, session.chat_id),
                 )
@@ -23500,121 +23694,131 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
                 return
             _consume_scroll_if_any()
 
-            target = _pick_target(text, opposing)
-            result = spells_module.resolve_damage_spell(spell_id, character, target)
-            result = _apply_empowered_spell(update.effective_user.id, character, spell, result, target=target)
-            result = _apply_eldritch_smite(update.effective_user.id, character, spell_id, result)
-            # Subclass system (2026-07-24): a Wizard specialized in this
-            # spell's own school (spells.py's real "school" field) deals
-            # more with it -- the one real mechanical hook this pilot
-            # subclass system grants so far.
-            if character.get("subclass") and spell.get("school") == character["subclass"]:
-                result["damage_dealt"] = int(result["damage_dealt"] * (1 + SUBCLASS_SCHOOL_DAMAGE_BONUS_PCT / 100))
-            # Arcane Circle membership benefit (2026-07-25, per Coffee):
-            # a real, flat +15% on top of any subclass bonus above --
-            # stacks additively-then-multiplicatively the same way the
-            # subclass bonus itself stacks on the base roll, not a
-            # separate independent multiplier. Real live bug (2026-08-13,
-            # synergy pass): checked primary guild only -- held_guild_ids
-            # also covers a Promotion-earned secondary guild.
-            if "arcane_circle" in held_guild_ids(character):
-                pre_arcane_bonus_damage = result["damage_dealt"]
-                result["damage_dealt"] = int(result["damage_dealt"] * (1 + ARCANE_CIRCLE_SPELL_DAMAGE_BONUS_PCT / 100))
-                # Synergy Phase 10 resists_arcane_circle (2026-08-14, The
-                # Hollow Bell -- "it rang once... the sound never finished
-                # arriving," a real spell-side counterpart to v1.27.214's
-                # weapon-side resists_forge_guild): negates half of the
-                # ARCANE CIRCLE BONUS SPECIFICALLY on every cast after the
-                # first, checked right here (after the bonus is added, not
-                # folded into apply_damage_type_modifier below -- same
-                # ordering trap that fix's own audit flagged, just for the
-                # spell pipeline this time).
-                if target and target.get("resists_arcane_circle"):
-                    arcane_bonus_amount = result["damage_dealt"] - pre_arcane_bonus_damage
-                    if target.get("_arcane_circle_resisted"):
-                        result["damage_dealt"] -= arcane_bonus_amount // 2
-                    else:
-                        target["_arcane_circle_resisted"] = True
-            # Damage-type system (2026-07-24): resolve_damage_spell never
-            # calls resolve_attack (its own, separate pipeline -- see
-            # rules/combat.py's docstring), so it needs its own call to
-            # the same resistance/vulnerability/immunity + magic-
-            # penetration math a weapon hit already gets.
-            pre_elemental_spell_damage = result["damage_dealt"]
-            result["damage_dealt"] = apply_damage_type_modifier(
-                result["damage_dealt"], spell.get("damage_type", "physical"), target, character
-            )
-            # Elemental resistance stacking (2026-08-10, per Coffee: "if
-            # enemies are strong in an element... heal the enemy") --
-            # same overflow-heal step resolve_attack/resolve_thrown_attack
-            # already apply for weapon hits, mirrored here since spell
-            # damage is its own separate pipeline (see the comment just
-            # above on why apply_damage_type_modifier is called again here
-            # at all).
-            elemental_heal_gained = elemental_overflow_heal(
-                pre_elemental_spell_damage, spell.get("damage_type", "physical"), target, character
-            )
-            if elemental_heal_gained:
-                target_hp_max = target.get("hp_max", target["hp_current"])
-                target["hp_current"] = min(target["hp_current"] + elemental_heal_gained, target_hp_max)
-            # Totem Warrior subclass hook (2026-07-25): real 5E's Bear
-            # Totem Spirit extends Rage's damage resistance to nearly
-            # everything, including magic -- unlike base Rage (which
-            # already halves weapon damage taken while raging, see
-            # resolve_attack's own "raging" check), NOTHING in this game
-            # previously made spell damage respect Rage at all. Scoped
-            # to Totem Warrior specifically (not every raging
-            # Barbarian), same as real 5E reserving this for the one
-            # totem spirit that actually grants it.
-            if target.get("raging") and target.get("subclass") == TOTEM_WARRIOR_SUBCLASS_NAME:
-                result["damage_dealt"] = result["damage_dealt"] // 2
-            target["hp_current"] = max(target["hp_current"] - result["damage_dealt"], 0)
-            _sync_player_to_db(target)
-            # Boss Enrage (2026-07-27) -- resolve_damage_spell is its own
-            # separate pipeline (spells.py), so it doesn't go through
-            # resolve_attack's own enrage-threshold check; mirrored here
-            # so a boss can still enrage from spell damage, not just
-            # weapon hits. No enraged-attacker bonus needed on this path
-            # -- monsters never cast spells in this game (CLAUDE.md's own
-            # documented limitation), so the attacker here is always a
-            # real player, never an enraged boss.
-            enrage_triggered = False
-            if (target.get("is_boss") and not target.get("enraged") and target["hp_current"] > 0
-                    and target["hp_current"] <= target.get("hp_max", target["hp_current"]) * ENRAGE_HP_THRESHOLD):
-                target["enraged"] = True
-                enrage_triggered = True
-            # Bloodied (2026-08-01, task #244) -- same manual mirror of
-            # rules/combat.py's check as Boss Enrage just above, for the
-            # same reason (resolve_damage_spell is its own pipeline).
-            bloodied_triggered = False
-            if (not target.get("bloodied") and target["hp_current"] > 0
-                    and target["hp_current"] <= target.get("hp_max", target["hp_current"]) * BLOODIED_HP_THRESHOLD):
-                target["bloodied"] = True
-                bloodied_triggered = True
-            full_result = {
-                **result, "attacker": character["name"], "defender": target["name"],
-                "hit": True, "defender_hp_remaining": target["hp_current"],
-                "defender_hp_max": target.get("hp_max", target["hp_current"]),
-                # Surfaces the spell's real damage type in narration
-                # (2026-07-27), same convention _format_combat_result
-                # now applies to a real weapon hit's damage_type.
-                "damage_type": spell.get("damage_type", "physical"),
-            }
-            await _post_narrated(update, character, text, full_result, session, action_label=spell["name"])
-            if enrage_triggered:
-                await _safe_send(
-                    update,
-                    f"🔥 **{target['name']} flies into a desperate rage — its attacks hit "
-                    f"even harder for the rest of this fight!**",
+            primary_target = _pick_target(text, opposing)
+            spell_pct, element_pct = _grind_spell_mastery(character, spell_id, spell.get("damage_type", "physical"))
+            mastery_multiplier = _spell_mastery_power_multiplier(spell_pct, element_pct)
+            # Spell Mastery multi-target reach (2026-08-22) -- every
+            # spell not flagged spell["aoe"] (the overwhelming majority)
+            # gets exactly [primary_target] back here, so this loop runs
+            # exactly once with exactly today's target for every cast
+            # that isn't one of the handful of AOE-flagged spells at
+            # 100%+ mastery -- zero behavior change otherwise.
+            for target in _resolve_spell_target_list(spell, spell_pct, opposing, primary_target):
+                result = spells_module.resolve_damage_spell(spell_id, character, target)
+                result["damage_dealt"] = int(result["damage_dealt"] * mastery_multiplier)
+                result = _apply_empowered_spell(update.effective_user.id, character, spell, result, target=target)
+                result = _apply_eldritch_smite(update.effective_user.id, character, spell_id, result)
+                # Subclass system (2026-07-24): a Wizard specialized in this
+                # spell's own school (spells.py's real "school" field) deals
+                # more with it -- the one real mechanical hook this pilot
+                # subclass system grants so far.
+                if character.get("subclass") and spell.get("school") == character["subclass"]:
+                    result["damage_dealt"] = int(result["damage_dealt"] * (1 + SUBCLASS_SCHOOL_DAMAGE_BONUS_PCT / 100))
+                # Arcane Circle membership benefit (2026-07-25, per Coffee):
+                # a real, flat +15% on top of any subclass bonus above --
+                # stacks additively-then-multiplicatively the same way the
+                # subclass bonus itself stacks on the base roll, not a
+                # separate independent multiplier. Real live bug (2026-08-13,
+                # synergy pass): checked primary guild only -- held_guild_ids
+                # also covers a Promotion-earned secondary guild.
+                if "arcane_circle" in held_guild_ids(character):
+                    pre_arcane_bonus_damage = result["damage_dealt"]
+                    result["damage_dealt"] = int(result["damage_dealt"] * (1 + ARCANE_CIRCLE_SPELL_DAMAGE_BONUS_PCT / 100))
+                    # Synergy Phase 10 resists_arcane_circle (2026-08-14, The
+                    # Hollow Bell -- "it rang once... the sound never finished
+                    # arriving," a real spell-side counterpart to v1.27.214's
+                    # weapon-side resists_forge_guild): negates half of the
+                    # ARCANE CIRCLE BONUS SPECIFICALLY on every cast after the
+                    # first, checked right here (after the bonus is added, not
+                    # folded into apply_damage_type_modifier below -- same
+                    # ordering trap that fix's own audit flagged, just for the
+                    # spell pipeline this time).
+                    if target and target.get("resists_arcane_circle"):
+                        arcane_bonus_amount = result["damage_dealt"] - pre_arcane_bonus_damage
+                        if target.get("_arcane_circle_resisted"):
+                            result["damage_dealt"] -= arcane_bonus_amount // 2
+                        else:
+                            target["_arcane_circle_resisted"] = True
+                # Damage-type system (2026-07-24): resolve_damage_spell never
+                # calls resolve_attack (its own, separate pipeline -- see
+                # rules/combat.py's docstring), so it needs its own call to
+                # the same resistance/vulnerability/immunity + magic-
+                # penetration math a weapon hit already gets.
+                pre_elemental_spell_damage = result["damage_dealt"]
+                result["damage_dealt"] = apply_damage_type_modifier(
+                    result["damage_dealt"], spell.get("damage_type", "physical"), target, character
                 )
-            if bloodied_triggered:
-                await _safe_send(update, f"🩸 **{target['name']} is bloodied!**")
-            if result.get("eldritch_smite_bonus"):
-                await _safe_send(
-                    update,
-                    f"🖤 **{character['name']}** channels a spell slot into the blast — "
-                    f"**+{result['eldritch_smite_bonus']} extra force damage!**",
+                # Elemental resistance stacking (2026-08-10, per Coffee: "if
+                # enemies are strong in an element... heal the enemy") --
+                # same overflow-heal step resolve_attack/resolve_thrown_attack
+                # already apply for weapon hits, mirrored here since spell
+                # damage is its own separate pipeline (see the comment just
+                # above on why apply_damage_type_modifier is called again here
+                # at all).
+                elemental_heal_gained = elemental_overflow_heal(
+                    pre_elemental_spell_damage, spell.get("damage_type", "physical"), target, character
                 )
+                if elemental_heal_gained:
+                    target_hp_max = target.get("hp_max", target["hp_current"])
+                    target["hp_current"] = min(target["hp_current"] + elemental_heal_gained, target_hp_max)
+                # Totem Warrior subclass hook (2026-07-25): real 5E's Bear
+                # Totem Spirit extends Rage's damage resistance to nearly
+                # everything, including magic -- unlike base Rage (which
+                # already halves weapon damage taken while raging, see
+                # resolve_attack's own "raging" check), NOTHING in this game
+                # previously made spell damage respect Rage at all. Scoped
+                # to Totem Warrior specifically (not every raging
+                # Barbarian), same as real 5E reserving this for the one
+                # totem spirit that actually grants it.
+                if target.get("raging") and target.get("subclass") == TOTEM_WARRIOR_SUBCLASS_NAME:
+                    result["damage_dealt"] = result["damage_dealt"] // 2
+                target["hp_current"] = max(target["hp_current"] - result["damage_dealt"], 0)
+                _sync_player_to_db(target)
+                # Boss Enrage (2026-07-27) -- resolve_damage_spell is its own
+                # separate pipeline (spells.py), so it doesn't go through
+                # resolve_attack's own enrage-threshold check; mirrored here
+                # so a boss can still enrage from spell damage, not just
+                # weapon hits. No enraged-attacker bonus needed on this path
+                # -- the attacker here is always a real player casting their
+                # own spell (a monster's own cast goes through the separate
+                # _maybe_monster_cast_spell path instead).
+                enrage_triggered = False
+                if (target.get("is_boss") and not target.get("enraged") and target["hp_current"] > 0
+                        and target["hp_current"] <= target.get("hp_max", target["hp_current"]) * ENRAGE_HP_THRESHOLD):
+                    target["enraged"] = True
+                    enrage_triggered = True
+                # Bloodied (2026-08-01, task #244) -- same manual mirror of
+                # rules/combat.py's check as Boss Enrage just above, for the
+                # same reason (resolve_damage_spell is its own pipeline).
+                bloodied_triggered = False
+                if (not target.get("bloodied") and target["hp_current"] > 0
+                        and target["hp_current"] <= target.get("hp_max", target["hp_current"]) * BLOODIED_HP_THRESHOLD):
+                    target["bloodied"] = True
+                    bloodied_triggered = True
+                full_result = {
+                    **result, "attacker": character["name"], "defender": target["name"],
+                    "hit": True, "defender_hp_remaining": target["hp_current"],
+                    "defender_hp_max": target.get("hp_max", target["hp_current"]),
+                    # Surfaces the spell's real damage type in narration
+                    # (2026-07-27), same convention _format_combat_result
+                    # now applies to a real weapon hit's damage_type.
+                    "damage_type": spell.get("damage_type", "physical"),
+                }
+                await _post_narrated(update, character, text, full_result, session, action_label=spell["name"])
+                if enrage_triggered:
+                    await _safe_send(
+                        update,
+                        f"🔥 **{target['name']} flies into a desperate rage — its attacks hit "
+                        f"even harder for the rest of this fight!**",
+                    )
+                if bloodied_triggered:
+                    await _safe_send(update, f"🩸 **{target['name']} is bloodied!**")
+                if result.get("eldritch_smite_bonus"):
+                    await _safe_send(
+                        update,
+                        f"🖤 **{character['name']}** channels a spell slot into the blast — "
+                        f"**+{result['eldritch_smite_bonus']} extra force damage!**",
+                    )
 
             removed = session.remove_defeated()
             await _announce_defeats(update, session, removed)
@@ -23680,22 +23884,54 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
         if not await _spend_cast_resource(update, character, spell, via_scroll, via_gear, gear_instance_id, gear_spell_uses):
             return
         _consume_scroll_if_any()
-        result = spells_module.resolve_heal_spell(spell_id, character, target_character)
-        # A summon has no DB row to write -- resolve_heal_spell already
-        # mutated the real session.participants dict in place (the same
-        # object reference _find_live_summon_by_name returned), so the
-        # live combat state is already correct; a real character still
-        # needs its own DB row updated the normal way.
-        if not is_summon_target:
-            db.update_character(target_character["telegram_user_id"], update.effective_chat.id, hp_current=target_character["hp_current"])
-        is_self = target_character["telegram_user_id"] == character["telegram_user_id"]
-        target_note = "" if is_self else f" on **{target_character['name']}**"
-        inactive_note = " (resting)" if target_character.get("is_inactive") else ""
-        await _safe_send(
-            update,
-            f"✨ **{character['name']}** casts {spell['name']}{target_note}{inactive_note} and heals {result['healing_done']} HP "
-            f"({result['hp_current']}/{result['hp_max']}).",
-        )
+        spell_pct, element_pct = _grind_spell_mastery(character, spell_id, spell.get("damage_type") or "heal")
+        mastery_multiplier = _spell_mastery_power_multiplier(spell_pct, element_pct)
+        # Spell Mastery multi-target heal reach (2026-08-22) -- mass_cure_
+        # wounds is the one flagged spell["aoe"] heal; every other heal
+        # spell (the overwhelming majority) always resolves against just
+        # target_character, unchanged. Only real, non-summon party
+        # members are eligible as EXTRA targets (a live summon can still
+        # be the one hand-picked primary target, exactly as before this
+        # system existed, just never an additional AOE target -- keeps
+        # the in-memory-vs-DB-row split below simple and correct).
+        heal_candidates = []
+        if mid_combat and spell.get("aoe"):
+            own_side = combat_session.sides.get(update.effective_user.id)
+            heal_candidates = [
+                p for p in combat_session.living_on_side(own_side)
+                if p["telegram_user_id"] != target_character["telegram_user_id"]
+                and p["telegram_user_id"] > -1_000_000
+            ]
+        for i, h_target in enumerate(_resolve_spell_target_list(spell, spell_pct, heal_candidates, target_character)):
+            h_is_summon = is_summon_target if i == 0 else False
+            result = spells_module.resolve_heal_spell(spell_id, character, h_target)
+            # Mastery bonus applied as extra healing on top of the base
+            # roll (spells.resolve_heal_spell has no multiplier param of
+            # its own and already mutated hp_current in place) -- same
+            # "add the bonus after, respecting the hp_max cap" shape
+            # _apply_eldritch_smite's own bonus-damage addition uses.
+            if mastery_multiplier > 1.0:
+                extra = int(result["healing_done"] * (mastery_multiplier - 1.0))
+                if extra:
+                    hp_before_extra = h_target["hp_current"]
+                    h_target["hp_current"] = min(h_target["hp_current"] + extra, h_target.get("hp_max", h_target["hp_current"]))
+                    result["healing_done"] += h_target["hp_current"] - hp_before_extra
+                    result["hp_current"] = h_target["hp_current"]
+            # A summon has no DB row to write -- resolve_heal_spell already
+            # mutated the real session.participants dict in place (the same
+            # object reference _find_live_summon_by_name returned), so the
+            # live combat state is already correct; a real character still
+            # needs its own DB row updated the normal way.
+            if not h_is_summon:
+                db.update_character(h_target["telegram_user_id"], update.effective_chat.id, hp_current=h_target["hp_current"])
+            is_self = h_target["telegram_user_id"] == character["telegram_user_id"]
+            target_note = "" if is_self else f" on **{h_target['name']}**"
+            inactive_note = " (resting)" if h_target.get("is_inactive") else ""
+            await _safe_send(
+                update,
+                f"✨ **{character['name']}** casts {spell['name']}{target_note}{inactive_note} and heals {result['healing_done']} HP "
+                f"({result['hp_current']}/{result['hp_max']}).",
+            )
         if mid_combat:
             await _advance_turn_and_resolve_ai_turns(update, combat_session)
 
@@ -25662,6 +25898,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_pass_turn(update)
     elif action == "check_sheet":
         await _do_check_sheet(update, intent.get("target"))
+    elif action == "check_story":
+        await _do_show_story_so_far(update)
     elif action == "talk_npc" and intent.get("npc_name"):
         npc_id = _find_npc_id_by_name(intent["npc_name"])
         if not npc_id or npc_id not in _NPCS:
