@@ -12492,7 +12492,13 @@ async def _do_view_quest_detail(update: Update, kind: str | None, ident: str | N
         card = _format_quest_card(
             "story", quest["title"], quest["description"], quest.get("reward_xp"), quest.get("reward_gold"), extra,
         )
-        await _safe_send(update, card, speak=False)
+        # Cancel button (2026-08-22, per Coffee: "in the quests menu
+        # when we click on a quest we can cancel the quest?... doesnt
+        # decline the quest it jus allows them to do it at another
+        # time"). Goes through a real confirmation step first
+        # (_do_confirm_cancel_quest), not an immediate action.
+        cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel Quest", callback_data=f"quest|cancelconfirm|story|{ident}")]])
+        await _safe_send(update, card, reply_markup=cancel_kb, speak=False)
         return
 
     if kind == "board":
@@ -12514,7 +12520,8 @@ async def _do_view_quest_detail(update: Update, kind: str | None, ident: str | N
             return
         progress = f"Progress: {bq['progress_count']}/{bq['objective_count']}"
         card = _format_quest_card("board", bq["title"], bq["description"], bq.get("reward_xp"), bq.get("reward_gold"), progress)
-        await _safe_send(update, card, speak=False)
+        cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel Quest", callback_data=f"quest|cancelconfirm|board|{ident}")]])
+        await _safe_send(update, card, reply_markup=cancel_kb, speak=False)
         return
 
     if kind == "curriculum":
@@ -12528,6 +12535,103 @@ async def _do_view_quest_detail(update: Update, kind: str | None, ident: str | N
             "curriculum", step["title"], step["flavor"], step.get("reward_xp"), step.get("reward_gold"), extra,
         )
         await _safe_send(update, card, speak=False)
+        return
+
+
+async def _do_confirm_cancel_quest(update: Update, kind: str | None, ident: str | None) -> None:
+    """
+    Real request (2026-08-22, per Coffee): the actual cancel needs a
+    real "are you sure?" step first, naming the REAL progress that
+    would be lost -- his own example: "if its 22/60 Goblins to be
+    slain, it would reset to 0/60" -- not a generic warning. Story
+    quests have no numeric progress counter in this engine (just
+    accepted/not), so their confirmation is the simpler "you'll need
+    to find it again" framing instead.
+    """
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None or kind is None or ident is None:
+        return
+
+    if kind == "story":
+        quest = CAMPAIGN["quests"].get(ident)
+        if quest is None or ident not in character["active_quests"]:
+            return
+        text = (
+            f"⚠️ Cancel **{quest['title']}**?\n\n"
+            f"This won't fail the quest -- you can pick it back up by returning to where you found it. "
+            f"Are you sure?"
+        )
+        buttons = [
+            [InlineKeyboardButton("✅ Yes, cancel it", callback_data=f"quest|cancel|story|{ident}")],
+            [InlineKeyboardButton("◀️ No, keep it", callback_data=f"quest|view|story|{ident}")],
+        ]
+        await _safe_send(update, text, reply_markup=InlineKeyboardMarkup(buttons), speak=False)
+        return
+
+    if kind == "board":
+        bq = next(
+            (q for q in db.get_accepted_board_quests_for_user(update.effective_user.id, update.effective_chat.id)
+             if str(q["board_quest_id"]) == str(ident)),
+            None,
+        )
+        if bq is None:
+            return
+        text = (
+            f"⚠️ Cancel **{bq['title']}**?\n\n"
+            f"All progress will reset -- you're currently at **{bq['progress_count']}/{bq['objective_count']}**, "
+            f"this would go back to **0/{bq['objective_count']}**. This doesn't decline it permanently -- it'll be "
+            f"back on the board next time you're there. Are you sure?"
+        )
+        buttons = [
+            [InlineKeyboardButton("✅ Yes, cancel it", callback_data=f"quest|cancel|board|{ident}")],
+            [InlineKeyboardButton("◀️ No, keep it", callback_data=f"quest|view|board|{ident}")],
+        ]
+        await _safe_send(update, text, reply_markup=InlineKeyboardMarkup(buttons), speak=False)
+        return
+
+
+async def _do_cancel_quest(update: Update, kind: str | None, ident: str | None) -> None:
+    """
+    Real, confirmed cancel (2026-08-22, per Coffee) -- only ever
+    reached from _do_confirm_cancel_quest's own "Yes, cancel it"
+    button, never a single tap. Removes it from wherever it's tracked
+    as active without touching completed_quests/marking it declined,
+    so it's naturally offered again later (story:
+    _offerable_quest_at_location; board: get_or_generate_all_board_
+    quests, same real board slot, reset the same way an expired quest
+    already resets via db.cancel_board_quest).
+    """
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None or kind is None or ident is None:
+        return
+
+    if kind == "story":
+        quest = CAMPAIGN["quests"].get(ident)
+        if quest is None or ident not in character["active_quests"]:
+            return
+        db.cancel_quest(update.effective_user.id, update.effective_chat.id, ident)
+        await _safe_send(
+            update,
+            f"🗑️ Cancelled **{quest['title']}** — you can pick it back up by returning to where you found it.",
+            speak=False,
+        )
+        return
+
+    if kind == "board":
+        bq = next(
+            (q for q in db.get_accepted_board_quests_for_user(update.effective_user.id, update.effective_chat.id)
+             if str(q["board_quest_id"]) == str(ident)),
+            None,
+        )
+        if bq is None:
+            return
+        db.cancel_board_quest(int(ident), update.effective_user.id, update.effective_chat.id)
+        await _safe_send(
+            update,
+            f"🗑️ Cancelled **{bq['title']}** — progress reset to 0/{bq['objective_count']}. "
+            f"It'll be back on the board next time you're there.",
+            speak=False,
+        )
         return
 
 
@@ -12575,6 +12679,18 @@ async def quest_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         kind = parts[2] if len(parts) > 2 else None
         ident = parts[3] if len(parts) > 3 else None
         await _do_dismiss_quest_offer(update, kind, ident)
+        return
+
+    if action == "cancelconfirm":
+        kind = parts[2] if len(parts) > 2 else None
+        ident = parts[3] if len(parts) > 3 else None
+        await _do_confirm_cancel_quest(update, kind, ident)
+        return
+
+    if action == "cancel":
+        kind = parts[2] if len(parts) > 2 else None
+        ident = parts[3] if len(parts) > 3 else None
+        await _do_cancel_quest(update, kind, ident)
         return
 
     if action == "resolve":

@@ -1942,6 +1942,25 @@ def accept_quest(telegram_user_id: int, chat_id: int, quest_id: str) -> dict | N
     return update_character(telegram_user_id, chat_id, active_quests=active)
 
 
+def cancel_quest(telegram_user_id: int, chat_id: int, quest_id: str) -> dict | None:
+    """
+    Real request (2026-08-22, per Coffee: "in the quests menu when we
+    click on a quest we can cancel the quest?... doesnt decline the
+    quest it jus allows them to do it at another time"). Same pop-
+    from-active_quests shape complete_quest already uses, just WITHOUT
+    ever touching completed_quests -- so _offerable_quest_at_location
+    (which only ever skips a quest_id already in completed_quests or
+    active_quests) naturally re-offers it the next time this character
+    reaches the quest's own location, exactly as asked.
+    """
+    character = get_character(telegram_user_id, chat_id)
+    if character is None:
+        return None
+    active = character["active_quests"]
+    active.pop(quest_id, None)
+    return update_character(telegram_user_id, chat_id, active_quests=active)
+
+
 def join_guild(telegram_user_id: int, chat_id: int, guild_id: str) -> dict | None:
     """
     First guild ever joined becomes the PRIMARY guild (character.guild,
@@ -3113,6 +3132,31 @@ def accept_board_quest(board_quest_id: int, telegram_user_id: int, chat_id: int)
             "WHERE board_quest_id = ? AND chat_id = ? AND accepted_by IS NULL",
             (telegram_user_id, now.isoformat(), datetime.fromtimestamp(expires, timezone.utc).isoformat(),
              board_quest_id, chat_id),
+        )
+        row = conn.execute(
+            "SELECT * FROM board_quests WHERE board_quest_id = ? AND chat_id = ?", (board_quest_id, chat_id)
+        ).fetchone()
+    return _board_quest_row_to_dict(row) if row else None
+
+
+def cancel_board_quest(board_quest_id: int, telegram_user_id: int, chat_id: int) -> dict | None:
+    """
+    Real request (2026-08-22, per Coffee: "in the quests menu when we
+    click on a quest we can cancel the quest?... doesnt decline the
+    quest it jus allows them to do it at another time"). Same reset
+    shape expire_stale_board_quests already uses for a quest that aged
+    out on its own (accepted_by/accepted_at/expires_at cleared,
+    progress_count back to 0) -- this is just the player choosing that
+    outcome deliberately, with a real confirmation first (see bot.py's
+    _do_confirm_cancel_quest), instead of waiting for the clock.
+    Scoped to accepted_by = telegram_user_id so a stale/guessed
+    board_quest_id can never cancel someone else's accepted quest.
+    """
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE board_quests SET accepted_by = NULL, accepted_at = NULL, expires_at = NULL, "
+            "progress_count = 0 WHERE board_quest_id = ? AND chat_id = ? AND accepted_by = ? AND completed_at IS NULL",
+            (board_quest_id, chat_id, telegram_user_id),
         )
         row = conn.execute(
             "SELECT * FROM board_quests WHERE board_quest_id = ? AND chat_id = ?", (board_quest_id, chat_id)

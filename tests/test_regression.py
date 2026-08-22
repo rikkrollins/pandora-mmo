@@ -1151,6 +1151,116 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("A quiet request for wood", combined)
         self.assertIn("1/3", combined)
 
+    async def test_cancel_story_quest_button_asks_for_confirmation_first(self):
+        """
+        Real request (2026-08-22, Coffee): "in the quests menu when we
+        click on a quest we can cancel the quest?" then, follow-up:
+        "make it a push button option-ask the player, are u sure?" --
+        the first tap must show a confirmation, never cancel immediately.
+        """
+        use_test_db("tests/tmp/quest_cancel_story_confirm_test.db")
+        user_id = 900710
+        make_basic_character(user_id, "CancelStoryConfirmTester", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, active_quests={"welcome_to_the_crossroads": {"accepted_at": "2026-08-20T00:00:00+00:00"}})
+
+        sink = []
+        await bot.quest_menu_callback(
+            FakeCallbackUpdate(user_id, "quest|cancelconfirm|story|welcome_to_the_crossroads", sink), DummyContext(),
+        )
+        combined = "\n".join(sink)
+        self.assertIn("Are you sure", combined)
+        # Nothing actually cancelled yet.
+        self.assertIn("welcome_to_the_crossroads", db.get_character(user_id, -999)["active_quests"])
+
+    async def test_confirmed_cancel_story_quest_lets_it_be_offered_again_at_its_location(self):
+        use_test_db("tests/tmp/quest_cancel_story_test.db")
+        user_id = 900711
+        make_basic_character(user_id, "CancelStoryTester", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, active_quests={"welcome_to_the_crossroads": {"accepted_at": "2026-08-20T00:00:00+00:00"}})
+
+        sink = []
+        await bot.quest_menu_callback(
+            FakeCallbackUpdate(user_id, "quest|cancel|story|welcome_to_the_crossroads", sink), DummyContext(),
+        )
+        self.assertTrue(any("Cancelled" in s for s in sink))
+        character = db.get_character(user_id, -999)
+        self.assertNotIn("welcome_to_the_crossroads", character["active_quests"])
+        self.assertNotIn("welcome_to_the_crossroads", character["completed_quests"])
+        # The real re-offer check must now find it again.
+        offer = bot._offerable_quest_at_location(character, "crossroads_tavern")
+        self.assertIsNotNone(offer)
+        self.assertEqual(offer[0], "welcome_to_the_crossroads")
+
+    async def test_cancel_board_quest_confirmation_shows_the_real_progress_that_would_be_lost(self):
+        """
+        Real follow-up (Coffee): "ask the player, are u sure? all
+        progress from this quest will reset... say if its 22/60
+        Goblins to be slain, it would reset to 0/60" -- the exact real
+        numbers must appear, not a generic warning.
+        """
+        use_test_db("tests/tmp/quest_cancel_board_confirm_test.db")
+        user_id = 900712
+        make_basic_character(user_id, "CancelBoardConfirmTester", current_location="crossroads_tavern")
+        bq = db.create_board_quest(
+            "crossroads_tavern", -999, "quest-cancel-test-day", "Slay some goblins", "Slay 60 Goblins.", None,
+            "defeat_monster", "goblin", 60, 200, 100,
+        )
+        db.accept_board_quest(bq["board_quest_id"], user_id, -999)
+        db.record_board_quest_progress(bq["board_quest_id"], 22)
+
+        sink = []
+        await bot.quest_menu_callback(
+            FakeCallbackUpdate(user_id, f"quest|cancelconfirm|board|{bq['board_quest_id']}", sink), DummyContext(),
+        )
+        combined = "\n".join(sink)
+        self.assertIn("Are you sure", combined)
+        self.assertIn("22/60", combined)
+        self.assertIn("0/60", combined)
+        # Nothing actually reset yet.
+        still_accepted = db.get_accepted_board_quests_for_user(user_id, -999)
+        self.assertEqual(still_accepted[0]["progress_count"], 22)
+
+    async def test_confirmed_cancel_board_quest_resets_progress_and_reopens_the_board_slot(self):
+        use_test_db("tests/tmp/quest_cancel_board_test.db")
+        user_id = 900713
+        make_basic_character(user_id, "CancelBoardTester", current_location="crossroads_tavern")
+        bq = db.create_board_quest(
+            "crossroads_tavern", -999, "quest-cancel-test-day2", "Slay some goblins", "Slay 60 Goblins.", None,
+            "defeat_monster", "goblin", 60, 200, 100,
+        )
+        db.accept_board_quest(bq["board_quest_id"], user_id, -999)
+        db.record_board_quest_progress(bq["board_quest_id"], 22)
+
+        sink = []
+        await bot.quest_menu_callback(
+            FakeCallbackUpdate(user_id, f"quest|cancel|board|{bq['board_quest_id']}", sink), DummyContext(),
+        )
+        self.assertTrue(any("Cancelled" in s and "0/60" in s for s in sink), sink)
+        self.assertEqual(db.get_accepted_board_quests_for_user(user_id, -999), [])
+
+        # The real, same underlying row must be reopened -- not deleted or replaced.
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM board_quests WHERE board_quest_id = ?", (bq["board_quest_id"],)
+            ).fetchone()
+        refreshed = db._board_quest_row_to_dict(row)
+        self.assertIsNone(refreshed["accepted_by"])
+        self.assertEqual(refreshed["progress_count"], 0)
+        self.assertIsNone(refreshed["completed_at"])
+
+    async def test_cancel_no_keep_it_button_leaves_everything_untouched(self):
+        use_test_db("tests/tmp/quest_cancel_keepit_test.db")
+        user_id = 900714
+        make_basic_character(user_id, "KeepItTester", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, active_quests={"welcome_to_the_crossroads": {"accepted_at": "2026-08-20T00:00:00+00:00"}})
+
+        sink = []
+        # "No, keep it" is just the existing quest|view action, reused as-is.
+        await bot.quest_menu_callback(
+            FakeCallbackUpdate(user_id, "quest|view|story|welcome_to_the_crossroads", sink), DummyContext(),
+        )
+        self.assertIn("welcome_to_the_crossroads", db.get_character(user_id, -999)["active_quests"])
+
     async def test_view_branching_board_quest_at_full_progress_shows_real_choice_buttons(self):
         """
         Real live bug this session (v1.27.286): a branching board quest

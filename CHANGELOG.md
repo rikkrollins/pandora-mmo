@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.315] — Cancel a quest from the Quest menu
+
+**Real request (2026-08-22, Coffee): "can u make it so in the quests
+menu when we click on a quest we can cancel the quest? the player can
+get the quest again by going to the location that triggers the quest
+again. it doesnt decline the quest it jus allows them to do it at
+another time" — followed by: "make it a push button option-ask the
+player, are u sure ? all progress from this quest will reset if you
+cancel this quest. (say if its 22/60 Goblins to be slain, it would
+reset to 0,60)."**
+
+Both story and board quest detail screens now have a real "❌ Cancel
+Quest" button. Tapping it shows a real confirmation naming the actual
+progress that would be lost (e.g. "you're currently at 22/60, this
+would go back to 0/60") before anything happens — only the "✅ Yes,
+cancel it" button on that confirmation actually cancels; "◀️ No, keep
+it" returns to the detail screen untouched. Cancelling a story quest
+removes it from `active_quests` (new `db.cancel_quest`) without
+touching `completed_quests`, so `_offerable_quest_at_location`
+naturally offers it again next time the character reaches its
+location. Cancelling a board quest resets the same real board_quest
+row (new `db.cancel_board_quest`, same reset shape an expired quest
+already gets) — same instance, not a new one, back on the board for
+anyone. Guild curriculum steps have no accept step to begin with, so
+they don't get a cancel button. Verified with 5 new tests plus 6
+collateral tests, all green.
+
 ## [1.27.314] — Real directional/pin emoji for navigation buttons
 
 **Real dev-bridge requests (2026-08-22, Coffee, two screenshots):
