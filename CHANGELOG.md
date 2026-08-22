@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.318] — Diagnostic logging for a real, unconfirmed Remnant-summon cap report
+
+**Real dev-bridge report (2026-08-22, Coffee): summoned the Wrathflame
+Unbound twice in the same battle, ~7 minutes apart — "I don't think my
+character should be able to do that yet."** Confirmed via real log
+evidence (`bot_live_tmp.log`) both summons genuinely happened, same
+session, same callback path (`bm|summontarget`), no errors between
+them. The per-battle cap check (`_summons_per_battle`) reads correctly
+structured against Pan's real Summoning Mastery (4% → cap of 1), and a
+real executed test of the exact same cap logic passes cleanly — the
+root cause isn't confirmed from static reading or offline testing
+alone. Added targeted logging at the cap-check site (session_id,
+telegram_user_id, `id(caster)`, used/cap/mastery) so a recurrence is
+traceable — same "log it now, catch it live" pattern used for the
+still-unconfirmed Eldritch Blast misclassification report. Logging
+only; no behavior change.
+
 ## [1.27.317] — Shield/Uncanny Dodge become real push-button reactions
 
 **Real dev-bridge report (2026-08-22, Coffee, screenshot): "Why did I

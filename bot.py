@@ -25187,6 +25187,26 @@ async def _do_summon_remnant(update: Update, text: str, forced_roll: int | None 
         cap = _summons_per_battle(character)
         used = caster.get("summons_used_this_battle", 0)
         mastery = cap is None
+        # Diagnostic logging (2026-08-22, real dev-bridge report,
+        # Coffee: "Let me [cast] this twice, and I don't think my
+        # character should be able to do that yet" -- two real,
+        # separate, ~7-minutes-apart summons in the same fight,
+        # confirmed via bot_live_tmp.log, both via the normal bm|
+        # summontarget callback path). Static reading of this cap
+        # check found nothing wrong -- same session, same participant
+        # lookup, no errors between the two calls -- so this logs the
+        # real id(caster) alongside session_id/used/cap: if a future
+        # recurrence shows a DIFFERENT id(caster) for the same
+        # session_id+telegram_user_id, that confirms the participant
+        # dict itself got replaced somewhere between the two calls
+        # (the actual mechanism still isn't confirmed); if id(caster)
+        # matches but used still reads 0 on the second call, the bug
+        # is elsewhere. Same "log it so it's traceable if it recurs"
+        # pattern as the Eldritch Blast misclassification investigation.
+        logger.info(
+            f"[summon] session={session.session_id} user={caster.get('telegram_user_id')} "
+            f"caster_id={id(caster)} remnant={remnant_id} used={used} cap={cap} mastery={mastery}"
+        )
         if mastery:
             if character["spell_slots_current"] < 1:
                 await update.effective_chat.send_message(
