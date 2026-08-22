@@ -2,6 +2,22 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.314] — Real directional/pin emoji for navigation buttons
+
+**Real dev-bridge requests (2026-08-22, Coffee, two screenshots):
+"Can you use emogis to make this more visually stimulating and easier
+to navigate" (Waypoints, a bare list of location names) and "Can you
+use emoji's for navigations?! ⬇️⬆️➡️⬅️" (the look-around movement
+buttons, every direction sharing one generic 🚶).**
+
+Movement buttons now carry a real compass/floor arrow per direction
+(⬆️ north, ⬇️ south, ➡️ east, ⬅️ west, 🔼 up, 🔽 down) — the complete
+real set this campaign's own location data uses, confirmed by reading
+every location's `directions` dict rather than guessing; a connection
+with no named direction keeps the old generic 🚶 rather than inventing
+one. Waypoint fast-travel buttons get a real 📍 pin icon per row
+instead of bare text. Verified with 4 new tests, all green.
+
 ## [1.27.313] — Level and class shown on Party menu buttons
 
 **Real dev-bridge request (2026-08-22, Coffee, right after seeing the

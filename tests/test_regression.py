@@ -21461,6 +21461,50 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         mock_post.assert_not_called()
         self.assertTrue(any("isn't interested in talking" in msg for msg in sink), sink)
 
+    def test_look_action_travel_buttons_use_real_directional_emoji(self):
+        """
+        Real dev-bridge request (2026-08-22, Coffee, screenshot: "Can
+        you use emoji's for navigations?! ⬇️⬆️➡️⬅️..."). crossroads_tavern
+        has a real, known direction for all 6 real direction words this
+        campaign uses (north/south/east/west/up/down) -- confirmed via
+        direct read of campaign.json's own "directions" dict.
+        """
+        location = cl.get_location(bot.CAMPAIGN, "crossroads_tavern")
+        kb = bot._look_action_keyboard(location, [])
+        labels_by_data = {btn.callback_data: btn.text for row in kb.inline_keyboard for btn in row}
+        self.assertEqual(labels_by_data["travel|go|market_row"][:2], "⬆️")
+        self.assertEqual(labels_by_data["travel|go|stonearch_bridge"][:2], "⬇️")
+        self.assertEqual(labels_by_data["travel|go|whispering_wood"][:2], "➡️")
+        self.assertEqual(labels_by_data["travel|go|the_colosseum"][:2], "⬅️")
+        self.assertIn("🔼", labels_by_data["travel|go|tavern_upstairs"])
+        self.assertIn("🔽", labels_by_data["travel|go|tavern_cellar"])
+
+    def test_look_action_travel_button_falls_back_to_walking_emoji_with_no_named_direction(self):
+        """A real connection with no matching entry in the location's own "directions" dict must never guess a direction -- keeps the old generic 🚶."""
+        real_location = cl.get_location(bot.CAMPAIGN, "crossroads_tavern")
+        stripped = dict(real_location)
+        stripped["directions"] = {}
+        kb = bot._look_action_keyboard(stripped, [])
+        labels = [btn.text for row in kb.inline_keyboard for btn in row]
+        self.assertTrue(any(label.startswith("🚶") for label in labels))
+        self.assertFalse(any(label.startswith(("⬆️", "⬇️", "➡️", "⬅️", "🔼", "🔽")) for label in labels))
+
+    def test_waypoint_keyboard_buttons_carry_a_real_pin_emoji(self):
+        """Real dev-bridge request (2026-08-22, Coffee, screenshot of the bare-text Waypoints list): "use emogis to make this more visually stimulating"."""
+        visited = cl.get_all_location_ids(bot.CAMPAIGN)[:3]
+        kb = bot._waypoint_keyboard(visited, current_location_id="__nowhere__")
+        labels = [btn.text for row in kb.inline_keyboard for btn in row]
+        self.assertTrue(labels)
+        self.assertTrue(all(label.startswith("📍 ") for label in labels))
+
+    async def test_waypoint_tap_still_travels_correctly_with_the_new_emoji_label(self):
+        user_id = 950720
+        make_basic_character(user_id, "WaypointEmojiTester", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, visited_locations=["crossroads_tavern", "market_row"])
+        sink = []
+        await bot.waypoint_menu_callback(FakeCallbackUpdate(user_id, "waypoint|go|market_row", sink), DummyContext())
+        self.assertEqual(db.get_character(user_id, -999)["current_location"], "market_row")
+
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
     """

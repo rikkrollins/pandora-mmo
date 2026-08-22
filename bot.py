@@ -17465,6 +17465,11 @@ async def _do_arcane_recovery(update: Update) -> None:
     await _maybe_send_ability_image(update, "Arcane Recovery", "a wizard studying arcane tomes to recover spent magic", "📖")
 
 
+_DIRECTION_EMOJI = {
+    "north": "⬆️", "south": "⬇️", "east": "➡️", "west": "⬅️", "up": "🔼", "down": "🔽",
+}
+
+
 def _look_action_keyboard(location: dict, unclaimed_board_quests: list) -> InlineKeyboardMarkup | None:
     """
     Per Coffee (2026-07-21): "when u look around put pop up options for
@@ -17502,13 +17507,26 @@ def _look_action_keyboard(location: dict, unclaimed_board_quests: list) -> Inlin
         rows.append([InlineKeyboardButton("🕯️ Pray at the Shrine", callback_data="lookact|pray")])
 
     connections = location.get("connections", [])
-    direction_for_dest = {dest: word.capitalize() for word, dest in location.get("directions", {}).items()}
+    direction_for_dest = {dest: word for word, dest in location.get("directions", {}).items()}
     for dest_id in connections:
         dest = cl.get_location(CAMPAIGN, dest_id)
         if dest is None:
             continue
-        label = f"{direction_for_dest[dest_id]}: {dest['name']}" if dest_id in direction_for_dest else dest["name"]
-        rows.append([InlineKeyboardButton(f"🚶 {label}", callback_data=f"travel|go|{dest_id}")])
+        # Real dev-bridge request (2026-08-22, Coffee: "Can you use
+        # emoji's for navigations?! ⬇️⬆️➡️⬅️..."), same pass as the
+        # Waypoints pin below. Only the campaign's own real direction
+        # words (north/south/east/west/up/down -- confirmed the
+        # complete real set via every location's own "directions"
+        # dict) get a real compass/floor arrow; a connection with no
+        # named direction keeps the old generic 🚶, never guessed.
+        direction_word = direction_for_dest.get(dest_id)
+        if direction_word:
+            emoji = _DIRECTION_EMOJI.get(direction_word.lower(), "🚶")
+            label = f"{direction_word.capitalize()}: {dest['name']}"
+        else:
+            emoji = "🚶"
+            label = dest["name"]
+        rows.append([InlineKeyboardButton(f"{emoji} {label}", callback_data=f"travel|go|{dest_id}")])
     return InlineKeyboardMarkup(rows) if rows else None
 
 
@@ -25153,13 +25171,21 @@ async def _do_summon_remnant(update: Update, text: str, forced_roll: int | None 
 # ---------------------------------------------------------------------
 
 def _waypoint_keyboard(visited_locations: list[str], current_location_id: str) -> InlineKeyboardMarkup:
+    """
+    Real dev-bridge request (2026-08-22, Coffee, screenshot of this
+    exact bare-text list: "Can you use emogis to make this more
+    visually stimulating and easier to navigate"). A real, universal
+    destination-pin icon per row -- not a fabricated per-location
+    emoji, which this game's own grounding convention (never invent
+    flavor a location's own data doesn't have) rules out.
+    """
     rows = []
     for loc_id in visited_locations:
         if loc_id == current_location_id:
             continue
         loc = cl.get_location(CAMPAIGN, loc_id)
         if loc:
-            rows.append([InlineKeyboardButton(loc["name"], callback_data=f"waypoint|go|{loc_id}")])
+            rows.append([InlineKeyboardButton(f"📍 {loc['name']}", callback_data=f"waypoint|go|{loc_id}")])
     return InlineKeyboardMarkup(rows)
 
 
