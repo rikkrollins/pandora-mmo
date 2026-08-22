@@ -36,7 +36,7 @@ from ai.support_agent import (
     _deterministic_inventory_answer, _deterministic_location_connections_answer, _deterministic_quest_task_answer,
 )
 from ai.text_cleanup import strip_think_tags
-from rules.combat import resolve_attack
+from rules.combat import resolve_attack, reaction_precheck
 from rules.crafting import RECIPES
 from tests.helpers import (
     DummyContext, DummyMessage, FakeBot, FakeCallbackUpdate, FakeChat, FakeUpdate, FakeUser,
@@ -2007,33 +2007,49 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # 15-19 would hit without Shield but not with it (+5 AC), while
         # 20 is a crit (unaffected) and under 15 already misses. Retry
         # until landing in that band so this isn't flaky.
+        #
+        # Redesigned 2026-08-22 (per Coffee: "make it a fast response
+        # push button... dont make it use spell points, make it use a
+        # dice roll and stat") -- resolve_attack itself no longer
+        # decides whether Shield fires; it only trusts a real,
+        # already-made `shield_reaction_confirmed` decision (made by
+        # bot.py's async _maybe_confirm_reaction, tested separately
+        # below). This test confirms resolve_attack's OWN half: given
+        # an explicit confirmation, Shield still correctly turns a
+        # would-be hit into a miss, no spell slot involved at all.
         weapon = {"ability": "strength", "damage_dice": "1d1", "damage_bonus": 0}
         for _ in range(60):
             attacker = {"name": "Attacker", "strength": 10, "proficiency_bonus": 0}
             defender = {
                 "name": "Shielder", "dexterity": 10, "armor_class": 15,
                 "hp_current": 50, "hp_max": 50, "char_class": "Wizard",
-                "known_spells": ["shield"], "spell_slots_current": 2,
+                "known_spells": ["shield"],
             }
-            result = resolve_attack(attacker, defender, weapon, round_number=1)
+            result = resolve_attack(attacker, defender, weapon, round_number=1, shield_reaction_confirmed=True)
             if result["attack_roll"] in range(15, 20) and not result["critical_hit"]:
                 self.assertFalse(result["hit"])
                 self.assertTrue(result["shield_reaction_triggered"])
-                self.assertEqual(defender["spell_slots_current"], 1)
                 self.assertEqual(defender["reaction_used_round"], 1)
                 return
         self.fail("never landed a roll in the Shield-relevant band in 60 tries")
 
-    def test_shield_doesnt_fire_without_a_spell_slot(self):
+    def test_shield_doesnt_fire_without_confirmation(self):
+        """
+        Real request (2026-08-22, Coffee): Shield must never auto-fire
+        on its own anymore -- only a real, already-made confirmation
+        (shield_reaction_confirmed=True) makes it apply, regardless of
+        known_spells. This is the core of the whole redesign: no
+        confirmation in, no reaction out.
+        """
         weapon = {"ability": "strength", "damage_dice": "1d1", "damage_bonus": 0}
         for _ in range(60):
             attacker = {"name": "Attacker", "strength": 10, "proficiency_bonus": 0}
             defender = {
-                "name": "OutOfSlots", "dexterity": 10, "armor_class": 15,
+                "name": "Unconfirmed", "dexterity": 10, "armor_class": 15,
                 "hp_current": 50, "hp_max": 50, "char_class": "Wizard",
-                "known_spells": ["shield"], "spell_slots_current": 0,
+                "known_spells": ["shield"],
             }
-            result = resolve_attack(attacker, defender, weapon, round_number=1)
+            result = resolve_attack(attacker, defender, weapon, round_number=1)  # shield_reaction_confirmed defaults False
             if result["attack_roll"] in range(15, 20) and not result["critical_hit"]:
                 self.assertTrue(result["hit"])
                 self.assertFalse(result["shield_reaction_triggered"])
@@ -2055,13 +2071,16 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # reaction before the loop ever reached a plain hit to assert on.
         # Confirmed live 2026-07-16: failed under real random rolls in an
         # otherwise-clean full suite run for exactly this reason.
-        result = resolve_attack(attacker, defender, weapon, round_number=1, forced_roll=10)
+        # uncanny_dodge_confirmed=True (2026-08-22 redesign, see Shield's
+        # own test above for the same real reasoning).
+        result = resolve_attack(attacker, defender, weapon, round_number=1, forced_roll=10, uncanny_dodge_confirmed=True)
         self.assertTrue(result["hit"])
         self.assertFalse(result["critical_hit"])
         self.assertTrue(result["uncanny_dodge_triggered"])
         self.assertEqual(result["damage_dealt"], 4)
 
     def test_uncanny_dodge_doesnt_fire_below_level_5(self):
+        """Even WITH a real confirmation, resolve_attack still refuses to apply Uncanny Dodge below the real level-5 gate."""
         weapon = {"ability": "strength", "damage_dice": "8d1", "damage_bonus": 0}
         attacker = {"name": "Attacker", "strength": 20, "proficiency_bonus": 5}
         defender = {
@@ -2069,7 +2088,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "hp_current": 50, "hp_max": 50, "char_class": "Rogue", "level": 4,
         }
         for _ in range(20):
-            result = resolve_attack(dict(attacker), defender, weapon, round_number=1)
+            result = resolve_attack(dict(attacker), defender, weapon, round_number=1, uncanny_dodge_confirmed=True)
             if result["hit"] and not result["critical_hit"]:
                 self.assertFalse(result["uncanny_dodge_triggered"])
                 self.assertEqual(result["damage_dealt"], 8)
@@ -2080,22 +2099,103 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # A level-5 Rogue Wizard hybrid isn't real, but this directly
         # tests the shared reaction economy: once reaction_used_round
         # matches the current round, neither Shield nor Uncanny Dodge
-        # should fire again this round.
+        # should fire again this round -- confirmed explicitly True for
+        # both, so this genuinely tests the round gate, not just the
+        # (now-separate) confirmation gate.
         defender = {
             "name": "Spent", "dexterity": 10, "armor_class": 15,
             "hp_current": 50, "hp_max": 50, "char_class": "Rogue", "level": 5,
-            "known_spells": ["shield"], "spell_slots_current": 5,
+            "known_spells": ["shield"],
             "reaction_used_round": 1,
         }
         weapon = {"ability": "strength", "damage_dice": "8d1", "damage_bonus": 0}
         attacker = {"name": "Attacker", "strength": 10, "proficiency_bonus": 0}
         for _ in range(60):
-            result = resolve_attack(dict(attacker), dict(defender), weapon, round_number=1)
+            result = resolve_attack(
+                dict(attacker), dict(defender), weapon, round_number=1,
+                shield_reaction_confirmed=True, uncanny_dodge_confirmed=True,
+            )
             if result["attack_roll"] in range(15, 20) and not result["critical_hit"]:
                 self.assertFalse(result["shield_reaction_triggered"])
                 self.assertFalse(result["uncanny_dodge_triggered"])
                 return
         self.fail("never landed a roll in the relevant band in 60 tries")
+
+    def test_reaction_precheck_reports_shield_eligible_for_a_would_be_hit(self):
+        """
+        Real request (2026-08-22, Coffee): reaction_precheck is the new
+        pure, read-only companion to resolve_attack that lets bot.py's
+        async layer decide via a real prompt BEFORE the real attack
+        resolves. Must report eligibility correctly without mutating
+        anything.
+        """
+        weapon = {"ability": "strength", "damage_dice": "1d1", "damage_bonus": 0}
+        attacker = {"name": "Attacker", "strength": 10, "proficiency_bonus": 0}
+        defender = {
+            "name": "Shielder", "dexterity": 10, "armor_class": 15,
+            "hp_current": 50, "hp_max": 50, "char_class": "Wizard", "known_spells": ["shield"],
+        }
+        for _ in range(60):
+            precheck = reaction_precheck(attacker, dict(defender), weapon, round_number=1)
+            if precheck["raw_roll"] in range(15, 20):  # a real would-be-hit, non-crit band at AC 15
+                self.assertTrue(precheck["shield_eligible"])
+                self.assertFalse(precheck["uncanny_dodge_eligible"])
+                # Nothing mutated -- still the same untouched defender dict.
+                self.assertNotIn("reaction_used_round", defender)
+                return
+        self.fail("never landed a roll in the relevant band in 60 tries")
+
+    def test_reaction_precheck_reports_ineligible_for_a_miss_a_crit_or_no_known_shield(self):
+        weapon = {"ability": "strength", "damage_dice": "1d1", "damage_bonus": 0}
+        attacker = {"name": "Attacker", "strength": 10, "proficiency_bonus": 0}
+        no_shield_defender = {
+            "name": "NoShield", "dexterity": 10, "armor_class": 15,
+            "hp_current": 50, "hp_max": 50, "char_class": "Wizard", "known_spells": [],
+        }
+        for _ in range(60):
+            precheck = reaction_precheck(attacker, dict(no_shield_defender), weapon, round_number=1)
+            if precheck["raw_roll"] in range(15, 20):
+                self.assertFalse(precheck["shield_eligible"])
+                break
+        else:
+            self.fail("never landed a roll in the relevant band in 60 tries")
+
+        # A guaranteed miss (AC far above anything this attacker can roll).
+        miss_defender = {
+            "name": "Untouchable", "dexterity": 10, "armor_class": 99,
+            "hp_current": 50, "hp_max": 50, "char_class": "Wizard", "known_spells": ["shield"],
+        }
+        miss_precheck = reaction_precheck(attacker, miss_defender, weapon, round_number=1)
+        self.assertFalse(miss_precheck["shield_eligible"])
+
+        # Reaction already used this round.
+        used_defender = {
+            "name": "AlreadyReacted", "dexterity": 10, "armor_class": 15,
+            "hp_current": 50, "hp_max": 50, "char_class": "Wizard", "known_spells": ["shield"],
+            "reaction_used_round": 1,
+        }
+        for _ in range(60):
+            precheck = reaction_precheck(attacker, dict(used_defender), weapon, round_number=1)
+            if precheck["raw_roll"] in range(15, 20):
+                self.assertFalse(precheck["shield_eligible"])
+                return
+        self.fail("never landed a roll in the relevant band in 60 tries")
+
+    def test_reaction_precheck_reports_uncanny_dodge_eligible_for_a_landed_hit(self):
+        weapon = {"ability": "strength", "damage_dice": "8d1", "damage_bonus": 0}
+        attacker = {"name": "Attacker", "strength": 20, "proficiency_bonus": 5}
+        defender = {
+            "name": "Dodger", "dexterity": 10, "armor_class": 1,
+            "hp_current": 50, "hp_max": 50, "char_class": "Rogue", "level": 5,
+        }
+        precheck = reaction_precheck(attacker, defender, weapon, round_number=1, forced_roll=10)
+        self.assertTrue(precheck["uncanny_dodge_eligible"])
+        self.assertFalse(precheck["shield_eligible"])
+        self.assertNotIn("reaction_used_round", defender)  # still untouched
+
+        too_young = {**defender, "level": 4}
+        precheck2 = reaction_precheck(attacker, too_young, weapon, round_number=1, forced_roll=10)
+        self.assertFalse(precheck2["uncanny_dodge_eligible"])
 
     # -- Shields, auto-equip, equipping party members, sheet display of
     #    equipped/carried-not-equipped gear (v1.10.10, per Coffee) ------
@@ -9154,20 +9254,112 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         result = await asyncio.wait_for(task, timeout=5)
         self.assertTrue(result)
 
-    async def test_shield_reaction_announcement_states_slots_remaining(self):
+    async def test_shield_reaction_announcement_no_longer_mentions_spell_slots(self):
         """
-        Same real dev-bridge report as the Counterspell test above --
-        Shield is the OTHER auto-triggered reaction that silently spends
-        a spell slot (rules/combat.py), and its announcement previously
-        never said so either.
+        Redesigned 2026-08-22 (per Coffee: "dont make it use spell
+        points, make it use a dice roll and stat") -- Shield no longer
+        costs a slot at all, so its announcement no longer states a
+        remaining-slot count (it used to, per an earlier real
+        dev-bridge report about exactly that line).
         """
         sink = []
         update = FakeUpdate(996094, "look", sink)
-        defender = {"name": "Shieldy", "spell_slots_current": 1, "spell_slots_max": 4}
+        defender = {"name": "Shieldy"}
         result = {"shield_reaction_triggered": True, "uncanny_dodge_triggered": False}
         await bot._announce_reaction(update, defender, result)
-        self.assertTrue(any("1/4 left" in msg for msg in sink), sink)
-        self.assertTrue(any("Shield as a reaction" in msg for msg in sink), sink)
+        self.assertTrue(any("Shield" in msg for msg in sink), sink)
+        self.assertFalse(any("slot" in msg.lower() for msg in sink), sink)
+
+    async def test_maybe_confirm_reaction_ai_defender_decides_instantly_no_prompt(self):
+        """
+        Real request (2026-08-22, Coffee): same real/AI split
+        Counterspell already uses -- an AI defender has no human to
+        tap a button, so a successful DEX check decides instantly.
+        """
+        from unittest.mock import patch, AsyncMock
+        defender = {"telegram_user_id": -700950, "name": "AI Shielder", "dexterity": 10, "is_ai": True}
+        with patch("bot.roll_d20", return_value=20), \
+             patch("bot._prompt_reaction_choice", new=AsyncMock()) as mock_prompt:
+            confirmed = await bot._maybe_confirm_reaction(FakeUpdate(1, "look", []), defender, "shield")
+        self.assertTrue(confirmed)
+        mock_prompt.assert_not_called()
+
+    async def test_maybe_confirm_reaction_failed_dex_check_never_prompts_regardless_of_defender(self):
+        """The dice roll happens FIRST, before ever checking human vs AI -- a failed roll never reaches the prompt for anyone."""
+        from unittest.mock import patch, AsyncMock
+        human_defender = {"telegram_user_id": 996200, "name": "SlowHuman", "dexterity": 10, "is_ai": False}
+        with patch("bot.roll_d20", return_value=1), \
+             patch("bot._prompt_reaction_choice", new=AsyncMock()) as mock_prompt:
+            confirmed = await bot._maybe_confirm_reaction(FakeUpdate(996200, "look", []), human_defender, "shield")
+        self.assertFalse(confirmed)
+        mock_prompt.assert_not_called()
+
+    async def test_maybe_confirm_reaction_human_defender_gets_a_real_prompt(self):
+        from unittest.mock import patch, AsyncMock
+        human_defender = {"telegram_user_id": 996201, "name": "RealPlayer", "dexterity": 10, "is_ai": False}
+        with patch("bot.roll_d20", return_value=20), \
+             patch("bot._prompt_reaction_choice", new=AsyncMock(return_value=True)) as mock_prompt:
+            confirmed = await bot._maybe_confirm_reaction(FakeUpdate(996201, "look", []), human_defender, "shield")
+        self.assertTrue(confirmed)
+        mock_prompt.assert_called_once()
+        prompt_args = mock_prompt.call_args.args
+        self.assertEqual(prompt_args[1], 996201)  # the real defender's own telegram_user_id, not the attacker's
+
+        with patch("bot.roll_d20", return_value=20), \
+             patch("bot._prompt_reaction_choice", new=AsyncMock(return_value=False)):
+            declined = await bot._maybe_confirm_reaction(FakeUpdate(996201, "look", []), human_defender, "shield")
+        self.assertFalse(declined)
+
+    async def test_resolve_attack_with_reaction_check_ai_defender_applies_shield_instantly(self):
+        """Real end-to-end: an AI defender's successful DEX check applies Shield with no prompt, turning a would-be hit into a real miss."""
+        from unittest.mock import patch, AsyncMock
+        attacker = {"name": "Attacker", "strength": 10, "proficiency_bonus": 0}
+        defender = {
+            "telegram_user_id": -700951, "name": "AI Shielder", "dexterity": 10, "armor_class": 15,
+            "hp_current": 50, "hp_max": 50, "char_class": "Wizard", "known_spells": ["shield"], "is_ai": True,
+        }
+        weapon = {"ability": "strength", "damage_dice": "1d1", "damage_bonus": 0}
+        with patch("bot.roll_d20", return_value=20), \
+             patch("bot._prompt_reaction_choice", new=AsyncMock()) as mock_prompt:
+            result = await bot._resolve_attack_with_reaction_check(
+                FakeUpdate(1, "look", []), attacker, defender, weapon, round_number=1, forced_roll=15,
+            )
+        self.assertFalse(result["hit"])
+        self.assertTrue(result["shield_reaction_triggered"])
+        mock_prompt.assert_not_called()
+
+    async def test_resolve_attack_with_reaction_check_human_defender_prompted_and_confirms(self):
+        from unittest.mock import patch, AsyncMock
+        attacker = {"name": "Attacker", "strength": 10, "proficiency_bonus": 0}
+        defender = {
+            "telegram_user_id": 996202, "name": "RealShielder", "dexterity": 10, "armor_class": 15,
+            "hp_current": 50, "hp_max": 50, "char_class": "Wizard", "known_spells": ["shield"], "is_ai": False,
+        }
+        weapon = {"ability": "strength", "damage_dice": "1d1", "damage_bonus": 0}
+        with patch("bot.roll_d20", return_value=20), \
+             patch("bot._prompt_reaction_choice", new=AsyncMock(return_value=True)) as mock_prompt:
+            result = await bot._resolve_attack_with_reaction_check(
+                FakeUpdate(996202, "look", []), attacker, defender, weapon, round_number=1, forced_roll=15,
+            )
+        self.assertFalse(result["hit"])
+        self.assertTrue(result["shield_reaction_triggered"])
+        mock_prompt.assert_called_once()
+
+    async def test_resolve_attack_with_reaction_check_human_declines_attack_lands(self):
+        from unittest.mock import patch, AsyncMock
+        attacker = {"name": "Attacker", "strength": 10, "proficiency_bonus": 0}
+        defender = {
+            "telegram_user_id": 996203, "name": "DecliningShielder", "dexterity": 10, "armor_class": 15,
+            "hp_current": 50, "hp_max": 50, "char_class": "Wizard", "known_spells": ["shield"], "is_ai": False,
+        }
+        weapon = {"ability": "strength", "damage_dice": "1d1", "damage_bonus": 0}
+        with patch("bot.roll_d20", return_value=20), \
+             patch("bot._prompt_reaction_choice", new=AsyncMock(return_value=False)):
+            result = await bot._resolve_attack_with_reaction_check(
+                FakeUpdate(996203, "look", []), attacker, defender, weapon, round_number=1, forced_roll=15,
+            )
+        self.assertTrue(result["hit"])
+        self.assertFalse(result["shield_reaction_triggered"])
 
     async def test_ai_party_companion_can_cast_their_own_real_known_spell(self):
         """

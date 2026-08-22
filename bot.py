@@ -94,7 +94,7 @@ from models import (
 from rules.combat import (
     resolve_attack, resolve_death_save, UNDEAD_MONSTER_KEYS, apply_damage_type_modifier, elemental_overflow_heal,
     ENRAGE_HP_THRESHOLD, ENRAGE_DAMAGE_BONUS_PCT, ENRAGE_WARNING_ROUND, ENRAGE_ROUND_THRESHOLD,
-    BLOODIED_HP_THRESHOLD, resolve_thrown_attack,
+    BLOODIED_HP_THRESHOLD, resolve_thrown_attack, reaction_precheck,
 )
 from rules.crafting import (
     RECIPES, get_recipe, has_materials, resolve_craft,
@@ -4179,25 +4179,17 @@ async def _announce_reaction(update: Update, defender: dict, result: dict) -> No
     real reaction firing.
     """
     if result.get("shield_reaction_triggered"):
-        # Real dev-bridge report (2026-08-18, Coffee): "My character
-        # cast two spell slots last battle and has 4 slots. Why did
-        # they have none left after only using two?" Root cause: Shield
-        # is a REAL auto-triggered reaction (rules/combat.py) that
-        # spends a slot every time it fires, with no player action
-        # involved -- against a boss landing several hits a round, it
-        # can burn through remaining slots fast, and this line never
-        # said so. Not a bug (the slot spend itself is correct and
-        # documented in CLAUDE.md's Reactions section), but a real
-        # narration gap: a player watching their slot count had no way
-        # to connect "it went to 0" with these reactions actually being
-        # the cause. Now states the real remaining count every time.
-        slots_left = defender.get("spell_slots_current", 0)
-        slots_max = defender.get("spell_slots_max", slots_left)
-        await _safe_send(
-            update,
-            f"🛡️ **{defender['name']}** casts Shield as a reaction — the attack goes wide! "
-            f"(spell slot used — {slots_left}/{slots_max} left)",
-        )
+        # Real dev-bridge report (2026-08-18, Coffee): a player's slot
+        # count dropped with no explanation, traced to this same
+        # reaction firing silently -- this line used to state the real
+        # remaining slot count to explain it. Redesigned 2026-08-22
+        # (per Coffee: "dont make it use spell points, make it use a
+        # dice roll and stat") -- Shield no longer costs a slot at all
+        # (see rules/combat.py's resolve_attack + bot.py's
+        # _maybe_confirm_reaction), so there's nothing left to report
+        # here; the player already made the real choice via the
+        # push-button prompt that preceded this line.
+        await _safe_send(update, f"🛡️ **{defender['name']}** reacts with Shield — the attack goes wide!")
     elif result.get("uncanny_dodge_triggered"):
         await _safe_send(update, f"🌀 **{defender['name']}** uses Uncanny Dodge, halving the damage!")
 
@@ -6405,8 +6397,8 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
                 result = await _maybe_ai_throw_weapon(update, session, current, target)
             if result is None:
                 adv, disadv = _attack_advantage_disadvantage(current, target)
-                result = resolve_attack(
-                    current, target, _weapon_for_attacker(current), advantage=adv, disadvantage=disadv,
+                result = await _resolve_attack_with_reaction_check(
+                    update, current, target, _weapon_for_attacker(current), advantage=adv, disadvantage=disadv,
                     defender_relentless_endurance_available=_relentless_endurance_available(target),
                     round_number=session.round_number,
                 )
@@ -8321,12 +8313,12 @@ def _decide_monster_spell(caster: dict) -> str | None:
 # fix.
 _PENDING_REACTIONS: dict[str, dict] = {}
 # 10s (was 30s) -- per Coffee, dev-bridge (2026-08-21): "to keep the
-# battle moving fast, make these timers only 10 seconds." Only real
-# call site is Counterspell's opt-in prompt (Shield/Uncanny Dodge stay
-# fully automatic, no prompt at all) -- confirmed already spell-slot-
-# free and gated behind a real DEX check before this ever fires (see
-# _maybe_monster_cast_spell's own 2026-08-20 redesign), so this change
-# is scoped to just the wait window, nothing else about the mechanic.
+# battle moving fast, make these timers only 10 seconds." Originally
+# Counterspell's only real call site; Shield/Uncanny Dodge joined it
+# 2026-08-22 (see _maybe_confirm_reaction/_resolve_attack_with_
+# reaction_check below) -- same real DEX-check-gated, spell-slot-free
+# shape Counterspell's own 2026-08-20 redesign already established,
+# same 10s window.
 REACTION_PROMPT_TIMEOUT_SECONDS = 10
 
 
@@ -8431,6 +8423,70 @@ async def reaction_prompt_callback(update: Update, context: ContextTypes.DEFAULT
     pending["event"].set()
     await _safe_answer(query)
     await _safe_edit_markup(query)
+
+
+async def _maybe_confirm_reaction(update: Update, defender: dict, kind: str) -> bool:
+    """
+    Shield/Uncanny Dodge redesign (2026-08-22, per Coffee, dev-bridge:
+    "Why did I cast shield?... computer should not be casting spells...
+    without the direct command of the player" -- then: "make it a fast
+    response push button. 10 seconds like the previous one [Counter-
+    spell]... dont make it use spell points, make it use a dice roll
+    and stat"). Same real shape Counterspell already uses
+    (_maybe_monster_cast_spell's own 2026-08-20 redesign): a real DEX
+    check rolls FIRST, silently -- only a success gets a real 10s
+    push-button prompt (_prompt_reaction_choice) for an actual human
+    defender, or decides instantly for an AI one (nobody there to
+    tap). No spell-slot cost anywhere in this flow -- the dice check
+    IS the cost. Only ever called when the caller's own
+    reaction_precheck already confirmed this reaction is eligible.
+    """
+    if roll_d20() + ability_modifier(defender.get("dexterity", 10)) < SKILL_CHECK_DC:
+        return False
+    if defender.get("is_ai"):
+        return True
+    label = "Shield" if kind == "shield" else "Uncanny Dodge"
+    return await _prompt_reaction_choice(
+        update, defender["telegram_user_id"],
+        f"🛡️ **{defender['name']}** — that attack would hit! Cast {label}?",
+        label, "Take the hit",
+    )
+
+
+async def _resolve_attack_with_reaction_check(
+    update: Update, attacker: dict, defender: dict, weapon: dict,
+    advantage: bool = False, disadvantage: bool = False,
+    defender_relentless_endurance_available: bool = False,
+    round_number: int = 0, forced_roll: int | None = None,
+    forced_damage_roll: int | None = None, damage_multiplier: int = 1,
+) -> dict:
+    """
+    Drop-in replacement for a bare resolve_attack(...) call (2026-08-22
+    Shield/Uncanny Dodge redesign -- see _maybe_confirm_reaction's own
+    docstring) -- every real call site in this file now goes through
+    this instead. Runs reaction_precheck (rules/combat.py) first to see
+    if Shield/Uncanny Dodge would matter, maybe confirms it (prompt or
+    instant, per _maybe_confirm_reaction), then calls the real
+    resolve_attack with the SAME d20 roll the precheck already made
+    (forced_roll) so both agree on the same outcome, and the
+    already-decided confirmation instead of letting resolve_attack
+    silently auto-decide (which it no longer can -- it just trusts
+    what it's told).
+    """
+    precheck = reaction_precheck(
+        attacker, defender, weapon, round_number, advantage=advantage, disadvantage=disadvantage, forced_roll=forced_roll,
+    )
+    shield_confirmed = await _maybe_confirm_reaction(update, defender, "shield") if precheck["shield_eligible"] else False
+    uncanny_dodge_confirmed = (
+        await _maybe_confirm_reaction(update, defender, "uncanny_dodge") if precheck["uncanny_dodge_eligible"] else False
+    )
+    return resolve_attack(
+        attacker, defender, weapon, advantage=advantage, disadvantage=disadvantage,
+        defender_relentless_endurance_available=defender_relentless_endurance_available,
+        round_number=round_number, forced_roll=precheck["raw_roll"],
+        forced_damage_roll=forced_damage_roll, damage_multiplier=damage_multiplier,
+        shield_reaction_confirmed=shield_confirmed, uncanny_dodge_confirmed=uncanny_dodge_confirmed,
+    )
 
 
 async def _maybe_monster_cast_spell(
@@ -9050,8 +9106,8 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
             backstab_overflow = _mastery_overflow_multiplier(
                 attacker.get("backstab_proficiency_pct", PROFICIENCY_STARTING_PCT)
             ) if backstab_triggered else 1.0
-            result = resolve_attack(
-                attacker, target, weapon_used, advantage=adv, disadvantage=disadv,
+            result = await _resolve_attack_with_reaction_check(
+                update, attacker, target, weapon_used, advantage=adv, disadvantage=disadv,
                 defender_relentless_endurance_available=_relentless_endurance_available(target),
                 round_number=session.round_number,
                 forced_roll=forced_roll if attack_num == 0 else None,
@@ -10435,8 +10491,8 @@ async def _resolve_flee_attempt(update, session: sessions.Session, action_text: 
         if fleeing["hp_current"] <= 0:
             break
         enemy_weapon = _weapon_for_attacker(enemy)
-        atk_result = resolve_attack(
-            enemy, fleeing, enemy_weapon, round_number=session.round_number,
+        atk_result = await _resolve_attack_with_reaction_check(
+            update, enemy, fleeing, enemy_weapon, round_number=session.round_number,
         )
         opportunity_blocks.append(_format_combat_result(
             "", atk_result, enemy["name"], fleeing["name"],

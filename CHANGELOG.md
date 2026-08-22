@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.317] — Shield/Uncanny Dodge become real push-button reactions
+
+**Real dev-bridge report (2026-08-22, Coffee, screenshot): "Why did I
+cast shield? This should only work if I am casting it myself under my
+own command — the computer should not be casting spells from any
+players or characters without the direct command of the player."**
+Followed by, once talked through live: **"i really like how u did
+counter previously with the push buttons... make it a fast response
+push button. 10 seconds like the previous one"** and **"dont make it
+use spell points, make it use a dice roll and stat."**
+
+Shield and Uncanny Dodge no longer auto-trigger silently — they now
+work exactly like Counterspell already does: a real DEX check rolls
+first, silently; only on a success does a human defender get a real
+10-second push-button prompt ("Cast Shield?" / "Take the hit"), or an
+AI defender decide instantly (nobody there to tap). No spell-slot cost
+either way — the dice check is the cost now, same redesign Counterspell
+got on 2026-08-20. Manually pre-casting Shield yourself is completely
+unaffected — it's still automatic for its real duration, exactly as
+before; only the *automatic reaction* trigger changed. Applies in
+every fight, bosses included — same shared combat pipeline, no
+separate work needed. New `rules.combat.reaction_precheck` (pure,
+read-only) and `bot._resolve_attack_with_reaction_check`/
+`_maybe_confirm_reaction` wrap all 3 real places an attack can land on
+a party member. Verified with 18 real executed tests (12 new/rewritten
++ 6 collateral), all green.
+
 ## [1.27.316] — Escalated combat timeout window lengthened
 
 **Real dev-bridge report (2026-08-22, Coffee, screenshot): "it feels

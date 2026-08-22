@@ -304,11 +304,68 @@ def start_combat(participants: list[dict]) -> list[dict]:
     return sorted(participants, key=lambda p: p["initiative"], reverse=True)
 
 
+def reaction_precheck(attacker: dict, defender: dict, weapon: dict, round_number: int = 0,
+                       advantage: bool = False, disadvantage: bool = False,
+                       forced_roll: int | None = None) -> dict:
+    """
+    Real-only-read companion to resolve_attack (2026-08-22, per
+    Coffee's push-button reaction redesign -- see resolve_attack's own
+    docstring). Rolls the real attack once -- same weapon-proficiency/
+    hybrid-AC/formation-AC/shield_active/Bless math resolve_attack
+    itself uses -- and reports whether Shield or Uncanny Dodge would
+    actually matter, WITHOUT resolving damage or mutating attacker,
+    defender, or anything else. Lets the async caller (bot.py's
+    _resolve_attack_with_reaction_check) decide via a real dice-roll-
+    gated prompt BEFORE calling the real resolve_attack with the same
+    `forced_roll`, so both calls agree on the same d20 outcome.
+
+    Uncanny Dodge eligibility only needs "the hit landed," not the
+    exact damage number -- real 5E's own rule is "you take damage from
+    an attack that hits you," true for any real weapon hit -- so this
+    never needs to duplicate the full damage-rolling pipeline just to
+    report eligibility.
+    """
+    attack_ability = "dexterity" if attacker.get("char_class") == "Monk" else weapon.get("ability", "strength")
+    weapon_category = weapon.get("weapon_category", "simple")
+    weapon_proficient = (
+        is_weapon_proficient(attacker.get("char_class"), weapon_category)
+        or f"prof_{weapon_category}_weapons" in (attacker.get("skill_tree_upgrades") or [])
+    )
+    shield_bonus = 5 if "shield_active" in defender.get("conditions", []) else 0
+    effective_defender_ac = (
+        defender["armor_class"] + hybrid_features.hybrid_ac_bonus(defender) + formation_ac_bonus(defender) + shield_bonus
+    )
+    attack_result = roll_attack(
+        attacker, target_ac=effective_defender_ac, ability=attack_ability,
+        proficient=weapon_proficient, advantage=advantage, disadvantage=disadvantage, forced_roll=forced_roll,
+    )
+    if "blessed" in attacker.get("conditions", []) and not attack_result["critical_fail"] and not attack_result["critical_hit"]:
+        attack_result["total"] += 2
+        attack_result["hit"] = attack_result["total"] >= effective_defender_ac
+
+    reaction_available = defender.get("reaction_used_round") != round_number
+    shield_eligible = (
+        attack_result["hit"] and not attack_result["critical_hit"] and reaction_available
+        and "shield" in (defender.get("known_spells") or [])
+    )
+    uncanny_dodge_eligible = (
+        attack_result["hit"] and reaction_available and not shield_eligible
+        and defender.get("char_class") == "Rogue" and defender.get("level", 1) >= 5
+    )
+    return {
+        "raw_roll": attack_result["raw_roll"],
+        "shield_eligible": shield_eligible,
+        "uncanny_dodge_eligible": uncanny_dodge_eligible,
+    }
+
+
 def resolve_attack(attacker: dict, defender: dict, weapon: dict,
                     advantage: bool = False, disadvantage: bool = False,
                     defender_relentless_endurance_available: bool = False,
                     round_number: int = 0, forced_roll: int | None = None,
-                    forced_damage_roll: int | None = None, damage_multiplier: int = 1) -> dict:
+                    forced_damage_roll: int | None = None, damage_multiplier: int = 1,
+                    shield_reaction_confirmed: bool = False,
+                    uncanny_dodge_confirmed: bool = False) -> dict:
     """
     Resolve one attack. `weapon` is a dict like:
         {"ability": "strength", "damage_dice": "1d8", "damage_bonus": 0}
@@ -383,18 +440,32 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     roll-then-apply-damage step to actually have a checkpoint in
     between, rather than a bolt-on; that checkpoint already exists
     naturally (attack_result is fully known before any damage is
-    rolled or applied), so both plug in there. This engine has no
-    real-time "declare a reaction" prompt, so both are auto-triggered
-    exactly when they'd actually change the outcome, spending a real
-    resource, never wasted on a roll they couldn't have affected:
-    - Shield (Wizard/Sorcerer, real spell + real spell slot): if the
-      hit isn't a critical and the attack total is below
-      defender's AC + 5, casting Shield retroactively turns it into a
-      miss -- the same "ac_bonus" effect Shield's spells.py entry has
-      always had, just never read anywhere before now (same silent-
-      dead-effect shape as this session's potions/equipment fixes).
-    - Uncanny Dodge (real 5E Rogue feature, level 5+): halves the
-      damage from a confirmed hit.
+    rolled or applied), so both plug in there.
+
+    Real redesign (2026-08-22, per Coffee, dev-bridge: "Why did I cast
+    shield?... computer should not be casting spells... without the
+    direct command of the player" -- then: "make it a fast response
+    push button. 10 seconds like the previous one [Counterspell]...
+    dont make it use spell points, make it use a dice roll and stat").
+    This pure, synchronous function has no way to pause for a real
+    Telegram button tap, so it no longer DECIDES whether either
+    reaction fires -- `shield_reaction_confirmed`/`uncanny_dodge_
+    confirmed` are trusted as already-decided (by bot.py's async
+    `_resolve_attack_with_reaction_check`, which runs a real DEX check
+    then, on success, a real 10s push-button prompt for a human
+    defender or an instant yes for an AI one -- see that function's
+    own docstring). Neither costs a spell slot anymore -- the dice
+    check IS the cost, same as Counterspell's own 2026-08-20 redesign.
+    Manually pre-cast Shield (the `"shield_active"` timed condition,
+    folded into `effective_defender_ac` above) is a completely
+    separate path, untouched by any of this -- it stays automatic for
+    its real duration, exactly as before.
+    - Shield (Wizard/Sorcerer): if confirmed and the hit isn't a
+      critical, casting Shield retroactively turns it into a miss --
+      the same "ac_bonus" effect Shield's spells.py entry has always
+      had.
+    - Uncanny Dodge (real 5E Rogue feature, level 5+): if confirmed,
+      halves the damage from a confirmed hit.
     Both cost the defender their one reaction for the round (`round_
     number`, tracked via `reaction_used_round` on the participant dict,
     the same combat-only in-memory convention as `raging`/`conditions`
@@ -466,11 +537,8 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
 
     shield_reaction_triggered = False
     reaction_available = defender.get("reaction_used_round") != round_number
-    if (attack_result["hit"] and not attack_result["critical_hit"] and reaction_available
-            and "shield" in (defender.get("known_spells") or [])
-            and defender.get("spell_slots_current", 0) > 0
-            and attack_result["total"] < effective_defender_ac + 5):
-        defender["spell_slots_current"] -= 1
+    if (shield_reaction_confirmed and attack_result["hit"] and not attack_result["critical_hit"]
+            and reaction_available and "shield" in (defender.get("known_spells") or [])):
         defender["reaction_used_round"] = round_number
         attack_result["hit"] = False
         shield_reaction_triggered = True
@@ -752,7 +820,7 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         # from a confirmed hit, once per round -- shares the same
         # reaction economy as Shield above (reaction_available already
         # reflects whether Shield used it first this round).
-        if (reaction_available and defender.get("char_class") == "Rogue"
+        if (uncanny_dodge_confirmed and reaction_available and defender.get("char_class") == "Rogue"
                 and defender.get("level", 1) >= 5 and damage_dealt > 0):
             damage_dealt = damage_dealt // 2
             defender["reaction_used_round"] = round_number
