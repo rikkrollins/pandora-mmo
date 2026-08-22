@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.316] — Escalated combat timeout window lengthened
+
+**Real dev-bridge report (2026-08-22, Coffee, screenshot): "it feels
+like the game is skipping the players turn... when the push menu
+popped up for me to select the options, it said it was no longer my
+turn, and then it continued to attack the enemy."**
+
+Traced through the actual fight log: Pan sat 4th in a 9-participant
+initiative order (5 party + 4 enemies) — every non-human turn ahead of
+his own runs real Ollama narration (30-160s+, single-slot), so a full
+round back around to him could take several real minutes. The existing
+timeout system (`_check_combat_timeouts`) is real and intentional —
+auto-attack after 5 minutes of no response, per Coffee's own earlier
+"Default action is Fight" spec — but once triggered once in a fight,
+every later turn that fight dropped to a much shorter 30s/60s
+escalated window, which was easy to miss entirely given how long a
+round could take, making the auto-attack feel like the game was
+skipping his turn. Per Coffee's own follow-up direction ("Lengthen the
+escalated window... give more like 2-3 minutes instead of 30-60s"),
+`COMBAT_TIMEOUT_ESCALATED_WARNING_SECONDS`/`_ACTION_SECONDS` widened
+3x (30s→90s, 60s→180s) — still shorter than the full 3min/5min window,
+but no longer a near-instant reset. Nothing was "reusing a previous
+statement" as suspected — each forced action sends a fresh synthetic
+attack; the real cause was purely the window being too tight for a
+fight this size. Verified against the existing timeout test suite
+(all green, including the escalation-specific tests, which read the
+constants dynamically).
+
 ## [1.27.315] — Cancel a quest from the Quest menu
 
 **Real request (2026-08-22, Coffee): "can u make it so in the quests

@@ -716,16 +716,29 @@ SAFE_LOCATION_FALLBACK = "crossroads_tavern"
 # at 5 -- deliberately much shorter than the general IDLE_* thresholds
 # above, since a whole party is actively blocked on one person's turn
 # during combat, unlike ordinary idleness. Once a player has been
-# auto-timed-out once in the CURRENT fight, their window shortens to a
-# flat 1 minute (30s warn / 60s act) for any LATER turn -- they've
-# already shown they're away; don't make everyone wait the full window
-# twice. Real activity (a message sent since their turn began) resets
-# them back to the full window on their next turn, in case they were
-# just deciding what to do.
+# auto-timed-out once in the CURRENT fight, their window shortens for
+# any LATER turn -- they've already shown they're away; don't make
+# everyone wait the full window twice. Real activity (a message sent
+# since their turn began) resets them back to the full window on their
+# next turn, in case they were just deciding what to do.
+#
+# Real dev-bridge report (2026-08-22, Coffee): in a 9-participant
+# fight (5 party + 4 enemies), Pan sat 4th in initiative -- every
+# non-human turn ahead of his own real turn runs actual Ollama
+# narration (30-160s+, single-slot on this server), so a full round
+# back around to him could genuinely take several real minutes. The
+# original 30s/60s escalated window was easy to miss entirely under
+# that kind of round length, making the auto-attack feel like the game
+# was "skipping his turn" rather than a deliberate timeout. Per
+# Coffee's own direction (2026-08-22, follow-up to this exact report:
+# "Lengthen the escalated window... give more like 2-3 minutes instead
+# of 30-60s"), widened 3x -- still meaningfully shorter than the full
+# 3min/5min window (so an escalated player doesn't block the party as
+# long as a first-timeout one), but no longer a near-instant reset.
 COMBAT_TIMEOUT_WARNING_SECONDS = 180
 COMBAT_TIMEOUT_ACTION_SECONDS = 300
-COMBAT_TIMEOUT_ESCALATED_WARNING_SECONDS = 30
-COMBAT_TIMEOUT_ESCALATED_ACTION_SECONDS = 60
+COMBAT_TIMEOUT_ESCALATED_WARNING_SECONDS = 90
+COMBAT_TIMEOUT_ESCALATED_ACTION_SECONDS = 180
 
 # Real (telegram_user_id, chat_id) pairs already warned about their
 # current idle stretch, so the warning fires once, not every check
