@@ -11149,6 +11149,31 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(f"party|setrow|{leader_id}|back", formation_buttons)
         self.assertIn(f"party|setrow|{member_id}|back", formation_buttons)
 
+    def test_party_member_buttons_show_level_and_class_beside_the_name(self):
+        """
+        Real dev-bridge request (2026-08-22, Coffee, after seeing the
+        new split Party menu): "I really like the menu can you put the
+        characters level beside them and maybe their class?" Checked
+        across all three real screens the name appears on.
+        """
+        leader_id, member_id = 950668, 950669
+        make_basic_character(leader_id, "LabelLeader", current_location="crossroads_tavern", char_class="Cleric")
+        make_basic_character(member_id, "LabelMember", current_location="crossroads_tavern", char_class="Rogue")
+        party_id = db.create_party(leader_id, -999)
+        db.update_character(member_id, -999, party_id=party_id)
+        leader = db.get_character(leader_id, -999)
+        member = db.get_character(member_id, -999)
+        expected = f"LabelMember (Lv{member['level']} Rogue)"
+
+        bench_labels = [btn.text for row in bot._party_keyboard(leader).inline_keyboard for btn in row]
+        self.assertTrue(any(expected in label for label in bench_labels), bench_labels)
+
+        formation_labels = [btn.text for row in bot._formation_keyboard(leader).inline_keyboard for btn in row]
+        self.assertTrue(any(expected in label for label in formation_labels), formation_labels)
+
+        sheet_labels = [btn.text for row in bot._party_sheets_keyboard(leader).inline_keyboard for btn in row]
+        self.assertTrue(any(expected in label for label in sheet_labels), sheet_labels)
+
     def test_battle_menu_shows_more_button_not_a_bare_run_button(self):
         import sessions
         sessions.end_session(-999)

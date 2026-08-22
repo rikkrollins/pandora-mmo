@@ -14130,6 +14130,17 @@ async def member_level_callback(update: Update, context: ContextTypes.DEFAULT_TY
             await _safe_send(update, skill_line)
 
 
+def _member_label(m: dict) -> str:
+    """
+    Real request (2026-08-22, per Coffee, dev-bridge, after seeing the
+    new split Party menu: "I really like the menu can you put the
+    characters level beside them and maybe their class?"). Shared by
+    every per-member button label across the Party/Formation/Party
+    Sheets screens so a name in a long roster isn't just a bare name.
+    """
+    return f"{m['name']} (Lv{m['level']} {m['char_class']})"
+
+
 def _party_keyboard(character: dict) -> InlineKeyboardMarkup | None:
     """
     Per Coffee (2026-07-21): "add (Party) to the menu ... Being able to
@@ -14178,12 +14189,12 @@ def _party_keyboard(character: dict) -> InlineKeyboardMarkup | None:
         for m in members:
             if m.get("is_benched"):
                 rows.append([InlineKeyboardButton(
-                    f"⬜ {m['name']} (benched — tap to activate)",
+                    f"⬜ {_member_label(m)} — benched, tap to activate",
                     callback_data=f"party|unbench|{m['telegram_user_id']}",
                 )])
             else:
                 rows.append([InlineKeyboardButton(
-                    f"✅ {m['name']} (active — tap to bench)",
+                    f"✅ {_member_label(m)} — active, tap to bench",
                     callback_data=f"party|bench|{m['telegram_user_id']}",
                 )])
     elif character.get("pending_party_invite"):
@@ -14231,12 +14242,12 @@ def _formation_keyboard(character: dict) -> InlineKeyboardMarkup:
             m_row = m.get("formation_row", "front")
             if m_row == "back":
                 rows.append([InlineKeyboardButton(
-                    f"🔮 {m['name']}: Back row (tap for Front)",
+                    f"🔮 {_member_label(m)}: Back row (tap for Front)",
                     callback_data=f"party|setrow|{m['telegram_user_id']}|front",
                 )])
             else:
                 rows.append([InlineKeyboardButton(
-                    f"🛡️ {m['name']}: Front row (tap for Back)",
+                    f"🛡️ {_member_label(m)}: Front row (tap for Back)",
                     callback_data=f"party|setrow|{m['telegram_user_id']}|back",
                 )])
     return InlineKeyboardMarkup(rows)
@@ -14261,7 +14272,7 @@ def _party_sheets_keyboard(character: dict) -> InlineKeyboardMarkup:
         ]
         for m in members:
             rows.append([InlineKeyboardButton(
-                f"📄 View {m['name']}'s Sheet", callback_data=f"party|viewsheet|{m['telegram_user_id']}",
+                f"📄 {_member_label(m)} — View Sheet", callback_data=f"party|viewsheet|{m['telegram_user_id']}",
             )])
     return InlineKeyboardMarkup(rows)
 

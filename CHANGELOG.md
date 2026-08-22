@@ -2,6 +2,18 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.313] — Level and class shown on Party menu buttons
+
+**Real dev-bridge request (2026-08-22, Coffee, right after seeing the
+new split Party menu): "I really like the menu can you put the
+characters level beside them and maybe their class?"**
+
+Every per-member button across the three Party screens (bench/unbench
+on the main Party screen, front/back row toggles on Formation, View
+Sheet on Party Sheets) now reads "Name (Lv# Class)" instead of a bare
+name — one shared `_member_label` helper, so a party roster is
+readable at a glance instead of needing a tap to find out who's who.
+
 ## [1.27.312] — Party menu split into Formation and Party Sheets
 
 **Real request (2026-08-22, Coffee): "the party menu looks confusing
