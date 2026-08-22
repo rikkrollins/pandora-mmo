@@ -2,6 +2,37 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.311] — Redundant lower-power spells auto-prune on learn
+
+**Real dev-bridge report (2026-08-22, Coffee, screenshot of the new
+Magic menu showing Fireball/Lightning Bolt/Ice Storm/Cone of Cold all
+at once): "Can you please go through the spell list and if there's
+any spells that are the same but a lower level, can they not be
+replaced when we get the higher level spell? I don't see the point in
+having a we[a]k spell if I have a spell that can already do the exact
+same thing."**
+
+Every real leveled (non-cantrip) damage/heal spell costs exactly the
+same flat one spell slot to cast, so once a character knows a
+strictly stronger spell of the same real shape (same effect, same
+damage_type, same AOE-or-not), the weaker one was pure dead weight —
+never a real choice. New `spells.prune_redundant_lower_power_spells`
+compares REAL expected damage/healing (`average_damage` against each
+spell's own dice), not the spell's level number — a real catalog check
+found level doesn't reliably track power (Guiding Bolt, level 1,
+radiant, averages 14 damage; Moonbeam, level 2, radiant, only 11 —
+pruning by level alone would have kept the weaker spell). AOE spells
+are never compared against single-target ones of the same element
+(losing AOE reach is a real downside), cantrips are never pruned
+(free, unlimited-use, a different resource entirely), and anything
+with `always_hits` (Magic Missile's whole reason to exist) is
+protected regardless of raw damage. Hooked into both real places a
+spell enters `known_spells`: class level-up grants (`db.py`) and
+Remnant-taught spells (`bot.py`, last version). A one-time live
+backfill applied the same pruning retroactively to every existing
+character's already-known spells, fixing the exact bloat Coffee's
+screenshot showed.
+
 ## [1.27.310] — Magic menu
 
 **Real request (2026-08-22, Coffee): "can you add a Menu for Magic ?

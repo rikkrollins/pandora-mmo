@@ -2425,7 +2425,12 @@ def _compute_xp_updates(character: dict, amount: int) -> dict:
         newly_unlocked = spells_module.spells_unlocked_at_level(character["char_class"], new_level)
         newly_learned = [s for s in newly_unlocked if s not in character["known_spells"]]
         if newly_learned:
-            updates["known_spells"] = character["known_spells"] + newly_learned
+            # Redundant-spell pruning (2026-08-22, per Coffee) -- see
+            # spells.prune_redundant_lower_power_spells's own docstring
+            # for the full real-power-comparison rule this applies.
+            updates["known_spells"] = spells_module.prune_redundant_lower_power_spells(
+                character["known_spells"] + newly_learned
+            )
 
         # Real, permanent guild stat + profession growth (2026-08-13, per
         # Coffee: "you add a + to stat that levels up the players stat

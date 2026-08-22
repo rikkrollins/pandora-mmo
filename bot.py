@@ -12018,7 +12018,20 @@ async def _check_quest_completions_defeat_monster(update_like, session: sessions
                 if not already_knows_element and element in REMNANT_ELEMENT_TAUGHT_SPELL:
                     taught_spell_id = REMNANT_ELEMENT_TAUGHT_SPELL[element]
                     taught_spell = spells_module.get_spell(taught_spell_id)
-                    updates = {"known_spells": fresh_character["known_spells"] + [taught_spell_id]}
+                    # Redundant-spell pruning (2026-08-22, per Coffee) --
+                    # see spells.prune_redundant_lower_power_spells's own
+                    # docstring. A no-op here today (the teach only ever
+                    # fires when already_knows_element is False, so
+                    # there's nothing of this element to prune yet), but
+                    # applied for the same reason every other real
+                    # known_spells grant site now does -- correctness
+                    # shouldn't quietly depend on that gate never
+                    # changing.
+                    updates = {
+                        "known_spells": spells_module.prune_redundant_lower_power_spells(
+                            fresh_character["known_spells"] + [taught_spell_id]
+                        )
+                    }
                     if fresh_character.get("spell_slots_max", 0) < 1:
                         updates["spell_slots_max"] = 1
                         updates["spell_slots_current"] = fresh_character.get("spell_slots_current", 0) + 1

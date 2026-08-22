@@ -4,7 +4,7 @@ Spell catalog and resolution. Like everything else in the rules layer,
 spell damage/healing numbers are rolled through rules/dice.py — the AI
 narrates what a spell looked like, but never decides its numeric effect.
 """
-from rules.dice import roll_damage, roll_d20, ability_modifier
+from rules.dice import roll_damage, roll_d20, ability_modifier, average_damage
 from rules.leveling import (
     is_proficient_in_save, LIFE_SUBCLASS_HEAL_BONUS, power_scale_ratio,
     COMBAT_SUBCLASS_NAMES, COMBAT_SUBCLASS_DAMAGE_BONUS_PCT, world_damage_multiplier,
@@ -462,6 +462,75 @@ def spells_unlocked_at_level(char_class: str, character_level: int) -> list[str]
 
 def get_spell(spell_id: str) -> dict | None:
     return SPELLS.get(spell_id)
+
+
+def _spell_power(spell: dict) -> float:
+    """Real expected damage/healing for one spell -- 0.0 for anything with no dice at all (buffs, negates, etc.)."""
+    dice = spell.get("damage_dice") or spell.get("heal_dice")
+    return average_damage(dice) if dice else 0.0
+
+
+def prune_redundant_lower_power_spells(known_spells: list[str]) -> list[str]:
+    """
+    Real request (2026-08-22, Coffee, dev-bridge, screenshot of the new
+    Magic menu showing Fireball/Lightning Bolt/Ice Storm/Cone of Cold
+    all at once): "if there's any spells that are the same but a lower
+    level, can they not be replaced when we get the higher level
+    spell? I don't see the point in having a weak[er] spell if I have
+    a spell that can already do the exact same thing."
+
+    Every real leveled (non-cantrip) damage/heal spell in this game
+    costs exactly the same flat one spell slot to cast
+    (bot._spend_cast_resource only checks `spell["level"] > 0`, never
+    the specific level) -- so once a character knows a STRICTLY
+    stronger spell of the same real shape, the weaker one is genuinely
+    dead weight, never a real choice.
+
+    Compares REAL expected damage/healing (average_damage against each
+    spell's own damage_dice/heal_dice), never the spell's "level"
+    number -- a real check of this game's own catalog found level does
+    NOT reliably track power (Guiding Bolt, level 1, radiant, averages
+    14 damage; Moonbeam, level 2, radiant, averages only 11 -- pruning
+    by level alone would have thrown away the actually-stronger
+    spell). Grouped by (effect, damage_type, aoe) so an AOE spell is
+    never compared against a single-target one of the same element
+    (losing AOE reach is a real downside a higher level number alone
+    doesn't make up for) -- e.g. Fireball (AOE) and Flame Strike
+    (single-target, same average damage, higher level) both survive
+    fire pruning, each covering a different real use.
+
+    Cantrips (level 0 -- free, unlimited-use, a genuinely different
+    resource from a slot-costing spell) and anything with
+    `always_hits` (a real, distinct guaranteed-hit mechanic -- Magic
+    Missile's whole reason to exist, not just "weaker damage") are
+    never pruned regardless of what else is known. A tie in power
+    keeps both (neither strictly dominates).
+    """
+    def _group(spell: dict):
+        return (spell["effect"], spell.get("damage_type"), bool(spell.get("aoe")))
+
+    def _prunable(spell: dict | None) -> bool:
+        return bool(spell) and spell.get("effect") in ("damage", "heal") \
+            and spell.get("level", 0) > 0 and not spell.get("always_hits")
+
+    kept = list(known_spells)
+    for spell_id in known_spells:
+        spell = get_spell(spell_id)
+        if not _prunable(spell):
+            continue
+        my_power = _spell_power(spell)
+        my_group = _group(spell)
+        for other_id in known_spells:
+            if other_id == spell_id:
+                continue
+            other = get_spell(other_id)
+            if not _prunable(other) or _group(other) != my_group:
+                continue
+            if _spell_power(other) > my_power:
+                if spell_id in kept:
+                    kept.remove(spell_id)
+                break
+    return kept
 
 
 def _save_bonus(target: dict, save_ability: str) -> int:

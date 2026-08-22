@@ -10941,6 +10941,88 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_show_magic_menu(FakeUpdate(user_id, "", sink))
         self.assertIn("don't know any spells yet", sink[0])
 
+    def test_prune_redundant_spells_drops_the_strictly_weaker_same_shape_spell(self):
+        """
+        Real dev-bridge report (2026-08-22, Coffee, screenshot of the
+        new Magic menu): "if there's any spells that are the same but
+        a lower level, can they not be replaced when we get the higher
+        level spell?" burning_hands (non-AOE fire, avg 10.5) is
+        strictly weaker than scorching_ray (non-AOE fire, avg 21) --
+        must be dropped. fireball (AOE fire) has nothing stronger in
+        its own AOE-fire group and must survive.
+        """
+        known = ["burning_hands", "scorching_ray", "fireball"]
+        pruned = spells.prune_redundant_lower_power_spells(known)
+        self.assertNotIn("burning_hands", pruned)
+        self.assertIn("scorching_ray", pruned)
+        self.assertIn("fireball", pruned)
+
+    def test_prune_redundant_spells_never_cross_compares_aoe_against_single_target(self):
+        """Ice Storm and Cone of Cold are both AOE cold -- Cone of Cold (stronger) should drop Ice Storm."""
+        pruned = spells.prune_redundant_lower_power_spells(["ice_storm", "cone_of_cold"])
+        self.assertEqual(pruned, ["cone_of_cold"])
+
+    def test_prune_redundant_spells_never_removes_the_stronger_spell_just_because_its_level_is_lower(self):
+        """
+        Real catalog check: Guiding Bolt (level 1, radiant, avg 14)
+        actually out-damages Moonbeam (level 2, radiant, avg 11) --
+        pruning by level number alone would wrongly keep the weaker
+        spell. Power, not level, must decide.
+        """
+        pruned = spells.prune_redundant_lower_power_spells(["guiding_bolt", "moonbeam"])
+        self.assertEqual(pruned, ["guiding_bolt"])
+
+    def test_prune_redundant_spells_never_touches_cantrips_or_always_hits_spells(self):
+        """
+        fire_bolt is a free cantrip (level 0) -- never pruned even
+        though fireball (same element) is far stronger. magic_missile
+        has always_hits, a real distinct mechanic no other force spell
+        shares -- never pruned even though spiritual_weapon deals more
+        average damage.
+        """
+        pruned = spells.prune_redundant_lower_power_spells(["fire_bolt", "fireball"])
+        self.assertIn("fire_bolt", pruned)
+        pruned2 = spells.prune_redundant_lower_power_spells(["magic_missile", "spiritual_weapon"])
+        self.assertIn("magic_missile", pruned2)
+
+    def test_prune_redundant_spells_keeps_both_on_a_real_power_tie(self):
+        """Lightning Bolt (AOE) and Call Lightning (non-AOE) are different shapes -- both must survive regardless of any tie."""
+        pruned = spells.prune_redundant_lower_power_spells(["lightning_bolt", "call_lightning"])
+        self.assertIn("lightning_bolt", pruned)
+        self.assertIn("call_lightning", pruned)
+
+    def test_prune_redundant_spells_groups_heals_together_with_no_damage_type(self):
+        """cure_wounds beats healing_word (both non-AOE heals); mass_cure_wounds (AOE) survives independently."""
+        pruned = spells.prune_redundant_lower_power_spells(["cure_wounds", "healing_word", "mass_cure_wounds"])
+        self.assertEqual(set(pruned), {"cure_wounds", "mass_cure_wounds"})
+
+    async def test_level_up_spell_grant_prunes_a_now_redundant_previously_known_spell(self):
+        """
+        Real end-to-end check of the level-up hook (db.py's
+        _compute_xp_updates, reached through the real public
+        db.add_xp): a Sorcerer who already knows burning_hands should
+        lose it automatically the moment leveling up grants
+        scorching_ray for real.
+        """
+        from rules.leveling import XP_THRESHOLDS
+        use_test_db("tests/tmp/prune_level_up_test.db")
+        user_id = 950710
+        make_basic_character(
+            user_id, "PruneLevelUpTester", current_location="crossroads_tavern",
+            char_class="Sorcerer", known_spells=["fire_bolt", "burning_hands"],
+        )
+        # Scorching Ray unlocks at a real, later Sorcerer level -- push
+        # XP past that threshold and let the real level-up path apply it.
+        target_level = next(
+            lvl for lvl in range(2, 10)
+            if "scorching_ray" in spells.spells_unlocked_at_level("sorcerer", lvl)
+        )
+        db.add_xp(user_id, -999, XP_THRESHOLDS[target_level])
+        updated = db.get_character(user_id, -999)
+        self.assertIn("scorching_ray", updated["known_spells"])
+        self.assertNotIn("burning_hands", updated["known_spells"])
+        self.assertIn("fire_bolt", updated["known_spells"])  # cantrip, never pruned
+
     def test_bare_party_keyword_classified_as_check_party(self):
         """
         Found via topic-activity monitoring (2026-08-19): a bare "Party"
