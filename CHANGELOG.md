@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.332] — "Move Grask and Wren to the front row" now moves both
+
+**Real dev-bridge report (2026-08-23, Coffee, screenshot): "Move Grask
+and Wren to the front row"** resolved to nothing — "No one named
+'Grask and Wren' is in your party."
+
+Root cause: the shared name-matcher deliberately refuses to guess when
+more than one real party member's name appears in a single-target
+command (the right call for something like attacking or healing, where
+an ambiguous match must never be assumed) — but a formation-row change
+can legitimately name several people on purpose. `_do_set_formation_row`
+now falls back to moving every real party member actually named, all
+at once, only when the strict single-target lookup can't resolve one
+exact person; naming just one person still behaves exactly as before.
+
+Verified with a new test reproducing the exact reported phrase against
+the prior code (fails) and the fix (passes), plus a 7-test collateral
+run confirming every existing formation-row behavior (first-name
+matching, ambiguous-name refusal, non-party-member rejection, the
+tap-to-move button) is unaffected.
+
 ## [1.27.331] — Casual possessives ("pips" without an apostrophe) now match a party member's name
 
 **Real live bug (2026-08-23, Coffee, screenshot): "Show pips affinity"

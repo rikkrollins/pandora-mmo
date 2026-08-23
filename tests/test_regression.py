@@ -11533,6 +11533,37 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.get_character(member_id, -999).get("formation_row"), "back")
         self.assertEqual(db.get_character(leader_id, -999).get("formation_row", "front"), "front")
 
+    async def test_set_formation_row_moves_multiple_named_party_members_at_once(self):
+        """
+        Real dev-bridge report (2026-08-23, Coffee, screenshot): "Move
+        Grask and Wren to the front row" resolved to nothing at all --
+        _match_member_by_name_or_username's own single-candidate safety
+        net (correct for a genuinely single-target action) also
+        silently blocked a command naming more than one real match on
+        purpose.
+        """
+        leader_id = 950408
+        grask_id = 950409
+        wren_id = 950410
+        make_basic_character(leader_id, "MultiFormationLeader", current_location="crossroads_tavern")
+        make_basic_character(grask_id, "Grask Emberscale", current_location="crossroads_tavern")
+        make_basic_character(wren_id, "Wren Hollowbrook", current_location="crossroads_tavern")
+        party_id = db.create_party(leader_id, -999)
+        db.update_character(grask_id, -999, party_id=party_id)
+        db.update_character(wren_id, -999, party_id=party_id)
+
+        sink = []
+        await bot._do_set_formation_row(
+            FakeUpdate(leader_id, "Move Grask and Wren to the front row", sink),
+            "Grask and Wren", "front",
+        )
+        self.assertEqual(db.get_character(grask_id, -999).get("formation_row"), "front")
+        self.assertEqual(db.get_character(wren_id, -999).get("formation_row"), "front")
+        self.assertEqual(db.get_character(leader_id, -999).get("formation_row", "front"), "front")
+        combined = "\n".join(sink)
+        self.assertIn("Grask Emberscale", combined)
+        self.assertIn("Wren Hollowbrook", combined)
+
     async def test_set_formation_row_matches_a_party_member_by_first_name_alone(self):
         """
         Real live bug (2026-08-09, Coffee, dev-topic screenshot): "Move

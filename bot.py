@@ -2147,6 +2147,32 @@ def _match_member_by_name_or_username(text: str, members: list[dict]) -> dict | 
     return None
 
 
+def _match_all_members_by_name(text: str, members: list[dict]) -> list[dict]:
+    """
+    Real dev-bridge request (2026-08-23, Coffee, screenshot): "Move
+    Grask and Wren to the front row" -- naming MULTIPLE party members
+    for one shared formation action. _match_member_by_name_or_username
+    deliberately returns nothing once more than one name matches (the
+    right call for a genuinely single-target action, where an
+    ambiguous match must never be guessed), but a formation-row command
+    can legitimately target several real people on purpose. Returns
+    every real member whose full name OR first name (same casual
+    apostrophe-optional possessive the single-target matcher already
+    allows) is actually mentioned in the text, in party order -- never
+    guessing beyond an exact name match.
+    """
+    lowered = text.lower()
+    matched = []
+    for member in members:
+        name_lower = member["name"].lower()
+        first = name_lower.split()[0]
+        if re.search(r"\b" + re.escape(name_lower) + r"\b", lowered) or re.search(
+            r"\b" + re.escape(first) + r"'?s?\b", lowered
+        ):
+            matched.append(member)
+    return matched
+
+
 def _find_party_target_by_name(text: str, chat_id: int) -> dict | None:
     """
     Finds a party member (real player, AI companion, or a currently
@@ -15207,6 +15233,31 @@ async def _do_unbench_member(update: Update, target_name: str) -> None:
     await _safe_send(update, f"🪑 **{target['name']}** is back in the active party.")
 
 
+def _move_to_formation_row(update: Update, target: dict, row: str) -> None:
+    """
+    The actual real DB write + live-session sync for one target,
+    shared by both the single- and multi-target paths of
+    _do_set_formation_row below. Real-time mid-fight repositioning
+    (2026-08-01, per Coffee: "let the party use formations to move
+    forward and pull back in battle" -- meant to matter for THIS
+    fight, not just the next one). A combat session's participants are
+    a snapshot taken at _do_start_combat time; without this, the DB
+    write would be correct for future fights but silently invisible to
+    the targeting/AC math (_pick_formation_weighted_target, resolve_
+    attack's formation_ac_bonus) for the fight actually in progress.
+    Same "find and mutate the live participant dict too" pattern
+    _do_use_item's heal branch already uses for hp_current.
+    """
+    db.update_character(target["telegram_user_id"], update.effective_chat.id, formation_row=row)
+    session = sessions.get_session_for_user(update.effective_chat.id, target["telegram_user_id"])
+    if session is not None:
+        live_target = next(
+            (p for p in session.participants if p["telegram_user_id"] == target["telegram_user_id"]), None,
+        )
+        if live_target is not None:
+            live_target["formation_row"] = row
+
+
 async def _do_set_formation_row(update: Update, target_name: str, row: str) -> None:
     """
     Real battle-formation customization (2026-08-01, per Coffee: "allow
@@ -15218,6 +15269,16 @@ async def _do_set_formation_row(update: Update, target_name: str, row: str) -> N
     affects who gets targeted). A named target must be a real party
     member if the requester IS in a party; with no name given, it
     defaults to the requester themselves.
+
+    Real dev-bridge request (2026-08-23, Coffee, screenshot): "Move
+    Grask and Wren to the front row" used to resolve to NOTHING --
+    _match_member_by_name_or_username's own single-candidate safety
+    net (correct for a genuinely single-target action, where an
+    ambiguous match must never be guessed) also silently blocked a
+    command that named more than one real match ON PURPOSE. When the
+    single-target lookup can't resolve one exact person, this now
+    falls back to _match_all_members_by_name and moves every real
+    party member actually named, all at once, in one combined message.
     """
     telegram_user_id = update.effective_user.id
     character = db.get_character(telegram_user_id, update.effective_chat.id)
@@ -15225,46 +15286,46 @@ async def _do_set_formation_row(update: Update, target_name: str, row: str) -> N
         await _safe_send(update, "You don't have a character yet!")
         return
     if not target_name or target_name.strip().lower() in ("me", "myself", "my own"):
-        target = character
+        targets = [character]
     else:
-        target = _find_party_target_by_name(target_name, update.effective_chat.id)
         party_id = character.get("party_id")
-        if target is None or (party_id and target.get("party_id") != party_id) or (
-            not party_id and target["telegram_user_id"] != telegram_user_id
-        ):
-            await _safe_send(update, f"No one named \"{target_name}\" is in your party.")
-            return
-    if target.get("formation_row", "front") == row:
-        await _safe_send(update, f"{target['name']} is already in the {row} row.")
-        return
-    db.update_character(target["telegram_user_id"], update.effective_chat.id, formation_row=row)
-    # Real-time mid-fight repositioning (2026-08-01, per Coffee: "let
-    # the party use formations to move forward and pull back in
-    # battle" -- meant to matter for THIS fight, not just the next
-    # one). A combat session's participants are a snapshot taken at
-    # _do_start_combat time; without this, the DB write above would be
-    # correct for future fights but silently invisible to the targeting/
-    # AC math (_pick_formation_weighted_target, resolve_attack's
-    # formation_ac_bonus) for the fight actually in progress. Same
-    # "find and mutate the live participant dict too" pattern
-    # _do_use_item's heal branch already uses for hp_current.
-    session = sessions.get_session_for_user(update.effective_chat.id, target["telegram_user_id"])
-    if session is not None:
-        live_target = next(
-            (p for p in session.participants if p["telegram_user_id"] == target["telegram_user_id"]), None,
+        single = _find_party_target_by_name(target_name, update.effective_chat.id)
+        single_valid = single is not None and (
+            (party_id and single.get("party_id") == party_id)
+            or (not party_id and single["telegram_user_id"] == telegram_user_id)
         )
-        if live_target is not None:
-            live_target["formation_row"] = row
+        if single_valid:
+            targets = [single]
+        else:
+            candidates = db.get_party_members_by_id(party_id) if party_id else [character]
+            targets = _match_all_members_by_name(target_name, candidates)
+            if not targets:
+                await _safe_send(update, f"No one named \"{target_name}\" is in your party.")
+                return
+
+    already_there = [t["name"] for t in targets if t.get("formation_row", "front") == row]
+    moving = [t for t in targets if t.get("formation_row", "front") != row]
+    if not moving:
+        verb = "is" if len(already_there) == 1 else "are"
+        await _safe_send(update, f"{', '.join(already_there)} {verb} already in the {row} row.")
+        return
+
+    for target in moving:
+        _move_to_formation_row(update, target, row)
+
+    names = ", ".join(f"**{t['name']}**" for t in moving)
+    plural = len(moving) > 1
     if row == "back":
         await _safe_send(
             update,
-            f"🔮 **{target['name']}** moves to the **back row** — less likely to be targeted, "
+            f"🔮 {names} move{'' if plural else 's'} to the **back row** — less likely to be targeted, "
             f"harder to hit, free to heal, cast, or shoot from safety.",
         )
     else:
         await _safe_send(
             update,
-            f"🛡️ **{target['name']}** moves to the **front row** — takes point, the enemy's first target.",
+            f"🛡️ {names} move{'' if plural else 's'} to the **front row** — takes point, "
+            f"the enemy's first target.",
         )
 
 
