@@ -16,7 +16,7 @@ import re
 import shutil
 import time
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import requests
@@ -1260,6 +1260,141 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             FakeCallbackUpdate(user_id, "quest|view|story|welcome_to_the_crossroads", sink), DummyContext(),
         )
         self.assertIn("welcome_to_the_crossroads", db.get_character(user_id, -999)["active_quests"])
+
+    async def test_weekly_monthly_quest_cap_refuses_a_4th_simultaneous_one(self):
+        """
+        Real request (2026-08-23, Coffee, after a real accepted-quest
+        list piled up to 12+ simultaneous Weekly/Monthly board quests
+        across every location he'd visited): "Add a global cap." The
+        per-location generation cap never limited how many DIFFERENT
+        locations' long-lived quests one character could hold at once.
+        """
+        import board_quests as board_quests_module
+        use_test_db("tests/tmp/long_term_quest_cap_test.db")
+        user_id = 900800
+        make_basic_character(user_id, "CapTester", current_location="crossroads_tavern")
+
+        locations = ["crossroads_tavern", "market_row", "stonearch_bridge"]
+        for i, loc in enumerate(locations):
+            db.update_character(user_id, -999, current_location=loc)
+            tier = "weekly" if i % 2 == 0 else "monthly"
+            bq = db.create_board_quest(
+                loc, -999, board_quests_module._period_key(tier), f"Long-term task {i}", "...", None,
+                "gather_material", "wood", 5, 40, 20, tier=tier,
+            )
+            db.accept_board_quest(bq["board_quest_id"], user_id, -999)
+
+        # A 4th location, a real 4th weekly quest posted but not yet accepted.
+        db.update_character(user_id, -999, current_location="whispering_wood")
+        fourth = db.create_board_quest(
+            "whispering_wood", -999, board_quests_module._period_key("weekly"), "One too many", "...", None,
+            "gather_material", "wood", 5, 40, 20, tier="weekly",
+        )
+        from unittest.mock import patch
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "A quiet task awaits."}
+
+        sink = []
+        # whispering_wood has no daily board quest cached yet in a
+        # fresh test DB -- get_or_generate_all_board_quests lazily
+        # generates one via a REAL Ollama narration call
+        # (ai/dm_agent.py's narrate_branching_quest_setup) unrelated
+        # to the cap this test targets. Mocked the same way this
+        # file's own board-quest-generation tests already do.
+        with patch("ai.dm_agent.requests.post", return_value=FakeResponse()):
+            await bot._do_accept_quest(
+                FakeUpdate(user_id, f"I accept {fourth['title']}", sink), f"I accept {fourth['title']}",
+            )
+        self.assertTrue(any("3" in m for m in sink), sink)
+        still_accepted = db.get_accepted_board_quests_for_user(user_id, -999)
+        self.assertEqual(len(still_accepted), 3)
+        self.assertNotIn(fourth["board_quest_id"], [bq["board_quest_id"] for bq in still_accepted])
+
+    async def test_daily_quest_exempt_from_the_weekly_monthly_cap(self):
+        """Daily quests already self-limit via their own real 24h expiry -- the new cap is scoped to Weekly/Monthly only."""
+        import board_quests as board_quests_module
+        use_test_db("tests/tmp/long_term_quest_cap_daily_test.db")
+        user_id = 900801
+        make_basic_character(user_id, "DailyExemptTester", current_location="crossroads_tavern")
+
+        locations = ["crossroads_tavern", "market_row", "stonearch_bridge"]
+        for i, loc in enumerate(locations):
+            db.update_character(user_id, -999, current_location=loc)
+            tier = "weekly" if i % 2 == 0 else "monthly"
+            bq = db.create_board_quest(
+                loc, -999, board_quests_module._period_key(tier), f"Long-term task {i}", "...", None,
+                "gather_material", "wood", 5, 40, 20, tier=tier,
+            )
+            db.accept_board_quest(bq["board_quest_id"], user_id, -999)
+
+        db.update_character(user_id, -999, current_location="whispering_wood")
+        daily = db.create_board_quest(
+            "whispering_wood", -999, board_quests_module._period_key("daily"), "A quick daily errand", "...", None,
+            "gather_material", "wood", 3, 20, 10, tier="daily",
+        )
+        from unittest.mock import patch
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "A quiet task awaits."}
+
+        sink = []
+        with patch("ai.dm_agent.requests.post", return_value=FakeResponse()):
+            await bot._do_accept_quest(
+                FakeUpdate(user_id, f"I accept {daily['title']}", sink), f"I accept {daily['title']}",
+            )
+        self.assertTrue(any("accepts Quest" in m for m in sink), sink)
+        accepted_ids = [bq["board_quest_id"] for bq in db.get_accepted_board_quests_for_user(user_id, -999)]
+        self.assertIn(daily["board_quest_id"], accepted_ids)
+        self.assertEqual(len(accepted_ids), 4)
+
+    async def test_accepting_exactly_the_cap_limit_of_weekly_monthly_quests_succeeds(self):
+        import board_quests as board_quests_module
+        use_test_db("tests/tmp/long_term_quest_cap_boundary_test.db")
+        user_id = 900802
+        make_basic_character(user_id, "CapBoundaryTester", current_location="crossroads_tavern")
+
+        locations = ["crossroads_tavern", "market_row"]
+        for i, loc in enumerate(locations):
+            db.update_character(user_id, -999, current_location=loc)
+            tier = "weekly" if i % 2 == 0 else "monthly"
+            bq = db.create_board_quest(
+                loc, -999, board_quests_module._period_key(tier), f"Long-term task {i}", "...", None,
+                "gather_material", "wood", 5, 40, 20, tier=tier,
+            )
+            db.accept_board_quest(bq["board_quest_id"], user_id, -999)
+
+        db.update_character(user_id, -999, current_location="stonearch_bridge")
+        third = db.create_board_quest(
+            "stonearch_bridge", -999, board_quests_module._period_key("monthly"), "The real third one", "...", None,
+            "gather_material", "wood", 5, 40, 20, tier="monthly",
+        )
+        from unittest.mock import patch
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "A quiet task awaits."}
+
+        sink = []
+        with patch("ai.dm_agent.requests.post", return_value=FakeResponse()):
+            await bot._do_accept_quest(
+                FakeUpdate(user_id, f"I accept {third['title']}", sink), f"I accept {third['title']}",
+            )
+        self.assertTrue(any("accepts Quest" in m for m in sink), sink)
+        accepted_ids = [bq["board_quest_id"] for bq in db.get_accepted_board_quests_for_user(user_id, -999)]
+        self.assertIn(third["board_quest_id"], accepted_ids)
+        self.assertEqual(len(accepted_ids), 3)
 
     async def test_view_branching_board_quest_at_full_progress_shows_real_choice_buttons(self):
         """
@@ -8245,6 +8380,21 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         make_basic_character(player_id, "TimeoutTester", chat_id=-999500, current_location="crossroads_tavern")
 
         def new_fight(player_hp=None):
+            # Real fix (2026-08-23, per Coffee): _check_combat_timeouts
+            # now also skips forcing an action at all when the player
+            # was recently active (COMBAT_TIMEOUT_RECENT_ACTIVITY_
+            # GRACE_SECONDS) regardless of total elapsed time -- a real
+            # player continuously engaged with the menu was still
+            # getting force-attacked purely on wall-clock elapsed time
+            # before this fix. Backdated here (make_basic_character's
+            # own last_active_at default is "just now") so these
+            # scenarios correctly simulate genuine silence, not recent
+            # engagement -- session4 below still explicitly sets a
+            # fresh timestamp to test the "real activity" reset case.
+            db.update_character(
+                player_id, -999500,
+                last_active_at=(datetime.now(timezone.utc) - timedelta(seconds=bot.COMBAT_TIMEOUT_ACTION_SECONDS + 30)).isoformat(),
+            )
             character = db.get_character(player_id, -999500)
             if player_hp is not None:
                 character["hp_current"] = player_hp
@@ -8323,6 +8473,62 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(after_char.get("current_location"), "crossroads_tavern")
         self.assertNotIn(player_id, session5.turn_order)
         self.assertNotIn(player_id, sessions._USER_SESSION)
+
+    async def test_recently_active_player_never_gets_force_attacked_even_past_the_elapsed_threshold(self):
+        """
+        Real dev-bridge report (2026-08-23, Coffee, screenshot + angry
+        follow-up: "It literally skipped my turn, and it didn't even
+        give me a chance to select... you keep saying it's fixed"). The
+        earlier escalated-window lengthening (v1.27.316) didn't fix
+        this because it was never the real cause: the force-attack
+        decision only ever looked at wall-clock elapsed time since the
+        turn began, never whether the player was ACTUALLY, currently
+        engaged (browsing Items/Skills, exactly what the screenshot
+        showed against a 7000 HP boss). last_active_at was already
+        updated on every real button tap, but that only ever cleared
+        the ESCALATION flag for a future turn -- it never stopped an
+        already-due force-attack on the CURRENT one. This is the real
+        fix: real activity within COMBAT_TIMEOUT_RECENT_ACTIVITY_
+        GRACE_SECONDS skips forcing anything this cycle, no matter how
+        far past the elapsed threshold the turn already is.
+        """
+        import sessions
+
+        class _FakeSendBot:
+            def __init__(self):
+                self.sent = []
+
+            async def send_message(self, chat_id=None, message_thread_id=None, text=None, **kwargs):
+                self.sent.append(text)
+
+        fake_bot = _FakeSendBot()
+        player_id = 991002
+        make_basic_character(player_id, "RecentlyActiveTester", chat_id=-999501, current_location="crossroads_tavern")
+        companion = {"telegram_user_id": -700003, "name": "TestCompanion2", "hp_current": 50, "hp_max": 50,
+                     "is_ai": True, "strength": 12, "dexterity": 12, "armor_class": 12,
+                     "damage_dice": "1d6", "damage_bonus": 0, "damage_type": "physical", "proficiency_bonus": 2}
+        foe = {"telegram_user_id": -700004, "name": "TestDummy2", "hp_current": 7000, "hp_max": 7000,
+               "is_ai": True, "strength": 10, "dexterity": 10, "armor_class": 8,
+               "damage_dice": "1d4", "damage_bonus": 0, "damage_type": "physical",
+               "proficiency_bonus": 2, "xp_reward": 10, "monster_key": "test_dummy"}
+        character = db.get_character(player_id, -999501)
+        sides = {player_id: "party", -700003: "party", -700004: "enemy"}
+        session = sessions.start_session(-999501, [character, companion, foe], sides=sides)
+        idx = session.turn_order.index(player_id)
+        session.current_turn_index = idx
+        # Well past even the escalated action threshold -- would force
+        # an attack under the old, elapsed-time-only logic.
+        session.turn_started_at[player_id] = time.time() - (bot.COMBAT_TIMEOUT_ACTION_SECONDS + 30)
+        # But the player tapped a battle-menu button (Items/Skills/etc.)
+        # just moments ago -- real, current engagement.
+        db.update_character(
+            player_id, -999501,
+            last_active_at=(datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat(),
+        )
+        await bot._check_combat_timeouts(fake_bot)
+        self.assertFalse(any("attack on instinct" in (m or "") for m in fake_bot.sent), fake_bot.sent)
+        self.assertEqual(session.current_participant_id(), player_id)
+        sessions.end_session(-999501, session)
 
     async def test_combat_timeout_check_skips_a_contended_session_instead_of_blocking_on_it(self):
         """

@@ -2,6 +2,52 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.322] — Global cap on simultaneous Weekly/Monthly board quests
+
+**Real request (2026-08-23, Coffee), after a real accepted-quest list
+piled up to 12+ simultaneous Weekly/Monthly board quests across every
+location he'd visited: "I don't think it's purging the quests from us
+after 24 hours" — traced (this is real, intentional per-tier expiry:
+Daily=24h, Weekly=7 days, Monthly=30 days, from a 2026-07-25 request)
+and then, per follow-up: "Add a global cap."**
+
+The per-location generation cap (1 Weekly + 1 Monthly quest posted per
+location) was never a per-character ceiling — a player who'd visited 8
+different locations could hold 8 real, simultaneously long-lived
+quests with no limit at all. A new cap
+(`MAX_SIMULTANEOUS_LONG_TERM_BOARD_QUESTS = 3`) now refuses accepting
+a new Weekly/Monthly quest once a character already holds 3, across
+all locations — with a clear message pointing at the Quest menu's real
+Cancel button (v1.27.315) to make room. Daily quests are exempt (they
+already self-limit via their own 24h expiry). Verified with 3 new
+tests, all green.
+
+## [1.27.321] — Real fix: force-attack timeout now respects genuine engagement
+
+**Real dev-bridge report (2026-08-23, Coffee, screenshot + a very
+direct follow-up): "It literally skipped my turn, and it didn't even
+give me a chance to select... you keep saying it's fixed."**
+
+The earlier escalated-timeout lengthening (v1.27.316) did not fix this
+because it was never the actual cause. `_check_combat_timeouts`'s
+force-attack decision was based ONLY on wall-clock elapsed time since
+the turn began — `last_active_at` was already updated on every real
+battle-menu button tap, but that only ever cleared the *escalation*
+flag for a player's *next* turn; it never stopped an already-due
+force-attack on the *current* one. A player genuinely, continuously
+engaged — reading through a long Items/Scrolls list, exactly what the
+screenshot showed against a 7000 HP boss — could still get
+force-attacked mid-navigation the instant the wall-clock threshold
+passed, no matter how recently they'd actually tapped something.
+
+Real fix: any real activity within a new
+`COMBAT_TIMEOUT_RECENT_ACTIVITY_GRACE_SECONDS` (30s) window now skips
+forcing (and warning about) an action entirely this cycle, regardless
+of total elapsed time — only genuine, unbroken silence for the full
+window ever triggers it now. Verified with a real test proving a
+player past the elapsed threshold but active 5 seconds ago is never
+force-attacked, plus the full existing timeout test suite, all green.
+
 ## [1.27.320] — Stale post-combat narration no longer delivered
 
 **Real dev-bridge report (2026-08-22, Coffee): "The battle is over

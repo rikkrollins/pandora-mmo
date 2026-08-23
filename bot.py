@@ -740,6 +740,27 @@ COMBAT_TIMEOUT_ACTION_SECONDS = 300
 COMBAT_TIMEOUT_ESCALATED_WARNING_SECONDS = 90
 COMBAT_TIMEOUT_ESCALATED_ACTION_SECONDS = 180
 
+# Real dev-bridge report (2026-08-23, Coffee, screenshot + a genuinely
+# angry follow-up: "It literally skipped my turn, and it didn't even
+# give me a chance to select... you keep saying it's fixed"): the
+# escalated-window lengthening above did NOT fix this, because it was
+# never actually the real cause. _check_combat_timeouts's force-attack
+# decision was based ONLY on wall-clock elapsed time since the turn
+# began (`now - turn_started_at[pid]`) -- last_active_at was already
+# being updated on every real button tap (battle_menu_callback,
+# 2026-08-11 fix) but that ONLY ever cleared the ESCALATION flag for a
+# player's NEXT turn, never reset THIS turn's own clock or skipped an
+# already-due force-attack. A player who was genuinely, continuously
+# engaged -- reading through a long Items/Scrolls list, exactly what
+# the screenshot shows Elduinn doing against a 7000 HP boss -- could
+# still get force-attacked mid-navigation the instant the wall-clock
+# threshold passed, no matter how recently they'd actually tapped
+# something. This is the real fix: if the player interacted at all
+# within this grace window, skip forcing (and warning) THIS cycle
+# outright, regardless of total elapsed time -- only genuine,
+# unbroken SILENCE for the full window now ever triggers it.
+COMBAT_TIMEOUT_RECENT_ACTIVITY_GRACE_SECONDS = 30
+
 # Real (telegram_user_id, chat_id) pairs already warned about their
 # current idle stretch, so the warning fires once, not every check
 # cycle. Keyed on the pair, not bare telegram_user_id (2026-08-06 multi-
@@ -11119,12 +11140,17 @@ async def _check_combat_timeouts(bot) -> None:
                 continue
 
             character = db.get_character(pid, session.chat_id)
+            recently_active = False
             if character and character.get("last_active_at"):
                 try:
-                    if datetime.fromisoformat(character["last_active_at"]).timestamp() > turn_started:
+                    last_active_ts = datetime.fromisoformat(character["last_active_at"]).timestamp()
+                    if last_active_ts > turn_started:
                         session.timeout_escalated.discard(pid)
+                    recently_active = (now - last_active_ts) < COMBAT_TIMEOUT_RECENT_ACTIVITY_GRACE_SECONDS
                 except (TypeError, ValueError):
                     pass
+            if recently_active:
+                continue
 
             escalated = pid in session.timeout_escalated
             warning_threshold = COMBAT_TIMEOUT_ESCALATED_WARNING_SECONDS if escalated else COMBAT_TIMEOUT_WARNING_SECONDS
@@ -12128,6 +12154,16 @@ async def _check_quest_completions_defeat_monster(update_like, session: sessions
                 )
 
 
+# Real request (2026-08-23, per Coffee, after a real accepted-quest
+# list piled up to 12+ simultaneous Weekly/Monthly board quests across
+# every location he'd visited): "Add a global cap." The per-location
+# generation cap (board_quests.BOARD_QUEST_TIER_COUNT) never limited
+# how many DIFFERENT locations' long-lived quests one character could
+# hold at once -- this is that missing per-character ceiling, checked
+# in _do_accept_quest right before a Weekly/Monthly acceptance.
+MAX_SIMULTANEOUS_LONG_TERM_BOARD_QUESTS = 3
+
+
 async def _do_accept_quest(update: Update, text: str = "") -> None:
     telegram_user_id = update.effective_user.id
     character = db.get_character(telegram_user_id, update.effective_chat.id)
@@ -12271,6 +12307,30 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
             titles = ", ".join(f'"{q["title"]}"' for q in available)
             await update.effective_chat.send_message(
                 f"There's more than one thing posted here — which one? {titles}",
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+            )
+            return
+
+    # Real request (2026-08-23, per Coffee, after seeing a real
+    # accepted-quest list pile up to 12+ Weekly/Monthly board quests
+    # at once: "Add a global cap"). The per-LOCATION cap
+    # (BOARD_QUEST_TIER_COUNT, 1 weekly + 1 monthly posted per
+    # location) was never a per-CHARACTER cap -- a player who'd
+    # visited 8 different locations could hold 8 real, simultaneously
+    # long-lived (7-30 real day) Weekly/Monthly quests with no ceiling
+    # at all. Daily quests are exempt -- they already self-limit via
+    # their own real 24h expiry, this is specifically about the
+    # long-lived tiers piling up across locations.
+    if board_quest.get("tier") in ("weekly", "monthly"):
+        long_term_count = sum(
+            1 for bq in db.get_accepted_board_quests_for_user(telegram_user_id, update.effective_chat.id)
+            if bq.get("tier") in ("weekly", "monthly")
+        )
+        if long_term_count >= MAX_SIMULTANEOUS_LONG_TERM_BOARD_QUESTS:
+            await update.effective_chat.send_message(
+                f"You're already juggling {long_term_count} real Weekly/Monthly quests — that's the max "
+                f"({MAX_SIMULTANEOUS_LONG_TERM_BOARD_QUESTS}) at once. Finish, or cancel one from the Quest "
+                f"menu, before taking on another.",
                 message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
             return
