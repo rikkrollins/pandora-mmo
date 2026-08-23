@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.329] — "My Quests" now shows the whole party's accepted Companion Favors
+
+**Real live bug (2026-08-23, Coffee): "i am not seeing current
+accepted affinity tasks in 'My Quests' menu."**
+
+Root cause, confirmed via the live DB: Coffee's own party-mate had
+accepted every currently-open Companion Favor — none himself. "My
+Quests" (both the free-text screen and the button-driven drill-down
+list) only ever showed the *viewer's own* accepted board quests. That
+was already wrong for Companion Favors specifically, since v1.27.328
+made them a real, shared, party-wide mechanic — any real party member
+can complete one, so any real party member should be able to see it.
+
+"My Quests" (both surfaces) now shows every currently accepted favor
+for the whole party, not just the ones the viewer personally tapped
+Accept on, noting who actually accepted it when it wasn't you. Tapping
+into a party-mate's own favor shows real details (including the actual
++affinity reward and companion name) but never offers to cancel it —
+only the real accepter can do that.
+
+Verified with a new test that reproduces the exact reported gap (favor
+accepted by a party-mate, invisible to the viewer) against the prior
+code, passing after the fix, plus a 14-test collateral run across the
+whole My Quests / Affinity Menu / board-quest-detail surface.
+
 ## [1.27.328] — Companion Favor progress visibility + a real crediting bug fix
 
 **Real dev-bridge reports (2026-08-23, Coffee): "i completed the task

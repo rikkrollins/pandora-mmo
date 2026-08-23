@@ -14895,6 +14895,66 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(favor["location_id"], combined)  # never the raw synthetic location_id
         self.assertNotIn("companion_favor:wren_hollowbrook", combined)
 
+    async def test_check_quests_shows_a_favor_a_party_mate_accepted_not_just_the_viewers_own(self):
+        """
+        Real live bug (2026-08-23, Coffee: "i am not seeing current
+        accepted affinity tasks in 'My Quests' menu"). Root cause
+        confirmed via the live DB: his own party-mate had accepted
+        every currently-open favor, none himself -- "My Quests" only
+        ever showed the viewer's own accepted list, even though
+        Companion Favors are already a real, shared, party-wide
+        mechanic (any real party member can complete one).
+        """
+        import board_quests
+        chat_id = -999052
+        viewer_id = 900993
+        accepter_id = 900994
+        make_basic_character(viewer_id, "MyQuestsPartyViewer", chat_id=chat_id, current_location="crossroads_tavern")
+        party_id = db.create_party(viewer_id, chat_id)
+        make_basic_character(accepter_id, "MyQuestsPartyAccepter", chat_id=chat_id, current_location="crossroads_tavern")
+        db.update_character(accepter_id, chat_id, party_id=party_id)
+        companion_id = -900995
+        make_basic_character(companion_id, "Wren Hollowbrook", chat_id=chat_id, current_location="hollow_stump_shrine", is_ai=True)
+        db.update_character(companion_id, chat_id, party_id=party_id)
+        favor = board_quests.get_or_generate_companion_favor(bot.CAMPAIGN, "wren_hollowbrook", chat_id)
+        db.accept_board_quest(favor["board_quest_id"], accepter_id, chat_id)  # the PARTY-MATE accepts, not the viewer
+
+        sink = []
+        await bot._do_check_quests(FakeUpdate(viewer_id, "check quests", sink, chat_id=chat_id))
+        combined = "\n".join(sink)
+        self.assertIn("Companion favors accepted", combined)
+        self.assertIn("Wren Hollowbrook", combined)
+        self.assertIn("MyQuestsPartyAccepter", combined)  # who actually accepted it
+
+        # The My Quests BUTTON list must show it too.
+        viewer_character = db.get_character(viewer_id, chat_id)
+        keyboard = bot._my_quests_keyboard(viewer_character)
+        self.assertIsNotNone(keyboard)
+        labels = [b.text for row in keyboard.inline_keyboard for b in row]
+        self.assertTrue(any(favor["title"] in l for l in labels), labels)
+
+        # Tapping it must actually show real details, not silently do nothing.
+        from unittest.mock import patch
+        sink2 = []
+        real_safe_send = bot._safe_send
+        captured_markups = []
+
+        async def spying_safe_send(upd, text, **kwargs):
+            captured_markups.append(kwargs.get("reply_markup"))
+            return await real_safe_send(upd, text, **kwargs)
+
+        with patch("bot._safe_send", side_effect=spying_safe_send):
+            await bot.quest_menu_callback(
+                FakeCallbackUpdate(viewer_id, f"quest|view|board|{favor['board_quest_id']}", sink2, chat_id=chat_id), DummyContext(),
+            )
+        combined2 = "\n".join(sink2)
+        self.assertIn(favor["title"], combined2)
+        self.assertIn("trust with Wren Hollowbrook", combined2)
+        self.assertIn("MyQuestsPartyAccepter", combined2)
+        # Never offers to cancel a party-mate's own accepted favor.
+        self.assertTrue(len(captured_markups) > 0)
+        self.assertIsNone(captured_markups[-1])
+
     def test_board_quests_are_isolated_per_chat(self):
         """
         Multi-tenant scaling Phase 4d (2026-08-06): board_quests

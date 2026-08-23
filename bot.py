@@ -12741,7 +12741,14 @@ def _my_quests_keyboard(character: dict) -> InlineKeyboardMarkup | None:
         if quest:
             buttons.append([InlineKeyboardButton(f"📜 {quest['title']}", callback_data=f"quest|view|story|{quest_id}")])
     for bq in db.get_accepted_board_quests_for_user(character["telegram_user_id"], character["chat_id"]):
+        if bq["location_id"].startswith(board_quests_module.COMPANION_FAVOR_LOCATION_PREFIX):
+            continue  # shown below, party-wide, not just the viewer's own
         buttons.append([InlineKeyboardButton(f"📋 {bq['title']}", callback_data=f"quest|view|board|{bq['board_quest_id']}")])
+    # Party-wide, not viewer-only (2026-08-23, real dev-bridge report,
+    # Coffee: "i am not seeing current accepted affinity tasks in 'My
+    # Quests' menu") -- see _accepted_companion_favors_for_party.
+    for bq in _accepted_companion_favors_for_party(character):
+        buttons.append([InlineKeyboardButton(f"💞 {bq['title']}", callback_data=f"quest|view|board|{bq['board_quest_id']}")])
     for guild_id in held_guild_ids(character):
         step_index = _guild_curriculum_step_index(character, guild_id)
         step = guild_curriculum_module.get_step(guild_id, step_index)
@@ -12804,11 +12811,24 @@ async def _do_view_quest_detail(update: Update, kind: str | None, ident: str | N
         return
 
     if kind == "board":
+        # Companion Favors are party-wide now (2026-08-23) -- a tap from
+        # the "My Quests" list may name a favor a PARTY-MATE accepted,
+        # not the viewer, so the lookup falls back to the whole party's
+        # accepted favors, not just the viewer's own list.
         bq = next(
             (q for q in db.get_accepted_board_quests_for_user(update.effective_user.id, update.effective_chat.id)
              if str(q["board_quest_id"]) == str(ident)),
             None,
         )
+        is_favor = False
+        if bq is None:
+            bq = next(
+                (q for q in _accepted_companion_favors_for_party(character) if str(q["board_quest_id"]) == str(ident)),
+                None,
+            )
+            is_favor = bq is not None
+        else:
+            is_favor = bq["location_id"].startswith(board_quests_module.COMPANION_FAVOR_LOCATION_PREFIX)
         if bq is None:
             return
         if bq.get("branch_data") and bq["progress_count"] >= bq["objective_count"]:
@@ -12821,9 +12841,23 @@ async def _do_view_quest_detail(update: Update, kind: str | None, ident: str | N
             await _safe_send(update, card, reply_markup=InlineKeyboardMarkup(buttons), speak=False)
             return
         progress = f"Progress: {bq['progress_count']}/{bq['objective_count']}"
+        if is_favor:
+            npc_data = CAMPAIGN["npcs"].get(bq["giver_npc"])
+            npc_name = npc_data["name"] if npc_data else bq["giver_npc"]
+            progress += f" — reward: +{bq['reward_affinity']} trust with {npc_name}"
+            if bq["accepted_by"] != update.effective_user.id:
+                handler = db.get_character(bq["accepted_by"], update.effective_chat.id)
+                if handler:
+                    progress += f" (accepted by {handler['name']})"
         card = _format_quest_card("board", bq["title"], bq["description"], bq.get("reward_xp"), bq.get("reward_gold"), progress)
-        cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel Quest", callback_data=f"quest|cancelconfirm|board|{ident}")]])
-        await _safe_send(update, card, reply_markup=cancel_kb, speak=False)
+        # Never offer to cancel a party-mate's own accepted favor --
+        # view-only for anyone but whoever actually accepted it.
+        reply_markup = None
+        if bq["accepted_by"] == update.effective_user.id:
+            reply_markup = InlineKeyboardMarkup(
+                [[InlineKeyboardButton("❌ Cancel Quest", callback_data=f"quest|cancelconfirm|board|{ident}")]]
+            )
+        await _safe_send(update, card, reply_markup=reply_markup, speak=False)
         return
 
     if kind == "curriculum":
@@ -13105,11 +13139,10 @@ async def _do_check_quests(update: Update) -> None:
     # named by the real companion instead. Real dev-bridge report
     # (Coffee, screenshot): "You need to show the task and how much is
     # remaining for completion of the task."
-    accepted_favors = [
+    accepted_board_quests = [
         bq for bq in accepted_board_quests_all
-        if bq["location_id"].startswith(board_quests_module.COMPANION_FAVOR_LOCATION_PREFIX)
+        if not bq["location_id"].startswith(board_quests_module.COMPANION_FAVOR_LOCATION_PREFIX)
     ]
-    accepted_board_quests = [bq for bq in accepted_board_quests_all if bq not in accepted_favors]
     if accepted_board_quests:
         lines.append("\n**Board quests accepted:**")
         for bq in accepted_board_quests:
@@ -13127,13 +13160,23 @@ async def _do_check_quests(update: Update) -> None:
                 progress = f"{bq['progress_count']}/{bq['objective_count']}"
                 lines.append(f"• {bq['title']} ({bq_location_name}) — {progress}\n  {bq['description']}")
 
+    # Party-wide, not viewer-only (2026-08-23, real dev-bridge report,
+    # Coffee: "i am not seeing current accepted affinity tasks in 'My
+    # Quests' menu" -- his own party-mate had accepted all of them,
+    # none himself; see _accepted_companion_favors_for_party's own
+    # docstring for the full root cause).
+    accepted_favors = _accepted_companion_favors_for_party(character)
     if accepted_favors:
         lines.append("\n**Companion favors accepted:**")
         for bq in accepted_favors:
             npc_data = CAMPAIGN["npcs"].get(bq["giver_npc"])
             npc_name = npc_data["name"] if npc_data else bq["giver_npc"]
             progress = f"{bq['progress_count']} of {bq['objective_count']}"
-            lines.append(f"• {bq['title']} (for {npc_name}) — {progress}\n  {bq['description']}")
+            by_note = "" if bq["accepted_by"] == character["telegram_user_id"] else (
+                f" (accepted by {db.get_character(bq['accepted_by'], update.effective_chat.id)['name']})"
+                if db.get_character(bq["accepted_by"], update.effective_chat.id) else ""
+            )
+            lines.append(f"• {bq['title']} (for {npc_name}) — {progress}{by_note}\n  {bq['description']}")
 
     location_id = character["current_location"]
     location = cl.get_location(CAMPAIGN, location_id)
@@ -21580,6 +21623,37 @@ def _companion_favor_giver_is_in_party(character: dict, npc_id: str | None) -> b
         m.get("is_ai") and _npc_id_for_companion_name(m["name"]) == npc_id
         for m in db.get_party_members_by_id(character["party_id"])
     )
+
+
+def _accepted_companion_favors_for_party(character: dict) -> list[dict]:
+    """
+    Real dev-bridge report (2026-08-23, Coffee: "i am not seeing
+    current accepted affinity tasks in 'My Quests' menu"). Root cause:
+    Companion Favors are already a real, shared, party-wide mechanic
+    (any real party member's kill/gather can credit one, and any real
+    party member's affinity is what's actually raised -- see the
+    v1.27.328 crediting fix), but "My Quests" only ever showed the
+    VIEWER's own accepted list -- if a party-mate happened to be the
+    one who tapped Accept, the viewer never saw it at all, even though
+    they could just as easily complete it. Returns every currently
+    accepted (not yet completed) favor for every real (non-AI) member
+    of this character's own party, de-duplicated, not just the
+    viewer's own.
+    """
+    party_id = character.get("party_id")
+    real_pids = {character["telegram_user_id"]}
+    if party_id:
+        real_pids |= {
+            m["telegram_user_id"] for m in db.get_party_members_by_id(party_id) if not m.get("is_ai")
+        }
+    favors, seen_ids = [], set()
+    for pid in real_pids:
+        for bq in db.get_accepted_board_quests_for_user(pid, character["chat_id"]):
+            if (bq["location_id"].startswith(board_quests_module.COMPANION_FAVOR_LOCATION_PREFIX)
+                    and bq["board_quest_id"] not in seen_ids):
+                favors.append(bq)
+                seen_ids.add(bq["board_quest_id"])
+    return favors
 
 
 def _complete_companion_favor(update: Update, character: dict, board_quest: dict) -> str:
