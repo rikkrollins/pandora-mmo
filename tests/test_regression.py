@@ -816,6 +816,75 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(offer)
         self.assertEqual(offer[0], "a_wardens_vigil")
 
+    def test_story_quest_not_offered_until_the_prior_quest_in_its_own_chapter_is_done(self):
+        """
+        Real live request (2026-08-23, Coffee: "certain quests shud
+        only trigger on completion of the previous story quest... I
+        want the characters to follow the game in a linear fashion").
+        arc_1_discovery's real, hand-authored order is welcome_to_the_
+        crossroads -> the_hollow_stump -> clear_the_warrens -- the 2nd
+        quest must not offer until the 1st is actually completed.
+        (hollow_stump_shrine also hosts a Remnant superboss quest with
+        no chapter gate of its own, by design -- that one legitimately
+        still offers in the meantime, just never the_hollow_stump.)
+        """
+        make_basic_character(960110, "LinearWalker", current_location="hollow_stump_shrine")
+        character = db.get_character(960110, -999)
+        offer = bot._offerable_quest_at_location(character, "hollow_stump_shrine")
+        self.assertNotEqual((offer or (None,))[0], "the_hollow_stump")
+
+        db.complete_quest(960110, -999, "welcome_to_the_crossroads")
+        character = db.get_character(960110, -999)
+        offer = bot._offerable_quest_at_location(character, "hollow_stump_shrine")
+        self.assertIsNotNone(offer)
+        self.assertEqual(offer[0], "the_hollow_stump")
+
+    def test_story_quest_not_offered_from_a_chapter_the_character_hasnt_reached_yet(self):
+        """
+        Real live request (2026-08-23, Coffee): a quest from a LATER
+        chapter than the one the character is actually on must not
+        offer, even standing right at that quest's own location.
+        arc_2_descent's first quest (the_wrong_color) sits at
+        glimmerdeep_grotto -- a fresh arc_1 character standing there
+        must not be offered it yet.
+        """
+        make_basic_character(960111, "StillOnChapterOne", current_location="glimmerdeep_grotto")
+        character = db.get_character(960111, -999)
+        offer = bot._offerable_quest_at_location(character, "glimmerdeep_grotto")
+        self.assertIsNone(offer)
+
+    def test_suggested_level_shows_real_data_never_an_invented_number(self):
+        """
+        Real live request (2026-08-23, Coffee, screenshot of The
+        Wayfarer's Circuit's offer): "can you please put the preferred
+        or suggested level for these quest so the player knows?!"
+        Grounded only in real campaign.json data -- an arc with a real
+        required_level shows a real number, an unbanded arc (5-14, left
+        at a 99 placeholder) shows a chapter position instead, a side
+        quest resolves its REAL destination (not its shallow offer
+        spot) via the location-to-chapter graph, and a Remnant gets no
+        label at all (a deliberately separate, non-chapter-bound ladder).
+        """
+        arc1_quest_id = bot.CAMPAIGN["story_arcs"]["arc_1_discovery"]["quests"][0]
+        arc1_quest = bot.CAMPAIGN["quests"][arc1_quest_id]
+        self.assertEqual(bot._quest_suggested_level(arc1_quest_id, arc1_quest), "⭐ **Suggested Level:** 1+")
+
+        arc9_quest_id = bot.CAMPAIGN["story_arcs"]["arc_9_whispering_wood"]["quests"][0]
+        arc9_quest = bot.CAMPAIGN["quests"][arc9_quest_id]
+        level_line = bot._quest_suggested_level(arc9_quest_id, arc9_quest)
+        self.assertIn("Chapter 9", level_line)
+        self.assertNotIn("Suggested Level", level_line)
+
+        # The Wayfarer's Circuit: offered standing in whispering_wood (arc_1),
+        # but its real objective is whispering_wood_sunken_den (arc_9 territory).
+        wayfarers = bot.CAMPAIGN["quests"]["wayfarers_circuit"]
+        level_line = bot._quest_suggested_level("wayfarers_circuit", wayfarers)
+        self.assertIn("Chapter 9", level_line)
+
+        remnant_id = "remnant_the_wrathflame_unbound"
+        remnant_quest = bot.CAMPAIGN["quests"][remnant_id]
+        self.assertEqual(bot._quest_suggested_level(remnant_id, remnant_quest), "")
+
     # -- Spell progression actually reaches every level the unlock table
     #    promises, up to character level 9 (v1.10.3) ---------------------
     def test_every_class_has_real_spells_at_every_promised_tier(self):

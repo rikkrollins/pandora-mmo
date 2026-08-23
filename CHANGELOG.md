@@ -2,6 +2,45 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.342] — Suggested quest levels + linear story-chapter gating
+
+**Real dev-bridge request (2026-08-23, Coffee, screenshot of "The
+Wayfarer's Circuit" quest offer):** "we've been seeing a lot of quests
+like this popping up when we go to locations and I don't know if
+they're story quest or side quest but... can you please put the
+preferred or suggested level for these quest so the player knows?! If
+some of these quests are popping up too soon and not syncing up with
+the storyline... I want the characters to follow the game in a linear
+fashion only getting quests when they are supposed to be getting those
+quests."
+
+Investigated live: `_offerable_quest_at_location` (every quest-offer
+push in the game runs through it) had no level or story-progress check
+at all. Two real fixes:
+
+- **Every quest offer now shows a real suggested level** — grounded
+  only in actual `campaign.json` data, never invented. A story-arc
+  quest shows its arc's real `required_level` (arcs 1-4); an unbanded
+  arc (5-14, left at a `99` placeholder) shows a chapter position
+  instead of a fabricated number. A side/guild quest resolves the same
+  way from its REAL objective location, not the incidental spot it's
+  offered at — The Wayfarer's Circuit is offered standing in
+  Whispering Wood (Chapter 1 territory) but its real destination,
+  Whispering Wood's Sunken Den, is genuinely Chapter 9 territory, found
+  via a real graph search (not a zone-name guess — `whispering_wood`
+  is reused for both an early shallow zone and a much deeper one,
+  confirmed live). Remnant superbosses get no label — a deliberately
+  separate, not-chapter-bound ladder by design.
+- **Story quests now only offer in their own real, hand-authored
+  order, one chapter at a time** — a quest from a later chapter than
+  the one you're actually on never offers, and within your current
+  chapter, quests only offer once the earlier ones in that same
+  chapter are done. Confirmed with Coffee via AskUserQuestion: this
+  applies ONLY to the 14 main story arcs' own quests — side/guild
+  quests (The Wayfarer's Circuit, A Warden's Vigil, etc.) stay exactly
+  as open as they are today, since several are intentionally early
+  content that happens to sit at a late-chapter location.
+
 ## [1.27.341] — Affinity gates spread across the map, two new varieties, and a passive Favor payoff
 
 **Real live request (2026-08-23, Coffee, right after v1.27.340 fixed

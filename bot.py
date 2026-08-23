@@ -18,6 +18,7 @@ import os
 import random
 import re
 import time
+from collections import deque
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
@@ -11426,7 +11427,32 @@ def _meets_quest_guild_requirement(character: dict, quest: dict) -> bool:
 
 
 def _offerable_quest_at_location(character: dict, location_id: str) -> tuple[str, dict] | None:
-    """The first not-yet-completed, not-yet-active, guild-eligible quest whose 'location' matches, if any."""
+    """
+    The first not-yet-completed, not-yet-active, guild-eligible quest
+    whose 'location' matches, if any.
+
+    Real live request (2026-08-23, Coffee: "I want the characters to
+    follow the game in a linear fashion only getting quests when they
+    are supposed to be getting those quests... certain quests shud
+    only trigger on completion of the previous story quest"). Applies
+    ONLY to quests that belong to one of the 14 main story arcs
+    (confirmed scope with Coffee via AskUserQuestion) -- side/guild
+    quests (The Wayfarer's Circuit, A Warden's Vigil, etc.) stay open
+    on their existing location/guild condition alone, unchanged, since
+    several already sit at locations that are graph-deep in a LATE
+    chapter's zone even though they're intentionally open early
+    content (e.g. offered the moment you join that guild) -- chapter-
+    gating those would wrongly block real, already-shipped access.
+    A story-arc quest is only offerable once its own arc is the
+    character's CURRENT arc (_current_story_arc) AND every earlier
+    quest in that arc's own real, hand-authored order is already
+    completed -- the same real sequence _next_step_hint_facts already
+    reads for narration, just enforced at the offer gate for the first
+    time.
+    """
+    current = _current_story_arc(character)
+    current_arc_id = current[0] if current else None
+    completed = set(character["completed_quests"])
     for quest_id, quest in CAMPAIGN.get("quests", {}).items():
         if quest.get("location") != location_id:
             continue
@@ -11434,6 +11460,14 @@ def _offerable_quest_at_location(character: dict, location_id: str) -> tuple[str
             continue
         if not _meets_quest_guild_requirement(character, quest):
             continue
+        arc_info = _story_arc_for_quest(quest_id)
+        if arc_info:
+            arc_id, arc = arc_info
+            if arc_id != current_arc_id:
+                continue
+            prior_quests = arc["quests"][:arc["quests"].index(quest_id)]
+            if not completed.issuperset(prior_quests):
+                continue
         return quest_id, quest
     return None
 
@@ -11749,6 +11783,89 @@ def _story_arc_for_quest(quest_id: str) -> tuple[str, dict] | None:
     return None
 
 
+def _location_chapter_arc_index(location_id: str | None) -> int | None:
+    """
+    Which story arc "owns" a location -- real, live request (2026-08-23,
+    Coffee: "can you please put the preferred or suggested level for
+    these quest so the player knows"). Deliberately NOT a zone-name-
+    prefix match: confirmed live that `whispering_wood` is BOTH arc_1's
+    shallow entry zone AND the namesake of a much deeper arc_9 zone,
+    reached only through an entirely different connection chain
+    (whispering_wood_root_hollow -> ..._sunken_den -> ..._hollow_
+    threshold -> ..._deeper_roots -> ..._deep_root_chamber) -- a prefix
+    match would wrongly call all of that "arc_1." Instead: multi-source
+    BFS over the real location connection graph, seeded from every
+    arc's own quests' real locations (location/trigger.location/
+    objective_location, whichever are set), each location owned by
+    whichever arc's seed reaches it first (ties toward the earlier
+    arc). Returns None if the location is unreachable from any arc's
+    own seeds. Small graph (~90 locations) -- recomputed fresh each
+    call, no caching, same style as the existing uncached
+    _current_story_arc/_story_arc_for_quest.
+    """
+    if not location_id:
+        return None
+    arc_ids = list(CAMPAIGN.get("story_arcs", {}).keys())
+    owner: dict[str, int] = {}
+    for idx, arc_id in enumerate(arc_ids):
+        arc = CAMPAIGN["story_arcs"][arc_id]
+        for quest_id in arc.get("quests", []):
+            quest = CAMPAIGN["quests"].get(quest_id, {})
+            for loc in (quest.get("location"), quest.get("trigger", {}).get("location"), quest.get("objective_location")):
+                if loc and loc not in owner:
+                    owner[loc] = idx
+    queue = deque(owner.keys())
+    while queue:
+        cur = queue.popleft()
+        loc_data = cl.get_location(CAMPAIGN, cur)
+        for neighbor in (loc_data.get("connections", []) if loc_data else []):
+            if neighbor not in owner:
+                owner[neighbor] = owner[cur]
+                queue.append(neighbor)
+    return owner.get(location_id)
+
+
+def _quest_suggested_level(quest_id: str, quest: dict) -> str:
+    """
+    Real dev-bridge request (2026-08-23, Coffee, screenshot of The
+    Wayfarer's Circuit's offer card): "can you please put the preferred
+    or suggested level for these quest so the player knows?!" Grounded
+    only in real, already-authored campaign.json data -- never invents
+    a number. Arcs 1-4 have a real required_level (1/5/10/15); arcs
+    5-14 are left at a 99 placeholder (not a real gate for those arcs),
+    so those show a chapter POSITION instead of a fabricated number.
+    Remnant superbosses (quest ids starting "remnant_") are skipped
+    entirely -- a deliberately separate, NOT chapter-bound difficulty
+    ladder by design (reachable early, unbeatable for a long time); a
+    chapter label would mislead rather than help.
+    """
+    if quest_id.startswith("remnant_"):
+        return ""
+    arc_ids = list(CAMPAIGN.get("story_arcs", {}).keys())
+    arc_info = _story_arc_for_quest(quest_id)
+    if arc_info:
+        arc_id, arc = arc_info
+        required_level = arc.get("required_level", 99)
+        if required_level < 99:
+            return f"⭐ **Suggested Level:** {required_level}+"
+        return f"⭐ **Chapter {arc_ids.index(arc_id) + 1}** of the story"
+
+    # Side/guild quest (no arc) -- the real destination matters more than
+    # the incidental spot the offer text happens to appear at (The
+    # Wayfarer's Circuit is offered standing in whispering_wood, arc_1
+    # territory, but its real objective sits in whispering_wood_sunken_
+    # den, arc_9 territory -- that's the one that should inform this).
+    real_location = quest.get("objective_location") or quest.get("trigger", {}).get("location") or quest.get("location")
+    owner_idx = _location_chapter_arc_index(real_location)
+    if owner_idx is None:
+        return ""
+    owner_arc = CAMPAIGN["story_arcs"][arc_ids[owner_idx]]
+    required_level = owner_arc.get("required_level", 99)
+    if required_level < 99:
+        return f"⭐ **Suggested Level:** {required_level}+"
+    return f"⭐ **Around Chapter {owner_idx + 1}**"
+
+
 def _chapter_complete_note(telegram_user_id: int, chat_id: int, quest_id: str) -> str:
     """
     If completing quest_id just finished every quest in its story arc,
@@ -11828,9 +11945,10 @@ async def _maybe_push_quest_offer(update: Update, character: dict, quest_id: str
         return
     already_pushed.add(push_key)
 
+    extra_bits = [line for line in (_quest_suggested_level(quest_id, quest), f"🔍 **Clue:** {quest['clue']}" if quest.get("clue") else None) if line]
     card = _format_quest_card(
         "story", quest["title"], quest["description"], quest.get("reward_xp"), quest.get("reward_gold"),
-        f"🔍 **Clue:** {quest['clue']}" if quest.get("clue") else None,
+        "\n".join(extra_bits) if extra_bits else None,
     )
     buttons = InlineKeyboardMarkup([
         [InlineKeyboardButton("📜 Accept", callback_data=f"quest|accept|story|{quest_id}")],
@@ -12783,7 +12901,7 @@ def _format_quest_card(
     return f"{icon} **{title}**\n{description}{extra}{reward_line}"
 
 
-def _format_story_quest_poster(quest: dict, location_id: str, chat_id: int | None = None) -> str:
+def _format_story_quest_poster(quest_id: str, quest: dict, location_id: str, chat_id: int | None = None) -> str:
     """
     A real "wanted poster" style display for an offerable story quest --
     title, description, reward, and who's actually offering it. Real
@@ -12805,6 +12923,13 @@ def _format_story_quest_poster(quest: dict, location_id: str, chat_id: int | Non
         reward_bits.append(items_module.get_item(quest["reward_item"])["name"])
     reward_line = f"\n💰 **Reward:** {', '.join(reward_bits)}" if reward_bits else ""
 
+    # Real live request (2026-08-23, Coffee: "can you please put the
+    # preferred or suggested level for these quest so the player
+    # knows?!") -- same real, never-invented signal _maybe_push_quest_
+    # offer's own card already shows.
+    level_line = _quest_suggested_level(quest_id, quest)
+    level_line = f"\n{level_line}" if level_line else ""
+
     giver_ids = _npcs_at_location(location_id, chat_id)
     giver_names = [cl.get_npc(CAMPAIGN, n)["name"] for n in giver_ids if cl.get_npc(CAMPAIGN, n)]
     location = cl.get_location(CAMPAIGN, location_id)
@@ -12820,6 +12945,7 @@ def _format_story_quest_poster(quest: dict, location_id: str, chat_id: int | Non
         f"📜 **WANTED: {quest['title']}**\n"
         f"{quest['description']}"
         f"{reward_line}"
+        f"{level_line}"
         f"{giver_line}"
         f"{ask_line}"
     )
@@ -13324,8 +13450,8 @@ async def _do_check_quests(update: Update) -> None:
     if not story_offer and not area_board_quests:
         lines.append("Nothing posted here today.")
     if story_offer:
-        _, quest = story_offer
-        lines.append(_format_story_quest_poster(quest, location_id, character["chat_id"]))
+        story_quest_id, quest = story_offer
+        lines.append(_format_story_quest_poster(story_quest_id, quest, location_id, character["chat_id"]))
     if area_board_quests:
         lines.append(board_quests_module.format_board_listings(area_board_quests))
     if story_offer or any(not q.get("accepted_by") and not q.get("completed_at") for q in area_board_quests):
