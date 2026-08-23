@@ -11823,6 +11823,29 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         companion_name = companion_npc["name"] if companion_npc else npc_id
         resolution_note = f"\n\n🤝 **{companion_name}** {note_text}."
 
+    # Real trust-building request (2026-08-23, Coffee: "make a way we
+    # can build trust. how about by doing quests for them?" -- asked
+    # right after finding the_first_city's own real story gate needs
+    # 40 companion affinity, and the ONLY existing way to raise it was
+    # +1 per ordinary talk_npc chat, real friction his own live
+    # character hit: 25 real chats short even with his most-invested
+    # companion). Every quest with a real giver_npc (the same field
+    # _offerable_companion_quest already uses to identify "this is a
+    # companion's own personal quest") now grants a real, one-time
+    # affinity boost on completion -- a resolution quest (id ends
+    # "_resolution", the arc's actual culmination) is worth more than
+    # its own setup quest. Applied AFTER the banded-resolution check
+    # above (which already read the PRE-boost affinity to decide THIS
+    # quest's own ending) so a resolution quest can never retroactively
+    # buy its own better outcome.
+    giver_npc = quest.get("giver_npc")
+    if giver_npc:
+        quest_affinity_boost = 15 if quest_id.endswith("_resolution") else 10
+        db.adjust_affinity(
+            telegram_user_id, update_like.effective_chat.id, giver_npc, quest_affinity_boost,
+            event=f"Completed \"{quest['title']}\" for them.",
+        )
+
     if reward_xp:
         await _award_xp_and_announce_level_up(update_like, telegram_user_id, update_like.effective_chat.id, reward_xp)
     if reward_gold:
@@ -21202,6 +21225,40 @@ def _npc_id_for_companion_name(name: str) -> str | None:
     return None
 
 
+def _maybe_boost_companion_affinity_for_support(
+    update, character: dict, target, boost: int, verb: str,
+) -> None:
+    """
+    Real request (2026-08-23, Coffee: "make a way we can build trust.
+    how about by doing quests for them?" -> shipped as a one-time
+    quest-completion boost, then a same-session follow-up: "how about
+    when we heal them it raises affinity and when we cast supportive
+    spells onto them it does that too. things like defening, countering,
+    shilding, too" and, separately, "reviving also"). Unlike the quest
+    boost, this is small and repeatable -- it can fire many times a
+    fight. Only fires for an actual recruited companion (never self,
+    never a live-combat-only summon, which has no real npc_id) --
+    reuses the exact same _npc_id_for_companion_name lookup
+    the_first_city's own real story gate already relies on.
+    `target` may be a live session participant dict or a plain DB
+    character row; both carry telegram_user_id/name/is_ai.
+    """
+    if target is None:
+        return
+    target_id = target.get("telegram_user_id")
+    if target_id is None or target_id == character.get("telegram_user_id"):
+        return
+    if not target.get("is_ai"):
+        return
+    npc_id = _npc_id_for_companion_name(target.get("name", ""))
+    if not npc_id:
+        return
+    db.adjust_affinity(
+        character["telegram_user_id"], update.effective_chat.id, npc_id, boost,
+        event=f"{character['name']} {verb} them.",
+    )
+
+
 def _check_story_gate(character: dict, current: dict, destination_id: str) -> str | None:
     """
     Full-storyline plan, Phase 1: a third gate type on a location
@@ -21840,6 +21897,7 @@ async def _do_use_item(update: Update, text: str) -> None:
         # misdirect to the wrong, actually-active character.
         if not is_summon_target:
             db.update_character_by_id(target["character_id"], hp_current=new_hp)
+            _maybe_boost_companion_affinity_for_support(update, character, target, 2, "healed")
         message = (
             f"🧪 **{character['name']}** uses a {item['name']}{target_note}, "
             f"healing {new_hp - hp_before} HP ({new_hp}/{hp_max})."
@@ -21928,6 +21986,9 @@ async def _do_use_item(update: Update, text: str) -> None:
                 live_target["hp_current"] = hp_max
             revive_note = " — brought back from death" if was_dead else ""
             healed_lines.append(f"**{recipient['name']}** fully restored{revive_note} ({hp_max}/{hp_max} HP)")
+            _maybe_boost_companion_affinity_for_support(
+                update, character, recipient, 10 if was_dead else 2, "revived" if was_dead else "healed",
+            )
         message = f"🏕️ **{character['name']}** sets up the {item['name']} — " + "; ".join(healed_lines) + "."
 
     elif effect == "restore_spell_slots":
@@ -22309,6 +22370,7 @@ async def _apply_shrine_offering(update: Update, character: dict, target: dict) 
         target["character_id"], is_dead=0, hp_current=target_hp_max, died_at=None,
         death_save_successes=0, death_save_failures=0,
     )
+    _maybe_boost_companion_affinity_for_support(update, character, target, 10, "revived")
     rest_of_party = _bless_present_party_to_full(character, exclude_character_ids=target["character_id"])
     blessing_note = f" The rest of the party is blessed to full HP too: {'; '.join(rest_of_party)}." if rest_of_party else ""
     await _safe_send(
@@ -22349,6 +22411,7 @@ async def _apply_shrine_offering_all(update: Update, character: dict, dead_membe
         )
         revived_lines.append(f"**{target['name']}** ({target_hp_max}/{target_hp_max} HP)")
         revived_ids.add(target["character_id"])
+        _maybe_boost_companion_affinity_for_support(update, character, target, 10, "revived")
     rest_of_party = _bless_present_party_to_full(character, exclude_character_ids=revived_ids)
     blessing_note = f" The rest of the party is blessed to full HP too: {'; '.join(rest_of_party)}." if rest_of_party else ""
     await _safe_send(
@@ -24514,6 +24577,7 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
             # needs its own DB row updated the normal way.
             if not h_is_summon:
                 db.update_character(h_target["telegram_user_id"], update.effective_chat.id, hp_current=h_target["hp_current"])
+                _maybe_boost_companion_affinity_for_support(update, character, h_target, 2, "healed")
             is_self = h_target["telegram_user_id"] == character["telegram_user_id"]
             target_note = "" if is_self else f" on **{h_target['name']}**"
             inactive_note = " (resting)" if h_target.get("is_inactive") else ""
@@ -24572,6 +24636,7 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
             target_character["telegram_user_id"], update.effective_chat.id, is_dead=0, hp_current=revive_hp, died_at=None,
             death_save_successes=0, death_save_failures=0,
         )
+        _maybe_boost_companion_affinity_for_support(update, character, target_character, 10, "revived")
         await _safe_send(
             update,
             f"✨ **{character['name']}** casts {spell['name']} on **{target_character['name']}** — "
@@ -24857,6 +24922,7 @@ async def _cast_utility_spell(
             if not await spend():
                 return
             session.stabilized_ids.add(target_p["telegram_user_id"])
+            _maybe_boost_companion_affinity_for_support(update, character, target_p, 3, "stabilized")
             await _finish(f"✨ **{character['name']}** casts {spell['name']} on **{target_p['name']}** — they're stable, no longer at risk of dying.")
             return
 
@@ -24872,6 +24938,7 @@ async def _cast_utility_spell(
                 for p in session.participants:
                     if session.sides.get(p["telegram_user_id"]) == session.sides.get(user_id) and p["hp_current"] > 0:
                         _apply_timed_condition(p, "blessed", duration, session)
+                        _maybe_boost_companion_affinity_for_support(update, character, p, 1, "cast Bless on")
                 await _finish(f"🌟 **{character['name']}** casts {spell['name']} — the whole party fights truer for {duration} rounds.")
                 return
 
@@ -24901,6 +24968,7 @@ async def _cast_utility_spell(
                 return
             actual_duration = 1 if spell_id == "shield" else duration
             _apply_timed_condition(target_p, condition_for_spell, actual_duration, session)
+            _maybe_boost_companion_affinity_for_support(update, character, target_p, 2, f"cast {spell['name']} on")
             note = f" on **{target_p['name']}**" if target_p["telegram_user_id"] != user_id else ""
             await _finish(f"✨ **{character['name']}** casts {spell['name']}{note} — real effect for {actual_duration} round(s).")
             return

@@ -2,6 +2,49 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.325] — Helping a companion now genuinely builds trust with them
+
+**Real request (2026-08-23, Coffee): "make a way we can build trust.
+how about by doing quests for them?"** — asked right after finding
+that `the_hush_below → the_first_city` requires 40 companion affinity,
+and the only existing way to raise it was +1 per ordinary chat (his own
+character was 25 real conversations short even with his most-invested
+companion). Followed up in the same session: "how about when we heal
+them it raises affinity and when we cast supportive spells onto them
+it does that too... defening, countering, shilding, too" and,
+separately, "reviving also."
+
+Two real, additive trust sources now exist, both landing on the same
+`npc_relationships.affinity` column the story gate already reads:
+
+- **Completing a companion's own personal quest** (any quest with a
+  real `giver_npc` — Sera, Borin, Wren, Pip, Grask, Vesh each have one)
+  grants a one-time affinity boost on completion: +10 for a setup
+  quest, +15 for the arc's actual resolution quest. Applied *after*
+  the existing banded-resolution check (which decides that quest's own
+  loyal/distant/estranged ending) so a resolution quest can never
+  retroactively buy its own better outcome.
+- **Actively supporting a companion in the field** — small, repeatable
+  boosts, not one-time: healing them with an item or spell (+2),
+  reviving them from death (+10, via Revivify, a Tent/Cabin/House-type
+  item, or a shrine offering), stabilizing them at 0 HP with Spare the
+  Dying (+3), and casting a buff spell on them — Shield, Bless,
+  Invisibility, Protection from Evil and Good, or Death Ward (+1–2).
+  Self-targeted casts and live combat summons (no real companion
+  identity) are correctly excluded.
+
+Verified with 7 new tests, each confirmed to fail against the prior
+code before the fix and pass after. Collateral: found and fixed 2
+pre-existing test bugs (`test_use_item_heal_potion_damages_undead_
+enemy_instead_of_healing`/`..._cannot_target_a_non_undead_enemy`) that
+had been silently broken since v1.27.317 — their `patch("bot._resolve_
+ai_turns", ...)` no longer matched the real call path
+(`_advance_turn_and_resolve_ai_turns` → `_resolve_ai_turns_inner`
+directly), so a real AI attack resolution ran against a deliberately
+minimal test enemy dict and crashed on a missing "strength" key. Not a
+live-game bug (real monsters always carry full stat blocks) — a test
+fixture gap only, now fixed.
+
 ## [1.27.324] — Remnant-taught spell gate now checks the specific spell, not the element
 
 **Real dev-bridge report (2026-08-23, Coffee): "my character ravenlofty

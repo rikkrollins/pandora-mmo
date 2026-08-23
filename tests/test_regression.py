@@ -1904,7 +1904,16 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [user_id, -2_600_401]
 
         sink = []
-        with patch("bot._resolve_ai_turns", new=AsyncMock()):
+        # Real regression (2026-08-23, found verifying an unrelated
+        # change): _do_use_item's undead branch advances the turn via
+        # _advance_turn_and_resolve_ai_turns, which calls
+        # _resolve_ai_turns_inner directly (not the _resolve_ai_turns
+        # wrapper this used to patch) -- since v1.27.317's Shield/
+        # Uncanny Dodge redesign added a real reaction_precheck call on
+        # every AI attack, letting the real inner resolver run against
+        # this test's deliberately-minimal enemy dict (no "strength")
+        # now hard-crashes instead of silently no-op'ing like before.
+        with patch("bot._resolve_ai_turns_inner", new=AsyncMock()):
             await bot._do_use_item(
                 FakeUpdate(user_id, "use healing potion on test wraith", sink), "use healing potion on test wraith",
             )
@@ -1962,7 +1971,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [user_id, -2_600_403]
 
         sink = []
-        with patch("bot._resolve_ai_turns", new=AsyncMock()):
+        # Same real regression as the undead-damage test just above --
+        # this path goes through _resolve_ai_turns_inner directly, not
+        # the _resolve_ai_turns wrapper.
+        with patch("bot._resolve_ai_turns_inner", new=AsyncMock()):
             await bot._do_use_item(
                 FakeUpdate(user_id, "use healing potion on test goblin", sink), "use healing potion on test goblin",
             )
@@ -3842,6 +3854,131 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await _drain_narration_queue()
 
         self.assertFalse(any("A vivid, real flavor line." in m for m in sink), sink)
+
+    async def test_completing_a_companions_own_quest_grants_a_real_affinity_boost(self):
+        """
+        Real request (2026-08-23, Coffee: "make a way we can build
+        trust. how about by doing quests for them?" -- asked right
+        after finding the_first_city's story gate needs 40 companion
+        affinity and the only existing way to raise it was +1 per
+        ordinary chat). A quest with a real giver_npc now grants a
+        real, one-time boost on completion -- +10 for a setup quest.
+        """
+        user_id = 900950
+        make_basic_character(user_id, "TrustBuilder", current_location="crossroads_tavern")
+        before = db.get_relationship(user_id, -999, "wren_hollowbrook")["affinity"]
+        sink = []
+        await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "wrens_root_worry")
+        after = db.get_relationship(user_id, -999, "wren_hollowbrook")["affinity"]
+        self.assertEqual(after - before, 10)
+
+    async def test_completing_a_companions_resolution_quest_grants_a_bigger_boost(self):
+        """The arc's actual culmination (quest id ends "_resolution") is worth more than its own setup quest."""
+        from unittest.mock import patch
+        user_id = 900951
+        make_basic_character(user_id, "TrustBuilderResolution", current_location="crossroads_tavern")
+        before = db.get_relationship(user_id, -999, "grask_emberscale")["affinity"]
+        sink = []
+        with patch("bot.narrate_chapter_climax", return_value="A quiet, resolved moment."):
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "grasks_resolution")
+        after = db.get_relationship(user_id, -999, "grask_emberscale")["affinity"]
+        self.assertEqual(after - before, 15)
+
+    async def test_resolution_quest_boost_never_retroactively_changes_its_own_ending(self):
+        """
+        The banded resolution outcome (loyal/distant/estranged) must
+        read the PRE-boost affinity -- a resolution quest can't buy
+        its own better ending the instant it completes.
+        """
+        from unittest.mock import patch
+        user_id = 900952
+        make_basic_character(user_id, "NoSelfBuyTester", current_location="crossroads_tavern")
+        # Start well below 40 -- even after the +15 completion boost
+        # (would land at 33), this must NOT read as the "high" trust band.
+        db.adjust_affinity(user_id, -999, "pip_thistledown", 18)
+        sink = []
+        with patch("bot.narrate_chapter_climax", return_value="A quiet, resolved moment."):
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "pips_resolution")
+        reply = "\n".join(sink)
+        self.assertFalse(
+            "finally stops" in reply, "the 'high trust' ending text must not appear -- pre-boost affinity was only 18"
+        )
+        after = db.get_relationship(user_id, -999, "pip_thistledown")
+        self.assertEqual(after["affinity"], 33)
+        self.assertEqual(after["resolution"], "resolved_distant")
+
+    async def test_healing_a_live_companion_with_an_item_raises_their_affinity(self):
+        """
+        Real same-session follow-up (2026-08-23, Coffee: "how about
+        when we heal them it raises affinity"). A recruited AI
+        companion healed with an item gains a small, real trust boost.
+        """
+        user_id = 900960
+        make_basic_character(user_id, "SupportHealer", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "healing_potion", 1)
+        party_id = db.create_party(user_id, -999)
+        companion_id = -900961
+        make_basic_character(companion_id, "Grask Emberscale", current_location="crossroads_tavern", is_ai=True)
+        db.update_character(companion_id, -999, party_id=party_id, hp_current=5)
+        before = db.get_relationship(user_id, -999, "grask_emberscale")["affinity"]
+        sink = []
+        await bot._do_use_item(FakeUpdate(user_id, "use healing potion on Grask Emberscale", sink), "use healing potion on Grask Emberscale")
+        after = db.get_relationship(user_id, -999, "grask_emberscale")["affinity"]
+        self.assertEqual(after - before, 2)
+
+    async def test_healing_yourself_with_an_item_never_touches_any_affinity(self):
+        """Self-heals aren't a trust-building act -- no npc_id to credit anyway."""
+        user_id = 900962
+        make_basic_character(user_id, "SelfHealer", current_location="crossroads_tavern", hp_max=30)
+        db.update_character(user_id, -999, hp_current=5)
+        db.add_item(user_id, -999, "healing_potion", 1)
+        sink = []
+        await bot._do_use_item(FakeUpdate(user_id, "use healing potion", sink), "use healing potion")
+        character = db.get_character(user_id, -999)
+        self.assertGreater(character["hp_current"], 5)  # confirms the heal actually happened
+
+    async def test_reviving_a_dead_companion_with_revivify_grants_a_bigger_affinity_boost(self):
+        """Reviving is a bigger deal than a routine heal -- worth more trust ("reviving also")."""
+        user_id = 900963
+        make_basic_character(user_id, "Reviver", current_location="crossroads_tavern",
+                              char_class="Cleric", known_spells=["revivify"], spell_slots_max=4)
+        party_id = db.create_party(user_id, -999)
+        companion_id = -900964
+        make_basic_character(companion_id, "Wren Hollowbrook", current_location="crossroads_tavern", is_ai=True)
+        db.update_character(companion_id, -999, party_id=party_id, is_dead=1, hp_current=0)
+        before = db.get_relationship(user_id, -999, "wren_hollowbrook")["affinity"]
+        sink = []
+        await bot._do_cast_spell(FakeUpdate(user_id, "cast revivify on Wren Hollowbrook", sink), "cast revivify on Wren Hollowbrook")
+        after = db.get_relationship(user_id, -999, "wren_hollowbrook")["affinity"]
+        self.assertEqual(after - before, 10)
+
+    async def test_casting_shield_on_a_companion_raises_their_affinity(self):
+        """A supportive buff spell cast onto an ally ("defening... shilding") is a real trust-building act too."""
+        import sessions
+
+        user_id = 900965
+        make_basic_character(user_id, "ShieldCaster", current_location="crossroads_tavern",
+                              char_class="Wizard", known_spells=["shield"], spell_slots_max=4)
+        party_id = db.create_party(user_id, -999)
+        companion_id = -900966
+        make_basic_character(companion_id, "Pip Thistledown", current_location="crossroads_tavern", is_ai=True)
+        db.update_character(companion_id, -999, party_id=party_id)
+        caster = db.get_character(user_id, -999)
+        companion = db.get_character(companion_id, -999)
+        enemy = {
+            "telegram_user_id": -900967, "name": "TestWolf", "hp_current": 20, "hp_max": 20,
+            "is_ai": True, "strength": 12, "dexterity": 12, "armor_class": 12, "initiative": 5, "monster_key": "wolf",
+        }
+        participants = [
+            dict(caster, initiative=15, conditions=[]), dict(companion, initiative=14, conditions=[]), enemy,
+        ]
+        sides = {user_id: "party", companion_id: "party", -900967: "enemy"}
+        sessions.start_session(-999, participants, sides=sides)
+        before = db.get_relationship(user_id, -999, "pip_thistledown")["affinity"]
+        sink = []
+        await bot._do_cast_spell(FakeUpdate(user_id, "cast shield on Pip Thistledown", sink), "cast shield on Pip Thistledown")
+        after = db.get_relationship(user_id, -999, "pip_thistledown")["affinity"]
+        self.assertEqual(after - before, 2)
 
     async def test_weapon_mastery_overflow_scales_the_bonus_strike(self):
         """
