@@ -11564,6 +11564,204 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Grask Emberscale", combined)
         self.assertIn("Wren Hollowbrook", combined)
 
+    async def test_compound_message_moves_two_named_members_to_different_rows(self):
+        """
+        Real dev-bridge follow-up (2026-08-23, Coffee): "move Grask
+        forward move Ravenloft back" -- a genuine compound message
+        naming two DIFFERENT people for two DIFFERENT rows. Verifies
+        this works end-to-end through the real adventure_master_handler
+        dispatch (parse_intents' own compound-message splitter +
+        _dispatch_intent's per-segment loop, both pre-existing
+        infrastructure from the 2026-07-12/13 compound-message feature)
+        with real punctuation between the two clauses -- not just
+        _do_set_formation_row in isolation, which was already proven
+        correct on its own.
+        """
+        from unittest.mock import patch
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "A quiet task awaits."}
+
+        leader_id = 950411
+        grask_id = 950412
+        wren_id = 950413
+        make_basic_character(leader_id, "CompoundFormationLeader", current_location="crossroads_tavern")
+        make_basic_character(grask_id, "Grask Emberscale", current_location="crossroads_tavern", is_ai=True)
+        make_basic_character(wren_id, "Wren Hollowbrook", current_location="crossroads_tavern", is_ai=True)
+        party_id = db.create_party(leader_id, -999)
+        db.update_character(grask_id, -999, party_id=party_id, formation_row="back")
+        db.update_character(wren_id, -999, party_id=party_id, formation_row="front")
+
+        sink = []
+        with patch("ai.dm_agent.requests.post", return_value=FakeResponse()):
+            await bot.adventure_master_handler(
+                FakeUpdate(leader_id, "move Grask forward, move Wren back", sink), DummyContext(),
+            )
+        self.assertEqual(db.get_character(grask_id, -999).get("formation_row"), "front")
+        self.assertEqual(db.get_character(wren_id, -999).get("formation_row"), "back")
+
+    async def test_linked_turn_moves_back_before_the_enemys_counterattack_resolves(self):
+        """
+        Real dev-bridge request (2026-08-23, Coffee): "I moved to the
+        front row I cast lightning bolt and then I move to the back
+        row... a fighter could essentially step forward, use the
+        attack bonus from the front row, and then move back into a
+        defensive position." The actual tactical point only holds if
+        the trailing "move back" applies BEFORE the enemy's own
+        counter-attack in the same call -- verified by spying on the
+        real resolve_attack call and capturing the defender's
+        formation_row at the exact moment the enemy's attack resolves,
+        not just the final DB state afterward.
+        """
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        caster_id = 950440
+        make_basic_character(
+            caster_id, "LinkedTurnWizard", char_class="Wizard", current_location="crossroads_tavern",
+            known_spells=["magic_missile"], spell_slots_max=2,
+        )
+        db.update_character(caster_id, -999, spell_slots_current=2, formation_row="back")
+        enemy = {"telegram_user_id": -5200970, "name": "LinkedTurnGoblin", "dexterity": 10, "strength": 10,
+                 "hp_current": 500, "hp_max": 500, "conditions": [], "resistances": [], "vulnerabilities": [],
+                 "is_ai": 1, "monster_key": "goblin", "armor_class": 12, "formation_row": "front"}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        session = sessions.start_session(-999, [caster, enemy], {caster_id: "party", -5200970: "enemy"})
+        session.turn_order = [caster_id, -5200970]
+
+        captured_rows = []
+        real_resolve_attack = bot.resolve_attack
+
+        def spying_resolve_attack(attacker, defender, *args, **kwargs):
+            if attacker.get("telegram_user_id") == -5200970:  # the enemy attacking the caster
+                captured_rows.append(defender.get("formation_row"))
+            return real_resolve_attack(attacker, defender, *args, **kwargs)
+
+        sink = []
+        with patch("bot.resolve_attack", side_effect=spying_resolve_attack), \
+             patch("bot.narrate_action", return_value="A tense exchange."):
+            await bot.adventure_master_handler(
+                FakeUpdate(caster_id, "I move to the front row, cast magic missile, then move to the back row", sink),
+                DummyContext(),
+            )
+        self.assertTrue(captured_rows, "the enemy never actually attacked the caster -- test setup issue")
+        self.assertEqual(captured_rows[0], "back")
+        self.assertEqual(db.get_character(caster_id, -999).get("formation_row"), "back")
+        sessions.end_session(-999)
+
+    async def test_linked_turn_rejects_a_message_naming_two_real_actions(self):
+        """Real dev-bridge constraint (2026-08-23, Coffee): "they cannot say move forward, cast multiple spells and then move back" -- confirmed via AskUserQuestion: reject the WHOLE message, nothing happens."""
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        caster_id = 950441
+        make_basic_character(
+            caster_id, "LinkedTurnRejectWizard", char_class="Wizard", current_location="crossroads_tavern",
+            known_spells=["magic_missile", "fire_bolt"], spell_slots_max=2,
+        )
+        db.update_character(caster_id, -999, spell_slots_current=2, formation_row="back")
+        enemy = {"telegram_user_id": -5200971, "name": "LinkedTurnRejectGoblin", "dexterity": 10, "strength": 10,
+                 "hp_current": 500, "hp_max": 500, "conditions": [], "resistances": [], "vulnerabilities": [],
+                 "is_ai": 1, "monster_key": "goblin", "armor_class": 12, "formation_row": "front"}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        session = sessions.start_session(-999, [caster, enemy], {caster_id: "party", -5200971: "enemy"})
+        session.turn_order = [caster_id, -5200971]
+
+        before_slots = db.get_character(caster_id, -999)["spell_slots_current"]
+        sink = []
+        with patch("bot.narrate_action", return_value="A tense exchange."):
+            await bot.adventure_master_handler(
+                FakeUpdate(caster_id, "move to the front row, cast magic missile, cast fire bolt, move to the back row", sink),
+                DummyContext(),
+            )
+        self.assertTrue(any("one real action per turn" in s.lower() for s in sink), sink)
+        after = db.get_character(caster_id, -999)
+        self.assertEqual(after["spell_slots_current"], before_slots)  # neither spell was cast
+        self.assertEqual(after.get("formation_row"), "back")  # no formation change either
+        sessions.end_session(-999)
+
+    def _make_mixed_class_party(self, leader_id: int, chat_id: int = -999) -> tuple[int, int, int, int]:
+        """Shared fixture: a real party with one Fighter, one Barbarian (both martial), one Wizard, one Cleric (both casters)."""
+        make_basic_character(leader_id, "ClassCategoryLeader", char_class="Fighter", current_location="crossroads_tavern")
+        party_id = db.create_party(leader_id, chat_id)
+        barb_id = leader_id + 1
+        wiz_id = leader_id + 2
+        cleric_id = leader_id + 3
+        make_basic_character(barb_id, "TestBarbarian", char_class="Barbarian", current_location="crossroads_tavern", is_ai=True)
+        make_basic_character(wiz_id, "TestWizard", char_class="Wizard", current_location="crossroads_tavern", is_ai=True)
+        make_basic_character(cleric_id, "TestCleric", char_class="Cleric", current_location="crossroads_tavern", is_ai=True)
+        for cid in (barb_id, wiz_id, cleric_id):
+            db.update_character(cid, chat_id, party_id=party_id)
+        return party_id, barb_id, wiz_id, cleric_id
+
+    async def test_set_formation_row_moves_fighters_category_to_front_row(self):
+        """Real dev-bridge request (2026-08-23, Coffee): "move the fighters to the front row"."""
+        leader_id = 950420
+        _, barb_id, wiz_id, cleric_id = self._make_mixed_class_party(leader_id)
+        db.update_character(leader_id, -999, formation_row="back")
+        db.update_character(barb_id, -999, formation_row="back")
+        db.update_character(wiz_id, -999, formation_row="back")
+        db.update_character(cleric_id, -999, formation_row="back")
+
+        sink = []
+        await bot._do_set_formation_row(FakeUpdate(leader_id, "move the fighters to the front row", sink), "the fighters", "front")
+        self.assertEqual(db.get_character(leader_id, -999).get("formation_row"), "front")  # Fighter
+        self.assertEqual(db.get_character(barb_id, -999).get("formation_row"), "front")  # Barbarian
+        self.assertEqual(db.get_character(wiz_id, -999).get("formation_row"), "back")  # untouched
+        self.assertEqual(db.get_character(cleric_id, -999).get("formation_row"), "back")  # untouched
+
+    async def test_set_formation_row_moves_magic_users_category_to_back_row(self):
+        """Real dev-bridge request (2026-08-23, Coffee): "move magic users or specific classes to the back row"."""
+        leader_id = 950424
+        _, barb_id, wiz_id, cleric_id = self._make_mixed_class_party(leader_id)
+
+        sink = []
+        await bot._do_set_formation_row(FakeUpdate(leader_id, "move magic users to the back row", sink), "magic users", "back")
+        self.assertEqual(db.get_character(wiz_id, -999).get("formation_row"), "back")
+        self.assertEqual(db.get_character(cleric_id, -999).get("formation_row"), "back")
+        self.assertEqual(db.get_character(leader_id, -999).get("formation_row", "front"), "front")  # Fighter untouched
+        self.assertEqual(db.get_character(barb_id, -999).get("formation_row", "front"), "front")  # Barbarian untouched
+
+    async def test_set_formation_row_moves_a_literal_class_name(self):
+        """A literal class name ("the wizards") resolves to just that one class, not the whole caster category."""
+        leader_id = 950428
+        _, barb_id, wiz_id, cleric_id = self._make_mixed_class_party(leader_id)
+
+        sink = []
+        await bot._do_set_formation_row(FakeUpdate(leader_id, "move the wizards back", sink), "the wizards", "back")
+        self.assertEqual(db.get_character(wiz_id, -999).get("formation_row"), "back")
+        self.assertEqual(db.get_character(cleric_id, -999).get("formation_row", "front"), "front")  # a DIFFERENT caster, untouched
+
+    async def test_set_formation_row_class_category_reached_through_the_real_handler(self):
+        """End-to-end: "move the fighters to the front row" through the real adventure_master_handler, not just _do_set_formation_row directly."""
+        from unittest.mock import patch
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "A quiet task awaits."}
+
+        leader_id = 950432
+        _, barb_id, wiz_id, cleric_id = self._make_mixed_class_party(leader_id)
+        db.update_character(leader_id, -999, formation_row="back")
+        db.update_character(barb_id, -999, formation_row="back")
+
+        sink = []
+        with patch("ai.dm_agent.requests.post", return_value=FakeResponse()):
+            await bot.adventure_master_handler(
+                FakeUpdate(leader_id, "move the fighters to the front row", sink), DummyContext(),
+            )
+        self.assertEqual(db.get_character(leader_id, -999).get("formation_row"), "front")
+        self.assertEqual(db.get_character(barb_id, -999).get("formation_row"), "front")
+
     async def test_set_formation_row_matches_a_party_member_by_first_name_alone(self):
         """
         Real live bug (2026-08-09, Coffee, dev-topic screenshot): "Move
@@ -11740,6 +11938,20 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # No regression: real flee phrasing is unaffected.
         self.assertEqual(_keyword_fallback("flee the fight", [])["action"], "flee")
         self.assertEqual(_keyword_fallback("run away", [])["action"], "flee")
+
+    def test_flee_recognizes_fallback_run_and_runaway_as_bare_words(self):
+        """
+        Real dev-bridge request (2026-08-23, Coffee's own literal
+        example): "when we say fallback, or run or runaway, signifies
+        AI players to run." "fallback" (one word) is deliberately
+        distinct from the existing "fall back" (two words, already
+        claimed by set_back_row above) -- no collision.
+        """
+        self.assertEqual(_keyword_fallback("Fallback!", [])["action"], "flee")
+        self.assertEqual(_keyword_fallback("Runaway!", [])["action"], "flee")
+        self.assertEqual(_keyword_fallback("Run!", [])["action"], "flee")
+        # Word-boundary safety: must not fire on an unrelated word merely containing "run".
+        self.assertNotEqual(_keyword_fallback("We are running out of torches.", [])["action"], "flee")
         # False-positive guard: an unrelated sentence ending in "back"
         # after an earlier "pull " must not misfire as a formation command.
         self.assertNotEqual(
@@ -16835,6 +17047,56 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink2 = []
         await bot._do_flee(FakeUpdate(player_id, "I flee", sink2), "I flee", forced_roll=20)
         self.assertTrue(any("no fleeing this fight" in s.lower() for s in sink2), "a real story boss with no Remnant must still refuse outright")
+        sessions.end_session(-999)
+
+    async def test_flee_broadcasts_retreat_guidance_to_every_ai_party_member(self):
+        """
+        Real dev-bridge request (2026-08-23, Coffee: "when we say
+        fallback, or run or runaway, signifies AI players to run").
+        Confirmed via AskUserQuestion the speaker's own real flee
+        attempt fires too (unchanged _resolve_flee_attempt below) --
+        this test is specifically about the NEW broadcast: every real
+        AI party member in the same session gets the same real
+        human_guidance _do_message_ai already writes for one named
+        companion (task #222), which _resolve_ai_turns_inner's own
+        existing guidance check already knows how to act on.
+        """
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        player_id = 900493
+        make_basic_character(player_id, "Fallbacker", char_class="Fighter", current_location="crossroads_tavern")
+        player = db.get_character(player_id, -999)
+        player["telegram_user_id"] = player_id
+        ai1 = {"telegram_user_id": -960001, "name": "BroadcastAlly1", "dexterity": 12, "strength": 12,
+               "armor_class": 13, "hp_current": 20, "hp_max": 20, "is_ai": 1, "char_class": "Fighter", "level": 1}
+        ai2 = {"telegram_user_id": -960002, "name": "BroadcastAlly2", "dexterity": 12, "strength": 12,
+               "armor_class": 13, "hp_current": 20, "hp_max": 20, "is_ai": 1, "char_class": "Fighter", "level": 1}
+        enemy = {"telegram_user_id": -960003, "name": "BroadcastGoblin", "dexterity": 10, "strength": 10,
+                 "armor_class": 12, "hp_current": 30, "hp_max": 30, "is_ai": 1, "monster_key": "goblin"}
+        session = sessions.start_session(
+            -999, [player, ai1, ai2, enemy],
+            {player_id: "party", -960001: "party", -960002: "party", -960003: "enemy"},
+        )
+        session.turn_order = [player_id, -960001, -960002, -960003]
+        session.current_turn_index = 0
+
+        # The AI turn cascade that follows the speaker's own resolved
+        # flee (_resolve_flee_attempt's own tail call) is real,
+        # pre-existing, unchanged behavior -- mocked away here so this
+        # test stays focused on the one new thing being verified: the
+        # broadcast write, which happens BEFORE that cascade even starts.
+        from unittest.mock import AsyncMock
+        sink = []
+        with patch("bot.narrate_skill_check", return_value="ok"), \
+             patch("bot._resolve_ai_turns", new=AsyncMock()):
+            await bot._do_flee(FakeUpdate(player_id, "Fallback!", sink), "Fallback!", forced_roll=20)
+        self.assertEqual(
+            bot._chat_scoped_dict(bot._AI_PLAYER_CONTEXTS, -999)[-960001].user_data.get("human_guidance"), "Fallback!",
+        )
+        self.assertEqual(
+            bot._chat_scoped_dict(bot._AI_PLAYER_CONTEXTS, -999)[-960002].user_data.get("human_guidance"), "Fallback!",
+        )
         sessions.end_session(-999)
 
     async def test_level_2_rogue_flee_skips_opportunity_attacks(self):

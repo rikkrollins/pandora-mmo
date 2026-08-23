@@ -2173,6 +2173,41 @@ def _match_all_members_by_name(text: str, members: list[dict]) -> list[dict]:
     return matched
 
 
+# Class/category-based bulk formation moves (2026-08-23, per Coffee,
+# dev-bridge: "move the fighters to the front row and move magic users
+# or specific classes to the back row"). Confirmed the split via
+# AskUserQuestion: martial/front-line vs caster/"magic user", on top of
+# always supporting a literal class name too (any of models.VALID_CLASSES).
+MARTIAL_CLASSES = {"Fighter", "Barbarian", "Paladin", "Monk", "Rogue", "Ranger"}
+CASTER_CLASSES = {"Wizard", "Sorcerer", "Cleric", "Druid", "Bard", "Warlock"}
+_MARTIAL_CATEGORY_WORDS = ("fighters", "martial", "melee", "warriors", "front liners", "front-liners")
+_CASTER_CATEGORY_WORDS = ("magic users", "magic-users", "casters", "spellcasters", "spell casters", "mages")
+
+
+def _match_members_by_class_category(text: str, members: list[dict]) -> list[dict]:
+    """
+    Real dev-bridge request (2026-08-23, Coffee, screenshot): "move the
+    fighters to the front row and move magic users or specific classes
+    to the back row." Checked in this order: a category phrase
+    ("magic users"/"fighters"/etc.) wins first since it's the more
+    specific ask when both happen to be present; a literal class name
+    (e.g. "move the wizards back") still works as its own real,
+    single-class group. Returns every real member matching, or [] if
+    neither a category phrase nor a real class name is mentioned --
+    never guesses beyond an exact match, same philosophy as every
+    other name/category matcher in this file.
+    """
+    lowered = text.lower()
+    if any(phrase in lowered for phrase in _CASTER_CATEGORY_WORDS):
+        return [m for m in members if m.get("char_class") in CASTER_CLASSES]
+    if any(phrase in lowered for phrase in _MARTIAL_CATEGORY_WORDS):
+        return [m for m in members if m.get("char_class") in MARTIAL_CLASSES]
+    for class_name in VALID_CLASSES:
+        if re.search(r"\b" + re.escape(class_name.lower()) + r"'?s?\b", lowered):
+            return [m for m in members if m.get("char_class") == class_name]
+    return []
+
+
 def _find_party_target_by_name(text: str, chat_id: int) -> dict | None:
     """
     Finds a party member (real player, AI companion, or a currently
@@ -10661,6 +10696,25 @@ async def _resolve_flee_attempt(update, session: sessions.Session, action_text: 
         await _resolve_ai_turns(update, session)
 
 
+def _broadcast_retreat_to_ai_party(update: Update, session: sessions.Session, guidance_text: str) -> None:
+    """
+    Real dev-bridge request (2026-08-23, Coffee: "when we say fallback,
+    or run or runaway, signifies AI players to run"). Reuses the exact
+    same human_guidance mechanism _do_message_ai already writes for one
+    named companion (task #222) -- _resolve_ai_turns_inner's own
+    guidance check (run/retreat/flee/fall back/escape, ~line 6356)
+    already fires correctly for each on their own next turn; this just
+    sets the SAME field for every real AI party member in the fight at
+    once instead of requiring one at a time by name.
+    """
+    for p in session.participants:
+        if session.sides.get(p["telegram_user_id"]) == "party" and p.get("is_ai"):
+            context_like = _chat_scoped_dict(_AI_PLAYER_CONTEXTS, update.effective_chat.id).setdefault(
+                p["telegram_user_id"], _AiPlayerContext(),
+            )
+            context_like.user_data["human_guidance"] = guidance_text
+
+
 async def _do_flee(update: Update, action_text: str, forced_roll: int | None = None) -> None:
     """
     A real dice roll to escape an active fight — "cancel" no longer
@@ -10672,6 +10726,14 @@ async def _do_flee(update: Update, action_text: str, forced_roll: int | None = N
     difficulty is never something the AI gets to invent. Confirms it's
     really the caller's own turn, then hands off to the shared
     _resolve_flee_attempt above.
+
+    Real dev-bridge request (2026-08-23, Coffee: "when we say fallback,
+    or run or runaway, signifies AI players to run"): confirmed via
+    AskUserQuestion that a bare retreat callout should trigger the
+    SPEAKER's own real flee attempt too, not just the AI companions --
+    exactly what this function already does. Broadcasts the same real
+    guidance to every AI party member in this session right alongside
+    the speaker's own attempt below.
     """
     chat_id = update.effective_chat.id
     async with _held_session(chat_id, update.effective_user.id) as session:
@@ -10699,6 +10761,7 @@ async def _do_flee(update: Update, action_text: str, forced_roll: int | None = N
             )
             return
 
+        _broadcast_retreat_to_ai_party(update, session, action_text)
         await _resolve_flee_attempt(update, session, action_text, forced_roll)
 
 
@@ -15279,6 +15342,10 @@ async def _do_set_formation_row(update: Update, target_name: str, row: str) -> N
     single-target lookup can't resolve one exact person, this now
     falls back to _match_all_members_by_name and moves every real
     party member actually named, all at once, in one combined message.
+    A third tier, _match_members_by_class_category, handles "move the
+    fighters to the front row"/"move magic users back"/a literal class
+    name -- checked last so a real name always wins over a same-word
+    class coincidence.
     """
     telegram_user_id = update.effective_user.id
     character = db.get_character(telegram_user_id, update.effective_chat.id)
@@ -15299,6 +15366,15 @@ async def _do_set_formation_row(update: Update, target_name: str, row: str) -> N
         else:
             candidates = db.get_party_members_by_id(party_id) if party_id else [character]
             targets = _match_all_members_by_name(target_name, candidates)
+            if not targets:
+                # Class/category-based bulk moves (2026-08-23, per
+                # Coffee: "move the fighters to the front row and move
+                # magic users or specific classes to the back row") --
+                # only tried once name-based matching (single AND
+                # multi) has both come up empty, so a real party
+                # member's own name always wins over a same-word class
+                # coincidence.
+                targets = _match_members_by_class_category(target_name, candidates)
             if not targets:
                 await _safe_send(update, f"No one named \"{target_name}\" is in your party.")
                 return
@@ -26521,6 +26597,21 @@ def _clear_all_stateful_flows(context: ContextTypes.DEFAULT_TYPE, user_id: int, 
     return cleared
 
 
+# Linked one-turn actions (2026-08-23, per Coffee, dev-bridge request
+# for "move forward, cast a spell, move back" as one real turn). Used
+# by adventure_master_handler's own compound-message dispatch below --
+# FORMATION_ACTIONS are genuinely free/anytime (no turn-ownership
+# check anywhere in _do_set_formation_row); REAL_TURN_ACTIONS are the
+# actual combat actions/class features that consume a turn.
+FORMATION_ACTIONS = {"set_front_row", "set_back_row"}
+REAL_TURN_ACTIONS = {
+    "attack", "cast_spell", "shove", "throw_weapon", "use_item", "flee",
+    "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "arcane_recovery",
+    "channel_divinity", "action_surge", "reckless_attack", "divine_smite",
+    "flurry_of_blows", "wild_shape", "breath_weapon",
+}
+
+
 async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     The single natural-language entry point for everything that happens
@@ -26818,6 +26909,47 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # identical to what parse_intent alone would have returned before
     # this existed.
     intents = await asyncio.to_thread(parse_intents, text, known_npc_names=known_npcs, environment_name=environment_name)
+
+    # Linked one-turn actions (2026-08-23, per Coffee, dev-bridge: "I
+    # moved to the front row I cast lightning bolt and then I move to
+    # the back row... Formations and actions can be linked as long as
+    # it requires a one turn action. But they cannot say move forward,
+    # cast multiple spells and then move back"). Formation changes
+    # (_do_set_formation_row) are a genuinely free, anytime action --
+    # confirmed by reading it, no turn-ownership check exists there at
+    # all -- so a real combat action can safely be sandwiched between
+    # two of them in one compound message. Only ever engages mid-
+    # combat, and only when the SAME message contains at least one
+    # formation intent alongside at least one real, turn-consuming
+    # action; an ordinary compound message (e.g. "recruit Sarah, check
+    # my inventory") is completely untouched.
+    if len(intents) > 1 and sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id) is not None:
+        formation_intents = [i for i in intents if i["action"] in FORMATION_ACTIONS]
+        real_action_intents = [i for i in intents if i["action"] in REAL_TURN_ACTIONS]
+        if len(real_action_intents) >= 2:
+            for i in intents:
+                logger.info(f"[intent] user={update.effective_user.id} action={i['action']!r} text={i['raw_text']!r}")
+            await update.effective_chat.send_message(
+                "Only one real action per turn — formation moves are free, but pick just one "
+                "attack/spell/ability and resend.",
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+            )
+            return
+        if formation_intents and real_action_intents:
+            # Reordered (not just re-sequenced for cosmetics): every
+            # formation move -- including ones that appeared AFTER the
+            # real action in the original message -- now applies to the
+            # live session participant BEFORE the real action's own
+            # handler runs its internal _advance_turn_and_resolve_ai_
+            # turns. Without this, "attack, then step back to defense"
+            # would apply the retreat only after the enemy's own
+            # counter-attack in the same call had already resolved,
+            # which defeats the entire tactical point of stepping back.
+            other_intents = [
+                i for i in intents if i["action"] not in FORMATION_ACTIONS and i["action"] not in REAL_TURN_ACTIONS
+            ]
+            intents = formation_intents + real_action_intents + other_intents
+
     action = intents[0]["action"]
     # Player-facing message CONTENT is never logged elsewhere (only HTTP
     # metadata is, via httpx's own logging) — without this, a

@@ -1060,9 +1060,20 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # Real live bug (2026-07-23, Coffee: "Run from battle" got classified
     # as bare chat instead of fleeing -- only "run away" was covered,
     # missing the equally natural "run from X").
-    flee_words = ["flee", "run away", "run from", "try to run", "try to escape", "escape the fight",
-                  "retreat", "get out of here", "get me out", "make a break for it"]
+    # "runaway"/"fallback" (2026-08-23, Coffee, dev-bridge: "when we
+    # say fallback, or run or runaway, signifies AI players to run") --
+    # the one-word forms of "run away"/"fall back" weren't covered
+    # either; _do_flee now also broadcasts real retreat guidance to
+    # every AI party member in the same session when this fires.
+    flee_words = ["flee", "run away", "runaway", "run from", "try to run", "try to escape", "escape the fight",
+                  "retreat", "fallback", "get out of here", "get me out", "make a break for it"]
     if any(w in lowered for w in flee_words):
+        return {**base, "action": "flee"}
+    # Bare "run" (2026-08-23, Coffee's own literal example: "fallback,
+    # or run, or runaway") -- a real word-boundary match (not a plain
+    # substring like the rest of flee_words above) so this doesn't fire
+    # on "running"/"runner"/an unrelated word merely containing "run".
+    if re.search(r"\brun\b", lowered):
         return {**base, "action": "flee"}
 
     # Real party invite/accept/leave — checked here, before any known NPC
