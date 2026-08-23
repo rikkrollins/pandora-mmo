@@ -4286,6 +4286,45 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Pip Thistledown", combined)
         self.assertNotIn("Wren Hollowbrook", combined)
 
+    async def test_affinity_menu_narrows_on_a_casual_possessive_without_an_apostrophe(self):
+        """
+        Real live bug (2026-08-23, Coffee, screenshot): "Show pips
+        affinity" (no apostrophe -- the entirely natural way to type a
+        possessive on a phone) still showed all 7 companions. Root
+        cause in the SHARED _match_member_by_name_or_username matcher
+        every "name a party member" targeting call site in this game
+        uses (combat, items, spells, party moves, not just Affinity):
+        \\bpip\\b requires a word boundary right after "pip", but
+        "pips" has none there.
+        """
+        chat_id = -999055
+        user_id = 901002
+        make_basic_character(user_id, "AffinityPossessiveTester", chat_id=chat_id, current_location="crossroads_tavern")
+        party_id = db.create_party(user_id, chat_id)
+        pip_id = -901003
+        make_basic_character(pip_id, "Pip Thistledown", chat_id=chat_id, current_location="stonearch_bridge", is_ai=True)
+        db.update_character(pip_id, chat_id, party_id=party_id)
+        wren_id = -901004
+        make_basic_character(wren_id, "Wren Hollowbrook", chat_id=chat_id, current_location="hollow_stump_shrine", is_ai=True)
+        db.update_character(wren_id, chat_id, party_id=party_id)
+
+        sink = []
+        await bot._do_show_affinity_menu(FakeUpdate(user_id, "Show pips affinity", sink, chat_id=chat_id), "Show pips affinity")
+        combined = "\n".join(sink)
+        self.assertIn("Companion trust (1)", combined)
+        self.assertIn("Pip Thistledown", combined)
+        self.assertNotIn("Wren Hollowbrook", combined)
+
+    async def test_match_member_by_name_still_matches_the_bare_first_name_and_a_real_apostrophe_s(self):
+        """Collateral safety net for the shared matcher -- "pip" and "pip's" must still resolve exactly as before."""
+        members = [
+            {"name": "Pip Thistledown", "telegram_user_id": -1, "telegram_username": None},
+            {"name": "Wren Hollowbrook", "telegram_user_id": -2, "telegram_username": None},
+        ]
+        self.assertEqual(bot._match_member_by_name_or_username("attack pip", members)["name"], "Pip Thistledown")
+        self.assertEqual(bot._match_member_by_name_or_username("give pip's sword to him", members)["name"], "Pip Thistledown")
+        self.assertIsNone(bot._match_member_by_name_or_username("nothing relevant here", members))
+
     async def test_affinity_menu_shows_everyone_when_no_companion_is_named(self):
         chat_id = -999054
         user_id = 900999

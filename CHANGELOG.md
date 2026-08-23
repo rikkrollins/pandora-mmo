@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.331] — Casual possessives ("pips" without an apostrophe) now match a party member's name
+
+**Real live bug (2026-08-23, Coffee, screenshot): "Show pips affinity"
+still showed all 7 companions** — literally minutes after v1.27.330
+shipped the same-sounding fix, since this was a *different* root
+cause underneath it.
+
+Traced to the SHARED `_match_member_by_name_or_username` matcher —
+used by every "name a party member" targeting spot in this game, not
+just the Affinity Menu (combat targeting, item/spell use, equip,
+party formation, and more). Its first-name fallback required a strict
+word boundary right after the name (`\bpip\b`), but "pips" has no
+boundary there — the plural/apostrophe-dropped "s" is contiguous with
+the name, which is exactly how people naturally type a possessive on
+a phone. Now optionally allows a trailing `'s` or bare `s` in that
+same boundary, so "pip", "pip's", and "pips" all resolve to Pip
+Thistledown alike — everywhere this matcher is used, not just Affinity.
+
+Verified with a new test proving the exact reported phrase against the
+prior code (fails) and the fix (passes), a matcher-level test confirming
+the existing bare-first-name and real-apostrophe-s cases are untouched,
+and an 8-test collateral run across combat/item/equip/party-formation
+targeting.
+
 ## [1.27.330] — Affinity Menu can now be narrowed to one named companion
 
 **Real dev-bridge report (2026-08-23, Coffee, screenshot): "Allow this

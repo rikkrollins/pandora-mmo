@@ -2127,9 +2127,20 @@ def _match_member_by_name_or_username(text: str, members: list[dict]) -> dict | 
     # ambiguous shared first name is left unmatched rather than
     # guessed, same "don't guess when ambiguous" philosophy as every
     # other fallback in this codebase (interactables, locations, NPCs).
+    # Real dev-bridge report (2026-08-23, Coffee, screenshot): "Show
+    # pips affinity" ("pips affinity" is casual first-name possessive,
+    # the entirely natural way to drop an apostrophe when typing on a
+    # phone) matched nothing here -- \bpip\b requires a word boundary
+    # immediately after "pip", but "pips" has no boundary there (the
+    # "s" is contiguous), so a plain possessive/plural of a first name
+    # silently fell through. `'?s?` optionally allows a trailing
+    # apostrophe-s or bare s right in the boundary itself -- "pip",
+    # "pip's", and "pips" all now match "Pip Thistledown" alike. Same
+    # single-candidate safety net as before: an ambiguous match across
+    # multiple members is still left unmatched, never guessed.
     first_name_matches = [
         member for member in members
-        if re.search(r"\b" + re.escape(member["name"].lower().split()[0]) + r"\b", lowered)
+        if re.search(r"\b" + re.escape(member["name"].lower().split()[0]) + r"'?s?\b", lowered)
     ]
     if len(first_name_matches) == 1:
         return first_name_matches[0]
