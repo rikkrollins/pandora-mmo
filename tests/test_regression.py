@@ -4375,6 +4375,51 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(after["spell_slots_max"], 3, "an already-real caster's slots must be untouched")
         sessions.end_session(-999)
 
+    async def test_binding_still_teaches_the_taught_spell_even_if_a_different_matching_element_spell_is_known(self):
+        """
+        Real dev-bridge report (2026-08-23, Coffee): "my character
+        ravenlofty doesnt have the spell from wrathflame... can u make
+        sure all players who beat it has it?" Ravenloft's real live
+        character already knew Fire Bolt/Burning Hands (real fire
+        spells) but not Fireball itself -- the old gate ("already
+        knows ANY spell of this element") wrongly treated that as
+        "already has a fire spell," teaching nothing. The gate is now
+        specifically "already knows THIS exact taught spell" -- a
+        character who knows a real but different, weaker fire spell
+        still gets Fireball, and the weaker one gets pruned by the
+        same real redundant-spell logic.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock as _AsyncMock
+        sessions.end_session(-999)
+        user_id = 950973
+        make_basic_character(
+            user_id, "KnowsBurningHandsOnly", char_class="Warlock", current_location="hollow_stump_shrine",
+            known_spells=["fire_bolt", "burning_hands"], spell_slots_max=1,
+        )
+        db.update_character(user_id, -999, spell_slots_current=1)
+        enemy = {
+            "telegram_user_id": -5200973, "name": "The Wrathflame Unbound", "dexterity": 10, "strength": 10,
+            "hp_current": 0, "hp_max": 100, "is_ai": 1, "monster_key": "the_wrathflame_unbound",
+        }
+        session = sessions.start_session(-999, [db.get_character(user_id, -999), enemy], {user_id: "party", -5200973: "enemy"})
+        session.turn_order = [user_id, -5200973]
+        with patch("bot._maybe_send_remnant_lore_image", new=_AsyncMock()), \
+             patch("bot._check_and_award_achievements", new=_AsyncMock()):
+            await bot._check_quest_completions_defeat_monster(FakeUpdate(user_id, "", []), session)
+        after = db.get_character(user_id, -999)
+        self.assertIn("the_wrathflame_unbound", after["bound_remnants"])
+        self.assertIn("fireball", after["known_spells"])
+        self.assertIn("fire_bolt", after["known_spells"], "the free cantrip is never pruned")
+        # Burning Hands (single-target) and Fireball (AOE) are
+        # different real "shapes" -- prune_redundant_lower_power_spells
+        # deliberately never compares an AOE spell against a single-
+        # target one of the same element (losing AOE reach is a real
+        # downside a higher power number alone doesn't make up for),
+        # so Burning Hands correctly survives here too.
+        self.assertIn("burning_hands", after["known_spells"])
+        sessions.end_session(-999)
+
     async def test_freshly_taught_fighter_can_actually_cast_the_taught_spell_end_to_end(self):
         """End-to-end through the real battle-menu-eligible path: a Fighter granted Fireball via Remnant binding can genuinely cast it through _do_cast_spell, no special-casing needed since known_spells/spell_slots_current already drive the real UI+cast flow class-agnostically."""
         import sessions

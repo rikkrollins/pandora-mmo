@@ -12107,8 +12107,8 @@ async def _check_quest_completions_defeat_monster(update_like, session: sessions
                 )
                 await _maybe_send_remnant_lore_image(update_like, remnant_id, remnant_data)
                 # Remnant-taught spells (2026-08-22) -- if this character
-                # has no real spell of the Remnant's own element yet,
-                # binding it teaches the strongest matching one
+                # doesn't already know the Remnant's own specific taught
+                # spell, binding it teaches that exact spell
                 # (REMNANT_ELEMENT_TAUGHT_SPELL). A character with zero
                 # spell slots (any non-caster) also gets a real slot to
                 # actually cast it with -- the battle menu's own "✨
@@ -12117,24 +12117,33 @@ async def _check_quest_completions_defeat_monster(update_like, session: sessions
                 # slots_current, never char_class), so nothing else here
                 # needs to change for a Fighter to get a genuinely
                 # working cast button the moment this fires.
+                #
+                # Real correction (2026-08-23, per Coffee: "my character
+                # ravenlofty doesnt have the spell from wrathflame...
+                # can u make sure all players who beat it has it?").
+                # This used to gate on "already knows ANY spell of the
+                # Remnant's element" -- too broad: Ravenloft already
+                # knew Fire Bolt/Burning Hands (both real fire spells),
+                # so binding Wrathflame Unbound taught him nothing,
+                # even though he genuinely didn't have Fireball, the
+                # actual "spell that the remnant has" per the original
+                # request. Now checks specifically for the taught
+                # spell_id itself -- a character keeps every fire spell
+                # they already knew (the pruning below still trims any
+                # that are now strictly weaker than the new one).
                 element = remnant_data["element"]
                 fresh_character = db.get_character(telegram_user_id, session.chat_id)
-                already_knows_element = any(
-                    spells_module.get_spell(sid) and spells_module.get_spell(sid).get("damage_type") == element
-                    for sid in fresh_character.get("known_spells", [])
-                )
-                if not already_knows_element and element in REMNANT_ELEMENT_TAUGHT_SPELL:
-                    taught_spell_id = REMNANT_ELEMENT_TAUGHT_SPELL[element]
+                taught_spell_id = REMNANT_ELEMENT_TAUGHT_SPELL.get(element)
+                already_knows_taught_spell = taught_spell_id in (fresh_character.get("known_spells") or [])
+                if taught_spell_id and not already_knows_taught_spell:
                     taught_spell = spells_module.get_spell(taught_spell_id)
                     # Redundant-spell pruning (2026-08-22, per Coffee) --
                     # see spells.prune_redundant_lower_power_spells's own
-                    # docstring. A no-op here today (the teach only ever
-                    # fires when already_knows_element is False, so
-                    # there's nothing of this element to prune yet), but
-                    # applied for the same reason every other real
-                    # known_spells grant site now does -- correctness
-                    # shouldn't quietly depend on that gate never
-                    # changing.
+                    # docstring. No longer a no-op now that the gate is
+                    # per-spell, not per-element -- a character who
+                    # already knew a real but strictly weaker fire spell
+                    # (e.g. Burning Hands) correctly loses it here in
+                    # favor of the newly-taught Fireball.
                     updates = {
                         "known_spells": spells_module.prune_redundant_lower_power_spells(
                             fresh_character["known_spells"] + [taught_spell_id]

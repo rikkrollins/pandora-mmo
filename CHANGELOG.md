@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.324] — Remnant-taught spell gate now checks the specific spell, not the element
+
+**Real dev-bridge report (2026-08-23, Coffee): "my character ravenlofty
+doesnt have the spell from wrathflame... can u make sure all players
+who beat it has it?"**
+
+Ravenloft already knew Fire Bolt and Burning Hands (real fire spells)
+but not Fireball itself — the Remnant-teach gate used to check
+"already knows ANY spell of the Remnant's element," which wrongly
+treated that as "already has a fire spell" and taught nothing, even
+though he never actually got Fireball, the real "spell that the
+remnant has" per the original request. The gate now checks
+specifically for the taught spell itself — a character keeps every
+other spell they already knew (the existing redundant-spell pruning
+still trims anything now strictly weaker, same shape-aware rule as
+before). A one-time backfill applied the corrected rule to everyone
+who'd already bound a Remnant: Ravenloft, Bram Ashfield, and Wren
+Hollowbrook all gained Fireball from Wrathflame Unbound. Verified with
+a new test proving the exact scenario, plus 3 collateral tests.
+
 ## [1.27.323] — Healing potions can now target live combat summons
 
 **Real dev-bridge report (2026-08-23, Coffee, screenshot): "I just
