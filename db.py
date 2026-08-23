@@ -398,6 +398,15 @@ def init_db() -> None:
         # xp_gain_multiplier -- no extra plumbing needed for that part.
         if "tier" not in board_quest_columns:
             conn.execute("ALTER TABLE board_quests ADD COLUMN tier TEXT NOT NULL DEFAULT 'daily'")
+        # Companion Favors (2026-08-23, per Coffee: "affinity menu...
+        # task based quests that are easy and attainable"): a small,
+        # repeatable board_quest scoped to a recruited companion
+        # (synthetic location_id "companion_favor:{npc_id}") instead of
+        # a real location, rewarding real npc_relationships.affinity
+        # instead of gold/XP -- see get_or_generate_companion_favor in
+        # board_quests.py. Every existing board quest simply gets 0.
+        if "reward_affinity" not in board_quest_columns:
+            conn.execute("ALTER TABLE board_quests ADD COLUMN reward_affinity INTEGER NOT NULL DEFAULT 0")
 
         if "party_id" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN party_id INTEGER")
@@ -3077,19 +3086,19 @@ def get_active_board_quest(location_id: str, chat_id: int, day_key: str, tier: s
 def create_board_quest(location_id: str, chat_id: int, day_key: str, title: str, description: str,
                         giver_npc: str | None, objective_type: str, objective_target: str,
                         objective_count: int, reward_xp: int, reward_gold: int,
-                        tier: str = "daily") -> dict:
+                        tier: str = "daily", reward_affinity: int = 0) -> dict:
     with get_connection() as conn:
         cur = conn.execute(
             """
             INSERT INTO board_quests (
                 location_id, chat_id, day_key, title, description, giver_npc,
                 objective_type, objective_target, objective_count,
-                reward_xp, reward_gold, generated_at, tier
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                reward_xp, reward_gold, generated_at, tier, reward_affinity
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (location_id, chat_id, day_key, title, description, giver_npc,
              objective_type, objective_target, objective_count,
-             reward_xp, reward_gold, datetime.now(timezone.utc).isoformat(), tier),
+             reward_xp, reward_gold, datetime.now(timezone.utc).isoformat(), tier, reward_affinity),
         )
         board_quest_id = cur.lastrowid
         row = conn.execute(

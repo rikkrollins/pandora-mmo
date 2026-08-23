@@ -65,6 +65,8 @@ environment", "use my surroundings against it", "interact with the environment")
 asking who their active/current character is (e.g. "who is my active character").
 - "check_inventory" is for asking what's in their backpack/bag/items they're carrying.
 - "check_party" is for asking who's in the party, how many members, or who's adventuring with them.
+- "check_affinity" is for asking how a companion feels about them, their trust/affinity level, or how to build \
+trust with a companion.
 - "recruit_npc" is for asking a specific named NPC to join their party / travel with them / come along.
 - "rest" is for resting, recovering, healing up outside combat, or asking to be revived/healed after being downed. \
 Note this no longer heals instantly — it settles the character in to rest, and they recover in proportion to real \
@@ -328,6 +330,13 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
         return {**base, "action": "check_formation"}
     if re.search(r"\bwaypoints?\b", lowered):
         return {**base, "action": "check_waypoints"}
+    # Affinity Menu (2026-08-23, per Coffee: "affinity menu so players
+    # arent guessing"). Bare "affinity"/"trust" are distinctive enough
+    # in this game's vocabulary to fire unconditionally, same reasoning
+    # as menu/formation/waypoints just above -- no other real use of
+    # either word exists anywhere in this campaign's own text.
+    if re.search(r"\baffinity\b|\btrust\b", lowered):
+        return {**base, "action": "check_affinity"}
 
     # Real dev-bridge report (2026-08-18, Coffee): "When I use open, it
     # seems to work, but when I say view, it doesn't seem to work" --
@@ -2412,7 +2421,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "drink_water", "choose_subclass", "start_echo_trial", "check_professions",
                 "talk_party", "use_environment", "throw_weapon",
                 "check_menu", "check_formation", "check_waypoints", "check_equip_menu",
-                "check_remnants", "check_story", "check_magic",
+                "check_remnants", "check_story", "check_magic", "check_affinity",
             )
             if parsed["action"] not in valid_actions:
                 return fallback

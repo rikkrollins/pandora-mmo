@@ -4007,6 +4007,208 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         after = db.get_relationship(user_id, -999, "pip_thistledown")["affinity"]
         self.assertEqual(after - before, 2)
 
+    # -- Affinity Menu + Companion Favors (2026-08-23, per Coffee:
+    #    "lets work on affinity menu so players arent guessing... task
+    #    based quests that are easy and attainable, use push buttons")
+
+    def test_get_or_generate_companion_favor_produces_a_small_real_objective(self):
+        import board_quests
+        favor = board_quests.get_or_generate_companion_favor(bot.CAMPAIGN, "wren_hollowbrook", -999)
+        self.assertIsNotNone(favor)
+        self.assertEqual(favor["giver_npc"], "wren_hollowbrook")
+        self.assertIn(favor["objective_type"], ("gather_material", "defeat_monster"))
+        count_range = board_quests.COMPANION_FAVOR_COUNT_RANGE[
+            "gather" if favor["objective_type"] == "gather_material" else "defeat"
+        ]
+        self.assertGreaterEqual(favor["objective_count"], count_range[0])
+        self.assertLessEqual(favor["objective_count"], count_range[1])
+        self.assertEqual(favor["reward_affinity"], board_quests.COMPANION_FAVOR_REWARD_AFFINITY)
+        self.assertEqual(favor["reward_xp"], 0)
+        self.assertEqual(favor["reward_gold"], 0)
+        # No duplicate generated while this one's still outstanding.
+        favor2 = board_quests.get_or_generate_companion_favor(bot.CAMPAIGN, "wren_hollowbrook", -999)
+        self.assertEqual(favor["board_quest_id"], favor2["board_quest_id"])
+
+    def test_companion_favor_never_assigns_a_real_boss_monster(self):
+        """Wren Hollowbrook's own recruit location (hollow_stump_shrine) has ONLY a real boss (the_wrathflame_unbound) as a monster -- must never be picked."""
+        import board_quests
+        for _ in range(10):
+            favor = board_quests.get_or_generate_companion_favor(bot.CAMPAIGN, "wren_hollowbrook", -999 - _)
+            self.assertIsNotNone(favor)
+            if favor["objective_type"] == "defeat_monster":
+                self.assertNotEqual(favor["objective_target"], "the_wrathflame_unbound")
+
+    async def test_gathering_credits_a_companion_favor_regardless_of_current_location(self):
+        """
+        Real design point: a companion travels with the party, not a
+        location -- gather crediting for a companion favor must not
+        require standing at any particular spot, unlike a real location
+        board quest. Own chat_id (board_quests aren't otherwise isolated
+        per test the way character rows are, since a Companion Favor's
+        location_id is keyed only by npc_id+chat_id, not by player).
+        """
+        from unittest.mock import patch
+        import board_quests
+        chat_id = -999041
+        user_id = 900970
+        make_basic_character(user_id, "FavorGatherer", chat_id=chat_id, current_location="crossroads_tavern")
+        party_id = db.create_party(user_id, chat_id)
+        companion_id = -900971
+        make_basic_character(companion_id, "Wren Hollowbrook", chat_id=chat_id, current_location="hollow_stump_shrine", is_ai=True)
+        db.update_character(companion_id, chat_id, party_id=party_id)
+
+        favor = board_quests.get_or_generate_companion_favor(bot.CAMPAIGN, "wren_hollowbrook", chat_id)
+        self.assertEqual(favor["objective_type"], "gather_material")  # confirmed above: always gather here
+        db.accept_board_quest(favor["board_quest_id"], user_id, chat_id)
+        before_affinity = db.get_relationship(user_id, chat_id, "wren_hollowbrook")["affinity"]
+
+        # The favor's own synthetic location_id (companion_favor:wren_hollowbrook) never matches any real
+        # location -- the player's REAL current_location just needs the actual material to gather at all, which
+        # naturally proves this credits regardless of the favor's own (unmatchable) location_id.
+        db.update_character(user_id, chat_id, current_location="hollow_stump_shrine")
+        sink = []
+        with patch("bot.narrate_skill_check", return_value="A quiet, successful gathering."):
+            for _ in range(favor["objective_count"]):
+                await bot._do_gather(
+                    FakeUpdate(user_id, "gather moonpetal", sink, chat_id=chat_id), "gather moonpetal", forced_roll=20,
+                )
+        after = db.get_relationship(user_id, chat_id, "wren_hollowbrook")
+        self.assertEqual(after["affinity"] - before_affinity, board_quests.COMPANION_FAVOR_REWARD_AFFINITY)
+        completed = db.get_active_board_quests(favor["location_id"], chat_id, favor["day_key"], tier="daily")
+        self.assertTrue(any(q["board_quest_id"] == favor["board_quest_id"] and q["completed_at"] for q in completed))
+        character = db.get_character(user_id, chat_id)
+        self.assertEqual(character["inventory"].get("moonpetal", 0), 0)  # delivered, not kept
+
+    async def test_defeating_a_monster_credits_a_companion_favor_via_a_real_combat_victory(self):
+        """
+        Same real design point as the gather test above, proven through
+        the actual combat-victory path (_award_victory_xp) instead of a
+        direct db call -- a real fight anywhere, not just at the
+        favor's own (unmatchable) synthetic location_id.
+        """
+        import sessions
+        import board_quests
+        chat_id = -999047
+        sessions.end_session(chat_id)
+        user_id = 900981
+        make_basic_character(user_id, "FavorFighter", chat_id=chat_id, current_location="stonearch_bridge")
+        party_id = db.create_party(user_id, chat_id)
+        companion_id = -900982
+        make_basic_character(companion_id, "Pip Thistledown", chat_id=chat_id, current_location="stonearch_bridge", is_ai=True)
+        db.update_character(companion_id, chat_id, party_id=party_id)
+
+        # Direct row instead of the generator (already tested on its own
+        # above) -- deterministic objective_type/target for this test.
+        favor = db.create_board_quest(
+            board_quests.COMPANION_FAVOR_LOCATION_PREFIX + "pip_thistledown", chat_id, "test-day",
+            "A favor: deal with the spiders", "...", "pip_thistledown",
+            "defeat_monster", "giant_spider", 1, 0, 0, tier="daily",
+            reward_affinity=board_quests.COMPANION_FAVOR_REWARD_AFFINITY,
+        )
+        db.accept_board_quest(favor["board_quest_id"], user_id, chat_id)
+        before_affinity = db.get_relationship(user_id, chat_id, "pip_thistledown")["affinity"]
+
+        enemy_id = -2_600_500
+        enemy = {"telegram_user_id": enemy_id, "name": "Giant Spider", "dexterity": 10, "xp_reward": 50, "monster_key": "giant_spider"}
+        fighter = db.get_character(user_id, chat_id)
+        fighter["telegram_user_id"] = user_id
+        session = sessions.start_session(chat_id, [fighter, enemy], {enemy_id: "enemy", user_id: "party"})
+        session.turn_order = [user_id, enemy_id]
+
+        await bot._award_victory_xp(FakeUpdate(user_id, "", [], chat_id=chat_id), session)
+        after_affinity = db.get_relationship(user_id, chat_id, "pip_thistledown")["affinity"]
+        self.assertEqual(after_affinity - before_affinity, board_quests.COMPANION_FAVOR_REWARD_AFFINITY)
+        updated = db.get_active_board_quests(favor["location_id"], chat_id, "test-day", tier="daily")[0]
+        self.assertIsNotNone(updated["completed_at"])
+        sessions.end_session(chat_id)
+
+    async def test_favor_never_credited_once_the_companion_has_left_the_party(self):
+        from unittest.mock import patch
+        import board_quests
+        chat_id = -999042
+        user_id = 900972
+        make_basic_character(user_id, "FavorAbandoner", chat_id=chat_id, current_location="hollow_stump_shrine")
+        party_id = db.create_party(user_id, chat_id)
+        companion_id = -900973
+        make_basic_character(companion_id, "Wren Hollowbrook", chat_id=chat_id, current_location="hollow_stump_shrine", is_ai=True)
+        db.update_character(companion_id, chat_id, party_id=party_id)
+        favor = board_quests.get_or_generate_companion_favor(bot.CAMPAIGN, "wren_hollowbrook", chat_id)
+        db.accept_board_quest(favor["board_quest_id"], user_id, chat_id)
+        # Companion leaves the party entirely.
+        db.update_character(companion_id, chat_id, party_id=None)
+        before_affinity = db.get_relationship(user_id, chat_id, "wren_hollowbrook")["affinity"]
+        sink = []
+        with patch("bot.narrate_skill_check", return_value="A quiet, successful gathering."):
+            for _ in range(favor["objective_count"]):
+                await bot._do_gather(
+                    FakeUpdate(user_id, "gather moonpetal", sink, chat_id=chat_id), "gather moonpetal", forced_roll=20,
+                )
+        after_affinity = db.get_relationship(user_id, chat_id, "wren_hollowbrook")["affinity"]
+        self.assertEqual(after_affinity, before_affinity)  # never credited
+
+    async def test_affinity_menu_shows_level_class_description_and_favor_button(self):
+        chat_id = -999043
+        user_id = 900974
+        make_basic_character(user_id, "AffinityMenuViewer", chat_id=chat_id, current_location="crossroads_tavern")
+        party_id = db.create_party(user_id, chat_id)
+        companion_id = -900975
+        make_basic_character(companion_id, "Wren Hollowbrook", chat_id=chat_id, current_location="hollow_stump_shrine",
+                              is_ai=True, char_class="Druid")
+        db.update_character(companion_id, chat_id, party_id=party_id, level=8)
+        sink = []
+        await bot._do_show_affinity_menu(FakeUpdate(user_id, "", sink, chat_id=chat_id))
+        combined = "\n".join(sink)
+        self.assertIn("Wren Hollowbrook", combined)
+        self.assertIn("Lv8", combined)
+        self.assertIn("Druid", combined)
+        self.assertIn(bot.CAMPAIGN["npcs"]["wren_hollowbrook"]["personality"], combined)
+        self.assertIn("Favor", combined)
+
+    async def test_affinity_menu_with_no_companions_gives_a_real_explanation_not_an_empty_screen(self):
+        chat_id = -999044
+        user_id = 900976
+        make_basic_character(user_id, "NoCompanionsYet", chat_id=chat_id, current_location="crossroads_tavern")
+        sink = []
+        await bot._do_show_affinity_menu(FakeUpdate(user_id, "", sink, chat_id=chat_id))
+        self.assertTrue(any("haven't recruited" in s for s in sink))
+
+    async def test_accept_favor_button_accepts_the_exact_board_quest_shown(self):
+        """Same class of bug just fixed in v1.27.326 for story quests -- verify the new callback explicitly, don't assume it's safe by construction."""
+        import board_quests
+        chat_id = -999045
+        user_id = 900977
+        make_basic_character(user_id, "FavorButtonTester", chat_id=chat_id, current_location="crossroads_tavern")
+        party_id = db.create_party(user_id, chat_id)
+        companion_id = -900978
+        make_basic_character(companion_id, "Wren Hollowbrook", chat_id=chat_id, current_location="hollow_stump_shrine", is_ai=True)
+        db.update_character(companion_id, chat_id, party_id=party_id)
+        favor = board_quests.get_or_generate_companion_favor(bot.CAMPAIGN, "wren_hollowbrook", chat_id)
+        sink = []
+        await bot.affinity_menu_callback(
+            FakeCallbackUpdate(user_id, f"affinity|acceptfavor|{favor['board_quest_id']}", sink, chat_id=chat_id), DummyContext(),
+        )
+        accepted = db.get_active_board_quests(favor["location_id"], chat_id, favor["day_key"], tier="daily")[0]
+        self.assertEqual(accepted["accepted_by"], user_id)
+
+    async def test_check_affinity_free_text_and_party_menu_button_reach_the_same_screen(self):
+        chat_id = -999046
+        user_id = 900979
+        make_basic_character(user_id, "AffinityRouteTester", chat_id=chat_id, current_location="crossroads_tavern")
+        party_id = db.create_party(user_id, chat_id)
+        companion_id = -900980
+        make_basic_character(companion_id, "Wren Hollowbrook", chat_id=chat_id, current_location="hollow_stump_shrine", is_ai=True)
+        db.update_character(companion_id, chat_id, party_id=party_id)
+
+        sink1 = []
+        await bot._route_text_message(FakeUpdate(user_id, "check my affinity", sink1, chat_id=chat_id), DummyContext())
+        self.assertTrue(any("Companion trust" in s for s in sink1))
+
+        sink2 = []
+        await bot.party_menu_callback(
+            FakeCallbackUpdate(user_id, "party|showaffinity", sink2, chat_id=chat_id), DummyContext(),
+        )
+        self.assertTrue(any("Companion trust" in s for s in sink2))
+
     async def test_weapon_mastery_overflow_scales_the_bonus_strike(self):
         """
         Real live request (2026-08-20, Coffee): "add the extra % to the

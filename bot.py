@@ -5063,6 +5063,39 @@ async def _award_victory_xp(update: Update, session: sessions.Session) -> tuple[
                     f"({updated['progress_count']}/{updated['objective_count']})"
                 )
 
+    # Companion Favors (2026-08-23): unlike the location-scoped loop
+    # just above, these are per-PLAYER (each real party member may have
+    # accepted a different companion's own favor) and never tied to
+    # event_location at all -- a companion travels with the party, so
+    # this runs regardless of where the fight happened.
+    defeated_monster_keys = {
+        p.get("monster_key") for p in session.participants
+        if session.sides.get(p["telegram_user_id"]) == "enemy"
+    }
+    for pid in real_party_ids:
+        pid_character = db.get_character(pid, update.effective_chat.id)
+        if pid_character is None:
+            continue
+        for board_quest in db.get_accepted_board_quests_for_user(pid, update.effective_chat.id):
+            if not (board_quest["location_id"].startswith(board_quests_module.COMPANION_FAVOR_LOCATION_PREFIX)
+                    and board_quest["objective_type"] == "defeat_monster"
+                    and board_quest["objective_target"] in defeated_monster_keys
+                    and _companion_favor_giver_is_in_party(pid_character, board_quest["giver_npc"])):
+                continue
+            defeated_matching = sum(
+                1 for p in session.participants
+                if session.sides.get(p["telegram_user_id"]) == "enemy"
+                and p.get("monster_key") == board_quest["objective_target"]
+            )
+            updated = db.record_board_quest_progress(board_quest["board_quest_id"], defeated_matching)
+            if updated["progress_count"] >= updated["objective_count"]:
+                board_notes.append(_complete_companion_favor(update, pid_character, updated))
+            else:
+                board_notes.append(
+                    f"\n📋 {pid_character['name']}'s favor progress: {updated['title']} "
+                    f"({updated['progress_count']}/{updated['objective_count']})"
+                )
+
     # Bonus gear loot: real, keepable, equippable magic item (2026-08-02
     # magic item system, per Coffee: "make loot real" -- previously
     # rules/item_generator.py's roll had no stable item_id and could
@@ -11285,6 +11318,27 @@ def _offerable_companion_quest(character: dict) -> tuple[str, dict] | None:
     return None
 
 
+def _offerable_quest_for_specific_companion(character: dict, npc_id: str) -> tuple[str, dict] | None:
+    """
+    Same real checks _offerable_companion_quest already applies
+    (completed/active/guild-requirement), scoped to ONE given
+    companion instead of "first match across the whole party" -- used
+    by the Affinity Menu (2026-08-23) so each companion's own card can
+    show its own real personal-quest offer, if any, rather than only
+    ever surfacing whichever companion happens to come first in
+    CAMPAIGN["quests"]'s own dict order.
+    """
+    for quest_id, quest in CAMPAIGN.get("quests", {}).items():
+        if quest.get("giver_npc") != npc_id:
+            continue
+        if quest_id in character["completed_quests"] or quest_id in character["active_quests"]:
+            continue
+        if not _meets_quest_guild_requirement(character, quest):
+            continue
+        return quest_id, quest
+    return None
+
+
 def _npc_quest_facts(character: dict, npc_id: str) -> str | None:
     """
     Real, current quest info to ground an NPC's dialogue when asked
@@ -11791,6 +11845,26 @@ def _companion_trust_band(telegram_user_id: int, chat_id: int, npc_id: str) -> s
     if affinity <= -20:
         return "low"
     return "mid"
+
+
+def _trust_tier_label(affinity: int) -> str:
+    """
+    Cosmetic-only 5-tier label for the Affinity Menu (2026-08-23, per
+    Coffee: "affinity menu so players arent guessing") -- purely a
+    richer display over the same real number. Does NOT change
+    _companion_trust_band's own real 3-band thresholds (40/-20), which
+    story gates and companion-quest resolutions already depend on --
+    this just labels the same underlying scale more granularly.
+    """
+    if affinity >= 60:
+        return "💜 Loyal"
+    if affinity >= 40:
+        return "💙 Trusted"
+    if affinity >= 20:
+        return "💚 Friendly"
+    if affinity >= -19:
+        return "⚪ Neutral"
+    return "🖤 Estranged"
 
 
 async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest_id: str) -> None:
@@ -14499,6 +14573,7 @@ def _party_keyboard(character: dict) -> InlineKeyboardMarkup | None:
     rows = [
         [InlineKeyboardButton("🔮 Formation", callback_data="party|showformation")],
         [InlineKeyboardButton("📄 Party Sheets", callback_data="party|showsheets")],
+        [InlineKeyboardButton("💞 Affinity", callback_data="party|showaffinity")],
     ]
     party_id = character.get("party_id")
 
@@ -14642,6 +14717,122 @@ async def _do_show_party_sheets_menu(update: Update) -> None:
     )
 
 
+async def _do_show_affinity_menu(update: Update) -> None:
+    """
+    Real request (2026-08-23, Coffee: "lets work on affinity menu so
+    players arent guessing. i want info from the AI players (Lv, Class,
+    and Description). Also include some quests that players can boost
+    affinity for that player, use push buttons, Make it task based
+    quests that are easy and attainable"). Before this, affinity was a
+    completely invisible backend number -- a player only ever
+    discovered a real trust gate (e.g. the_hush_below's own 40-affinity
+    requirement to reach the_first_city) by hitting its deliberately
+    vague in-fiction rejection message, with no way to see their actual
+    number or what to do about it. One message per recruited AI
+    companion, same one-card-per-member pattern _do_check_party's
+    sheets view already uses.
+    """
+    telegram_user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    character = db.get_character(telegram_user_id, chat_id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(chat_id, "adventure")
+        )
+        return
+    party_id = character.get("party_id")
+    companions = [
+        m for m in (db.get_party_members_by_id_including_inactive_slots(party_id) if party_id else [])
+        if m.get("is_ai")
+    ]
+    if not companions:
+        await _safe_send(
+            update,
+            "💞 **Affinity** — you haven't recruited any companions yet. Once you do, this is where "
+            "you'll see how they feel about you, and small favors you can do to earn their trust.",
+            speak=False,
+        )
+        return
+
+    await update.effective_chat.send_message(
+        f"💞 **Companion trust ({len(companions)}):**",
+        message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+    )
+    for member in companions:
+        npc_id = _find_npc_id_by_name(member["name"])
+        npc_data = CAMPAIGN["npcs"].get(npc_id) if npc_id else None
+        if npc_id is None or npc_data is None:
+            continue
+        relationship = db.get_relationship(telegram_user_id, chat_id, npc_id)
+        affinity = relationship["affinity"]
+        resolution = relationship.get("resolution", "unresolved")
+        resolution_note = {
+            "resolved_loyal": "\n🏅 Their story with you is settled — loyal.",
+            "resolved_distant": "\n🏅 Their story with you is settled — distant.",
+            "resolved_estranged": "\n🏅 Their story with you is settled — estranged.",
+        }.get(resolution, "")
+
+        lines = [
+            f"💞 {_member_label(member)}",
+            f"\"{npc_data['personality']}\"",
+            f"Trust: {_trust_tier_label(affinity)} ({affinity}/100){resolution_note}",
+            "\n_Raise trust by healing or buffing them in a fight, doing a favor, or completing "
+            "their own personal quest._",
+        ]
+        rows = []
+
+        favor = board_quests_module.get_or_generate_companion_favor(CAMPAIGN, npc_id, chat_id)
+        if favor is not None:
+            if favor.get("accepted_by") is None:
+                lines.append(f"\n📋 Favor: \"{favor['title']}\" — {favor['description']}")
+                rows.append([InlineKeyboardButton(
+                    "✅ Accept Favor", callback_data=f"affinity|acceptfavor|{favor['board_quest_id']}",
+                )])
+            elif favor["accepted_by"] == telegram_user_id:
+                lines.append(
+                    f"\n📋 Favor in progress: \"{favor['title']}\" "
+                    f"({favor['progress_count']}/{favor['objective_count']})"
+                )
+            else:
+                lines.append(f"\n📋 Favor: \"{favor['title']}\" — already being handled.")
+
+        quest_offer = _offerable_quest_for_specific_companion(character, npc_id)
+        if quest_offer is not None:
+            quest_id, quest = quest_offer
+            lines.append(f"\n📜 Personal quest available: \"{quest['title']}\"")
+            rows.append([InlineKeyboardButton(
+                f"📜 Accept: {quest['title']}", callback_data=f"quest|accept|story|{quest_id}",
+            )])
+
+        await _safe_send(
+            update, "\n".join(lines), speak=False,
+            reply_markup=InlineKeyboardMarkup(rows) if rows else None,
+        )
+
+
+async def affinity_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _do_show_affinity_menu's own buttons -- currently just Accept Favor."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    await _safe_answer(query)
+    if action == "acceptfavor" and len(parts) > 2:
+        try:
+            board_quest_id = int(parts[2])
+        except ValueError:
+            return
+        accepted = db.accept_board_quest(board_quest_id, update.effective_user.id, update.effective_chat.id)
+        if accepted is None:
+            await update.effective_chat.send_message(
+                "That favor's already been taken on — check the Affinity menu again for what's open now.",
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+            )
+            return
+        npc_data = CAMPAIGN["npcs"].get(accepted["giver_npc"])
+        npc_name = npc_data["name"] if npc_data else accepted["giver_npc"]
+        await _safe_send(update, f"✅ Favor accepted for **{npc_name}**: \"{accepted['title']}\"")
+
+
 async def party_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles taps on _party_keyboard -- dispatches through the exact same real invite/accept/leave handlers free text already uses."""
     query = update.callback_query
@@ -14658,6 +14849,8 @@ async def party_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         await _do_show_party_formation(update)
     elif action == "showsheets":
         await _do_show_party_sheets_menu(update)
+    elif action == "showaffinity":
+        await _do_show_affinity_menu(update)
     elif action == "invite" and len(parts) > 2:
         try:
             target_id = int(parts[2])
@@ -15946,13 +16139,27 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
         # 24h expires_at window must still be creditable; day_key is
         # only about what's currently postable, not what's still valid.
         for board_quest in db.get_accepted_board_quests_for_user(update.effective_user.id, update.effective_chat.id):
-            if not (board_quest["location_id"] == character["current_location"]
-                    and board_quest["objective_type"] == "gather_material"
-                    and board_quest["objective_target"] == node["material"]):
+            # Companion Favors (2026-08-23) travel with the party, not
+            # a location -- creditable regardless of where the player
+            # currently stands, as long as the favor's own companion is
+            # still actually in this player's party. Everything else
+            # (a real location board quest) keeps the original
+            # current-location requirement, unchanged.
+            is_companion_favor = board_quest["location_id"].startswith(board_quests_module.COMPANION_FAVOR_LOCATION_PREFIX)
+            if is_companion_favor:
+                if not (board_quest["objective_type"] == "gather_material"
+                        and board_quest["objective_target"] == node["material"]
+                        and _companion_favor_giver_is_in_party(character, board_quest["giver_npc"])):
+                    continue
+            elif not (board_quest["location_id"] == character["current_location"]
+                      and board_quest["objective_type"] == "gather_material"
+                      and board_quest["objective_target"] == node["material"]):
                 continue
             updated = db.record_board_quest_progress(board_quest["board_quest_id"], quantity)
             if updated["progress_count"] >= updated["objective_count"]:
-                if updated.get("branch_data"):
+                if is_companion_favor:
+                    message += _complete_companion_favor(update, character, updated)
+                elif updated.get("branch_data"):
                     message += (
                         f"\n📜 **{updated['title']}** — objective complete. A decision awaits "
                         f"(check quests to see the choice)."
@@ -21302,6 +21509,49 @@ def _maybe_boost_companion_affinity_for_support(
     )
 
 
+def _companion_favor_giver_is_in_party(character: dict, npc_id: str | None) -> bool:
+    """
+    Companion Favors (2026-08-23) travel with the party, not a
+    location -- a favor only stays creditable while the companion who
+    asked for it is still actually recruited into this player's own
+    party (never a stale favor for someone who's since left/been
+    benched off the roster entirely).
+    """
+    if not npc_id or not character.get("party_id"):
+        return False
+    return any(
+        m.get("is_ai") and _npc_id_for_companion_name(m["name"]) == npc_id
+        for m in db.get_party_members_by_id(character["party_id"])
+    )
+
+
+def _complete_companion_favor(update: Update, character: dict, board_quest: dict) -> str:
+    """
+    Companion Favors auto-complete the instant their objective is met
+    -- unlike a normal board quest, there's no "place" to walk back to
+    for a companion who travels with the party, so this skips
+    _check_board_quest_turnin's arrival-gated flow entirely. Removes
+    the gathered material from inventory (same "delivered, not kept"
+    fix _check_board_quest_turnin already applies to real board
+    quests) and grants the real, small affinity reward. Returns the
+    confirmation line to append to the caller's own message.
+    """
+    if board_quest["objective_type"] == "gather_material":
+        db.remove_item(
+            character["telegram_user_id"], update.effective_chat.id,
+            board_quest["objective_target"], board_quest["objective_count"],
+        )
+    db.complete_board_quest(board_quest["board_quest_id"])
+    npc_id = board_quest["giver_npc"]
+    npc_data = CAMPAIGN["npcs"].get(npc_id)
+    npc_name = npc_data["name"] if npc_data else npc_id
+    db.adjust_affinity(
+        character["telegram_user_id"], update.effective_chat.id, npc_id,
+        board_quest["reward_affinity"], event=f"Did a favor: \"{board_quest['title']}\".",
+    )
+    return f"\n💞 **{npc_name}** — favor done: **{board_quest['title']}**. Trust grows a little."
+
+
 def _check_story_gate(character: dict, current: dict, destination_id: str) -> str | None:
     """
     Full-storyline plan, Phase 1: a third gate type on a location
@@ -26389,7 +26639,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # explicit direction.
     if character and character.get("is_dead"):
         is_status_check = action in (
-            "check_sheet", "check_inventory", "check_magic", "check_party", "check_quests",
+            "check_sheet", "check_inventory", "check_magic", "check_party", "check_quests", "check_affinity",
             "show_map", "ask_clue", "list_characters", "switch_character",
             "create_character", "delete_character", "chat",
         )
@@ -26425,7 +26675,7 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # until Revivify -- never passively healed away by resting/waking.
     if character and character.get("is_inactive") and not character.get("is_dead"):
         is_status_check = action in (
-            "check_sheet", "check_inventory", "check_magic", "check_party", "check_quests",
+            "check_sheet", "check_inventory", "check_magic", "check_party", "check_quests", "check_affinity",
             "show_map", "ask_clue", "list_characters", "go_inactive", "rest", "chat",
         )
         explicit_wake = any(
@@ -26597,6 +26847,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_check_inventory(update)
     elif action == "check_party":
         await _do_check_party(update, text)
+    elif action == "check_affinity":
+        await _do_show_affinity_menu(update)
     elif action == "check_menu":
         await _do_show_menu(update)
     elif action == "check_formation":
@@ -30228,6 +30480,7 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(skilltree_menu_callback, pattern=r"^skilltree\|"))
     application.add_handler(CallbackQueryHandler(story_menu_callback, pattern=r"^story\|"))
     application.add_handler(CallbackQueryHandler(party_menu_callback, pattern=r"^party\|"))
+    application.add_handler(CallbackQueryHandler(affinity_menu_callback, pattern=r"^affinity\|"))
     application.add_handler(CallbackQueryHandler(travel_menu_callback, pattern=r"^travel\|"))
     application.add_handler(CallbackQueryHandler(look_action_menu_callback, pattern=r"^lookact\|"))
     application.add_handler(CallbackQueryHandler(shrine_menu_callback, pattern=r"^shrine\|"))

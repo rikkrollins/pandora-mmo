@@ -2,6 +2,46 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.327] — Affinity Menu + Companion Favors
+
+**Real request (2026-08-23, Coffee): "lets work on affinity menu so
+players arent guessing. i want info from the AI players (Lv, Class, and
+Description). Also include some quests that players can boost affinity
+for that player, use push buttons, Make it task based quests that are
+easy and attainable."**
+
+Companion trust (`npc_relationships.affinity`) has been a real,
+growing mechanic since v1.27.325 — but there was never a single screen
+showing it. A player only ever discovered a real trust gate (e.g. the
+40-affinity requirement to reach The First City) by hitting its
+deliberately vague in-fiction rejection, with zero visibility into
+their actual number or what to do about it.
+
+New **💞 Affinity** screen (Party menu button, or just say "check my
+affinity"/"trust"): one card per recruited companion — Level, Class,
+their real personality blurb, a 5-tier trust label (Estranged →
+Neutral → Friendly → Trusted → Loyal) plus the raw number, a resolution
+badge once their personal arc is settled, and a plain hint on how to
+raise it.
+
+New **Companion Favors** — small, repeatable, push-button tasks (gather
+2-3 of something / defeat 1-2 real (never boss-tier) monsters) tied to
+a specific companion rather than a location, since a companion travels
+with the party. Reward is a modest affinity boost only — deliberately
+no gold/XP, keeping this screen's purpose singular (confirmed via a
+real design discussion). Completes instantly the moment the objective
+is met, no arrival-gated turn-in (there's no "place" to walk back to
+for a companion who's always with you). A companion's own bigger
+personal-quest offer, if one's currently available, shows on the same
+card too, reusing the exact Accept-button fix from v1.27.326.
+
+Verified with 10 new tests (favor generation, boss-monster exclusion,
+gather/defeat crediting proven to work regardless of the player's own
+location, a favor correctly going uncredited once its companion has
+left the party, menu rendering, empty-party messaging, the new
+Accept-Favor button, and free-text/button routing parity), plus 12
+collateral board-quest/gather/combat-XP tests confirmed unaffected.
+
 ## [1.27.326] — Quest Accept button now accepts the exact quest you tapped
 
 **Real dev-bridge report (2026-08-23, screenshot): "Every time I click

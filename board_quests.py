@@ -152,6 +152,124 @@ def _generate_for_location(
     )
 
 
+# Companion Favors (2026-08-23, per Coffee: "affinity menu... task
+# based quests that are easy and attainable"). Deliberately smaller
+# than even a daily board quest's own COUNT_RANGE -- this is meant to
+# be a quick, repeatable trust-builder, not a real bounty. Reward is
+# affinity only (Coffee's explicit call, confirmed via AskUserQuestion)
+# -- no gold/XP, unlike every other board quest, so this screen's
+# purpose stays singular.
+COMPANION_FAVOR_COUNT_RANGE = {"defeat": (1, 2), "gather": (2, 3)}
+COMPANION_FAVOR_REWARD_AFFINITY = 5
+COMPANION_FAVOR_LOCATION_PREFIX = "companion_favor:"
+
+FAVOR_DEFEAT_TITLES = [
+    "A favor: deal with the {plural}",
+    "Could use a hand with the {plural}",
+]
+FAVOR_GATHER_TITLES = [
+    "A favor: bring some {name}",
+    "Could use a hand gathering {name}",
+]
+
+
+def _recruit_location_for_npc(campaign_data: dict, npc_id: str) -> dict | None:
+    """
+    Companion favors need a real monster/resource-node pool to draw
+    from, same as a location board quest, but campaign.json's npc
+    entries don't store their own location directly -- reverse-looked-
+    up the same way _npc_id_for_companion_name in bot.py already does
+    the opposite direction (name -> npc_id).
+    """
+    for location_id in cl.get_all_location_ids(campaign_data):
+        location = cl.get_location(campaign_data, location_id)
+        if location and npc_id in (location.get("npcs") or []):
+            return location
+    return None
+
+
+def _non_boss_monster_keys(campaign_data: dict, location: dict) -> list[str]:
+    """Companion Favors stay "easy and attainable" (per Coffee's explicit request) -- never assigns a real boss-tier monster as the defeat target."""
+    return [
+        m for m in location.get("monsters", [])
+        if not (campaign_data["monsters"].get(m) or {}).get("is_boss")
+    ]
+
+
+def get_or_generate_companion_favor(campaign_data: dict, npc_id: str, chat_id: int) -> dict | None:
+    """
+    One active (accepted or not, not yet completed) small favor per
+    recruited companion at a time -- generates a fresh one once the
+    current one's done, same daily-period-key regen cadence a real
+    board quest already has, so an abandoned one doesn't block forever.
+    Returns None only if this campaign genuinely has nothing to build
+    an objective from anywhere (never expected in practice, but no
+    location falls back gracefully instead of raising).
+    """
+    location_id = COMPANION_FAVOR_LOCATION_PREFIX + npc_id
+    existing = db.get_active_board_quests(location_id, chat_id, _day_key(), tier="daily")
+    active = [q for q in existing if not q.get("completed_at")]
+    if active:
+        return active[0]
+
+    location = _recruit_location_for_npc(campaign_data, npc_id)
+
+    def _has_favor_content(loc: dict | None) -> bool:
+        return bool(loc) and bool(_non_boss_monster_keys(campaign_data, loc) or loc.get("resource_nodes"))
+
+    # Falls back to any location with real non-boss monsters/resource
+    # nodes if this companion's own recruit spot has neither (or
+    # couldn't be found) -- generation should never silently produce
+    # nothing just because one specific location happens to be thin on
+    # content, or its only monster there is a real boss.
+    candidate_locations = [location] if location else []
+    if not _has_favor_content(location):
+        for loc_id in cl.get_all_location_ids(campaign_data):
+            loc = cl.get_location(campaign_data, loc_id)
+            if _has_favor_content(loc):
+                candidate_locations.append(loc)
+                break
+
+    monster_options, node_options = [], []
+    for loc in candidate_locations:
+        if loc:
+            monster_options = monster_options or _non_boss_monster_keys(campaign_data, loc)
+            node_options = node_options or loc.get("resource_nodes", [])
+
+    options = []
+    if monster_options:
+        options.append("defeat")
+    if node_options:
+        options.append("gather")
+    if not options:
+        return None
+
+    kind = random.choice(options)
+    if kind == "defeat":
+        monster_key = random.choice(monster_options)
+        monster_data = campaign_data["monsters"][monster_key]
+        count = random.randint(*COMPANION_FAVOR_COUNT_RANGE["defeat"])
+        title = random.choice(FAVOR_DEFEAT_TITLES).format(plural=_plural(monster_data["name"]))
+        description = f"Could use a hand dealing with {count}x {monster_data['name']}."
+        return db.create_board_quest(
+            location_id, chat_id, _day_key(), title, description, npc_id,
+            "defeat_monster", monster_key, count, 0, 0, tier="daily",
+            reward_affinity=COMPANION_FAVOR_REWARD_AFFINITY,
+        )
+
+    node = random.choice(node_options)
+    material_id = node["material"]
+    material_data = items_module.get_item(material_id) or {"name": material_id.replace("_", " ").title()}
+    count = random.randint(*COMPANION_FAVOR_COUNT_RANGE["gather"])
+    title = random.choice(FAVOR_GATHER_TITLES).format(name=material_data["name"])
+    description = f"Could use {count}x {material_data['name']}, if you happen to come across any."
+    return db.create_board_quest(
+        location_id, chat_id, _day_key(), title, description, npc_id,
+        "gather_material", material_id, count, 0, 0, tier="daily",
+        reward_affinity=COMPANION_FAVOR_REWARD_AFFINITY,
+    )
+
+
 def _faction_for_npc(campaign_data: dict, npc_id: str | None) -> str | None:
     if not npc_id:
         return None
