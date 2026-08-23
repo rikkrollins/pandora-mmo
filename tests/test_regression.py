@@ -19315,6 +19315,28 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         fallen_player = {"name": "ReproPlayer", "monster_key": None}
         self.assertTrue(bot._defeat_image_prompt(fallen_player).startswith("ReproPlayer,"))
 
+    def test_item_image_prompt_puts_the_real_name_first(self):
+        """
+        Real dev-bridge report (2026-08-23, Coffee, screenshot, on a
+        generated "Wood" image): "This doesn't look like a log of
+        wood" -- rendered as an ornate circular medallion instead.
+        Same exact root cause as the 2026-08-06 monster-image fix
+        (verified in that test above): the real name sat buried after
+        the generic "fantasy RPG {rarity} {type} icon" framing, which
+        the image model weighted far more heavily. This can't re-run
+        the live image API in the regression suite, so it verifies the
+        one thing that actually matters: the real item name is now the
+        first thing in the prompt, for a plain material, a rarer item,
+        and one with a real enchant/forge "note" attached.
+        """
+        wood = {"name": "Wood", "type": "material", "rarity": "common"}
+        self.assertTrue(bot._item_image_prompt(wood).startswith("Wood,"))
+
+        ring = {"name": "Ring of Warmth", "type": "ring", "rarity": "rare", "note": "Warm to the touch, like a coal that never quite goes out"}
+        prompt = bot._item_image_prompt(ring)
+        self.assertTrue(prompt.startswith("Ring of Warmth,"))
+        self.assertIn("Warm to the touch", prompt)  # the real customization detail is still preserved, just not first
+
     def test_spell_and_ability_image_prompts_exclude_a_person(self):
         """
         Real live feedback (2026-08-10, Coffee, dev-bridge screenshot):

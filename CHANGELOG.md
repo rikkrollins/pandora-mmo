@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.336] — Item images now render the actual item, not a generic icon
+
+**Real dev-bridge report (2026-08-23, Coffee, screenshot, on a
+generated "Wood" image): "This doesn't look like a log of wood"** —
+rendered as an ornate circular medallion/compass instead.
+
+Same exact root cause already confirmed and fixed for monster images
+back on 2026-08-06 ("These images don't really look like a crystal
+spider"): the item's real name sat buried in the *middle* of the image
+prompt, after the generic "fantasy RPG {rarity} {type} icon" framing —
+the image model weighted "icon" far more heavily than the actual name
+that followed it, rendering a generic decorative icon shape instead of
+the named thing. Moving the real name to the front of the prompt (the
+same reorder already proven to work for monsters) is the fix — applies
+to every item, not just Wood, since every item's prompt buried its
+name the same way. The item's own real enchant/forge "note" flavor
+text (e.g. "Warm to the touch...") is still preserved, just no longer
+first.
+
+Can't re-run the live image API in the regression suite, so verified
+the one thing that actually matters: the real item name is now the
+first thing in the prompt string, for a plain material, a rarer item,
+and one with a real customization note attached — confirmed to fail
+against the prior code and pass after.
+
 ## [1.27.335] — "Not your turn" now names whose turn it actually is
 
 **Real live report (2026-08-23, Coffee, screenshot): "the push
