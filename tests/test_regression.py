@@ -4079,6 +4079,56 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id, chat_id)
         self.assertEqual(character["inventory"].get("moonpetal", 0), 0)  # delivered, not kept
 
+    async def test_gathering_credits_a_favor_a_different_party_member_accepted(self):
+        """
+        Real live bug (2026-08-23, Coffee, screenshot: "I just
+        completed this task and it didn't recognize that I did it. I
+        had two successful gathering of bait" -- the favor still
+        showed "(1 of 2) — being handled by Laurienna"). Root cause:
+        gather crediting only ever checked the CURRENT gatherer's own
+        accepted board quests -- a different real party member
+        (Laurienna) had actually accepted this exact favor, so
+        Coffee's own gathering never even looked at it. Same real gap
+        already fixed for defeat_monster crediting in v1.27.328, just
+        missed here. Credit goes to whoever ACCEPTED it (Laurienna),
+        matching the defeat_monster path's own precedent; the material
+        comes out of whoever actually GATHERED it (Coffee).
+        """
+        from unittest.mock import patch
+        import board_quests
+        chat_id = -999056
+        accepter_id = 901010
+        gatherer_id = 901011
+        make_basic_character(accepter_id, "FavorAccepterLaurienna", chat_id=chat_id, current_location="stonearch_bridge")
+        party_id = db.create_party(accepter_id, chat_id)
+        make_basic_character(gatherer_id, "FavorGathererCoffee", chat_id=chat_id, current_location="stonearch_bridge")
+        db.update_character(gatherer_id, chat_id, party_id=party_id)
+        companion_id = -901012
+        make_basic_character(companion_id, "Sarah", chat_id=chat_id, current_location="crossroads_tavern", is_ai=True)
+        db.update_character(companion_id, chat_id, party_id=party_id)
+
+        favor = db.create_board_quest(
+            board_quests.COMPANION_FAVOR_LOCATION_PREFIX + "sera_wanderer", chat_id, "test-day",
+            "Could use a hand gathering Bait", "...", "sera_wanderer",
+            "gather_material", "bait", 2, 0, 0, tier="daily",
+            reward_affinity=board_quests.COMPANION_FAVOR_REWARD_AFFINITY,
+        )
+        db.accept_board_quest(favor["board_quest_id"], accepter_id, chat_id)  # Laurienna accepts
+        before_affinity = db.get_relationship(accepter_id, chat_id, "sera_wanderer")["affinity"]
+
+        sink = []
+        with patch("bot.narrate_skill_check", return_value="A quiet, successful gathering."):
+            for _ in range(favor["objective_count"]):
+                await bot._do_gather(  # Coffee gathers, never having accepted the favor himself
+                    FakeUpdate(gatherer_id, "gather bait", sink, chat_id=chat_id), "gather bait", forced_roll=20,
+                )
+        after_affinity = db.get_relationship(accepter_id, chat_id, "sera_wanderer")["affinity"]
+        self.assertEqual(after_affinity - before_affinity, board_quests.COMPANION_FAVOR_REWARD_AFFINITY)
+        completed = db.get_active_board_quests(favor["location_id"], chat_id, favor["day_key"], tier="daily")
+        self.assertTrue(any(q["board_quest_id"] == favor["board_quest_id"] and q["completed_at"] for q in completed))
+        # The bait came out of whoever actually gathered it, not the accepter (who never had it).
+        self.assertEqual(db.get_character(gatherer_id, chat_id)["inventory"].get("bait", 0), 0)
+
     async def test_defeating_a_monster_credits_a_companion_favor_via_a_real_combat_victory(self):
         """
         Same real design point as the gather test above, proven through

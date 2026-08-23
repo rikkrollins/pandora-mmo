@@ -16401,7 +16401,27 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
         # accepted on a previous calendar day but still inside its real
         # 24h expires_at window must still be creditable; day_key is
         # only about what's currently postable, not what's still valid.
-        for board_quest in db.get_accepted_board_quests_for_user(update.effective_user.id, update.effective_chat.id):
+        candidates = [(q, character) for q in db.get_accepted_board_quests_for_user(update.effective_user.id, update.effective_chat.id)]
+        seen_ids = {q["board_quest_id"] for q, _ in candidates}
+        # Companion Favors are party-wide (2026-08-23) -- real live bug
+        # (Coffee, screenshot: "I had two successful gathering of bait"
+        # but the favor still showed 1 of 2): his own gather only ever
+        # checked HIS OWN accepted quests above, never a party-mate's
+        # -- a different real party member (Laurienna) had actually
+        # accepted this exact favor. Same real gap already fixed for
+        # defeat_monster crediting in v1.27.328, just missed here.
+        # Reuses _accepted_companion_favors_for_party (built for the
+        # My Quests fix, v1.27.329). Credit still goes to whoever
+        # ACCEPTED the favor, matching the defeat_monster path's own
+        # precedent -- not necessarily whoever's doing the gathering.
+        for q in _accepted_companion_favors_for_party(character):
+            if q["board_quest_id"] not in seen_ids:
+                accepter = db.get_character(q["accepted_by"], update.effective_chat.id)
+                if accepter:
+                    candidates.append((q, accepter))
+                    seen_ids.add(q["board_quest_id"])
+
+        for board_quest, credited_character in candidates:
             # Companion Favors (2026-08-23) travel with the party, not
             # a location -- creditable regardless of where the player
             # currently stands, as long as the favor's own companion is
@@ -16421,7 +16441,7 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
             updated = db.record_board_quest_progress(board_quest["board_quest_id"], quantity)
             if updated["progress_count"] >= updated["objective_count"]:
                 if is_companion_favor:
-                    message += _complete_companion_favor(update, character, updated)
+                    message += _complete_companion_favor(update, credited_character, updated, gathered_by=character)
                 elif updated.get("branch_data"):
                     message += (
                         f"\n📜 **{updated['title']}** — objective complete. A decision awaits "
@@ -21819,7 +21839,7 @@ def _accepted_companion_favors_for_party(character: dict) -> list[dict]:
     return favors
 
 
-def _complete_companion_favor(update: Update, character: dict, board_quest: dict) -> str:
+def _complete_companion_favor(update: Update, character: dict, board_quest: dict, gathered_by: dict | None = None) -> str:
     """
     Companion Favors auto-complete the instant their objective is met
     -- unlike a normal board quest, there's no "place" to walk back to
@@ -21829,10 +21849,21 @@ def _complete_companion_favor(update: Update, character: dict, board_quest: dict
     fix _check_board_quest_turnin already applies to real board
     quests) and grants the real, small affinity reward. Returns the
     confirmation line to append to the caller's own message.
+
+    `character` is whoever gets the real affinity reward -- the
+    ACCEPTER of the favor, matching the defeat_monster crediting
+    path's own precedent (credit goes to whoever accepted it, not
+    necessarily whoever landed the killing blow). `gathered_by`
+    defaults to `character` (the common case: the accepter gathered
+    it themselves) and only needs to differ for a real party-wide
+    credit (2026-08-23) -- the gathered material always has to come
+    out of whoever's OWN backpack it actually landed in, which is the
+    real gatherer, not necessarily the favor's accepter.
     """
+    actor = gathered_by or character
     if board_quest["objective_type"] == "gather_material":
         db.remove_item(
-            character["telegram_user_id"], update.effective_chat.id,
+            actor["telegram_user_id"], update.effective_chat.id,
             board_quest["objective_target"], board_quest["objective_count"],
         )
     db.complete_board_quest(board_quest["board_quest_id"])

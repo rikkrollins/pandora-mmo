@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.334] — Gather crediting is now party-wide for Companion Favors too
+
+**Real dev-bridge report (2026-08-23, Coffee, screenshot): "I just
+completed this task and it didn't recognize that I did it. I had two
+successful gathering of bait"** — the favor still showed "(1 of 2) —
+being handled by Laurienna."
+
+Same bug class as the v1.27.328 defeat_monster crediting fix, just
+missed on the gather path: gather crediting only ever checked the
+*current gatherer's own* accepted board quests — a different real
+party member (Laurienna) had actually accepted this exact favor, so
+Coffee's own gathering never looked at it. Now reuses
+`_accepted_companion_favors_for_party` (already built for the My
+Quests fix, v1.27.329) to also check every accepted favor across the
+whole party. Credit still goes to whoever *accepted* the favor
+(matching the defeat_monster path's own precedent), while the gathered
+material correctly comes out of whoever actually *gathered* it —
+`_complete_companion_favor` gained an optional `gathered_by` parameter
+for this split.
+
+Verified with a new test reproducing the exact reported bug against
+the prior code (fails) and the fix (passes), plus a 9-test collateral
+run across gather/companion-favor/My-Quests confirmed unaffected.
+
 ## [1.27.333] — Natural-language battlefield commands: different rows per person, class-based bulk moves, linked one-turn actions, party-wide retreat
 
 **Real dev-bridge request (2026-08-23, Coffee), the rest of the
