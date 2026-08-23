@@ -14804,7 +14804,7 @@ async def _do_show_party_sheets_menu(update: Update) -> None:
     )
 
 
-async def _do_show_affinity_menu(update: Update) -> None:
+async def _do_show_affinity_menu(update: Update, text: str = "") -> None:
     """
     Real request (2026-08-23, Coffee: "lets work on affinity menu so
     players arent guessing. i want info from the AI players (Lv, Class,
@@ -14818,6 +14818,16 @@ async def _do_show_affinity_menu(update: Update) -> None:
     number or what to do about it. One message per recruited AI
     companion, same one-card-per-member pattern _do_check_party's
     sheets view already uses.
+
+    Real follow-up (2026-08-23, Coffee, dev-bridge screenshot): "Allow
+    this to work for individual characters" -- naming one companion
+    (e.g. "Show the affinity of PIP") used to still dump the WHOLE
+    roster instead of just that one. Reuses the exact same free-text
+    matcher (_match_member_by_name_or_username) every other "name a
+    party member" targeting call site in this file already shares --
+    full-name first, single-candidate first-name fallback. A named but
+    unmatched companion falls back to showing everyone rather than a
+    dead end.
     """
     telegram_user_id = update.effective_user.id
     chat_id = update.effective_chat.id
@@ -14840,6 +14850,11 @@ async def _do_show_affinity_menu(update: Update) -> None:
             speak=False,
         )
         return
+
+    if text:
+        named = _match_member_by_name_or_username(text, companions)
+        if named is not None:
+            companions = [named]
 
     await update.effective_chat.send_message(
         f"💞 **Companion trust ({len(companions)}):**",
@@ -26979,7 +26994,7 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     elif action == "check_party":
         await _do_check_party(update, text)
     elif action == "check_affinity":
-        await _do_show_affinity_menu(update)
+        await _do_show_affinity_menu(update, text)
     elif action == "check_menu":
         await _do_show_menu(update)
     elif action == "check_formation":

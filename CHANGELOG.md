@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.330] — Affinity Menu can now be narrowed to one named companion
+
+**Real dev-bridge report (2026-08-23, Coffee, screenshot): "Allow this
+to work for individual characters"** — asking "Show the affinity of
+PIP" still dumped the whole companion roster instead of just Pip.
+
+The Affinity Menu now reuses the exact same free-text name matcher
+every other "name a party member" targeting spot in this game already
+shares (`_match_member_by_name_or_username` — full name first, a
+single-candidate first-name fallback, e.g. "PIP" → Pip Thistledown) —
+naming one companion narrows the screen to just their own card; a
+plain "check my affinity" with no name still shows everyone, as
+before. The screenshot also confirmed "show/view/open/see" phrasing
+already worked (any sentence containing "affinity" or "trust" already
+routes correctly) — no separate fix was needed there.
+
+Verified with 2 new tests (named companion narrows to one card; no
+name still shows the full roster), plus a 7-test collateral run across
+the Affinity Menu surface.
+
 ## [1.27.329] — "My Quests" now shows the whole party's accepted Companion Favors
 
 **Real live bug (2026-08-23, Coffee): "i am not seeing current

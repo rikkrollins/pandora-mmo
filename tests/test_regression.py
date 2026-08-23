@@ -4261,6 +4261,50 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_show_affinity_menu(FakeUpdate(user_id, "", sink, chat_id=chat_id))
         self.assertTrue(any("haven't recruited" in s for s in sink))
 
+    async def test_affinity_menu_narrows_to_one_named_companion(self):
+        """
+        Real dev-bridge follow-up (2026-08-23, Coffee, screenshot):
+        "Allow this to work for individual characters" -- naming one
+        companion (e.g. "Show the affinity of PIP") used to still dump
+        the whole roster instead of just that one.
+        """
+        chat_id = -999053
+        user_id = 900996
+        make_basic_character(user_id, "AffinityNamedTester", chat_id=chat_id, current_location="crossroads_tavern")
+        party_id = db.create_party(user_id, chat_id)
+        pip_id = -900997
+        make_basic_character(pip_id, "Pip Thistledown", chat_id=chat_id, current_location="stonearch_bridge", is_ai=True)
+        db.update_character(pip_id, chat_id, party_id=party_id)
+        wren_id = -900998
+        make_basic_character(wren_id, "Wren Hollowbrook", chat_id=chat_id, current_location="hollow_stump_shrine", is_ai=True)
+        db.update_character(wren_id, chat_id, party_id=party_id)
+
+        sink = []
+        await bot._do_show_affinity_menu(FakeUpdate(user_id, "Show the affinity of PIP", sink, chat_id=chat_id), "Show the affinity of PIP")
+        combined = "\n".join(sink)
+        self.assertIn("Companion trust (1)", combined)
+        self.assertIn("Pip Thistledown", combined)
+        self.assertNotIn("Wren Hollowbrook", combined)
+
+    async def test_affinity_menu_shows_everyone_when_no_companion_is_named(self):
+        chat_id = -999054
+        user_id = 900999
+        make_basic_character(user_id, "AffinityUnnamedTester", chat_id=chat_id, current_location="crossroads_tavern")
+        party_id = db.create_party(user_id, chat_id)
+        pip_id = -901000
+        make_basic_character(pip_id, "Pip Thistledown", chat_id=chat_id, current_location="stonearch_bridge", is_ai=True)
+        db.update_character(pip_id, chat_id, party_id=party_id)
+        wren_id = -901001
+        make_basic_character(wren_id, "Wren Hollowbrook", chat_id=chat_id, current_location="hollow_stump_shrine", is_ai=True)
+        db.update_character(wren_id, chat_id, party_id=party_id)
+
+        sink = []
+        await bot._do_show_affinity_menu(FakeUpdate(user_id, "check my affinity", sink, chat_id=chat_id), "check my affinity")
+        combined = "\n".join(sink)
+        self.assertIn("Companion trust (2)", combined)
+        self.assertIn("Pip Thistledown", combined)
+        self.assertIn("Wren Hollowbrook", combined)
+
     async def test_accept_favor_button_accepts_the_exact_board_quest_shown(self):
         """Same class of bug just fixed in v1.27.326 for story quests -- verify the new callback explicitly, don't assume it's safe by construction."""
         import board_quests
