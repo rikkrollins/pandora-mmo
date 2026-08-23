@@ -16441,6 +16441,23 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
                     candidates.append((q, accepter))
                     seen_ids.add(q["board_quest_id"])
 
+        # Real live bug (2026-08-23, Coffee, screenshot: "I completed
+        # this task and it didnt credit it"): this loop used to `break`
+        # after crediting the FIRST matching candidate, so a player
+        # with their OWN personal board quest for the same material at
+        # the same location (very common -- both quests/favors for a
+        # given node share that node's one material) silently ate the
+        # single credit, and a party-mate's Companion Favor for that
+        # same material never got touched even though the gather
+        # genuinely succeeded and the item landed in inventory. Live DB
+        # confirmed: Ravenloft's own "[Monthly] A supply run for
+        # Moonpetal Flower" quest got the 3x credit (28->31 would have
+        # been next) while Wren's favor (accepted by party-mate
+        # Laurienna) stayed at 0/3. defeat_monster crediting
+        # (_award_victory_xp) never had this bug -- it already credits
+        # every eligible match with no break. Matching that precedent:
+        # one real gather now credits EVERY matching quest/favor at
+        # once, not just whichever happened to be first in the list.
         for board_quest, credited_character in candidates:
             # Companion Favors (2026-08-23) travel with the party, not
             # a location -- creditable regardless of where the player
@@ -16485,7 +16502,6 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
                     f"\n📋 Board quest progress: {updated['title']} "
                     f"({updated['progress_count']}/{updated['objective_count']})"
                 )
-            break
 
     await _safe_send(update, message)
     if success:

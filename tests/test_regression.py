@@ -4129,6 +4129,69 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # The bait came out of whoever actually gathered it, not the accepter (who never had it).
         self.assertEqual(db.get_character(gatherer_id, chat_id)["inventory"].get("bait", 0), 0)
 
+    async def test_gathering_credits_a_players_own_quest_and_a_partys_favor_from_one_gather(self):
+        """
+        Real live bug (2026-08-23, Coffee, screenshot: "I completed this
+        task and it didnt credit it" -- gathered 3x Moonpetal Flower,
+        which correctly bumped his OWN personal board quest ("[Monthly]
+        A supply run for Moonpetal Flower", 28/65), but a party-mate's
+        Companion Favor for the same material (Wren's favor, accepted by
+        Laurienna) stayed stuck at 0/3). Root cause: the crediting loop
+        `break`d after the first matching candidate -- a player's own
+        personal board quest for the same material at the same location
+        is common (both draw from the location's one resource node) and
+        always sorted first, so it silently ate the only credit every
+        time, regardless of whether a party favor also matched. Fixed to
+        credit every real match, same as _award_victory_xp already does
+        for defeat_monster favors (no break there either).
+        """
+        from unittest.mock import patch
+        import board_quests
+        chat_id = -999049
+        gatherer_id = 900986
+        accepter_id = 900987
+        make_basic_character(gatherer_id, "OwnQuestGatherer", chat_id=chat_id, current_location="hollow_stump_shrine")
+        party_id = db.create_party(gatherer_id, chat_id)
+        make_basic_character(accepter_id, "PartyFavorAccepter", chat_id=chat_id, current_location="crossroads_tavern")
+        db.update_character(accepter_id, chat_id, party_id=party_id)
+        companion_id = -900988
+        make_basic_character(companion_id, "Wren Hollowbrook", chat_id=chat_id, current_location="hollow_stump_shrine", is_ai=True)
+        db.update_character(companion_id, chat_id, party_id=party_id)
+
+        # The gatherer's own personal board quest at his own location -- this is what used to eat the credit.
+        own_quest = db.create_board_quest(
+            "hollow_stump_shrine", chat_id, "test-day",
+            "A supply run for Moonpetal Flower", "...", None,
+            "gather_material", "moonpetal", 65, 0, 0, tier="monthly",
+        )
+        db.accept_board_quest(own_quest["board_quest_id"], gatherer_id, chat_id)
+
+        # A party-mate's Companion Favor for the same material -- this is what silently never got touched.
+        favor = db.create_board_quest(
+            board_quests.COMPANION_FAVOR_LOCATION_PREFIX + "wren_hollowbrook", chat_id, "test-day",
+            "Could use a hand gathering Moonpetal Flower", "...", "wren_hollowbrook",
+            "gather_material", "moonpetal", 3, 0, 0, tier="daily",
+            reward_affinity=board_quests.COMPANION_FAVOR_REWARD_AFFINITY,
+        )
+        db.accept_board_quest(favor["board_quest_id"], accepter_id, chat_id)
+        before_affinity = db.get_relationship(accepter_id, chat_id, "wren_hollowbrook")["affinity"]
+
+        sink = []
+        with patch("bot.narrate_skill_check", return_value="A quiet, successful gathering."):
+            for _ in range(favor["objective_count"]):
+                await bot._do_gather(
+                    FakeUpdate(gatherer_id, "gather moonpetal", sink, chat_id=chat_id), "gather moonpetal", forced_roll=20,
+                )
+
+        updated_own = db.get_active_board_quests("hollow_stump_shrine", chat_id, "test-day", tier="monthly")
+        own_row = next(q for q in updated_own if q["board_quest_id"] == own_quest["board_quest_id"])
+        self.assertGreater(own_row["progress_count"], 0)  # the personal quest still credits, same as before
+
+        after_affinity = db.get_relationship(accepter_id, chat_id, "wren_hollowbrook")["affinity"]
+        self.assertGreater(after_affinity, before_affinity)  # the party favor is now ALSO credited, not skipped
+        completed_favor = db.get_active_board_quests(favor["location_id"], chat_id, "test-day", tier="daily")
+        self.assertTrue(any(q["board_quest_id"] == favor["board_quest_id"] and q["completed_at"] for q in completed_favor))
+
     async def test_defeating_a_monster_credits_a_companion_favor_via_a_real_combat_victory(self):
         """
         Same real design point as the gather test above, proven through

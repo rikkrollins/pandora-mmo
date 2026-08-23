@@ -2,6 +2,28 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.338] — Gathering credits ALL matching quests/favors now, not just the first
+
+**Real dev-bridge report (2026-08-23, Coffee, screenshot): "I completed
+this task and it didnt credit it."** Gathered 3x Moonpetal Flower at
+Hollow Stump Shrine (Wisdom 20 vs DC 13, a clean success) — his own
+personal board quest ("[Monthly] A supply run for Moonpetal Flower")
+correctly ticked up to 28/65, but Wren's Companion Favor for the same
+material (accepted by party-mate Laurienna) stayed stuck at 0/3.
+
+Root cause, confirmed live via the DB: `_do_gather`'s crediting loop
+`break`d after the FIRST matching candidate. A player's own personal
+board quest for a location's material is common — both a personal
+quest and a Companion Favor can easily target the same node's one
+material at once — and the personal quest was always built first in
+the candidate list, so it silently ate the only credit every time,
+regardless of whether a party favor also matched the same gather.
+`_award_victory_xp`'s defeat_monster crediting never had this bug (no
+`break` there) — one real kill already credits every eligible match.
+Gathering now does the same: one successful gather credits every
+matching personal quest AND every matching party Companion Favor at
+once, not just whichever happened to be first.
+
 ## [1.27.337] — v1.27.336's item-image fix was too broad — scoped back to just Wood
 
 **Real dev-bridge report (2026-08-23, Coffee, screenshot, on a
