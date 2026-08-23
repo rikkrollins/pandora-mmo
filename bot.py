@@ -22041,9 +22041,22 @@ def _check_story_gate(character: dict, current: dict, destination_id: str) -> st
             for npc_id in companion_npc_ids
         )
         if not trusted:
+            # Real dev-bridge request (2026-08-23, Coffee: "Now that we
+            # have fixed the affinity system and it makes more sense.
+            # Can you please modify this message to explain to the
+            # players that an AI companion needs minimum of 40 affinity
+            # points and then tell them they can look up the affinity
+            # by typing affinity"). The old line was deliberately vague
+            # in-fiction flavor text with no real number and no hint
+            # how to check it -- same blind-gate problem the Affinity
+            # Menu (v1.27.327) was built to fix everywhere else, just
+            # missed at this one rejection message. min_affinity is
+            # interpolated directly (not hardcoded 40) so this stays
+            # correct if campaign.json's own gate value ever changes.
             return (
-                "None of your companions are ready to go any further — whatever "
-                "waits ahead, they need to trust this path (and you) more first."
+                f"None of your companions are ready to go any further — at least one needs "
+                f"**{min_affinity}+ affinity** with you first. Type **affinity** to check where "
+                f"everyone stands."
             )
 
     return None

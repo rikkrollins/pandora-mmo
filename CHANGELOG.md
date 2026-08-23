@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.340] — The Hush Below's trust gate now states the real number
+
+**Real dev-bridge request (2026-08-23, Coffee, screenshot): "Now that
+we have fixed the affinity system and it makes more sense. Can you
+please modify this message to explain to the players that an AI
+companion needs minimum of 40 affinity points and then tell them they
+can look up the affinity by typing affinity. If there is any other
+places in the game where we need a certain affinity number to
+continue, please make sure it's stated for the player."**
+
+The Hush Below → The First City rejection ("None of your companions
+are ready to go any further... they need to trust this path (and you)
+more first") was deliberately vague in-fiction flavor text with no
+real number and no hint how to check it — the exact blind-gate problem
+the Affinity Menu (v1.27.327) was built to fix everywhere else, just
+missed at this one rejection message. Now reads: "...at least one
+needs **40+ affinity** with you first. Type **affinity** to check
+where everyone stands." (interpolates the gate's real `min_affinity`
+value, not a hardcoded 40, so it stays correct if that ever changes).
+
+Audited the rest of the campaign for Coffee's second ask: this is the
+ONLY `requires_companion_trust`/`min_affinity` gate that exists
+anywhere in `campaigns/default/campaign.json` — nothing else needed
+the same treatment.
+
 ## [1.27.339] — Two more raw sends hardened against flood control
 
 Real error-log hits (2026-08-23): `telegram.error.RetryAfter` at

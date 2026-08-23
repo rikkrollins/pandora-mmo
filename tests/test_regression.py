@@ -4192,6 +4192,40 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         completed_favor = db.get_active_board_quests(favor["location_id"], chat_id, "test-day", tier="daily")
         self.assertTrue(any(q["board_quest_id"] == favor["board_quest_id"] and q["completed_at"] for q in completed_favor))
 
+    def test_companion_trust_gate_rejection_states_the_real_number_and_how_to_check_it(self):
+        """
+        Real dev-bridge request (2026-08-23, Coffee, screenshot of The
+        Hush Below's rejection): "Can you please modify this message to
+        explain to the players that an AI companion needs minimum of 40
+        affinity points and then tell them they can look up the
+        affinity by typing affinity." The old line ("None of your
+        companions are ready to go any further... they need to trust
+        this path (and you) more first") gave no real number and no
+        hint how to check it -- the exact blind-gate problem the
+        Affinity Menu (v1.27.327) was built to fix everywhere else.
+        min_affinity is read off the gate itself (not hardcoded 40) so
+        this stays correct even if campaign.json's own value changes.
+        """
+        chat_id = -999050
+        user_id = 900989
+        make_basic_character(user_id, "GateWalker", chat_id=chat_id, current_location="the_hush_below")
+        party_id = db.create_party(user_id, chat_id)
+        companion_id = -900990
+        make_basic_character(companion_id, "Wren Hollowbrook", chat_id=chat_id, current_location="the_hush_below", is_ai=True)
+        db.update_character(companion_id, chat_id, party_id=party_id)
+
+        current = {"story_gates": {"the_deep_beyond": {"requires_companion_trust": {"min_affinity": 40}}}}
+        character = db.get_character(user_id, chat_id)
+
+        rejection = bot._check_story_gate(character, current, "the_deep_beyond")
+        self.assertIsNotNone(rejection)
+        self.assertIn("40", rejection)
+        self.assertIn("affinity", rejection.lower())
+
+        db.adjust_affinity(user_id, chat_id, "wren_hollowbrook", 40, event="test")
+        character = db.get_character(user_id, chat_id)
+        self.assertIsNone(bot._check_story_gate(character, current, "the_deep_beyond"))
+
     async def test_defeating_a_monster_credits_a_companion_favor_via_a_real_combat_victory(self):
         """
         Same real design point as the gather test above, proven through
