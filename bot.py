@@ -21716,13 +21716,32 @@ async def _do_use_item(update: Update, text: str) -> None:
         if undead_opposing:
             undead_enemy_target = _match_member_by_name_or_username(text, undead_opposing)
 
+    # Real dev-bridge report (2026-08-23, Coffee, screenshot: "I just
+    # tried to heal one of the lesser spirits, and for some reason it
+    # healed me?"): confirmed via the real callback log --
+    # `bm|usetarget|greater_healing_potion|A Lesser Spirit` correctly
+    # named the summon, but the target lookup below only ever searched
+    # `all_party_members` (a pure DB query, db.get_party_members_by_id_
+    # including_inactive_slots) -- a live combat-only summon (negative
+    # telegram_user_id, no DB row at all) can never be found there, so
+    # it silently fell through to `or character`, healing the CASTER
+    # instead every time, for 0 HP since Elduinn was already full.
+    # Same real gap _do_cast_spell's heal branch already had and fixed
+    # 2026-08-21 (Coffee: "we can heal them") via
+    # _find_live_summon_by_name -- reused here unchanged.
+    is_summon_target = False
     if undead_enemy_target is not None:
         target = undead_enemy_target
         is_self = False
         target_note = f" on **{target['name']}**"
     else:
-        target = _match_member_by_name_or_username(text, all_party_members) or character
-        is_self = target["telegram_user_id"] == character["telegram_user_id"]
+        target = None
+        if session is not None and user_id in session.turn_order:
+            target = _find_live_summon_by_name(text, session, session.sides.get(user_id))
+            is_summon_target = target is not None
+        if target is None:
+            target = _match_member_by_name_or_username(text, all_party_members) or character
+        is_self = not is_summon_target and target["telegram_user_id"] == character["telegram_user_id"]
         target_note = "" if is_self else f" on **{target['name']}**"
 
     removed, _ = db.remove_item(update.effective_user.id, update.effective_chat.id, item_id, 1)
@@ -21802,12 +21821,16 @@ async def _do_use_item(update: Update, text: str) -> None:
         new_hp = min(hp_before + healing["total"], hp_max)
         if live_target is not None:
             live_target["hp_current"] = new_hp
-        # character_id, not telegram_user_id -- see
-        # update_character_by_id's docstring (2026-07-24): target might
-        # be an alive-but-inactive party member (their owner is
-        # currently playing someone else), which update_character would
-        # silently misdirect to the wrong, actually-active character.
-        db.update_character_by_id(target["character_id"], hp_current=new_hp)
+        # A summon has no DB row to write -- live_target above already
+        # mutated the real session.participants dict in place, so the
+        # live combat state is already correct. character_id, not
+        # telegram_user_id, for a real target -- see update_character_
+        # by_id's docstring (2026-07-24): target might be an alive-but-
+        # inactive party member (their owner is currently playing
+        # someone else), which update_character would silently
+        # misdirect to the wrong, actually-active character.
+        if not is_summon_target:
+            db.update_character_by_id(target["character_id"], hp_current=new_hp)
         message = (
             f"🧪 **{character['name']}** uses a {item['name']}{target_note}, "
             f"healing {new_hp - hp_before} HP ({new_hp}/{hp_max})."

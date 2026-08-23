@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.323] — Healing potions can now target live combat summons
+
+**Real dev-bridge report (2026-08-23, Coffee, screenshot): "I just
+tried to heal one of the lesser spirits, and for some reason it
+healed me?"**
+
+Confirmed via the real callback log —
+`bm|usetarget|greater_healing_potion|A Lesser Spirit` correctly named
+the summon he wanted to heal, but `_do_use_item`'s target lookup only
+ever searched DB-backed party members (`db.get_party_members_by_id_
+including_inactive_slots`). A live combat-only summon (negative
+telegram_user_id, no DB row at all) can never appear there, so it
+silently fell back to healing the caster instead — every time, for 0
+HP, since he was already full. Same real gap `_do_cast_spell`'s heal
+branch already had and fixed on 2026-08-21 for spell healing
+(`_find_live_summon_by_name`) — reused here unchanged for potions.
+Verified with a real test that fails against the old code and passes
+with the fix, plus collateral checks.
+
 ## [1.27.322] — Global cap on simultaneous Weekly/Monthly board quests
 
 **Real request (2026-08-23, Coffee), after a real accepted-quest list

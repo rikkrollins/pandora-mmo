@@ -4679,6 +4679,50 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(live_summon["hp_current"], 20, "the live summon's own in-memory HP must have actually increased")
         sessions.end_session(-999)
 
+    async def test_healing_potion_targets_a_live_summon_by_name_not_the_caster(self):
+        """
+        Real dev-bridge report (2026-08-23, Coffee, screenshot: "I just
+        tried to heal one of the lesser spirits, and for some reason it
+        healed me?"). Confirmed via the real callback log --
+        `bm|usetarget|greater_healing_potion|A Lesser Spirit` correctly
+        named the summon, but the old target lookup only ever searched
+        DB-backed party members, so it silently fell back to healing
+        the CASTER instead every time. Same real gap _do_cast_spell's
+        heal branch already had and fixed 2026-08-21 for spells --
+        _do_use_item's own potion path needed the identical fix.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        uid = 900491
+        make_basic_character(uid, "PotionHealer", current_location="crossroads_tavern")
+        db.update_character(uid, -999, hp_current=600, hp_max=600, inventory={"greater_healing_potion": 1})
+        character = db.get_character(uid, -999)
+        character["telegram_user_id"] = uid
+        enemy = {"telegram_user_id": -5200916, "name": "UseSummonDummy", "dexterity": 10, "strength": 10,
+                 "armor_class": 5, "hp_current": 500, "hp_max": 500, "is_ai": 1}
+        summon = {"telegram_user_id": -4077777, "name": "A Lesser Spirit", "dexterity": 14, "strength": 10,
+                  "armor_class": 12, "hp_current": 20, "hp_max": 100, "is_ai": 1, "xp_reward": 0}
+        session = sessions.start_session(
+            -999, [character, enemy, summon], {uid: "party", -5200916: "enemy", -4077777: "party"},
+        )
+        session.turn_order = [uid, -4077777, -5200916]
+        session.current_turn_index = 0
+        sink = []
+        with patch("bot._get_combat_throttle_seconds", return_value=0.0), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            await bot._do_use_item(
+                FakeUpdate(uid, "use greater healing potion on A Lesser Spirit", sink),
+                "use greater healing potion on A Lesser Spirit",
+            )
+        live_summon = next(p for p in session.participants if p["telegram_user_id"] == -4077777)
+        self.assertGreater(live_summon["hp_current"], 20, "the live summon must be the one actually healed")
+        # The caster's own HP must be completely untouched -- this is
+        # the exact "healed me instead" bug being fixed.
+        self.assertEqual(db.get_character(uid, -999)["hp_current"], 600)
+        self.assertTrue(any("A Lesser Spirit" in m for m in sink), sink)
+        sessions.end_session(-999)
+
     async def test_summon_spirit_scroll_actually_advances_the_turn(self):
         """
         Real live bug (2026-08-21, Coffee: "when players use the scrolls
