@@ -5714,6 +5714,41 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot.battle_menu_callback(update, DummyContext())  # must not raise
         sessions.end_session(-999)
 
+    async def test_stale_battle_menu_tap_names_whose_turn_it_actually_is(self):
+        """
+        Real live report (2026-08-23, Coffee, screenshot: "the push
+        buttons showed up but i couldnt press them and it continued to
+        attack without my command" -- explicitly not a timeout).
+        Root-caused via the real live log: a burst of per-companion AI
+        narration hit Telegram's own flood control right as this exact
+        fight started, delaying delivery of the real "it's your turn"
+        prompt by 30s+ -- the buttons the player was actually tapping
+        were a stale menu from before that delay. A bare "It's not
+        your turn right now" gave no way to tell a genuinely stale tap
+        apart from a real bug; naming whose turn it is now gives the
+        player something actionable.
+        """
+        import sessions
+        sessions.end_session(-999)
+        stale_tapper_id, current_id = 900487, 900488
+        make_basic_character(stale_tapper_id, "StaleMenuTapper", current_location="crossroads_tavern")
+        make_basic_character(current_id, "ActualCurrentTurn", current_location="crossroads_tavern")
+        tapper = db.get_character(stale_tapper_id, -999)
+        tapper["telegram_user_id"] = stale_tapper_id
+        current = db.get_character(current_id, -999)
+        current["telegram_user_id"] = current_id
+        enemy = {"telegram_user_id": -5200907, "name": "StaleTurnEnemy", "dexterity": 10, "hp_current": 20, "hp_max": 20, "is_ai": 1}
+        session = sessions.start_session(-999, [tapper, current, enemy], {stale_tapper_id: "party", current_id: "party", -5200907: "enemy"})
+        session.turn_order = [current_id, stale_tapper_id, -5200907]
+        session.current_turn_index = 0  # genuinely current's turn, not the tapper's
+
+        sink = []
+        await bot.battle_menu_callback(FakeCallbackUpdate(stale_tapper_id, "bm|skills", sink), DummyContext())
+        combined = "\n".join(sink)
+        self.assertIn("ActualCurrentTurn", combined)
+        self.assertIn("not your turn", combined.lower())
+        sessions.end_session(-999)
+
     async def test_flurry_of_blows_rejects_non_monk(self):
         import sessions
         sessions.end_session(-999)

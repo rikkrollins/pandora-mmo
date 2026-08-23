@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.335] — "Not your turn" now names whose turn it actually is
+
+**Real live report (2026-08-23, Coffee, screenshot): "the push
+buttons showed up but i couldnt press them and it continued to attack
+without my command" — explicitly not a timeout.**
+
+Root-caused via the real live log, not guesswork: a burst of
+per-companion AI-turn narration hit Telegram's own flood control right
+as this exact fight started (a confirmed `RetryAfter` — "Flood control
+exceeded, retry in 37 seconds" — in the same minute as the report).
+That delay can push delivery of the actual "it's your turn" prompt out
+by 30+ seconds; the battle-menu buttons Coffee was actually looking at
+and tapping were a stale menu from *before* that delay, while the real
+game state (whose turn it is) had already moved on underneath it —
+tapping them correctly got refused, but with zero information about
+why, indistinguishable from a real bug.
+
+The rejection now names whose turn it genuinely is right now, so a
+stale tap reads as "oh, I'm looking at an old message" instead of "the
+game skipped me." This doesn't eliminate the underlying flood-control
+delay itself (a real, separate, bigger fix — likely consolidating the
+per-companion AI narration burst into fewer messages per round — is
+still open), but it turns a confusing dead end into something a
+player can actually act on immediately.
+
+Verified with a new test reproducing the exact symptom (a stale tap
+gets a bare, uninformative rejection) against the prior code and the
+fix, plus the existing stale-tap-never-crashes regression confirmed
+unaffected.
+
 ## [1.27.334] — Gather crediting is now party-wide for Companion Favors too
 
 **Real dev-bridge report (2026-08-23, Coffee, screenshot): "I just

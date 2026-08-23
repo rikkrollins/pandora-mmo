@@ -2999,7 +2999,27 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await asyncio.to_thread(db.touch_last_active, user_id, chat_id)
     session = sessions.get_session_for_user(chat_id, user_id)
     if session is None or session.current_participant_id() != user_id:
-        await _safe_answer(query, "It's not your turn right now.", show_alert=True)
+        # Real live report (2026-08-23, Coffee, screenshot: "the push
+        # buttons showed up but i couldnt press them and it continued
+        # to attack without my command" -- explicitly not a timeout).
+        # Root-caused via the real live log: a burst of per-companion
+        # AI-turn narration hit Telegram's own flood control right as
+        # this exact fight started (confirmed RetryAfter entries within
+        # the same minute), which can delay delivery of the actual
+        # "it's your turn" prompt by 30s+ -- the buttons the player was
+        # actually looking at and tapping were a STALE menu from before
+        # that delay, while game state had already moved on underneath
+        # it. Naming whose turn it genuinely is right now turns a dead-
+        # end "not your turn" into something the player can actually
+        # act on (wait for that companion's own AI turn to resolve, or
+        # recognize a newer prompt has since arrived) instead of
+        # silently retrying the same stale buttons.
+        current_name = session.current_participant()["name"] if session is not None else None
+        alert_text = (
+            f"It's not your turn right now — it's {current_name}'s turn. If you tapped an older message, "
+            f"check for a newer one below."
+        ) if current_name else "It's not your turn right now."
+        await _safe_answer(query, alert_text, show_alert=True)
         return
 
     parts = (query.data or "").split("|")
