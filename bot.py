@@ -9134,9 +9134,15 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
 
     async with _held_session(chat_id, update.effective_user.id) as session:
         if session is None:
-            await update.effective_chat.send_message(
-                "No combat is active right now.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-            )
+            # Real error-log hit (2026-08-23, bot.py:9137 in _do_attack):
+            # this raw send_message had no flood-control retry, so a
+            # genuine Telegram RetryAfter during a busy combat round
+            # just dropped this reply outright. _safe_send already
+            # exists for exactly this (up to 3 retries, honoring
+            # RetryAfter's own wait) -- same identical raw send was
+            # copy-pasted at every one of this guard's call sites, so
+            # fixed everywhere it appears, not just the one that errored.
+            await _safe_send(update, "No combat is active right now.")
             return
 
         user_id = update.effective_user.id
@@ -10494,9 +10500,15 @@ async def _do_shove(update: Update, action_text: str, forced_roll: int | None = 
     chat_id = update.effective_chat.id
     async with _held_session(chat_id, update.effective_user.id) as session:
         if session is None:
-            await update.effective_chat.send_message(
-                "No combat is active right now.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-            )
+            # Real error-log hit (2026-08-23, bot.py:9137 in _do_attack):
+            # this raw send_message had no flood-control retry, so a
+            # genuine Telegram RetryAfter during a busy combat round
+            # just dropped this reply outright. _safe_send already
+            # exists for exactly this (up to 3 retries, honoring
+            # RetryAfter's own wait) -- same identical raw send was
+            # copy-pasted at every one of this guard's call sites, so
+            # fixed everywhere it appears, not just the one that errored.
+            await _safe_send(update, "No combat is active right now.")
             return
 
         user_id = update.effective_user.id
@@ -10758,9 +10770,15 @@ async def _do_flee(update: Update, action_text: str, forced_roll: int | None = N
     chat_id = update.effective_chat.id
     async with _held_session(chat_id, update.effective_user.id) as session:
         if session is None:
-            await update.effective_chat.send_message(
-                "No combat is active right now.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-            )
+            # Real error-log hit (2026-08-23, bot.py:9137 in _do_attack):
+            # this raw send_message had no flood-control retry, so a
+            # genuine Telegram RetryAfter during a busy combat round
+            # just dropped this reply outright. _safe_send already
+            # exists for exactly this (up to 3 retries, honoring
+            # RetryAfter's own wait) -- same identical raw send was
+            # copy-pasted at every one of this guard's call sites, so
+            # fixed everywhere it appears, not just the one that errored.
+            await _safe_send(update, "No combat is active right now.")
             return
 
         user_id = update.effective_user.id
@@ -14976,10 +14994,11 @@ async def _do_show_affinity_menu(update: Update, text: str = "") -> None:
         if named is not None:
             companions = [named]
 
-    await update.effective_chat.send_message(
-        f"💞 **Companion trust ({len(companions)}):**",
-        message_thread_id=topics.thread_id_for(chat_id, "adventure"),
-    )
+    # Real error-log hit (2026-08-23): a raw send_message here had no
+    # flood-control retry, so a genuine Telegram RetryAfter during a
+    # busy moment just dropped this header outright. _safe_send exists
+    # for exactly this (up to 3 retries, honoring RetryAfter's own wait).
+    await _safe_send(update, f"💞 **Companion trust ({len(companions)}):**", speak=False)
     for member in companions:
         npc_id = _find_npc_id_by_name(member["name"])
         npc_data = CAMPAIGN["npcs"].get(npc_id) if npc_id else None
@@ -18041,9 +18060,15 @@ async def _do_use_environment(update: Update) -> None:
     chat_id = update.effective_chat.id
     async with _held_session(chat_id, update.effective_user.id) as session:
         if session is None:
-            await update.effective_chat.send_message(
-                "No combat is active right now.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-            )
+            # Real error-log hit (2026-08-23, bot.py:9137 in _do_attack):
+            # this raw send_message had no flood-control retry, so a
+            # genuine Telegram RetryAfter during a busy combat round
+            # just dropped this reply outright. _safe_send already
+            # exists for exactly this (up to 3 retries, honoring
+            # RetryAfter's own wait) -- same identical raw send was
+            # copy-pasted at every one of this guard's call sites, so
+            # fixed everywhere it appears, not just the one that errored.
+            await _safe_send(update, "No combat is active right now.")
             return
 
         user_id = update.effective_user.id

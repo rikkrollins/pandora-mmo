@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.339] — Two more raw sends hardened against flood control
+
+Real error-log hits (2026-08-23): `telegram.error.RetryAfter` at
+`bot.py` in both `_do_attack` ("No combat is active right now.") and
+`_do_show_affinity_menu` ("Companion trust (N):" header). Both were
+raw `update.effective_chat.send_message(...)` calls with no retry —
+`_safe_send` already exists precisely to survive a transient Telegram
+flood-control burst (up to 3 retries, honoring `RetryAfter`'s own
+requested wait), but these two call sites predated it and were never
+migrated. The "No combat is active right now." string was duplicated
+at 4 identical call sites in `_do_attack`-style guards — fixed at all
+4, not just the one that happened to error, since they're byte-
+identical copies of the same defect.
+
 ## [1.27.338] — Gathering credits ALL matching quests/favors now, not just the first
 
 **Real dev-bridge report (2026-08-23, Coffee, screenshot): "I completed
