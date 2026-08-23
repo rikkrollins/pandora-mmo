@@ -6693,6 +6693,57 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(after_hp, before_hp, "Assassin's Throw must guarantee a hit even against impossible AC")
         sessions.end_session(-999)
 
+    async def test_ai_turn_cascade_paces_itself_to_avoid_flood_control(self):
+        """
+        Real live bug (2026-08-23, Coffee: "it skipping my turn on
+        every battle... it just did it again"). Confirmed via log
+        correlation: a busy round resolving several AI-controlled
+        turns back-to-back genuinely hit Telegram's real flood control
+        (two real 429s, forced 14-17s waits) -- narration caching
+        (v1.27.193) made routine turns fast enough to blast through
+        15-20+ real Telegram sends well under Telegram's own burst
+        window. _ai_turn_pacing_delay is now called once per resolved
+        AI turn (skipping the very first, so the player's own
+        immediate feedback is never delayed). Verified here with a
+        real (unmocked) _resolve_ai_turns_inner cascade: enemy's turn
+        (iteration 1, no pacing) -> ally companion's turn (iteration 2,
+        pacing) -> reaches the real human's own turn (iteration 3,
+        pacing, then stops and announces). Every combatant given
+        effectively-impossible AC/HP so the real dice can't end the
+        fight early or knock anyone out, keeping the iteration count
+        deterministic.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        user_id = 950950
+        make_basic_character(user_id, "PacingTester", current_location="crossroads_tavern")
+        enemy_id, companion_id = -2_500_070, -2_500_071
+        enemy = {"telegram_user_id": enemy_id, "name": "UnkillableSpider", "strength": 10, "dexterity": 10,
+                 "armor_class": 500, "hp_current": 9999, "hp_max": 9999, "is_ai": 1, "monster_key": "goblin"}
+        companion = {"telegram_user_id": companion_id, "name": "UnkillableAlly", "strength": 10, "dexterity": 10,
+                     "armor_class": 500, "hp_current": 9999, "hp_max": 9999, "is_ai": 1, "level": 1, "char_class": "Fighter"}
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        player["armor_class"] = 500
+        player["hp_current"] = player["hp_max"] = 9999
+
+        session = sessions.start_session(
+            -999, [player, enemy, companion],
+            {user_id: "party", enemy_id: "enemy", companion_id: "party"},
+        )
+        session.turn_order = [enemy_id, companion_id, user_id]
+        session.current_turn_index = 0
+
+        pacing_mock = AsyncMock()
+        with patch("bot.narrate_action", return_value="A blow lands."), \
+             patch("bot._ai_turn_pacing_delay", new=pacing_mock):
+            await bot._resolve_ai_turns_inner(FakeUpdate(user_id, "", []), session)
+            await _drain_narration_queue()
+
+        self.assertEqual(pacing_mock.call_count, 2)
+        sessions.end_session(-999)
+
     async def test_throw_intent_classified_and_battle_menu_offers_a_target_picker(self):
         from ai.intent_parser import _keyword_fallback
         r = _keyword_fallback("Throw the dagger at the goblin", [])

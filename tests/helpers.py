@@ -79,6 +79,21 @@ def use_test_db(path: str) -> None:
     sessions._START_LOCKS.clear()
     sessions._NEXT_SESSION_ID = 1
 
+    # bot._ai_turn_pacing_delay (2026-08-23, real live flood-control
+    # fix -- see its own docstring in bot.py) deliberately sleeps
+    # between each resolved AI turn in a real fight. That's purely a
+    # live-Telegram-traffic concern, not game logic, so it's neutralized
+    # to a no-op here for the whole test suite -- otherwise every
+    # multi-turn combat test would pick up real wall-clock delay for no
+    # test-relevant reason. Lazy import to avoid a circular import at
+    # module load time (bot.py itself doesn't import tests/helpers.py,
+    # but importing it here at module scope would still force bot.py to
+    # fully load before some test modules are ready for that).
+    import bot
+    async def _no_pacing_delay() -> None:
+        return None
+    bot._ai_turn_pacing_delay = _no_pacing_delay
+
 
 class FakeMessage:
     def __init__(self, text, thread_id=None, reply_to_message=None):

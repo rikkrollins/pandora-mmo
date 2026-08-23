@@ -6135,6 +6135,14 @@ async def _advance_turn_and_resolve_ai_turns(update: Update, session: sessions.S
         await _maybe_send_battle_formation_image(update, session)
 
 
+AI_TURN_PACING_SECONDS = 0.35
+
+
+async def _ai_turn_pacing_delay() -> None:
+    """Deliberate pace between resolved AI turns -- see the call site in _resolve_ai_turns_inner for the real incident this fixes."""
+    await asyncio.sleep(AI_TURN_PACING_SECONDS)
+
+
 async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> None:
     """
     Resolves consecutive AI-controlled turns AND auto-resolved death-save
@@ -6176,6 +6184,31 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
             )
             sessions.end_session(session.chat_id, session)
             return
+
+        # Real live bug (2026-08-23, Coffee: "it skipping my turn on
+        # every battle... it just did it again"). Confirmed live via
+        # log correlation: a cascade of several AI-controlled turns
+        # resolving back-to-back genuinely hits Telegram's own flood
+        # control mid-fight (a real 429, `RetryAfter` -- narration
+        # caching, v1.27.193, made routine turns fast enough to blast
+        # through 15-20+ real sendMessage/sendPhoto/sendChatAction
+        # calls in well under Telegram's own burst window). _safe_send
+        # already retries and waits out the FULL requested duration
+        # (up to ~15-30s) rather than losing the message, so no turn is
+        # actually skipped -- but that forced wait is exactly what
+        # reads to a player as a frozen/skipped turn (this is the same
+        # root cause v1.27.335 only partially addressed, by naming
+        # whose turn it actually is in the rejection message, not by
+        # preventing the flood control in the first place). A small,
+        # deliberate pace between each resolved AI turn (skipping the
+        # very first, so the player's own immediate feedback is never
+        # delayed) keeps a busy round under Telegram's real limit, so
+        # the retry-and-wait path is rarely needed at all. Its own
+        # patchable function, not a bare asyncio.sleep inline -- purely
+        # a live-traffic concern, not game logic, so tests/helpers.py's
+        # use_test_db() neutralizes it to a no-op for the whole suite.
+        if iterations > 1:
+            await _ai_turn_pacing_delay()
 
         stall_threshold = max(len(session.turn_order) * 2, 4)
         # Real bug caught by the full-playthrough simulation (2026-07-24):

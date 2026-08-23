@@ -2,6 +2,39 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.343] — AI-turn cascades now pace themselves to avoid Telegram flood control
+
+**Real live report (2026-08-23, Coffee, mid-fight): "it skipping my
+turn on every battle... it just did it again."** Root-caused live via
+log correlation against Coffee's ACTUAL active session (4 Crystal
+Spiders): right after his own attack, the bot hit two genuine Telegram
+`429 Too Many Requests` / `RetryAfter` flood-control errors within 30
+seconds, forced to wait 14-17 seconds each time before it could even
+send. `_safe_send` already retries and waits out the full requested
+duration rather than losing a message — so no turn was ever actually
+skipped — but that forced wait is exactly what reads as a frozen/
+skipped turn. This is the same root cause v1.27.335 only partially
+addressed (naming whose turn it actually is in the rejection message)
+without preventing the flood control itself.
+
+Real cause: narration caching (v1.27.193) made routine AI turns fast
+enough that a busy round resolving several AI-controlled turns back-
+to-back can blast through 15-20+ real `sendMessage`/`sendPhoto`/
+`sendChatAction` calls well under Telegram's own burst window.
+`_resolve_ai_turns_inner` now paces itself with a small, deliberate
+delay between each resolved AI turn (skipping the very first, so the
+player's own immediate feedback is never delayed) — keeping a busy
+round under Telegram's real limit in the first place, instead of
+hitting it and then waiting out a real retry.
+
+(Separately confirmed, not a bug: the "Attack a spider" text that
+appeared to trigger this fight WAS a real message from Coffee's own
+account — typing "attack" with no fight active auto-starts combat AND
+immediately resolves that first attack in one step, a deliberate
+behavior shipped earlier this project. Worth a design conversation on
+its own if it's not what's wanted anymore, but it's not what caused
+the turn-skipping feeling here — the flood control was.)
+
 ## [1.27.342] — Suggested quest levels + linear story-chapter gating
 
 **Real dev-bridge request (2026-08-23, Coffee, screenshot of "The
