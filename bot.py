@@ -12196,6 +12196,66 @@ async def _check_quest_completions_defeat_monster(update_like, session: sessions
 MAX_SIMULTANEOUS_LONG_TERM_BOARD_QUESTS = 3
 
 
+async def _accept_offered_story_quest(update: Update, quest_id: str, quest: dict) -> bool:
+    """
+    Real dev-bridge bug (2026-08-23, screenshot: "Every time I click on
+    this quest, it keeps giving me different quests and not the quest
+    I'm trying to get... about three"). quest_menu_callback's own
+    Accept button already encodes the EXACT quest_id the player tapped
+    in its callback_data (see _maybe_push_quest_offer/_quest_board_
+    keyboard, both build `quest|accept|story|{quest_id}`), but used to
+    route through _do_accept_quest's free-text path, passing only the
+    quest's TITLE as a plain string -- that path re-derives "whatever
+    story quest is offerable at the player's CURRENT location" via
+    _offerable_quest_at_location and accepts THAT, silently ignoring
+    which quest was actually tapped whenever it wasn't the one for
+    wherever the player happens to be standing right now. Confirmed
+    live: tapping the offer card for "The Song Under the Well"
+    (location the_weeping_well) actually accepted "Grask's Choice"
+    instead (whatever the player's own current location's own offer
+    was) -- the Main-topic log and the still-pending offer card in the
+    same screenshot show this directly. Fixed by accepting the TAPPED
+    quest_id directly, no location-based re-derivation, for every
+    button-tap accept. The free-text flow below (a typed "I accept the
+    quest") is untouched -- there the player never named a specific
+    quest_id, so re-deriving "what's offerable here" is still the
+    right, and only possible, behavior.
+
+    Returns False (and sends a real message, not silence) if the quest
+    is no longer genuinely offerable -- already completed/active, or a
+    guild requirement no longer met -- which only happens from a stale
+    button tap on an old message, not a live bug.
+    """
+    telegram_user_id = update.effective_user.id
+    character = db.get_character(telegram_user_id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return False
+    if quest_id in character["completed_quests"] or quest_id in character["active_quests"]:
+        await update.effective_chat.send_message(
+            "That quest offer isn't current anymore.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        )
+        return False
+    if not _meets_quest_guild_requirement(character, quest):
+        await update.effective_chat.send_message(
+            "That quest offer isn't current anymore.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        )
+        return False
+    opening_note = await _arc_opening_note(update, character, quest_id, quest)
+    db.accept_quest(telegram_user_id, update.effective_chat.id, quest_id)
+    if quest_id in (character.get("dismissed_quest_ids") or []):
+        db.update_character(
+            telegram_user_id, update.effective_chat.id,
+            dismissed_quest_ids=[q for q in character["dismissed_quest_ids"] if q != quest_id],
+        )
+    await _safe_send(update, f"{opening_note}📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}")
+    await _notify_main_topic(update, f"📜 **{character['name']}** accepted a quest: {quest['title']}")
+    await _check_quest_completions_reach_location(update, telegram_user_id, character["current_location"])
+    return True
+
+
 async def _do_accept_quest(update: Update, text: str = "") -> None:
     telegram_user_id = update.effective_user.id
     character = db.get_character(telegram_user_id, update.effective_chat.id)
@@ -12235,41 +12295,11 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
             or any(q["title"].lower() in text.lower() for q in available)
         )
         if not names_something_else:
-            opening_note = await _arc_opening_note(update, character, quest_id, quest)
-            db.accept_quest(telegram_user_id, update.effective_chat.id, quest_id)
-            # Quest Menu (2026-08-20): a real accept always clears any
-            # earlier "Not now" on this exact quest_id -- the soft
-            # pacing gate only ever suppresses a future PROACTIVE push
-            # for an offer still sitting unaccepted; once accepted
-            # there's nothing left to (not) push.
-            if quest_id in (character.get("dismissed_quest_ids") or []):
-                db.update_character(
-                    telegram_user_id, update.effective_chat.id,
-                    dismissed_quest_ids=[q for q in character["dismissed_quest_ids"] if q != quest_id],
-                )
-            await _safe_send(update, f"{opening_note}📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}")
-            await _notify_main_topic(update, f"📜 **{character['name']}** accepted a quest: {quest['title']}")
-            # Real live bug (2026-08-06, Coffee via dev-topic screenshot:
-            # "This quest isn't working for me... I've done everything in
-            # this area and I haven't been able to complete it like I have
-            # been with my other two characters"): completion for a
-            # reach_location-trigger quest is ONLY ever checked from
-            # _do_move's "arrived at a new location" event -- but
-            # _offerable_quest_at_location only ever offers a story quest
-            # while the player is ALREADY standing at quest['location'].
-            # For the 3 quests whose 'location' and trigger.location are
-            # the SAME place (the_hollow_stump, the_wrong_color,
-            # the_hush_stage1_signs -- confirmed via campaign.json), the
-            # player is by construction already at the trigger location
-            # the instant they accept, and will never "arrive" there again
-            # unless they happen to leave and come back -- a real,
-            # reproducible permanent soft-lock, confirmed live: Pan
-            # accepted the_hollow_stump while standing in Hollow Stump
-            # Shrine and never completed it, while Ravenloft/Elduinn (who
-            # apparently wandered off and back) did. Checking right here,
-            # immediately after accepting, closes the gap for good instead
-            # of depending on incidental future movement.
-            await _check_quest_completions_reach_location(update, telegram_user_id, location_id)
+            # _accept_offered_story_quest also handles the
+            # reach_location-trigger soft-lock check (2026-08-06) and
+            # the dismissed_quest_ids clear (2026-08-20) -- see its own
+            # docstring.
+            await _accept_offered_story_quest(update, quest_id, quest)
             return
 
     # Confirmed live 2026-07-14 (Coffee): this shortcut was
@@ -12885,11 +12915,24 @@ async def quest_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     if action == "accept":
         kind = parts[2] if len(parts) > 2 else None
         ident = parts[3] if len(parts) > 3 else None
-        title = None
+        # Real dev-bridge bug (2026-08-23): a "story" accept tap used
+        # to be re-routed through _do_accept_quest's free-text path
+        # (passing only the quest's title), which re-derives "whatever
+        # story quest is offerable at the player's CURRENT location"
+        # rather than trusting the exact quest_id this button's own
+        # callback_data already carries -- see _accept_offered_story_
+        # quest's own docstring for the full root cause. Board quests
+        # are untouched (no report of the same symptom there, and
+        # board quests are scoped by the player's current location
+        # anyway, so the mismatch this fix targets can't occur there).
         if kind == "story":
             quest = CAMPAIGN["quests"].get(ident)
-            title = quest["title"] if quest else None
-        elif kind == "board":
+            if quest is None:
+                return
+            await _accept_offered_story_quest(update, ident, quest)
+            return
+        title = None
+        if kind == "board":
             character = db.get_character(update.effective_user.id, update.effective_chat.id)
             if character is not None:
                 location_id = character["current_location"]

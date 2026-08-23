@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.326] — Quest Accept button now accepts the exact quest you tapped
+
+**Real dev-bridge report (2026-08-23, screenshot): "Every time I click
+on this quest, it keeps giving me different quests and not the quest.
+I'm trying to get it's giving me about three."**
+
+Root cause: the Accept button's own `callback_data` already carries
+the exact `quest_id` tapped, but the handler re-routed through
+`_do_accept_quest`'s free-text path (title only), which re-derives
+"whatever story quest is offerable at your CURRENT location" and
+accepts *that* instead — silently ignoring which quest was actually
+tapped whenever it wasn't the one for wherever you're standing. The
+screenshot showed "The Song Under the Well" still offered right when
+the Main topic logged "Grask's Choice" (the player's current
+location's own offer) accepted instead — exactly this bug. New
+`_accept_offered_story_quest()` now accepts the tapped quest_id
+directly, with its own completed/active/guild-requirement checks so a
+stale button tap on an old message fails safely instead of silently.
+`quest_menu_callback`'s story-accept branch (and `_do_accept_quest`'s
+own free-text branch, refactored onto the same helper) both use it.
+Board-quest accept is untouched — already scoped correctly. Verified
+with a new test proving the exact failure mode against the prior code,
+plus 13 collateral quest/accept tests confirmed unaffected.
+
 ## [1.27.325] — Helping a companion now genuinely builds trust with them
 
 **Real request (2026-08-23, Coffee): "make a way we can build trust.

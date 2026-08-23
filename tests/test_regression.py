@@ -1191,6 +1191,33 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(offer)
         self.assertEqual(offer[0], "welcome_to_the_crossroads")
 
+    async def test_accept_button_accepts_the_exact_tapped_quest_not_the_current_locations_offer(self):
+        """
+        Real dev-bridge bug (2026-08-23, screenshot): "Every time I
+        click on this quest, it keeps giving me different quests and
+        not the quest I'm trying to get... about three." Root cause:
+        the Accept button's own callback_data carries the exact
+        quest_id tapped, but the handler used to re-route through
+        _do_accept_quest's free-text path (title only), which silently
+        re-derived "whatever story quest is offerable at the player's
+        CURRENT location" instead -- ignoring which quest was actually
+        tapped whenever it wasn't the one for wherever the player is
+        standing. Reproduced here: character stands at crossroads_tavern
+        (whose own real offer is welcome_to_the_crossroads) and taps
+        Accept on a DIFFERENT quest (the_hollow_stump, a different real
+        location) -- the tapped quest must be the one actually accepted.
+        """
+        use_test_db("tests/tmp/quest_accept_button_exact_id_test.db")
+        user_id = 900713
+        make_basic_character(user_id, "AcceptButtonTester", current_location="crossroads_tavern")
+        sink = []
+        await bot.quest_menu_callback(
+            FakeCallbackUpdate(user_id, "quest|accept|story|the_hollow_stump", sink), DummyContext(),
+        )
+        character = db.get_character(user_id, -999)
+        self.assertIn("the_hollow_stump", character["active_quests"])
+        self.assertNotIn("welcome_to_the_crossroads", character["active_quests"])
+
     async def test_cancel_board_quest_confirmation_shows_the_real_progress_that_would_be_lost(self):
         """
         Real follow-up (Coffee): "ask the player, are u sure? all
