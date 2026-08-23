@@ -19315,27 +19315,41 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         fallen_player = {"name": "ReproPlayer", "monster_key": None}
         self.assertTrue(bot._defeat_image_prompt(fallen_player).startswith("ReproPlayer,"))
 
-    def test_item_image_prompt_puts_the_real_name_first(self):
+    def test_item_image_prompt_puts_wood_specifically_first_and_leaves_everything_else_alone(self):
         """
         Real dev-bridge report (2026-08-23, Coffee, screenshot, on a
         generated "Wood" image): "This doesn't look like a log of
-        wood" -- rendered as an ornate circular medallion instead.
-        Same exact root cause as the 2026-08-06 monster-image fix
-        (verified in that test above): the real name sat buried after
-        the generic "fantasy RPG {rarity} {type} icon" framing, which
-        the image model weighted far more heavily. This can't re-run
-        the live image API in the regression suite, so it verifies the
-        one thing that actually matters: the real item name is now the
-        first thing in the prompt, for a plain material, a rarer item,
-        and one with a real enchant/forge "note" attached.
+        wood" -- rendered as an ornate circular medallion instead. Same
+        exact root cause as the 2026-08-06 monster-image fix (verified
+        in that test above): the real name sat buried after the
+        generic "fantasy RPG {rarity} {type} icon" framing, which the
+        image model weighted far more heavily.
+
+        Real immediate follow-up (2026-08-23, Coffee, after this fix
+        first shipped applying the reorder to EVERY item): "there was
+        NOTHING wrong with the old image of the silver leaf herb! i
+        only wanted to change the wood image!! fix this back!" --
+        every item shares the same deterministic seed, so a genuinely
+        different PROMPT string at that same seed still renders a
+        different image; reordering every item's prompt silently
+        changed every item's art, not just Wood's. Scoped to ONLY the
+        "wood" item_id (_ITEM_IMAGE_NAME_FIRST_IDS) -- this test
+        verifies both halves: wood gets the fix, an unrelated item
+        (silverleaf, the exact one Coffee flagged, and a rarer item
+        with a real enchant note) keeps the exact original prompt
+        shape, completely unchanged.
         """
         wood = {"name": "Wood", "type": "material", "rarity": "common"}
-        self.assertTrue(bot._item_image_prompt(wood).startswith("Wood,"))
+        self.assertTrue(bot._item_image_prompt("wood", wood).startswith("Wood,"))
+
+        silverleaf = {"name": "Silverleaf Herb", "type": "material", "rarity": "common"}
+        prompt = bot._item_image_prompt("silverleaf", silverleaf)
+        self.assertTrue(prompt.startswith("fantasy RPG common material icon, Silverleaf Herb,"))
 
         ring = {"name": "Ring of Warmth", "type": "ring", "rarity": "rare", "note": "Warm to the touch, like a coal that never quite goes out"}
-        prompt = bot._item_image_prompt(ring)
-        self.assertTrue(prompt.startswith("Ring of Warmth,"))
-        self.assertIn("Warm to the touch", prompt)  # the real customization detail is still preserved, just not first
+        prompt2 = bot._item_image_prompt("ring_of_warmth", ring)
+        self.assertTrue(prompt2.startswith("fantasy RPG rare ring icon, Ring of Warmth,"))
+        self.assertIn("Warm to the touch", prompt2)
 
     def test_spell_and_ability_image_prompts_exclude_a_person(self):
         """

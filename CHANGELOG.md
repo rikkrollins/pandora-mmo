@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.337] — v1.27.336's item-image fix was too broad — scoped back to just Wood
+
+**Real dev-bridge report (2026-08-23, Coffee, screenshot, on a
+generated Silverleaf Herb image): "Whenever you did change the silver
+leaf herb image, and I don't like [it] at all"** — then, immediately
+and explicitly: "there was NOTHING wrong with the old image of the
+silver leaf herb! i only wanted to change the wood image!! fix this
+back!"
+
+v1.27.336's fix (moving the item's real name to the front of the
+image prompt) was correct for the reported bug — but applied to
+*every* item, not just Wood. Every item shares the same deterministic
+image seed, so a genuinely different prompt string at that same seed
+still renders a genuinely different image — the reorder silently
+changed every item's art the instant it shipped, including ones (like
+Silverleaf Herb) that were never broken.
+
+Reverted to scoped: only the "wood" item_id gets the name-first
+prompt now; every other item keeps the exact original prompt shape,
+unchanged. Extend the allowlist (`_ITEM_IMAGE_NAME_FIRST_IDS`) only
+when a real report confirms a *specific* item is actually wrong —
+never blanket-wide again.
+
+Verified with an updated test confirming both halves: Wood gets the
+fix, an unrelated item (Silverleaf Herb, the exact one flagged, plus a
+rarer item with a real enchant note) keeps the original prompt
+completely unchanged.
+
 ## [1.27.336] — Item images now render the actual item, not a generic icon
 
 **Real dev-bridge report (2026-08-23, Coffee, screenshot, on a

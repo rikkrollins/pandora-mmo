@@ -18645,7 +18645,14 @@ def _npc_portrait_prompt(npc_data: dict) -> str:
     )
 
 
-def _item_image_prompt(item_data: dict) -> str:
+# Real dev-bridge report (2026-08-23, Coffee): "wood" rendered as a
+# decorative medallion instead of logs -- the ONLY item_id confirmed
+# broken so far. See _item_image_prompt's own docstring for why this
+# is a real, deliberate allowlist rather than a blanket prompt change.
+_ITEM_IMAGE_NAME_FIRST_IDS = {"wood"}
+
+
+def _item_image_prompt(item_id: str, item_data: dict) -> str:
     """
     Grounded only in the item's own real name/type/rarity fields, plus
     its own hand-written "note" flavor text when it has one (2026-07-26,
@@ -18657,25 +18664,35 @@ def _item_image_prompt(item_data: dict) -> str:
     invents a material/design detail beyond what's already written.
 
     Real dev-bridge report (2026-08-23, Coffee, screenshot: "This
-    doesn't look like a log of wood" -- the generated image was an
-    ornate circular medallion/compass, nothing like actual logs). Same
-    exact root cause already confirmed and fixed for monster images
-    (2026-08-06, "These images don't really look like a crystal
-    spider"): the item's real name sat buried in the MIDDLE of the
-    prompt, after the generic "fantasy RPG {rarity} {type} icon"
-    framing -- the image model weighted "icon" far more heavily than
-    the actual name after it, rendering a generic decorative icon
-    shape instead of the named thing. Moving the real name to the
-    FRONT of the prompt, same reorder the monster fix already proved
-    works, is the fix -- applies to every item, not just Wood, since
-    every item's prompt buried its name the same way.
+    doesn't look like a log of wood"). Same root cause already
+    confirmed and fixed for monster images (2026-08-06, "These images
+    don't really look like a crystal spider"): the item's real name
+    sat buried in the MIDDLE of the prompt, after the generic "fantasy
+    RPG {rarity} {type} icon" framing -- the image model weighted
+    "icon" far more heavily than the actual name after it. Moving the
+    real name to the FRONT of the prompt is the proven fix -- BUT per
+    Coffee's own explicit, immediate follow-up ("there was NOTHING
+    wrong with the old image of the silver leaf herb! i only wanted to
+    change the wood image!! fix this back!"): every item shares the
+    same deterministic seed -> a real, DIFFERENT prompt string at that
+    same seed still renders a genuinely different image, so applying
+    this reorder to every item silently changed every item's art the
+    instant it shipped, not just Wood's. Scoped to ONLY the specific
+    item_id(s) actually confirmed broken, so nothing else's image
+    generation changes -- extend this set only when a real report
+    confirms a specific item, never applied blanket-wide again.
     """
     rarity = item_data.get("rarity", "common")
     item_type = item_data.get("type", "item")
     note = item_data.get("note")
     detail = f", {note}" if note else ""
+    if item_id in _ITEM_IMAGE_NAME_FIRST_IDS:
+        return (
+            f"{item_data['name']}, fantasy RPG {rarity} {item_type} icon{detail}, "
+            "isolated on a plain background, digital game art, no text or labels"
+        )
     return (
-        f"{item_data['name']}, fantasy RPG {rarity} {item_type} icon{detail}, "
+        f"fantasy RPG {rarity} {item_type} icon, {item_data['name']}{detail}, "
         "isolated on a plain background, digital game art, no text or labels"
     )
 
@@ -18689,7 +18706,7 @@ async def _maybe_send_item_image(update: Update, item_id: str, item_data: dict) 
     many images at once for little value. Same deterministic-per-item
     convention as locations/NPCs/monsters.
     """
-    prompt = _item_image_prompt(item_data)
+    prompt = _item_image_prompt(item_id, item_data)
     await _send_generated_image(
         update, prompt, f"🎒 {item_data['name']}",
         seed=_deterministic_image_seed(f"item:{item_id}"), log_key=item_id,
@@ -19820,7 +19837,7 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if len(caption) > 1024:
             stats_line = _format_item_stats_line(item)
             caption = f"🎒 {item['name']}" + (f"\n📊 {stats_line}" if stats_line else "")
-        prompt = _item_image_prompt(item)
+        prompt = _item_image_prompt(item_id, item)
         sent = await _send_generated_image(
             update, prompt, caption, seed=_deterministic_image_seed(f"item:{item_id}"), log_key=item_id,
             reply_markup=_item_actions_keyboard(item_id),
