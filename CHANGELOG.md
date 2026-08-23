@@ -2,6 +2,42 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.328] — Companion Favor progress visibility + a real crediting bug fix
+
+**Real dev-bridge reports (2026-08-23, Coffee): "i completed the task
+for PIP, killing a giant spider and it wasnt credited"; "You need to
+show the task and how much is remaining for completion of the task";
+"can u show accepted affinity tasks in the 'My Quests' menu? i need to
+be able to see wht is left for completion... If the task is gather 2
+moonpetal flowers, show it eg. (0 of 2) until completion."**
+
+Two real fixes:
+
+- **Crediting bug (the actual reported miss).** Root-caused via the
+  live DB: a shared multi-human party where the favor was accepted by
+  one real player, but a *different* real party member was the one
+  actually in the winning combat session. Companion Favor crediting
+  was scoped to only the literal combat participants of that one
+  fight, so an accepting player who wasn't personally in it never got
+  credit — even though they share the same party (and the same
+  companion). Now credits any real member of the same party, matching
+  how real location board quests already work. Verified with a test
+  that reproduces the exact bug (0 credit) against the prior code and
+  passes after the fix.
+- **Visibility.** The Affinity Menu now always shows real progress —
+  "(0 of 2)" style — in all three favor states: not yet accepted,
+  accepted by you, or accepted by another real party member (who's
+  now named, instead of a bare "already being handled"). Accepted
+  Companion Favors also now show up in "My Quests," under their own
+  real companion name — they were technically already board_quests
+  rows and *did* appear there before, but under the raw internal
+  synthetic location id instead of a real name, which is now fixed
+  too.
+
+Verified with 6 new/extended tests, all confirmed to fail against the
+prior code and pass after, plus a 15-test collateral run across the
+whole Affinity Menu + Companion Favor + My Quests surface.
+
 ## [1.27.327] — Affinity Menu + Companion Favors
 
 **Real request (2026-08-23, Coffee): "lets work on affinity menu so

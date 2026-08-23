@@ -5068,11 +5068,35 @@ async def _award_victory_xp(update: Update, session: sessions.Session) -> tuple[
     # accepted a different companion's own favor) and never tied to
     # event_location at all -- a companion travels with the party, so
     # this runs regardless of where the fight happened.
+    #
+    # Real live bug (2026-08-23, Coffee: "i completed the task for PIP,
+    # killing a giant spider and it wasnt credited"): confirmed via the
+    # live DB -- the favor was accepted by a DIFFERENT real party member
+    # (a shared multi-human party, party_id 3) than whoever was actually
+    # in THIS combat session's own turn_order (real_party_ids). Scoping
+    # credit to only the literal fight participants missed every favor
+    # accepted by a real party member who wasn't personally in that one
+    # fight, even though they share the same party (and the same
+    # companion) with whoever was. Real location board quests already
+    # don't have this problem (any accepted quest at the matching
+    # location credits regardless of who accepted it) -- broadened to
+    # match: every REAL (non-AI) member of any fighter's own party is
+    # now credit-eligible, not just literal combat participants.
     defeated_monster_keys = {
         p.get("monster_key") for p in session.participants
         if session.sides.get(p["telegram_user_id"]) == "enemy"
     }
-    for pid in real_party_ids:
+    credit_eligible_pids = set(real_party_ids)
+    fighter_party_ids = {
+        c["party_id"] for c in (db.get_character(pid, update.effective_chat.id) for pid in real_party_ids)
+        if c and c.get("party_id")
+    }
+    for party_id in fighter_party_ids:
+        for m in db.get_party_members_by_id(party_id):
+            if not m.get("is_ai"):
+                credit_eligible_pids.add(m["telegram_user_id"])
+
+    for pid in credit_eligible_pids:
         pid_character = db.get_character(pid, update.effective_chat.id)
         if pid_character is None:
             continue
@@ -13073,7 +13097,19 @@ async def _do_check_quests(update: Update) -> None:
     # already existed (db.get_accepted_board_quests_for_user, already
     # used by _do_resolve_quest_choice) -- it just wasn't being shown
     # here, the one place a player would naturally look for it.
-    accepted_board_quests = db.get_accepted_board_quests_for_user(update.effective_user.id, update.effective_chat.id)
+    accepted_board_quests_all = db.get_accepted_board_quests_for_user(update.effective_user.id, update.effective_chat.id)
+    # Companion Favors (2026-08-23) are real board_quests rows too (a
+    # synthetic location_id, "companion_favor:{npc_id}"), but showing
+    # them in the generic loop below would print that raw synthetic id
+    # as if it were a real place -- split out into their own section,
+    # named by the real companion instead. Real dev-bridge report
+    # (Coffee, screenshot): "You need to show the task and how much is
+    # remaining for completion of the task."
+    accepted_favors = [
+        bq for bq in accepted_board_quests_all
+        if bq["location_id"].startswith(board_quests_module.COMPANION_FAVOR_LOCATION_PREFIX)
+    ]
+    accepted_board_quests = [bq for bq in accepted_board_quests_all if bq not in accepted_favors]
     if accepted_board_quests:
         lines.append("\n**Board quests accepted:**")
         for bq in accepted_board_quests:
@@ -13090,6 +13126,14 @@ async def _do_check_quests(update: Update) -> None:
                 # to do for this quest" needs.
                 progress = f"{bq['progress_count']}/{bq['objective_count']}"
                 lines.append(f"• {bq['title']} ({bq_location_name}) — {progress}\n  {bq['description']}")
+
+    if accepted_favors:
+        lines.append("\n**Companion favors accepted:**")
+        for bq in accepted_favors:
+            npc_data = CAMPAIGN["npcs"].get(bq["giver_npc"])
+            npc_name = npc_data["name"] if npc_data else bq["giver_npc"]
+            progress = f"{bq['progress_count']} of {bq['objective_count']}"
+            lines.append(f"• {bq['title']} (for {npc_name}) — {progress}\n  {bq['description']}")
 
     location_id = character["current_location"]
     location = cl.get_location(CAMPAIGN, location_id)
@@ -14783,18 +14827,31 @@ async def _do_show_affinity_menu(update: Update) -> None:
 
         favor = board_quests_module.get_or_generate_companion_favor(CAMPAIGN, npc_id, chat_id)
         if favor is not None:
+            # Real dev-bridge report (2026-08-23, Coffee, screenshot):
+            # "You need to show the task and how much is remaining for
+            # completion of the task" -- follow-up: "If the task is
+            # gather 2 moonpetal flowers, show it eg. (0 of 2) until
+            # completion." Progress is now always shown, in every one
+            # of the 3 favor states (not yet accepted, accepted by the
+            # viewer, or accepted by another real party member) -- the
+            # old "already being handled" line gave zero indication of
+            # what the task even was or how far along it stood.
+            progress = f"({favor['progress_count']} of {favor['objective_count']})"
             if favor.get("accepted_by") is None:
-                lines.append(f"\n📋 Favor: \"{favor['title']}\" — {favor['description']}")
+                lines.append(f"\n📋 Favor: \"{favor['title']}\" {progress} — {favor['description']}")
                 rows.append([InlineKeyboardButton(
                     "✅ Accept Favor", callback_data=f"affinity|acceptfavor|{favor['board_quest_id']}",
                 )])
             elif favor["accepted_by"] == telegram_user_id:
                 lines.append(
-                    f"\n📋 Favor in progress: \"{favor['title']}\" "
-                    f"({favor['progress_count']}/{favor['objective_count']})"
+                    f"\n📋 Favor in progress: \"{favor['title']}\" {progress} — {favor['description']}"
                 )
             else:
-                lines.append(f"\n📋 Favor: \"{favor['title']}\" — already being handled.")
+                handler = db.get_character(favor["accepted_by"], chat_id)
+                handler_name = handler["name"] if handler else "another party member"
+                lines.append(
+                    f"\n📋 Favor: \"{favor['title']}\" {progress} — being handled by {handler_name}."
+                )
 
         quest_offer = _offerable_quest_for_specific_companion(character, npc_id)
         if quest_offer is not None:

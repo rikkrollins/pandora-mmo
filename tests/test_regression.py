@@ -4122,6 +4122,53 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(updated["completed_at"])
         sessions.end_session(chat_id)
 
+    async def test_defeat_favor_credits_even_when_the_accepting_player_wasnt_in_that_specific_fight(self):
+        """
+        Real live bug (2026-08-23, Coffee: "i completed the task for
+        PIP, killing a giant spider and it wasnt credited"). Root
+        cause confirmed via the live DB: a shared multi-human party
+        (party_id 3) -- the favor was accepted by one real player, but
+        a DIFFERENT real party member was the one actually in the
+        winning combat session. Credit must reach every real member of
+        the same party, not just literal combat participants.
+        """
+        import sessions
+        import board_quests
+        chat_id = -999048
+        sessions.end_session(chat_id)
+        accepter_id = 900983
+        fighter_id = 900984
+        make_basic_character(accepter_id, "FavorAccepter", chat_id=chat_id, current_location="tavern_cellar")
+        party_id = db.create_party(accepter_id, chat_id)
+        make_basic_character(fighter_id, "FavorFighterOther", chat_id=chat_id, current_location="stonearch_bridge")
+        db.update_character(fighter_id, chat_id, party_id=party_id)
+        companion_id = -900985
+        make_basic_character(companion_id, "Pip Thistledown", chat_id=chat_id, current_location="stonearch_bridge", is_ai=True)
+        db.update_character(companion_id, chat_id, party_id=party_id)
+
+        favor = db.create_board_quest(
+            board_quests.COMPANION_FAVOR_LOCATION_PREFIX + "pip_thistledown", chat_id, "test-day",
+            "A favor: deal with the spiders", "...", "pip_thistledown",
+            "defeat_monster", "giant_spider", 1, 0, 0, tier="daily",
+            reward_affinity=board_quests.COMPANION_FAVOR_REWARD_AFFINITY,
+        )
+        # The ACCEPTER, not the fighter, accepts the favor.
+        db.accept_board_quest(favor["board_quest_id"], accepter_id, chat_id)
+        before_affinity = db.get_relationship(accepter_id, chat_id, "pip_thistledown")["affinity"]
+
+        # Only the FIGHTER is a real combat participant this session -- the accepter is elsewhere entirely.
+        enemy_id = -2_600_501
+        enemy = {"telegram_user_id": enemy_id, "name": "Giant Spider", "dexterity": 10, "xp_reward": 50, "monster_key": "giant_spider"}
+        fighter = db.get_character(fighter_id, chat_id)
+        fighter["telegram_user_id"] = fighter_id
+        session = sessions.start_session(chat_id, [fighter, enemy], {enemy_id: "enemy", fighter_id: "party"})
+        session.turn_order = [fighter_id, enemy_id]
+
+        await bot._award_victory_xp(FakeUpdate(fighter_id, "", [], chat_id=chat_id), session)
+        after_affinity = db.get_relationship(accepter_id, chat_id, "pip_thistledown")["affinity"]
+        self.assertEqual(after_affinity - before_affinity, board_quests.COMPANION_FAVOR_REWARD_AFFINITY)
+        sessions.end_session(chat_id)
+
     async def test_favor_never_credited_once_the_companion_has_left_the_party(self):
         from unittest.mock import patch
         import board_quests
@@ -4163,6 +4210,48 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Druid", combined)
         self.assertIn(bot.CAMPAIGN["npcs"]["wren_hollowbrook"]["personality"], combined)
         self.assertIn("Favor", combined)
+        self.assertIn("of", combined)  # real "(0 of N)" progress, not just a bare title
+
+    async def test_affinity_menu_shows_real_progress_for_a_favor_accepted_by_the_viewer(self):
+        """Real follow-up (Coffee, screenshot): "show the task and how much is remaining for completion of the task"."""
+        import board_quests
+        chat_id = -999049
+        user_id = 900986
+        make_basic_character(user_id, "AffinityProgressViewer", chat_id=chat_id, current_location="crossroads_tavern")
+        party_id = db.create_party(user_id, chat_id)
+        companion_id = -900987
+        make_basic_character(companion_id, "Wren Hollowbrook", chat_id=chat_id, current_location="hollow_stump_shrine", is_ai=True)
+        db.update_character(companion_id, chat_id, party_id=party_id)
+        favor = board_quests.get_or_generate_companion_favor(bot.CAMPAIGN, "wren_hollowbrook", chat_id)
+        db.accept_board_quest(favor["board_quest_id"], user_id, chat_id)
+        db.record_board_quest_progress(favor["board_quest_id"], 1)
+        sink = []
+        await bot._do_show_affinity_menu(FakeUpdate(user_id, "", sink, chat_id=chat_id))
+        combined = "\n".join(sink)
+        self.assertIn(f"(1 of {favor['objective_count']})", combined)
+        self.assertIn(favor["description"], combined)
+
+    async def test_affinity_menu_shows_progress_and_handler_for_a_favor_accepted_by_someone_else(self):
+        """Real follow-up to Coffee's screenshot showing "already being handled" with no progress at all."""
+        import board_quests
+        chat_id = -999050
+        viewer_id = 900988
+        other_id = 900989
+        make_basic_character(viewer_id, "AffinityOtherViewer", chat_id=chat_id, current_location="crossroads_tavern")
+        party_id = db.create_party(viewer_id, chat_id)
+        make_basic_character(other_id, "AffinityOtherHandler", chat_id=chat_id, current_location="crossroads_tavern")
+        db.update_character(other_id, chat_id, party_id=party_id)
+        companion_id = -900990
+        make_basic_character(companion_id, "Wren Hollowbrook", chat_id=chat_id, current_location="hollow_stump_shrine", is_ai=True)
+        db.update_character(companion_id, chat_id, party_id=party_id)
+        favor = board_quests.get_or_generate_companion_favor(bot.CAMPAIGN, "wren_hollowbrook", chat_id)
+        db.accept_board_quest(favor["board_quest_id"], other_id, chat_id)
+        db.record_board_quest_progress(favor["board_quest_id"], 1)
+        sink = []
+        await bot._do_show_affinity_menu(FakeUpdate(viewer_id, "", sink, chat_id=chat_id))
+        combined = "\n".join(sink)
+        self.assertIn(f"(1 of {favor['objective_count']})", combined)
+        self.assertIn("AffinityOtherHandler", combined)
 
     async def test_affinity_menu_with_no_companions_gives_a_real_explanation_not_an_empty_screen(self):
         chat_id = -999044
@@ -14774,6 +14863,37 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink = []
         await bot._do_check_quests(FakeUpdate(user_id, "check quests", sink))
         self.assertIn("Board quests completed", " ".join(sink))
+
+    async def test_check_quests_shows_an_accepted_companion_favor_with_real_progress(self):
+        """
+        Real request (2026-08-23, Coffee): "can u show accepted
+        affinity tasks in the 'My Quests' menu? i need to be able to
+        see wht is left for completion." A companion favor is a real
+        board_quests row with a synthetic location_id
+        (companion_favor:{npc_id}) -- must show under its own real
+        companion name, never the raw synthetic id, and never mixed
+        into the generic "Board quests accepted" section.
+        """
+        import board_quests
+        chat_id = -999051
+        user_id = 900991
+        make_basic_character(user_id, "MyQuestsFavorViewer", chat_id=chat_id, current_location="crossroads_tavern")
+        party_id = db.create_party(user_id, chat_id)
+        companion_id = -900992
+        make_basic_character(companion_id, "Wren Hollowbrook", chat_id=chat_id, current_location="hollow_stump_shrine", is_ai=True)
+        db.update_character(companion_id, chat_id, party_id=party_id)
+        favor = board_quests.get_or_generate_companion_favor(bot.CAMPAIGN, "wren_hollowbrook", chat_id)
+        db.accept_board_quest(favor["board_quest_id"], user_id, chat_id)
+        db.record_board_quest_progress(favor["board_quest_id"], 1)
+
+        sink = []
+        await bot._do_check_quests(FakeUpdate(user_id, "check quests", sink, chat_id=chat_id))
+        combined = "\n".join(sink)
+        self.assertIn("Companion favors accepted", combined)
+        self.assertIn("Wren Hollowbrook", combined)
+        self.assertIn(f"{1} of {favor['objective_count']}", combined)
+        self.assertNotIn(favor["location_id"], combined)  # never the raw synthetic location_id
+        self.assertNotIn("companion_favor:wren_hollowbrook", combined)
 
     def test_board_quests_are_isolated_per_chat(self):
         """
