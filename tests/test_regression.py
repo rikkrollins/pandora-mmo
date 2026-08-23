@@ -4226,6 +4226,123 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id, chat_id)
         self.assertIsNone(bot._check_story_gate(character, current, "the_deep_beyond"))
 
+    def test_breadth_trust_gate_requires_the_real_count_of_companions_above_threshold(self):
+        """
+        Real live request (2026-08-23, Coffee: "why not have another
+        spot where 3 chars need to be affinity of 60" -- new "count"
+        shape on requires_companion_trust, e.g. hollow_verge_ashen_
+        reliquary -> hollow_verge_inner_sanctum). Two of three
+        companions above threshold still fails; all three passes.
+        """
+        chat_id = -999051
+        user_id = 900991
+        make_basic_character(user_id, "BreadthWalker", chat_id=chat_id, current_location="hollow_verge_ashen_reliquary")
+        party_id = db.create_party(user_id, chat_id)
+        for offset, name in enumerate(["Wren Hollowbrook", "Pip Thistledown", "Grask Emberscale"], start=1):
+            companion_id = -900991 - offset
+            make_basic_character(companion_id, name, chat_id=chat_id, current_location="hollow_verge_ashen_reliquary", is_ai=True)
+            db.update_character(companion_id, chat_id, party_id=party_id)
+
+        current = {"story_gates": {"the_deep_beyond": {"requires_companion_trust": {"min_affinity": 60, "count": 3}}}}
+        character = db.get_character(user_id, chat_id)
+
+        # Zero trusted yet.
+        rejection = bot._check_story_gate(character, current, "the_deep_beyond")
+        self.assertIsNotNone(rejection)
+        self.assertIn("3", rejection)
+        self.assertIn("60", rejection)
+
+        # Only 2 of 3 above threshold -- still fails.
+        db.adjust_affinity(user_id, chat_id, "wren_hollowbrook", 60, event="test")
+        db.adjust_affinity(user_id, chat_id, "pip_thistledown", 60, event="test")
+        character = db.get_character(user_id, chat_id)
+        self.assertIsNotNone(bot._check_story_gate(character, current, "the_deep_beyond"))
+
+        # All 3 above threshold -- passes.
+        db.adjust_affinity(user_id, chat_id, "grask_emberscale", 60, event="test")
+        character = db.get_character(user_id, chat_id)
+        self.assertIsNone(bot._check_story_gate(character, current, "the_deep_beyond"))
+
+    def test_paired_trust_gate_requires_both_specific_companions_recruited_and_trusted(self):
+        """
+        Real live request (2026-08-23, Coffee: "another spot requiring
+        two members that 'get along'" -- new "pair" shape on
+        requires_companion_trust, e.g. wordless_choir_resonance_well ->
+        wordless_choir_source). Fails if only one of the pair is
+        recruited (even if trusted); fails if both are recruited but
+        only one meets min_affinity; passes only when both are
+        recruited AND both meet it.
+        """
+        chat_id = -999052
+        user_id = 900995
+        make_basic_character(user_id, "PairWalker", chat_id=chat_id, current_location="wordless_choir_resonance_well")
+        party_id = db.create_party(user_id, chat_id)
+        wren_id, vesh_id = -900996, -900997
+        make_basic_character(wren_id, "Wren Hollowbrook", chat_id=chat_id, current_location="wordless_choir_resonance_well", is_ai=True)
+        db.update_character(wren_id, chat_id, party_id=party_id)
+
+        current = {"story_gates": {"the_deep_beyond": {
+            "requires_companion_trust": {"pair": ["wren_hollowbrook", "vesh_nightglass"], "min_affinity": 40},
+        }}}
+        character = db.get_character(user_id, chat_id)
+
+        # Only Wren recruited (not Vesh) -- fails even at full trust.
+        db.adjust_affinity(user_id, chat_id, "wren_hollowbrook", 40, event="test")
+        character = db.get_character(user_id, chat_id)
+        rejection = bot._check_story_gate(character, current, "the_deep_beyond")
+        self.assertIsNotNone(rejection)
+        self.assertIn("Wren Hollowbrook", rejection)
+        self.assertIn("Vesh Nightglass", rejection)
+
+        # Both recruited, but Vesh below threshold -- still fails.
+        make_basic_character(vesh_id, "Vesh Nightglass", chat_id=chat_id, current_location="wordless_choir_resonance_well", is_ai=True)
+        db.update_character(vesh_id, chat_id, party_id=party_id)
+        character = db.get_character(user_id, chat_id)
+        self.assertIsNotNone(bot._check_story_gate(character, current, "the_deep_beyond"))
+
+        # Both recruited and both at/above threshold -- passes.
+        db.adjust_affinity(user_id, chat_id, "vesh_nightglass", 40, event="test")
+        character = db.get_character(user_id, chat_id)
+        self.assertIsNone(bot._check_story_gate(character, current, "the_deep_beyond"))
+
+    def test_companion_favor_pays_more_affinity_once_the_companion_already_trusts_you(self):
+        """
+        Real live request (2026-08-23, Coffee: "give the affinity real
+        in-game purpose"). Favors stay affinity-only reward (Coffee's
+        own earlier explicit call, board_quests.py's COMPANION_FAVOR_
+        REWARD_AFFINITY docstring) -- the payout now compounds with
+        existing trust instead of staying a flat number forever.
+        """
+        import board_quests
+        chat_id = -999053
+        user_id = 900998
+        make_basic_character(user_id, "FavorBonusTester", chat_id=chat_id, current_location="hollow_stump_shrine")
+
+        def _complete_one_favor():
+            favor = db.create_board_quest(
+                board_quests.COMPANION_FAVOR_LOCATION_PREFIX + "wren_hollowbrook", chat_id, "test-day",
+                "A favor: bring some Silverleaf Herb", "...", "wren_hollowbrook",
+                "gather_material", "silverleaf", 1, 0, 0, tier="daily",
+                reward_affinity=board_quests.COMPANION_FAVOR_REWARD_AFFINITY,
+            )
+            db.accept_board_quest(favor["board_quest_id"], user_id, chat_id)
+            character = db.get_character(user_id, chat_id)
+            before = db.get_relationship(user_id, chat_id, "wren_hollowbrook")["affinity"]
+            bot._complete_companion_favor(FakeUpdate(user_id, "", [], chat_id=chat_id), character, favor)
+            after = db.get_relationship(user_id, chat_id, "wren_hollowbrook")["affinity"]
+            return after - before
+
+        # Neutral (starts at 0): flat reward, no bonus.
+        self.assertEqual(_complete_one_favor(), board_quests.COMPANION_FAVOR_REWARD_AFFINITY)
+
+        # Push to Trusted (40+) with a direct adjustment, then complete another favor: +2 bonus.
+        db.adjust_affinity(user_id, chat_id, "wren_hollowbrook", 40, event="test")
+        self.assertEqual(_complete_one_favor(), board_quests.COMPANION_FAVOR_REWARD_AFFINITY + 2)
+
+        # Push to Loyal (60+), then complete another favor: +5 bonus.
+        db.adjust_affinity(user_id, chat_id, "wren_hollowbrook", 20, event="test")
+        self.assertEqual(_complete_one_favor(), board_quests.COMPANION_FAVOR_REWARD_AFFINITY + 5)
+
     async def test_defeating_a_monster_credits_a_companion_favor_via_a_real_combat_victory(self):
         """
         Same real design point as the gather test above, proven through

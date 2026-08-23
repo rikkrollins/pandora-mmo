@@ -21962,9 +21962,21 @@ def _complete_companion_favor(update: Update, character: dict, board_quest: dict
     npc_id = board_quest["giver_npc"]
     npc_data = CAMPAIGN["npcs"].get(npc_id)
     npc_name = npc_data["name"] if npc_data else npc_id
+    # Real live request (2026-08-23, Coffee: "give the affinity real
+    # in-game purpose"). Favors stay affinity-ONLY reward (Coffee's own
+    # earlier explicit call when this system shipped, board_quests.py
+    # ~155-163 -- no gold/XP added here either), but the ONE number it
+    # pays out now compounds with existing trust: a companion who
+    # already trusts you goes further out of their way for you, same
+    # Trusted(40)/Loyal(60) boundaries as everywhere else in this
+    # mechanic (_trust_tier_label). Read BEFORE the award so the bonus
+    # reflects the trust that was already there, not trust this same
+    # favor is about to grant.
+    current_affinity = db.get_relationship(character["telegram_user_id"], update.effective_chat.id, npc_id)["affinity"]
+    tier_bonus = 5 if current_affinity >= 60 else 2 if current_affinity >= 40 else 0
     db.adjust_affinity(
         character["telegram_user_id"], update.effective_chat.id, npc_id,
-        board_quest["reward_affinity"], event=f"Did a favor: \"{board_quest['title']}\".",
+        board_quest["reward_affinity"] + tier_bonus, event=f"Did a favor: \"{board_quest['title']}\".",
     )
     return f"\n💞 **{npc_name}** — favor done: **{board_quest['title']}**. Trust grows a little."
 
@@ -22027,6 +22039,19 @@ def _check_story_gate(character: dict, current: dict, destination_id: str) -> st
 
     trust_gate = gate.get("requires_companion_trust")
     if trust_gate:
+        # Real live request (2026-08-23, Coffee, after v1.27.340 fixed
+        # this gate's message: "if its only in one place thats abit
+        # pointless of a mechanic... use this for other places as
+        # well... have another spot where 3 chars need to be affinity
+        # of 60, then another spot requiring two members that 'get
+        # along'"). This ONE trust_gate dict now supports 3 real
+        # shapes, all keyed on the same min_affinity/_trust_tier_label
+        # number scale (bot.py's Trusted=40/Loyal=60 boundaries):
+        #   {"min_affinity": N}                  -- any ONE companion (original, e.g. The Hush Below's 40 -- kept as the
+        #                                            simplest form deliberately, since it's most players' first encounter
+        #                                            with this mechanic)
+        #   {"min_affinity": N, "count": K}       -- at least K distinct companions each individually at/above N
+        #   {"pair": [npc_a, npc_b], "min_affinity": N} -- two SPECIFIC companions, both recruited, both at/above N
         min_affinity = trust_gate.get("min_affinity", 0)
         companion_npc_ids = []
         party_id = character.get("party_id")
@@ -22036,28 +22061,49 @@ def _check_story_gate(character: dict, current: dict, destination_id: str) -> st
                     npc_id = _npc_id_for_companion_name(member["name"])
                     if npc_id:
                         companion_npc_ids.append(npc_id)
-        trusted = any(
-            db.get_relationship(character["telegram_user_id"], character["chat_id"], npc_id)["affinity"] >= min_affinity
-            for npc_id in companion_npc_ids
-        )
-        if not trusted:
-            # Real dev-bridge request (2026-08-23, Coffee: "Now that we
-            # have fixed the affinity system and it makes more sense.
-            # Can you please modify this message to explain to the
-            # players that an AI companion needs minimum of 40 affinity
-            # points and then tell them they can look up the affinity
-            # by typing affinity"). The old line was deliberately vague
-            # in-fiction flavor text with no real number and no hint
-            # how to check it -- same blind-gate problem the Affinity
-            # Menu (v1.27.327) was built to fix everywhere else, just
-            # missed at this one rejection message. min_affinity is
-            # interpolated directly (not hardcoded 40) so this stays
-            # correct if campaign.json's own gate value ever changes.
-            return (
-                f"None of your companions are ready to go any further — at least one needs "
-                f"**{min_affinity}+ affinity** with you first. Type **affinity** to check where "
-                f"everyone stands."
+
+        pair = trust_gate.get("pair")
+        if pair:
+            npc_a, npc_b = pair
+            both_trusted = (
+                npc_a in companion_npc_ids and npc_b in companion_npc_ids
+                and all(
+                    db.get_relationship(character["telegram_user_id"], character["chat_id"], npc_id)["affinity"] >= min_affinity
+                    for npc_id in pair
+                )
             )
+            if not both_trusted:
+                name_a = CAMPAIGN["npcs"].get(npc_a, {}).get("name", npc_a)
+                name_b = CAMPAIGN["npcs"].get(npc_b, {}).get("name", npc_b)
+                return (
+                    f"**{name_a}** and **{name_b}** need to be traveling with you, both trusting you "
+                    f"**{min_affinity}+**, before this goes any further. Type **affinity** to check where "
+                    f"everyone stands."
+                )
+        else:
+            required_count = trust_gate.get("count", 1)
+            trusted_count = sum(
+                1 for npc_id in companion_npc_ids
+                if db.get_relationship(character["telegram_user_id"], character["chat_id"], npc_id)["affinity"] >= min_affinity
+            )
+            if trusted_count < required_count:
+                if required_count <= 1:
+                    # Real dev-bridge request (2026-08-23, Coffee): the
+                    # old line was deliberately vague in-fiction flavor
+                    # text with no real number and no hint how to check
+                    # it -- min_affinity is interpolated directly (not
+                    # hardcoded 40) so this stays correct if the gate's
+                    # own value ever changes.
+                    return (
+                        f"None of your companions are ready to go any further — at least one needs "
+                        f"**{min_affinity}+ affinity** with you first. Type **affinity** to check where "
+                        f"everyone stands."
+                    )
+                return (
+                    f"Your party isn't ready to go any further — at least **{required_count}** companions need "
+                    f"**{min_affinity}+ affinity** with you first (currently {trusted_count}). Type **affinity** "
+                    f"to check where everyone stands."
+                )
 
     return None
 

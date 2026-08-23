@@ -2,6 +2,49 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.341] — Affinity gates spread across the map, two new varieties, and a passive Favor payoff
+
+**Real live request (2026-08-23, Coffee, right after v1.27.340 fixed
+The Hush Below's trust-gate message): "if its only in one place thats
+abit pointless of a mechanic and game design... why not have another
+spot where 3 chars need to be affinity of 60, then another spot
+requiring two members that 'get along'... dont over use it, maybe have
+them before leaving chapter areas."** Follow-up: "give the affinity
+real in-game purpose."
+
+`requires_companion_trust` (the gate type behind Hush Below → First
+City) now supports 3 shapes, all on the same Trusted(40)/Loyal(60)
+scale the Affinity Menu already shows:
+- `{"min_affinity": N}` — any ONE companion (unchanged — The Hush
+  Below keeps its original 40/1, deliberately: it's most players'
+  first encounter with this mechanic, so it stays the simplest form).
+- `{"min_affinity": N, "count": K}` — a real BREADTH requirement, K
+  distinct companions each individually above N.
+- `{"pair": [npc_a, npc_b], "min_affinity": N}` — two SPECIFIC
+  companions, both recruited, both above N.
+
+4 new gates, all on real existing endgame arc-exit connections
+(arcs 11-14, already `required_level: 99`), nothing early/mid-game
+touched:
+- `hollow_verge_ashen_reliquary` → `hollow_verge_inner_sanctum`: 3
+  companions @ 60.
+- `unmoored_isle_loom` → `unmoored_isle_last_measure`: 3 companions
+  @ 60.
+- `wordless_choir_resonance_well` → `wordless_choir_source`: Wren
+  Hollowbrook + Vesh Nightglass, both @ 40 (Vesh's own resolution
+  content already has her needing someone steady to hold onto — Wren
+  fits).
+- `greymoor_downs_the_unopened_seal` → `greymoor_downs_the_last_
+  question`: Pip Thistledown + Grask Emberscale, both @ 40 (both
+  companions' own goals are explicitly about waiting for a reason to
+  finally move on).
+
+Also: Companion Favors (still affinity-ONLY reward, per Coffee's own
+earlier explicit call — no gold/XP added) now pay a bonus once the
+companion already trusts you: +2 at Trusted (40+), +5 at Loyal (60+),
+on top of the flat 5. Gives affinity a passive, compounding payoff
+between gates, not just a gate-day one.
+
 ## [1.27.340] — The Hush Below's trust gate now states the real number
 
 **Real dev-bridge request (2026-08-23, Coffee, screenshot): "Now that

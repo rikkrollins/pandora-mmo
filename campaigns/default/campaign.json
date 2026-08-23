@@ -961,7 +961,11 @@
         },
         "story_gates": {
           "hollow_verge_inner_sanctum": {
-            "requires_cleared_location": "hollow_verge_ashen_reliquary"
+            "requires_cleared_location": "hollow_verge_ashen_reliquary",
+            "requires_companion_trust": {
+              "min_affinity": 60,
+              "count": 3
+            }
           }
         },
         "grid_position": {
@@ -1063,6 +1067,14 @@
         "monsters": [
           "the_unopened"
         ],
+        "story_gates": {
+          "greymoor_downs_the_last_question": {
+            "requires_companion_trust": {
+              "pair": ["pip_thistledown", "grask_emberscale"],
+              "min_affinity": 40
+            }
+          }
+        },
         "grid_position": {
           "x": 0,
           "y": 0
@@ -2109,7 +2121,11 @@
         },
         "story_gates": {
           "wordless_choir_source": {
-            "requires_cleared_location": "wordless_choir_resonance_well"
+            "requires_cleared_location": "wordless_choir_resonance_well",
+            "requires_companion_trust": {
+              "pair": ["wren_hollowbrook", "vesh_nightglass"],
+              "min_affinity": 40
+            }
           }
         },
         "grid_position": {
@@ -2663,7 +2679,11 @@
         },
         "story_gates": {
           "unmoored_isle_last_measure": {
-            "requires_cleared_location": "unmoored_isle_loom"
+            "requires_cleared_location": "unmoored_isle_loom",
+            "requires_companion_trust": {
+              "min_affinity": 60,
+              "count": 3
+            }
           }
         },
         "grid_position": {
