@@ -2,6 +2,59 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.345] — Progressive difficulty pass: 2 remaining Chapter 1-8 bosses + 11 of 12 Remnants
+
+Real live request (2026-08-24, Coffee): "i think the boss in the first
+city should have more hp" → after showing The Waking Ember's old 1,400
+HP actually matched its story-boss neighbors → "i feel these numbers
+are too low.. i want things getting progressively harder from this
+point on, raising HP and Damage BOOST, def, and attack/magic power
+also. be creative. this boss shud have around 7,000 hp" → "start with
+the first 8 chapters, same with remnants make all of them from this
+point on much harder, using HP, attack/magic power and higher
+def/resistences."
+
+Scope, confirmed via live investigation: chapters 1-8 only have 2 real
+story bosses left ahead of Coffee's party (The Waking Ember, arc_3;
+The Waiting Shape, arc_4 — goblin_boss/the_unspoken are already
+behind him; chapters 5-8 have no real boss of their own, just an
+already-recently-balanced trash-mob chain, left untouched). Checked
+every real character in the live DB: only `the_wrathflame_unbound` has
+ever been bound by anyone, so all 11 other Remnants were safe to
+rebalance with zero risk of changing something already beaten
+(`the_wrathflame_unbound` and the deliberately-unbeatable `the_unasked`
+are excluded).
+
+HP, flat damage bonus, armor class, and proficiency bonus (the real
+"attack/magic power" lever — adds to attack rolls and spell save DCs)
+all raised, ordered monotonically by level — this also fixes existing
+inconsistencies, not just raises the ceiling (e.g. The Archive's
+Keeper, level 30, had only 1,250 HP against tier-mate The Root That
+Remembers' 13,000; The Cairnbound's 85,000 HP was a similar outlier
+the other way).
+
+| Monster | Level | HP | Dmg bonus | AC | Prof |
+|---|---|---|---|---|---|
+| The Waking Ember | 35 | 1,400→**7,000** | 70→**100** | 18→**21** | 4→**5** |
+| The Waiting Shape | 45 | 1,688→**9,500** | 56→**120** | 17→**23** | 4→**6** |
+| The Archive's Keeper | 30 | 1,250→**9,500** | 50→**80** | 21→**24** | 5→**6** |
+| The Root That Remembers | 30 | 13,000→**18,000** | 50→**85** | 20→**23** | 5→**6** |
+| The Drowned Choir | 40 | 8,000→**14,000** | 60→**95** | 20→**23** | 5→**6** |
+| The Hollow Bell | 50 | 8,000→**16,000** | 75→**110** | 21→**24** | 5→**7** |
+| The Farthest Span | 60 | 7,900→**18,000** | 90→**125** | 20→**24** | 5→**7** |
+| The Buried Current | 70 | 8,100→**20,000** | 100→**140** | 20→**25** | 5→**7** |
+| The Spire's Grace | 80 | 8,300→**23,000** | 130→**160** | 21→**25** | 5→**8** |
+| The Waiting Dark | 95 | 9,000→**27,000** | 210→**265** | 22→**26** | 5→**8** |
+| The Unopened | 99 | 9,400→**28,000** | 225→**275** | 22→**26** | 5→**8** |
+| The Cairnbound | 99 | 85,000→**100,000** | 225→**280** | 21→**26** | 5→**8** |
+| The Deepest Record | 100 | 9,500→**32,000** | 230→**290** | 23→**27** | 6→**9** |
+
+Chapters 9-14's own bosses are explicitly deferred, per Coffee: "we
+will work on chapters 9-14 later when we get to that point." Each
+Remnant's existing resistance/vulnerability pairing (resists its own
+element, vulnerable to a thematic counter) is left as-is — armor class
+is the def lever raised here, not new elemental resist percentages.
+
 ## [1.27.344] — Two self-improvement-pass fixes: silent "initiate battle" + AI players naming raw monster keys
 
 Both found by the autonomous self-improvement monitoring cron, drafted uncommitted, reviewed and shipped in this session.
