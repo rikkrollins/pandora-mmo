@@ -5194,6 +5194,47 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(p2["hp_current"], 200, "the second real player must ALSO take real damage from the same AOE cast, unconditionally")
         sessions.end_session(-999)
 
+    async def test_insect_plague_is_a_real_multi_target_spell_now(self):
+        """
+        Real live request (2026-08-24, Coffee, watching a live fight
+        against The Root That Remembers: "is he able to hit multile
+        foes at once?"). Insect Plague had no aoe flag at all, unlike
+        every other real multi-target damage spell in this game
+        (fireball/lightning_bolt/ice_storm/cone_of_cold) -- single-
+        target only despite being a swarm/plague spell. Same real
+        "no mastery grind for monsters" rule as fireball's own AOE test
+        above -- a poison-element boss/Remnant that knows it now hits
+        every real player at once, unconditionally, the moment it casts.
+        """
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        p1_id = 950967
+        p2_id = 950968
+        make_basic_character(p1_id, "PlagueTarget1", chat_id=-999, hp_max=200)
+        make_basic_character(p2_id, "PlagueTarget2", chat_id=-999, hp_max=200)
+        p1 = db.get_character(p1_id, -999)
+        p1["telegram_user_id"] = p1_id
+        p2 = db.get_character(p2_id, -999)
+        p2["telegram_user_id"] = p2_id
+        boss = {
+            "telegram_user_id": -5200967, "name": "PlagueBoss", "dexterity": 12, "strength": 19,
+            "armor_class": 23, "hp_current": 18000, "hp_max": 18000, "proficiency_bonus": 6,
+            "is_ai": 1, "is_boss": True, "monster_key": "the_root_that_remembers",
+            "known_spells": ["insect_plague"], "resistances": [], "vulnerabilities": [], "immunities": [],
+        }
+        session = sessions.start_session(-999, [p1, p2, boss], {p1_id: "party", p2_id: "party", -5200967: "enemy"})
+        session.turn_order = [-5200967, p1_id, p2_id]
+
+        sink = []
+        with patch("random.random", return_value=0.0), patch("rules.dice.random.randint", return_value=4), \
+             patch("bot.narrate_action", return_value="The swarm rises."):
+            result = await bot._maybe_monster_cast_spell(FakeUpdate(p1_id, "combat", sink), session, boss, p1, spell_id="insect_plague")
+        self.assertIsNotNone(result, "boss must actually have cast the spell")
+        self.assertLess(p1["hp_current"], 200, "the primary target must take real damage")
+        self.assertLess(p2["hp_current"], 200, "the second real player must ALSO take real damage from the same cast, unconditionally")
+        sessions.end_session(-999)
+
     async def test_binding_a_new_element_remnant_teaches_the_matching_spell_and_grants_a_slot(self):
         """A non-caster (zero known spells, zero slots) binding the_wrathflame_unbound (fire) for the first time learns real Fireball and gets a real, usable spell slot."""
         import sessions

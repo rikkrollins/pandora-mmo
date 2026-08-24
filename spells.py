@@ -341,6 +341,20 @@ SPELLS = {
     "insect_plague": {
         "name": "Insect Plague", "level": 5, "school": "conjuration",
         "effect": "damage", "damage_dice": "4d10", "save_ability": "constitution", "damage_type": "poison",
+        # Real live request (2026-08-24, Coffee, watching a live fight
+        # against The Root That Remembers: "is he able to hit multile
+        # foes at once?"): a real swarm/plague spell had no aoe flag at
+        # all, unlike every other multi-target damage spell in this
+        # file (fireball/lightning_bolt/ice_storm/cone_of_cold) --
+        # single-target only despite the name. A monster caster (e.g.
+        # any poison-element Remnant/boss with this in known_spells)
+        # hits every living opposing-side target unconditionally the
+        # moment this fires (bot._maybe_monster_cast_spell's own "no
+        # grind/gate for monsters" rule); a player caster (a Druid, or
+        # anyone taught it via a poison Remnant bind) gets the normal
+        # Spell Mastery ramp every other aoe spell already has --
+        # single-target until real mastery is built up.
+        "aoe": True,
     },
     "hold_monster": {
         "name": "Hold Monster", "level": 5, "school": "enchantment",

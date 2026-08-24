@@ -2,6 +2,22 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.346] — Insect Plague is a real multi-target spell now
+
+Real live finding (2026-08-24, Coffee, watching a live fight against
+The Root That Remembers): "does his abilities work? is he able to hit
+multile foes at once?" Checked — Insect Plague had no `aoe` flag at
+all, unlike every other multi-target damage spell in this game
+(Fireball/Lightning Bolt/Ice Storm/Cone of Cold) — single-target only
+despite being a swarm/plague spell. Fixed with the same `"aoe": True`
+flag those already use: a monster/boss with it in `known_spells` (any
+poison-element Remnant, or the 3 shaman variants) now hits every real
+player at once, unconditionally, the instant it casts — monsters never
+grind Spell Mastery, same rule already established for Fireball. A
+player who's learned it (a Druid, or anyone taught it by binding a
+poison Remnant) gets the normal Spell Mastery ramp every other AOE
+spell already has, starting single-target until real mastery is built.
+
 ## [1.27.345] — Progressive difficulty pass: 2 remaining Chapter 1-8 bosses + 11 of 12 Remnants
 
 Real live request (2026-08-24, Coffee): "i think the boss in the first
