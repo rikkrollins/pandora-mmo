@@ -2,6 +2,14 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.344] — Two self-improvement-pass fixes: silent "initiate battle" + AI players naming raw monster keys
+
+Both found by the autonomous self-improvement monitoring cron, drafted uncommitted, reviewed and shipped in this session.
+
+**"Initiate battle with the spiders" got silent "chat" (topic-activity finding, 2026-08-23):** `_keyword_fallback` (ai/intent_parser.py) had no path to `start_combat` for this phrasing — no "fight" word, no `attack_words` match, no `COMBAT_START_WORDS` match — so the player got zero response. Added `"initiate battle"`, `"initiate combat"`, `"begin battle"`, `"start the battle"`, `"start battle"` to `COMBAT_START_WORDS`, matching that list's existing explicit-phrase-only precision (this model has a confirmed bias toward false-positive `start_combat` guesses, so new entries stay conservative multi-word phrases, not single words).
+
+**Autonomous AI players typed raw monster keys instead of names (topic-activity finding, 2026-08-24):** two different AI players both said "I attack crystal_spider" — the literal snake_case key. Root cause: `_build_ai_player_situation_facts` (bot.py) built its "Danger here" fact by joining `location["monsters"]`'s raw keys directly, instead of resolving each to its real display name the way every other fact in that function (items, spells, NPCs) already does — the AI's own prompt said "Danger here: crystal_spider," so it echoed that back verbatim. Now resolves through `CAMPAIGN["monsters"][key]["name"]`.
+
 ## [1.27.343] — AI-turn cascades now pace themselves to avoid Telegram flood control
 
 **Real live report (2026-08-23, Coffee, mid-fight): "it skipping my

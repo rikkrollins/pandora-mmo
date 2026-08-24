@@ -14316,6 +14316,24 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_keyword_fallback("fight the goblin, not the spider", [])["action"], "attack")
         self.assertEqual(_keyword_fallback("lets fight", [])["action"], "attack")
 
+    def test_initiate_battle_phrasing_starts_combat_instead_of_silent_chat(self):
+        """
+        Real topic-activity finding (2026-08-23, self-improvement
+        monitoring pass): "Initiate battle with the spiders" fell all
+        the way through _keyword_fallback's own explicit checks (no
+        "fight" word, no attack_words match, no COMBAT_START_WORDS
+        match) to the silent "chat" default -- the player got zero
+        response. Same class of gap as the bare-"Fight"/negated-fight
+        fixes above: an explicit, high-precision phrase list, not a
+        broad substring guess (this model has a confirmed bias toward
+        false-positive start_combat guesses, per COMBAT_START_WORDS'
+        own docstring, so new entries stay conservative multi-word
+        phrases).
+        """
+        for text in ["Initiate battle with the spiders", "initiate combat", "Begin battle",
+                     "Start the battle", "start battle"]:
+            self.assertEqual(_keyword_fallback(text, [])["action"], "start_combat", text)
+
     def test_bare_compass_direction_movement_no_longer_misclassifies_as_chat(self):
         """
         Real live bug (2026-08-10, topic-activity log): "Travel west"
@@ -18996,6 +19014,24 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         poor_buyer = db.get_character(buyer_id, -999)
         poor_facts = bot._build_ai_player_situation_facts(poor_buyer, "crossroads_tavern")
         self.assertNotIn("The player marketplace has", poor_facts)
+
+    def test_ai_companion_situation_facts_use_real_monster_names_not_raw_keys(self):
+        """
+        Real topic-activity finding (2026-08-24, self-improvement
+        monitoring pass): two different autonomous AI players both
+        typed "I attack crystal_spider" -- the literal snake_case
+        monster_key, not a real name. Root cause: "Danger here" joined
+        location["monsters"]'s own raw keys directly instead of
+        resolving each to its real display name, unlike every other
+        fact this function builds (items, spells, NPCs) -- the same
+        "verbatim-example-parroting" failure class already fixed here
+        for items/movement, just missed for monsters.
+        """
+        character = make_basic_character(900584, "MonsterFactsWalker", current_location="glimmerdeep_grotto")
+        facts = bot._build_ai_player_situation_facts(character, "glimmerdeep_grotto")
+        self.assertIn("Danger here", facts)
+        self.assertIn("Crystal Spider", facts)
+        self.assertNotIn("crystal_spider", facts)
 
     def test_ai_companion_example_prompt_includes_market_buy_and_sell(self):
         """Companion test: the real example lines only appear when their real grounding fact is actually present in the situation facts, same convention every other example already follows."""

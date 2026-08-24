@@ -32,6 +32,12 @@ from remnants import REMNANTS
 COMBAT_START_WORDS = [
     "start combat", "begin fight", "let's fight", "lets fight", "encounter",
     "start a fight", "begin combat", "fight some", "fight the",
+    # Real topic-activity finding (2026-08-23, self-improvement monitoring
+    # pass): "Initiate battle with the spiders" fell all the way through
+    # _keyword_fallback's own explicit checks to its silent "chat"
+    # default -- the player got zero response. Same class of explicit-
+    # phrase-only fix as the rest of this list.
+    "initiate battle", "initiate combat", "begin battle", "start the battle", "start battle",
 ]
 
 INTENT_SYSTEM_PROMPT = """You are an intent classifier for a text-based D&D 5E game. \

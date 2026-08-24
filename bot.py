@@ -30206,9 +30206,20 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
         ]
         if recruitable_here:
             lines.append(f"You could recruit: {', '.join(recruitable_here)}")
+    # Real topic-activity finding (2026-08-24, self-improvement
+    # monitoring pass): two different autonomous AI players both typed
+    # "I attack crystal_spider" -- the literal snake_case monster_key,
+    # not a real name -- because this line joined monsters_here's own
+    # raw keys directly instead of resolving each to its real display
+    # name the way every other list in this function already does
+    # (items, spells, NPCs). Same "verbatim-example-parroting" failure
+    # class this function's own comments already describe fixing for
+    # items/movement, just missed here.
     monsters_here = location.get("monsters", [])
     if monsters_here:
-        lines.append(f"Danger here: {', '.join(monsters_here)}")
+        monster_names = [CAMPAIGN["monsters"][m]["name"] for m in monsters_here if m in CAMPAIGN["monsters"]]
+        if monster_names:
+            lines.append(f"Danger here: {', '.join(monster_names)}")
     # Mirrors _do_move's own reachable-destination computation (minus
     # locked_connections, which need an item the AI player may not have
     # and aren't unconditionally reachable) -- without descends_to/
