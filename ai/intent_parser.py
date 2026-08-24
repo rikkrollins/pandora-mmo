@@ -2670,6 +2670,25 @@ def parse_intents(text: str, known_npc_names: list[str] | None = None, force_mod
         ):
             return [parse_intent(text, known_npc_names, force_model=force_model, environment_name=environment_name)]
 
+        # Real live bug (2026-08-24, self-improvement monitoring pass,
+        # topic-activity log): "move grask and wren to the backrow"
+        # split into "move grask" / "wren to the backrow" -- each
+        # fragment names a real, known companion with no row keyword of
+        # its own, so both independently (and wrongly) matched talk_npc
+        # instead of falling through to "chat" -- exactly the ambiguous-
+        # fragment trap the whole, UNSPLIT text's own multi-name
+        # formation matcher (v1.27.332) already solves correctly
+        # ("grask and wren" as one shared target). Only overrides the
+        # split when EVERY segment independently landed on talk_npc --
+        # a genuine "move X to the front row, then attack the goblin"
+        # splits into two DIFFERENT real actions (set_front_row,
+        # attack), never all talk_npc, so this never touches that
+        # already-working linked-turn-action case (v1.27.333).
+        whole_message_fallback = _keyword_fallback(text, known_npc_names, environment_name=environment_name)
+        if (whole_message_fallback["action"] in ("set_front_row", "set_back_row")
+                and all(i["action"] == "talk_npc" for i in segment_intents)):
+            return [whole_message_fallback]
+
         real_segment_intents = [i for i in segment_intents if i["action"] != "chat"]
         if len(real_segment_intents) >= 2:
             return real_segment_intents

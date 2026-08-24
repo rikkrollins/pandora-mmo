@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.347] — "Move X and Y to the back row" no longer breaks into two wrong talk_npc actions
+
+Real bug found by the self-improvement monitoring cron via topic-
+activity scanning: "move grask and wren to the backrow" (one shared
+destination for two names joined by "and") was being split by the
+compound-message splitter into "move grask" / "wren to the backrow" —
+each fragment names a real, known companion with no row keyword of
+its own, so both independently (and wrongly) matched `talk_npc`
+instead of the whole message's own correct multi-name formation read
+(v1.27.332). Only reproduces with real `known_npc_names` passed, which
+is why the bare-fragment fallback looked fine in isolation.
+
+Fixed in `ai/intent_parser.py`'s `parse_intents`: when every split
+segment lands on `talk_npc` but the whole, unsplit text resolves to a
+real formation action (`set_front_row`/`set_back_row`), trust the
+whole-message read instead of the split. Verified this does NOT touch
+the genuine "move X to the front row, then attack the goblin"
+linked-turn case (v1.27.333) — that splits into two genuinely
+different real actions, never all `talk_npc`, so the new check never
+fires for it.
+
 ## [1.27.346] — Insect Plague is a real multi-target spell now
 
 Real live finding (2026-08-24, Coffee, watching a live fight against

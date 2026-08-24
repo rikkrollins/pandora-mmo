@@ -12064,6 +12064,33 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.get_character(grask_id, -999).get("formation_row"), "front")
         self.assertEqual(db.get_character(wren_id, -999).get("formation_row"), "back")
 
+    def test_shared_destination_two_names_stays_one_formation_intent_not_two_talk_npcs(self):
+        """
+        Real live bug (2026-08-24, self-improvement monitoring pass,
+        topic-activity log): "move grask and wren to the backrow" (ONE
+        shared destination for two names joined by "and", unlike the
+        different-rows case above which has its own row keyword per
+        clause) split into "move grask" / "wren to the backrow" --
+        each fragment names a real, known companion with no row
+        keyword of its own, so both independently (and wrongly)
+        matched talk_npc instead of the whole message's own correct
+        multi-name formation read. Confirmed with real known_npc_names
+        passed (as every real bot.py call site does) -- without them,
+        the bare fragments correctly fall through to "chat" instead
+        and this bug doesn't reproduce, which is why it needed a
+        second look with realistic call arguments.
+        """
+        known = ["Grask Emberscale", "Wren Hollowbrook"]
+        intents = parse_intents("move grask and wren to the backrow", known)
+        self.assertEqual(len(intents), 1)
+        self.assertEqual(intents[0]["action"], "set_back_row")
+
+        # Must NOT interfere with a genuine two-different-actions message
+        # (v1.27.333's linked-turn-action feature) just because its
+        # first clause also happens to be a formation move.
+        linked = parse_intents("Move Grask to the front row, then attack the goblin", known)
+        self.assertEqual([i["action"] for i in linked], ["set_front_row", "attack"])
+
     async def test_linked_turn_moves_back_before_the_enemys_counterattack_resolves(self):
         """
         Real dev-bridge request (2026-08-23, Coffee): "I moved to the
