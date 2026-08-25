@@ -44,8 +44,8 @@ BOARD_QUEST_TIER_COUNT_RANGE = {
 BOARD_QUEST_TIER_REWARD_MULT = {"daily": 1, "weekly": 6, "monthly": 25}
 
 DEFEAT_BOUNTY_TITLES = [
-    "Thin the {plural}",
-    "Clear out the {plural}",
+    "Thin {plural}",
+    "Clear out {plural}",
     "A {name} problem",
     "Trouble with {plural}",
 ]
@@ -67,7 +67,31 @@ def _plural(name: str) -> str:
         return irregular.capitalize() if name[:1].isupper() else irregular
     if name.lower().endswith("f"):
         return name[:-1] + "ves"
+    # Real dev-bridge report (2026-08-25, Coffee's party, screenshot): a
+    # board quest title read "A Quiet Word About The The Root
+    # Rememberss" -- a literal doubled "s" from blindly appending "s"
+    # to a name that already ends in one ("The Root That Remembers").
+    # Real English pluralization: a word already ending in s/x/z/ch/sh
+    # takes "es", not another bare "s" (goblin_boss -> "Goblin Bosses",
+    # not "Goblin Bosss") -- the only other monster name in this
+    # campaign's whole bestiary that ends in "s".
+    if name.lower().endswith(("s", "x", "z", "ch", "sh")):
+        return name + "es"
     return name + "s"
+
+
+def _the(name: str) -> str:
+    """
+    Prefixes "the " unless the name already carries its own article --
+    most real bosses/Remnants do ("The Root That Remembers", "The
+    Waiting Shape", ...; 11 of this campaign's 12 Remnants start with
+    "The"). Same live bug this fixes as _plural's own doubled-"s" case
+    (2026-08-25 dev-bridge report): every title template that used to
+    hardcode a literal "the " right before a monster-name placeholder
+    doubled it into "the The X" whenever that placeholder held one of
+    these names.
+    """
+    return name if name.lower().startswith("the ") else f"the {name}"
 
 
 def _day_key(now: datetime | None = None) -> str:
@@ -127,8 +151,14 @@ def _generate_for_location(
         monster_key = random.choice(monster_options)
         monster_data = campaign_data["monsters"][monster_key]
         count = random.randint(*count_range["defeat"])
+        # _the() on the plural (2026-08-25 dev-bridge report): this
+        # generator, unlike Companion Favors, never excludes boss-tier
+        # monsters -- "Thin {plural}"/"Clear out {plural}" used to
+        # hardcode their own "the " right before the placeholder, which
+        # doubled into "the The X" for any boss/Remnant whose name
+        # already starts with "The" (11 of 12 do).
         title = tier_label + random.choice(DEFEAT_BOUNTY_TITLES).format(
-            name=monster_data["name"], plural=_plural(monster_data["name"]),
+            name=monster_data["name"], plural=_the(_plural(monster_data["name"])),
         )
         description = f"Defeat {count}x {monster_data['name']} at {location['name']}."
         reward_xp = max(monster_data.get("xp_reward", 50) * count // 2, 10) * reward_mult
@@ -164,8 +194,8 @@ COMPANION_FAVOR_REWARD_AFFINITY = 5
 COMPANION_FAVOR_LOCATION_PREFIX = "companion_favor:"
 
 FAVOR_DEFEAT_TITLES = [
-    "A favor: deal with the {plural}",
-    "Could use a hand with the {plural}",
+    "A favor: deal with {plural}",
+    "Could use a hand with {plural}",
 ]
 FAVOR_GATHER_TITLES = [
     "A favor: bring some {name}",
@@ -249,7 +279,12 @@ def get_or_generate_companion_favor(campaign_data: dict, npc_id: str, chat_id: i
         monster_key = random.choice(monster_options)
         monster_data = campaign_data["monsters"][monster_key]
         count = random.randint(*COMPANION_FAVOR_COUNT_RANGE["defeat"])
-        title = random.choice(FAVOR_DEFEAT_TITLES).format(plural=_plural(monster_data["name"]))
+        # _the() (2026-08-25 dev-bridge report, same root cause as
+        # _generate_for_location's own fix): not currently reachable in
+        # practice since _non_boss_monster_keys already excludes every
+        # "The X"-named boss/Remnant from candidates here, but fixed for
+        # consistency/defense-in-depth in case that exclusion ever loosens.
+        title = random.choice(FAVOR_DEFEAT_TITLES).format(plural=_the(_plural(monster_data["name"])))
         description = f"Could use a hand dealing with {count}x {monster_data['name']}."
         return db.create_board_quest(
             location_id, chat_id, _day_key(), title, description, npc_id,
@@ -325,7 +360,14 @@ def _generate_branching_quest_for_location(campaign_data: dict, location_id: str
             f"Deal with {count}x {monster_data['name']} at {location['name']} — but the request came "
             f"with an odd insistence on exactly this target, not just 'whatever's causing trouble.'"
         )
-        title = f"A Quiet Word About the {subject_name}"
+        # Real dev-bridge report (2026-08-25, Coffee's party, screenshot):
+        # a board quest title read "A Quiet Word About The The Root
+        # Rememberss" -- this "the" collided with a monster name that
+        # already starts with its own "The " (most real bosses/Remnants
+        # do: The Root That Remembers, The Waiting Shape, etc.), doubling
+        # it. _the() never adds a second article when the name already
+        # carries one.
+        title = f"A Quiet Word About {_the(subject_name)}"
     else:
         node = random.choice(node_options)
         material_id = node["material"]

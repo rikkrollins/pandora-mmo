@@ -1492,6 +1492,69 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(third["board_quest_id"], accepted_ids)
         self.assertEqual(len(accepted_ids), 3)
 
+    def test_branching_quest_title_never_doubles_the_article_or_the_s(self):
+        """
+        Real dev-bridge report (2026-08-25, Coffee's party, screenshot,
+        "Why can't I move on?"): a board quest title read "A Quiet Word
+        About The The Root Rememberss" -- two real bugs at once. (1)
+        The template's own literal "the" collided with a monster name
+        that already starts with its own "The " (most real bosses/
+        Remnants do). (2) _plural() blindly appended "s" to a name that
+        already ends in one. whispering_wood_deep_glade's only monster
+        is The Root That Remembers (a Remnant, no trash mobs there at
+        all), so this reliably reproduces the exact live report.
+        Forces the "defeat" branch and count=2 (real English
+        pluralization only matters at count != 1) deterministically.
+        """
+        import board_quests
+        from unittest.mock import patch
+
+        with patch("board_quests.random.choice", side_effect=lambda seq: seq[0]), \
+             patch("board_quests.random.randint", return_value=2), \
+             patch("board_quests.narrate_branching_quest_setup", return_value="A quiet request awaits."):
+            quest = board_quests._generate_branching_quest_for_location(
+                bot.CAMPAIGN, "whispering_wood_deep_glade", -999, set(),
+            )
+        self.assertIsNotNone(quest)
+        self.assertNotIn("The The", quest["title"])
+        self.assertNotIn("Rememberss", quest["title"])
+        self.assertEqual(quest["title"], "A Quiet Word About The Root That Rememberses")
+
+    def test_the_never_doubles_an_existing_article(self):
+        """The shared article-prefix helper behind the fix above -- never prepends a second 'the' when the name already carries its own."""
+        import board_quests
+        self.assertEqual(board_quests._the("The Root That Remembers"), "The Root That Remembers")
+        self.assertEqual(board_quests._the("Crystal Spider"), "the Crystal Spider")
+
+    def test_regular_board_quest_defeat_title_also_never_doubles_the_article(self):
+        """
+        Same live bug class as the branching-quest test above, but for
+        the REGULAR (non-branching) daily/weekly/monthly board quest
+        generator (_generate_for_location) -- this one, unlike Companion
+        Favors, never excludes boss-tier monsters, so "Thin the
+        {plural}"/"Clear out the {plural}" were just as reachable for a
+        "The X"-named boss/Remnant. whispering_wood_deep_glade's only
+        monster is The Root That Remembers, so this reliably reproduces
+        the same real collision through the OTHER generator.
+        """
+        import board_quests
+        from unittest.mock import patch
+
+        with patch("board_quests.random.choice", side_effect=lambda seq: seq[0]), \
+             patch("board_quests.random.randint", return_value=2):
+            quest = board_quests._generate_for_location(bot.CAMPAIGN, "whispering_wood_deep_glade", -999, set())
+        self.assertIsNotNone(quest)
+        self.assertNotIn("the The", quest["title"])
+        self.assertNotIn("Rememberss", quest["title"])
+        self.assertEqual(quest["title"], "Thin The Root That Rememberses")
+
+    def test_plural_handles_names_already_ending_in_s(self):
+        """Real English rule: a name ending in s/x/z/ch/sh takes "es", not a doubled bare "s" -- see the live board-quest-title bug above."""
+        import board_quests
+        self.assertEqual(board_quests._plural("The Root That Remembers"), "The Root That Rememberses")
+        self.assertEqual(board_quests._plural("Goblin Boss"), "Goblin Bosses")
+        self.assertEqual(board_quests._plural("Crystal Spider"), "Crystal Spiders")
+
     async def test_view_branching_board_quest_at_full_progress_shows_real_choice_buttons(self):
         """
         Real live bug this session (v1.27.286): a branching board quest
@@ -5804,6 +5867,43 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         after = db.get_character(uid, -999)
         self.assertEqual(after["is_dead"], 1, "must still be dead -- only a real Revivify clears this")
         self.assertEqual(after["hp_current"], 0, "must NOT be passively healed while dead")
+
+    async def test_brand_new_players_first_chat_message_gets_a_real_onboarding_nudge(self):
+        """
+        Real live finding (2026-08-24, self-improvement monitoring pass,
+        topic-activity log): a genuinely brand-new telegram user's
+        first-ever message ("Hola") classified as "chat" -- silent by
+        design for ordinary banter -- but this player has never created
+        a character at all, so they got total silence on their very
+        first message. Now gets a real onboarding nudge instead. An
+        EXISTING player between characters (has a roster, just no
+        active one) must still get real silence -- unchanged.
+        """
+        from unittest.mock import patch
+
+        class FakeChatResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": '{"action": "chat"}'}
+
+        sink = []
+        brand_new_uid = 900488
+        with patch("ai.intent_parser.requests.post", return_value=FakeChatResponse()):
+            await bot.adventure_master_handler(FakeUpdate(brand_new_uid, "Hola", sink), DummyContext())
+        self.assertTrue(any("create a character" in s.lower() for s in sink), sink)
+
+        # An existing player with a real active character must NOT get
+        # the nudge on ordinary chatter -- real silence, unchanged from
+        # before this fix (this is the overwhelmingly common case, so
+        # confirming it stays silent matters more than the edge case).
+        existing_uid = 900489
+        make_basic_character(existing_uid, "ExistingChatter", current_location="crossroads_tavern")
+        sink2 = []
+        with patch("ai.intent_parser.requests.post", return_value=FakeChatResponse()):
+            await bot.adventure_master_handler(FakeUpdate(existing_uid, "just chatting", sink2), DummyContext())
+        self.assertFalse(any("create a character" in s.lower() for s in sink2), sink2)
 
     async def test_heal_spell_still_works_outside_combat_with_no_session(self):
         """The turn-advance fix ("fix them also", 2026-08-21) must never break healing outside combat -- a resting party member with no active session has nothing to advance, and casting must behave exactly as before."""
@@ -14401,6 +14501,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         for text in ["Initiate battle with the spiders", "initiate combat", "Begin battle",
                      "Start the battle", "start battle"]:
             self.assertEqual(_keyword_fallback(text, [])["action"], "start_combat", text)
+
+    def test_start_a_battle_indefinite_article_also_starts_combat(self):
+        """
+        Real dev-bridge report (2026-08-25, Coffee's party): "Start a
+        battle" (indefinite article, distinct from "start battle"/
+        "start the battle" already covered above) fell through to
+        silent "chat" -- part of a real "why can't I move on?" report
+        where the player was trying to start the fight needed to clear
+        a requires_cleared_location gate.
+        """
+        self.assertEqual(_keyword_fallback("Start a battle", [])["action"], "start_combat")
 
     def test_bare_compass_direction_movement_no_longer_misclassifies_as_chat(self):
         """

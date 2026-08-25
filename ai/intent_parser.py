@@ -38,6 +38,12 @@ COMBAT_START_WORDS = [
     # default -- the player got zero response. Same class of explicit-
     # phrase-only fix as the rest of this list.
     "initiate battle", "initiate combat", "begin battle", "start the battle", "start battle",
+    # Real dev-bridge report (2026-08-25, Coffee's party): "Start a
+    # battle" (indefinite article, not "the"/no article) fell all the
+    # way through to silent "chat" -- the player was trying to start
+    # the fight needed to clear a requires_cleared_location gate and
+    # got no response, part of a real "why can't I move on?" report.
+    "start a battle",
 ]
 
 INTENT_SYSTEM_PROMPT = """You are an intent classifier for a text-based D&D 5E game. \

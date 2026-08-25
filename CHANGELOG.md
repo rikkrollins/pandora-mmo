@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.348] — "Why can't I move on?" — silent "start a battle" + doubled board-quest titles
+
+Real dev-bridge report (2026-08-25, Coffee's party, screenshot): "Why
+can't I move on?" A board quest read "A Quiet Word About The The Root
+Rememberss" and the player couldn't re-engage the fight blocking their
+path. Investigated live: the `requires_cleared_location` gate itself
+was correct (Charvenna genuinely hasn't cleared `whispering_wood_deep_
+glade` or bound The Root That Remembers yet) — but two real bugs made
+it feel broken:
+
+- **"Start a battle" (indefinite article) fell through to silent
+  "chat"** — `start battle`/`start the battle`/`start a fight` were
+  already covered, `start a battle` specifically wasn't. Added to
+  `ai/intent_parser.py`'s `COMBAT_START_WORDS`.
+- **Board quest titles doubled their article and pluralization for
+  any "The X"-named boss/Remnant** (11 of this campaign's 12 Remnants
+  start with "The"). Two compounding bugs in `board_quests.py`: (1)
+  `_plural()` blindly appended "s" to a name that already ends in one
+  ("Remembers" → "Rememberss") — now follows the real English rule
+  (s/x/z/ch/sh → "es"). (2) Multiple title templates hardcoded their
+  own "the " immediately before a name/plural placeholder, doubling
+  into "the The X" — fixed with a new shared `_the()` helper (only
+  prefixes "the " when the name doesn't already carry its own
+  article), applied everywhere a template had this exact pattern:
+  the branching "moral-choice" quest generator (the exact one that
+  produced the reported title), the regular daily/weekly/monthly
+  bounty generator, and Companion Favors (not currently reachable
+  there since bosses are already excluded, fixed anyway for
+  consistency).
+
 ## [1.27.347] — "Move X and Y to the back row" no longer breaks into two wrong talk_npc actions
 
 Real bug found by the self-improvement monitoring cron via topic-

@@ -27845,6 +27845,22 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
             location = cl.get_location(CAMPAIGN, character["current_location"])
             if location is not None and _find_interactable(location, text):
                 await _do_examine(update, text)
+        elif not db.list_characters(update.effective_user.id, update.effective_chat.id):
+            # Real live finding (2026-08-24, self-improvement monitoring
+            # pass, topic-activity log): a genuinely brand-new player's
+            # first-ever message ("Hola") classified as "chat" -- silent
+            # by design for ordinary banter, but this player has NEVER
+            # created a character at all (db.list_characters is empty,
+            # not just "no active one" -- an existing player between
+            # characters still gets real silence here, unchanged). Total
+            # silence on someone's very first message is a much worse
+            # first impression than one onboarding nudge, same "don't
+            # stay silent when a real game fact IS present" reasoning as
+            # the interactable-fallback fix just above.
+            await _safe_send(
+                update,
+                "You don't have any characters yet — say 'I want to create a character' to get started!",
+            )
     # Any other unmatched "chat": no game action, let it be ordinary
     # roleplay chatter with no bot response required.
 
