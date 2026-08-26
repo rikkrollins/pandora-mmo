@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.364] — Kess the Bandit, Phase 2A: chapter 8's real climax
+
+Real live direction (Coffee): chapter 8's climactic point should BE
+Kess, players should walk away thinking they've beaten her, and
+"chapter 8 should only be 1 evolution" -- both fights happening within
+chapter 8, further escalation explicitly deferred to a later pass.
+Also: give new players time to reach the first city before the reveal
+fires, and don't let her ambush anyone at all until they've actually
+accepted the quest to find her.
+
+- Two new generic, reusable quest/NPC fields: `requires_completed_quest`
+  (checked wherever a companion quest is offered) and
+  `requires_active_quest` (checked before a hostile ambient NPC's
+  ambush can fire) -- neither affects any quest/NPC that doesn't set
+  them.
+- `borins_blackthorn_warning` (the reveal quest) now waits until
+  `first_city_arrival` is complete, giving new players room to learn
+  the game first.
+- Kess's ambient ambush in Greymoor Downs is now fully quest-gated --
+  she doesn't appear at all until `kess_first_reckoning` is actually
+  accepted.
+- New quest `kess_the_unbound_reckoning`: she goes down in the first
+  fight and gets back up as something else entirely (`kess_the_unbound`,
+  a real escalated stat block, same location). Both her quests are now
+  appended to `arc_8_greymoor_downs`'s own quest list, so chapter 8
+  genuinely doesn't read as complete until both fights are won.
+- Further evolutions, mid-game sightings across chapters 9-13, and the
+  true final battle after chapter 14 are roadmapped, not built --
+  revisiting when the party's own progress actually reaches them.
+
 ## [1.27.363] — Kess the Bandit, Phase 1: the seed of a real antagonist arc
 
 Real live conversation (Coffee: "when we goto greymoor downs we get

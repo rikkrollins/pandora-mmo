@@ -394,7 +394,8 @@
           "greymoor_downs_wolf"
         ],
         "npcs": [
-          "kess_the_bandit"
+          "kess_the_bandit",
+          "kess_the_unbound"
         ],
         "resource_nodes": [
           {
@@ -2885,6 +2886,7 @@
       "alignment": "Chaotic Evil",
       "disposition": "hostile",
       "is_boss": true,
+      "requires_active_quest": "kess_first_reckoning",
       "stats": {
         "level": 23,
         "dexterity": 16,
@@ -2895,6 +2897,27 @@
         "xp_reward": 150,
         "damage_dice": "1d6",
         "damage_bonus": 15
+      }
+    },
+    "kess_the_unbound": {
+      "name": "Kess, the Unbound",
+      "role": "bandit_captain",
+      "personality": "what's left of Kess after the crown of coin and threat finally broke -- the calculation is gone, and something underneath is doing the deciding now, in a voice that isn't quite hers",
+      "goals": "no longer tolls, no longer coin -- it wants what's left of the party standing between it and whatever it was promised",
+      "alignment": "Chaotic Evil",
+      "disposition": "hostile",
+      "is_boss": true,
+      "requires_active_quest": "kess_the_unbound_reckoning",
+      "stats": {
+        "level": 25,
+        "dexterity": 18,
+        "strength": 15,
+        "armor_class": 16,
+        "hp_max": 900,
+        "proficiency_bonus": 3,
+        "xp_reward": 300,
+        "damage_dice": "1d8",
+        "damage_bonus": 20
       }
     },
     "ossian_vane": {
@@ -3187,6 +3210,7 @@
       "description": "Borin's watched the roads long enough to know real banditry when he sees it, and the Blackthorn Raiders working the Greymoor Downs aren't it -- too well-fed, too well-armed, and the coin they take never seems to stay with them. He wants the party to see the Downs for themselves and judge who's really paying for it.",
       "objective_location": "greymoor_downs",
       "giver_npc": "borin_ironjaw",
+      "requires_completed_quest": "first_city_arrival",
       "reward_xp": 200,
       "reward_gold": 0,
       "reward_item": "torn_ledger_page",
@@ -3201,6 +3225,7 @@
       "description": "The ledger page names no one Borin recognizes, but it's real proof the one calling herself Kess answers to someone else entirely. He wants her stopped and questioned before whatever she's funding gets any further along.",
       "objective_location": "greymoor_downs",
       "giver_npc": "borin_ironjaw",
+      "requires_completed_quest": "borins_blackthorn_warning",
       "reward_xp": 500,
       "reward_gold": 200,
       "trigger": {
@@ -3208,6 +3233,21 @@
         "monster": "kess_the_bandit"
       },
       "clue": "Borin: 'Whoever's holding her leash won't show themselves while she's still standing.'",
+      "weight": "climactic"
+    },
+    "kess_the_unbound_reckoning": {
+      "title": "What Answered Instead",
+      "description": "Kess went down and stayed down -- and then she didn't. Something got up wearing her face, taller than her, wrong in the joints, already forgetting to sound like her. Borin says whatever they questioned a moment ago is gone; what's left has to be finished, now, before it remembers how to run.",
+      "objective_location": "greymoor_downs",
+      "giver_npc": "borin_ironjaw",
+      "requires_completed_quest": "kess_first_reckoning",
+      "reward_xp": 1000,
+      "reward_gold": 400,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "kess_the_unbound"
+      },
+      "clue": "Borin, quieter than you've ever heard him: 'That was never just a bandit captain. Go. Finish it.'",
       "weight": "climactic"
     },
     "wrens_root_worry": {
@@ -4411,7 +4451,9 @@
         "watchtowers_stalker",
         "the_tower_cellars_pup",
         "the_vantage_belows_alpha",
-        "the_barrow_depths_bound"
+        "the_barrow_depths_bound",
+        "kess_first_reckoning",
+        "kess_the_unbound_reckoning"
       ],
       "required_level": 99
     },

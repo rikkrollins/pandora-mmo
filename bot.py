@@ -8596,6 +8596,15 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
     if disposition == "hostile":
         if npc_id in _chat_scoped_set(_DEFEATED_NPCS, chat_id) or "stats" not in npc_data:
             return
+        # Real feature (2026-08-26, Kess arc Phase 2A, per Coffee: "dont
+        # show kess at all until the quest is triggered to find her").
+        # A new OPTIONAL npc_data field -- an NPC with none (every
+        # hostile ambient NPC before this pass) is unaffected. Checked
+        # per-character since active_quests is per-player, matching
+        # every other quest-state check in this game.
+        requires_active_quest = npc_data.get("requires_active_quest")
+        if requires_active_quest and requires_active_quest not in character["active_quests"]:
+            return
         async with sessions.get_start_lock(chat_id):
             if sessions.get_session_for_user(chat_id, character["telegram_user_id"]) is not None:
                 return
@@ -12033,6 +12042,24 @@ def _meets_quest_guild_requirement(character: dict, quest: dict) -> bool:
     return requires_guild in held_guild_ids(character)
 
 
+def _meets_quest_prerequisite_requirement(character: dict, quest: dict) -> bool:
+    """
+    Real feature (2026-08-26, Kess arc Phase 2A, per Coffee: "maybe
+    make it start after the players reach 'the first city' to give
+    players time to build characters and learn the game"). A new
+    OPTIONAL "requires_completed_quest" quest field, same shape as
+    requires_guild above -- a quest with none (every quest before this
+    pass) is completely unaffected. Needed because dict order alone
+    (the only thing _offerable_companion_quest otherwise relies on)
+    can't express "this companion quest shouldn't offer until a
+    totally unrelated, giver-less location quest is done."
+    """
+    requires_quest = quest.get("requires_completed_quest")
+    if not requires_quest:
+        return True
+    return requires_quest in character["completed_quests"]
+
+
 def _offerable_quest_at_location(character: dict, location_id: str) -> tuple[str, dict] | None:
     """
     The first not-yet-completed, not-yet-active, guild-eligible quest
@@ -12117,6 +12144,8 @@ def _offerable_companion_quest(character: dict) -> tuple[str, dict] | None:
             continue
         if not _meets_quest_guild_requirement(character, quest):
             continue
+        if not _meets_quest_prerequisite_requirement(character, quest):
+            continue
         return quest_id, quest
     return None
 
@@ -12137,6 +12166,8 @@ def _offerable_quest_for_specific_companion(character: dict, npc_id: str) -> tup
         if quest_id in character["completed_quests"] or quest_id in character["active_quests"]:
             continue
         if not _meets_quest_guild_requirement(character, quest):
+            continue
+        if not _meets_quest_prerequisite_requirement(character, quest):
             continue
         return quest_id, quest
     return None

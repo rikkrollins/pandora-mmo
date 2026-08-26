@@ -15189,9 +15189,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         active giver_npc="borin_ironjaw" quest in CAMPAIGN["quests"]'s
         own dict order -- borins_vouching_task/borins_resolution (his
         existing personal-arc quests) must still be offered first,
-        exactly as before this change; the new reveal quest only
-        surfaces once both are actually completed, same real sequencing
-        every other companion arc in this game already relies on.
+        exactly as before this change; the reveal quest only surfaces
+        once both are actually completed, same real sequencing every
+        other companion arc in this game already relies on.
+
+        Also covers the Phase 2A gate (2026-08-26, per Coffee: "make it
+        start after the players reach 'the first city' to give players
+        time to build characters and learn the game") -- even with
+        Borin's own arc resolved, borins_blackthorn_warning must NOT be
+        offered until requires_completed_quest ("first_city_arrival")
+        is actually satisfied, and the full chain through her first
+        two named encounters follows in real sequence after that.
         """
         user_id = 999913
         make_basic_character(user_id, "BorinQuestSeeker", current_location="crossroads_tavern")
@@ -15209,8 +15217,128 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         db.complete_quest(user_id, -999, "borins_resolution")
         character = db.get_character(user_id, -999)
+        self.assertIsNone(
+            bot._offerable_companion_quest(character),
+            "shouldn't offer the Blackthorn reveal before reaching the first city",
+        )
+
+        db.complete_quest(user_id, -999, "first_city_arrival")
+        character = db.get_character(user_id, -999)
         third = bot._offerable_companion_quest(character)
         self.assertEqual(third[0], "borins_blackthorn_warning")
+
+        db.complete_quest(user_id, -999, "borins_blackthorn_warning")
+        character = db.get_character(user_id, -999)
+        fourth = bot._offerable_companion_quest(character)
+        self.assertEqual(fourth[0], "kess_first_reckoning")
+
+        db.complete_quest(user_id, -999, "kess_first_reckoning")
+        character = db.get_character(user_id, -999)
+        fifth = bot._offerable_companion_quest(character)
+        self.assertEqual(fifth[0], "kess_the_unbound_reckoning")
+
+    async def test_kess_ambush_never_fires_before_the_reckoning_quest_is_accepted(self):
+        """
+        Real live request (2026-08-26, Kess arc Phase 2A, per Coffee:
+        "dont show kess at all until the quest is triggered to find
+        her"). Before this, kess_the_bandit's ambient ambush fired for
+        ANY character regardless of story progress. Fail-then-pass
+        target: kess_the_bandit["requires_active_quest"] plus the new
+        gate in _maybe_trigger_npc_encounter.
+        """
+        from unittest.mock import patch
+        import sessions
+        bot.setup_default_npcs()
+        sessions.end_session(-993)
+        user_id = 900940
+        character = make_basic_character(user_id, "TooEarlyForKess", chat_id=-993, current_location="crossroads_tavern")
+        location = cl.get_location(bot.CAMPAIGN, "crossroads_tavern")
+        sink = []
+        update = FakeUpdate(user_id, "irrelevant", sink, chat_id=-993)
+        with patch("bot.AMBIENT_NPC_ENCOUNTER_CHANCE", 1.0), \
+             patch("bot.random.random", return_value=0.0), \
+             patch("bot._npcs_at_location", return_value=["kess_the_bandit"]), \
+             patch("bot._effective_disposition", return_value="hostile"):
+            await bot._maybe_trigger_npc_encounter(update, character, location)
+        self.assertIsNone(
+            sessions.get_session_for_user(-993, user_id),
+            "Kess must not ambush a character who hasn't accepted kess_first_reckoning yet",
+        )
+        sessions.end_session(-993)
+
+    async def test_kess_ambush_fires_once_the_reckoning_quest_is_active(self):
+        """The other half of the gate above -- accepting the quest is what actually unlocks the encounter."""
+        from unittest.mock import patch, Mock, AsyncMock
+        import sessions
+        bot.setup_default_npcs()
+        sessions.end_session(-994)
+        user_id = 900941
+        character = make_basic_character(user_id, "ReadyForKess", chat_id=-994, current_location="crossroads_tavern")
+        # Matches test_hostile_npc_ambush_also_grows_for_an_overleveled_party's
+        # own level/HP setup -- a default level-1 character can be one-shot
+        # by Kess's undertuned-scaled stats, which isn't this test's concern.
+        db.update_character(user_id, -994, level=20, hp_current=772, hp_max=772)
+        db.accept_quest(user_id, -994, "kess_first_reckoning")
+        character = db.get_character(user_id, -994)
+        location = cl.get_location(bot.CAMPAIGN, "crossroads_tavern")
+        sink = []
+        update = FakeUpdate(user_id, "irrelevant", sink, chat_id=-994)
+        with patch("bot.AMBIENT_NPC_ENCOUNTER_CHANCE", 1.0), \
+             patch("bot.random.random", return_value=0.0), \
+             patch("bot._npcs_at_location", return_value=["kess_the_bandit"]), \
+             patch("bot._effective_disposition", return_value="hostile"), \
+             patch("bot.generate_ambient_line", return_value="You won't escape!"), \
+             patch("bot.narrate_boss_decision", new=Mock(return_value="Kess sizes you up.")), \
+             patch("bot.narrate_action", new=Mock(return_value="Kess strikes.")), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._maybe_trigger_npc_encounter(update, character, location)
+            await _drain_narration_queue(-994)
+        session = sessions.get_session_for_user(-994, user_id)
+        self.assertIsNotNone(session, "ambush should fire once kess_first_reckoning is active")
+        sessions.end_session(-994)
+
+    async def test_defeating_kess_the_unbound_completes_its_own_reckoning_quest(self):
+        """Same real _npc_combatant_from_stats/_check_quest_completions_defeat_monster path as the base form, for her evolved stage-2 form."""
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        player_id = 999914
+        make_basic_character(player_id, "UnboundHunter", current_location="greymoor_downs")
+        db.accept_quest(player_id, -999, "kess_the_unbound_reckoning")
+
+        npc_data = bot.CAMPAIGN["npcs"]["kess_the_unbound"]
+        kess = bot._npc_combatant_from_stats("kess_the_unbound", npc_data)
+        self.assertEqual(kess["monster_key"], "kess_the_unbound")
+        session = sessions.start_session(-999, [kess], {kess["telegram_user_id"]: "enemy", player_id: "party"})
+        session.turn_order = [kess["telegram_user_id"], player_id]
+
+        sink = []
+        with patch("bot.narrate_chapter_climax", return_value="A final, terrible quiet."):
+            await bot._check_quest_completions_defeat_monster(FakeUpdate(player_id, "irrelevant", sink), session)
+
+        character = db.get_character(player_id, -999)
+        self.assertIn("kess_the_unbound_reckoning", character["completed_quests"])
+        self.assertNotIn("kess_the_unbound_reckoning", character["active_quests"])
+        sessions.end_session(-999)
+
+    def test_arc_8_climax_now_requires_defeating_both_kess_forms(self):
+        """
+        Real live request (2026-08-26, Coffee: chapter 8's climactic
+        point should be Kess, with one evolution, all within chapter
+        8). arc_8_greymoor_downs only reads "complete" once every quest
+        in its list is done (bot.py's _current_story_arc/story-chapter
+        display) -- confirms both new Kess quests were actually
+        appended to that list, not just added to the quests dict.
+        """
+        arc = bot.CAMPAIGN["story_arcs"]["arc_8_greymoor_downs"]
+        original_quests = {
+            "watchtowers_stalker", "the_tower_cellars_pup", "the_vantage_belows_alpha", "the_barrow_depths_bound",
+        }
+        self.assertTrue(original_quests.issubset(set(arc["quests"])))
+        self.assertIn("kess_first_reckoning", arc["quests"])
+        self.assertIn("kess_the_unbound_reckoning", arc["quests"])
+        self.assertFalse(set(arc["quests"]).issubset(original_quests), "arc 8 should NOT read complete without both Kess fights")
+        self.assertTrue(set(arc["quests"]).issubset(original_quests | {"kess_first_reckoning", "kess_the_unbound_reckoning"}))
 
     def test_new_story_bosses_are_placed_at_their_real_locations(self):
         locs = {}
@@ -15830,6 +15958,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         user_id = 900712
         character = make_basic_character(user_id, "OverleveledVsKess", chat_id=-991, current_location="crossroads_tavern")
         db.update_character(user_id, -991, level=20, hp_current=772, hp_max=772)
+        # kess_the_bandit now carries requires_active_quest (Kess arc
+        # Phase 2A, 2026-08-26) -- her ambush is gated behind actually
+        # having accepted kess_first_reckoning, unrelated to this test's
+        # own scaling concern.
+        db.accept_quest(user_id, -991, "kess_first_reckoning")
         character = db.get_character(user_id, -991)
         location = cl.get_location(bot.CAMPAIGN, "crossroads_tavern")
         sink = []
@@ -22575,6 +22708,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             (nid for nid, data in bot.CAMPAIGN["npcs"].items() if "proficiency_bonus" in data.get("stats", {})), None,
         )
         self.assertIsNotNone(hostile_npc_id, "test needs at least one real NPC with combat-ready stats in campaign.json")
+        # kess_the_bandit (the real NPC this resolves to) now carries
+        # requires_active_quest (Kess arc Phase 2A, 2026-08-26) -- her
+        # ambush is gated behind actually having accepted
+        # kess_first_reckoning, unrelated to this test's own image concern.
+        if bot.CAMPAIGN["npcs"][hostile_npc_id].get("requires_active_quest"):
+            db.accept_quest(user_id, -990, bot.CAMPAIGN["npcs"][hostile_npc_id]["requires_active_quest"])
+            character = db.get_character(user_id, -990)
         location = cl.get_location(bot.CAMPAIGN, "crossroads_tavern")
 
         def fake_get(url, timeout=None):
