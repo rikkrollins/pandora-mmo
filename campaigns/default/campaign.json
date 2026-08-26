@@ -2910,6 +2910,7 @@
       "personality": "a stern, no-nonsense dwarf doing penance for an old failure by watching over the market instead of a castle gate",
       "goals": "looking for someone worth vouching for, so he can finally stop watching this street",
       "recruitable": true,
+      "pronouns": "he/him",
       "stats": {
         "race": "Dwarf",
         "char_class": "Paladin",
@@ -2937,6 +2938,7 @@
       "personality": "a quiet half-elf hermit who has tended this shrine's wild garden longer than anyone in town can remember, and speaks more easily to the plants than to people",
       "goals": "protecting the shrine from anyone who'd disturb it without understanding it first",
       "recruitable": true,
+      "pronouns": "she/her",
       "stats": {
         "race": "Half-Elf",
         "char_class": "Druid",
@@ -2963,6 +2965,7 @@
       "personality": "a cheerful halfling bard who's been 'just about to cross' this bridge for three days now, always with one more story first",
       "goals": "collecting a good enough story to finally justify moving on",
       "recruitable": true,
+      "pronouns": "they/them",
       "stats": {
         "race": "Halfling",
         "char_class": "Bard",
@@ -2989,6 +2992,7 @@
       "personality": "a dragonborn barbarian the goblins captured but never quite managed to break, still watching the tunnel entrance for a chance worth taking",
       "goals": "getting out of these warrens and putting them a long way behind him",
       "recruitable": true,
+      "pronouns": "he/him",
       "stats": {
         "race": "Dragonborn",
         "char_class": "Barbarian",

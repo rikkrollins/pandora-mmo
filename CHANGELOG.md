@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.350] — Every recruitable companion now has a real pronoun
+
+Follow-up to v1.27.349's pronoun-plumbing fix (per Coffee: "give them
+all pronouns please so narrations make sense"). The 4 companions still
+missing a canonical pronoun now have one in `campaigns/default/
+campaign.json`:
+
+- `borin_ironjaw` → he/him, `grask_emberscale` → he/him — both drawn
+  from their own existing bio text ("so **he** can finally stop
+  watching this street" / "putting them a long way behind **him**"),
+  not a guess.
+- `wren_hollowbrook` → she/her, `pip_thistledown` → they/them — no
+  existing textual evidence either way; a deliberate creative call,
+  not hidden canon.
+
+Also backfilled the 3 of these already recruited in the live game
+(Pip Thistledown, Grask Emberscale, Wren Hollowbrook all had
+`pronouns=None` from before v1.27.349 shipped) so their narration is
+grounded immediately rather than waiting on a fresh recruit.
+
 ## [1.27.349] — Duplicate-tap race, summon-tonic crash, and dropped companion pronouns
 
 Three real bugs found via error-log/dev-bridge monitoring (2026-08-25),

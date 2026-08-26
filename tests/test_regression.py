@@ -11869,13 +11869,23 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         up with pronouns=None in the DB, leaving narrate_action's own
         real grounding (ai/dm_agent.py) with nothing to work from and
         forced to guess blind for every single one, not just the
-        ambiguous ones. Sarah (sera_wanderer) and Vesh Nightglass both
-        carry a real canonical pronoun in campaign.json; confirms both
-        actually land on the recruited character's own DB row now.
+        ambiguous ones. All 6 recruitable companions now carry a real
+        canonical pronoun in campaign.json (2026-08-26, Coffee: "give
+        them all pronouns please so narrations make sense" -- Borin/
+        Grask's are drawn from their own existing bio text ("so HE can
+        finally stop..."/"...behind HIM"), Wren/Pip had no textual
+        evidence either way and are a deliberate judgment call, not a
+        guess at hidden canon); confirms every one actually lands on
+        the recruited character's own DB row now, not just the two
+        with pre-existing textual confirmation.
         """
         player_id = 900531
         make_basic_character(player_id, "PronounCollectorPlayer", current_location="crossroads_tavern")
-        for npc_id, display_name in (("sera_wanderer", "Sarah"), ("vesh_nightglass", "Vesh Nightglass")):
+        for npc_id, display_name in (
+            ("sera_wanderer", "Sarah"), ("vesh_nightglass", "Vesh Nightglass"),
+            ("borin_ironjaw", "Borin Ironjaw"), ("wren_hollowbrook", "Wren Hollowbrook"),
+            ("pip_thistledown", "Pip Thistledown"), ("grask_emberscale", "Grask Emberscale"),
+        ):
             expected = bot.CAMPAIGN["npcs"][npc_id]["pronouns"]
             sink = []
             await bot._do_recruit_npc(FakeUpdate(player_id, f"recruit {display_name}", sink), display_name)
