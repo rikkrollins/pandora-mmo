@@ -2968,6 +2968,42 @@ def _battle_menu_keyboard(session: sessions.Session) -> InlineKeyboardMarkup | N
 
 async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
+    Thin per-user-ordering wrapper around _battle_menu_callback_inner.
+
+    Real live bug (2026-08-25, error-log + dev-bridge findings: a 13x
+    RetryAfter flood-control burst sending the same "Fireball" image
+    during a live cast, plus a separate report "Not showing me the
+    prompt for my turn for the past three rounds"): unlike the typed-
+    text path (text_message_router -> _run_in_user_order, see that
+    function's own docstring), python-telegram-bot's
+    concurrent_updates=True meant every button tap dispatched
+    battle_menu_callback immediately and concurrently -- including
+    several rapid taps of the SAME still-visible button from the SAME
+    player. Nothing here re-checked "is it still your turn" until deep
+    inside the function, by which point multiple concurrent
+    invocations had already all passed that check (the turn hadn't
+    advanced yet in any of them), so each one independently re-resolved
+    the same cast/attack and re-sent its own copy of any combat image
+    -- a real burst of duplicate actions and duplicate sends, not just
+    a duplicate notification. Routing through the SAME per-user queue
+    already used for typed messages serializes this exactly like text
+    already is: a second rapid tap now waits for the first to finish,
+    and by the time it runs, the turn has genuinely moved on, so it
+    hits the existing "it's not your turn" rejection instead of
+    re-executing the action.
+    """
+    user_id = update.effective_user.id
+    if user_id in _USER_BUSY:
+        await _safe_answer(
+            update.callback_query,
+            "⏳ Still working on your last action — I'll get to this one right after.",
+            show_alert=False,
+        )
+    await _run_in_user_order(user_id, lambda: _battle_menu_callback_inner(update, context))
+
+
+async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
     Handles taps on the RPG-style battle menu (_battle_menu_keyboard) --
     per Coffee's request (2026-07-18): "create an RPG style battle menu
     for battles... Fight, Skills/Magic/Abilities, Items, Run."
@@ -9777,6 +9813,19 @@ async def _do_recruit_npc(update: Update, npc_name: str) -> None:
     # combat stats despite owning a weapon the whole time. Same helper,
     # same fix.
     db.auto_equip_best_gear(companion["telegram_user_id"], update.effective_chat.id)
+
+    # Real live report (2026-08-25, dev-bridge: "some characters are
+    # saying she when they are male characters"). Root cause: even
+    # sera_wanderer's own campaign.json entry already carries a real
+    # "pronouns": "she/her" field -- but this function never read it at
+    # all, so EVERY recruited companion (confirmed live: Sarah included)
+    # ended up with pronouns=None in the DB regardless, leaving
+    # narrate_action's own real grounding (ai/dm_agent.py, 2026-07-17 --
+    # "if a pronoun is needed for {name}, use: {pronouns}") with nothing
+    # to ground on and forced to guess blind for every single companion,
+    # not just the ones whose canonical pronoun was never decided.
+    if npc.get("pronouns"):
+        db.update_character_by_id(companion["character_id"], pronouns=npc["pronouns"])
 
     # Real bug found live (2026-07-17, Coffee: "if she is recruited she
     # shud follow the party?"): a recruited companion was never actually
@@ -22941,7 +22990,14 @@ async def _do_use_item(update: Update, text: str) -> None:
         )
         if live_target is not None:
             live_target["spell_slots_current"] = new_slots
-        db.update_character_by_id(target["character_id"], spell_slots_current=new_slots)
+        # Real live crash (2026-08-25, error-log finding): a summoned
+        # participant (e.g. "A Spirit") has no DB row at all -- live_target
+        # above already mutated the real session.participants dict in
+        # place, so the live combat state is already correct. Mirrors the
+        # "heal" branch's own is_summon_target guard just above, which
+        # already gets this right; this branch was simply missing it.
+        if not is_summon_target:
+            db.update_character_by_id(target["character_id"], spell_slots_current=new_slots)
         restored = new_slots - slots_before
         message = (
             f"✨ **{character['name']}** drinks a {item['name']}{target_note}, restoring "

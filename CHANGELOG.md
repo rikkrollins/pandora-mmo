@@ -2,6 +2,42 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.349] — Duplicate-tap race, summon-tonic crash, and dropped companion pronouns
+
+Three real bugs found via error-log/dev-bridge monitoring (2026-08-25),
+each with a real fail-then-pass test:
+
+- **Duplicate-tap race in the battle menu.** Root cause of both a 13x
+  Telegram flood-control burst (repeated "Fireball" image sends) and a
+  dev-bridge report, "Not showing me the prompt for my turn for the
+  past three rounds" — and the likely explanation for Charvenna's "I
+  haven't run out of magic" report too. `battle_menu_callback` never
+  serialized per-user the way the typed-text path already does
+  (`_run_in_user_order`), so python-telegram-bot's
+  `concurrent_updates=True` let two rapid taps of the SAME still-
+  visible button race through the "is it your turn" check before
+  either had advanced the turn — each one independently re-resolved
+  the same cast and re-sent its own image (and, for a scroll/slot-
+  spending cast, silently double-spent the resource on one real tap).
+  Now routed through the same per-user queue text already uses, so a
+  second rapid tap waits for the first and lands after the turn has
+  genuinely moved on, hitting the existing "it's not your turn"
+  rejection instead of re-executing the action.
+- **KeyError: 'character_id' crash** using a Greater Spell Tonic on a
+  live summon (e.g. "A Spirit") — a summon has no DB row at all.
+  `_do_use_item`'s `restore_spell_slots` branch was missing the same
+  `is_summon_target` guard its sibling `heal` branch already had.
+- **Recruited companions never got their real pronoun.** Even
+  `sera_wanderer`'s own `campaign.json` entry already carried a real
+  `"pronouns": "she/her"` field, but `_do_recruit_npc` never read it —
+  every recruited companion (Sarah included) landed in the DB with
+  `pronouns=None`, forcing `narrate_action`'s narration to guess blind
+  for all of them instead of using the real grounding added 2026-07-17.
+  Now wired through; also added Vesh Nightglass's own canonical
+  `she/her` (confirmed from her own bio text). Borin/Wren/Pip/Grask
+  still have no canonical pronoun in the data — left unset rather than
+  guessed.
+
 ## [1.27.348] — "Why can't I move on?" — silent "start a battle" + doubled board-quest titles
 
 Real dev-bridge report (2026-08-25, Coffee's party, screenshot): "Why

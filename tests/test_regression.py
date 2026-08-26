@@ -5743,6 +5743,48 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("A Lesser Spirit" in m for m in sink), sink)
         sessions.end_session(-999)
 
+    async def test_spell_tonic_on_a_live_summon_doesnt_crash_with_no_db_row(self):
+        """
+        Real live crash (2026-08-25, error-log finding): "use greater
+        spell tonic on A Spirit" (a real callback,
+        `bm|usetarget|greater_spell_tonic|A Spirit`) raised `KeyError:
+        'character_id'` -- a summon has no DB row at all, but the
+        restore_spell_slots branch unconditionally tried
+        db.update_character_by_id(target["character_id"], ...) anyway.
+        The "heal" branch just above it already guards this exact case
+        with `if not is_summon_target:` -- this branch was simply
+        missing the same guard.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        uid = 900492
+        make_basic_character(uid, "TonicOnSummonCaster", current_location="crossroads_tavern")
+        db.update_character(uid, -999, inventory={"greater_spell_tonic": 1})
+        character = db.get_character(uid, -999)
+        character["telegram_user_id"] = uid
+        enemy = {"telegram_user_id": -5200917, "name": "SpellTonicSummonDummy", "dexterity": 10, "strength": 10,
+                 "armor_class": 5, "hp_current": 500, "hp_max": 500, "is_ai": 1}
+        summon = {"telegram_user_id": -4077778, "name": "A Spirit", "dexterity": 14, "strength": 10,
+                  "armor_class": 12, "hp_current": 50, "hp_max": 50, "is_ai": 1, "xp_reward": 0,
+                  "spell_slots_current": 0, "spell_slots_max": 2}
+        session = sessions.start_session(
+            -999, [character, enemy, summon], {uid: "party", -5200917: "enemy", -4077778: "party"},
+        )
+        session.turn_order = [uid, -4077778, -5200917]
+        session.current_turn_index = 0
+        sink = []
+        with patch("bot._get_combat_throttle_seconds", return_value=0.0), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            await bot._do_use_item(
+                FakeUpdate(uid, "use greater spell tonic on A Spirit", sink),
+                "use greater spell tonic on A Spirit",
+            )  # must not raise KeyError: 'character_id'
+        live_summon = next(p for p in session.participants if p["telegram_user_id"] == -4077778)
+        self.assertGreater(live_summon["spell_slots_current"], 0, "the live summon's own slots must actually be restored")
+        self.assertTrue(any("A Spirit" in m for m in sink), sink)
+        sessions.end_session(-999)
+
     async def test_summon_spirit_scroll_actually_advances_the_turn(self):
         """
         Real live bug (2026-08-21, Coffee: "when players use the scrolls
@@ -11817,6 +11859,29 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         player = db.get_character(player_id, -999)
         self.assertEqual(db.get_party_size(player["party_id"]), 7)  # player + all 6 companions
 
+    async def test_recruiting_an_npc_with_a_canonical_pronoun_actually_saves_it(self):
+        """
+        Real live report (2026-08-25, dev-bridge: "some characters are
+        saying she when they are male characters"). Root cause: even
+        sera_wanderer's own campaign.json entry already carries a real
+        "pronouns": "she/her" field, but _do_recruit_npc never read it --
+        confirmed live, every recruited companion (Sarah included) ended
+        up with pronouns=None in the DB, leaving narrate_action's own
+        real grounding (ai/dm_agent.py) with nothing to work from and
+        forced to guess blind for every single one, not just the
+        ambiguous ones. Sarah (sera_wanderer) and Vesh Nightglass both
+        carry a real canonical pronoun in campaign.json; confirms both
+        actually land on the recruited character's own DB row now.
+        """
+        player_id = 900531
+        make_basic_character(player_id, "PronounCollectorPlayer", current_location="crossroads_tavern")
+        for npc_id, display_name in (("sera_wanderer", "Sarah"), ("vesh_nightglass", "Vesh Nightglass")):
+            expected = bot.CAMPAIGN["npcs"][npc_id]["pronouns"]
+            sink = []
+            await bot._do_recruit_npc(FakeUpdate(player_id, f"recruit {display_name}", sink), display_name)
+            companion = next(p for p in bot._get_party_members(-999) if p["name"] == display_name)
+            self.assertEqual(companion.get("pronouns"), expected, f"{display_name} should carry its real campaign.json pronoun")
+
     def test_accept_party_invite_full_message_reflects_the_real_configured_cap(self):
         """
         db.accept_party_invite's rejection message used to hardcode the
@@ -13419,6 +13484,69 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         after = db.get_character(caster_id, -999)
         self.assertEqual(after["spell_slots_current"], 4)  # untouched -- the SCROLL was spent, not a slot
         self.assertEqual(after["inventory"].get("scroll_fireball", 0), 2)  # scroll consumed
+        sessions.end_session(-999)
+
+    async def test_battle_menu_callback_serializes_rapid_duplicate_taps_per_user(self):
+        """
+        Real live incident (2026-08-25, error-log finding: 13x RetryAfter
+        flood-control burst re-sending the same "Fireball" image during
+        one cast, plus a matching dev-bridge report "Not showing me the
+        prompt for my turn for the past three rounds"): battle_menu_
+        callback never serialized per-user like the typed-text path
+        already does (_run_in_user_order) -- two rapid concurrent taps of
+        the SAME still-visible button raced through the "is it your turn"
+        check before either had advanced the turn, so BOTH independently
+        re-resolved the same cast (and re-sent the same image). Reproduces
+        the race directly: two concurrent taps of the same scroll button
+        by the same caster, with the slow "advance the turn"/"send an
+        image" steps stalled long enough to open the old race window --
+        only ONE should actually consume the scroll; the other must land
+        AFTER the turn has moved on and get rejected as "not your turn."
+        """
+        import asyncio
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        caster_id = 950960
+        make_basic_character(
+            caster_id, "RaceTapCaster", char_class="Wizard", current_location="crossroads_tavern",
+            known_spells=[], inventory={"scroll_fireball": 3},
+        )
+        enemy = {"telegram_user_id": -5200960, "name": "RaceTapGoblin", "dexterity": 10,
+                 "strength": 10, "hp_current": 200, "hp_max": 200, "conditions": [], "resistances": [],
+                 "vulnerabilities": [], "is_ai": 1}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        session = sessions.start_session(-999, [caster, enemy], {caster_id: "party", -5200960: "enemy"})
+        session.turn_order = [caster_id, -5200960]
+
+        async def slow_advance(update, sess):
+            await asyncio.sleep(0.05)
+            sess.advance_turn()
+
+        async def slow_image(*args, **kwargs):
+            await asyncio.sleep(0.05)
+            return True
+
+        sink1, sink2 = [], []
+        with patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock(side_effect=slow_advance)), \
+             patch("bot._maybe_send_spell_image", new=AsyncMock(side_effect=slow_image)), \
+             patch("bot.narrate_action", return_value="Flames erupt."):
+            await asyncio.gather(
+                bot.battle_menu_callback(FakeCallbackUpdate(caster_id, "bm|scroll|scroll_fireball", sink1), DummyContext()),
+                bot.battle_menu_callback(FakeCallbackUpdate(caster_id, "bm|scroll|scroll_fireball", sink2), DummyContext()),
+            )
+            await _drain_narration_queue(-999)
+        after = db.get_character(caster_id, -999)
+        self.assertEqual(
+            after["inventory"].get("scroll_fireball", 0), 2,
+            "exactly one of the two racing taps should have actually cast -- the other must be "
+            "rejected, not silently duplicate the cast",
+        )
+        self.assertTrue(
+            any("not your turn" in m.lower() for m in sink1 + sink2),
+            "the second, later tap must be rejected as not-your-turn rather than racing through",
+        )
         sessions.end_session(-999)
 
     async def test_inventory_scroll_button_never_spends_a_slot_even_when_the_spell_is_also_known(self):

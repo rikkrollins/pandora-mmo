@@ -3014,6 +3014,7 @@
       "personality": "a tiefling sorcerer who got turned around chasing a light down here and has been living off crystal-glow for longer than she'll admit",
       "goals": "finding someone who actually knows the way back to the surface",
       "recruitable": true,
+      "pronouns": "she/her",
       "stats": {
         "race": "Tiefling",
         "char_class": "Sorcerer",
