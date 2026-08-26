@@ -2881,6 +2881,7 @@
       "name": "Kess",
       "role": "bandit_captain",
       "personality": "a cold, calculating highwaywoman who sizes up travelers as marks before they've even noticed her — cruel by choice, not desperation",
+      "goals": "collecting tolls to fund something far bigger than banditry — she'd never say what, and the coin never stays with her crew",
       "alignment": "Chaotic Evil",
       "disposition": "hostile",
       "is_boss": true,
@@ -3179,6 +3180,34 @@
         "location": "market_row"
       },
       "clue": "Borin still takes up the same spot on Market Row every morning, like he hasn't decided anything yet.",
+      "weight": "climactic"
+    },
+    "borins_blackthorn_warning": {
+      "title": "More Than Banditry",
+      "description": "Borin's watched the roads long enough to know real banditry when he sees it, and the Blackthorn Raiders working the Greymoor Downs aren't it -- too well-fed, too well-armed, and the coin they take never seems to stay with them. He wants the party to see the Downs for themselves and judge who's really paying for it.",
+      "objective_location": "greymoor_downs",
+      "giver_npc": "borin_ironjaw",
+      "reward_xp": 200,
+      "reward_gold": 0,
+      "reward_item": "torn_ledger_page",
+      "trigger": {
+        "type": "reach_location",
+        "location": "greymoor_downs"
+      },
+      "clue": "Borin says a captain who takes tolls but never keeps the coin is working for somebody, not just herself."
+    },
+    "kess_first_reckoning": {
+      "title": "The Name on the Page",
+      "description": "The ledger page names no one Borin recognizes, but it's real proof the one calling herself Kess answers to someone else entirely. He wants her stopped and questioned before whatever she's funding gets any further along.",
+      "objective_location": "greymoor_downs",
+      "giver_npc": "borin_ironjaw",
+      "reward_xp": 500,
+      "reward_gold": 200,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "kess_the_bandit"
+      },
+      "clue": "Borin: 'Whoever's holding her leash won't show themselves while she's still standing.'",
       "weight": "climactic"
     },
     "wrens_root_worry": {

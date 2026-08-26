@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.363] — Kess the Bandit, Phase 1: the seed of a real antagonist arc
+
+Real live conversation (Coffee: "when we goto greymoor downs we get
+attacked by kess... doesnt have must narration or story sense in it...
+does the game have an antagonist? ... maybe this could evolve into the
+main END BOSS"). This game had no real antagonist at all — Kess was a
+bare ambient-ambush NPC with combat stats and nothing else. Phase 1
+plants the seed: a real motive, a real reveal quest, and a real named
+encounter. Later escalation (multiple recurring encounters, a final
+confrontation) is a deliberate roadmap-only follow-up, not built yet.
+
+- Kess now has a real `goals` field grounding her existing faction's
+  own unresolved lore hook (Blackthorn Raiders are "funded by something
+  bigger than banditry") — her ambient ambush narration can now hint at
+  more with zero new mechanics.
+- New quest `borins_blackthorn_warning` (giver: Borin Ironjaw, offered
+  once his own personal arc is complete) sends the party to judge
+  Greymoor Downs for themselves, rewarding a new lore item
+  (`torn_ledger_page`) confirming someone else is bankrolling her crew.
+- New quest `kess_first_reckoning` (`defeat_monster` trigger, weight
+  "climactic") gives Kess's first NAMED encounter real stakes and a
+  real AI-narrated completion.
+- Fixed a real gap in `_npc_combatant_from_stats`: Kess's combatant
+  never carried a `monster_key` (only `source_npc_id`, a field
+  `defeat_monster` quest-completion never reads) — no quest could ever
+  complete from defeating a hostile ambient NPC before this. Confirmed
+  via fail-then-pass test that this does NOT also add her to the
+  defeater's bestiary (`mark_known_monster` isn't wired to this path;
+  that's a separate, still-open gap).
+
 ## [1.27.362] — Healing Mastery: a shared "heal" element proficiency
 
 Real live request (Coffee: "use this proficiency for healing type

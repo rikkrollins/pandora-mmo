@@ -15144,6 +15144,74 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("the_first_city_quest", character["active_quests"])
         sessions.end_session(-999)
 
+    # -- Real live request (2026-08-26, per Coffee: evolve Kess the
+    #    Bandit from a bare random ambush into a real recurring
+    #    antagonist arc, starting with a reveal quest from Borin
+    #    Ironjaw and a real named encounter). ---------------------------
+    def test_kess_combatant_carries_a_real_monster_key(self):
+        """
+        Real live gap: _npc_combatant_from_stats never set monster_key
+        at all (only source_npc_id), so NO defeat_monster quest could
+        ever complete from beating a hostile ambient NPC like Kess.
+        """
+        npc_data = bot.CAMPAIGN["npcs"]["kess_the_bandit"]
+        combatant = bot._npc_combatant_from_stats("kess_the_bandit", npc_data)
+        self.assertEqual(combatant["monster_key"], "kess_the_bandit")
+
+    async def test_defeating_kess_completes_the_kess_first_reckoning_quest(self):
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        player_id = 999912
+        make_basic_character(player_id, "BlackthornHunter", current_location="greymoor_downs")
+        db.accept_quest(player_id, -999, "kess_first_reckoning")
+
+        npc_data = bot.CAMPAIGN["npcs"]["kess_the_bandit"]
+        kess = bot._npc_combatant_from_stats("kess_the_bandit", npc_data)
+        session = sessions.start_session(-999, [kess], {kess["telegram_user_id"]: "enemy", player_id: "party"})
+        session.turn_order = [kess["telegram_user_id"], player_id]
+
+        sink = []
+        # kess_first_reckoning is weight="climactic" -- completion fires a
+        # real narrate_chapter_climax Ollama call, mocked here same as the
+        # existing resolution-quest tests above.
+        with patch("bot.narrate_chapter_climax", return_value="A quiet, resolved moment."):
+            await bot._check_quest_completions_defeat_monster(FakeUpdate(player_id, "irrelevant", sink), session)
+
+        character = db.get_character(player_id, -999)
+        self.assertIn("kess_first_reckoning", character["completed_quests"])
+        self.assertNotIn("kess_first_reckoning", character["active_quests"])
+        sessions.end_session(-999)
+
+    async def test_borin_offers_the_blackthorn_warning_only_after_his_own_arc_resolves(self):
+        """
+        _offerable_companion_quest matches the first not-yet-completed/
+        active giver_npc="borin_ironjaw" quest in CAMPAIGN["quests"]'s
+        own dict order -- borins_vouching_task/borins_resolution (his
+        existing personal-arc quests) must still be offered first,
+        exactly as before this change; the new reveal quest only
+        surfaces once both are actually completed, same real sequencing
+        every other companion arc in this game already relies on.
+        """
+        user_id = 999913
+        make_basic_character(user_id, "BorinQuestSeeker", current_location="crossroads_tavern")
+        sink = []
+        await bot._do_recruit_npc(FakeUpdate(user_id, "recruit Borin Ironjaw", sink), "Borin Ironjaw")
+
+        character = db.get_character(user_id, -999)
+        first = bot._offerable_companion_quest(character)
+        self.assertEqual(first[0], "borins_vouching_task")
+
+        db.complete_quest(user_id, -999, "borins_vouching_task")
+        character = db.get_character(user_id, -999)
+        second = bot._offerable_companion_quest(character)
+        self.assertEqual(second[0], "borins_resolution")
+
+        db.complete_quest(user_id, -999, "borins_resolution")
+        character = db.get_character(user_id, -999)
+        third = bot._offerable_companion_quest(character)
+        self.assertEqual(third[0], "borins_blackthorn_warning")
+
     def test_new_story_bosses_are_placed_at_their_real_locations(self):
         locs = {}
         for region in bot.CAMPAIGN["locations"].values():

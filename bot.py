@@ -8521,6 +8521,17 @@ def _npc_combatant_from_stats(npc_id: str, npc_data: dict, party_levels: list[in
         "is_ai": 1, "xp_reward": round(xp_reward * stat_mult),
         "source_npc_id": npc_id,
         "is_boss": is_boss,
+        # Real live gap (2026-08-26, per Coffee: give a hostile ambient
+        # NPC like Kess a real story -- confirmed live that NO
+        # defeat_monster quest could ever complete from beating one,
+        # since this combatant never carried a monster_key at all
+        # (only source_npc_id, a different field _check_quest_
+        # completions_defeat_monster never reads). Note: mark_known_
+        # monster (the bestiary write) is only ever called from
+        # _do_start_combat's own loop, not this ambient-ambush path --
+        # this does NOT also add the NPC to known_monsters, that's a
+        # separate, still-open gap.
+        "monster_key": npc_id,
     }
     if stats.get("damage_dice"):
         combatant["damage_dice"] = stats["damage_dice"]

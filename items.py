@@ -649,6 +649,18 @@ ITEMS = {
         "price": 0, "weight": 0.1,
         "description": "Worn smooth from use, though nothing you've found yet has ever turned for it.",
     },
+    # Real live request (2026-08-26, per Coffee: evolve Kess the Bandit
+    # from a bare random ambush into a real recurring antagonist arc,
+    # via a real reveal quest from Borin Ironjaw). A quiet confirmation
+    # of the blackthorn_raiders faction's own already-written hook
+    # ("funded by something bigger than banditry," campaign.json) --
+    # never invented from nothing, just made concrete.
+    "torn_ledger_page": {
+        "name": "Torn Ledger Page", "type": "quest_item", "rarity": "unique",
+        "price": 0, "weight": 0.1,
+        "description": "A single page torn from a Blackthorn Raiders' account book — tallies of coin far too "
+                       "large for a roadside gang, paid out to a name written in a hand that isn't Kess's.",
+    },
 
     # --- Crafting / trade materials ---
     "iron_ore": {"name": "Iron Ore", "type": "material", "rarity": "common", "price": 5, "weight": 2, "description": "A rough, heavy chunk, veined with metal not yet worth calling ore-grade."},
