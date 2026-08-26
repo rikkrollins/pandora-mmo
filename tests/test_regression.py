@@ -625,6 +625,59 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id, -999)
         self.assertEqual(character["current_location"], "the_unmoored_isle")
 
+    async def test_first_city_hides_the_ascend_hint_until_the_shard_is_actually_held(self):
+        """
+        Real live report (2026-08-26, Coffee: "in the first city you
+        have a location showing (sky) but the location is for a evolved
+        3 character... please not even show it until it is time for the
+        player to go there, that way they dont get stuck by travelling
+        then not able to get back to the ground layer"). The Unmoored
+        Isle has no path back down to the_first_city in its own
+        "directions" (only deeper sky content past it) -- so a player
+        who saw and followed "You could ascend to: The Unmoored Isle"
+        before actually holding shard_of_dim_light could genuinely
+        strand themselves the moment they somehow got up there anyway.
+        _location_extra_detail's ascend/descend lines now check the
+        same real gates _do_move already enforces before showing at
+        all.
+        """
+        from unittest.mock import patch
+
+        async def no_real_image_call(*args, **kwargs):
+            return False
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "Something old and warm hums beneath the spire."}
+
+        user_id = 888889
+        make_basic_character(user_id, "PrematureRoamer", current_location="the_first_city")
+        db.update_character(user_id, -999, level=10)
+        db.add_item(user_id, -999, "torch", 1)  # so _do_look doesn't short-circuit on darkness first
+
+        sink = []
+        # the_first_city has a quest board with no cached quests yet in a
+        # fresh test DB -- get_or_generate_all_board_quests lazily
+        # generates one via a real Ollama call unrelated to the bug this
+        # test targets, same reasoning as this file's other _do_look
+        # tests that mock both real network calls _do_look can trigger.
+        with patch("bot._send_generated_image", side_effect=no_real_image_call), \
+             patch("ai.dm_agent.requests.post", return_value=FakeResponse()):
+            await bot._do_look(FakeUpdate(user_id, "look around", sink))
+        reply = "\n".join(sink)
+        self.assertNotIn("Unmoored Isle", reply, "shouldn't be hinted at before the shard is held")
+
+        db.add_item(user_id, -999, "shard_of_dim_light", 1)
+        sink.clear()
+        with patch("bot._send_generated_image", side_effect=no_real_image_call), \
+             patch("ai.dm_agent.requests.post", return_value=FakeResponse()):
+            await bot._do_look(FakeUpdate(user_id, "look around", sink))
+        reply = "\n".join(sink)
+        self.assertIn("You could ascend to: The Unmoored Isle", reply, reply)
+
     # -- The Unmoored Isle has a real final boss (post-1.10.0) --------
     def test_unmoored_isle_has_a_real_unfleeable_boss(self):
         """

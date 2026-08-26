@@ -19505,9 +19505,13 @@ def _location_extra_detail(character: dict, location: dict, location_id: str, ch
             ]
             lines.append(f"You can travel to: {', '.join(conn_labels)}")
     if "descends_to" in location:
-        lines.append(f"You could descend to: {cl.get_location(CAMPAIGN, location['descends_to'])['name']}")
+        below = cl.get_location(CAMPAIGN, location["descends_to"])
+        if _character_can_currently_reach(character, below):
+            lines.append(f"You could descend to: {below['name']}")
     if "ascends_to" in location:
-        lines.append(f"You could ascend to: {cl.get_location(CAMPAIGN, location['ascends_to'])['name']}")
+        above = cl.get_location(CAMPAIGN, location["ascends_to"])
+        if _character_can_currently_reach(character, above):
+            lines.append(f"You could ascend to: {above['name']}")
     interactables = location.get("interactables", {})
     if interactables:
         names = [i["name"] for i in interactables.values()]
@@ -22326,6 +22330,29 @@ def _check_story_gate(character: dict, current: dict, destination_id: str) -> st
                 )
 
     return None
+
+
+def _character_can_currently_reach(character: dict, destination: dict) -> bool:
+    """
+    Real live report (2026-08-26, Coffee: "in the first city you have a
+    location showing (sky) but the location is for a evolved 3
+    character... please not even show it until it is time for the
+    player to go there, that way they dont get stuck by travelling
+    then not able to get back to the ground layer"). the_first_city's
+    real "You could ascend to: The Unmoored Isle" line
+    (_location_extra_detail) was unconditional -- shown regardless of
+    whether the character actually held the isle's requires_item
+    (shard_of_dim_light) or met its requires_rebirth_count -- even
+    though the isle itself has no path back down to the_first_city in
+    its own "directions" (only deeper sky content), so a player who
+    saw and followed that line before they were really ready could
+    genuinely strand themselves. Same three real gates _do_move already
+    enforces at actual travel time, factored out so the DISPLAY can
+    check them too instead of just the enforcement.
+    """
+    if destination.get("requires_item") and destination["requires_item"] not in character.get("inventory", {}):
+        return False
+    return _meets_location_level(character, destination) and _meets_rebirth_requirement(character, destination)
 
 
 def _meets_location_level(character: dict, destination: dict) -> bool:

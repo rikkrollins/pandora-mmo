@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.352] — First City no longer hints at the sky before you're ready
+
+Real live report (2026-08-26, Coffee: "in the first city you have a
+location showing (sky) but the location is for a evolved 3 character
+... please not even show it on the First City locations until it is
+time for the player to go there, that way they dont get stuck by
+travelling then not able to get back to the ground layer"). The First
+City's "look around" unconditionally showed "You could ascend to: The
+Unmoored Isle" regardless of whether the character actually held the
+isle's required `shard_of_dim_light` — and the isle itself has no path
+back down to The First City in its own `directions` (only deeper sky
+content past it), so a player who followed that hint before they were
+really ready could genuinely strand themselves. `_location_extra_detail`'s
+ascend/descend lines now check the same real gates (`requires_item`,
+`min_level`, `requires_rebirth_count`) `_do_move` already enforces at
+actual travel time, via a new shared `_character_can_currently_reach`
+helper, before showing at all. Real fail-then-pass test added
+(`test_first_city_hides_the_ascend_hint_until_the_shard_is_actually_held`).
+
 ## [1.27.351] — Flee messages now name who actually fled
 
 Real live confusion (2026-08-26, dev-bridge, Charvenna: "I asked to
