@@ -6569,6 +6569,64 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot.battle_menu_callback(update, DummyContext())  # must not raise
         sessions.end_session(-999)
 
+    # -- Real live report (2026-08-26, Coffee: "i have no seen any
+    #    indication of Second wind in battle or in menu, add it to the
+    #    skills menu so the player can select it via push button"). ---
+    async def test_battle_menu_offers_second_wind_to_a_fighter_with_no_known_spells(self):
+        """
+        Second Wind is a class feature, not a spell -- a Fighter with
+        zero known_spells used to never see a "Skills" button at all
+        (its visibility only ever checked known_spells), leaving Second
+        Wind completely unreachable by button regardless of typing it.
+        """
+        import sessions
+        sessions.end_session(-999)
+        user_id = 950960
+        make_basic_character(user_id, "SecondWindFighter", char_class="Fighter", current_location="crossroads_tavern")
+        enemy = {"telegram_user_id": -5200960, "name": "SecondWindGoblin", "dexterity": 10,
+                 "hp_current": 20, "hp_max": 20, "is_ai": 1}
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", -5200960: "enemy"})
+        session.turn_order = [user_id, -5200960]
+        session.current_turn_index = 0
+
+        sink = []
+        await bot.battle_menu_callback(FakeCallbackUpdate(user_id, "bm|menu", sink), DummyContext())
+        self.assertTrue(any("Skills" in s for s in sink), "a Fighter with a real, usable Second Wind must see a Skills button")
+
+        sink2 = []
+        await bot.battle_menu_callback(FakeCallbackUpdate(user_id, "bm|skills", sink2), DummyContext())
+        self.assertTrue(any("Second Wind" in s for s in sink2))
+        sessions.end_session(-999)
+
+    async def test_second_wind_button_actually_heals(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 950961
+        make_basic_character(user_id, "SecondWindButtonUser", char_class="Fighter", current_location="crossroads_tavern",
+                              hp_max=50)
+        db.update_character(user_id, -999, hp_current=10)
+        enemy = {"telegram_user_id": -5200961, "name": "SecondWindGoblin2", "dexterity": 10,
+                 "hp_current": 20, "hp_max": 20, "is_ai": 1}
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", -5200961: "enemy"})
+        session.turn_order = [user_id, -5200961]
+        session.current_turn_index = 0
+
+        sink = []
+        await bot.battle_menu_callback(FakeCallbackUpdate(user_id, "bm|secondwind", sink), DummyContext())
+        after = db.get_character(user_id, -999)
+        self.assertGreater(after["hp_current"], 10)
+        self.assertEqual(db.get_feature_uses(user_id, -999, "second_wind"), 1)
+
+        # Second tap this rest must no longer offer the button at all.
+        sink2 = []
+        await bot.battle_menu_callback(FakeCallbackUpdate(user_id, "bm|skills", sink2), DummyContext())
+        self.assertFalse(any("Second Wind" in s for s in sink2), "already-used Second Wind must not still be offered")
+        sessions.end_session(-999)
+
     async def test_stale_battle_menu_tap_names_whose_turn_it_actually_is(self):
         """
         Real live report (2026-08-23, Coffee, screenshot: "the push

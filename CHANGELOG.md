@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.361] — Second Wind now has a real battle-menu button
+
+Real live report (Coffee: "i have no seen any indication of Second
+wind in battle or in menu, add it to the skills menu so the player
+can select it via push button"). Second Wind is a class feature, not
+a spell — a Fighter with zero known_spells never even saw a "Skills"
+button at all (its visibility only checked known_spells), leaving
+Second Wind reachable by typing only. Skills' top-level visibility and
+its own button list now also account for a genuinely usable Second
+Wind (real Fighter, hasn't already spent this rest's one use).
+
+2 new tests, all passing.
+
 ## [1.27.360] — Using the environment is now a real risk, not a guaranteed win
 
 Real live feedback (Coffee, dev-bridge): "it shouldn't be an automatic

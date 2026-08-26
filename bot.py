@@ -2957,7 +2957,20 @@ def _battle_menu_keyboard(session: sessions.Session) -> InlineKeyboardMarkup | N
         return None
 
     row = [InlineKeyboardButton("⚔️ Fight", callback_data="bm|fight")]
-    if character.get("known_spells"):
+    # Real live report (2026-08-26, Coffee: "i have no seen any
+    # indication of Second wind in battle or in menu, add it to the
+    # skills menu so the player can select it via push button"): Second
+    # Wind (and every other real class feature action -- Rage, Action
+    # Surge, Lay on Hands, etc.) was always typed-text-only, unlike
+    # every spell here. Second Wind specifically is grounded the same
+    # "only shown if genuinely usable right now" way Items already is
+    # (real Fighter, hasn't already spent their one use since the last
+    # rest) rather than a generic button everyone sees.
+    has_usable_second_wind = (
+        character.get("char_class") == "Fighter"
+        and db.get_feature_uses(current["telegram_user_id"], session.chat_id, "second_wind") < 1
+    )
+    if character.get("known_spells") or has_usable_second_wind:
         row.append(InlineKeyboardButton("✨ Skills", callback_data="bm|skills"))
     usable_ids = _battle_usable_item_ids(character)
     if usable_ids:
@@ -3155,8 +3168,20 @@ async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFA
             [InlineKeyboardButton(spells_module.get_spell(sid)["name"], callback_data=f"bm|cast|{sid}")]
             for sid in known if spells_module.get_spell(sid)
         ]
+        # Second Wind (2026-08-26, per Coffee: "add it to the skills
+        # menu") -- same "only shown if genuinely usable right now"
+        # grounding as _battle_menu_keyboard's own visibility check for
+        # this same button.
+        if (character and character.get("char_class") == "Fighter"
+                and db.get_feature_uses(user_id, chat_id, "second_wind") < 1):
+            spell_buttons.append([InlineKeyboardButton("💨 Second Wind", callback_data="bm|secondwind")])
         spell_buttons.append([InlineKeyboardButton("« Back", callback_data="bm|menu")])
         await _safe_edit_markup(query, InlineKeyboardMarkup(spell_buttons))
+        return
+
+    if action == "secondwind":
+        await _safe_edit_markup(query)
+        await _do_second_wind(update)
         return
 
     if action == "cast":
