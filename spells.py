@@ -283,6 +283,17 @@ SPELLS = {
         "name": "Hold Person", "level": 2, "school": "enchantment",
         "effect": "buff", "duration_rounds": 10,
     },
+    "lesser_restoration": {
+        # Real live gap (2026-08-26, per Coffee: "what cures silence?" ->
+        # "create an item and a spell to cure silence -- check other
+        # status effects and make sure there is items and spells to
+        # cure them also"). Real 5E's actual Lesser Restoration cures
+        # blinded, deafened, paralyzed, or poisoned -- adapted to this
+        # engine's own condition set in bot.py's _cast_utility_spell
+        # (silenced standing in for deafened).
+        "name": "Lesser Restoration", "level": 2, "school": "abjuration",
+        "effect": "negate", "duration_rounds": 0,
+    },
     "moonbeam": {
         "name": "Moonbeam", "level": 2, "school": "evocation",
         "effect": "damage", "damage_dice": "2d10", "save_ability": "constitution", "damage_type": "radiant",
@@ -421,10 +432,10 @@ CLASS_SPELL_LISTS = {
                  "fireball", "lightning_bolt", "counterspell",
                  "ice_storm", "polymorph", "cone_of_cold", "hold_monster"],
     "cleric": ["cure_wounds", "healing_word", "guiding_bolt", "command", "bless",
-               "spiritual_weapon", "hold_person", "dispel_magic", "revivify",
+               "spiritual_weapon", "hold_person", "lesser_restoration", "dispel_magic", "revivify",
                "death_ward", "guardian_of_faith", "flame_strike", "mass_cure_wounds"],
     "druid": ["cure_wounds", "animal_friendship", "faerie_fire",
-              "moonbeam", "hold_person", "call_lightning",
+              "moonbeam", "hold_person", "lesser_restoration", "call_lightning",
               "ice_storm", "polymorph", "insect_plague", "mass_cure_wounds"],
     "bard": ["healing_word", "charm_person", "faerie_fire",
              "invisibility", "hold_person", "dispel_magic",
@@ -433,9 +444,9 @@ CLASS_SPELL_LISTS = {
                 "misty_step", "hold_person", "counterspell", "dispel_magic",
                 "banishment", "dimension_door", "hold_monster"],
     "paladin": ["cure_wounds", "command", "protection_from_evil_and_good",
-                "death_ward", "banishment"],
+                "lesser_restoration", "death_ward", "banishment"],
     "ranger": ["cure_wounds", "animal_friendship", "hunters_mark", "longstrider",
-               "summon_lesser_spirit", "insect_plague"],
+               "lesser_restoration", "summon_lesser_spirit", "insect_plague"],
 }
 
 

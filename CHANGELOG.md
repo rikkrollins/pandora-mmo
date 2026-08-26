@@ -2,6 +2,37 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.358] — Real cures for silenced, blinded, and poisoned
+
+Real live request (Coffee: "what cures silence?" -> "create an item
+and a spell to cure silence -- check other status effects and make
+sure there is items and spells to cure them also"). Audited this
+engine's own on_hit_condition system: `prone`/`poisoned`/`blinded`/
+`silenced` all persist until combat ends by design, but only
+`poisoned` had a cure (Antitoxin) — `blinded` and `silenced` had
+none at all, and `poisoned` had no *spell* cure either. `prone`
+recovers the moment you act again (same real 5E "standing up" rule),
+so it doesn't need one.
+
+- **New items**: Vocal Tonic (cures silenced) and Clarifying Drops
+  (cures blinded), both via a new generic, data-driven `cure_condition`
+  item effect — Antitoxin's existing `cure_poison` path is untouched.
+- **New spell**: Lesser Restoration (Cleric/Druid/Paladin/Ranger,
+  level 2) — real 5E's actual spell, adapted to this engine's condition
+  set: cures blinded, paralyzed, poisoned, *or* silenced (silenced
+  standing in for 5E's "deafened").
+- **Dispel Magic** can now also target a party ally (previously
+  enemy-only in this engine) and clears `silenced` along with its
+  existing removable conditions, per a direct follow-up request.
+- All three status-cure items now stocked in every shop in the game,
+  including the Arcane Nook (which didn't even carry Antitoxin before).
+- Also used the live fight against The Unspoken as a real test: nobody
+  cast Insect Plague, so the party's actual poison damage output for
+  that fight was confirmed at 0.
+
+7 new real tests, all passing; original enemy-targeting Dispel Magic
+behavior reconfirmed unaffected.
+
 ## [1.27.357] — Fixed an inverted difficulty curve on the arc 2-4 story bosses
 
 Real live request (Coffee: "make sure the boss in the first city is

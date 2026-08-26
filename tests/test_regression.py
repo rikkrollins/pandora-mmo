@@ -2210,6 +2210,47 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("poisoned", live.get("conditions", []))
         sessions.end_session(-999)
 
+    # -- Real live gap (2026-08-26, per Coffee: "what cures silence?" ->
+    #    "create an item and a spell to cure silence -- check other
+    #    status effects and make sure there is items and spells to cure
+    #    them also"). This engine had NO cure at all for blinded/
+    #    silenced (poisoned already had Antitoxin). -------------------
+    async def test_use_item_vocal_tonic_cures_silenced_mid_combat(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900110
+        make_basic_character(user_id, "Silenced", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "vocal_tonic", 1)
+        character = db.get_character(user_id, -999)
+        character["conditions"] = ["silenced"]
+        session = sessions.start_session(-999, [character], {user_id: "party"})
+
+        sink = []
+        await bot._do_use_item(FakeUpdate(user_id, "I use my vocal tonic", sink), "I use my vocal tonic")
+        combined = " ".join(sink)
+        self.assertIn("clears: silenced", combined.lower())
+        live = next(p for p in session.participants if p["telegram_user_id"] == user_id)
+        self.assertNotIn("silenced", live.get("conditions", []))
+        sessions.end_session(-999)
+
+    async def test_use_item_clarifying_drops_cures_blinded_mid_combat(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900111
+        make_basic_character(user_id, "Blinded", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "clarifying_drops", 1)
+        character = db.get_character(user_id, -999)
+        character["conditions"] = ["blinded"]
+        session = sessions.start_session(-999, [character], {user_id: "party"})
+
+        sink = []
+        await bot._do_use_item(FakeUpdate(user_id, "I use my clarifying drops", sink), "I use my clarifying drops")
+        combined = " ".join(sink)
+        self.assertIn("clears: blinded", combined.lower())
+        live = next(p for p in session.participants if p["telegram_user_id"] == user_id)
+        self.assertNotIn("blinded", live.get("conditions", []))
+        sessions.end_session(-999)
+
     async def test_use_item_restores_spell_slots_and_consumes_the_tonic(self):
         """
         Real feature request (2026-08-10, per Coffee: "make an item to
@@ -14022,6 +14063,102 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         reply = "\n".join(sink)
         self.assertIn("SpareDyingAlly", reply)
         self.assertTrue(down_ally_id in session.stabilized_ids)
+        sessions.end_session(-999)
+
+    # -- Real live gap (2026-08-26, per Coffee: "what cures silence?" ->
+    #    "create an item and a spell to cure silence -- check other
+    #    status effects and make sure there is items and spells to cure
+    #    them also"). ----------------------------------------------------
+    async def test_lesser_restoration_cures_silenced_poisoned_blinded_and_paralyzed(self):
+        import sessions
+        sessions.end_session(-999)
+        caster_id, ally_id = 950940, 950941
+        make_basic_character(caster_id, "RestorationCaster", char_class="Cleric",
+                              known_spells=["lesser_restoration"], spell_slots_max=2, current_location="crossroads_tavern")
+        make_basic_character(ally_id, "RestorationAlly", current_location="crossroads_tavern")
+        enemy = {"telegram_user_id": -5200940, "name": "RestorationGoblin", "dexterity": 10,
+                 "hp_current": 20, "hp_max": 20, "conditions": []}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        ally = db.get_character(ally_id, -999)
+        ally["telegram_user_id"] = ally_id
+        session = sessions.start_session(-999, [caster, ally, enemy],
+                                          {caster_id: "party", ally_id: "party", -5200940: "enemy"})
+        session.turn_order = [caster_id, ally_id, -5200940]
+        session.current_turn_index = 0
+        ally_p = next(p for p in session.participants if p["telegram_user_id"] == ally_id)
+        ally_p["conditions"] = ["silenced", "poisoned", "blinded", "paralyzed", "blessed"]
+
+        sink = []
+        await bot._do_cast_spell(
+            FakeUpdate(caster_id, "cast lesser restoration on RestorationAlly", sink),
+            "cast lesser restoration on RestorationAlly",
+        )
+        combined = "\n".join(sink)
+        self.assertIn("clears:", combined.lower())
+        for cured in ("silenced", "poisoned", "blinded", "paralyzed"):
+            self.assertNotIn(cured, ally_p["conditions"], f"{cured} should have been cured")
+        self.assertIn("blessed", ally_p["conditions"], "Lesser Restoration must not touch unrelated buffs")
+        after_caster = db.get_character(caster_id, -999)
+        self.assertEqual(after_caster["spell_slots_current"], 1)
+        sessions.end_session(-999)
+
+    async def test_lesser_restoration_refuses_and_refunds_nothing_when_target_is_fine(self):
+        import sessions
+        sessions.end_session(-999)
+        caster_id, ally_id = 950942, 950943
+        make_basic_character(caster_id, "RestorationCaster2", char_class="Cleric",
+                              known_spells=["lesser_restoration"], spell_slots_max=2, current_location="crossroads_tavern")
+        make_basic_character(ally_id, "RestorationAlly2", current_location="crossroads_tavern")
+        enemy = {"telegram_user_id": -5200942, "name": "RestorationGoblin2", "dexterity": 10,
+                 "hp_current": 20, "hp_max": 20, "conditions": []}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        ally = db.get_character(ally_id, -999)
+        ally["telegram_user_id"] = ally_id
+        session = sessions.start_session(-999, [caster, ally, enemy],
+                                          {caster_id: "party", ally_id: "party", -5200942: "enemy"})
+        session.turn_order = [caster_id, ally_id, -5200942]
+        session.current_turn_index = 0
+
+        sink = []
+        await bot._do_cast_spell(
+            FakeUpdate(caster_id, "cast lesser restoration on RestorationAlly2", sink),
+            "cast lesser restoration on RestorationAlly2",
+        )
+        combined = "\n".join(sink)
+        self.assertIn("nothing was spent", combined.lower())
+        after_caster = db.get_character(caster_id, -999)
+        self.assertEqual(after_caster["spell_slots_current"], 2, "nothing should be spent when there's nothing to cure")
+        sessions.end_session(-999)
+
+    async def test_dispel_magic_also_cures_silenced(self):
+        """Per Coffee's follow-up request: "add it to dispel magics list also" -- silenced added alongside its existing removable conditions."""
+        import sessions
+        sessions.end_session(-999)
+        caster_id, ally_id = 950944, 950945
+        make_basic_character(caster_id, "DispelSilenceCaster", char_class="Wizard",
+                              known_spells=["dispel_magic"], spell_slots_max=1, current_location="crossroads_tavern")
+        make_basic_character(ally_id, "DispelSilenceAlly", current_location="crossroads_tavern")
+        enemy = {"telegram_user_id": -5200944, "name": "DispelSilenceGoblin", "dexterity": 10,
+                 "hp_current": 20, "hp_max": 20, "conditions": []}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        ally = db.get_character(ally_id, -999)
+        ally["telegram_user_id"] = ally_id
+        session = sessions.start_session(-999, [caster, ally, enemy],
+                                          {caster_id: "party", ally_id: "party", -5200944: "enemy"})
+        session.turn_order = [caster_id, ally_id, -5200944]
+        session.current_turn_index = 0
+        ally_p = next(p for p in session.participants if p["telegram_user_id"] == ally_id)
+        ally_p["conditions"] = ["silenced"]
+
+        sink = []
+        await bot._do_cast_spell(
+            FakeUpdate(caster_id, "cast dispel magic on DispelSilenceAlly", sink),
+            "cast dispel magic on DispelSilenceAlly",
+        )
+        self.assertNotIn("silenced", ally_p["conditions"])
         sessions.end_session(-999)
 
     async def test_command_cast_via_battle_menu_offers_target_and_word_together(self):

@@ -23484,6 +23484,31 @@ async def _do_use_item(update: Update, text: str) -> None:
             if cured else
             f"🧪 **{character['name']}** uses a {item['name']}{target_note}, just in case."
         )
+
+    elif effect == "cure_condition":
+        # Real live gap (2026-08-26, per Coffee: "create an item and a
+        # spell to cure silence -- check other status effects and make
+        # sure there is items and spells to cure them also"). Generic,
+        # data-driven cure -- driven by the item's own "cures" list
+        # (Vocal Tonic: silenced; Clarifying Drops: blinded) -- rather
+        # than a bespoke branch per condition, same shape as
+        # dispel_magic's own "removed = [c for c in conditions if c in
+        # (...)]" pattern (bot.py's _cast_utility_spell). Antitoxin's
+        # existing cure_poison branch above is untouched.
+        cured_conditions = []
+        if session is not None:
+            live_target = next(
+                (p for p in session.participants if p["telegram_user_id"] == target["telegram_user_id"]), None,
+            )
+            if live_target:
+                cured_conditions = [c for c in live_target.get("conditions", []) if c in item.get("cures", [])]
+                for c in cured_conditions:
+                    live_target["conditions"].remove(c)
+        message = (
+            f"🧪 **{character['name']}** uses a {item['name']}{target_note} — clears: {', '.join(cured_conditions)}."
+            if cured_conditions else
+            f"🧪 **{character['name']}** uses a {item['name']}{target_note}, just in case."
+        )
     else:
         # Flavor-only consumables (rations, ale, torch, etc.) -- real 5E
         # items this game has no mechanic for (hunger, light radius), same
@@ -26388,6 +26413,51 @@ async def _cast_utility_spell(
             await _finish(f"✨ **{character['name']}** casts {spell['name']} on **{target_p['name']}** — they're stable, no longer at risk of dying.")
             return
 
+        if spell_id == "lesser_restoration":
+            # Real live gap (2026-08-26, per Coffee: "what cures
+            # silence?" -> "create an item and a spell to cure silence -
+            # check other status effects and make sure there is items
+            # and spells to cure them also"). This engine's own code
+            # comment (see the "paralyzed" save-recovery block above) is
+            # explicit: "no duration tracking for ANY OTHER condition --
+            # prone/poisoned/blinded/silenced all persist until combat
+            # ends." Real 5E's actual Lesser Restoration cures blinded,
+            # deafened, paralyzed, or poisoned -- adapted here to this
+            # engine's own condition set (silenced standing in for
+            # deafened, both being "can't use a sense/verbal component"
+            # afflictions). Paralyzed already has its own save-based
+            # recovery (2026-07-27), but curing it outright here too is
+            # still real 5E behavior, not a new invented shortcut.
+            is_summon_target = False
+            target_p = _find_live_summon_by_name(text, session, session.sides.get(user_id))
+            is_summon_target = target_p is not None
+            if target_p is None:
+                target_character = _find_party_target_by_name(text, chat_id) or character
+                target_p = next(
+                    (p for p in session.participants if p["telegram_user_id"] == target_character["telegram_user_id"]), None,
+                )
+            if target_p is None:
+                await update.effective_chat.send_message(
+                    "That target isn't here to cast it on.", message_thread_id=topics.thread_id_for(chat_id, "adventure")
+                )
+                return
+            cured = [c for c in target_p.get("conditions", []) if c in ("blinded", "paralyzed", "poisoned", "silenced")]
+            if not cured:
+                await update.effective_chat.send_message(
+                    f"**{target_p['name']}** isn't suffering from anything {spell['name']} can cure right now. Nothing was spent.",
+                    message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+                )
+                return
+            if not await spend():
+                return
+            for c in cured:
+                target_p["conditions"].remove(c)
+            if not is_summon_target:
+                _maybe_boost_companion_affinity_for_support(update, character, target_p, 2, f"cast {spell['name']} on")
+            note = f" on **{target_p['name']}**" if target_p["telegram_user_id"] != user_id else ""
+            await _finish(f"✨ **{character['name']}** casts {spell['name']}{note} — clears: {', '.join(cured)}.")
+            return
+
         # Self or named-ally targeted buffs
         if spell_id in ("shield", "bless", "invisibility", "protection_from_evil_and_good", "death_ward", "longstrider"):
             if spell_id == "bless":
@@ -26441,6 +26511,37 @@ async def _cast_utility_spell(
             await _safe_send(update, f"🌀 **{character['name']}** casts {spell['name']} and blinks away from danger.")
             await _resolve_flee_attempt(update, session, text, forced_roll=20)
             return
+
+        # Dispel Magic, ally side (2026-08-26, per Coffee: "add it to
+        # dispel magics list also" -- silenced): real 5E Dispel Magic
+        # can target ANY creature, not just an enemy, unlike hex/faerie_
+        # fire/hold_person/polymorph/banishment below (which really are
+        # offense-only in this engine). Checked here, before the shared
+        # "everything past this point targets an opposing combatant"
+        # block, so naming a real party member routes to THEM instead
+        # of silently resolving against the enemy side. Only actually
+        # diverts when the name resolves to a genuine party member with
+        # something removable -- an unnamed/enemy-aimed "dispel magic"
+        # falls straight through to the existing opposing-target
+        # behavior below, unchanged.
+        if spell_id == "dispel_magic":
+            ally_target = _find_party_target_by_name(text, chat_id)
+            if ally_target is not None and ally_target["telegram_user_id"] != user_id:
+                ally_p = next(
+                    (p for p in session.participants if p["telegram_user_id"] == ally_target["telegram_user_id"]), None,
+                )
+                if ally_p is not None:
+                    removed = [c for c in ally_p.get("conditions", []) if c in (
+                        "blessed", "faerie_fire", "protected", "invisible", "charmed",
+                        "hex_mark", "hunters_mark", "shield_active", "death_warded", "silenced",
+                    )]
+                    if removed:
+                        if not await spend():
+                            return
+                        for c in removed:
+                            ally_p["conditions"].remove(c)
+                        await _finish(f"🌀 **{character['name']}** casts {spell['name']} on **{ally_p['name']}** — clears: {', '.join(removed)}.")
+                        return
 
         # Everything past this point targets an opposing combatant
         opposing = session.living_on_side(session.opposing_side(user_id))
@@ -26529,7 +26630,7 @@ async def _cast_utility_spell(
         if spell_id == "dispel_magic":
             removed = [c for c in target.get("conditions", []) if c in (
                 "blessed", "faerie_fire", "protected", "invisible", "charmed",
-                "hex_mark", "hunters_mark", "shield_active", "death_warded",
+                "hex_mark", "hunters_mark", "shield_active", "death_warded", "silenced",
             )]
             if not removed:
                 await update.effective_chat.send_message(

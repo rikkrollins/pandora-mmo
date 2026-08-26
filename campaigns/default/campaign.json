@@ -3053,6 +3053,8 @@
         "wooden_shield",
         "healing_potion",
         "antitoxin",
+        "vocal_tonic",
+        "clarifying_drops",
         "rations",
         "torch",
         "scroll_magic_missile",
@@ -3091,7 +3093,10 @@
         "scroll_fireball",
         "weathered_surface_map",
         "tattered_underground_chart",
-        "herbalism_guide_basic"
+        "herbalism_guide_basic",
+        "antitoxin",
+        "vocal_tonic",
+        "clarifying_drops"
       ]
     },
     "grimsbys_tavern": {
@@ -3102,6 +3107,8 @@
         "rations",
         "healing_potion",
         "antitoxin",
+        "vocal_tonic",
+        "clarifying_drops",
         "torch"
       ]
     }

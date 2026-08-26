@@ -113,6 +113,27 @@ ITEMS = {
         "price": 15, "weight": 0.1, "effect": "cure_poison",
         "description": "Cures poison. A thin, bitter tonic. Smells like it's already working before you drink it.",
     },
+    # Real live gap (2026-08-26, per Coffee: "what cures silence?" ->
+    # "create an item and a spell to cure silence -- check other status
+    # effects and make sure there is items and spells to cure them
+    # also"). Confirmed live: this engine's own on_hit_condition system
+    # has NO cure at all for blinded/silenced (poisoned already had
+    # Antitoxin above; prone recovers on its own the moment you act
+    # again, same real 5E "standing up" rule, so it doesn't need one).
+    # Both use a new generic "cure_condition" effect (bot.py's
+    # _do_use_item) rather than a bespoke one-off per condition, driven
+    # by each item's own "cures" list -- Antitoxin's existing
+    # "cure_poison" path is left exactly as it was, untouched.
+    "vocal_tonic": {
+        "name": "Vocal Tonic", "type": "consumable", "rarity": "common",
+        "price": 15, "weight": 0.1, "effect": "cure_condition", "cures": ["silenced"],
+        "description": "Cures silence. A warm, honeyed syrup that unsticks a blocked throat and clears whatever's choking off your voice.",
+    },
+    "clarifying_drops": {
+        "name": "Clarifying Drops", "type": "consumable", "rarity": "common",
+        "price": 15, "weight": 0.1, "effect": "cure_condition", "cures": ["blinded"],
+        "description": "Cures blindness. A few cold drops restore your sight almost instantly, though the sting lingers a moment after.",
+    },
     # Per Coffee (2026-08-10): spell slots have no in-battle recovery
     # option at all in this game (real rule, see Support's deterministic
     # answer in ai/support_agent.py) -- these give casters a genuine
