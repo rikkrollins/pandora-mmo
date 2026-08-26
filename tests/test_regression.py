@@ -6310,6 +6310,115 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(stuck_on_caster, "casting a utility spell mid-combat must advance the turn, not leave the caster stuck")
         sessions.end_session(-999)
 
+    # -- Real live request (2026-08-26, per Coffee, screenshot of "Charm
+    #    Person... a real combat buff lasting 10 rounds": "change it
+    #    from 10 to have it approximately 3 to 5 and then have some
+    #    kind of variability or a dice roll... any other spells that
+    #    have a mechanic similar to this... I want it decided like
+    #    this"). --------------------------------------------------------
+    async def test_bless_now_rolls_a_random_3_to_5_round_duration_instead_of_a_flat_10(self):
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        uid = 900487
+        make_basic_character(
+            uid, "DurationRoller", char_class="Cleric", known_spells=["bless"], spell_slots_max=3,
+            current_location="crossroads_tavern",
+        )
+        db.update_character(uid, -999, spell_slots_current=3)
+        enemy = {"telegram_user_id": -5200922, "name": "DurationDummy", "dexterity": 10, "strength": 10,
+                 "armor_class": 5, "hp_current": 100, "hp_max": 100, "conditions": [], "is_ai": 1, "monster_key": "goblin"}
+        character = db.get_character(uid, -999)
+        character["telegram_user_id"] = uid
+        session = sessions.start_session(-999, [character, enemy], {uid: "party", -5200922: "enemy"})
+        session.turn_order = [uid, -5200922]
+        session.current_turn_index = 0
+
+        round_before = session.round_number
+        sink = []
+        with patch("bot.random.randint", return_value=4) as mock_randint, \
+                patch("bot.narrate_action", return_value="The blow lands."), \
+                patch("bot._get_combat_throttle_seconds", return_value=0.0):
+            await bot._do_cast_spell(FakeUpdate(uid, "cast bless", sink), "cast bless")
+        mock_randint.assert_any_call(3, 5)
+        caster_p = next(p for p in session.participants if p["telegram_user_id"] == uid)
+        expiry = caster_p.get("condition_expires_round", {}).get("blessed")
+        self.assertIsNotNone(expiry)
+        self.assertEqual(expiry, round_before + 4)
+        sessions.end_session(-999)
+
+    async def test_charmed_condition_ends_early_on_a_successful_wisdom_save(self):
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        uid = 900488
+        make_basic_character(
+            uid, "EarlySaveCaster", char_class="Wizard", known_spells=["charm_person"], spell_slots_max=1,
+            current_location="crossroads_tavern",
+        )
+        db.update_character(uid, -999, spell_slots_current=1)
+        enemy = {"telegram_user_id": -5200923, "name": "CharmedGoblin", "dexterity": 10, "strength": 10,
+                 "wisdom": 10, "armor_class": 5, "hp_current": 100, "hp_max": 100, "conditions": [], "is_ai": 1,
+                 "monster_key": "goblin"}
+        character = db.get_character(uid, -999)
+        character["telegram_user_id"] = uid
+        session = sessions.start_session(-999, [character, enemy], {uid: "party", -5200923: "enemy"})
+        session.turn_order = [uid, -5200923]
+        session.current_turn_index = 0
+
+        sink = []
+        with patch("bot.narrate_action", return_value="The blow lands."), \
+                patch("bot._get_combat_throttle_seconds", return_value=0.0):
+            await bot._do_cast_spell(FakeUpdate(uid, "cast charm person on the goblin", sink), "cast charm person on the goblin")
+        enemy_p = next(p for p in session.participants if p["telegram_user_id"] == -5200923)
+        self.assertIn("charmed", enemy_p["conditions"])
+
+        with patch("sessions.roll_d20", return_value=20), \
+                patch("bot.narrate_action", return_value="The blow lands."), \
+                patch("bot._get_combat_throttle_seconds", return_value=0.0):
+            await bot._advance_turn_and_resolve_ai_turns(FakeUpdate(uid, "", []), session)
+        self.assertNotIn("charmed", enemy_p["conditions"], "a natural-20 Wisdom save should end it early")
+        sessions.end_session(-999)
+
+    async def test_blessed_buff_is_never_subject_to_the_new_early_save(self):
+        """
+        Deliberately NOT applying the new early-save mechanic to a
+        beneficial buff a caster puts on their own ally -- there's no
+        sense in which Bless gives the willing, benefiting ally a
+        chance to involuntarily shrug it off early, and doing so would
+        only make the spell strictly worse.
+        """
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        uid = 900489
+        make_basic_character(
+            uid, "BlessKeeper", char_class="Cleric", known_spells=["bless"], spell_slots_max=1,
+            current_location="crossroads_tavern",
+        )
+        db.update_character(uid, -999, spell_slots_current=1)
+        enemy = {"telegram_user_id": -5200924, "name": "BlessDummy", "dexterity": 10, "strength": 10,
+                 "armor_class": 5, "hp_current": 100, "hp_max": 100, "conditions": [], "is_ai": 1, "monster_key": "goblin"}
+        character = db.get_character(uid, -999)
+        character["telegram_user_id"] = uid
+        session = sessions.start_session(-999, [character, enemy], {uid: "party", -5200924: "enemy"})
+        session.turn_order = [uid, -5200924]
+        session.current_turn_index = 0
+
+        sink = []
+        with patch("bot.narrate_action", return_value="The blow lands."), \
+                patch("bot._get_combat_throttle_seconds", return_value=0.0):
+            await bot._do_cast_spell(FakeUpdate(uid, "cast bless", sink), "cast bless")
+        caster_p = next(p for p in session.participants if p["telegram_user_id"] == uid)
+        self.assertIn("blessed", caster_p["conditions"])
+
+        with patch("sessions.roll_d20", return_value=20), \
+                patch("bot.narrate_action", return_value="The blow lands."), \
+                patch("bot._get_combat_throttle_seconds", return_value=0.0):
+            await bot._advance_turn_and_resolve_ai_turns(FakeUpdate(uid, "", []), session)
+        self.assertIn("blessed", caster_p["conditions"], "a beneficial buff must never be shaken off early")
+        sessions.end_session(-999)
+
     async def test_eldritch_smite_never_spends_the_warlocks_last_slot(self):
         """Regression guard: the bonus must never fire when it would leave the Warlock with zero slots."""
         from unittest.mock import patch

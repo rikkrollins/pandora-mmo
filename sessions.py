@@ -32,7 +32,10 @@ import os
 import time
 from dataclasses import dataclass, field
 
+import config
 from rules.combat import start_combat
+from rules.dice import ability_modifier, roll_d20
+from rules.leveling import is_proficient_in_save
 
 # Real live incident (2026-07-18): a deploy restart mid-combat wiped
 # Sugar's in-progress fight entirely (turn order, both goblins' HP) since
@@ -98,6 +101,14 @@ class Session:
     # BATTLEFIELD has already shown the player, not any single
     # combatant, same reasoning as environment_used above.
     shown_monster_keys: set = field(default_factory=set)
+    # Real live request (2026-08-26, per Coffee: timed buffs/debuffs
+    # should get a real saving throw each round for an early end, not
+    # just a fixed expiry) -- _expire_timed_conditions appends a real,
+    # human-readable line here whenever a save succeeds early; bot.py's
+    # _advance_turn_and_resolve_ai_turns drains and sends these the same
+    # round it checks for a round-wrap, since sessions.py itself never
+    # talks to Telegram directly.
+    pending_condition_notices: list = field(default_factory=list)
 
     def current_participant_id(self) -> int:
         return self.turn_order[self.current_turn_index]
@@ -153,6 +164,27 @@ class Session:
             self.turn_started_at[new_pid] = time.time()
             self.timeout_warned.discard(new_pid)
 
+    def _end_timed_condition(self, p: dict, name: str) -> None:
+        """Shared cleanup for one timed condition ending, whether by natural expiry or an early save -- see _expire_timed_conditions."""
+        p.get("condition_expires_round", {}).pop(name, None)
+        if name in p.get("conditions", []):
+            p["conditions"].remove(name)
+        if name in ("hex_mark", "hunters_mark"):
+            p.pop("marked_target_id", None)
+        if name == "polymorphed":
+            # Real 5E: polymorph ends, real stats return. Backup was
+            # captured at cast time (bot.py's polymorph branch);
+            # hp_current is restored capped at whatever damage was
+            # actually taken in beast form, same "current HP carries
+            # over, max HP reverts" rule real 5E uses.
+            backup = p.pop("_polymorph_backup", None)
+            if backup:
+                taken = max(backup["hp_current"] - p["hp_current"], 0)
+                for key in ("armor_class", "strength", "dexterity", "hp_max"):
+                    if key in backup:
+                        p[key] = backup[key]
+                p["hp_current"] = max(p["hp_max"] - taken, 1)
+
     def _expire_timed_conditions(self) -> None:
         """
         Shared duration mechanism for every timed spell effect (Bless,
@@ -167,32 +199,52 @@ class Session:
         (banished_participants, restored by round number) since it
         removes a participant from turn_order entirely rather than
         applying a condition.
+
+        Real live request (2026-08-26, per Coffee: these shouldn't just
+        run out on a fixed schedule -- "have some kind of variability
+        or a dice roll" each round for an early end): before checking
+        natural expiry, a participant carrying one of the genuinely
+        RESISTABLE conditions below (something imposed on an unwilling
+        target, real 5E's own "save ends" style) gets one Wisdom saving
+        throw per round (same fixed SKILL_CHECK_DC this game already
+        uses everywhere, same shape as Paralyzed's own save-to-break-
+        free mechanic in bot.py) -- succeed and it ends right now,
+        regardless of how many rounds were left on the random 3-5 roll
+        bot.py gave it at cast time. Deliberately NOT applied to a
+        beneficial buff a caster puts on their OWN ally (blessed,
+        invisible, protected, shield_active, death_warded) -- there's
+        no real-5E or narrative sense in which Bless/Invisibility give
+        the willing, benefiting ally a chance to involuntarily shrug
+        off their own buff early, and doing so would only make those
+        spells strictly worse for no reason anyone asked for. Paralyzed
+        is also excluded -- it already has its own separate, start-of-
+        turn save mechanic, which would otherwise double up here.
         """
+        RESISTABLE_CONDITIONS = {"charmed", "faerie_fire", "hex_mark", "hunters_mark", "polymorphed"}
         for p in self.participants:
             expiries = p.get("condition_expires_round")
             if not expiries:
                 continue
+            saved_early = []
+            for name in expiries.keys():
+                if name not in RESISTABLE_CONDITIONS:
+                    continue
+                save_roll = roll_d20()
+                save_bonus = ability_modifier(p.get("wisdom", 10))
+                if is_proficient_in_save(p.get("char_class"), "wisdom"):
+                    save_bonus += p.get("proficiency_bonus", 2)
+                if save_roll + save_bonus >= config.SKILL_CHECK_DC:
+                    saved_early.append(name)
+                    self.pending_condition_notices.append(
+                        f"🎲 **{p['name']}** shakes off {name.replace('_', ' ')} early! "
+                        f"(Wisdom save: {save_roll}+{save_bonus}={save_roll + save_bonus} vs DC {config.SKILL_CHECK_DC})"
+                    )
+            for name in saved_early:
+                self._end_timed_condition(p, name)
+
             expired = [name for name, until in expiries.items() if self.round_number > until]
             for name in expired:
-                del expiries[name]
-                if name in p.get("conditions", []):
-                    p["conditions"].remove(name)
-                if name in ("hex_mark", "hunters_mark"):
-                    p.pop("marked_target_id", None)
-                if name == "polymorphed":
-                    # Real 5E: polymorph ends, real stats return. Backup
-                    # was captured at cast time (bot.py's polymorph
-                    # branch); hp_current is restored capped at whatever
-                    # damage was actually taken in beast form, same
-                    # "current HP carries over, max HP reverts" rule
-                    # real 5E uses.
-                    backup = p.pop("_polymorph_backup", None)
-                    if backup:
-                        taken = max(backup["hp_current"] - p["hp_current"], 0)
-                        for key in ("armor_class", "strength", "dexterity", "hp_max"):
-                            if key in backup:
-                                p[key] = backup[key]
-                        p["hp_current"] = max(p["hp_max"] - taken, 1)
+                self._end_timed_condition(p, name)
 
     def log_event(self, text: str) -> None:
         self.event_log.append(text)
@@ -371,6 +423,10 @@ class Session:
             # shipped won't have this key -- must not crash restoring a
             # real in-progress fight.
             shown_monster_keys=set(data.get("shown_monster_keys", [])),
+            # .get(...) with a default: a snapshot written before this
+            # shipped won't have this key -- must not crash restoring a
+            # real in-progress fight.
+            pending_condition_notices=data.get("pending_condition_notices", []),
         )
 
 

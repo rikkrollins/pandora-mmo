@@ -6593,6 +6593,18 @@ async def _advance_turn_and_resolve_ai_turns(update: Update, session: sessions.S
     """
     round_before = session.round_number
     session.advance_turn()
+    # Real live request (2026-08-26, per Coffee): a resistable timed
+    # condition (Charm Person, Faerie Fire, Hex/Hunter's Mark,
+    # Polymorph) can now end EARLY via a real per-round save --
+    # session.advance_turn() -> _expire_timed_conditions is the only
+    # place that roll happens, so this is the one shared spot to drain
+    # and actually announce whatever it found, same "sessions.py never
+    # talks to Telegram directly" separation every other real game fact
+    # in this engine already follows.
+    if session.pending_condition_notices:
+        for notice in session.pending_condition_notices:
+            await _safe_send(update, notice, speak=False)
+        session.pending_condition_notices.clear()
     await _resolve_ai_turns_inner(update, session)
     if session.round_number != round_before:
         await _maybe_send_battle_formation_image(update, session)
@@ -26286,7 +26298,23 @@ async def _cast_utility_spell(
         consume_scroll_if_any()
         return True
 
-    duration = spell.get("duration_rounds", 10) or 10
+    # Real live request (2026-08-26, per Coffee, screenshot of "Charm
+    # Person... a real combat buff lasting 10 rounds": "change it from
+    # 10 to have it approximately 3 to 5 and then have some kind of
+    # variability or a dice roll... any other spells that have a
+    # mechanic similar to this... I want it decided like this"). Every
+    # spell using the flat 10-round default (Bless, Charm Person,
+    # Animal Friendship, Hex/Hunter's Mark, Faerie Fire, Invisibility,
+    # Protection from Evil and Good, Hold Person/Hold Monster) now
+    # rolls a real random 3-5 round base at cast time instead. The
+    # OTHER half of his request -- a real saving throw each round for
+    # the affected creature to end it early -- reuses Paralyzed's own
+    # exact fixed-DC save mechanic, see Session._expire_timed_
+    # conditions. Spells with a genuinely different duration (1-round
+    # effects like Shield/Guidance, or 0 for instant effects) are
+    # completely unaffected -- this only ever touches the "10" marker.
+    raw_duration = spell.get("duration_rounds", 10) or 10
+    duration = random.randint(3, 5) if raw_duration == 10 else raw_duration
 
     # Self-only, no target needed, no combat required ------------------
     if spell_id == "detect_magic":

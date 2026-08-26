@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.359] — Randomized, resistable durations on buff/debuff spells
+
+Real live request (Coffee, screenshot of "Charm Person... a real
+combat buff lasting 10 rounds"): "change it from 10 to have it
+approximately 3 to 5 and then have some kind of variability or a dice
+roll... any other spells that have a mechanic similar to this... I
+want it decided like this." Clarified the exact mechanic with him
+first (random 3-5 base, real saving throw each round to end early).
+
+- Every spell that used the flat 10-round default (Bless, Charm
+  Person, Animal Friendship, Hex/Hunter's Mark, Faerie Fire,
+  Invisibility, Protection from Evil and Good, Hold Person/Hold
+  Monster) now rolls a random 3-5 round base duration at cast time.
+- Genuinely resistable conditions (`charmed`, `faerie_fire`,
+  `hex_mark`, `hunters_mark`, `polymorphed` — effects imposed on an
+  unwilling target) now get a real Wisdom saving throw each round
+  (same fixed DC used everywhere else) for an early end — same shape
+  as Paralyzed's existing save-to-break-free mechanic.
+- Deliberately NOT applied to a beneficial buff a caster puts on their
+  own ally (`blessed`, `invisible`, `protected`, `shield_active`,
+  `death_warded`) — there's no sense in which Bless should give the
+  willing, benefiting ally a chance to shrug it off early.
+- 3 new tests, all passing; original mid-combat cast-advances-turn and
+  Shield/Dispel Magic/flee collateral behavior reconfirmed unaffected.
+
 ## [1.27.358] — Real cures for silenced, blinded, and poisoned
 
 Real live request (Coffee: "what cures silence?" -> "create an item
