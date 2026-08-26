@@ -6151,7 +6151,7 @@
       "dexterity": 12,
       "strength": 19,
       "armor_class": 23,
-      "hp_max": 18000,
+      "hp_max": 12000,
       "proficiency_bonus": 6,
       "xp_reward": 1500,
       "is_boss": true,
