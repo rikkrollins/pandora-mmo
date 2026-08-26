@@ -12203,6 +12203,25 @@ def _npc_quest_facts(character: dict, npc_id: str) -> str | None:
         reward_text = f" Reward: {', '.join(reward_bits)}." if reward_bits else ""
         lines.append(f"Your real quest to offer: \"{quest['title']}\" — {quest['description']}{reward_text}")
 
+    # Real live report (2026-08-26, Coffee: "i only see [Borin's quest]
+    # in the affinity menu, it needs to be more clear to be able to be
+    # found"). A recruited companion's own personal quest
+    # (_offerable_quest_for_specific_companion) was never checked here
+    # at all -- asking Borin directly about "your quest" got the same
+    # vague non-answer this whole function was originally built to fix
+    # for Grimsby, just for a different reason (companion quests, not
+    # story quests, were the blind spot this time).
+    companion_offer = _offerable_quest_for_specific_companion(character, npc_id)
+    if companion_offer:
+        _, quest = companion_offer
+        reward_bits = [f"{quest['reward_xp']} XP"] if quest.get("reward_xp") else []
+        if quest.get("reward_gold"):
+            reward_bits.append(f"{quest['reward_gold']} gold")
+        if quest.get("reward_item"):
+            reward_bits.append(items_module.get_item(quest["reward_item"])["name"])
+        reward_text = f" Reward: {', '.join(reward_bits)}." if reward_bits else ""
+        lines.append(f"Your real quest to offer: \"{quest['title']}\" — {quest['description']}{reward_text}")
+
     board_quests = board_quests_module.get_all_todays_board_quests(location_id, character["chat_id"])
     for q in board_quests:
         if q.get("giver_npc") != npc_id or q.get("completed_at"):
@@ -20194,6 +20213,20 @@ def _location_extra_detail(character: dict, location: dict, location_id: str, ch
             lines.append(f"📜 {npc_names[0]} looks like they could use your help with something.")
         else:
             lines.append("📜 There's a task tied to this place, though no one's here to ask about it right now.")
+
+    # Real live report (2026-08-26, Coffee: "i only see [Borin's quest]
+    # in the affinity menu, it needs to be more clear to be able to be
+    # found"). A recruited companion's own personal quest -- unlike the
+    # location quests above, which only ever get an approximated "some
+    # NPC here" hint -- has a real, exact giver_npc, so this can name
+    # them directly. Shown regardless of npcs_here/story_offer above,
+    # since a recruited companion travels with the party rather than
+    # staying tied to any one location.
+    companion_offer = _offerable_companion_quest(character)
+    if companion_offer:
+        _, quest = companion_offer
+        giver_name = CAMPAIGN["npcs"].get(quest["giver_npc"], {}).get("name", "someone in your party")
+        lines.append(f"📜 {giver_name} has something to ask of you — try talking to them.")
 
     board_quests_here = board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, location_id, chat_id)
     unclaimed_board_quests = [q for q in board_quests_here if not q.get("accepted_by")]
@@ -29192,6 +29225,19 @@ async def hint_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     story_offer = _offerable_quest_at_location(character, character["current_location"])
     if story_offer:
         lines.append("• Someone here looks like they need help with something — try talking to them")
+
+    # Real live report (2026-08-26, Coffee: "i only see [Borin's quest]
+    # in the affinity menu, it needs to be more clear to be able to be
+    # found"). A recruited companion's own personal quest was never
+    # mentioned by "look" at all -- named here (not the generic line
+    # above, since we already know exactly who) and shown regardless of
+    # which location the party's currently in, since a recruited
+    # companion travels with the party rather than staying put.
+    companion_offer = _offerable_companion_quest(character)
+    if companion_offer:
+        _, quest = companion_offer
+        giver_name = CAMPAIGN["npcs"].get(quest["giver_npc"], {}).get("name", "someone in your party")
+        lines.append(f"• {giver_name} has something to ask of you — try talking to them")
 
     board_quests_here = board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, character["current_location"], update.effective_chat.id)
     if any(not q.get("accepted_by") and not q.get("completed_at") for q in board_quests_here):

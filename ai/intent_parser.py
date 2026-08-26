@@ -45,6 +45,14 @@ COMBAT_START_WORDS = [
     # the fight needed to clear a requires_cleared_location gate and
     # got no response, part of a real "why can't I move on?" report.
     "start a battle",
+    # Real topic-activity finding (2026-08-26, self-improvement
+    # monitoring pass): "Battle a wisp" got the silent "chat" default,
+    # and Coffee immediately retried as "Start a battle with a wisp"
+    # (which DOES match "start a battle" above) 25 seconds later --
+    # same real "why didn't that do anything?" friction as the other
+    # entries in this list. "fight the"/"fight some" already cover this
+    # exact shape for "fight"; "battle" was never extended the same way.
+    "battle a", "battle the", "battle some",
 ]
 
 INTENT_SYSTEM_PROMPT = """You are an intent classifier for a text-based D&D 5E game. \

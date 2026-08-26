@@ -15577,6 +15577,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         """
         self.assertEqual(_keyword_fallback("Start a battle", [])["action"], "start_combat")
 
+    def test_battle_a_target_phrasing_starts_combat_instead_of_silent_chat(self):
+        """
+        Real topic-activity finding (2026-08-26, self-improvement
+        monitoring pass): "Battle a wisp" got the silent "chat" default
+        and Coffee immediately retried as "Start a battle with a wisp"
+        25 seconds later -- same real friction as the other entries in
+        this list. "fight the"/"fight some" already cover this exact
+        "verb + article + target" shape for "fight"; "battle" was never
+        extended the same way.
+        """
+        for text in ["Battle a wisp", "Battle the goblin", "Battle some spiders"]:
+            self.assertEqual(_keyword_fallback(text, [])["action"], "start_combat", text)
+
     def test_bare_compass_direction_movement_no_longer_misclassifies_as_chat(self):
         """
         Real live bug (2026-08-10, topic-activity log): "Travel west"
@@ -17295,6 +17308,37 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         combined = " ".join(sink)
         self.assertIn("bounty posted on the board", combined)
 
+    async def test_look_hints_at_a_recruited_companions_own_offerable_quest(self):
+        """
+        Real live report (2026-08-26, Coffee: "i only see [Borin's
+        quest] in the affinity menu, it needs to be more clear to be
+        able to be found"). Unlike the location-quest hint above (which
+        only approximates "some NPC here"), a companion's own personal
+        quest has a real giver_npc and gets named directly -- and shows
+        up regardless of location, since a recruited companion travels
+        with the party.
+        """
+        user_id = 900951
+        make_basic_character(user_id, "CompanionQuestLooker", current_location="crossroads_tavern")
+        sink = []
+        await bot._do_recruit_npc(FakeUpdate(user_id, "recruit Borin Ironjaw", sink), "Borin Ironjaw")
+        sink.clear()
+        await bot._do_look(FakeUpdate(user_id, "look around", sink))
+        combined = " ".join(sink)
+        self.assertIn("Borin Ironjaw", combined)
+        self.assertIn("has something to ask of you", combined)
+
+    async def test_asking_a_companion_about_their_quest_is_grounded_too(self):
+        """Same real gap, other surface: _npc_quest_facts grounds talk_npc dialogue, and never checked companion quests before this fix."""
+        user_id = 900952
+        make_basic_character(user_id, "CompanionQuestAsker", current_location="crossroads_tavern")
+        sink = []
+        await bot._do_recruit_npc(FakeUpdate(user_id, "recruit Borin Ironjaw", sink), "Borin Ironjaw")
+        character = db.get_character(user_id, -999)
+        facts = bot._npc_quest_facts(character, "borin_ironjaw")
+        self.assertIsNotNone(facts, "asking Borin about his own quest should be grounded in a real answer")
+        self.assertIn("A Name Worth Vouching For", facts)
+
     # -- Character description field (2026-07-16, per Coffee) ----------
     async def test_set_description_inline_extraction_saves_directly(self):
         user_id = 900508
@@ -18295,6 +18339,18 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         reply = sink[-1]
         self.assertIn("Things you might try here", reply)
         self.assertIn("Gather", reply)
+
+    async def test_hint_also_surfaces_a_recruited_companions_offerable_quest(self):
+        """Same real gap/fix as the "look around" companion-quest test above, applied to /hint's own separate rendering."""
+        user_id = 900953
+        make_basic_character(user_id, "HintCompanionQuest", current_location="crossroads_tavern")
+        sink = []
+        await bot._do_recruit_npc(FakeUpdate(user_id, "recruit Borin Ironjaw", sink), "Borin Ironjaw")
+        sink.clear()
+        await bot.hint_command(FakeUpdate(user_id, "/hint", sink), None)
+        reply = sink[-1]
+        self.assertIn("Borin Ironjaw", reply)
+        self.assertIn("has something to ask of you", reply)
 
     # -- Leaderboard / Hall of Fame (2026-07-17, per Coffee, task #74) --
     async def test_leaderboard_ranks_by_xp_and_excludes_combat_companions(self):

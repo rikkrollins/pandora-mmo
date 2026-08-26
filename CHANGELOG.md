@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.366] — Borin's (and every companion's) own quest is now findable without digging into the Affinity Menu
+
+Real live report (Coffee): "i only see [Borin's quest] in the affinity
+menu, it needs to be more clear to be able to be found." Root cause: a
+recruited companion's own personal quest was ALREADY grounded into the
+autonomous-AI-party's own decision-making facts, but never surfaced to
+a human player anywhere except the Affinity Menu -- neither "look
+around" nor `/hint` ever mentioned it, and asking a companion directly
+about "your quest" got the same kind of vague non-answer this exact
+function (`_npc_quest_facts`) was originally built to fix for Grimsby.
+
+- "Look around" and `/hint` now both name the companion directly
+  ("Borin Ironjaw has something to ask of you") whenever they have an
+  offerable personal quest -- shown regardless of location, since a
+  recruited companion travels with the party.
+- Asking a companion about their own quest now gets a real, grounded
+  answer instead of the model guessing.
+
+## [1.27.365] — "Battle a wisp" no longer falls through to silent chat
+
+Found via a self-improvement monitoring pass (topic-activity log):
+Coffee typed "Battle a wisp" and got no response at all, then
+immediately retried as "Start a battle with a wisp" (which worked) 25
+seconds later. `ai/intent_parser.py`'s COMBAT_START_WORDS covered
+"fight the"/"fight some" for that verb, but never extended the same
+"verb + article + target" shape to "battle" -- added "battle a"/
+"battle the"/"battle some".
+
 ## [1.27.364] — Kess the Bandit, Phase 2A: chapter 8's real climax
 
 Real live direction (Coffee): chapter 8's climactic point should BE
