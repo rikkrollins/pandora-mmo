@@ -2,6 +2,12 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.355] — The Unspoken raised to 3,800 HP
+
+Real live request (2026-08-26, Coffee, dev-bridge: "I think the
+unspoken should have 3800 HP"). `the_unspoken` (arc_2 story boss,
+level 25) was at 938 HP — raised to 3,800 per his direct ask.
+
 ## [1.27.354] — Single-word item names in "give X to Y" phrasing
 
 Real live gap (2026-08-26, topic-activity finding): "Give Pan
