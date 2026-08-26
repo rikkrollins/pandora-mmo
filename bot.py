@@ -871,6 +871,26 @@ _PENDING_ASI_CHOICE: dict[int, set] = {}
 # in the other.
 _PENDING_DUELS: dict[int, dict[int, int]] = {}
 
+# Player-to-player trading (2026-08-26, per Coffee: "create a tradeing
+# system... trade with (player)... put items (all types) into a group
+# so we can offer it to a player... a spot for gold... player can
+# accept or decline... open to all players"). A formal, two-sided
+# negotiation -- deliberately separate from the existing _do_give_item
+# (an immediate, one-sided hand-off with no consent needed). In-memory
+# only, chat-scoped like _PENDING_DUELS, NOT DB-persisted or
+# snapshotted across restarts -- same intentional non-durability as
+# _PENDING_LOOT_VOTES: a live, short negotiation that fully refunds on
+# timeout or restart, not durable game state.
+#
+# _ACTIVE_TRADES[chat_id][trade_id] -> record (see _new_trade_record).
+# _USER_ACTIVE_TRADE[chat_id][telegram_user_id] -> trade_id, so both
+# sides of a trade resolve to the SAME record in O(1) without scanning.
+TRADE_TIMEOUT_SECONDS = 600
+_ACTIVE_TRADES: dict[int, dict] = {}
+_USER_ACTIVE_TRADE: dict[int, dict] = {}
+_NEXT_TRADE_ID = 1
+
+
 # Character description (2026-07-16, per Coffee): "add a description to my
 # character" asks what the description should be rather than trying to
 # extract free-form biography text out of the SAME message an intent
@@ -1810,6 +1830,24 @@ def _get_combat_eligible_party_members(location_id: str, chat_id: int) -> list[d
         p for p in _get_party_members(chat_id)
         if p["current_location"] == location_id and not p.get("is_inactive")
     ]
+
+
+def _get_trade_eligible_members(chat_id: int) -> list[dict]:
+    """
+    Real independent economic actors in this chat: real players
+    (is_ai=0) plus genuinely autonomous AI-played characters
+    (is_ai=1, is_autonomous=1) -- explicitly EXCLUDING recruited AI
+    companions (is_ai=1, is_autonomous=0). A companion isn't an
+    independent agent (it travels with and is controlled by its
+    recruiter), so letting it be a trade PARTNER would be a real
+    gold/item laundering vector between two humans who each control
+    one side. Not location-scoped (2026-08-26, per Coffee: "have it so
+    trade is open to all players") -- unlike _get_combat_eligible_party_
+    members, a formal trade requires the OTHER side's explicit accept,
+    which already neutralizes the "unwanted item shows up" concern
+    room-scoping exists to prevent for the unilateral _do_give_item.
+    """
+    return [p for p in _get_party_members(chat_id) if not p.get("is_ai") or p.get("is_autonomous")]
 
 
 def _equipped_profession_bonus(character: dict, profession: str) -> int:
@@ -4940,6 +4978,395 @@ async def _check_pending_loot_votes(bot) -> None:
                 )
             else:
                 await _safe_send(update_like, f"No one wanted the **{record['item_name']}** — it's left behind.")
+
+
+# Player-to-player trading (2026-08-26) -- see the _ACTIVE_TRADES/
+# _USER_ACTIVE_TRADE state comment near _PENDING_DUELS for the full
+# design rationale. Same shared "module dict + keyboard + message-text
+# renderer + callback + periodic sweep" shape as Loot Voting just
+# above, adapted for exactly two named parties instead of an open
+# crowd, and a much longer (10-minute) idle window since building a
+# multi-item offer via text takes real back-and-forth.
+
+def _new_trade_id() -> str:
+    global _NEXT_TRADE_ID
+    trade_id = f"trade{_NEXT_TRADE_ID}"
+    _NEXT_TRADE_ID += 1
+    return trade_id
+
+
+def _trade_keyboard(trade_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Accept", callback_data=f"trade|{trade_id}|accept"),
+        InlineKeyboardButton("❌ Cancel", callback_data=f"trade|{trade_id}|cancel"),
+    ]])
+
+
+def _trade_side_lines(side: dict) -> str:
+    lines = [f"**{side['name']}'s offer:**"]
+    if side["items"]:
+        for item_id, qty in side["items"].items():
+            item = items_module.get_item(item_id)
+            name = item["name"] if item else item_id
+            lines.append(f"  • {qty}x {name}")
+    if side["gold"]:
+        lines.append(f"  • 💰 {side['gold']} gold")
+    if not side["items"] and not side["gold"]:
+        lines.append("  (nothing offered yet)")
+    lines.append("  ✅ Accepted" if side["accepted"] else "  ⬜ Not yet accepted")
+    return "\n".join(lines)
+
+
+def _trade_message_text(record: dict) -> str:
+    """
+    Shared by every trade action (open/add/remove/accept) so the message
+    never drifts out of sync with real state -- same discipline
+    _loot_vote_message_text already established. The natural-language
+    equivalent of the Diablo-style two-grids-plus-gold-slot-plus-accept-
+    checkbox screenshot Coffee shared: two clearly labeled offer blocks,
+    each with its own items, gold, and accepted marker.
+    """
+    return (
+        f"🤝 **Trade: {record['party_a']['name']} ↔ {record['party_b']['name']}**\n\n"
+        f"{_trade_side_lines(record['party_a'])}\n\n"
+        f"{_trade_side_lines(record['party_b'])}\n\n"
+        f"Say \"add X to the trade\" / \"remove X from the trade\", then \"accept the trade\" "
+        f"once you're happy with it — changing an offer un-accepts both sides."
+    )
+
+
+def _find_trade_for_user(chat_id: int, telegram_user_id: int) -> dict | None:
+    trade_id = _chat_scoped_dict(_USER_ACTIVE_TRADE, chat_id).get(telegram_user_id)
+    if trade_id is None:
+        return None
+    return _chat_scoped_dict(_ACTIVE_TRADES, chat_id).get(trade_id)
+
+
+def _trade_side_key(record: dict, telegram_user_id: int) -> str | None:
+    if record["party_a"]["id"] == telegram_user_id:
+        return "party_a"
+    if record["party_b"]["id"] == telegram_user_id:
+        return "party_b"
+    return None
+
+
+def _return_trade_goods(chat_id: int, side: dict) -> None:
+    """Refunds everything currently held in one side's offer back to its real owner -- used by cancel and timeout."""
+    for item_id, qty in side["items"].items():
+        db.add_item(side["id"], chat_id, item_id, qty)
+    if side["gold"]:
+        character = db.get_character(side["id"], chat_id)
+        if character:
+            db.update_character(side["id"], chat_id, gold=character["gold"] + side["gold"])
+
+
+def _end_trade(chat_id: int, record: dict) -> None:
+    _chat_scoped_dict(_ACTIVE_TRADES, chat_id).pop(record["trade_id"], None)
+    user_map = _chat_scoped_dict(_USER_ACTIVE_TRADE, chat_id)
+    user_map.pop(record["party_a"]["id"], None)
+    user_map.pop(record["party_b"]["id"], None)
+
+
+_TRADE_GOLD_PATTERN = re.compile(r"(\d+)\s*gold\b")
+
+
+async def _do_trade_request(update: Update, text: str) -> None:
+    telegram_user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    character = db.get_character(telegram_user_id, chat_id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(chat_id, "adventure")
+        )
+        return
+
+    if _find_trade_for_user(chat_id, telegram_user_id) is not None:
+        await update.effective_chat.send_message(
+            "You're already in a trade — say \"cancel the trade\" first if you want to start a different one.",
+            message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        )
+        return
+
+    eligible = [
+        p for p in _get_trade_eligible_members(chat_id) if p["telegram_user_id"] != telegram_user_id
+    ]
+    recipient = _match_member_by_name_or_username(text, eligible)
+    if recipient is None:
+        # Same care _do_give_item takes distinguishing "nobody by that
+        # name" from "that's a real companion, just not a valid target"
+        # -- a recruited AI companion is deliberately excluded from
+        # _get_trade_eligible_members (see that function's own
+        # docstring), so naming one here would otherwise get the same
+        # generic "name someone real" message as naming nobody at all.
+        all_members = [p for p in _get_party_members(chat_id) if p["telegram_user_id"] != telegram_user_id]
+        companion = _match_member_by_name_or_username(text, all_members)
+        if companion is not None and companion.get("is_ai") and not companion.get("is_autonomous"):
+            await update.effective_chat.send_message(
+                f"**{companion['name']}** is a companion, not an independent trader — trade only works "
+                f"between real players (human or autonomous AI).",
+                message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+            )
+        else:
+            await update.effective_chat.send_message(
+                "Trade with whom? Name a real player who's actually active in this game.",
+                message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+            )
+        return
+
+    if _find_trade_for_user(chat_id, recipient["telegram_user_id"]) is not None:
+        await update.effective_chat.send_message(
+            f"**{recipient['name']}** is already in a trade with someone else right now.",
+            message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        )
+        return
+
+    trade_id = _new_trade_id()
+    record = {
+        "trade_id": trade_id,
+        "chat_id": chat_id,
+        "party_a": {"id": telegram_user_id, "name": character["name"], "items": {}, "gold": 0, "accepted": False},
+        "party_b": {"id": recipient["telegram_user_id"], "name": recipient["name"], "items": {}, "gold": 0, "accepted": False},
+        "last_activity_at": time.time(),
+    }
+    _chat_scoped_dict(_ACTIVE_TRADES, chat_id)[trade_id] = record
+    user_map = _chat_scoped_dict(_USER_ACTIVE_TRADE, chat_id)
+    user_map[telegram_user_id] = trade_id
+    user_map[recipient["telegram_user_id"]] = trade_id
+    await _safe_send(update, _trade_message_text(record), reply_markup=_trade_keyboard(trade_id), speak=False)
+
+
+async def _mutate_trade_offer(update: Update, text: str, adding: bool) -> None:
+    """Shared by _do_trade_add/_do_trade_remove -- same item/gold parsing, opposite direction."""
+    telegram_user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    character = db.get_character(telegram_user_id, chat_id)
+    if character is None:
+        return
+    record = _find_trade_for_user(chat_id, telegram_user_id)
+    if record is None:
+        await update.effective_chat.send_message(
+            "You're not in a trade right now — say \"trade with X\" to start one.",
+            message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        )
+        return
+    side_key = _trade_side_key(record, telegram_user_id)
+    other_key = "party_b" if side_key == "party_a" else "party_a"
+    side = record[side_key]
+
+    changed_lines = []
+    gold_match = _TRADE_GOLD_PATTERN.search(text.lower())
+    if gold_match:
+        amount = int(gold_match.group(1))
+        if adding:
+            if amount > character["gold"]:
+                changed_lines.append(f"You only have {character['gold']} gold — can't add {amount}.")
+            else:
+                db.update_character(telegram_user_id, chat_id, gold=character["gold"] - amount)
+                side["gold"] += amount
+                changed_lines.append(f"Added {amount} gold to the trade.")
+        else:
+            amount = min(amount, side["gold"])
+            side["gold"] -= amount
+            character = db.get_character(telegram_user_id, chat_id)
+            db.update_character(telegram_user_id, chat_id, gold=character["gold"] + amount)
+            changed_lines.append(f"Took {amount} gold back out of the trade.")
+
+    items_wanted = _extract_item_list(
+        text, list(character["inventory"].keys()) if adding else list(side["items"].keys())
+    )
+    for item_id, quantity in items_wanted:
+        item_name = items_module.get_item(item_id)["name"]
+        if adding:
+            removed, _ = db.remove_item(telegram_user_id, chat_id, item_id, quantity)
+            if not removed:
+                have = character["inventory"].get(item_id, 0)
+                changed_lines.append(f"You don't have {quantity}x {item_name} to add — you only have {have}.")
+                continue
+            side["items"][item_id] = side["items"].get(item_id, 0) + quantity
+            changed_lines.append(f"Added {quantity}x {item_name} to the trade.")
+        else:
+            have = side["items"].get(item_id, 0)
+            quantity = min(quantity, have)
+            if quantity <= 0:
+                continue
+            remaining = have - quantity
+            if remaining <= 0:
+                side["items"].pop(item_id, None)
+            else:
+                side["items"][item_id] = remaining
+            db.add_item(telegram_user_id, chat_id, item_id, quantity)
+            changed_lines.append(f"Took {quantity}x {item_name} back out of the trade.")
+
+    if not changed_lines:
+        await update.effective_chat.send_message(
+            f"{'Add' if adding else 'Remove'} what to the trade, exactly? Name something real, "
+            f"or an amount of gold.",
+            message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        )
+        return
+
+    # Real behavior from the Diablo-style trade window Coffee shared:
+    # changing your own offer un-commits BOTH sides, since the other
+    # party accepted a now-stale offer.
+    side["accepted"] = False
+    record[other_key]["accepted"] = False
+    record["last_activity_at"] = time.time()
+    await _safe_send(update, "\n".join(changed_lines), speak=False)
+    await _safe_send(update, _trade_message_text(record), reply_markup=_trade_keyboard(record["trade_id"]), speak=False)
+
+
+async def _do_trade_add(update: Update, text: str) -> None:
+    await _mutate_trade_offer(update, text, adding=True)
+
+
+async def _do_trade_remove(update: Update, text: str) -> None:
+    await _mutate_trade_offer(update, text, adding=False)
+
+
+async def _finalize_trade(update: Update, chat_id: int, record: dict) -> None:
+    """
+    Both sides have accepted -- credit each side's already-held goods to
+    the OTHER party. Items/gold were removed from each offerer's real
+    inventory the instant they were added (see _mutate_trade_offer), so
+    this is purely a credit step, not a "do they still have it" race --
+    the goods have been sitting safely in this in-memory record the
+    whole time. Still re-checks both characters actually still exist
+    (one could theoretically be deleted mid-negotiation) before
+    crediting, refunding to whichever side is still real if not.
+    """
+    party_a, party_b = record["party_a"], record["party_b"]
+    a_alive = db.get_character(party_a["id"], chat_id) is not None
+    b_alive = db.get_character(party_b["id"], chat_id) is not None
+    if not (a_alive and b_alive):
+        if a_alive:
+            _return_trade_goods(chat_id, party_a)
+        if b_alive:
+            _return_trade_goods(chat_id, party_b)
+        _end_trade(chat_id, record)
+        await update.effective_chat.send_message(
+            "Trade cancelled — one of the characters involved no longer exists. Anything held has been returned.",
+            message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        )
+        return
+
+    for item_id, qty in party_a["items"].items():
+        db.add_item(party_b["id"], chat_id, item_id, qty)
+    for item_id, qty in party_b["items"].items():
+        db.add_item(party_a["id"], chat_id, item_id, qty)
+    if party_a["gold"]:
+        recipient = db.get_character(party_b["id"], chat_id)
+        db.update_character(party_b["id"], chat_id, gold=recipient["gold"] + party_a["gold"])
+    if party_b["gold"]:
+        recipient = db.get_character(party_a["id"], chat_id)
+        db.update_character(party_a["id"], chat_id, gold=recipient["gold"] + party_b["gold"])
+
+    _end_trade(chat_id, record)
+    await _safe_send(
+        update,
+        f"🤝 **Trade complete!** {party_a['name']} and {party_b['name']} have exchanged goods.",
+        speak=False,
+    )
+
+
+async def _trade_accept_side(update: Update, chat_id: int, telegram_user_id: int) -> None:
+    record = _find_trade_for_user(chat_id, telegram_user_id)
+    if record is None:
+        await update.effective_chat.send_message(
+            "You're not in a trade right now.", message_thread_id=topics.thread_id_for(chat_id, "adventure")
+        )
+        return
+    side_key = _trade_side_key(record, telegram_user_id)
+    record[side_key]["accepted"] = True
+    record["last_activity_at"] = time.time()
+    if record["party_a"]["accepted"] and record["party_b"]["accepted"]:
+        await _finalize_trade(update, chat_id, record)
+        return
+    await _safe_send(update, _trade_message_text(record), reply_markup=_trade_keyboard(record["trade_id"]), speak=False)
+
+
+async def _trade_cancel_trade(update: Update, chat_id: int, telegram_user_id: int) -> None:
+    record = _find_trade_for_user(chat_id, telegram_user_id)
+    if record is None:
+        await update.effective_chat.send_message(
+            "You're not in a trade right now.", message_thread_id=topics.thread_id_for(chat_id, "adventure")
+        )
+        return
+    canceller = record[_trade_side_key(record, telegram_user_id)]["name"]
+    _return_trade_goods(chat_id, record["party_a"])
+    _return_trade_goods(chat_id, record["party_b"])
+    _end_trade(chat_id, record)
+    await _safe_send(
+        update,
+        f"❌ **{canceller}** cancelled the trade with {record['party_b']['name'] if canceller == record['party_a']['name'] else record['party_a']['name']} — anything offered has been returned.",
+        speak=False,
+    )
+
+
+async def _do_trade_accept(update: Update) -> None:
+    await _trade_accept_side(update, update.effective_chat.id, update.effective_user.id)
+
+
+async def _do_trade_cancel(update: Update) -> None:
+    await _trade_cancel_trade(update, update.effective_chat.id, update.effective_user.id)
+
+
+async def _do_trade_status(update: Update) -> None:
+    record = _find_trade_for_user(update.effective_chat.id, update.effective_user.id)
+    if record is None:
+        await update.effective_chat.send_message(
+            "You're not in a trade right now — say \"trade with X\" to start one.",
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        )
+        return
+    await _safe_send(update, _trade_message_text(record), reply_markup=_trade_keyboard(record["trade_id"]), speak=False)
+
+
+async def trade_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    trade_id = parts[1] if len(parts) > 1 else ""
+    action = parts[2] if len(parts) > 2 else ""
+    chat_id = update.effective_chat.id
+    telegram_user_id = update.effective_user.id
+    record = _chat_scoped_dict(_ACTIVE_TRADES, chat_id).get(trade_id)
+    if record is None:
+        await _safe_answer(query, "That trade's no longer active.", show_alert=True)
+        return
+    if telegram_user_id not in (record["party_a"]["id"], record["party_b"]["id"]):
+        await _safe_answer(query, "That's not your trade.", show_alert=True)
+        return
+    await _safe_answer(query)
+    if action == "accept":
+        await _trade_accept_side(update, chat_id, telegram_user_id)
+    elif action == "cancel":
+        await _trade_cancel_trade(update, chat_id, telegram_user_id)
+
+
+async def _check_pending_trades(bot) -> None:
+    """
+    Periodic timeout sweep (same architecture as _check_pending_loot_
+    votes, run from the same _idle_inactivity_loop). An abandoned trade
+    would otherwise permanently lock the offered items/gold out of both
+    sides' usable inventory forever -- tracked via last_activity_at (not
+    started_at) so an actively-being-negotiated trade never expires
+    mid-conversation just because the whole thing is taking a while.
+    """
+    now = time.time()
+    for chat_id in list(_ACTIVE_TRADES.keys()):
+        for trade_id in list(_ACTIVE_TRADES[chat_id].keys()):
+            record = _ACTIVE_TRADES[chat_id][trade_id]
+            if now - record["last_activity_at"] < TRADE_TIMEOUT_SECONDS:
+                continue
+            _return_trade_goods(chat_id, record["party_a"])
+            _return_trade_goods(chat_id, record["party_b"])
+            _end_trade(chat_id, record)
+            update_like = _AiPlayerUpdate(bot, chat_id, record["party_a"]["id"], "")
+            await _safe_send(
+                update_like,
+                f"⌛ Trade between **{record['party_a']['name']}** and **{record['party_b']['name']}** "
+                f"timed out — anything offered has been returned.",
+                speak=False,
+            )
 
 
 async def _award_victory_xp(update: Update, session: sessions.Session) -> tuple[str, list[str]]:
@@ -27819,6 +28246,18 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_find_merchant(update)
     elif action == "give_item":
         await _do_give_item(update, intent.get("raw_text", text))
+    elif action == "trade_request":
+        await _do_trade_request(update, intent.get("raw_text", text))
+    elif action == "trade_add":
+        await _do_trade_add(update, intent.get("raw_text", text))
+    elif action == "trade_remove":
+        await _do_trade_remove(update, intent.get("raw_text", text))
+    elif action == "trade_accept":
+        await _do_trade_accept(update)
+    elif action == "trade_cancel":
+        await _do_trade_cancel(update)
+    elif action == "trade_status":
+        await _do_trade_status(update)
     elif action == "use_item":
         await _do_use_item(update, intent.get("raw_text", text))
     elif action == "give_offering":
@@ -30898,6 +31337,10 @@ async def _idle_inactivity_loop(application: Application) -> None:
         except Exception as e:
             logger.error(f"[loot_vote] background loop failed this cycle: {e!r}")
         try:
+            await _check_pending_trades(application.bot)
+        except Exception as e:
+            logger.error(f"[trade] background loop failed this cycle: {e!r}")
+        try:
             _apply_passive_party_regen()
         except Exception as e:
             logger.error(f"[world_tick] passive party regen failed this cycle: {e!r}")
@@ -31273,6 +31716,7 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(battle_menu_callback, pattern=r"^bm\|"))
     application.add_handler(CallbackQueryHandler(itemview_callback, pattern=r"^itemview\|"))
     application.add_handler(CallbackQueryHandler(loot_vote_callback, pattern=r"^lootvote\|"))
+    application.add_handler(CallbackQueryHandler(trade_menu_callback, pattern=r"^trade\|"))
     application.add_handler(CallbackQueryHandler(guild_curriculum_callback, pattern=r"^gcurr\|"))
     # Task #176: out-of-combat browsing buttons (shop/spells/quest board),
     # own callback-data namespaces so none of these can ever collide with

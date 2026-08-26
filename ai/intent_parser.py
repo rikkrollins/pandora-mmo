@@ -171,6 +171,17 @@ combat, not just moving within it. Set "target" to their name, or omit/self if u
 - "find_merchant" is for asking where to get supplies or find the nearest shop/merchant.
 - "give_item" is for handing/giving/trading a carried item to another real player or AI companion, \
 not a shop transaction (e.g. "give my healing potion to Sarah", "hand Borin the torch"). Set "target" to the recipient's name.
+- "trade_request" is for proposing a formal, two-sided trade with another real player (e.g. "trade with Sarah", \
+"I want to trade with Bob") -- distinct from "give_item", which is an immediate, one-sided hand-off with no \
+consent needed. Set "target" to the other player's name.
+- "trade_add" is for putting an item or a gold amount into an OPEN trade's own offer (e.g. "add 3 healing potions \
+to the trade", "add 50 gold to trade", "put my torch in the trade"). Set "item_name"/"quantity" for items, or leave \
+"raw_text" as the full message so the amount of gold can be parsed from it.
+- "trade_remove" is for taking an item or gold back OUT of an open trade's own offer before it's finalized \
+(e.g. "remove the healing potion from the trade", "take 20 gold out of the trade").
+- "trade_accept" is for locking in / accepting the current state of an open trade (e.g. "accept the trade", "I accept").
+- "trade_cancel" is for backing out of or declining an open trade (e.g. "cancel the trade", "decline the trade", "I decline").
+- "trade_status" is for asking to see the current state of an open trade again (e.g. "check my trade", "what's in the trade").
 - "second_wind" is specifically a Fighter's real class feature: a bonus action to catch their breath and \
 recover some HP outside of resting (e.g. "I use second wind", "catch my breath", "second wind").
 - "rage" is specifically a Barbarian's real class feature: entering a rage before or during a fight for \
@@ -698,6 +709,41 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
         lowered,
     ):
         return {**base, "action": "ask_clue"}
+
+    # Formal two-sided trade (2026-08-26, per Coffee: "have it so we can
+    # say 'trade with (player)'"). Checked BEFORE give_item's own "trade "
+    # trigger-verb/dative checks below -- those already treat bare
+    # "trade " as a give_item verb (e.g. "trade Sarah my sword"), and
+    # give_item's dative regex (`trade (\w+) (\w+) (\w+)`) would otherwise
+    # match "trade with bob please" too (capturing "with" as a bogus
+    # recipient name), silently stealing this phrasing before it ever
+    # reached here. "trade with X" is structurally distinct enough (the
+    # literal word "with" right after "trade") to intercept unconditionally,
+    # first.
+    trade_with_match = re.search(r"\btrade\s+with\s+", lowered)
+    if trade_with_match:
+        name = text[trade_with_match.end():].strip()
+        for cut in (" please", " now", "?", "."):
+            if name.lower().endswith(cut):
+                name = name[: len(name) - len(cut)].strip()
+        return {**base, "action": "trade_request", "target": name or None}
+
+    # Adding/removing items or gold to/from an already-open trade, and
+    # accepting/declining it -- same feature. Checked here (before
+    # give_item) so "add the torch to the trade" never falls into
+    # give_item's own broader vocabulary (it doesn't share give_item's
+    # trigger verbs at all, so this is just keeping the whole trade
+    # feature's checks grouped together).
+    if re.search(r"\b(?:add|put|offer)\b.+\b(?:to|in)\s+(?:the\s+)?trade\b", lowered):
+        return {**base, "action": "trade_add"}
+    if re.search(r"\b(?:remove|take)\b.+\b(?:from|out of)\s+(?:the\s+)?trade\b", lowered):
+        return {**base, "action": "trade_remove"}
+    if re.search(r"\b(?:accept|confirm|lock in)\s+(?:the\s+)?trade\b", lowered) or lowered.strip() in ("accept trade", "i accept the trade", "i accept"):
+        return {**base, "action": "trade_accept"}
+    if re.search(r"\b(?:cancel|decline|reject|back out of)\s+(?:the\s+)?trade\b", lowered) or lowered.strip() in ("decline trade", "i decline the trade", "i decline"):
+        return {**base, "action": "trade_cancel"}
+    if re.search(r"\b(?:check|show|what'?s in)\s+(?:my\s+)?(?:the\s+)?trade\b", lowered):
+        return {**base, "action": "trade_status"}
 
     # give_item (player-to-player trading, 2026-07-15): checked after
     # ask_clue above so "give me a clue/hint" is never shadowed -- this
@@ -2445,6 +2491,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "talk_party", "use_environment", "throw_weapon",
                 "check_menu", "check_formation", "check_waypoints", "check_equip_menu",
                 "check_remnants", "check_story", "check_magic", "check_affinity",
+                "trade_request", "trade_add", "trade_remove", "trade_accept", "trade_cancel", "trade_status",
             )
             if parsed["action"] not in valid_actions:
                 return fallback
@@ -2557,7 +2604,7 @@ _COMPOUND_SPLIT_PATTERN = re.compile(r",\s*(?:and\s+)?|\s+and then\s+|\s+then\s+
 
 # Actions where a player commonly lists several items in one message
 # ("buy 10 torches, 1 pickaxe, 5 bait") -- see parse_intents below.
-_SHOPPING_LIST_ACTIONS = {"buy", "sell", "give_item", "equip_item"}
+_SHOPPING_LIST_ACTIONS = {"buy", "sell", "give_item", "equip_item", "trade_add", "trade_remove"}
 # What a bare "<qty> <item>" segment (no verb of its own) tends to
 # misclassify as, once split away from the verb that gave it context.
 _BARE_ITEM_MISFIRES = {"chat", "gather", "craft"}

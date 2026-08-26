@@ -2,6 +2,42 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.353] — Player-to-player trading system
+
+Real live request (Coffee): "create a tradeing system, have it so we
+can say 'trade with (player)'... put items (all types) into a group
+so we can offer it to a player... a spot for gold so players can trade
+items for gold... open to all players." A formal, two-sided
+negotiation, separate from the existing unilateral `give_item`:
+
+- **"trade with X"** opens a shared, live-updating trade window in
+  Adventure (visible to everyone, same as loot votes) between the
+  initiator and any other real player or genuinely autonomous AI
+  character in the chat — deliberately NOT a recruited AI companion
+  (`is_ai=1, is_autonomous=0`), which isn't an independent economic
+  actor and would otherwise be a real gold/item laundering vector
+  between two humans. Not location-scoped, per "open to all players" —
+  a formal trade requires the other side's explicit accept, which
+  already neutralizes the "unwanted item shows up" concern room-
+  scoping exists to prevent for `give_item`.
+- **"add X to the trade" / "add N gold to the trade"** and their
+  "remove ... from the trade" mirror build up each side's own offer.
+  Items and gold are locked out of the offerer's real inventory the
+  instant they're added (same convention as market listings), so the
+  same item can never be double-offered or spent out from under a
+  trade mid-negotiation.
+- **"accept the trade" / "cancel the trade"** (plus ✅/❌ buttons on the
+  live message). Changing either side's offer un-accepts BOTH sides —
+  matching the real Diablo-style trade window Coffee shared for
+  reference. Mutual accept executes immediately: each side's held
+  goods are credited to the other, and the trade closes.
+- Idle trades (10 minutes with no activity) time out and fully refund
+  both sides, via the same periodic sweep architecture as loot votes.
+- Fixed a real, confirmed keyword collision along the way:
+  `ai/intent_parser.py`'s existing `give_item` dative regex already
+  matched "trade with X" (capturing "with" as a bogus recipient name)
+  — the new `trade_request` check now intercepts first.
+
 ## [1.27.352] — First City no longer hints at the sky before you're ready
 
 Real live report (2026-08-26, Coffee: "in the first city you have a

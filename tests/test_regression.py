@@ -1936,6 +1936,171 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         recipient = db.get_character(recipient_id, -999)
         self.assertEqual(recipient["inventory"].get("healing_potion", 0), 0)
 
+    # -- Player-to-player trading (2026-08-26, per Coffee: "create a
+    #    tradeing system... trade with (player)... put items (all
+    #    types) into a group so we can offer it to a player... a spot
+    #    for gold... player can accept or decline... open to all
+    #    players"). A formal, two-sided negotiation, distinct from the
+    #    unilateral give_item above. -------------------------------
+    def test_trade_with_phrasing_classified_correctly(self):
+        self.assertEqual(_keyword_fallback("trade with Sarah", [])["action"], "trade_request")
+        self.assertEqual(_keyword_fallback("I want to trade with bob please", [])["action"], "trade_request")
+        self.assertEqual(_keyword_fallback("add 3 healing potions to the trade", [])["action"], "trade_add")
+        self.assertEqual(_keyword_fallback("add 50 gold to trade", [])["action"], "trade_add")
+        self.assertEqual(_keyword_fallback("remove the healing potion from the trade", [])["action"], "trade_remove")
+        self.assertEqual(_keyword_fallback("accept the trade", [])["action"], "trade_accept")
+        self.assertEqual(_keyword_fallback("decline the trade", [])["action"], "trade_cancel")
+        self.assertEqual(_keyword_fallback("check my trade", [])["action"], "trade_status")
+        # Must not regress the existing give_item dative phrasing this
+        # new "trade with" check is inserted right before.
+        self.assertEqual(_keyword_fallback("trade sarah my sword", [])["action"], "give_item")
+
+    async def test_trade_request_opens_a_live_offer_message_visible_to_both_sides(self):
+        import sessions
+        sessions.end_session(-999)
+        a_id, b_id = 951001, 951002
+        make_basic_character(a_id, "TraderA", current_location="crossroads_tavern")
+        make_basic_character(b_id, "TraderB", current_location="whispering_wood")
+
+        sink = []
+        await bot._do_trade_request(FakeUpdate(a_id, "trade with TraderB", sink), "trade with TraderB")
+        combined = "\n".join(sink)
+        self.assertIn("TraderA", combined)
+        self.assertIn("TraderB", combined)
+        trade_id_a = bot._chat_scoped_dict(bot._USER_ACTIVE_TRADE, -999).get(a_id)
+        trade_id_b = bot._chat_scoped_dict(bot._USER_ACTIVE_TRADE, -999).get(b_id)
+        self.assertIsNotNone(trade_id_a)
+        self.assertEqual(trade_id_a, trade_id_b)
+
+    async def test_trade_recruited_companion_is_not_a_valid_trade_target(self):
+        import sessions
+        sessions.end_session(-999)
+        a_id = 951003
+        make_basic_character(a_id, "TraderCompanionSeeker", current_location="crossroads_tavern")
+        make_basic_character(951004, "LoyalCompanion", current_location="crossroads_tavern", is_ai=True)
+
+        sink = []
+        await bot._do_trade_request(FakeUpdate(a_id, "trade with LoyalCompanion", sink), "trade with LoyalCompanion")
+        combined = "\n".join(sink)
+        self.assertIn("not an independent trader", combined)
+        self.assertIsNone(bot._find_trade_for_user(-999, a_id))
+
+    async def test_trade_add_locks_the_item_out_of_the_offerers_inventory_immediately(self):
+        import sessions
+        sessions.end_session(-999)
+        a_id, b_id = 951005, 951006
+        make_basic_character(a_id, "LockerA", current_location="crossroads_tavern")
+        make_basic_character(b_id, "LockerB", current_location="crossroads_tavern")
+        db.add_item(a_id, -999, "healing_potion", 2)
+
+        sink = []
+        await bot._do_trade_request(FakeUpdate(a_id, "trade with LockerB", sink), "trade with LockerB")
+        sink.clear()
+        await bot._do_trade_add(FakeUpdate(a_id, "add 1 healing potion to the trade", sink), "add 1 healing potion to the trade")
+
+        after = db.get_character(a_id, -999)
+        self.assertEqual(after["inventory"].get("healing_potion", 0), 1, "the offered item must actually leave the offerer's real inventory")
+        record = bot._find_trade_for_user(-999, a_id)
+        self.assertEqual(record["party_a"]["items"].get("healing_potion"), 1)
+
+    async def test_trade_offer_change_resets_the_other_sides_accept_flag(self):
+        import sessions
+        sessions.end_session(-999)
+        a_id, b_id = 951007, 951008
+        make_basic_character(a_id, "ResetA", current_location="crossroads_tavern")
+        make_basic_character(b_id, "ResetB", current_location="crossroads_tavern")
+        db.add_item(a_id, -999, "healing_potion", 2)
+
+        sink = []
+        await bot._do_trade_request(FakeUpdate(a_id, "trade with ResetB", sink), "trade with ResetB")
+        # Only B accepts here -- if BOTH accepted, the trade would
+        # immediately finalize and clear (design decision: mutual
+        # accept auto-executes), leaving nothing left to test the
+        # reset-on-change behavior against.
+        await bot._do_trade_accept(FakeUpdate(b_id, "accept the trade", sink))
+        record = bot._find_trade_for_user(-999, a_id)
+        self.assertTrue(record["party_b"]["accepted"])
+
+        await bot._do_trade_add(FakeUpdate(a_id, "add 1 healing potion to the trade", sink), "add 1 healing potion to the trade")
+        record = bot._find_trade_for_user(-999, a_id)
+        self.assertFalse(record["party_a"]["accepted"], "the side that changed its own offer must not be marked accepted")
+        self.assertFalse(record["party_b"]["accepted"], "the OTHER side must also un-accept -- it agreed to a now-stale offer")
+
+    async def test_trade_executes_atomically_on_mutual_accept_and_swaps_real_inventory_and_gold(self):
+        import sessions
+        sessions.end_session(-999)
+        a_id, b_id = 951009, 951010
+        make_basic_character(a_id, "SwapA", current_location="crossroads_tavern")
+        make_basic_character(b_id, "SwapB", current_location="whispering_wood")
+        db.add_item(a_id, -999, "healing_potion", 1)
+        db.add_item(b_id, -999, "torch", 1)
+        db.update_character(a_id, -999, gold=100)
+        db.update_character(b_id, -999, gold=50)
+
+        sink = []
+        await bot._do_trade_request(FakeUpdate(a_id, "trade with SwapB", sink), "trade with SwapB")
+        await bot._do_trade_add(FakeUpdate(a_id, "add 1 healing potion to the trade", sink), "add 1 healing potion to the trade")
+        await bot._do_trade_add(FakeUpdate(a_id, "add 20 gold to the trade", sink), "add 20 gold to the trade")
+        await bot._do_trade_add(FakeUpdate(b_id, "add 1 torch to the trade", sink), "add 1 torch to the trade")
+        await bot._do_trade_accept(FakeUpdate(a_id, "accept the trade", sink))
+        await bot._do_trade_accept(FakeUpdate(b_id, "accept the trade", sink))
+
+        final_a = db.get_character(a_id, -999)
+        final_b = db.get_character(b_id, -999)
+        self.assertEqual(final_a["inventory"].get("healing_potion", 0), 0)
+        self.assertEqual(final_a["inventory"].get("torch", 0), 1, "A should now hold what B offered")
+        self.assertEqual(final_b["inventory"].get("torch", 0), 0)
+        self.assertEqual(final_b["inventory"].get("healing_potion", 0), 1, "B should now hold what A offered")
+        self.assertEqual(final_a["gold"], 80)  # 100 - 20 offered, B offered no gold
+        self.assertEqual(final_b["gold"], 70)  # 50 + 20 received
+        self.assertIsNone(bot._find_trade_for_user(-999, a_id))
+        self.assertIsNone(bot._find_trade_for_user(-999, b_id))
+
+    async def test_trade_times_out_and_refunds_both_sides(self):
+        import sessions
+        sessions.end_session(-999)
+        a_id, b_id = 951011, 951012
+        make_basic_character(a_id, "TimeoutA", current_location="crossroads_tavern")
+        make_basic_character(b_id, "TimeoutB", current_location="crossroads_tavern")
+        db.add_item(a_id, -999, "healing_potion", 1)
+
+        sink = []
+        await bot._do_trade_request(FakeUpdate(a_id, "trade with TimeoutB", sink), "trade with TimeoutB")
+        await bot._do_trade_add(FakeUpdate(a_id, "add 1 healing potion to the trade", sink), "add 1 healing potion to the trade")
+        record = bot._find_trade_for_user(-999, a_id)
+        self.assertEqual(db.get_character(a_id, -999)["inventory"].get("healing_potion", 0), 0)
+        record["last_activity_at"] = time.time() - bot.TRADE_TIMEOUT_SECONDS - 1
+
+        class _FakeBot:
+            async def send_message(self, *a, **k):
+                return None
+
+        await bot._check_pending_trades(_FakeBot())
+        self.assertEqual(db.get_character(a_id, -999)["inventory"].get("healing_potion", 0), 1, "refunded on timeout")
+        self.assertIsNone(bot._find_trade_for_user(-999, a_id))
+        self.assertIsNone(bot._find_trade_for_user(-999, b_id))
+
+    async def test_trade_cancel_refunds_both_sides_immediately(self):
+        import sessions
+        sessions.end_session(-999)
+        a_id, b_id = 951013, 951014
+        make_basic_character(a_id, "CancelA", current_location="crossroads_tavern")
+        make_basic_character(b_id, "CancelB", current_location="crossroads_tavern")
+        db.add_item(a_id, -999, "healing_potion", 1)
+        db.update_character(a_id, -999, gold=30)
+
+        sink = []
+        await bot._do_trade_request(FakeUpdate(a_id, "trade with CancelB", sink), "trade with CancelB")
+        await bot._do_trade_add(FakeUpdate(a_id, "add 1 healing potion to the trade", sink), "add 1 healing potion to the trade")
+        await bot._do_trade_add(FakeUpdate(a_id, "add 10 gold to the trade", sink), "add 10 gold to the trade")
+        await bot._do_trade_cancel(FakeUpdate(b_id, "cancel the trade", sink))
+
+        after = db.get_character(a_id, -999)
+        self.assertEqual(after["inventory"].get("healing_potion", 0), 1)
+        self.assertEqual(after["gold"], 30)
+        self.assertIsNone(bot._find_trade_for_user(-999, a_id))
+        self.assertIsNone(bot._find_trade_for_user(-999, b_id))
+
     # -- Potions were completely non-functional: no action anywhere ever
     #    read a consumable's heal_dice/effect field (v1.10.8) ----------
     def test_use_item_phrasing_classified_correctly(self):
