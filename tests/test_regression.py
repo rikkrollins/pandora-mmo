@@ -8162,6 +8162,56 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("turn" in line.lower() for line in sink))
         sessions.end_session(-999)
 
+    async def test_no_spell_slots_message_survives_a_flood_control_blip(self):
+        """
+        Real live crash (2026-08-26, error-log finding, code_location
+        bot.py:25500 in _spend_cast_resource): a burst of prior combat
+        sends (a Remnant summon + AI companion turns) exhausted
+        Telegram's flood control right as Coffee tapped Insect Plague
+        with 0 spell slots left -- _spend_cast_resource's rejection used
+        a raw update.effective_chat.send_message with none of
+        _safe_send's real 3-retry/honor-requested-wait handling, so the
+        RetryAfter propagated as an unhandled exception and silently ate
+        his whole turn (confirmed live: "Unhandled exception while
+        processing update" right after this exact call). Simulates the
+        same blip (the very first send raises RetryAfter, same as a real
+        Telegram 429) and confirms the rejection message still reaches
+        the player instead of crashing.
+        """
+        import sessions
+        from telegram.error import RetryAfter
+        sessions.end_session(-999)
+        user_id = 950907
+        make_basic_character(user_id, "FloodBlipCleric", char_class="Cleric", current_location="crossroads_tavern",
+                              known_spells=["guiding_bolt"])
+        db.update_character(user_id, -999, spell_slots_current=0)
+        enemy = {
+            "telegram_user_id": -2_500_057, "name": "FloodBlipGoblin", "dexterity": 10,
+            "hp_current": 20, "hp_max": 20, "is_ai": 1, "monster_key": "goblin",
+        }
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", -2_500_057: "enemy"})
+        session.turn_order = [user_id, -2_500_057]
+        session.current_turn_index = 0
+
+        update = FakeUpdate(user_id, "cast guiding bolt on the goblin", [])
+        real_send = update.effective_chat.send_message
+        calls = {"n": 0}
+
+        async def flaky_send(text, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RetryAfter(1)
+            return await real_send(text, **kwargs)
+
+        update.effective_chat.send_message = flaky_send
+        await bot._do_cast_spell(update, "cast guiding bolt on the goblin")  # must not raise
+        combined = "\n".join(update.effective_chat._sink)
+        self.assertIn("no spell slots remaining", combined.lower())
+        self.assertGreaterEqual(calls["n"], 2, "the send must have actually been retried, not just swallowed")
+        sessions.end_session(-999)
+
     async def test_equipped_profession_bonus_crosses_a_real_dc_boundary(self):
         """
         Real Phase 4 deliverable of the magic item system (2026-08-02):

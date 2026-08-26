@@ -25486,9 +25486,20 @@ async def _spend_cast_resource(
     if via_gear:
         feature_key = f"item_spell_{gear_instance_id}"
         if db.get_feature_uses(update.effective_user.id, update.effective_chat.id, feature_key) >= gear_spell_uses:
-            await update.effective_chat.send_message(
+            # Real live crash (2026-08-26, error-log finding): a raw
+            # send_message here has no protection against Telegram flood
+            # control, unlike _safe_send's real 3-retry/honor-requested-
+            # wait handling -- confirmed live, a burst of prior combat
+            # sends (a Remnant summon + AI companion turns) exhausted the
+            # rate limit right as this exact cast attempt tried to send
+            # its rejection, propagating as an unhandled exception and
+            # silently eating the player's whole turn. Same fix shape as
+            # every other "_safe_send, not a raw send_message" call site
+            # in this file (task #187).
+            await _safe_send(
+                update,
                 f"You've already used {spell['name']} from that item as many times as you can since your last rest.",
-                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+                speak=False,
             )
             await _resend_battle_menu_if_still_their_turn(update)
             return False
@@ -25497,11 +25508,12 @@ async def _spend_cast_resource(
     if not via_scroll and spell["level"] > 0:
         spent, _ = db.spend_spell_slot(update.effective_user.id, update.effective_chat.id)
         if not spent:
-            await update.effective_chat.send_message(
+            await _safe_send(
+                update,
                 f"You have no spell slots remaining to cast {spell['name']} "
                 f"({character['spell_slots_current']}/{character['spell_slots_max']} left). "
                 f"Rest to recover them.",
-                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+                speak=False,
             )
             await _resend_battle_menu_if_still_their_turn(update)
             return False

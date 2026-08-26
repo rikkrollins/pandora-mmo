@@ -4735,7 +4735,7 @@
         "radiant"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 63,
+      "damage_bonus": 140,
       "damage_type": "psychic",
       "known_spells": [
         "vicious_mockery"

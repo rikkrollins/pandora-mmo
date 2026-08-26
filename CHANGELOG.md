@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.356] — Spell-slot rejection survives flood control; The Unspoken hits harder
+
+Real live crash (2026-08-26, error-log finding, `bot.py:25500` in
+`_spend_cast_resource`): a burst of prior combat sends (a Remnant
+summon + AI companion turns) exhausted Telegram's flood control right
+as Coffee tapped Insect Plague with 0 spell slots left — the "no spell
+slots remaining" rejection used a raw `send_message` with none of
+`_safe_send`'s real 3-retry/honor-requested-wait handling, so the
+RetryAfter propagated as an unhandled exception and silently ate his
+whole turn. Both raw sends in `_spend_cast_resource` (the spell-slot
+and gear-charge rejections) now go through `_safe_send`. Real
+fail-then-pass test added.
+
+Also: watched the live fight against The Unspoken as a real difficulty
+check (per Coffee's request) — by round 5 the party had dealt 801
+damage while taking only 269 back (mostly healed away), a clearly
+lopsided, too-easy fight. Raised its `damage_bonus` 63 → 140 so it's a
+real threat; HP stays at 3,800 (v1.27.355). Applies to the next
+encounter — this fight's own in-memory session already has the old
+value baked in and can't be changed mid-combat.
+
 ## [1.27.355] — The Unspoken raised to 3,800 HP
 
 Real live request (2026-08-26, Coffee, dev-bridge: "I think the
