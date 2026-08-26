@@ -18769,6 +18769,59 @@ async def _do_use_environment(update: Update) -> None:
                 )
             return
 
+        # Real live feedback (2026-08-26, per Coffee, dev-bridge: "it
+        # shouldn't be an automatic win. We need to make it a
+        # challenge... Give it a chance of RNG? ... the enemy would be
+        # able to attack them too!"): this used to be a guaranteed hit
+        # with zero risk -- now a real Strength (Athletics) check, same
+        # fixed DC and proficient-check shape _do_shove already uses.
+        # Only a SUCCESS actually brings the hazard down (and only a
+        # success spends it) -- a failed attempt does nothing to the
+        # enemies, wastes the turn, AND provokes a real free attack from
+        # every living enemy, same "opportunity attacks" mechanic
+        # _resolve_flee_attempt already uses for breaking off a fight.
+        # Not spent on failure, so the party can genuinely try again on
+        # a later turn instead of losing the option outright.
+        # roll_ability_check just needs the ability score/proficiency
+        # fields (identical on both copies) -- but any HP the retaliation
+        # deals below MUST land on the live session participant (what
+        # remove_defeated/is_combat_over/every other real combat check
+        # actually reads), not this freshly-fetched DB copy, same
+        # "session.current_participant(), not db.get_character()"
+        # distinction _resolve_flee_attempt's own fleeing variable draws.
+        live_actor = session.current_participant()
+        check = roll_ability_check(character, "strength", proficient=True)
+        if check["total"] < SKILL_CHECK_DC:
+            retaliation_blocks = []
+            for enemy in opposing:
+                if live_actor["hp_current"] <= 0:
+                    break
+                enemy_weapon = _weapon_for_attacker(enemy)
+                atk_result = await _resolve_attack_with_reaction_check(
+                    update, enemy, live_actor, enemy_weapon, round_number=session.round_number,
+                )
+                retaliation_blocks.append(_format_combat_result(
+                    "", atk_result, enemy["name"], live_actor["name"], weapon_name=enemy_weapon.get("name"),
+                ))
+            _sync_player_to_db(live_actor)
+            message = (
+                f"🌍 **{character['name']}** tries to turn {environment['name']} against the fight, but fumbles it "
+                f"(Strength check: {check['total']} vs DC {SKILL_CHECK_DC}) — nothing happens, and the opening costs them."
+            )
+            if retaliation_blocks:
+                message += "\n\n🗡️ **The enemy strikes back:**\n\n" + "\n\n".join(retaliation_blocks)
+            await _safe_send(update, message)
+            removed = session.remove_defeated()
+            await _announce_defeats(update, session, removed)
+            if session.is_combat_over():
+                winner = _determine_winner(session)
+                if winner != "party":
+                    await _safe_send(update, f"💀 **Combat over!** The {winner} side is victorious!")
+                    sessions.end_session(chat_id, session)
+                    return
+            await _advance_turn_and_resolve_ai_turns(update, session)
+            return
+
         session.environment_used = True
         dmg = roll_damage(environment["damage_dice"])
         scaled_total = int(dmg["total"] * power_scale_ratio(character["level"], character.get("rebirth_count", 0)))

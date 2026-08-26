@@ -14270,6 +14270,66 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("silenced", ally_p["conditions"])
         sessions.end_session(-999)
 
+    # -- Real live feedback (2026-08-26, per Coffee, dev-bridge: "it
+    #    shouldn't be an automatic win. We need to make it a
+    #    challenge... Give it a chance of RNG? ... the enemy would be
+    #    able to attack them too!"). _do_use_environment used to be a
+    #    guaranteed hit with zero risk. --------------------------------
+    async def test_use_environment_success_still_damages_every_enemy_and_spends_it(self):
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        uid = 950950
+        make_basic_character(uid, "EnvSuccessUser", current_location="goblin_warrens")
+        character = db.get_character(uid, -999)
+        character["telegram_user_id"] = uid
+        enemy = {"telegram_user_id": -5200950, "name": "EnvGoblin", "dexterity": 10, "strength": 10,
+                 "armor_class": 12, "hp_current": 50, "hp_max": 50, "conditions": [], "is_ai": 1}
+        session = sessions.start_session(-999, [character, enemy], {uid: "party", -5200950: "enemy"})
+        session.turn_order = [uid, -5200950]
+        session.current_turn_index = 0
+
+        sink = []
+        with patch("bot.roll_ability_check", return_value={"total": 99}), \
+                patch("bot.narrate_action", return_value="A blow lands."):
+            await bot._do_use_environment(FakeUpdate(uid, "use the environment", sink))
+            await _drain_narration_queue(-999)
+        combined = "\n".join(sink)
+        self.assertIn("takes", combined.lower())
+        enemy_p = next(p for p in session.participants if p["telegram_user_id"] == -5200950)
+        self.assertLess(enemy_p["hp_current"], 50)
+        self.assertTrue(session.environment_used)
+        sessions.end_session(-999)
+
+    async def test_use_environment_failure_provokes_retaliation_and_stays_available(self):
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        uid = 950951
+        make_basic_character(uid, "EnvFailureUser", current_location="goblin_warrens", hp_max=200)
+        db.update_character(uid, -999, hp_current=200)
+        character = db.get_character(uid, -999)
+        character["telegram_user_id"] = uid
+        character["hp_current"] = 200
+        enemy = {"telegram_user_id": -5200951, "name": "EnvGoblin2", "dexterity": 10, "strength": 18,
+                 "armor_class": 5, "hp_current": 50, "hp_max": 50, "conditions": [], "is_ai": 1}
+        session = sessions.start_session(-999, [character, enemy], {uid: "party", -5200951: "enemy"})
+        session.turn_order = [uid, -5200951]
+        session.current_turn_index = 0
+
+        sink = []
+        with patch("bot.roll_ability_check", return_value={"total": 1}), \
+                patch("bot.narrate_action", return_value="A blow lands."):
+            await bot._do_use_environment(FakeUpdate(uid, "use the environment", sink))
+            await _drain_narration_queue(-999)
+        combined = "\n".join(sink)
+        self.assertIn("fumbles", combined.lower())
+        enemy_p = next(p for p in session.participants if p["telegram_user_id"] == -5200951)
+        self.assertEqual(enemy_p["hp_current"], 50, "a failed attempt must deal zero damage to any enemy")
+        self.assertFalse(session.environment_used, "a failed attempt must not spend the one-time hazard")
+        self.assertIn("strikes back", combined.lower(), "the enemy must get a real free attack back on a failed attempt")
+        sessions.end_session(-999)
+
     async def test_command_cast_via_battle_menu_offers_target_and_word_together(self):
         """
         Command genuinely needs BOTH a target and a command word

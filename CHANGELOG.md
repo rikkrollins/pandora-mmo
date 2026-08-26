@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.360] — Using the environment is now a real risk, not a guaranteed win
+
+Real live feedback (Coffee, dev-bridge): "it shouldn't be an automatic
+win. We need to make it a challenge... Give it a chance of RNG? ...
+the enemy would be able to attack them too!" `_do_use_environment`
+(the one-per-fight interactive combat hazard — collapsing tunnels,
+loose stalactites) used to be a guaranteed hit on every enemy with
+zero risk.
+
+- Now a real Strength (Athletics) check, same fixed DC and
+  proficient-check shape `_do_shove` already uses.
+- **Success**: works exactly as before — AOE damage to every enemy,
+  spends the one-time hazard.
+- **Failure**: nothing happens to the enemies, and every living enemy
+  gets a real free attack back, same "opportunity attacks" mechanic
+  `_resolve_flee_attempt` already uses for breaking off a fight. NOT
+  spent on failure — the party can genuinely try again on a later turn.
+
+2 new tests, all passing (fail-then-pass confirmed against the old
+guaranteed-hit behavior).
+
 ## [1.27.359] — Randomized, resistable durations on buff/debuff spells
 
 Real live request (Coffee, screenshot of "Charm Person... a real
