@@ -17803,6 +17803,45 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("no fleeing this fight" in s.lower() for s in sink2), "a real story boss with no Remnant must still refuse outright")
         sessions.end_session(-999)
 
+    async def test_successful_flee_names_who_actually_fled(self):
+        """
+        Real live confusion (2026-08-26, dev-bridge, Charvenna: "I asked
+        to join the battle not flee" / "I didn't call anyone to join me
+        why are they leaving the battle"). _resolve_flee_attempt is
+        shared by a human's own _do_flee AND the human_guidance mid-fight
+        retreat path (an AI COMPANION fleeing on its OWN turn) -- but the
+        escape line used to say a bare "You break away and flee", naming
+        nobody, unlike every other outcome in this same function
+        (opportunity attacks/knocked-unconscious/Cunning Action all
+        already name `fleeing['name']`). Read right after her own "Join
+        the battle" attempt, an unnamed "You break away and flee"
+        reasonably looked like HER OWN character had fled, when it was
+        really an AI companion's turn. Confirms the escape message now
+        names the real fleeing participant.
+        """
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        player_id = 900962
+        make_basic_character(
+            player_id, "FleeNamer", char_class="Fighter", current_location="crossroads_tavern",
+            hp_max=50, armor_class=15,
+        )
+        player = db.get_character(player_id, -999)
+        player["telegram_user_id"] = player_id
+        enemy = {"telegram_user_id": -5200962, "name": "WeakFleeGoblin", "dexterity": 8, "strength": 8,
+                 "armor_class": 5, "hp_current": 20, "hp_max": 20, "is_ai": 1}
+        session = sessions.start_session(-999, [player, enemy], {player_id: "party", -5200962: "enemy"})
+        session.turn_order = [player_id, -5200962]
+        session.current_turn_index = 0
+        sink = []
+        with patch("bot.narrate_skill_check", return_value="ok"):
+            await bot._do_flee(FakeUpdate(player_id, "I flee", sink), "I flee", forced_roll=20)
+        reply = "\n".join(sink)
+        self.assertIn("FleeNamer breaks away and flees", reply, reply)
+        self.assertNotIn("You break away", reply)
+        sessions.end_session(-999)
+
     async def test_flee_broadcasts_retreat_guidance_to_every_ai_party_member(self):
         """
         Real dev-bridge request (2026-08-23, Coffee: "when we say

@@ -2,6 +2,22 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.351] — Flee messages now name who actually fled
+
+Real live confusion (2026-08-26, dev-bridge, Charvenna: "I asked to
+join the battle not flee" / "I didn't call anyone to join me why are
+they leaving the battle" / "Why is it not letting me fight").
+`_resolve_flee_attempt` is shared by a human's own `_do_flee` AND the
+`human_guidance` mid-fight retreat path (an AI companion fleeing on
+its own turn) — but the escape line said a bare "You break away and
+flee to X!", naming nobody, unlike every other outcome in that same
+function (opportunity attacks/knocked-unconscious/Cunning Action all
+already name `fleeing['name']`). Read right after her own "Join the
+battle" attempt, the unnamed line reasonably looked like her own
+character had fled, when it was really narrating an AI companion's
+turn. Now names the real fleeing participant. Real fail-then-pass test
+added (`test_successful_flee_names_who_actually_fled`).
+
 ## [1.27.350] — Every recruitable companion now has a real pronoun
 
 Follow-up to v1.27.349's pronoun-plumbing fix (per Coffee: "give them

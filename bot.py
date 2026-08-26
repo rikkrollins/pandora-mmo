@@ -10800,10 +10800,22 @@ async def _resolve_flee_attempt(update, session: sessions.Session, action_text: 
     session.remove_dead_player(user_id)
     combat_over = session.is_combat_over()
 
+    # Real live confusion (2026-08-26, dev-bridge, Charvenna: "I asked
+    # to join the battle not flee" / "I didn't call anyone to join me
+    # why are they leaving the battle"): this function is shared by a
+    # human's own _do_flee AND the human_guidance mid-fight retreat
+    # path (task #222, an AI COMPANION fleeing on its own turn) -- but
+    # the bare "You break away" here never named who actually fled,
+    # unlike every other outcome in this same function (opportunity
+    # attacks, knocked unconscious, Cunning Action all already say
+    # `fleeing['name']`). Read right after her own "Join the battle"
+    # attempt, an unnamed "You break away and flee" reasonably looked
+    # like HER OWN character had fled, when it was really narrating an
+    # AI companion's turn.
     await _safe_send(
         update,
-        f"{message}\n\n🏃 **You break away and flee to {destination_name}!**"
-        + ("\n\n🏳️ With you gone, the fight has no one left to finish — it ends here." if combat_over else ""),
+        f"{message}\n\n🏃 **{fleeing['name']} breaks away and flees to {destination_name}!**"
+        + ("\n\n🏳️ With them gone, the fight has no one left to finish — it ends here." if combat_over else ""),
     )
     if combat_over:
         sessions.end_session(chat_id, session)
