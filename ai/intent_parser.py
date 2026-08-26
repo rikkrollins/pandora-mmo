@@ -17,6 +17,7 @@ import re
 import requests
 
 import config
+import items as items_module
 import rules.leveling as leveling
 import spells as spells_module
 from ai.text_cleanup import strip_think_tags
@@ -839,6 +840,24 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     }
     dative_match = re.search(r"\b(?:give|hand|trade|send)\s+(\w+)\s+\w+\s+\w+", lowered)
     if dative_match and dative_match.group(1) not in _GIVE_ITEM_NON_RECIPIENTS:
+        return {**base, "action": "give_item"}
+
+    # Real live gap (2026-08-26, topic-activity finding): "Give Pan
+    # Antitoxin" fell through to a silent "chat" reply -- every dative
+    # check above requires at least TWO more words after the recipient
+    # specifically to avoid false-positiving on a bare-word idiom
+    # ("give Pan space/trouble/credit"), but a real single-word item
+    # name (Antitoxin, Torch) can never satisfy that. Confirmed live:
+    # Charvenna had to retype it as "Give Pan x5 antitoxin" (now three
+    # words after the recipient) to get it working at all. Rather than
+    # loosening the word-count heuristic generally (which would let
+    # "space"/"trouble"/"credit" back in), this verifies the single
+    # trailing word is an ACTUAL known item via items.find_item_
+    # mentioned_in_text against the full catalog -- a real item passes,
+    # an idiom's ordinary word doesn't.
+    single_word_dative_match = re.search(r"\b(?:give|hand|trade|send)\s+(\w+)\s+(\w+)\b", lowered)
+    if (single_word_dative_match and single_word_dative_match.group(1) not in _GIVE_ITEM_NON_RECIPIENTS
+            and items_module.find_item_mentioned_in_text(single_word_dative_match.group(2)) is not None):
         return {**base, "action": "give_item"}
 
     # Confirmed live 2026-07-14 (Coffee, reported as a broad "roadblock"

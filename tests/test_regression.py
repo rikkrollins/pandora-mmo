@@ -1858,6 +1858,27 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_keyword_fallback("give the sword away", [])["action"], "chat")
         self.assertEqual(_keyword_fallback("give my sword away", [])["action"], "chat")
 
+    def test_give_item_single_word_item_name_with_no_article_is_classified_correctly(self):
+        """
+        Real live gap (2026-08-26, topic-activity finding): "Give Pan
+        Antitoxin" fell through to a silent "chat" reply -- every
+        dative check requires at least TWO more words after the
+        recipient specifically to avoid false-positiving on a bare-word
+        idiom ("give Pan space/trouble/credit"), but a real single-word
+        item name (Antitoxin, Torch) can never satisfy that. Confirmed
+        live: Charvenna had to retype it as "Give Pan x5 antitoxin" to
+        get it working. Fixed by verifying the single trailing word is
+        an ACTUAL known item (items.find_item_mentioned_in_text against
+        the full catalog) rather than loosening the word-count
+        heuristic generally -- idioms with a real non-item word must
+        still fall through to chat exactly as before.
+        """
+        self.assertEqual(_keyword_fallback("Give Pan Antitoxin", [])["action"], "give_item")
+        self.assertEqual(_keyword_fallback("Give Pan Torch", [])["action"], "give_item")
+        self.assertEqual(_keyword_fallback("give pan credit", [])["action"], "chat")
+        self.assertEqual(_keyword_fallback("give pan space", [])["action"], "chat")
+        self.assertEqual(_keyword_fallback("give pan trouble", [])["action"], "chat")
+
     async def test_give_item_transfers_between_characters_at_the_same_location(self):
         use_test_db("tests/tmp/give_item_test.db")
         giver_id, recipient_id = 900001, 900002

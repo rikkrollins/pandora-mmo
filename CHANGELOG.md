@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.354] — Single-word item names in "give X to Y" phrasing
+
+Real live gap (2026-08-26, topic-activity finding): "Give Pan
+Antitoxin" fell through to a silent "chat" reply — every existing
+`give_item` dative check requires at least two more words after the
+recipient specifically to avoid false-positiving on a bare-word idiom
+("give Pan space/trouble/credit"), but a real single-word item name
+(Antitoxin, Torch) can never satisfy that. Confirmed live: Charvenna
+had to retype it as "Give Pan x5 antitoxin" to get it working at all.
+Fixed by verifying the single trailing word is an ACTUAL known item
+(`items.find_item_mentioned_in_text` against the full catalog) rather
+than loosening the word-count heuristic generally — idioms with a real
+non-item word still fall through to chat exactly as before.
+
 ## [1.27.353] — Player-to-player trading system
 
 Real live request (Coffee): "create a tradeing system, have it so we
