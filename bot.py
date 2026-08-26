@@ -369,6 +369,30 @@ def _grind_spell_mastery(character: dict, spell_id: str, damage_type: str) -> tu
     return spell_pct, element_pct
 
 
+def _grind_heal_mastery(character: dict) -> float:
+    """
+    Real live request (2026-08-26, per Coffee: "use this proficiency
+    for healing type scrolls, magic, and abilities that heal
+    characters... make healing proficiency like an element"). Cure
+    Wounds/Healing Word/Mass Cure Wounds already grind element_mastery_
+    pct["heal"] via _grind_spell_mastery (damage_type defaults to
+    "heal" for heal-effect spells) -- this is the exact same shared
+    bucket, reused here so Second Wind, Lay on Hands, and healing
+    items/potions grind and benefit from IT TOO, instead of each
+    having its own disconnected healing math. Returns the PRE-grind
+    pct (same "value as it stood before this use" contract every other
+    proficiency grind follows) -- callers apply _mastery_overflow_
+    multiplier to it themselves. Real players only, same rule every
+    other mastery type in this game follows.
+    """
+    element_dict = character.get("element_mastery_pct", {})
+    if character.get("is_ai") or not character.get("char_class"):
+        return element_dict.get("heal", PROFICIENCY_STARTING_PCT)
+    return _grind_dict_proficiency(
+        character["telegram_user_id"], character["chat_id"], "element_mastery_pct", element_dict, "heal",
+    )
+
+
 def _spell_mastery_power_multiplier(spell_pct: float, element_pct: float) -> float:
     """
     Real damage/healing bonus from Spell Mastery -- full weight for
@@ -2894,6 +2918,24 @@ def _turn_announcement(session: sessions.Session) -> str:
     )
 
 
+def _second_wind_is_usable_right_now(telegram_user_id: int, chat_id: int, character: dict) -> bool:
+    """
+    Shared by _battle_menu_keyboard's own Second Wind button visibility
+    and the "skills" button-list handler, so the two can never drift.
+    Real live request (2026-08-26, per Coffee): once healing mastery
+    (element_mastery_pct["heal"]) reaches real mastery, Second Wind's
+    once-per-rest cap is replaced entirely by spending a real spell
+    slot (see _do_second_wind) -- so once mastered, this is genuinely
+    usable any time there's a spell slot left, not just once per rest.
+    """
+    if character.get("char_class") != "Fighter":
+        return False
+    heal_pct = character.get("element_mastery_pct", {}).get("heal", PROFICIENCY_STARTING_PCT)
+    if heal_pct >= PROFICIENCY_MAX_PCT:
+        return character.get("spell_slots_current", 0) > 0
+    return db.get_feature_uses(telegram_user_id, chat_id, "second_wind") < 1
+
+
 def _battle_usable_item_ids(character: dict) -> list[str]:
     """
     Every carried item this character could tap a battle-menu button to
@@ -2966,10 +3008,7 @@ def _battle_menu_keyboard(session: sessions.Session) -> InlineKeyboardMarkup | N
     # "only shown if genuinely usable right now" way Items already is
     # (real Fighter, hasn't already spent their one use since the last
     # rest) rather than a generic button everyone sees.
-    has_usable_second_wind = (
-        character.get("char_class") == "Fighter"
-        and db.get_feature_uses(current["telegram_user_id"], session.chat_id, "second_wind") < 1
-    )
+    has_usable_second_wind = _second_wind_is_usable_right_now(current["telegram_user_id"], session.chat_id, character)
     if character.get("known_spells") or has_usable_second_wind:
         row.append(InlineKeyboardButton("✨ Skills", callback_data="bm|skills"))
     usable_ids = _battle_usable_item_ids(character)
@@ -3172,8 +3211,7 @@ async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFA
         # menu") -- same "only shown if genuinely usable right now"
         # grounding as _battle_menu_keyboard's own visibility check for
         # this same button.
-        if (character and character.get("char_class") == "Fighter"
-                and db.get_feature_uses(user_id, chat_id, "second_wind") < 1):
+        if character and _second_wind_is_usable_right_now(user_id, chat_id, character):
             spell_buttons.append([InlineKeyboardButton("💨 Second Wind", callback_data="bm|secondwind")])
         spell_buttons.append([InlineKeyboardButton("« Back", callback_data="bm|menu")])
         await _safe_edit_markup(query, InlineKeyboardMarkup(spell_buttons))
@@ -17969,6 +18007,19 @@ async def _do_second_wind(update: Update) -> None:
     1d10 + fighter level HP. Uses the shared feature_uses resource
     (see db.use_feature/get_feature_uses) -- resets on a full rest,
     same as every other limited-use feature added in this pass.
+
+    Real live request (2026-08-26, per Coffee: "use this proficiency
+    for healing type... abilities that heal characters... make healing
+    proficiency like an element" -- followed by: "when they have it
+    mastered they can use it as many times a day as they want but it
+    now uses a spell slot to cast so there is still a limit, but that
+    limit can be eventually be broken"). Once element_mastery_pct
+    "heal" reaches real mastery (PROFICIENCY_MAX_PCT, same 100%
+    threshold every other mastery tier in this game uses), the
+    once-per-rest cap is replaced entirely by spending a real spell
+    slot instead -- unlimited uses per rest, genuinely gated only by
+    how many slots are left, not a hard escape hatch bolted on top of
+    the old limit. Below mastery, behaves exactly as before.
     """
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -17982,9 +18033,22 @@ async def _do_second_wind(update: Update) -> None:
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
-    if db.get_feature_uses(update.effective_user.id, update.effective_chat.id, "second_wind") >= 1:
+
+    heal_pct = character.get("element_mastery_pct", {}).get("heal", PROFICIENCY_STARTING_PCT)
+    mastered = heal_pct >= PROFICIENCY_MAX_PCT
+    if mastered:
+        spent, character = db.spend_spell_slot(update.effective_user.id, update.effective_chat.id)
+        if not spent:
+            await update.effective_chat.send_message(
+                f"Your healing mastery has broken Second Wind's once-per-rest limit, but you're out of spell "
+                f"slots to fuel it with ({character['spell_slots_current']}/{character['spell_slots_max']} left).",
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+            )
+            return
+    elif db.get_feature_uses(update.effective_user.id, update.effective_chat.id, "second_wind") >= 1:
         await update.effective_chat.send_message(
-            "You've already used Second Wind since your last rest.",
+            "You've already used Second Wind since your last rest — keep grinding your healing mastery to "
+            "100% to break that limit and fuel it with spell slots instead.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
@@ -17997,10 +18061,12 @@ async def _do_second_wind(update: Update) -> None:
     # abilities in step with the same rescaled HP pools resolve_heal_
     # spell now scales for real spellcasting.
     healed = int(healed * power_scale_ratio(character["level"], character.get("rebirth_count", 0)))
+    healed = int(healed * _mastery_overflow_multiplier(_grind_heal_mastery(character)))
     new_hp = min(character["hp_max"], character["hp_current"] + healed)
     actual_healed = new_hp - character["hp_current"]
     db.update_character(update.effective_user.id, update.effective_chat.id, hp_current=new_hp)
-    db.use_feature(update.effective_user.id, update.effective_chat.id, "second_wind")
+    if not mastered:
+        db.use_feature(update.effective_user.id, update.effective_chat.id, "second_wind")
 
     await _safe_send(
         update,
@@ -19043,9 +19109,26 @@ async def _do_lay_on_hands(update: Update, target_text: str) -> None:
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
-    if db.get_feature_uses(update.effective_user.id, update.effective_chat.id, "lay_on_hands") >= 1:
+
+    # Real live request (2026-08-26, per Coffee: healing mastery breaks
+    # a healing ability's once-per-rest limit once mastered, fueled by
+    # spell slots instead -- same mechanic as _do_second_wind, see its
+    # own docstring for the full reasoning.
+    heal_pct = character.get("element_mastery_pct", {}).get("heal", PROFICIENCY_STARTING_PCT)
+    mastered = heal_pct >= PROFICIENCY_MAX_PCT
+    if mastered:
+        spent, character = db.spend_spell_slot(update.effective_user.id, update.effective_chat.id)
+        if not spent:
+            await update.effective_chat.send_message(
+                f"Your healing mastery has broken Lay on Hands' once-per-rest limit, but you're out of spell "
+                f"slots to fuel it with ({character['spell_slots_current']}/{character['spell_slots_max']} left).",
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+            )
+            return
+    elif db.get_feature_uses(update.effective_user.id, update.effective_chat.id, "lay_on_hands") >= 1:
         await update.effective_chat.send_message(
-            "You've already used your Lay on Hands pool since your last rest.",
+            "You've already used your Lay on Hands pool since your last rest — keep grinding your healing "
+            "mastery to 100% to break that limit and fuel it with spell slots instead.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
@@ -19056,11 +19139,13 @@ async def _do_lay_on_hands(update: Update, target_text: str) -> None:
     # Real player-power rebalance (2026-07-26): same healing-keeps-pace
     # fix as Second Wind/resolve_heal_spell above.
     pool = int(pool * power_scale_ratio(character["level"], character.get("rebirth_count", 0)))
+    pool = int(pool * _mastery_overflow_multiplier(_grind_heal_mastery(character)))
     target_character = _find_party_target_by_name(target_text, update.effective_chat.id) or character
     new_hp = min(target_character["hp_max"], target_character["hp_current"] + pool)
     actual_healed = new_hp - target_character["hp_current"]
     db.update_character(target_character["telegram_user_id"], update.effective_chat.id, hp_current=new_hp)
-    db.use_feature(update.effective_user.id, update.effective_chat.id, "lay_on_hands")
+    if not mastered:
+        db.use_feature(update.effective_user.id, update.effective_chat.id, "lay_on_hands")
 
     is_self = target_character["telegram_user_id"] == character["telegram_user_id"]
     target_note = "themself" if is_self else f"**{target_character['name']}**"
@@ -23415,9 +23500,17 @@ async def _do_use_item(update: Update, text: str) -> None:
             )
         hp_source = live_target if live_target is not None else target
         healing = roll_damage(item["heal_dice"])
+        # Real live request (2026-08-26, per Coffee: "use this
+        # proficiency for healing type scrolls, magic, and abilities
+        # that heal characters... make healing proficiency like an
+        # element"). The DRINKER's own healing mastery, not the
+        # target's -- same "the caster's own practice" convention every
+        # other mastery bonus in this game follows (Bardic Inspiration/
+        # Lay on Hands don't scale off who they're cast ON either).
+        healed_amount = int(healing["total"] * _mastery_overflow_multiplier(_grind_heal_mastery(character)))
         hp_before = hp_source["hp_current"]
         hp_max = hp_source.get("hp_max", hp_before)
-        new_hp = min(hp_before + healing["total"], hp_max)
+        new_hp = min(hp_before + healed_amount, hp_max)
         if live_target is not None:
             live_target["hp_current"] = new_hp
         # A summon has no DB row to write -- live_target above already

@@ -6625,6 +6625,83 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink2 = []
         await bot.battle_menu_callback(FakeCallbackUpdate(user_id, "bm|skills", sink2), DummyContext())
         self.assertFalse(any("Second Wind" in s for s in sink2), "already-used Second Wind must not still be offered")
+
+    # -- Real live request (2026-08-26, per Coffee: "use this
+    #    proficiency for healing type scrolls, magic, and abilities
+    #    that heal characters... make healing proficiency like an
+    #    element" -> "when they have it mastered they can use it as
+    #    many times a day as they want but it now uses a spell slot to
+    #    cast so there is still a limit, but that limit can be
+    #    eventually be broken"). ---------------------------------------
+    async def test_second_wind_grinds_shared_heal_element_mastery(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 950962
+        make_basic_character(user_id, "HealMasteryGrinder", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, hp_current=1, hp_max=100)
+        sink = []
+        await bot._do_second_wind(FakeUpdate(user_id, "second wind", sink))
+        after = db.get_character(user_id, -999)
+        self.assertAlmostEqual(after["element_mastery_pct"].get("heal", 0), bot.PROFICIENCY_STARTING_PCT + bot.PROFICIENCY_GRIND_INCREMENT)
+
+    async def test_second_wind_mastered_bypasses_the_rest_limit_via_spell_slots(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 950963
+        make_basic_character(user_id, "MasteredSecondWindUser", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(
+            user_id, -999, hp_current=1, hp_max=1000,
+            element_mastery_pct={"heal": bot.PROFICIENCY_MAX_PCT},
+            spell_slots_max=3, spell_slots_current=3,
+        )
+        for _ in range(3):
+            sink = []
+            await bot._do_second_wind(FakeUpdate(user_id, "second wind", sink))
+            combined = "\n".join(sink)
+            self.assertIn("catches their breath", combined.lower())
+        after = db.get_character(user_id, -999)
+        self.assertEqual(after["spell_slots_current"], 0, "each mastered use should spend one real spell slot")
+        self.assertEqual(db.get_feature_uses(user_id, -999, "second_wind"), 0, "mastered uses bypass feature_uses entirely")
+
+        sink = []
+        await bot._do_second_wind(FakeUpdate(user_id, "second wind", sink))
+        combined = "\n".join(sink)
+        self.assertIn("out of spell slots", combined.lower())
+
+    async def test_lay_on_hands_also_grinds_and_benefits_from_heal_mastery(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 950964
+        make_basic_character(user_id, "MasteredPaladin", char_class="Paladin", current_location="crossroads_tavern")
+        db.update_character(
+            user_id, -999, hp_current=1, hp_max=100000,
+            element_mastery_pct={"heal": bot.PROFICIENCY_MAX_PCT + 100.0},
+            spell_slots_max=2, spell_slots_current=2,
+        )
+        sink = []
+        await bot._do_lay_on_hands(FakeUpdate(user_id, "lay on hands", sink), "lay on hands")
+        sink2 = []
+        await bot._do_lay_on_hands(FakeUpdate(user_id, "lay on hands", sink2), "lay on hands")
+        after = db.get_character(user_id, -999)
+        self.assertEqual(after["spell_slots_current"], 0, "mastered Lay on Hands should also spend real spell slots for extra uses")
+        self.assertEqual(db.get_feature_uses(user_id, -999, "lay_on_hands"), 0)
+
+    async def test_healing_potion_grinds_and_benefits_from_heal_mastery(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 950965
+        make_basic_character(user_id, "PotionMasteryDrinker", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, hp_current=1, hp_max=100000,
+                             element_mastery_pct={"heal": bot.PROFICIENCY_MAX_PCT + 100.0})
+        db.add_item(user_id, -999, "healing_potion", 1)
+        sink = []
+        await bot._do_use_item(FakeUpdate(user_id, "use healing potion", sink), "use healing potion")
+        after = db.get_character(user_id, -999)
+        # healing_potion is "1d1+99" (100 flat) -- 100% overflow above
+        # mastery doubles it (_mastery_overflow_multiplier), so a real
+        # mastered drink should heal noticeably more than the bare 100.
+        self.assertGreater(after["hp_current"] - 1, 100)
+        self.assertGreater(after["element_mastery_pct"]["heal"], bot.PROFICIENCY_MAX_PCT + 100.0)
         sessions.end_session(-999)
 
     async def test_stale_battle_menu_tap_names_whose_turn_it_actually_is(self):

@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.362] — Healing Mastery: a shared "heal" element proficiency
+
+Real live request (Coffee: "use this proficiency for healing type
+scrolls, magic, and abilities that heal characters... make healing
+proficiency like an element" → "when they have it mastered they can
+use it as many times a day as they want but it now uses a spell slot
+to cast so there is still a limit, but that limit can be eventually be
+broken"). Cure Wounds/Healing Word/Mass Cure Wounds already grind and
+benefit from a shared `element_mastery_pct["heal"]` bucket — Second
+Wind, Lay on Hands, and healing potions/items were each running their
+own disconnected healing math with no connection to it at all.
+
+- Second Wind, Lay on Hands, and every healing item/potion now grind
+  that same shared "heal" mastery on real use, and get the same
+  `_mastery_overflow_multiplier` bonus (a real, permanent healing
+  boost once mastery climbs past 100%) spells already enjoy.
+- Once "heal" mastery reaches 100%, Second Wind's and Lay on Hands'
+  once-per-rest cap is replaced entirely — unlimited uses per rest,
+  gated only by spending a real spell slot per use instead. Below
+  mastery, both behave exactly as before.
+- The battle-menu Second Wind button (v1.27.361) now correctly stays
+  available once mastered, instead of disappearing after the first use.
+
+5 new tests, all passing.
+
 ## [1.27.361] — Second Wind now has a real battle-menu button
 
 Real live report (Coffee: "i have no seen any indication of Second
