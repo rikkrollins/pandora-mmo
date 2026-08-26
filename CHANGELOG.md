@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.367] — Stranded AI companions now resync to the party automatically
+
+Real live report (Coffee): Borin Ironjaw missed a real Wrathflame
+Unbound kill's Remnant bind and taught spell entirely, because he was
+stuck at a different location than the rest of his own party when it
+fell. Root cause: `_move_party_stragglers_along` correctly skips an AI
+companion who's mid-combat elsewhere at the exact moment the party
+moves (a real 2026-08-19 fix) -- but nothing ever re-synced them
+afterward once their own fight ended, so they just stayed wherever
+they were left until someone happened to move again, silently missing
+whatever happened in the meantime.
+
+- New `_resync_stranded_ai_companions()`, ticking alongside the
+  existing 60s world loop: whenever every OTHER active party member
+  agrees on one location, any companion who's fallen behind (not
+  dead, not benched, not itself mid-combat) gets moved to match. If
+  the rest of the party is itself split up, it skips rather than
+  guessing which location is "right."
+- Borin's own missed Wrathflame Remnant bind and Fireball spell were
+  manually backfilled to match what the rest of the party earned.
+
 ## [1.27.366] — Borin's (and every companion's) own quest is now findable without digging into the Affinity Menu
 
 Real live report (Coffee): "i only see [Borin's quest] in the affinity

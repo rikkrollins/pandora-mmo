@@ -11588,6 +11588,56 @@ def _apply_passive_party_regen() -> None:
                 db.update_character(character["telegram_user_id"], character["chat_id"], hp_current=new_hp)
 
 
+def _resync_stranded_ai_companions() -> None:
+    """
+    Real live gap (2026-08-26, Coffee: Borin Ironjaw missed a real
+    Wrathflame Unbound kill's Remnant bind and taught spell because he'd
+    been left behind at a stale location while the rest of his party
+    fought elsewhere). Root cause: _move_party_stragglers_along
+    correctly skips an AI companion who's mid-combat elsewhere at the
+    exact moment the party moves (2026-08-19 fix, see that function's
+    own docstring) -- but nothing ever re-synced him afterward once HIS
+    OWN fight ended; he just stayed wherever he'd been left until
+    someone happened to move again, potentially missing real events
+    (like this one) in the meantime.
+
+    Ticks alongside the existing 60s world loop, same as
+    _apply_passive_party_regen just above. Only moves a companion when
+    every OTHER real, currently-active party member (not dead, not
+    benched, not itself mid-combat) agrees on a single location -- if
+    the rest of the party is itself split up right now, there's no
+    single "right" place to send the straggler, so this skips rather
+    than guessing wrong, same principle ai/intent_parser.py's own
+    conditional/negation guards already use.
+    """
+    for chat_id in db.get_all_chat_ids():
+        members_by_party: dict[int, list[dict]] = {}
+        for character in _get_party_members(chat_id):
+            party_id = character.get("party_id")
+            if party_id is not None:
+                members_by_party.setdefault(party_id, []).append(character)
+
+        for members in members_by_party.values():
+            for companion in members:
+                if not companion.get("is_ai") or companion.get("is_dead") or companion.get("is_benched"):
+                    continue
+                if _in_active_combat(companion["telegram_user_id"], chat_id):
+                    continue
+                others_locations = {
+                    m["current_location"] for m in members
+                    if m["telegram_user_id"] != companion["telegram_user_id"]
+                    and not m.get("is_dead") and not m.get("is_benched")
+                    and not _in_active_combat(m["telegram_user_id"], chat_id)
+                }
+                if len(others_locations) == 1:
+                    consensus_location = next(iter(others_locations))
+                    if companion["current_location"] != consensus_location:
+                        db.move_character(companion["telegram_user_id"], chat_id, consensus_location)
+                        logger.info(
+                            f"[world_tick] resynced stranded AI companion {companion['name']} to {consensus_location}"
+                        )
+
+
 def _song_of_rest_bonus(character: dict) -> int:
     """
     Bard's Song of Rest (real 5E, level 2+, previously pure flavor
@@ -31744,6 +31794,10 @@ async def _idle_inactivity_loop(application: Application) -> None:
             _apply_passive_party_regen()
         except Exception as e:
             logger.error(f"[world_tick] passive party regen failed this cycle: {e!r}")
+        try:
+            _resync_stranded_ai_companions()
+        except Exception as e:
+            logger.error(f"[world_tick] stranded companion resync failed this cycle: {e!r}")
         try:
             _maybe_revive_standalone_ai_companions()
         except Exception as e:

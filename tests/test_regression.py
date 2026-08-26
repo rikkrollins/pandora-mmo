@@ -15340,6 +15340,97 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(set(arc["quests"]).issubset(original_quests), "arc 8 should NOT read complete without both Kess fights")
         self.assertTrue(set(arc["quests"]).issubset(original_quests | {"kess_first_reckoning", "kess_the_unbound_reckoning"}))
 
+    # -- Stranded AI companion resync (2026-08-26, real live gap: Borin
+    #    Ironjaw missed a real Wrathflame Unbound Remnant bind because
+    #    he'd been left behind at a stale location) ---------------------
+    async def test_resync_moves_a_stranded_companion_to_the_partys_consensus_location(self):
+        # A dedicated chat_id (not -999), same reasoning as every other
+        # test in this file that touches _get_party_members/db.get_all_
+        # chat_ids -- FastRegressionTests shares ONE real DB across every
+        # test method in a batch run (setUpClass, not setUp), so -999
+        # accumulates parties/companions across whichever other tests
+        # happened to run first in the same invocation, contaminating
+        # the "consensus location" this function computes.
+        import sessions
+        from unittest.mock import patch
+        chat_id = -996
+        sessions.end_session(chat_id)
+        user_id = 999920
+        make_basic_character(user_id, "StragglerLeader", current_location="crossroads_tavern", chat_id=chat_id)
+        sink = []
+        await bot._do_recruit_npc(FakeUpdate(user_id, "recruit Borin Ironjaw", sink, chat_id=chat_id), "Borin Ironjaw")
+        await bot._do_recruit_npc(FakeUpdate(user_id, "recruit Sarah", sink, chat_id=chat_id), "Sarah")
+
+        # Simulate the real desync: Borin got left behind somewhere else
+        # (e.g. he was mid-combat elsewhere during an earlier party
+        # move), while the leader and every other active companion have
+        # since moved on together.
+        db.move_character(user_id, chat_id, "whispering_wood")
+        borin = next(p for p in bot._get_party_members(chat_id) if p["name"] == "Borin Ironjaw")
+        sera = next(p for p in bot._get_party_members(chat_id) if p["name"] == "Sarah")
+        db.move_character(sera["telegram_user_id"], chat_id, "whispering_wood")
+        self.assertEqual(db.get_character(borin["telegram_user_id"], chat_id)["current_location"], "crossroads_tavern")
+
+        with patch("bot.db.get_all_chat_ids", return_value=[chat_id]):
+            bot._resync_stranded_ai_companions()
+
+        refreshed_borin = db.get_character(borin["telegram_user_id"], chat_id)
+        self.assertEqual(refreshed_borin["current_location"], "whispering_wood")
+
+    async def test_resync_never_moves_a_companion_currently_mid_combat(self):
+        import sessions
+        from unittest.mock import patch
+        chat_id = -997
+        sessions.end_session(chat_id)
+        user_id = 999921
+        make_basic_character(user_id, "StragglerLeader2", current_location="crossroads_tavern", chat_id=chat_id)
+        sink = []
+        await bot._do_recruit_npc(FakeUpdate(user_id, "recruit Borin Ironjaw", sink, chat_id=chat_id), "Borin Ironjaw")
+        borin = next(p for p in bot._get_party_members(chat_id) if p["name"] == "Borin Ironjaw")
+
+        db.move_character(user_id, chat_id, "whispering_wood")
+        # Borin's still fighting somewhere -- a real live session with
+        # him in the turn order, same real shape _in_active_combat checks.
+        boss = {"telegram_user_id": -3_500_001, "name": "A Stray Wolf", "dexterity": 12, "is_ai": 1}
+        session = sessions.start_session(
+            chat_id, [borin, boss], {borin["telegram_user_id"]: "party", boss["telegram_user_id"]: "enemy"},
+        )
+        session.turn_order = [borin["telegram_user_id"], boss["telegram_user_id"]]
+
+        with patch("bot.db.get_all_chat_ids", return_value=[chat_id]):
+            bot._resync_stranded_ai_companions()
+
+        self.assertEqual(
+            db.get_character(borin["telegram_user_id"], chat_id)["current_location"], "crossroads_tavern",
+            "a companion genuinely mid-combat must not be teleported out of it",
+        )
+        sessions.end_session(chat_id)
+
+    async def test_resync_skips_when_the_rest_of_the_party_disagrees_on_location(self):
+        """If the OTHER active party members aren't even in agreement, there's no single right place to send a straggler -- skip rather than guess."""
+        import sessions
+        from unittest.mock import patch
+        chat_id = -998
+        sessions.end_session(chat_id)
+        user_id = 999922
+        make_basic_character(user_id, "StragglerLeader3", current_location="crossroads_tavern", chat_id=chat_id)
+        sink = []
+        await bot._do_recruit_npc(FakeUpdate(user_id, "recruit Borin Ironjaw", sink, chat_id=chat_id), "Borin Ironjaw")
+        await bot._do_recruit_npc(FakeUpdate(user_id, "recruit Sarah", sink, chat_id=chat_id), "Sarah")
+        borin = next(p for p in bot._get_party_members(chat_id) if p["name"] == "Borin Ironjaw")
+        sera = next(p for p in bot._get_party_members(chat_id) if p["name"] == "Sarah")
+
+        db.move_character(user_id, chat_id, "whispering_wood")
+        db.move_character(sera["telegram_user_id"], chat_id, "stonearch_bridge")
+
+        with patch("bot.db.get_all_chat_ids", return_value=[chat_id]):
+            bot._resync_stranded_ai_companions()
+
+        self.assertEqual(
+            db.get_character(borin["telegram_user_id"], chat_id)["current_location"], "crossroads_tavern",
+            "no consensus location among the rest of the party -- must not guess",
+        )
+
     def test_new_story_bosses_are_placed_at_their_real_locations(self):
         locs = {}
         for region in bot.CAMPAIGN["locations"].values():
