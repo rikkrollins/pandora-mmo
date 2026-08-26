@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.357] — Fixed an inverted difficulty curve on the arc 2-4 story bosses
+
+Real live request (Coffee: "make sure the boss in the first city is
+also a challenge. check damage bonus"). Checking triggered a real find:
+v1.27.356's Unspoken bump (damage_bonus 63 → 140) pushed it ABOVE The
+Waking Ember (100, "the boss in the first city," a later/harder arc_3
+boss) and close to The Waiting Shape (120, arc_4) — an inverted curve
+where the earliest of the three hit hardest. Rescaled Ember and Shape
+by the same proportional growth (~2.2x) validated live against The
+Unspoken, preserving their original relative ratio to each other:
+
+| Boss | Arc | Level | HP | damage_bonus (before → after) |
+|---|---|---|---|---|
+| The Unspoken | 2 | 25 | 3,800 | 63 → 140 (v1.27.356) |
+| The Waking Ember | 3 | 35 | 7,000 | 100 → 220 |
+| The Waiting Shape | 4 | 45 | 9,500 | 120 → 265 |
+
+Monotonic again: each later boss now clearly outhits the one before it.
+
 ## [1.27.356] — Spell-slot rejection survives flood control; The Unspoken hits harder
 
 Real live crash (2026-08-26, error-log finding, `bot.py:25500` in

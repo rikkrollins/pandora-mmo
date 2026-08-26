@@ -4765,7 +4765,7 @@
       "life_drain": true,
       "counters_rage": true,
       "damage_dice": "1d8",
-      "damage_bonus": 100,
+      "damage_bonus": 220,
       "damage_type": "fire",
       "known_spells": [
         "fireball"
@@ -4807,7 +4807,7 @@
         "radiant"
       ],
       "damage_dice": "1d8",
-      "damage_bonus": 120,
+      "damage_bonus": 265,
       "damage_type": "necrotic",
       "known_spells": [
         "voidcall"
