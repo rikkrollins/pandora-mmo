@@ -2884,6 +2884,20 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         for text in ["check my equipment", "my equipment", "my inventory", "what am I carrying"]:
             self.assertEqual(_keyword_fallback(text, [])["action"], "check_inventory", text)
 
+    def test_auto_equip_a_named_companion_not_shadowed_by_the_npc_name_loop(self):
+        """
+        Real live bug (2026-08-27, dev-bridge screenshot: "Auto equip
+        isn't working for Borin"). "Auto equip Borin Ironjaw" used to be
+        swallowed by the known-NPC-name loop (checked_keyword_fallback's
+        own npc_name matching, further down) and came back as talk_npc
+        -- Borin's own quest dialogue instead of anyone's gear being
+        touched. auto_equip's check now runs before that loop, same
+        exact "named-target action shadowed by npc_name loop" fix shape
+        as throw_weapon right above it.
+        """
+        result = _keyword_fallback("Auto equip Borin Ironjaw", ["Borin Ironjaw", "Sarah"])
+        self.assertEqual(result["action"], "auto_equip")
+
     # -- Per Coffee (2026-07-15): bare "auto equip" alone, with no other
     #    words, should be enough to trigger it. ------------------------
     def test_bare_auto_equip_is_enough_to_trigger(self):

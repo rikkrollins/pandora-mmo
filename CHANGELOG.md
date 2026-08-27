@@ -2,6 +2,17 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.369] — "Auto equip [companion name]" no longer swallowed as talk_npc
+
+Real dev-bridge report (Coffee): "Auto equip Borin Ironjaw" replied
+with Borin's own quest dialogue instead of equipping anything.
+Root cause: `_keyword_fallback`'s auto_equip check lived AFTER the
+known-NPC-name loop, so any "auto equip <name>" request matching a
+real party member's name got swallowed as talk_npc first -- the same
+"named-target action shadowed by the npc_name loop" bug class this
+file has fixed for throw_weapon and several others before. Moved
+auto_equip's check ahead of that loop, same fix shape.
+
 ## [1.27.368] — True Aim's wasted points fixed; Wild Shape scales with rebirth
 
 Real live audit (Coffee, dev-bridge screenshot): "make [Universal

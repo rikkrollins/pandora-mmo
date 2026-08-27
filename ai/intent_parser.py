@@ -1119,6 +1119,18 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if lowered.startswith("throw ") or " throw " in lowered or lowered.startswith("i throw"):
         return {**base, "action": "throw_weapon"}
 
+    # Real live bug (2026-08-27, dev-bridge screenshot): "Auto equip
+    # Borin Ironjaw" got swallowed as talk_npc (Borin's own quest
+    # dialogue came back instead of gear being equipped) because this
+    # check used to live after the npc_name loop below -- same exact
+    # root cause/fix shape as throw_weapon just above, just never
+    # applied here despite auto_equip's own request naturally naming a
+    # party member to equip.
+    if any(w in lowered for w in ["auto equip", "auto-equip", "autoequip", "equip automatically",
+                                    "equip me automatically", "help me equip", "gear up automatically",
+                                    "put on my gear automatically", "equip my gear automatically"]):
+        return {**base, "action": "auto_equip"}
+
     for npc_name in known_npc_names:
         # Matches the NPC's full registered name as a substring ("old
         # maren" in "go talk to old maren") OR any single word of it, at
@@ -1767,14 +1779,6 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if any(w in lowered for w in ["my pronouns", "set pronouns", "character pronouns",
                                     "update my pronouns", "change my pronouns"]):
         return {**base, "action": "set_pronouns"}
-
-    # Checked BEFORE check_sheet below: "auto equip my character"/"equip
-    # my player" would otherwise match check_sheet's broad "my
-    # character" trigger first and never reach a more specific check.
-    if any(w in lowered for w in ["auto equip", "auto-equip", "autoequip", "equip automatically",
-                                    "equip me automatically", "help me equip", "gear up automatically",
-                                    "put on my gear automatically", "equip my gear automatically"]):
-        return {**base, "action": "auto_equip"}
 
     if any(w in lowered for w in [
         "my sheet", "my stats", "my hp", "my health", "my character", "status",
