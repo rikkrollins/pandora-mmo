@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.385] — Fixed pluralized multi-word item names failing to match
+
+Found via topic-activity monitoring, right after shipping v1.27.382's
+trade ambiguity-naming fix: Coffee's real follow-up attempts ("Add 10
+scrolls of the spirit to the trade") still failed even naming the
+EXACT real item, just pluralized.
+
+English pluralizes a multi-word item name at its FIRST word ("Scroll
+of the Spirit" -> "Scrolls of the Spirit"), not its last -- the exact-
+name substring check in `items.find_item_mentioned_in_text` only ever
+checked the literal singular name, so a pluralized phrase fell through
+to the weaker head-word fallback, which is ambiguous here (Scroll of
+the Lesser Spirit shares the same head noun "spirit") -- wrongly
+landing a genuinely unambiguous plural phrase on "which one?" instead
+of resolving cleanly the way its singular form already did.
+
+Now also checks a pluralized-first-word variant of each candidate's
+real name. Purely additive (checked alongside the existing exact
+match, never replacing it) -- confirmed safe across the wider buy/
+equip/trade test suite, which all share this one core matching
+function.
+
+Fail-then-pass verified with a new test
+(`test_trade_add_resolves_a_pluralized_exact_multiword_name`).
+
 ## [1.27.384] — Real button-driven trade system
 
 Real live request (Coffee): "can u add a button system for the trades

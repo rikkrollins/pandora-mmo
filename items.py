@@ -829,7 +829,24 @@ def find_item_mentioned_in_text(text: str, candidate_ids: list[str] | None = Non
     ordered = sorted(search_space, key=lambda i: -len(get_item(i)["name"]))
     for item_id in ordered:
         data = get_item(item_id)
-        if data["name"].lower() in lowered or item_id.replace("_", " ") in lowered:
+        name_lower = data["name"].lower()
+        # Real live bug (2026-08-27, found via topic-activity
+        # monitoring right after shipping trade's ambiguity-naming
+        # fix): "Add 10 scrolls of the spirit to the trade" -- the
+        # exact real name of a real, unambiguously-owned item (Scroll
+        # of the Spirit) -- failed to resolve at all, even though the
+        # SINGULAR "Scroll of the Spirit" worked fine. English pluralizes
+        # a multi-word item name at its FIRST word ("Scroll of the
+        # Spirit" -> "Scrolls of the Spirit"), not its last, so a bare
+        # substring check against the singular name never matches, and
+        # the phrase fell through to the weaker head-word fallback below
+        # -- ambiguous here since Scroll of the LESSER Spirit shares the
+        # same head noun "spirit", so a genuinely unambiguous plural
+        # phrase wrongly landed on "which one?" instead of resolving
+        # cleanly like its singular form already did.
+        first_word, sep, rest = name_lower.partition(" ")
+        plural_name = f"{first_word}s{sep}{rest}" if sep else f"{name_lower}s"
+        if name_lower in lowered or plural_name in lowered or item_id.replace("_", " ") in lowered:
             return item_id
 
     # Fall back to a generic category word (e.g. "potions" for "Healing

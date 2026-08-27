@@ -2294,6 +2294,40 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(after["inventory"].get("scroll_summon_spirit", 0), 13)
         self.assertEqual(after["inventory"].get("scroll_summon_spirit_ii", 0), 10)
 
+    async def test_trade_add_resolves_a_pluralized_exact_multiword_name(self):
+        """
+        Real live bug (2026-08-27, found via topic-activity monitoring
+        right after shipping the ambiguity-naming fix above): "Add 10
+        scrolls of the spirit to the trade" -- the exact real name of
+        Scroll of the Spirit, just pluralized -- failed to resolve at
+        all, even though the SINGULAR "Scroll of the Spirit" worked.
+        English pluralizes a multi-word item name at its FIRST word
+        ("Scroll" -> "Scrolls"), not its last, so the exact-name
+        substring check never matched, and the phrase fell through to
+        the weaker head-word fallback -- ambiguous here since Scroll of
+        the Lesser Spirit shares the same head noun "spirit", wrongly
+        landing on "which one?" for a genuinely unambiguous plural.
+        """
+        import sessions
+        sessions.end_session(-999)
+        a_id, b_id = 951017, 951018
+        make_basic_character(a_id, "PluralTraderA", current_location="crossroads_tavern")
+        make_basic_character(b_id, "PluralTraderB", current_location="crossroads_tavern")
+        db.add_item(a_id, -999, "scroll_summon_spirit", 13)
+        db.add_item(a_id, -999, "scroll_summon_spirit_ii", 10)
+
+        sink = []
+        await bot._do_trade_request(FakeUpdate(a_id, "trade with PluralTraderB", sink), "trade with PluralTraderB")
+        sink.clear()
+        await bot._do_trade_add(
+            FakeUpdate(a_id, "Add 3 scrolls of the spirit to the trade", sink),
+            "Add 3 scrolls of the spirit to the trade",
+        )
+        self.assertTrue(any("Added 3x Scroll of the Spirit" in m for m in sink), sink)
+        after = db.get_character(a_id, -999)
+        self.assertEqual(after["inventory"].get("scroll_summon_spirit_ii", 0), 7)
+        self.assertEqual(after["inventory"].get("scroll_summon_spirit", 0), 13, "the OTHER spirit scroll must be untouched")
+
     async def test_trade_offer_change_resets_the_other_sides_accept_flag(self):
         import sessions
         sessions.end_session(-999)
