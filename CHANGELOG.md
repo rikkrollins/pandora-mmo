@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.375] — Borin's Blackthorn quest no longer requires having Borin in the party
+
+Real live report (Coffee, 2026-08-27): "for players that dont have
+Borin on the team, how do they get the Kess the bandit quest? i dont
+want the player skipping over this and i want it to be available
+after players reach the first city. Why not have the quest available
+at crossroads tavern?"
+
+`borins_blackthorn_warning` (the quest that reveals the Blackthorn
+Raiders as more than bandits, and the real on-ramp to the Kess fight
+arc) was only ever offered via `giver_npc: "borin_ironjaw"` --
+companion-only, so a party that never recruited Borin had no path to
+it at all.
+
+- Added `"location": "crossroads_tavern"` to the quest so it's also
+  offered via the normal location-offer path, alongside its existing
+  companion path -- either route now works.
+- Found and closed a real gap while wiring this up:
+  `_offerable_quest_at_location` never checked
+  `_meets_quest_prerequisite_requirement`, unlike the companion-quest
+  offer functions. Without this the quest would've been offered at
+  the tavern before `first_city_arrival` was actually completed. Now
+  gated correctly at both offer paths.
+- Fail-then-pass verified: two new tests
+  (`test_blackthorn_warning_is_also_offerable_at_crossroads_tavern_without_borin`,
+  `test_blackthorn_warning_still_respects_the_first_city_gate_at_the_tavern`)
+  confirm the quest is reachable without Borin in the party, and still
+  respects the first-city gate.
+
 ## [1.27.374] — Map-wide coordinate overhaul: real, walkable dungeon paths
 
 Real live request, following the "Below the Cairn" map fix: the whole

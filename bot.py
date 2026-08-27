@@ -12160,6 +12160,8 @@ def _offerable_quest_at_location(character: dict, location_id: str) -> tuple[str
             continue
         if not _meets_quest_guild_requirement(character, quest):
             continue
+        if not _meets_quest_prerequisite_requirement(character, quest):
+            continue
         arc_info = _story_arc_for_quest(quest_id)
         if arc_info:
             arc_id, arc = arc_info

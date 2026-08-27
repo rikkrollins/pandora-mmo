@@ -3213,6 +3213,7 @@
       "title": "More Than Banditry",
       "description": "Borin's watched the roads long enough to know real banditry when he sees it, and the Blackthorn Raiders working the Greymoor Downs aren't it -- too well-fed, too well-armed, and the coin they take never seems to stay with them. He wants the party to see the Downs for themselves and judge who's really paying for it.",
       "objective_location": "greymoor_downs",
+      "location": "crossroads_tavern",
       "giver_npc": "borin_ironjaw",
       "requires_completed_quest": "first_city_arrival",
       "reward_xp": 200,

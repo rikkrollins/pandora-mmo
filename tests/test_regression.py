@@ -15251,6 +15251,42 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         fifth = bot._offerable_companion_quest(character)
         self.assertEqual(fifth[0], "kess_the_unbound_reckoning")
 
+    def test_blackthorn_warning_is_also_offerable_at_crossroads_tavern_without_borin(self):
+        """
+        Real live report (2026-08-27, Coffee: "for players that dont
+        have Borin on the team, how do they get the Kess the bandit
+        quest? i dont want the player skipping over this... Why not
+        have the quest available at crossroads tavern?"). Before this,
+        borins_blackthorn_warning only had a giver_npc -- a player who
+        never recruited Borin could never trigger the whole Kess arc at
+        all. Now also offerable via location (crossroads_tavern),
+        completely independent of party composition, while Borin
+        himself still personally offers it too if he's actually
+        recruited (both real, valid ways in).
+        """
+        user_id = 999924
+        character = make_basic_character(user_id, "NoBorinSeeker", current_location="crossroads_tavern")
+        # welcome_to_the_crossroads (Grimsby's own, ungated) is also a
+        # real quest at this same location and comes first in dict
+        # order -- clear it out of the way so the check below isolates
+        # borins_blackthorn_warning specifically.
+        db.complete_quest(user_id, -999, "welcome_to_the_crossroads")
+        db.complete_quest(user_id, -999, "first_city_arrival")
+        character = db.get_character(user_id, -999)
+
+        offer = bot._offerable_quest_at_location(character, "crossroads_tavern")
+        self.assertIsNotNone(offer, "should be offerable at the tavern with no companion required")
+        self.assertEqual(offer[0], "borins_blackthorn_warning")
+
+    def test_blackthorn_warning_still_respects_the_first_city_gate_at_the_tavern(self):
+        """The location-offer path must respect requires_completed_quest too, not just the companion path -- closing the exact gap this fix could otherwise reopen."""
+        user_id = 999925
+        character = make_basic_character(user_id, "TooEarlySeeker", current_location="crossroads_tavern")
+        db.complete_quest(user_id, -999, "welcome_to_the_crossroads")
+        character = db.get_character(user_id, -999)
+        offer = bot._offerable_quest_at_location(character, "crossroads_tavern")
+        self.assertIsNone(offer, "must not offer the Blackthorn reveal before reaching the first city")
+
     async def test_kess_ambush_never_fires_before_the_reckoning_quest_is_accepted(self):
         """
         Real live request (2026-08-26, Kess arc Phase 2A, per Coffee:
