@@ -2987,6 +2987,30 @@ def _hp_status_emoji(hp_current: int, hp_max: int) -> str:
     return "🔴"
 
 
+# Real live request (2026-08-27, Coffee, dev-bridge, sent twice: "I
+# don't think we need to say they're AI but we can use those brackets
+# for status elements like being poisoned or paralyzed. Use an emoji
+# for status effects."). Every real condition string this game's own
+# combat code actually applies to a participant's `conditions` list
+# (bot.py: prone/poisoned/blinded/silenced/paralyzed/frightened/
+# banished -- confirmed by grep, not guessed) gets one real emoji.
+_CONDITION_EMOJI = {
+    "prone": "🔻",
+    "poisoned": "☠️",
+    "blinded": "🙈",
+    "silenced": "🔇",
+    "paralyzed": "⚡",
+    "frightened": "😱",
+    "banished": "🌀",
+}
+
+
+def _condition_status_tag(conditions: list[str]) -> str:
+    """Real, current status-effect emoji for a combat roster line -- empty (no tag) for anyone with no active condition, same as the old "(AI)" tag being empty for a human player."""
+    emoji = [_CONDITION_EMOJI[c] for c in conditions if c in _CONDITION_EMOJI]
+    return f" {''.join(emoji)}" if emoji else ""
+
+
 def _turn_announcement(session: sessions.Session) -> str:
     """
     States whose turn it is, what round it is, and (per Coffee,
@@ -3017,18 +3041,27 @@ def _turn_announcement(session: sessions.Session) -> str:
     directly answers "first names only" and gets the party rows closer
     in width to the enemy rows (real column alignment still isn't
     possible in plain Telegram text, but shorter names wrap far less).
+
+    Real live follow-up (2026-08-27, Coffee, dev-bridge, sent twice):
+    "I don't think we need to say they're AI but we can use those
+    brackets for status elements like being poisoned or paralyzed. Use
+    an emoji for status effects." The "(AI)" tag is dropped entirely
+    (both here and in the roster below) in favor of a real status-
+    condition indicator (_condition_status_tag), grounded in each
+    participant's own real, already-tracked `conditions` list -- never
+    invented, and empty (no tag at all) for anyone with no active
+    condition, same as the old tag being empty for a human player.
     """
     def first_name(name: str) -> str:
         return name.split(" ", 1)[0]
 
     current = session.current_participant()
-    current_name = first_name(current["name"]) if session.sides.get(current["telegram_user_id"]) == "party" else current["name"]
-    label = f"{current_name} (AI)" if current.get("is_ai") else current_name
+    label = first_name(current["name"]) if session.sides.get(current["telegram_user_id"]) == "party" else current["name"]
     divider = "▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️"
 
     def roster_line(p: dict, shorten_name: bool) -> str:
         name = first_name(p["name"]) if shorten_name else p["name"]
-        tag = " (AI)" if p.get("is_ai") else ""
+        tag = _condition_status_tag(p.get("conditions", []))
         hp_max = p.get("hp_max", p["hp_current"])
         dot = _hp_status_emoji(p["hp_current"], hp_max)
         return f"{dot} **{name}**{tag} — {p['hp_current']}/{hp_max} HP"

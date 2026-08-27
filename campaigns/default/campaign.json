@@ -2892,15 +2892,15 @@
       "is_boss": true,
       "requires_active_quest": "kess_first_reckoning",
       "stats": {
-        "level": 23,
+        "level": 75,
         "dexterity": 16,
         "strength": 13,
-        "armor_class": 14,
-        "hp_max": 600,
-        "proficiency_bonus": 2,
-        "xp_reward": 150,
-        "damage_dice": "1d6",
-        "damage_bonus": 15
+        "armor_class": 20,
+        "hp_max": 4500,
+        "proficiency_bonus": 7,
+        "xp_reward": 2000,
+        "damage_dice": "1d8",
+        "damage_bonus": 150
       }
     },
     "kess_the_unbound": {
@@ -2913,15 +2913,15 @@
       "is_boss": true,
       "requires_active_quest": "kess_the_unbound_reckoning",
       "stats": {
-        "level": 25,
+        "level": 85,
         "dexterity": 18,
         "strength": 15,
-        "armor_class": 16,
-        "hp_max": 900,
-        "proficiency_bonus": 3,
-        "xp_reward": 300,
-        "damage_dice": "1d8",
-        "damage_bonus": 20
+        "armor_class": 23,
+        "hp_max": 6000,
+        "proficiency_bonus": 8,
+        "xp_reward": 3500,
+        "damage_dice": "1d10",
+        "damage_bonus": 195
       }
     },
     "ossian_vane": {

@@ -104,3 +104,20 @@ _PLACEHOLDER_TEXT_RE = re.compile(
 def is_placeholder_text(text: str) -> bool:
     """True if `text` is a bare placeholder token (e.g. "(stub)") rather than real narration prose."""
     return bool(_PLACEHOLDER_TEXT_RE.match(text.strip()))
+
+
+# Real live bug (2026-08-27, found via topic-activity monitoring): a
+# real Support question ("How many Godshards are required to craft any
+# item?") got back the ENTIRE reply as literally "\boxed{1}" -- a
+# math-tuned model habit of wrapping a final numeric answer in LaTeX's
+# \boxed{} notation, meant for a math worksheet, not a player-facing
+# sentence. No legitimate English sentence contains literal LaTeX
+# markup, so this is a safe, narrow unwrap, same "never trust the
+# model to follow plain-English formatting on its own" philosophy as
+# every other cleanup function above.
+_BOXED_NOTATION_RE = re.compile(r"\\boxed\{([^{}]*)\}")
+
+
+def strip_boxed_notation(text: str) -> str:
+    """Unwraps a LaTeX \\boxed{X} artifact to just its inner content X, wherever it appears in the text."""
+    return _BOXED_NOTATION_RE.sub(r"\1", text)

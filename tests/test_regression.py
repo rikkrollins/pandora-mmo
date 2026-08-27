@@ -13775,11 +13775,57 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         text = bot._turn_announcement(session)
         self.assertIn("It's now **Pip**'s turn!", text)
         self.assertIn("🟢 **Pip** —", text)
-        self.assertIn("🟢 **Bram** (AI) —", text)
+        self.assertIn("🟢 **Bram** —", text)
         self.assertNotIn("Thistledown", text)
         self.assertNotIn("Ashfield", text)
         # Enemy names stay full -- the request was scoped to the party.
         self.assertIn("**The Root That Remembers**", text)
+        sessions.end_session(-999)
+
+    def test_turn_announcement_shows_status_emoji_instead_of_ai_tag(self):
+        """
+        Real live follow-up (2026-08-27, Coffee, dev-bridge, sent
+        twice): "I don't think we need to say they're AI but we can use
+        those brackets for status elements like being poisoned or
+        paralyzed. Use an emoji for status effects." The "(AI)" tag is
+        gone everywhere in this message (roster lines AND the "whose
+        turn" label); a real active condition shows its own real emoji
+        instead, and nobody with no condition gets any tag at all,
+        matching how a human player's own line already had no tag.
+        """
+        import sessions
+        sessions.end_session(-999)
+        leader_id = 950609
+        make_basic_character(leader_id, "StatusLeader", current_location="crossroads_tavern")
+        poisoned_ally = {
+            "telegram_user_id": -5100015, "name": "PoisonedAlly", "is_ai": True,
+            "hp_current": 80, "hp_max": 100, "dexterity": 10, "conditions": ["poisoned"],
+        }
+        healthy_ally = {
+            "telegram_user_id": -5100016, "name": "HealthyAlly2", "is_ai": True,
+            "hp_current": 100, "hp_max": 100, "dexterity": 10,
+        }
+        enemy = {
+            "telegram_user_id": -5100017, "name": "ParalyzedGoblin",
+            "hp_current": 20, "hp_max": 20, "dexterity": 10, "conditions": ["paralyzed"],
+        }
+        leader = db.get_character(leader_id, -999)
+        leader["telegram_user_id"] = leader_id
+        session = sessions.start_session(
+            -999, [leader, poisoned_ally, healthy_ally, enemy],
+            {leader_id: "party", -5100015: "party", -5100016: "party", -5100017: "enemy"},
+        )
+        session.turn_order = [leader_id, -5100015, -5100016, -5100017]
+
+        text = bot._turn_announcement(session)
+        self.assertNotIn("(AI)", text)
+        self.assertIn("**PoisonedAlly** ☠️ —", text)
+        self.assertIn("**HealthyAlly2** —", text)
+        self.assertIn("**ParalyzedGoblin** ⚡ —", text)
+
+        self.assertEqual(bot._condition_status_tag([]), "")
+        self.assertEqual(bot._condition_status_tag(["poisoned"]), " ☠️")
+        self.assertEqual(bot._condition_status_tag(["poisoned", "prone"]), " ☠️🔻")
         sessions.end_session(-999)
 
     def test_formation_line_stays_silent_when_everyone_is_in_the_same_back_row(self):
@@ -22903,6 +22949,37 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "TBD the merchant counts her coins slowly.",
         ):
             self.assertFalse(is_placeholder_text(real_text), real_text)
+
+    def test_strip_boxed_notation_unwraps_a_leaked_latex_artifact(self):
+        """
+        Real live bug (2026-08-27, found via topic-activity
+        monitoring): a real Support question ("How many Godshards are
+        required to craft any item?") got back the ENTIRE reply as
+        literally "\\boxed{1}" -- a math-tuned model habit of wrapping a
+        final numeric answer in LaTeX's \\boxed{} notation, meant for a
+        math worksheet, never a player-facing sentence.
+        """
+        from ai.text_cleanup import strip_boxed_notation
+        self.assertEqual(strip_boxed_notation(r"\boxed{1}"), "1")
+        self.assertEqual(strip_boxed_notation(r"The answer is \boxed{5} scrolls."), "The answer is 5 scrolls.")
+        self.assertEqual(strip_boxed_notation("Nothing special here."), "Nothing special here.")
+
+    def test_support_question_never_leaks_raw_boxed_notation(self):
+        """The real support_agent call path applies strip_boxed_notation, not just the shared utility in isolation."""
+        from unittest.mock import patch
+        import ai.support_agent as support_agent_module
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": r"\boxed{1}"}
+
+        with patch("ai.support_agent.requests.post", return_value=FakeResponse()):
+            answer = support_agent_module.answer_support_question("Some genuinely uncommon question with no deterministic path")
+        self.assertNotIn("\\boxed", answer)
+        self.assertEqual(answer, "1")
 
     async def test_narrate_action_falls_back_when_model_returns_a_bare_placeholder(self):
         """Real live bug follow-up: narrate_action must never return "(stub)" verbatim -- it should fall back to the deterministic template, same as a real Ollama error."""

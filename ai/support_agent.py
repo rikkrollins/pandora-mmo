@@ -22,7 +22,7 @@ import items as items_module
 import races as races_module
 import remnants as remnants_module
 import spells as spells_module
-from ai.text_cleanup import strip_think_tags, is_placeholder_text
+from ai.text_cleanup import strip_think_tags, is_placeholder_text, strip_boxed_notation
 from guilds import GUILDS
 from models import VALID_CLASSES
 from rules.crafting import RECIPES, ADVANCED_RECIPES, ENCHANT_RECIPES
@@ -1569,7 +1569,7 @@ def answer_support_question(
                 )
                 response.raise_for_status()
                 data = response.json()
-                text = strip_think_tags(data.get("response", ""))
+                text = strip_boxed_notation(strip_think_tags(data.get("response", "")))
                 if text and not is_placeholder_text(text):
                     if character:
                         text = _correct_own_class_hallucination(text, character)

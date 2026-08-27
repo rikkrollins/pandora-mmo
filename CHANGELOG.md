@@ -2,6 +2,44 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.387] — Kess rebalanced to a real challenge + battle roster status emoji + Support LaTeX leak fix
+
+Three real fixes, requested/found while checking the party's setup right
+before their Kess encounter.
+
+**1. Kess was drastically undertuned for her own chapter.** Real live
+request (Coffee: "check kess damage bonus... i want to be sure this is
+a challenge"). Her real stats (level 23/25, HP 600/900, damage_bonus
+15/20) were 5-12x weaker than every comparable boss on this game's own
+confirmed difficulty curve -- even the level-20 Remnant the party
+already beat tonight hits harder (dmg_bonus 50 vs Kess's 15), despite
+being a lower level. Greymoor Downs (arc_8) has a real, Coffee-
+confirmed level band of 75-99 (2026-08-19 chapter-leveling pass) --
+Kess's own stats were never updated when the rest of that chapter's
+bestiary got leveled. Rebalanced against real neighboring bosses on
+the same curve: `kess_the_bandit` now level 75 / HP 4500 / damage_bonus
+150 (was 23 / 600 / 15); `kess_the_unbound` now level 85 / HP 6000 /
+damage_bonus 195 (was 25 / 900 / 20).
+
+**2. Battle roster: real status-effect emoji instead of "(AI)."** Real
+live follow-up (Coffee, dev-bridge, sent twice): "I don't think we need
+to say they're AI but we can use those brackets for status elements
+like being poisoned or paralyzed. Use an emoji for status effects." The
+"(AI)" tag is gone everywhere in the turn announcement; a real active
+condition (prone/poisoned/blinded/silenced/paralyzed/frightened/
+banished) now shows its own real emoji instead, grounded in each
+participant's own actual `conditions` list.
+
+**3. A Support answer leaked raw LaTeX notation.** Found via topic-
+activity monitoring: a real question ("How many Godshards are required
+to craft any item?") got back the entire reply as literally
+"\\boxed{1}" -- a math-tuned model habit meant for a worksheet, never a
+player-facing sentence. New `strip_boxed_notation` (ai/text_cleanup.py)
+unwraps it, same "never trust the model to follow plain-English
+formatting alone" philosophy as `strip_think_tags`.
+
+All three fail-then-pass verified with real executed tests.
+
 ## [1.27.386] — Support feedback survives restarts + real "used for" answers
 
 Asked to watch the new downvote buttons for real signal -- the very
