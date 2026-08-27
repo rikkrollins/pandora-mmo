@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.380] — RPG-styled battle turn announcement, color-coded HP
+
+Real live request (Coffee, 2026-08-27, dev-bridge screenshot from
+another app as a style reference): "can you use this as an example to
+make the battle menu more cleaned up like this? Also, can you use
+red, yellow and green colours for the HP number so when it hits
+certain thresholds it changes to the appropriate colour so the
+players have a visual indication of hp with colors?"
+
+The per-turn battle status message (`_turn_announcement`) is rewritten:
+- One line per participant instead of one dense comma-joined line per
+  side.
+- Real section headers (🛡️ **PARTY**, 👹 **ENEMY**) and a divider
+  between them.
+- A color-coded HP indicator per participant (🟢/🟡/🔴). Telegram bot
+  messages have no real text-color support (Markdown/HTML entities
+  only cover bold/italic/underline/strikethrough/code/spoiler/links,
+  never color) -- a colored emoji is the actual achievable equivalent,
+  same trick other Telegram RPG bots use. Thresholds are grounded in
+  the game's own existing real "bloodied" cutoff
+  (`rules.combat.BLOODIED_HP_THRESHOLD` = 50%) for green/yellow, and
+  half of that for yellow/red -- Coffee's request didn't specify a
+  second cutoff, so this halves the one real threshold that already
+  exists rather than inventing an unrelated number.
+
+Fail-then-pass verified with two new tests
+(`test_turn_announcement_shows_color_coded_hp_and_one_line_per_participant`,
+`test_hp_status_emoji_matches_the_games_own_real_bloodied_threshold`).
+
 ## [1.27.379] — Mid-combat revive stopped leaving a ghost in the fight, plus a real flood-control fix
 
 Two real live bugs, both caught the same evening during Coffee's own

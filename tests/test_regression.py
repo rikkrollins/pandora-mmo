@@ -13325,6 +13325,65 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.current_participant_id(), leader_id)  # turn unchanged
         sessions.end_session(-999)
 
+    def test_turn_announcement_shows_color_coded_hp_and_one_line_per_participant(self):
+        """
+        Real live request (2026-08-27, Coffee, dev-bridge screenshot
+        from another app as a style reference): "can you use this as an
+        example to make the battle menu more cleaned up like this?...
+        can you use red, yellow and green colours for the HP number so
+        when it hits certain thresholds it changes to the appropriate
+        colour." Telegram has no real text color, so a colored emoji
+        (_hp_status_emoji) is the real achievable stand-in -- green
+        above the game's own real "bloodied" cutoff
+        (rules.combat.BLOODIED_HP_THRESHOLD), yellow down to half of
+        that, red below. Also covers the roster moving from one dense
+        comma-joined line to one line per participant with real section
+        headers.
+        """
+        import sessions
+        sessions.end_session(-999)
+        leader_id = 950607
+        make_basic_character(leader_id, "ColorLeader", current_location="crossroads_tavern")
+        healthy_ally = {
+            "telegram_user_id": -5100010, "name": "HealthyAlly", "is_ai": True,
+            "hp_current": 90, "hp_max": 100, "dexterity": 10,
+        }
+        bloodied_ally = {
+            "telegram_user_id": -5100011, "name": "BloodiedAlly", "is_ai": True,
+            "hp_current": 40, "hp_max": 100, "dexterity": 10,
+        }
+        critical_enemy = {
+            "telegram_user_id": -5100012, "name": "CriticalGoblin",
+            "hp_current": 10, "hp_max": 100, "dexterity": 10,
+        }
+        leader = db.get_character(leader_id, -999)
+        leader["telegram_user_id"] = leader_id
+        session = sessions.start_session(
+            -999, [leader, healthy_ally, bloodied_ally, critical_enemy],
+            {leader_id: "party", -5100010: "party", -5100011: "party", -5100012: "enemy"},
+        )
+        session.turn_order = [leader_id, -5100010, -5100011, -5100012]
+
+        text = bot._turn_announcement(session)
+        self.assertIn("🛡️ **PARTY**", text)
+        self.assertIn("👹 **ENEMY**", text)
+        self.assertIn("🟢 **HealthyAlly**", text)
+        self.assertIn("🟡 **BloodiedAlly**", text)
+        self.assertIn("🔴 **CriticalGoblin**", text)
+        # One participant per line now, not comma-joined on one line.
+        self.assertNotIn("HealthyAlly (AI), BloodiedAlly (AI)", text)
+        sessions.end_session(-999)
+
+    def test_hp_status_emoji_matches_the_games_own_real_bloodied_threshold(self):
+        """Grounded in the same real rules.combat.BLOODIED_HP_THRESHOLD the game already uses for narration, not an invented cutoff."""
+        self.assertEqual(bot._hp_status_emoji(100, 100), "🟢")
+        self.assertEqual(bot._hp_status_emoji(51, 100), "🟢")
+        self.assertEqual(bot._hp_status_emoji(50, 100), "🟡")
+        self.assertEqual(bot._hp_status_emoji(26, 100), "🟡")
+        self.assertEqual(bot._hp_status_emoji(25, 100), "🔴")
+        self.assertEqual(bot._hp_status_emoji(0, 100), "🔴")
+        self.assertEqual(bot._hp_status_emoji(0, 0), "🔴")
+
     def test_turn_announcement_shows_the_formation_split_every_turn(self):
         """
         Real live request (2026-08-08, Coffee, prompted by the same

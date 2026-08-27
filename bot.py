@@ -2871,6 +2871,33 @@ def _format_combat_result(flavor_text: str, result: dict, actor_label: str, defe
     return "\n".join(lines)
 
 
+def _hp_status_emoji(hp_current: int, hp_max: int) -> str:
+    """
+    Real live request (2026-08-27, Coffee, dev-bridge screenshot from
+    another app as a style reference): "can you use red, yellow and
+    green colours for the HP number so when it hits certain thresholds
+    it changes to the appropriate colour so the players have a visual
+    indication of hp with colors?" Telegram bot messages have no real
+    text-color support at all -- MarkdownV2/HTML entities only cover
+    bold/italic/underline/strikethrough/code/spoiler/links, never a
+    color -- so a colored emoji indicator is the actual achievable
+    equivalent (the same trick every other Telegram RPG-style bot
+    uses). Green above the game's own existing real "bloodied" cutoff
+    (rules.combat.BLOODIED_HP_THRESHOLD, already used elsewhere for
+    narration), yellow down to half of that. Coffee's message didn't
+    specify a second cutoff -- halving the one real threshold that
+    already exists rather than inventing an unrelated number.
+    """
+    if hp_max <= 0:
+        return "🔴"
+    pct = hp_current / hp_max
+    if pct > BLOODIED_HP_THRESHOLD:
+        return "🟢"
+    if pct > BLOODIED_HP_THRESHOLD / 2:
+        return "🟡"
+    return "🔴"
+
+
 def _turn_announcement(session: sessions.Session) -> str:
     """
     States whose turn it is, what round it is, and (per Coffee,
@@ -2880,16 +2907,31 @@ def _turn_announcement(session: sessions.Session) -> str:
     real current HP -- so a player doesn't have to scroll back through
     the combat log to remember who's already down before picking a
     target.
+
+    Real live request (2026-08-27, Coffee, dev-bridge screenshot: "can
+    you use this as an example to make the battle menu more cleaned up
+    like this?"): the roster used to be one dense comma-joined line per
+    side -- replaced with one line per participant, real section
+    headers, and a color-coded HP indicator (_hp_status_emoji) for a
+    genuine at-a-glance RPG status screen, closer to the reference
+    layout, within what Telegram's own plain-text formatting actually
+    supports (no real columns/alignment -- Telegram has no fixed-width
+    rendering outside a code block, so this doesn't fake one).
     """
     current = session.current_participant()
     label = f"{current['name']} (AI)" if current.get("is_ai") else current["name"]
+    divider = "▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️"
 
     def roster_line(p: dict) -> str:
         tag = " (AI)" if p.get("is_ai") else ""
-        return f"{p['name']}{tag}: {p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP"
+        hp_max = p.get("hp_max", p["hp_current"])
+        dot = _hp_status_emoji(p["hp_current"], hp_max)
+        return f"{dot} **{p['name']}**{tag} — {p['hp_current']}/{hp_max} HP"
 
-    party_roster = ", ".join(roster_line(p) for p in session.living_on_side("party")) or "none left standing"
-    enemy_roster = ", ".join(roster_line(p) for p in session.living_on_side("enemy")) or "none left standing"
+    party_living = session.living_on_side("party")
+    enemy_living = session.living_on_side("enemy")
+    party_roster = "\n".join(roster_line(p) for p in party_living) or "none left standing"
+    enemy_roster = "\n".join(roster_line(p) for p in enemy_living) or "none left standing"
 
     # Real live request (2026-08-08, Coffee): the front/back formation
     # split used to only ever get shown once, in the message announcing
@@ -2899,20 +2941,25 @@ def _turn_announcement(session: sessions.Session) -> str:
     # every turn instead, same "none if nobody's split" behavior as
     # _format_formation_line already has (solo fights/no back-row
     # players stay silent, nothing new to say).
-    party_formation_line = _format_formation_line(session.living_on_side("party"))
-    enemy_formation_line = _format_formation_line(session.living_on_side("enemy"))
+    party_formation_line = _format_formation_line(party_living)
+    enemy_formation_line = _format_formation_line(enemy_living)
     formation_lines = "".join(
         f"\n{line}" for line in (party_formation_line, enemy_formation_line) if line
     )
 
     hint = (
-        "\n💡 Tap a button below, or just type what you want to do."
+        f"\n{divider}\n💡 Tap a button below, or just type what you want to do."
         if not current.get("is_ai") else ""
     )
     return (
-        f"🎲 **Round {session.round_number}** — It's now **{label}**'s turn! What do you do?\n"
-        f"⚔️ Party: {party_roster}\n"
-        f"👹 Enemy: {enemy_roster}"
+        f"⚔️ **Round {session.round_number}**\n"
+        f"It's now **{label}**'s turn! What do you do?\n"
+        f"{divider}\n"
+        f"🛡️ **PARTY**\n"
+        f"{party_roster}\n"
+        f"{divider}\n"
+        f"👹 **ENEMY**\n"
+        f"{enemy_roster}"
         f"{formation_lines}"
         f"{hint}"
     )
