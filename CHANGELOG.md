@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.368] — True Aim's wasted points fixed; Wild Shape scales with rebirth
+
+Real live audit (Coffee, dev-bridge screenshot): "make [Universal
+Manipulation abilities] have endgame purpose." Checked all 6 abilities
+shown investing points that pass -- 4 of the 5 flat/dice-based ones
+(Endless Fury, Greater Inspiration, Disciple's Grace, Draconic Hide)
+already scale correctly with level/rebirth via power_scale_ratio or
+the shared combat-damage pipeline's own rebirth_power_multiplier.
+Two real gaps confirmed and fixed:
+
+- **True Aim** (Ranger): the real bug behind Sarah and Zara Windrift
+  both having 10 points invested for no extra effect --
+  `TRUE_AIM_EXTRA_MONSTERS` only had 6 entries, so points 7-10 were
+  silently wasted (`list[:points]` just returns the whole list past
+  its length). Expanded to 47 real, curated non-boss monster keys
+  spanning the entire bestiary -- the original 6 stay first, in the
+  same order, so no existing character's behavior changes.
+- **Primal Surge** (Druid): Wild Shape's temp HP was the one ability
+  in this family that never ran through `power_scale_ratio`, so it
+  quietly became more negligible against real endgame HP pools every
+  rebirth while every sibling ability (Second Wind, Lay on Hands,
+  Bardic Inspiration) already kept pace. New shared
+  `_wild_shape_bonus_temp_hp()` helper used by both real call sites.
+
 ## [1.27.367] — Stranded AI companions now resync to the party automatically
 
 Real live report (Coffee): Borin Ironjaw missed a real Wrathflame

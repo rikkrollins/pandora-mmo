@@ -20604,6 +20604,47 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         adv3, _ = bot._attack_advantage_disadvantage(no_level_attacker, under_leveled_defender)
         self.assertFalse(adv3)
 
+    def test_true_aim_now_covers_far_more_than_the_old_six_monsters(self):
+        """
+        Real live bug (2026-08-27, Coffee dev-bridge screenshot): Sarah
+        and Zara Windrift both auto-invested 10 points into True Aim,
+        but TRUE_AIM_EXTRA_MONSTERS only had 6 entries -- since the real
+        check is TRUE_AIM_EXTRA_MONSTERS[:true_aim_points], points 7-10
+        silently did nothing at all. Confirms the list actually grew:
+        a 10th point now reaches a real monster ("alpha_wolf") that was
+        completely unreachable at any investment level before this fix.
+        """
+        ranger = {"conditions": [], "char_class": "Ranger", "skill_tree_upgrades": ["true_aim"] * 10}
+        self.assertGreater(len(bot.TRUE_AIM_EXTRA_MONSTERS), 6)
+        far_monster = bot.TRUE_AIM_EXTRA_MONSTERS[9]
+        adv, _ = bot._attack_advantage_disadvantage(ranger, {"conditions": [], "monster_key": far_monster})
+        self.assertTrue(adv, f"a 10th True Aim point should grant advantage against {far_monster}")
+
+        # The original first-6 order must be completely unchanged --
+        # an existing character's early points keep behaving identically.
+        self.assertEqual(
+            bot.TRUE_AIM_EXTRA_MONSTERS[:6],
+            ["wolf", "giant_spider", "crystal_spider", "shadow_wisp", "bone_legionnaire", "cairn_watcher"],
+        )
+
+    async def test_wild_shape_temp_hp_now_scales_with_rebirth(self):
+        """
+        Real live gap (2026-08-27, Coffee dev-bridge: "make [Universal
+        Manipulation abilities] have endgame purpose"). Second Wind/Lay
+        on Hands/Bardic Inspiration/every damage source already run
+        through power_scale_ratio to keep pace with rescaled endgame HP
+        pools -- Wild Shape's temp HP (and its Primal Surge skill-tree
+        bonus) was the one left out, so it silently became more
+        negligible every rebirth. A reborn Druid's Wild Shape must now
+        heal for strictly more than an otherwise-identical never-reborn
+        one at the same level.
+        """
+        base_character = {"level": 10, "rebirth_count": 0, "skill_tree_upgrades": []}
+        reborn_character = {"level": 10, "rebirth_count": 3, "skill_tree_upgrades": []}
+        base_bonus = bot._wild_shape_bonus_temp_hp(base_character)
+        reborn_bonus = bot._wild_shape_bonus_temp_hp(reborn_character)
+        self.assertGreater(reborn_bonus, base_bonus)
+
     async def test_counterspell_is_reaction_only_and_spends_nothing(self):
         # Real live bug (2026-08, Coffee: "i wasted a turn because of
         # this"): casting Counterspell used to spend a turn/slot and

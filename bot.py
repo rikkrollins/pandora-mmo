@@ -8898,7 +8898,7 @@ def _maybe_use_class_ability(current: dict, session: sessions.Session) -> str | 
     if char_class == "Druid" and level >= 2 and not current.get("wild_shaped"):
         if db.get_feature_uses(telegram_user_id, chat_id, "wild_shape") < WILD_SHAPE_MAX_USES:
             current["wild_shaped"] = True
-            bonus_temp_hp = wild_shape_temp_hp(level) + 2 * _skill_points(current, "primal_surge")
+            bonus_temp_hp = _wild_shape_bonus_temp_hp(current)
             current["temp_hp"] = max(current.get("temp_hp", 0), bonus_temp_hp)
             db.use_feature(telegram_user_id, chat_id, "wild_shape")
             return f"**{current['name']}** shifts into a beast — {bonus_temp_hp} temporary HP, claws and fangs bared!"
@@ -15069,11 +15069,43 @@ UNIVERSAL_MANIPULATION_CLASS_SKILLS = {
 # Ranger True Aim's real, grounded unlock order (2026-08-06) -- "wolf"
 # stays first so every character who already had the old one-shot
 # true_aim keeps EXACTLY the same behavior as their first point. Goblins
-# are excluded (already always favored for every Ranger, upgrade or
-# not); boss/unique-named monsters are excluded (favored-enemy trivially
-# steamrolling a real boss fight would cheapen it) -- real monster_keys
-# from campaigns/default/campaign.json's own bestiary, nothing invented.
-TRUE_AIM_EXTRA_MONSTERS = ["wolf", "giant_spider", "crystal_spider", "shadow_wisp", "bone_legionnaire", "cairn_watcher"]
+# whose monster_key actually starts with "goblin" are excluded (already
+# always favored for every Ranger, upgrade or not); boss/unique-named
+# monsters are excluded (favored-enemy trivially steamrolling a real
+# boss fight would cheapen it) -- real monster_keys from
+# campaigns/default/campaign.json's own bestiary, nothing invented.
+#
+# Real live gap found 2026-08-27 (Coffee, dev-bridge: Sarah and Zara
+# Windrift both auto-invested 10 points into True Aim, but this list
+# only had 6 entries -- since the check is `TRUE_AIM_EXTRA_MONSTERS[
+# :true_aim_points]`, points 7-10 were silently doing nothing at all,
+# no error, no feedback, just wasted currency. The original 6 stay
+# FIRST and in the SAME order (an existing character's early points
+# keep behaving identically); everything after is the game's entire
+# remaining real non-boss bestiary, spanning early wolves/spiders all
+# the way to level-90 apex variants (alpha_wolf) -- a Ranger who
+# genuinely commits to this line can now realistically never run out
+# of real monsters to add, matching every other Universal Manipulation
+# skill's own "unlimited" philosophy.
+TRUE_AIM_EXTRA_MONSTERS = [
+    "wolf", "giant_spider", "crystal_spider", "shadow_wisp", "bone_legionnaire", "cairn_watcher",
+    "greymoor_downs_wolf", "windswept_ridge_wolf", "wolf_pup", "alpha_wolf",
+    "den_bound_wolf", "stray_wood_wolf", "barrow_bound_wolf",
+    "verge_wraith", "bound_verge_wraith",
+    "elder_bone_legionnaire",
+    "young_cairn_watcher",
+    "choir_remnant", "young_choir_remnant", "elder_choir_remnant",
+    "still_machinery_sentinel", "root_wrought_sentinel", "deep_root_warden",
+    "voiceless_warden", "bound_voiceless_warden",
+    "hollow_watcher", "elder_hollow_watcher",
+    "turning_stair_guardian", "young_turning_stair_guardian",
+    "loom_warden", "bound_loom_warden",
+    "pool_wrought_spider", "crystal_spiderling", "elder_crystal_spider",
+    "spiderling", "brood_spider", "current_bound_spider", "elder_web_spider",
+    "watchtower_stalker",
+    "tunnel_goblin", "bramble_thicket_goblin", "young_goblin", "veteran_goblin",
+    "channel_bound_goblin", "root_bound_goblin", "root_goblin_pup", "elder_root_shaman",
+]
 
 # The two continuously-growing POOLS -- repeatable, 10%-compounding,
 # applied as a real permanent stat mutation right at purchase time
@@ -18192,6 +18224,26 @@ RAGE_DAMAGE_BONUS = 2
 WILD_SHAPE_MAX_USES = 2
 
 
+def _wild_shape_bonus_temp_hp(character: dict) -> int:
+    """
+    Real live gap (2026-08-27, per Coffee's dev-bridge: "make the
+    [Universal Manipulation abilities] have endgame purpose" -- found
+    while auditing Primal Surge specifically). Second Wind, Lay on
+    Hands, Bardic Inspiration, and every damage-dealing spell/attack in
+    this game already run their own resulting HP/damage total through
+    power_scale_ratio so they keep pace with the same 2026-07-26
+    monster HP/damage rebalance -- Wild Shape's temp HP (and its
+    Primal Surge skill-tree bonus) was the one ability left out, so
+    both quietly became more and more negligible relative to real
+    endgame HP pools every rebirth. Shared by both real call sites
+    (the deterministic AI auto-resolve path and the real player action)
+    so they can't drift out of sync with each other the way past
+    duplicated-logic bugs in this codebase already have.
+    """
+    base = wild_shape_temp_hp(character["level"]) + 2 * _skill_points(character, "primal_surge")
+    return int(base * power_scale_ratio(character["level"], character.get("rebirth_count", 0)))
+
+
 async def _do_rage(update: Update) -> None:
     """
     Real Barbarian class feature: bonus action to enter a rage — bonus
@@ -18466,9 +18518,7 @@ async def _do_wild_shape(update: Update) -> None:
         return
 
     participant["wild_shaped"] = True
-    bonus_temp_hp = wild_shape_temp_hp(character["level"])
-    # Universal Manipulation "primal_surge" (2026-08-06, repeatable): +2 temp HP per point invested, unlimited.
-    bonus_temp_hp += 2 * _skill_points(character, "primal_surge")
+    bonus_temp_hp = _wild_shape_bonus_temp_hp(character)
     participant["temp_hp"] = max(participant.get("temp_hp", 0), bonus_temp_hp)
     db.use_feature(update.effective_user.id, update.effective_chat.id, "wild_shape")
 
