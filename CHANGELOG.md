@@ -2,6 +2,43 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.381] — Support answer 👍/👎 feedback + fixed Kess on-ramp's misleading level
+
+Two real fixes from the same evening's dev-bridge/chat activity.
+
+**1. Support answer voting.** Real live request (Coffee: "work with the
+language model to vote or down vote responses so it can get better and
+more accurate?"). `lfm2.5-thinking` is a fixed, local, CPU-only model
+with no training pipeline here -- a vote can't retrain it, so this
+isn't RLHF. It's the practical, buildable equivalent: every genuinely
+model-answered Support reply (the main Support topic Q&A, `/help`
+used as a reply, and `/redo`'s Support re-answer -- NOT the
+deterministic sheet-lookup path, which is already a real fact with
+nothing to vote on) now carries a real 👍 Helpful / 👎 Not quite
+keyboard. A tap logs a real `[support_feedback]` line to
+`bot_live_tmp.log`, which `check_topic_activity.py` now also scans
+(same cursor, no new script needed) -- so a downvote surfaces to the
+next self-improvement pass exactly like a dev-bridge screenshot
+already does, just with lower friction than screenshotting it.
+
+**2. Kess on-ramp showed a scary, wrong-looking level.** Dev-bridge:
+"Is this the proper kess quest?! Why is it showing a suggested level
+of 75?! I think there's something wrong with the quest." `borins_
+blackthorn_warning` is a deliberate EARLY on-ramp (offerable right
+after `first_city_arrival`, arc_3, real level 10) whose own trigger is
+just reaching Greymoor Downs' entrance -- one of the "meet the weak
+stuff at the front door" zone entrances that deliberately sits BELOW
+that zone's real difficulty band (75-99). `_quest_suggested_level`'s
+geographic fallback showed the zone's own far-later band instead of
+this quest's own explicit, author-placed gate. Now prefers a quest's
+real `requires_completed_quest` arc level when one exists, before
+falling back to geography -- `borins_blackthorn_warning` now correctly
+shows **10+**; `kess_first_reckoning` itself (the actual fight,
+genuinely gated at 75+) is unaffected, and The Wayfarer's Circuit
+(no real prerequisite of its own) is unaffected too.
+
+Both fail-then-pass verified with real executed tests.
+
 ## [1.27.380] — RPG-styled battle turn announcement, color-coded HP
 
 Real live request (Coffee, 2026-08-27, dev-bridge screenshot from

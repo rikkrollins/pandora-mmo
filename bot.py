@@ -821,6 +821,61 @@ _LAST_KNOWN_CHAT_ID: int | None = getattr(config, "TELEGRAM_CHAT_ID", None)
 # restart, which is fine since there's nothing to redo right after one.
 _LAST_TOPIC_MESSAGE: dict[tuple[int, int], dict] = {}
 
+# Real live request (2026-08-27, Coffee: "work with the language
+# model to vote or down vote responses so it can get better and more
+# accurate?"). lfm2.5-thinking is a fixed, local, CPU-only model with
+# no training pipeline here -- a vote can't retrain it -- so this
+# isn't RLHF. It's the practical, buildable equivalent: a real 👍/👎 on
+# every Support answer, logged to bot_live_tmp.log as a real
+# [support_feedback] line (same style as the existing [support] log
+# line right above _do_answer_support_question's own reply), so
+# check_topic_activity.py (which already scans that exact log for
+# Support activity) surfaces flagged answers to a future self-
+# improvement pass -- same human-in-the-loop grounding-gap-fixing
+# pattern every past Support accuracy fix in this project has used,
+# just with real lower-friction signal than waiting for a dev-bridge
+# screenshot. In-memory only, same as _LAST_TOPIC_MESSAGE above --
+# resets on restart, so a vote tapped after a restart just logs
+# without the original question/answer text recoverable; acceptable,
+# same tradeoff this file already accepts elsewhere (_PUSHED_QUEST_OFFERS).
+_SUPPORT_FEEDBACK_LOG: dict[str, dict] = {}
+_SUPPORT_FEEDBACK_NEXT_ID = 1
+
+
+def _support_feedback_keyboard(question: str, answer: str) -> InlineKeyboardMarkup:
+    global _SUPPORT_FEEDBACK_NEXT_ID
+    fid = str(_SUPPORT_FEEDBACK_NEXT_ID)
+    _SUPPORT_FEEDBACK_NEXT_ID += 1
+    _SUPPORT_FEEDBACK_LOG[fid] = {"question": question, "answer": answer}
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("👍 Helpful", callback_data=f"supportvote|up|{fid}"),
+        InlineKeyboardButton("👎 Not quite", callback_data=f"supportvote|down|{fid}"),
+    ]])
+
+
+async def support_vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Handles taps on _support_feedback_keyboard -- logs a real
+    [support_feedback] line and acknowledges via a toast (not a text
+    edit: the original answer's own bold/formatting entities aren't
+    reconstructable from query.message.text alone, so appending to it
+    via edit_message_text would silently strip them -- a toast avoids
+    that entirely, same as most other button acknowledgments in this
+    file).
+    """
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    vote = parts[1] if len(parts) > 1 else ""
+    fid = parts[2] if len(parts) > 2 else ""
+    entry = _SUPPORT_FEEDBACK_LOG.pop(fid, None)
+    question = entry["question"] if entry else "<unknown, bot restarted since this answer>"
+    answer = entry["answer"] if entry else "<unknown, bot restarted since this answer>"
+    logger.info(f"[support_feedback] user={update.effective_user.id} vote={vote} question={question!r} answer={answer!r}")
+    toast = "Thanks — marked helpful!" if vote == "up" else "Thanks — flagged for review."
+    await _safe_answer(query, toast)
+    await _safe_edit_markup(query, None)
+
+
 # ---------------------------------------------------------------------
 # Living world — NPCs tagged "can_wander" in campaign.json (currently
 # Sarah and Theron) have a real, mutable current location, independent
@@ -12659,11 +12714,36 @@ def _quest_suggested_level(quest_id: str, quest: dict) -> str:
             return f"⭐ **Suggested Level:** {required_level}+"
         return f"⭐ **Chapter {arc_ids.index(arc_id) + 1}** of the story"
 
-    # Side/guild quest (no arc) -- the real destination matters more than
-    # the incidental spot the offer text happens to appear at (The
-    # Wayfarer's Circuit is offered standing in whispering_wood, arc_1
-    # territory, but its real objective sits in whispering_wood_sunken_
-    # den, arc_9 territory -- that's the one that should inform this).
+    # Real live bug (2026-08-27, Coffee, dev-bridge screenshot: "Why is
+    # it showing a suggested level of 75?!"): borins_blackthorn_warning
+    # is a deliberate EARLY on-ramp (offerable right after
+    # first_city_arrival, arc_3, real required_level 10) whose own
+    # trigger is just reaching greymoor_downs' own entrance -- one of
+    # the "meet the weak stuff at the front door" zone entrances that
+    # deliberately sits BELOW its zone's real difficulty band (chapter-
+    # band model, 2026-08-19). The geographic fallback below correctly
+    # serves The Wayfarer's Circuit (no real gate of its own, so the
+    # deep destination IS the only real signal) but wrongly showed this
+    # quest its much-later zone's full band (75+) instead of its own
+    # actual, explicit, author-placed gate. A real requires_completed_
+    # quest is a stronger, more precise signal than inferring from
+    # geography whenever one exists -- checked first.
+    prereq_id = quest.get("requires_completed_quest")
+    if prereq_id:
+        prereq_arc_info = _story_arc_for_quest(prereq_id)
+        if prereq_arc_info:
+            prereq_arc_id, prereq_arc = prereq_arc_info
+            required_level = prereq_arc.get("required_level", 99)
+            if required_level < 99:
+                return f"⭐ **Suggested Level:** {required_level}+"
+            return f"⭐ **Around Chapter {arc_ids.index(prereq_arc_id) + 1}**"
+
+    # Side/guild quest (no arc, no real prerequisite of its own) -- the
+    # real destination matters more than the incidental spot the offer
+    # text happens to appear at (The Wayfarer's Circuit is offered
+    # standing in whispering_wood, arc_1 territory, but its real
+    # objective sits in whispering_wood_sunken_den, arc_9 territory --
+    # that's the one that should inform this).
     real_location = quest.get("objective_location") or quest.get("trigger", {}).get("location") or quest.get("location")
     owner_idx = _location_chapter_arc_index(real_location)
     if owner_idx is None:
@@ -29474,7 +29554,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     question = f"Can you explain this: {replied_text.strip()}"
     async with _keep_typing(update.effective_chat, update.effective_message.message_thread_id):
         reply = await asyncio.to_thread(answer_support_question, question, character, party_members)
-    await update.effective_chat.send_message(reply, message_thread_id=update.effective_message.message_thread_id)
+    await update.effective_chat.send_message(
+        reply, message_thread_id=update.effective_message.message_thread_id,
+        reply_markup=_support_feedback_keyboard(question, reply),
+    )
 
 
 async def hint_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -30357,7 +30440,10 @@ async def redo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             party_members = _get_party_members(update.effective_chat.id) if character else None
             reply = await asyncio.to_thread(answer_support_question, stored_text, character, party_members)
             logger.info(f"[redo] support user={entry['user_id']} text={stored_text!r} reply={reply!r}")
-            await _safe_send(stored_update, reply, thread_id=topics.thread_id_for(update.effective_chat.id, "support"))
+            await _safe_send(
+                stored_update, reply, thread_id=topics.thread_id_for(update.effective_chat.id, "support"),
+                reply_markup=_support_feedback_keyboard(stored_text, reply),
+            )
             return
 
         # kind == "adventure": re-parse fresh (picks up any fix shipped
@@ -30966,7 +31052,10 @@ async def support_topic_handler(update: Update, context: ContextTypes.DEFAULT_TY
     async with _keep_typing(update.effective_chat, update.effective_message.message_thread_id):
         reply = await asyncio.to_thread(answer_support_question, question, character, party_members)
     logger.info(f"[support] user={update.effective_user.id} text={question!r} reply={reply!r}")
-    await _safe_send(update, reply, thread_id=topics.thread_id_for(update.effective_chat.id, "support"))
+    await _safe_send(
+        update, reply, thread_id=topics.thread_id_for(update.effective_chat.id, "support"),
+        reply_markup=_support_feedback_keyboard(question, reply),
+    )
 
 
 # Per-user message queues — see _run_in_user_order for why these exist.
@@ -32434,6 +32523,7 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(spell_menu_callback, pattern=r"^spell\|"))
     application.add_handler(CallbackQueryHandler(quest_menu_callback, pattern=r"^quest\|"))
     application.add_handler(CallbackQueryHandler(item_menu_callback, pattern=r"^item\|"))
+    application.add_handler(CallbackQueryHandler(support_vote_callback, pattern=r"^supportvote\|"))
     application.add_handler(CallbackQueryHandler(craft_menu_callback, pattern=r"^craft\|"))
     application.add_handler(CallbackQueryHandler(give_menu_callback, pattern=r"^give\|"))
     application.add_handler(CallbackQueryHandler(member_level_callback, pattern=r"^memberlvl\|"))

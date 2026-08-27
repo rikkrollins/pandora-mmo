@@ -34,6 +34,20 @@ SUPPORT_RE = re.compile(
     r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) \[INFO\] pandora_mmo: "
     r"\[support\] user=(?P<user>-?\d+) text=(?P<rest>.*)$"
 )
+# Real live request (2026-08-27, Coffee: "work with the language model
+# to vote or down vote responses so it can get better and more
+# accurate?") -- every Support answer now carries a real 👍/👎 button
+# (bot.py's _support_feedback_keyboard/support_vote_callback); a tap
+# logs this line the same way [support] already does. Surfaced here,
+# not a separate script, so it rides the exact same cursor and gets
+# reviewed by every regular self-improvement pass without any extra
+# wiring -- a 👎 is the strongest possible signal of a real grounding
+# gap, worth treating with at least as much weight as a repeated
+# "chat"-swallowed phrase.
+SUPPORT_FEEDBACK_RE = re.compile(
+    r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) \[INFO\] pandora_mmo: "
+    r"\[support_feedback\] user=(?P<user>-?\d+) vote=(?P<vote>up|down) (?P<rest>.*)$"
+)
 
 
 def load_state() -> dict:
@@ -66,6 +80,13 @@ def list_new_activity() -> list[dict]:
         m = SUPPORT_RE.match(line)
         if m and m["ts"] > cursor:
             activity.append({"timestamp": m["ts"], "topic": "support", "user": m["user"], "detail": m["rest"]})
+            continue
+        m = SUPPORT_FEEDBACK_RE.match(line)
+        if m and m["ts"] > cursor:
+            activity.append({
+                "timestamp": m["ts"], "topic": "support_feedback", "user": m["user"],
+                "detail": f"vote={m['vote']} {m['rest']}",
+            })
     return activity
 
 

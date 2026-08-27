@@ -559,6 +559,58 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("mirrors this structure", reply.lower())
         self.assertNotIn("similar stats", reply.lower())
 
+    async def test_support_answer_carries_real_vote_buttons(self):
+        """
+        Real live request (2026-08-27, Coffee: "work with the language
+        model to vote or down vote responses so it can get better and
+        more accurate?"). Every genuinely model-answered Support reply
+        (not the deterministic sheet-lookup path above, which is
+        already a real fact with nothing to vote on) now carries a real
+        👍/👎 keyboard.
+        """
+        from unittest.mock import patch
+        user_id = 111222
+        make_basic_character(user_id, "VoteAsker")
+        sink = []
+        update = FakeUpdate(user_id, "How does eldritch blast work?", sink, thread_id=bot.config.TOPIC_SUPPORT_ID)
+        real_safe_send = bot._safe_send
+        captured_markups = []
+
+        async def spying_safe_send(upd, text, **kwargs):
+            captured_markups.append(kwargs.get("reply_markup"))
+            return await real_safe_send(upd, text, **kwargs)
+
+        with patch("bot.answer_support_question", return_value="It's a real cantrip that scales with level."), \
+             patch("bot._safe_send", side_effect=spying_safe_send):
+            await bot.support_topic_handler(update, DummyContext())
+
+        self.assertTrue(len(captured_markups) >= 1)
+        markup = captured_markups[-1]
+        self.assertIsInstance(markup, bot.InlineKeyboardMarkup)
+        callback_datas = [btn.callback_data for row in markup.inline_keyboard for btn in row]
+        self.assertTrue(any(cd.startswith("supportvote|up|") for cd in callback_datas))
+        self.assertTrue(any(cd.startswith("supportvote|down|") for cd in callback_datas))
+
+    async def test_support_vote_callback_logs_feedback_and_clears_the_buttons(self):
+        """The actual tap handler: logs a real [support_feedback] line (grep-able by check_topic_activity.py) and removes the buttons so they can't be double-tapped."""
+        from unittest.mock import patch
+        keyboard = bot._support_feedback_keyboard("How does eldritch blast work?", "It's a real cantrip.")
+        fid = keyboard.inline_keyboard[0][0].callback_data.split("|")[2]
+        self.assertIn(fid, bot._SUPPORT_FEEDBACK_LOG)
+
+        sink = []
+        logged = []
+        with patch("bot.logger") as mock_logger:
+            mock_logger.info.side_effect = lambda msg: logged.append(msg)
+            await bot.support_vote_callback(
+                FakeCallbackUpdate(999333, f"supportvote|down|{fid}", sink), DummyContext(),
+            )
+
+        self.assertTrue(any("[support_feedback]" in m and "vote=down" in m for m in logged))
+        self.assertNotIn(fid, bot._SUPPORT_FEEDBACK_LOG, "the entry must be consumed, not leaked forever")
+        self.assertTrue(any("<answer:" in s for s in sink))
+        self.assertTrue(any("<edit_markup:" in s for s in sink))
+
     # -- Named sheet lookup broadened beyond own party (v1.7.1) --------
     def test_find_campaign_npc_by_name_gives_honest_info_not_fake_stats(self):
         npc = bot._find_campaign_npc_by_name("Grimsby")
@@ -937,6 +989,39 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         remnant_id = "remnant_the_wrathflame_unbound"
         remnant_quest = bot.CAMPAIGN["quests"][remnant_id]
         self.assertEqual(bot._quest_suggested_level(remnant_id, remnant_quest), "")
+
+    def test_early_onramp_quest_shows_its_own_prerequisites_level_not_its_far_off_zones(self):
+        """
+        Real live bug (2026-08-27, Coffee, dev-bridge screenshot: "Is
+        this the proper kess quest?! Why is it showing a suggested
+        level of 75?! I think there's something wrong with the quest").
+        borins_blackthorn_warning is a deliberate early on-ramp --
+        offerable right after first_city_arrival (arc_3, real
+        required_level 10) -- whose own trigger is just reaching
+        greymoor_downs' entrance, one of the "meet the weak stuff at
+        the front door" zone entrances that deliberately sits BELOW
+        that zone's real difficulty band (75-99). The old geographic
+        fallback showed the zone's own far-later band instead of this
+        quest's real, explicit, author-placed gate
+        (requires_completed_quest), which is the actual signal that
+        matters for "should I accept this now."
+        """
+        quest = bot.CAMPAIGN["quests"]["borins_blackthorn_warning"]
+        self.assertEqual(bot._quest_suggested_level("borins_blackthorn_warning", quest), "⭐ **Suggested Level:** 10+")
+
+        # kess_first_reckoning itself is IN arc_8 (unaffected by this
+        # fix -- still correctly shows the zone's real 75+ band, since
+        # that's genuinely when you're meant to actually fight Kess).
+        kess_quest = bot.CAMPAIGN["quests"]["kess_first_reckoning"]
+        self.assertEqual(bot._quest_suggested_level("kess_first_reckoning", kess_quest), "⭐ **Suggested Level:** 75+")
+
+        # The Wayfarer's Circuit has no requires_completed_quest of its
+        # own -- must be completely unaffected by this fix, still
+        # falling through to the geographic destination-based inference.
+        wayfarers = bot.CAMPAIGN["quests"]["wayfarers_circuit"]
+        self.assertIsNone(wayfarers.get("requires_completed_quest"))
+        level_line = bot._quest_suggested_level("wayfarers_circuit", wayfarers)
+        self.assertIn("Chapter 9", level_line)
 
     def test_greymoor_downs_quests_now_show_a_real_suggested_level_not_just_a_chapter(self):
         """
