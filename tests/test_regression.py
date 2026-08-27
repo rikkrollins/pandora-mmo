@@ -2146,6 +2146,44 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         record = bot._find_trade_for_user(-999, a_id)
         self.assertEqual(record["party_a"]["items"].get("healing_potion"), 1)
 
+    async def test_trade_add_names_real_candidates_when_genuinely_ambiguous(self):
+        """
+        Real live bug (2026-08-27, Coffee dev-bridge: "I am trying to
+        add items to the trade and it's not letting me" -- "Add 5
+        scrolls of spirits to the trade"). Not actually a bug in the
+        matcher: Elduinn genuinely owns BOTH Scroll of the Lesser
+        Spirit and Scroll of the Spirit, which share "Spirit" as their
+        real head noun, so "scrolls of spirits" is a real, deliberate
+        ambiguity -- but the old generic "Add what to the trade,
+        exactly?" message gave no hint that a real choice was needed,
+        indistinguishable from "nothing matched at all." Now names the
+        real candidates so the player knows to be specific.
+        """
+        import sessions
+        sessions.end_session(-999)
+        a_id, b_id = 951009, 951010
+        make_basic_character(a_id, "SpiritTraderA", current_location="crossroads_tavern")
+        make_basic_character(b_id, "SpiritTraderB", current_location="crossroads_tavern")
+        db.add_item(a_id, -999, "scroll_summon_spirit", 13)
+        db.add_item(a_id, -999, "scroll_summon_spirit_ii", 10)
+
+        sink = []
+        await bot._do_trade_request(FakeUpdate(a_id, "trade with SpiritTraderB", sink), "trade with SpiritTraderB")
+        sink.clear()
+        await bot._do_trade_add(
+            FakeUpdate(a_id, "Add 5 scrolls of spirits to the trade", sink),
+            "Add 5 scrolls of spirits to the trade",
+        )
+        reply = sink[-1]
+        self.assertIn("which one", reply.lower())
+        self.assertIn("Scroll of the Lesser Spirit", reply)
+        self.assertIn("Scroll of the Spirit", reply)
+        # Neither scroll should have actually moved -- a genuinely
+        # ambiguous phrase must never guess.
+        after = db.get_character(a_id, -999)
+        self.assertEqual(after["inventory"].get("scroll_summon_spirit", 0), 13)
+        self.assertEqual(after["inventory"].get("scroll_summon_spirit_ii", 0), 10)
+
     async def test_trade_offer_change_resets_the_other_sides_accept_flag(self):
         import sessions
         sessions.end_session(-999)

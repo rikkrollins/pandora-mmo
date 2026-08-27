@@ -5400,6 +5400,30 @@ async def _mutate_trade_offer(update: Update, text: str, adding: bool) -> None:
             changed_lines.append(f"Took {quantity}x {item_name} back out of the trade.")
 
     if not changed_lines:
+        # Real live bug (2026-08-27, Coffee dev-bridge: "I am trying to
+        # add items to the trade and it's not letting me" -- "Add 5
+        # scrolls of spirits to the trade"). The generic fallback below
+        # used to fire identically whether nothing matched at all OR a
+        # phrase was genuinely ambiguous (multiple real owned items --
+        # here, all four Spirit-summoning scrolls -- share the same
+        # head noun). Checking for real ambiguous candidates first
+        # gives an actual "which one?" naming the real options, same
+        # convention this file's own board-quest/market-listing
+        # disambiguation messages already use, instead of leaving the
+        # player with no idea why nothing happened.
+        candidate_pool = list(character["inventory"].keys()) if adding else list(side["items"].keys())
+        for phrase in _ITEM_LIST_SPLIT_PATTERN.split(text):
+            phrase = phrase.strip()
+            if not phrase:
+                continue
+            ambiguous = items_module.ambiguous_item_candidates(phrase, candidate_pool)
+            if len(ambiguous) > 1:
+                names = ", ".join(items_module.get_item(i)["name"] for i in ambiguous)
+                await update.effective_chat.send_message(
+                    f"More than one thing matches that — which one? {names}",
+                    message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+                )
+                return
         await update.effective_chat.send_message(
             f"{'Add' if adding else 'Remove'} what to the trade, exactly? Name something real, "
             f"or an amount of gold.",

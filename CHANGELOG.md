@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.382] — Trade add/remove names real candidates when genuinely ambiguous
+
+Real live dev-bridge report (Coffee): "I am trying to add items to the
+trade and it's not letting me" -- "Add 5 scrolls of spirits to the
+trade."
+
+Not actually a matcher bug: the character genuinely owns BOTH Scroll
+of the Lesser Spirit and Scroll of the Spirit, which share "Spirit" as
+their real head noun, so "scrolls of spirits" is a real, deliberate
+ambiguity guard in `items.find_item_mentioned_in_text` doing its job
+-- but the trade-add/remove fallback showed the exact same generic
+"Add what to the trade, exactly?" message whether nothing matched at
+all OR a phrase was genuinely ambiguous, giving no hint a real choice
+was needed. New `items.ambiguous_item_candidates()` (additive only --
+the original, heavily-tuned matching function is untouched) lets the
+trade flow now say "More than one thing matches that — which one?
+Scroll of the Lesser Spirit, Scroll of the Spirit" instead, same
+"which one?" convention this game's own board-quest/market-listing
+disambiguation already uses.
+
+Fail-then-pass verified with a new test
+(`test_trade_add_names_real_candidates_when_genuinely_ambiguous`).
+
 ## [1.27.381] — Support answer 👍/👎 feedback + fixed Kess on-ramp's misleading level
 
 Two real fixes from the same evening's dev-bridge/chat activity.

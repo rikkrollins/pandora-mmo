@@ -912,3 +912,42 @@ def find_item_mentioned_in_text(text: str, candidate_ids: list[str] | None = Non
     if len(matches) == 1:
         return matches.pop()
     return None
+
+
+def ambiguous_item_candidates(text: str, candidate_ids: list[str]) -> list[str]:
+    """
+    Real live bug (2026-08-27, Coffee dev-bridge: "I am trying to add
+    items to the trade and it's not letting me" -- "Add 5 scrolls of
+    spirits to the trade"). find_item_mentioned_in_text correctly
+    returned None here -- a real, deliberate ambiguity guard, not a
+    bug: the phrase's own head word ("spirit(s)") matches MULTIPLE
+    real owned items at once (Scroll of the Lesser Spirit, Scroll of
+    the Spirit, Scroll of the Greater Spirit, and Scroll of the Elder
+    Spirit all share "Spirit" as their head noun). The caller had no
+    way to tell "genuinely ambiguous, needs a real choice" apart from
+    "nothing matched at all," so both produced the exact same
+    unhelpful generic message. This duplicates ONLY the head-word
+    strong-match detection (not the full function above, which has a
+    long, carefully-tuned exact-match/weak-match/required_for fallback
+    history other real callers depend on staying unchanged) so a
+    caller can build a real "which one?" follow-up naming the actual
+    candidates, same convention this file's own board-quest/market-
+    listing disambiguation messages already use.
+    """
+    lowered = text.strip().lower().replace("armour", "armor").replace("fishing rod", "fishing pole")
+    lowered_words = set(re.findall(r"\w+(?:'\w+)?", lowered))
+    stopwords = {"the", "of", "an", "a", "on", "in", "to", "for", "and", "no"}
+    matches = []
+    for item_id in candidate_ids:
+        name_words = get_item(item_id)["name"].lower().split()
+        significant_words = [
+            w[:-1] if w.endswith("s") else w for w in name_words
+            if (w[:-1] if w.endswith("s") else w) not in stopwords
+            and len(w[:-1] if w.endswith("s") else w) >= 3
+        ]
+        if not significant_words:
+            continue
+        head_word = significant_words[-1]
+        if head_word in lowered_words or f"{head_word}s" in lowered_words:
+            matches.append(item_id)
+    return matches
