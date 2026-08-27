@@ -2,6 +2,42 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.379] — Mid-combat revive stopped leaving a ghost in the fight, plus a real flood-control fix
+
+Two real live bugs, both caught the same evening during Coffee's own
+marathon fight against The Root That Remembers.
+
+**1. Revivify never resynced the live combat session.** Dev-bridge
+report: "Pip is currently dead. I've tried to revive him once and I
+know I was able to revive him for some reason he's no longer in the
+party and when I'm trying to revive him it's saying that no one is
+dead in the party." Root cause: `_do_cast_spell`'s "resurrect" branch
+only ever wrote the DB row (is_dead=0, hp_current=revive_hp) -- unlike
+the heal branch right above it, it never touched the LIVE
+`session.participants` entry (still hp_current=0, exactly where
+`remove_defeated()` left it) or `turn_order` (which `remove_defeated()`
+had already dropped the companion from). Alive on paper, permanently
+benched in the actual fight -- and a second revivify attempt correctly
+but confusingly found nobody dead, since the DB already said so.
+Mid-combat revives now also restore the live participant's HP and put
+them back in `turn_order`.
+
+**2. Repeated identical menu taps could trip real Telegram flood
+control.** Reported live as "im hitting item and it keeps repeating"
+then "seems frozen." Re-tapping an already-current menu (e.g. "Items"
+twice) redrew the identical keyboard every time -- Telegram correctly
+rejects each one as "Message is not modified" (harmless alone), but a
+burst of these in bot_live_tmp.log genuinely burned through Telegram's
+per-chat edit-rate budget and triggered a real `RetryAfter("Flood
+control exceeded. Retry in 41 seconds")`, which then delayed every
+OTHER menu edit in that same chat too. `_safe_edit_markup` now tracks
+the last markup actually confirmed-applied per real message and skips
+the network call entirely for a repeat of the exact same markup.
+
+Both fail-then-pass verified with new tests
+(`test_reviving_a_mid_combat_defeated_companion_actually_returns_them_to_the_fight`,
+`test_repeated_identical_menu_edit_never_hits_telegram_twice`).
+
 ## [1.27.378] — Backpack sort-by-type button
 
 Real live request (Coffee, 2026-08-27): "create a function so i can

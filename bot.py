@@ -4184,6 +4184,27 @@ async def _safe_answer(query, text: str | None = None, show_alert: bool = False)
         return False
 
 
+# Real live incident (2026-08-27, Coffee: "im hitting item and it keeps
+# repeating"... "seems frozen" ... "make sure that NEVER happens
+# again"). Re-tapping a menu button while its markup is already showing
+# (e.g. "Items" tapped twice in a row) redraws the IDENTICAL keyboard
+# every time -- Telegram correctly refuses each one as "Message is not
+# modified" (harmless on its own), but confirmed live in
+# bot_live_tmp.log: a burst of identical "bm|items" taps in under a
+# minute burned through Telegram's own per-chat edit-rate budget and
+# produced a real RetryAfter("Flood control exceeded. Retry in 41
+# seconds") -- which then delays every OTHER menu edit in that same
+# chat too, not just the repeated one, reading as the whole battle menu
+# "freezing." Tracked per real (chat_id, message_id) -- a repeated tap
+# that would produce the exact same markup Telegram already has now
+# skips the network call entirely, so it can never contribute to real
+# flood control. No expiry, matching this file's existing chat/message-
+# scoped cache convention (e.g. _PUSHED_QUEST_OFFERS) -- small enough
+# per entry that unbounded growth over a long-running process is an
+# accepted tradeoff, same as those.
+_LAST_APPLIED_MARKUP: dict[tuple[int, int], InlineKeyboardMarkup | None] = {}
+
+
 async def _safe_edit_markup(query, reply_markup=None) -> bool:
     """
     Same bug shape as _safe_answer above, found live 2026-07-25: every
@@ -4197,12 +4218,28 @@ async def _safe_edit_markup(query, reply_markup=None) -> bool:
     at all, with no error shown to them. Swallowing this one specific,
     harmless case (nothing actually needed to change) lets the real
     action underneath still run every time.
+
+    2026-08-27: also short-circuits BEFORE the network call at all when
+    the requested markup is byte-for-byte identical to the last one
+    actually confirmed-applied to this exact message -- see
+    _LAST_APPLIED_MARKUP's own comment for the real flood-control
+    incident this prevents. A query with no real message identity (an
+    inline-mode callback, or a test double) just skips the cache and
+    behaves exactly as before.
     """
+    message = getattr(query, "message", None)
+    cache_key = (message.chat_id, message.message_id) if message is not None else None
+    if cache_key is not None and cache_key in _LAST_APPLIED_MARKUP and _LAST_APPLIED_MARKUP[cache_key] == reply_markup:
+        return True
     try:
         await query.edit_message_reply_markup(reply_markup=reply_markup)
+        if cache_key is not None:
+            _LAST_APPLIED_MARKUP[cache_key] = reply_markup
         return True
     except TelegramError as e:
         logger.warning(f"[callback] edit_message_reply_markup failed (likely already current): {e!r}")
+        if cache_key is not None and "not modified" in str(e).lower():
+            _LAST_APPLIED_MARKUP[cache_key] = reply_markup
         return False
 
 
@@ -26577,6 +26614,30 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
             target_character["telegram_user_id"], update.effective_chat.id, is_dead=0, hp_current=revive_hp, died_at=None,
             death_save_successes=0, death_save_failures=0,
         )
+        # Real live bug (2026-08-27, dev-bridge: "Pip is currently dead...
+        # I've tried to revive him once and I know I was able to revive
+        # him for some reason he's no longer in the party and when I'm
+        # trying to revive him it's saying that no one is dead in the
+        # party"). A mid-combat revive only ever wrote the DB row above --
+        # the LIVE session.participants entry (still hp_current=0 from
+        # remove_defeated()) and turn_order (which remove_defeated()
+        # already dropped this companion from) were never touched, unlike
+        # the heal branch just above, which mutates its own live h_target
+        # dict directly. Confirmed live: Pip's DB row genuinely showed
+        # is_dead=0/hp_current=51 after Coffee's first revive, while the
+        # SAME ongoing session's participant entry was still stuck at
+        # hp_current=0 and permanently out of turn_order -- alive on
+        # paper, a ghost in the actual fight, and a second revivify
+        # attempt correctly (but confusingly) reported nobody as dead.
+        if mid_combat:
+            live_participant = next(
+                (p for p in combat_session.participants if p["telegram_user_id"] == target_character["telegram_user_id"]),
+                None,
+            )
+            if live_participant is not None:
+                live_participant["hp_current"] = revive_hp
+                if target_character["telegram_user_id"] not in combat_session.turn_order:
+                    combat_session.turn_order.append(target_character["telegram_user_id"])
         _maybe_boost_companion_affinity_for_support(update, character, target_character, 10, "revived")
         await _safe_send(
             update,

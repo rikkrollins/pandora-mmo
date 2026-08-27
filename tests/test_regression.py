@@ -14665,6 +14665,129 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.get_character(leader_id, -999)["inventory"].get("scroll_revivify", 0), 0)
         sessions.end_session(-999, session)
 
+    async def test_reviving_a_mid_combat_defeated_companion_actually_returns_them_to_the_fight(self):
+        """
+        Real live bug (2026-08-27, dev-bridge: "Pip is currently dead...
+        I've tried to revive him once and I know I was able to revive
+        him for some reason he's no longer in the party and when I'm
+        trying to revive him it's saying that no one is dead in the
+        party"). Unlike the test above (which revives a companion who
+        was never actually a combat participant), this reproduces the
+        REAL shape: a companion who died DURING this fight --
+        remove_defeated() drops them from turn_order but leaves their
+        dict in session.participants at hp_current=0 (see that
+        function's own docstring). The resurrect branch of
+        _do_cast_spell only ever wrote the DB row -- the live
+        session.participants entry and turn_order were never resynced,
+        so a "successfully" revived companion stayed a permanent ghost
+        in the actual fight: alive on paper (DB), never taking another
+        turn, and a SECOND revivify attempt correctly but confusingly
+        reported nobody as dead.
+        """
+        import sessions
+        sessions.end_session(-999)
+        leader_id = 950802
+        make_basic_character(
+            leader_id, "MidCombatReviver", char_class="Cleric", current_location="crossroads_tavern",
+            known_spells=["revivify"], spell_slots_max=4,
+        )
+        party_id = db.create_party(leader_id, -999)
+        companion = db.create_ai_companion(
+            -999, "MidCombatFallen", "Elf", "Ranger",
+            ability_scores={"strength": 12, "dexterity": 17, "constitution": 13,
+                             "intelligence": 11, "wisdom": 15, "charisma": 10},
+            hp_max=30, armor_class=14, gold=0, inventory={},
+        )
+        db.add_ai_companion_to_party(companion["telegram_user_id"], -999, party_id)
+        leader = db.get_character(leader_id, -999)
+        companion_participant = db.get_character_by_id(companion["character_id"])
+        enemy = {
+            "telegram_user_id": -2_600_202, "name": "MidCombatGoblin", "dexterity": 10, "strength": 10,
+            "armor_class": 12, "hp_current": 20, "hp_max": 20, "proficiency_bonus": 2, "is_ai": 1,
+        }
+        session = sessions.start_session(
+            -999, [leader, companion_participant, enemy],
+            {leader_id: "party", companion["telegram_user_id"]: "party", -2_600_202: "enemy"},
+        )
+        if session.current_participant_id() != leader_id:
+            session.current_turn_index = session.turn_order.index(leader_id)
+
+        # The real way a companion dies mid-fight: 0 HP, then
+        # remove_defeated() drops them from turn_order (their participant
+        # dict itself stays behind, per that function's own docstring).
+        live_companion = next(p for p in session.participants if p["telegram_user_id"] == companion["telegram_user_id"])
+        live_companion["hp_current"] = 0
+        removed = session.remove_defeated()
+        self.assertEqual([r["telegram_user_id"] for r in removed], [companion["telegram_user_id"]])
+        self.assertNotIn(companion["telegram_user_id"], session.turn_order)
+        db.update_character_by_id(companion["character_id"], is_dead=1, hp_current=0, died_at="2026-08-27T00:00:00+00:00")
+
+        from unittest.mock import patch, AsyncMock
+        sink = []
+        with patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            await bot._do_cast_spell(
+                FakeUpdate(leader_id, f"cast revivify on {companion['name']}", sink),
+                f"cast revivify on {companion['name']}",
+            )
+
+        revived_db = db.get_character_by_id(companion["character_id"])
+        self.assertFalse(revived_db.get("is_dead"))
+        self.assertGreater(revived_db["hp_current"], 0)
+
+        live_companion_after = next(p for p in session.participants if p["telegram_user_id"] == companion["telegram_user_id"])
+        self.assertEqual(
+            live_companion_after["hp_current"], revived_db["hp_current"],
+            "the live combat session must reflect the revival too, not just the DB",
+        )
+        self.assertIn(
+            companion["telegram_user_id"], session.turn_order,
+            "a revived companion must actually get turns again, not stay a ghost",
+        )
+        sessions.end_session(-999, session)
+
+    async def test_repeated_identical_menu_edit_never_hits_telegram_twice(self):
+        """
+        Real live incident (2026-08-27, Coffee: "im hitting item and it
+        keeps repeating"... "seems frozen" ... "make sure that NEVER
+        happens again"). Re-tapping an already-current menu button (e.g.
+        "Items" twice in a row) used to call Telegram's real edit API
+        again with the identical markup every single time -- harmless
+        alone, but a burst of these was confirmed live to burn through
+        Telegram's per-chat edit-rate budget and trip real flood
+        control, which then delayed every OTHER menu edit in that same
+        chat too. _safe_edit_markup now short-circuits before ever
+        calling the network for a markup byte-identical to the last one
+        actually confirmed-applied to that exact message.
+        """
+        class FakeMessage:
+            def __init__(self):
+                self.chat_id = -999
+                self.message_id = 12345
+
+        class FakeQuery:
+            def __init__(self):
+                self.message = FakeMessage()
+                self.edit_calls = 0
+
+            async def edit_message_reply_markup(self, reply_markup=None):
+                self.edit_calls += 1
+
+        query = FakeQuery()
+        markup = bot.InlineKeyboardMarkup([[bot.InlineKeyboardButton("Longsword", callback_data="bm|use|longsword")]])
+
+        result1 = await bot._safe_edit_markup(query, markup)
+        self.assertTrue(result1)
+        self.assertEqual(query.edit_calls, 1, "the first tap must still reach Telegram for real")
+
+        result2 = await bot._safe_edit_markup(query, markup)
+        self.assertTrue(result2)
+        self.assertEqual(query.edit_calls, 1, "an identical repeat tap must never call Telegram again")
+
+        different_markup = bot.InlineKeyboardMarkup([[bot.InlineKeyboardButton("« Back", callback_data="bm|menu")]])
+        result3 = await bot._safe_edit_markup(query, different_markup)
+        self.assertTrue(result3)
+        self.assertEqual(query.edit_calls, 2, "a genuinely different markup must still go through")
+
     async def test_equip_via_battle_menu_offers_present_party_members_not_just_self(self):
         """
         Real live bug (2026-08-01, Coffee: "when i clicked equip it
