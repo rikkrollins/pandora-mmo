@@ -2,6 +2,24 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.372] — Companion portraits now reflect their real pronouns
+
+Real live report (Coffee): "some of the char pics were done before
+pronouns and arent accurate." Every recruitable companion's real
+pronoun was added 2026-08-26, but `_npc_portrait_prompt` was never
+updated to actually read it — confirmed by reading the function, it
+only ever used role/personality/race/class. "he/him"/"she/her" now
+fold a real "male"/"female" tag into the generated prompt;
+"they/them" (Pip) deliberately adds no gender word at all, same as
+having no pronoun on file — not everyone reduces to male/female, and
+forcing one would be exactly the invention this function has always
+tried to avoid.
+
+Portraits aren't cached — they're regenerated fresh (with a stable
+per-NPC seed for visual consistency) every time a player talks to that
+NPC, so this fixes itself automatically the next time anyone talks to
+Sarah, Vesh, Borin, Wren, Pip, or Grask. No backfill needed.
+
 ## [1.27.371] — "Below the Cairn" no longer renders on top of Market Row
 
 Real live report (Coffee, dev-bridge): "the location below the cairn

@@ -21310,6 +21310,46 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(prompt2.startswith("fantasy RPG rare ring icon, Ring of Warmth,"))
         self.assertIn("Warm to the touch", prompt2)
 
+    def test_npc_portrait_prompt_reflects_the_real_pronoun_on_file(self):
+        """
+        Real live report (2026-08-27, Coffee: "some of the char pics
+        were done before pronouns and arent accurate"). Every
+        recruitable companion's real pronoun was added 2026-08-26, but
+        _npc_portrait_prompt never read it at all -- confirmed live by
+        reading the function, it only ever used role/personality/
+        race/class. "he/him"/"she/her" now add a real "male"/"female"
+        tag; "they/them" (Pip) deliberately adds no gender word at all,
+        matching this function's own "never invent a gender" rule --
+        not everyone reduces to male/female, and forcing one would be
+        exactly the invention this function has always avoided.
+        """
+        borin = {"role": "retired_guard_captain", "personality": "a stern dwarf", "pronouns": "he/him",
+                 "stats": {"race": "Dwarf", "char_class": "Paladin"}}
+        self.assertIn("Dwarf male Paladin", bot._npc_portrait_prompt(borin))
+
+        sarah = {"role": "wandering_adventurer", "personality": "a quiet ranger", "pronouns": "she/her",
+                 "stats": {"race": "Elf", "char_class": "Ranger"}}
+        self.assertIn("Elf female Ranger", bot._npc_portrait_prompt(sarah))
+
+        pip = {"role": "traveling_minstrel", "personality": "a cheerful halfling bard", "pronouns": "they/them",
+               "stats": {"race": "Halfling", "char_class": "Bard"}}
+        prompt = bot._npc_portrait_prompt(pip)
+        self.assertIn("Halfling Bard", prompt)
+        self.assertNotIn("male", prompt)
+        self.assertNotIn("female", prompt)
+
+        # No stats block at all (most non-recruitable NPCs) -- the
+        # gender word still lands, just folded into the role instead.
+        no_stats = {"role": "shrine_keeper", "personality": "a quiet hermit", "pronouns": "she/her"}
+        self.assertIn("female shrine keeper", bot._npc_portrait_prompt(no_stats))
+
+        # No pronoun on file at all -- completely unaffected, same
+        # output shape as before this fix.
+        no_pronoun = {"role": "captive_fighter", "personality": "a dragonborn barbarian",
+                      "stats": {"race": "Dragonborn", "char_class": "Barbarian"}}
+        self.assertIn("Dragonborn Barbarian", bot._npc_portrait_prompt(no_pronoun))
+        self.assertNotIn("male", bot._npc_portrait_prompt(no_pronoun))
+
     def test_spell_and_ability_image_prompts_exclude_a_person(self):
         """
         Real live feedback (2026-08-10, Coffee, dev-bridge screenshot):

@@ -19664,23 +19664,39 @@ async def _maybe_send_location_image(update: Update, location: dict, location_id
     )
 
 
+_PRONOUNS_TO_PORTRAIT_GENDER_WORD = {"he/him": "male", "she/her": "female"}
+
+
 def _npc_portrait_prompt(npc_data: dict) -> str:
     """
     Grounded ONLY in real fields already in campaign.json -- role,
-    personality, and (for recruitable companions like Sarah, who carry
-    a real stats block) race/class. Deliberately never invents a
-    gender or appearance detail that isn't already a stated fact,
-    same "never invent a game fact" discipline as everywhere else in
-    this game (and the same reasoning that kept ai/tts_piper.py's two
-    voices purpose-based rather than guessing NPC genders). Non-
-    recruitable NPCs (most of them) have no stats block at all, so
-    race_class is simply omitted for those rather than guessed.
+    personality, pronouns, and (for recruitable companions like Sarah,
+    who carry a real stats block) race/class. Deliberately never
+    invents a gender or appearance detail that isn't already a stated
+    fact, same "never invent a game fact" discipline as everywhere
+    else in this game. Non-recruitable NPCs (most of them) have no
+    stats block at all, so race_class is simply omitted for those
+    rather than guessed.
+
+    Real live report (2026-08-27, Coffee: "some of the char pics were
+    done before pronouns and arent accurate"). Every recruitable
+    companion's real pronoun was added 2026-08-26 (v1.27.x pronoun
+    rollout), but this function was never updated to actually read it
+    -- a real fact this docstring's own "never invent" claim had
+    already stopped living up to, since using a stated pronoun isn't
+    inventing one. "they/them" (Pip) deliberately adds no gender word
+    at all, same as no pronoun on file -- not everyone reduces to
+    "male"/"female", and forcing one would be the exact invention this
+    function has always tried to avoid.
     """
     stats = npc_data.get("stats") or {}
-    race_class = f"{stats['race']} {stats['char_class']}, " if stats.get("race") and stats.get("char_class") else ""
+    gender_word = _PRONOUNS_TO_PORTRAIT_GENDER_WORD.get(npc_data.get("pronouns"), "")
+    gender_clause = f"{gender_word} " if gender_word else ""
+    race_class = f"{stats['race']} {gender_clause}{stats['char_class']}, " if stats.get("race") and stats.get("char_class") else ""
     role = (npc_data.get("role") or "").replace("_", " ")
+    role_clause = f"{gender_clause}{role}" if not race_class else role
     return (
-        f"fantasy RPG character portrait, {race_class}{role}, "
+        f"fantasy RPG character portrait, {race_class}{role_clause}, "
         f"{npc_data.get('personality', '')}, digital painting"
     )
 
