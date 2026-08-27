@@ -2,6 +2,24 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.373] — A bare "rest" now actually rests
+
+Found via a self-improvement monitoring pass: two different real
+players, in separate sessions, typed a bare "Rest"/"rest" and got
+silent chat (no response at all). `ai/intent_parser.py`'s `rest_words`
+only ever matched phrases like "I rest"/"want to rest"/"rest here" --
+never a standalone imperative, same bug class as the earlier bare-
+"Fight" fix.
+
+- Added a whole-word, negation-guarded check ("interest"/"arrest"
+  don't false-positive; "we cant rest here" correctly falls through
+  instead of resting) ahead of the old `rest_words` list, then
+  simplified that list since most of its entries were already
+  subsumed by the new check.
+- Verified against a full 118-test keyword-fallback sweep with zero
+  regressions (one already-known, unrelated pre-existing failure
+  aside).
+
 ## [1.27.372] — Companion portraits now reflect their real pronouns
 
 Real live report (Coffee): "some of the char pics were done before

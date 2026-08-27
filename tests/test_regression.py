@@ -15751,6 +15751,29 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotEqual(_keyword_fallback(text, [])["action"], "attack", text)
         # A real attack containing "not" elsewhere must still work.
         self.assertEqual(_keyword_fallback("fight the goblin, not the spider", [])["action"], "attack")
+
+    def test_bare_rest_classifies_as_rest_without_misfiring_on_interest_or_arrest(self):
+        """
+        Real live bug (2026-08-27, topic-activity log: two different
+        real players, in separate sessions, typed a bare "Rest"/"rest"
+        and got the silent "chat" default). Every existing rest_words
+        entry required "I rest"/"want to rest"/etc -- none of them a
+        standalone imperative. Same "bare single-word command" gap
+        already fixed for "Fight" (2026-08-07); a whole-word check so
+        this can't fire inside "interest"/"arrest".
+        """
+        self.assertEqual(_keyword_fallback("Rest", [])["action"], "rest")
+        self.assertEqual(_keyword_fallback("rest", [])["action"], "rest")
+        self.assertNotEqual(_keyword_fallback("That's an interesting theory", [])["action"], "rest")
+        self.assertNotEqual(_keyword_fallback("The guards put him under arrest", [])["action"], "rest")
+        # "take a rest" is still claimed by go_inactive, unaffected.
+        self.assertEqual(_keyword_fallback("take a rest", [])["action"], "go_inactive")
+
+    def test_negated_rest_phrasing_never_misclassifies_as_rest(self):
+        """A warning that resting ISN'T possible right now must not be read as a request to rest, same shape as negated_fight_phrases above."""
+        for text in ["I can't rest with these goblins around", "we cant rest here",
+                     "we won't rest until this is over", "we don't want to rest yet"]:
+            self.assertNotEqual(_keyword_fallback(text, [])["action"], "rest", text)
         self.assertEqual(_keyword_fallback("lets fight", [])["action"], "attack")
 
     def test_initiate_battle_phrasing_starts_combat_instead_of_silent_chat(self):

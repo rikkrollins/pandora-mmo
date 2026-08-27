@@ -2149,11 +2149,37 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
             duration = text[lowered.index(trigger) + len(trigger):].strip() if trigger.endswith(" ") else ""
             return {**base, "action": "go_inactive", "target": duration or None}
 
+    # Real live bug (2026-08-27, found via topic-activity monitoring):
+    # two different real players, in two separate sessions, typed a
+    # bare "Rest"/"rest" and got the silent chat default -- every
+    # existing rest_words entry below required "I rest"/"want to
+    # rest"/etc, none of them a standalone imperative. Same "bare
+    # single-word command" gap already fixed for "Fight" (2026-08-07).
+    # Checked BEFORE rest_words below (not after) specifically because
+    # rest_words' own "rest here" would otherwise match "we cant rest
+    # here" first and skip this negation guard entirely -- this one
+    # check now covers every phrasing containing the word "rest" at
+    # all, negation-guarded the same shape as negated_fight_phrases,
+    # since "I can't rest with these goblins around" is a warning, not
+    # a request to actually rest.
+    negated_rest_phrases = [
+        "can't rest", "cant rest", "cannot rest", "won't rest", "wont rest",
+        "don't want to rest", "dont want to rest", "shouldn't rest", "shouldnt rest",
+    ]
+    if any(p in lowered for p in negated_rest_phrases):
+        pass  # falls through to whatever this actually is instead of guessing "rest"
+    elif re.search(r"\brest\b", lowered) and not any(c in lowered for c in conditional_words):
+        return {**base, "action": "rest"}
+
     # "take a rest" is deliberately NOT here — it's claimed by go_inactive
     # above, since the user considers it equivalent to "resting until
-    # next session," not the in-universe full-heal action.
-    rest_words = ["i rest", "let's rest", "lets rest", "revive me", "heal up", "recover",
-                  "heal me", "want to rest", "rest here"]
+    # next session," not the in-universe full-heal action. "i rest"/
+    # "let's rest"/"lets rest"/"want to rest"/"rest here" are no longer
+    # listed here either -- all contain the bare word "rest", so the
+    # negation-guarded whole-word check just above already covers them
+    # (and, unlike this unguarded list ever did, without misreading
+    # "we cant rest here" as a real request to rest).
+    rest_words = ["revive me", "heal up", "recover", "heal me"]
     if any(w in lowered for w in rest_words):
         return {**base, "action": "rest"}
 
