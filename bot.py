@@ -13396,6 +13396,16 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
             db.accept_quest(telegram_user_id, update.effective_chat.id, quest_id)
             await _safe_send(update, f"{opening_note}📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}")
             await _notify_main_topic(update, f"📜 **{character['name']}** accepted a quest: {quest['title']}")
+            # Real live soft-lock (2026-08-27, Coffee dev-bridge: "I am
+            # not seeing the quest for Kess"). _accept_offered_story_
+            # quest already re-checks reach_location completion right
+            # after accepting (2026-08-06 fix, same bug class) -- this
+            # companion-offer branch never did, so a reach_location-
+            # triggered companion quest (borins_blackthorn_warning)
+            # accepted while already AT/past its trigger location could
+            # never complete: no further "arrival" event there would
+            # ever fire again.
+            await _check_quest_completions_reach_location(update, telegram_user_id, character["current_location"])
             return
 
     # No story quest on offer here — try the area's board quest(s) instead.

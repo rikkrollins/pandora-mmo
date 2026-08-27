@@ -15287,6 +15287,51 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         offer = bot._offerable_quest_at_location(character, "crossroads_tavern")
         self.assertIsNone(offer, "must not offer the Blackthorn reveal before reaching the first city")
 
+    async def test_accepting_a_companion_quest_at_its_own_trigger_location_completes_it_immediately(self):
+        """
+        Real live dev-bridge report (2026-08-27, Coffee: "I am not
+        seeing the quest for Kess"). Root cause: reach_location-trigger
+        quests are only checked for immediate completion right after
+        _accept_offered_story_quest (the LOCATION-offer accept path,
+        fixed for this exact bug class in v1.27.x, see
+        test_accepting_a_self_location_quest_completes_it_immediately_
+        not_a_soft_lock above) -- but _do_accept_quest's COMPANION-offer
+        branch never called that same check, just db.accept_quest and
+        a message. borins_blackthorn_warning is both companion-offered
+        (giver_npc: borin_ironjaw) and reach_location-triggered
+        (greymoor_downs) -- a player who accepts it while already AT
+        greymoor_downs (recruited Borin there, or wandered back through)
+        gets permanently soft-locked: no further "arrival" event at
+        that exact location will ever fire again, so kess_first_
+        reckoning (which requires it completed) never becomes
+        offerable. Confirmed live: Coffee's own character had exactly
+        this active_quests/completed_quests shape.
+        """
+        from unittest.mock import patch
+
+        user_id = 999926
+        make_basic_character(user_id, "AlreadyThereSeeker", current_location="crossroads_tavern")
+        sink = []
+        await bot._do_recruit_npc(FakeUpdate(user_id, "recruit Borin Ironjaw", sink), "Borin Ironjaw")
+        db.complete_quest(user_id, -999, "borins_vouching_task")
+        db.complete_quest(user_id, -999, "borins_resolution")
+        db.complete_quest(user_id, -999, "first_city_arrival")
+        db.update_character(user_id, -999, current_location="greymoor_downs")
+
+        sink = []
+        # greymoor_downs has no daily board quest cached yet in a fresh
+        # test DB -- _do_accept_quest unconditionally lazily-generates
+        # one first via a REAL Ollama narration call (ai/dm_agent.py's
+        # narrate_branching_quest_setup), unrelated to what this test
+        # targets. Mocked the same way this file's own board-quest-
+        # generation tests already do.
+        with patch("board_quests.narrate_branching_quest_setup", return_value="A quiet task awaits."):
+            await bot._do_accept_quest(FakeUpdate(user_id, "I accept the quest", sink), "I accept the quest")
+
+        character = db.get_character(user_id, -999)
+        self.assertIn("borins_blackthorn_warning", character["completed_quests"])
+        self.assertNotIn("borins_blackthorn_warning", character["active_quests"])
+
     async def test_kess_ambush_never_fires_before_the_reckoning_quest_is_accepted(self):
         """
         Real live request (2026-08-26, Kess arc Phase 2A, per Coffee:

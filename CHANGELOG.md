@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.376] — Fixed a real soft-lock in companion-offered reach_location quests
+
+Real live dev-bridge report (Coffee, 2026-08-27, minutes after v1.27.375
+shipped): "I am not seeing the quest for Kess." His character had
+`borins_blackthorn_warning` stuck active forever, so its dependent
+`kess_first_reckoning` could never become offerable.
+
+Root cause: `_accept_offered_story_quest` (the location-offer accept
+path) already re-checks `reach_location` completion immediately after
+accepting, fixed for exactly this bug class back on 2026-08-06 (see
+`test_accepting_a_self_location_quest_completes_it_immediately_not_a_soft_lock`)
+-- but `_do_accept_quest`'s COMPANION-offer branch never got the same
+check. `borins_blackthorn_warning` is both companion-offered
+(`giver_npc: borin_ironjaw`) and `reach_location`-triggered
+(`greymoor_downs`) -- accepting it while already at/past Greymoor Downs
+meant no further "arrival" event there would ever fire again, a
+permanent soft-lock. Added the same `_check_quest_completions_reach_
+location` call to the companion-offer branch.
+
+Fail-then-pass verified with a new test
+(`test_accepting_a_companion_quest_at_its_own_trigger_location_completes_it_immediately`).
+Coffee's own already-stuck quest isn't retroactively fixed by this
+code change alone -- walking back to Greymoor Downs once will complete
+it via the normal move-triggered check, same as always.
+
 ## [1.27.375] — Borin's Blackthorn quest no longer requires having Borin in the party
 
 Real live report (Coffee, 2026-08-27): "for players that dont have
