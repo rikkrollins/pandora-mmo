@@ -56,7 +56,19 @@ _MARGIN = 30
 _TITLE_HEIGHT = 46
 _LEGEND_LINE_HEIGHT = 20
 _MAX_CANVAS_WIDTH = 1800
-_MAX_CANVAS_HEIGHT = 1500
+# Real live gap found 2026-08-27 (map-coordinate overhaul,
+# scripts/build_location_grid.py): this used to silently clip a
+# layer's rendered cells with no crash, no warning -- confirmed by
+# actually rendering an injected far-off location and watching PIL
+# just never draw it. Real dungeon delves now get their own genuine
+# grid cells instead of stacking invisibly on one square (per Coffee:
+# "make it feel like Zelda dungeons"), and `underground` -- the
+# deepest layer, real multi-room dungeons chained several floors
+# down -- now spans up to ~30 real rows. Raised with real headroom
+# above that measured figure, not a bare-minimum fit, so the next
+# added dungeon room doesn't immediately reopen this same silent-clip
+# risk.
+_MAX_CANVAS_HEIGHT = 5500
 # A narrow layer (sky's real bounding box is only 2 columns wide) would
 # otherwise squeeze the icon-legend line -- a real floor under the grid
 # width, confirmed against a real render, wide enough for the full

@@ -2,6 +2,37 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.374] — Map-wide coordinate overhaul: real, walkable dungeon paths
+
+Real live request, following the "Below the Cairn" map fix: the whole
+visual map's coordinates should be correct and consistent, so it can
+actually be used for travel planning "like playing Zelda dungeons" --
+real strung-together paths and groupings, not everything crammed onto
+one square.
+
+- `scripts/build_location_grid.py` (a real tool already built
+  2026-08-20 for this same complaint) unconditionally collapsed every
+  up/down-connected pair onto the SAME map cell -- correct for the one
+  genuine same-building case (Crossroads Tavern's cellar/upstairs,
+  now the only entry in the new `SAME_CELL_VERTICAL_PAIRS`), but wrong
+  for real multi-room dungeon delves (Wordless Choir's 8 rooms,
+  Greymoor Downs' barrow/cairn chains, several others) that piled onto
+  one cell with only a text floor-badge to tell them apart.
+- Every such delve now gets its own real, distinct, visible cell,
+  using the same placement search a lateral neighbor already does.
+  Fixed two real bugs surfaced by this change along the way: the
+  island-shift math assumed zero internal vertical span (true before
+  this change, false now) and could land two unrelated dungeons on
+  identical cells; the fix now packs disconnected sub-dungeons into
+  real 2D "shelves" using the render's actual width budget instead of
+  stacking everything into one column.
+- Regenerated every location's real `grid_position` — zero collisions
+  anywhere, confirmed by an actual rendered PNG with no clipped cells
+  (`_MAX_CANVAS_HEIGHT` raised with real headroom above the measured
+  new bounding box).
+- `directions` labels themselves (what a player types to move) are
+  completely unchanged -- this is purely how the map looks.
+
 ## [1.27.373] — A bare "rest" now actually rests
 
 Found via a self-improvement monitoring pass: two different real

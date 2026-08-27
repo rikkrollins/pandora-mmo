@@ -23243,8 +23243,30 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(conflicts, [], "\n".join(conflicts))
 
     def test_campaign_grid_positions_agree_with_their_own_directions(self):
-        """Every directed edge's two grid_position values must actually be adjacent in the direction claimed -- not just reciprocal, but geometrically consistent."""
-        DELTA = {"north": (0, 1), "south": (0, -1), "east": (1, 0), "west": (-1, 0)}
+        """
+        Every directed edge's two grid_position values must actually be
+        adjacent in the direction claimed -- not just reciprocal, but
+        geometrically consistent.
+
+        Extended 2026-08-27 (map-coordinate overhaul, per Coffee:
+        "make it feel like Zelda dungeons... string paths") to also
+        validate up/down -- previously skipped entirely, on the
+        assumption every vertical edge shared its parent's exact
+        (x, y). That assumption only actually holds for
+        SAME_CELL_VERTICAL_PAIRS (the one real "same building, a
+        different floor" case, Crossroads Tavern's cellar/upstairs);
+        every other real up/down edge is now a genuine dungeon delve
+        with its own distinct cell, using the same delta a lateral
+        "south"/"north" edge would (scripts/build_location_grid.py's
+        own real placement rule) -- this closes the exact validation
+        gap an earlier research pass found.
+        """
+        import sys
+        sys.path.insert(0, "scripts")
+        import build_location_grid as blg
+
+        DELTA = {"north": (0, 1), "south": (0, -1), "east": (1, 0), "west": (-1, 0),
+                 "down": (0, -1), "up": (0, 1)}
         mismatches = []
         for layer_name, places in bot.CAMPAIGN["locations"].items():
             for lid, info in places.items():
@@ -23253,16 +23275,57 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                     continue
                 for word, dest in (info.get("directions") or {}).items():
                     if word not in DELTA:
-                        continue  # up/down share their parent's (x, y) by design
+                        continue
                     dest_pos = (places.get(dest) or {}).get("grid_position")
                     if dest_pos is None:
                         continue
-                    dx, dy = DELTA[word]
-                    expected = (pos["x"] + dx, pos["y"] + dy)
                     actual = (dest_pos["x"], dest_pos["y"])
+                    same_cell = (dest in blg.SAME_CELL_VERTICAL_PAIRS.get(lid, ())
+                                 or lid in blg.SAME_CELL_VERTICAL_PAIRS.get(dest, ()))
+                    if word in ("up", "down") and same_cell:
+                        expected = (pos["x"], pos["y"])  # the one real same-cell exception
+                    else:
+                        dx, dy = DELTA[word]
+                        expected = (pos["x"] + dx, pos["y"] + dy)
                     if actual != expected:
                         mismatches.append(f"[{layer_name}] {lid}.{word}={dest}: expected grid_position {expected}, got {actual}")
         self.assertEqual(mismatches, [], "\n".join(mismatches))
+
+    def test_wordless_choir_rooms_now_occupy_distinct_map_cells(self):
+        """
+        Real live bug (2026-08-27, map-coordinate overhaul): before
+        this rework, every up/down-connected room -- including this
+        real 8-room dungeon delve -- shared its parent's exact
+        (x, y), so the whole Wordless Choir piled onto ONE map cell,
+        distinguished only by a text floor-badge, invisible as a real
+        path. Confirms every one of its real rooms now has its own
+        distinct, visible grid cell.
+        """
+        underground = bot.CAMPAIGN["locations"]["underground"]
+        choir_ids = [
+            "wordless_choir_gate", "wordless_choir_antechamber", "wordless_choir_machinery",
+            "wordless_choir_hall", "wordless_choir_forgotten_chord", "wordless_choir_resonance_well",
+            "wordless_choir_source",
+        ]
+        seen = {}
+        for lid in choir_ids:
+            gp = underground[lid]["grid_position"]
+            coord = (gp["x"], gp["y"])
+            self.assertNotIn(coord, seen, f"{lid} collides with {seen.get(coord)} at {coord}")
+            seen[coord] = lid
+
+    def test_crossroads_tavern_cellar_and_upstairs_still_share_one_cell(self):
+        """
+        The one confirmed-real "same building, different floor" case
+        (scripts/build_location_grid.py's SAME_CELL_VERTICAL_PAIRS)
+        must not regress into getting its own separate cells the way
+        every OTHER up/down edge now correctly does.
+        """
+        surface = bot.CAMPAIGN["locations"]["surface"]
+        tavern_pos = surface["crossroads_tavern"]["grid_position"]
+        for lid in ("tavern_cellar", "tavern_upstairs"):
+            pos = surface[lid]["grid_position"]
+            self.assertEqual((pos["x"], pos["y"]), (tavern_pos["x"], tavern_pos["y"]), lid)
 
     # -- Task #11, real live request (2026-08-09, Coffee, Development-
     #    topic screenshot): "This does not look like a map. I want an

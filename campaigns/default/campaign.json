@@ -1572,8 +1572,8 @@
           "the_archives_keeper"
         ],
         "grid_position": {
-          "x": 0,
-          "y": 3
+          "x": 1,
+          "y": -11
         }
       },
       "the_first_city_deepest_record": {
@@ -1607,8 +1607,8 @@
           "the_deepest_record"
         ],
         "grid_position": {
-          "x": 0,
-          "y": 3
+          "x": 1,
+          "y": -12
         }
       },
       "the_first_city_forgotten_depth": {
@@ -1630,8 +1630,8 @@
           "damage_dice": "4d6"
         },
         "grid_position": {
-          "x": 0,
-          "y": 3
+          "x": 5,
+          "y": -11
         }
       },
       "whispering_wood_root_hollow": {
@@ -1664,8 +1664,8 @@
           "the_hollow_bell"
         ],
         "grid_position": {
-          "x": -1,
-          "y": 6
+          "x": -2,
+          "y": -21
         }
       },
       "whispering_wood_sunken_den": {
@@ -1695,8 +1695,8 @@
           }
         },
         "grid_position": {
-          "x": 0,
-          "y": 6
+          "x": -1,
+          "y": -21
         }
       },
       "whispering_wood_deeper_roots": {
@@ -1726,8 +1726,8 @@
           }
         },
         "grid_position": {
-          "x": 0,
-          "y": 4
+          "x": -1,
+          "y": -23
         }
       },
       "greymoor_downs_sunken_barrow": {
@@ -1761,8 +1761,7 @@
           }
         },
         "directions": {
-          "up": "greymoor_downs_barrow_depths",
-          "down": "greymoor_downs_barrow_depths"
+          "up": "greymoor_downs_barrow_depths"
         },
         "story_gates": {
           "greymoor_downs_barrow_depths": {
@@ -1770,8 +1769,8 @@
           }
         },
         "grid_position": {
-          "x": 0,
-          "y": 3
+          "x": -2,
+          "y": -6
         }
       },
       "stonearch_bridge_gorge_depths": {
@@ -1811,8 +1810,8 @@
           }
         },
         "grid_position": {
-          "x": -2,
-          "y": 3
+          "x": 4,
+          "y": -6
         }
       },
       "stonearch_bridge_deep_current": {
@@ -1842,8 +1841,8 @@
           }
         },
         "grid_position": {
-          "x": 0,
-          "y": 3
+          "x": 6,
+          "y": -6
         }
       },
       "wordless_choir_gate": {
@@ -1874,8 +1873,8 @@
           }
         },
         "grid_position": {
-          "x": 0,
-          "y": 3
+          "x": 5,
+          "y": -12
         }
       },
       "wordless_choir_machinery": {
@@ -1907,8 +1906,8 @@
           }
         },
         "grid_position": {
-          "x": 0,
-          "y": 3
+          "x": 5,
+          "y": -14
         }
       },
       "wordless_choir_hall": {
@@ -1938,8 +1937,8 @@
           }
         },
         "grid_position": {
-          "x": 0,
-          "y": 3
+          "x": 5,
+          "y": -15
         }
       },
       "wordless_choir_source": {
@@ -1967,8 +1966,8 @@
           "damage_dice": "4d6"
         },
         "grid_position": {
-          "x": 0,
-          "y": 3
+          "x": 5,
+          "y": -17
         }
       },
       "wordless_choir_antechamber": {
@@ -1998,8 +1997,8 @@
           }
         },
         "grid_position": {
-          "x": 0,
-          "y": 3
+          "x": 5,
+          "y": -13
         }
       },
       "wordless_choir_resonance_well": {
@@ -2027,14 +2026,17 @@
           "wordless_choir_source": {
             "requires_cleared_location": "wordless_choir_resonance_well",
             "requires_companion_trust": {
-              "pair": ["wren_hollowbrook", "vesh_nightglass"],
+              "pair": [
+                "wren_hollowbrook",
+                "vesh_nightglass"
+              ],
               "min_affinity": 40
             }
           }
         },
         "grid_position": {
-          "x": 0,
-          "y": 3
+          "x": 5,
+          "y": -16
         }
       },
       "wordless_choir_forgotten_chord": {
@@ -2057,8 +2059,8 @@
           }
         },
         "grid_position": {
-          "x": -1,
-          "y": 3
+          "x": 4,
+          "y": -14
         }
       },
       "goblin_warrens_supply_tunnel": {
@@ -2214,8 +2216,8 @@
           }
         },
         "grid_position": {
-          "x": 0,
-          "y": 3
+          "x": -2,
+          "y": -11
         }
       },
       "stonearch_bridge_web_hollow": {
@@ -2247,8 +2249,8 @@
           }
         },
         "grid_position": {
-          "x": -1,
-          "y": 3
+          "x": 5,
+          "y": -6
         }
       },
       "stonearch_bridge_undertow": {
@@ -2271,8 +2273,8 @@
           }
         },
         "grid_position": {
-          "x": 1,
-          "y": 3
+          "x": 7,
+          "y": -6
         }
       },
       "stonearch_bridge_silked_nook": {
@@ -2295,8 +2297,8 @@
           }
         },
         "grid_position": {
-          "x": -1,
-          "y": 4
+          "x": 5,
+          "y": -5
         }
       },
       "greymoor_downs_barrow_depths": {
@@ -2307,8 +2309,7 @@
           "greymoor_downs_sunken_barrow"
         ],
         "directions": {
-          "down": "greymoor_downs_sunken_barrow",
-          "up": "greymoor_downs_sunken_barrow"
+          "down": "greymoor_downs_sunken_barrow"
         },
         "monsters": [
           "barrow_bound_wolf"
@@ -2320,8 +2321,8 @@
           }
         },
         "grid_position": {
-          "x": 0,
-          "y": 3
+          "x": -2,
+          "y": -5
         }
       },
       "greymoor_downs_below_the_cairn": {
@@ -2358,8 +2359,8 @@
           "the_waiting_dark"
         ],
         "grid_position": {
-          "x": 2,
-          "y": 3
+          "x": 1,
+          "y": -5
         }
       },
       "greymoor_downs_the_unopened_seal": {
@@ -2387,14 +2388,17 @@
         "story_gates": {
           "greymoor_downs_the_last_question": {
             "requires_companion_trust": {
-              "pair": ["pip_thistledown", "grask_emberscale"],
+              "pair": [
+                "pip_thistledown",
+                "grask_emberscale"
+              ],
               "min_affinity": 40
             }
           }
         },
         "grid_position": {
-          "x": 2,
-          "y": 4
+          "x": 1,
+          "y": -6
         }
       },
       "greymoor_downs_the_last_question": {
@@ -2417,8 +2421,8 @@
           }
         },
         "grid_position": {
-          "x": 2,
-          "y": 5
+          "x": 1,
+          "y": -7
         }
       },
       "whispering_wood_hollow_threshold": {
@@ -2450,8 +2454,8 @@
           }
         },
         "grid_position": {
-          "x": 0,
-          "y": 5
+          "x": -1,
+          "y": -22
         }
       },
       "whispering_wood_stray_den": {
@@ -2474,8 +2478,8 @@
           }
         },
         "grid_position": {
-          "x": 1,
-          "y": 5
+          "x": 0,
+          "y": -22
         }
       },
       "whispering_wood_deep_root_chamber": {
@@ -2498,8 +2502,8 @@
           }
         },
         "grid_position": {
-          "x": 0,
-          "y": 3
+          "x": -1,
+          "y": -24
         }
       },
       "glimmerdeep_grotto_buried_glow": {
@@ -2621,7 +2625,7 @@
         },
         "grid_position": {
           "x": 0,
-          "y": 0
+          "y": -1
         }
       },
       "unmoored_isle_turning_stair": {
@@ -2654,7 +2658,7 @@
         },
         "grid_position": {
           "x": 0,
-          "y": 0
+          "y": -3
         }
       },
       "unmoored_isle_loom": {
@@ -2689,7 +2693,7 @@
         },
         "grid_position": {
           "x": 0,
-          "y": 0
+          "y": -4
         }
       },
       "unmoored_isle_first_wait": {
@@ -2718,7 +2722,7 @@
         },
         "grid_position": {
           "x": 0,
-          "y": 0
+          "y": -6
         }
       },
       "unmoored_isle_afterimage": {
@@ -2749,7 +2753,7 @@
         },
         "grid_position": {
           "x": 0,
-          "y": 0
+          "y": -2
         }
       },
       "unmoored_isle_last_measure": {
@@ -2780,7 +2784,7 @@
         },
         "grid_position": {
           "x": 0,
-          "y": 0
+          "y": -5
         }
       },
       "unmoored_isle_missed_step": {
@@ -2804,7 +2808,7 @@
         },
         "grid_position": {
           "x": 1,
-          "y": 0
+          "y": -3
         }
       }
     }

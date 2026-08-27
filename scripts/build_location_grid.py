@@ -61,6 +61,22 @@ VERTICAL_OVERRIDES: dict[str, dict[str, str]] = {
     "crossroads_tavern": {"tavern_upstairs": "up", "tavern_cellar": "down"},
 }
 
+# Real live request (2026-08-27, per Coffee: "make it feel like Zelda
+# dungeons... string paths onto longer pathways" -- after finding that
+# EVERY up/down-connected neighbor used to share its parent's exact
+# (x, y), piling entire multi-room dungeon delves (Wordless Choir's 8
+# rooms, Sunken Root Caverns' branches, etc.) onto ONE map cell,
+# distinguished only by a text floor-badge, invisible as a real path.
+# Confirmed only ONE real case in this whole campaign is genuinely "the
+# same building, a different floor" rather than "a separate room
+# reached by a stairway": Crossroads Tavern's own cellar/upstairs.
+# Keep this short and hand-reviewed, same discipline as
+# VERTICAL_OVERRIDES above -- everything NOT listed here gets a real,
+# distinct lateral cell instead (see _bfs_from_root's vertical handling).
+SAME_CELL_VERTICAL_PAIRS: dict[str, set[str]] = {
+    "crossroads_tavern": {"tavern_upstairs", "tavern_cellar"},
+}
+
 
 def _bfs_from_root(
     layer_name: str, places: dict, root: str, old_hints: dict, new_directions: dict, notes: list,
@@ -92,29 +108,34 @@ def _bfs_from_root(
         # work at all without a KeyError on `places[current]`.
         neighbors = [n for n in places[current]["connections"] if n in places]
 
-        # Up/down first -- a separate vertical axis. A vertical
-        # neighbor shares the SAME (x, y) as its parent (a different
-        # floor of the same map cell, matching how the renderer's own
-        # floor badges already display it), never competes for a
-        # lateral grid slot, and -- critically -- still gets placed
-        # into `coords` and enqueued so BFS actually walks through it;
-        # an earlier draft wired the direction label here but never
-        # placed/enqueued the neighbor, which silently orphaned entire
-        # sub-graphs reachable only via a vertical edge (confirmed:
-        # this was why most of underground/sky came back "unreachable"
-        # in the very first dry run).
-        vertical_here: dict[str, str] = {}
+        # Up/down first -- a separate vertical axis, but NOT
+        # automatically a shared cell anymore (2026-08-27 rework, see
+        # SAME_CELL_VERTICAL_PAIRS above). Every real up/down edge from
+        # this node is collected here regardless of source (an old
+        # `directions` hint, or a hand-reviewed VERTICAL_OVERRIDES
+        # entry), still gets placed into `coords` and enqueued so BFS
+        # actually walks through it (an earlier draft wired the
+        # direction label but never placed/enqueued the neighbor,
+        # which silently orphaned entire sub-graphs reachable only via
+        # a vertical edge -- confirmed live, this was why most of
+        # underground/sky came back "unreachable" in the very first
+        # dry run).
+        vertical_edges: dict[str, str] = {}
         for direction in ("up", "down"):
             hinted = old_hints[current].get(direction)
             if hinted in neighbors and direction not in new_directions[current]:
                 opp = OPPOSITE[direction]
                 if new_directions.get(hinted, {}).get(opp) in (None, current):
-                    vertical_here[hinted] = direction
+                    vertical_edges[hinted] = direction
         for neighbor_id, direction in VERTICAL_OVERRIDES.get(current, {}).items():
-            if neighbor_id in neighbors and direction not in new_directions[current] and neighbor_id not in vertical_here:
-                vertical_here[neighbor_id] = direction
+            if neighbor_id in neighbors and direction not in new_directions[current] and neighbor_id not in vertical_edges:
+                vertical_edges[neighbor_id] = direction
 
-        for neighbor, direction in vertical_here.items():
+        same_cell_pairs_here = SAME_CELL_VERTICAL_PAIRS.get(current, ())
+        same_cell_here = {n: d for n, d in vertical_edges.items() if n in same_cell_pairs_here}
+        delve_here = {n: d for n, d in vertical_edges.items() if n not in same_cell_pairs_here}
+
+        for neighbor, direction in same_cell_here.items():
             opp = OPPOSITE[direction]
             new_directions[current][direction] = neighbor
             new_directions.setdefault(neighbor, {})[opp] = current
@@ -122,10 +143,57 @@ def _bfs_from_root(
                 coords[neighbor] = (cx, cy)
                 queue.append(neighbor)
 
-        lateral_neighbors = [
-            n for n in neighbors
-            if n != new_directions[current].get("up") and n != new_directions[current].get("down")
-        ]
+        # Real dungeon delves (2026-08-27, per Coffee: "make it feel
+        # like Zelda dungeons... string paths, not everything piled on
+        # one square"). Any up/down edge NOT in SAME_CELL_VERTICAL_PAIRS
+        # is a real, separate room -- placed one real cell over, so
+        # it's visible on the map as part of a real path instead of
+        # stacked invisibly under a floor badge. The DIRECTION LABEL
+        # stays "down"/"up" regardless of which compass delta the cell
+        # actually lands on -- a player never sees raw (x, y), only a
+        # drawn line between two adjacent squares and the "descend"/
+        # "ascend" action text elsewhere, so this is never a visible
+        # lie the way a real lateral mislabel (calling an actual west
+        # neighbor "east") would be. Prefers the intuitive delta
+        # ("down"->south, "up"->north) but falls back through the same
+        # LATERAL_ORDER search real lateral neighbors use -- real live
+        # bug found in this rework's own first draft (a FIXED single
+        # slot, no fallback): dozens of unrelated delves all descending
+        # from rooms that happened to already share a column cascaded
+        # into the exact same "everything piles onto one cell" problem
+        # this rework exists to fix, just one level deeper each time.
+        # Only reports the same real overflow every lateral neighbor
+        # already can if all 4 compass slots are genuinely taken.
+        vertical_preferred = {"down": "south", "up": "north"}
+        for neighbor, direction in delve_here.items():
+            if neighbor in coords:
+                continue
+            preferred = vertical_preferred[direction]
+            candidates = [preferred] + [w for w in LATERAL_ORDER if w != preferred]
+            placed = False
+            for word in candidates:
+                dx, dy = DELTA[word]
+                target = (cx + dx, cy + dy)
+                if target in occupied and occupied[target] != neighbor:
+                    continue
+                coords[neighbor] = target
+                occupied[target] = neighbor
+                new_directions[current][direction] = neighbor
+                new_directions.setdefault(neighbor, {})[OPPOSITE[direction]] = current
+                queue.append(neighbor)
+                placed = True
+                break
+            if not placed:
+                notes.append(
+                    f"[{layer_name}] {current} <-> {neighbor}: real \"{direction}\" edge, but all 4 "
+                    f"neighboring cells are already occupied -- kept reachable via connections only."
+                )
+
+        # Excludes every up/down edge above (same-cell AND delve,
+        # placed or not) -- a delve edge that lost its preferred slot
+        # must stay connections-only, never get silently relabeled to
+        # a different compass word by the generic lateral loop below.
+        lateral_neighbors = [n for n in neighbors if n not in vertical_edges]
 
         for neighbor in lateral_neighbors:
             if neighbor in coords:
@@ -194,11 +262,36 @@ def build_layer(layer_name: str, places: dict) -> tuple[dict, list[str]]:
     # `descends_to`/another layer, never a same-layer `connections`
     # edge -- documented, deliberate campaign design, not a data bug,
     # e.g. the Wordless Choir sub-dungeon under the_first_city). Each
-    # gets its OWN local BFS from its own lowest-sorted member, then is
-    # shifted to sit two rows below whatever's already been placed, so
-    # it renders as a clearly separate annex rather than overlapping or
-    # being silently dropped.
+    # gets its OWN local BFS from its own lowest-sorted member.
+    #
+    # Real live bug found 2026-08-27 (this same rework, once delves got
+    # real internal depth instead of always sharing one cell): islands
+    # used to always stack straight down from a running max, one under
+    # the last -- harmless before this rework (every island was a
+    # single flat row), but several small islands (2-3 rooms) each
+    # stacking with a full "2 empty rows" gap, now that some islands
+    # have real depth, blew the canvas height budget the same way a
+    # real multi-room dungeon needs room for. Simple shelf-packing
+    # instead, using the layer's own existing WIDTH budget rather than
+    # stacking everything into one tall column: islands are placed
+    # left-to-right along a "shelf" (each 2 columns clear of the last);
+    # once a shelf would run wider than the main cluster's own real
+    # column count, a new shelf starts 2 rows below the deepest point
+    # anything on the previous shelf actually reached.
     remaining = {lid for lid in places if lid not in coords}
+    main_min_x = min((x for x, _ in coords.values()), default=0)
+    # Real render limit (map_render.py: _MAX_CANVAS_WIDTH=1800,
+    # CELL_SIZE=150, _MARGIN=30 -- (1800 - 30*2) / 150 = 11.8) -- using
+    # the layer's own (often much narrower) width here instead would
+    # starve shelf-packing of the real room the canvas actually has,
+    # which is exactly the bug that made the first version of this fix
+    # stack everything into one much-too-tall column.
+    shelf_width_budget = 11
+
+    shelf_x = main_min_x  # next free column on the current shelf
+    shelf_top_y = min((y for _, y in coords.values()), default=0) - 2  # this shelf's own ceiling (highest row available)
+    shelf_bottom_y = shelf_top_y  # deepest row anything on this shelf has reached so far
+
     while remaining:
         adjacency: dict[str, list[str]] = {lid: [] for lid in remaining}
         for lid in remaining:
@@ -218,11 +311,25 @@ def build_layer(layer_name: str, places: dict) -> tuple[dict, list[str]]:
         island_places = {lid: places[lid] for lid in component}
         island_coords = _bfs_from_root(layer_name, island_places, island_root, old_hints, new_directions, notes)
 
-        placed_max_y = max((y for _, y in coords.values()), default=0)
+        island_min_x = min((x for x, _ in island_coords.values()), default=0)
+        island_max_x = max((x for x, _ in island_coords.values()), default=0)
         island_min_y = min((y for _, y in island_coords.values()), default=0)
-        y_shift = (placed_max_y - island_min_y) - 2  # 2 empty rows of separation
+        island_max_y = max((y for _, y in island_coords.values()), default=0)
+        island_cols = island_max_x - island_min_x + 1
+
+        if shelf_x != main_min_x and (shelf_x - main_min_x) + island_cols > shelf_width_budget:
+            # This shelf's full -- start a new one below the deepest
+            # point anything already on it reached.
+            shelf_x = main_min_x
+            shelf_top_y = shelf_bottom_y - 2
+            shelf_bottom_y = shelf_top_y
+
+        x_shift = (shelf_x - island_min_x)
+        y_shift = (shelf_top_y - 2) - island_max_y
         for lid, (x, y) in island_coords.items():
-            coords[lid] = (x, y + y_shift)
+            coords[lid] = (x + x_shift, y + y_shift)
+        shelf_bottom_y = min(shelf_bottom_y, island_min_y + y_shift)
+        shelf_x += island_cols + 2
 
         remaining -= component
 
