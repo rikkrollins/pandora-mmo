@@ -611,6 +611,45 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("<answer:" in s for s in sink))
         self.assertTrue(any("<edit_markup:" in s for s in sink))
 
+    async def test_support_feedback_survives_a_restart(self):
+        """
+        Real live incident (2026-08-27): the FIRST real downvote ever
+        tapped (Sugar, on a Godshard answer) landed as "<unknown, bot
+        restarted since this answer>" -- this dict started purely
+        in-memory, and this dev session alone restarted the bot ~10
+        times in two hours shipping other fixes, wiping it every time.
+        Now persisted to a real file, loaded at process startup
+        (_load_support_feedback_state, called from main() only) and
+        rewritten on every add/consume -- this simulates a restart by
+        clearing the in-memory dict (what actually happens) and
+        reloading from disk, confirming the entry survives.
+        """
+        from unittest.mock import patch
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = f"{tmpdir}/support_feedback_test.json"
+            with patch("bot._SUPPORT_FEEDBACK_STATE_PATH", state_path):
+                keyboard = bot._support_feedback_keyboard("What is a Godshard?", "A mythic material.")
+                fid = keyboard.inline_keyboard[0][0].callback_data.split("|")[2]
+                self.assertIn(fid, bot._SUPPORT_FEEDBACK_LOG)
+
+                # Simulate a real restart: the in-memory dict is gone, exactly as it would be.
+                bot._SUPPORT_FEEDBACK_LOG.pop(fid, None)
+                self.assertNotIn(fid, bot._SUPPORT_FEEDBACK_LOG)
+
+                bot._load_support_feedback_state()
+                self.assertIn(fid, bot._SUPPORT_FEEDBACK_LOG)
+                self.assertEqual(bot._SUPPORT_FEEDBACK_LOG[fid]["question"], "What is a Godshard?")
+
+                sink = []
+                logged = []
+                with patch("bot.logger") as mock_logger:
+                    mock_logger.info.side_effect = lambda msg: logged.append(msg)
+                    await bot.support_vote_callback(
+                        FakeCallbackUpdate(999334, f"supportvote|down|{fid}", sink), DummyContext(),
+                    )
+                self.assertTrue(any("What is a Godshard?" in m for m in logged), logged)
+
     # -- Named sheet lookup broadened beyond own party (v1.7.1) --------
     def test_find_campaign_npc_by_name_gives_honest_info_not_fake_stats(self):
         npc = bot._find_campaign_npc_by_name("Grimsby")
@@ -3424,6 +3463,41 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(_deterministic_item_lookup_answer("What is a good strategy for this fight?"))
         # Must not guess when the phrase names something that isn't a real item.
         self.assertIsNone(_deterministic_item_lookup_answer("What is a Vorpal Blade?"))
+
+    def test_support_item_lookup_also_answers_what_its_used_for(self):
+        """
+        Real live gap (2026-08-27): Sugar's actual full question was
+        "what is a godshard and what is it used for" -- the lookup
+        answered the first half but stayed silent on the second, even
+        though Godshard genuinely IS a required material in two real
+        end-game recipes (Forge Guild's Godsforged Blade, Enchanters'
+        Guild's Godsforged Ward enchantment). Also covers the earlier
+        real gap this same question exposed: "What is Glimmerdeep Moss
+        used for?" (a proper-noun item name with no article) used to
+        match none of the old, narrower trigger phrases at all.
+        """
+        from ai.support_agent import _deterministic_item_lookup_answer, _item_recipe_usage_note
+        answer = _deterministic_item_lookup_answer("what is a godshard and what is it used for")
+        self.assertIn("Godsforged Blade", answer)
+        self.assertIn("Godsforged Ward", answer)
+
+        moss_answer = _deterministic_item_lookup_answer("What is Glimmerdeep Moss used for?")
+        self.assertIsNotNone(moss_answer)
+        self.assertIn("Used in crafting", moss_answer)
+
+        # A material with genuinely no real recipe use says so honestly,
+        # not silently (every REAL material in this game happens to
+        # have a use today, so this checks the helper directly with a
+        # synthetic id rather than relying on that staying true forever).
+        self.assertEqual(
+            _item_recipe_usage_note("not_a_real_item_id"),
+            "It isn't used in any known crafting or enchanting recipe.",
+        )
+
+        # A non-material item (e.g. a weapon) never gets a crafting-use line at all.
+        weapon_answer = _deterministic_item_lookup_answer("What is a Longsword?")
+        self.assertNotIn("Used in crafting", weapon_answer)
+        self.assertNotIn("known crafting", weapon_answer)
 
     def test_support_weapon_comparison_uses_real_numbers_not_vague_flavor(self):
         """

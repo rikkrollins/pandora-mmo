@@ -834,12 +834,43 @@ _LAST_TOPIC_MESSAGE: dict[tuple[int, int], dict] = {}
 # improvement pass -- same human-in-the-loop grounding-gap-fixing
 # pattern every past Support accuracy fix in this project has used,
 # just with real lower-friction signal than waiting for a dev-bridge
-# screenshot. In-memory only, same as _LAST_TOPIC_MESSAGE above --
-# resets on restart, so a vote tapped after a restart just logs
-# without the original question/answer text recoverable; acceptable,
-# same tradeoff this file already accepts elsewhere (_PUSHED_QUEST_OFFERS).
+# screenshot.
+#
+# Real live incident (2026-08-27, found within an hour of shipping
+# this): the FIRST real downvote ever tapped (Sugar, on a Godshard
+# answer) landed as "<unknown, bot restarted since this answer>" --
+# this dict started purely in-memory, and this dev session alone
+# restarted the bot ~10 times in two hours shipping other fixes,
+# wiping it each time. That's a much harsher real-world hit rate than
+# the "acceptable, same tradeoff as _PUSHED_QUEST_OFFERS" call this
+# comment originally made (a stale pushed-quest-offer re-showing once
+# is a minor annoyance; a downvote with no idea what it was ABOUT
+# defeats the entire point of the feature). Now persisted to a real
+# JSON file (_SUPPORT_FEEDBACK_STATE_PATH) -- loaded once at real
+# process startup (main(), never at plain import, so importing this
+# module for tests can't touch the live file) and rewritten on every
+# add/consume, so a vote survives any number of restarts between the
+# answer and the tap.
 _SUPPORT_FEEDBACK_LOG: dict[str, dict] = {}
 _SUPPORT_FEEDBACK_NEXT_ID = 1
+_SUPPORT_FEEDBACK_STATE_PATH = ".support_feedback_pending.json"
+
+
+def _load_support_feedback_state() -> None:
+    """Real process startup only (see main()) -- restores pending feedback entries across a restart."""
+    global _SUPPORT_FEEDBACK_NEXT_ID
+    try:
+        with open(_SUPPORT_FEEDBACK_STATE_PATH) as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return
+    _SUPPORT_FEEDBACK_LOG.update(data.get("pending", {}))
+    _SUPPORT_FEEDBACK_NEXT_ID = data.get("next_id", 1)
+
+
+def _save_support_feedback_state() -> None:
+    with open(_SUPPORT_FEEDBACK_STATE_PATH, "w") as f:
+        json.dump({"pending": _SUPPORT_FEEDBACK_LOG, "next_id": _SUPPORT_FEEDBACK_NEXT_ID}, f)
 
 
 def _support_feedback_keyboard(question: str, answer: str) -> InlineKeyboardMarkup:
@@ -847,6 +878,7 @@ def _support_feedback_keyboard(question: str, answer: str) -> InlineKeyboardMark
     fid = str(_SUPPORT_FEEDBACK_NEXT_ID)
     _SUPPORT_FEEDBACK_NEXT_ID += 1
     _SUPPORT_FEEDBACK_LOG[fid] = {"question": question, "answer": answer}
+    _save_support_feedback_state()
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("👍 Helpful", callback_data=f"supportvote|up|{fid}"),
         InlineKeyboardButton("👎 Not quite", callback_data=f"supportvote|down|{fid}"),
@@ -868,6 +900,8 @@ async def support_vote_callback(update: Update, context: ContextTypes.DEFAULT_TY
     vote = parts[1] if len(parts) > 1 else ""
     fid = parts[2] if len(parts) > 2 else ""
     entry = _SUPPORT_FEEDBACK_LOG.pop(fid, None)
+    if entry is not None:
+        _save_support_feedback_state()
     question = entry["question"] if entry else "<unknown, bot restarted since this answer>"
     answer = entry["answer"] if entry else "<unknown, bot restarted since this answer>"
     logger.info(f"[support_feedback] user={update.effective_user.id} vote={vote} question={question!r} answer={answer!r}")
@@ -32732,6 +32766,7 @@ def main() -> None:
     db.init_db()
     narration_cache.purge_stale_unplaceholdered_rows()
     setup_default_npcs()
+    _load_support_feedback_state()
     application = build_application()
     logger.info("BotApplication created successfully. Starting polling...")
     application.run_polling()

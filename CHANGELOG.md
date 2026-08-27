@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.386] — Support feedback survives restarts + real "used for" answers
+
+Asked to watch the new downvote buttons for real signal -- the very
+first real downvote (Sugar, on a Godshard answer) already exposed two
+real gaps within an hour of shipping.
+
+**1. A downvote lost its own context.** Sugar's vote landed as
+"<unknown, bot restarted since this answer>" -- `_SUPPORT_FEEDBACK_LOG`
+started purely in-memory, and this one dev session alone restarted the
+bot ~10 times in two hours shipping other fixes, wiping it every time.
+That's a much harsher real-world hit rate than this file's own
+original "acceptable, same tradeoff as `_PUSHED_QUEST_OFFERS`" call --
+a stale quest-offer re-showing once is a minor annoyance; a downvote
+with no idea what it was about defeats the entire point of the
+feature. Now persisted to a real file (`.support_feedback_pending.json`,
+gitignored), loaded once at real process startup and rewritten on
+every add/consume, so a vote survives any number of restarts between
+the answer and the tap.
+
+**2. Sugar's actual full question was "what is a godshard and what is
+it used for."** The deterministic item-lookup answer (v1.27.383)
+answered the first half but stayed silent on the second, even though
+Godshard genuinely IS a required material in two real end-game recipes
+(Forge Guild's Godsforged Blade, Enchanters' Guild's Godsforged Ward
+enchantment). New `_item_recipe_usage_note` scans the real RECIPES/
+ADVANCED_RECIPES/ENCHANT_RECIPES tables and appends a real "Used in
+crafting: ..." line for any material, or an honest "isn't used in any
+known crafting or enchanting recipe" when a real search finds none.
+Also broadened the trigger phrases (the original "what is A/AN/THE X"
+missed a bare proper-noun phrasing like "What is Glimmerdeep Moss used
+for?" entirely).
+
+Both fail-then-pass verified with real executed tests.
+
 ## [1.27.385] — Fixed pluralized multi-word item names failing to match
 
 Found via topic-activity monitoring, right after shipping v1.27.382's

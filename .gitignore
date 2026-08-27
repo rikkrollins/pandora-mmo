@@ -13,6 +13,7 @@ bot_test_tmp.log
 .autonomous_monitor_state.json
 .topic_monitor_state.json
 .error_log_state.json
+.support_feedback_pending.json
 bot_persistence.pickle
 sessions_snapshot.json
 sessions_snapshot.json.tmp

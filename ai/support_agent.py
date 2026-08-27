@@ -25,7 +25,7 @@ import spells as spells_module
 from ai.text_cleanup import strip_think_tags, is_placeholder_text
 from guilds import GUILDS
 from models import VALID_CLASSES
-from rules.crafting import RECIPES, ENCHANT_RECIPES
+from rules.crafting import RECIPES, ADVANCED_RECIPES, ENCHANT_RECIPES
 from rules.dice import average_damage
 from rules.leveling import (
     XP_THRESHOLDS, level_for_xp, MAX_LEVEL, CLASS_SUBCLASSES, COMBAT_SUBCLASS_NAMES,
@@ -1156,9 +1156,47 @@ def _deterministic_item_comparison_answer(question: str, character: dict | None 
 
 
 _ITEM_LOOKUP_QUESTION_WORDS = [
-    "what is a ", "what is an ", "what is the ", "what's a ", "what's an ", "what's the ",
-    "tell me about", "describe the", "describe a ", "describe an ",
+    # Real live gap (2026-08-27): the original narrower list (requiring
+    # an article -- "what is A X") missed Sugar's own real phrasing for
+    # a proper-noun item name, "What is Glimmerdeep Moss used for?" --
+    # no article at all. Broadened to the bare prefixes (which already
+    # match every article variant as a substring) plus "used for"
+    # phrasing. Still safe against false positives on an unrelated
+    # question: find_item_mentioned_in_text below must ALSO
+    # unambiguously name exactly one real item, or this still falls
+    # through to the LLM.
+    "what is ", "what's ", "tell me about", "describe ", "used for", "what's it for", "what is it for",
 ]
+
+
+def _item_recipe_usage_note(item_id: str) -> str:
+    """
+    Real live gap (2026-08-27): Sugar's actual full question was "what
+    is a godshard and what is it used for" -- the lookup below answered
+    the first half but stayed silent on the second, even though
+    Godshard genuinely IS a required material in two real end-game
+    recipes (Forge Guild's Godsforged Blade, Enchanters' Guild's
+    Godsforged Ward enchantment). Scans the real RECIPES/ADVANCED_
+    RECIPES/ENCHANT_RECIPES tables for this exact item_id as a required
+    material -- never invented -- and says so plainly when a real
+    search finds none, rather than staying silent (which reads
+    identically to "the model forgot to check").
+    """
+    uses = []
+    for recipe in RECIPES.values():
+        if item_id in recipe.get("materials", {}):
+            result = items_module.get_item(recipe["result_item"])
+            uses.append(result["name"] if result else recipe["result_item"])
+    for recipe in ADVANCED_RECIPES.values():
+        if item_id in recipe.get("materials", {}):
+            uses.append(recipe.get("name", "an advanced recipe"))
+    for recipe_id, recipe in ENCHANT_RECIPES.items():
+        if item_id in recipe.get("materials", {}):
+            label = recipe_id.replace("enchant_", "").replace("_", " ").title()
+            uses.append(f"the {label} enchantment")
+    if not uses:
+        return "It isn't used in any known crafting or enchanting recipe."
+    return f"Used in crafting: {', '.join(uses)}."
 
 
 def _deterministic_item_lookup_answer(question: str) -> str | None:
@@ -1177,9 +1215,10 @@ def _deterministic_item_lookup_answer(question: str) -> str | None:
     _deterministic_* answer in this file exists to route around, not a
     grounding-data gap. Bypasses the model entirely for a simple "what
     is X" single-item lookup, answering straight from that item's own
-    real fields. Returns None (falls through to the LLM) for any
-    question that isn't this exact shape, or that doesn't unambiguously
-    name exactly one real item -- never guesses.
+    real fields (plus its real crafting/enchanting uses, if any --
+    see _item_recipe_usage_note). Returns None (falls through to the
+    LLM) for any question that isn't this exact shape, or that doesn't
+    unambiguously name exactly one real item -- never guesses.
     """
     lowered = question.lower()
     if not any(phrase in lowered for phrase in _ITEM_LOOKUP_QUESTION_WORDS):
@@ -1204,6 +1243,8 @@ def _deterministic_item_lookup_answer(question: str) -> str | None:
         mechanic_bits.append(f"worth {item['price']} gold")
     if mechanic_bits:
         bits.append(" ".join(mechanic_bits).capitalize() + ".")
+    if item["type"] == "material":
+        bits.append(_item_recipe_usage_note(item_id))
     return " ".join(bits)
 
 

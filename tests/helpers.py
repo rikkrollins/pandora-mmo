@@ -94,6 +94,17 @@ def use_test_db(path: str) -> None:
         return None
     bot._ai_turn_pacing_delay = _no_pacing_delay
 
+    # Real live incident (2026-08-27, same class as sessions.SNAPSHOT_PATH
+    # above): bot._SUPPORT_FEEDBACK_STATE_PATH is a bare relative filename
+    # too, resolved against the process's cwd at save time -- any test
+    # exercising a Support answer or the vote-button callback (without
+    # this) would silently write real-looking pending-feedback data into
+    # the actual repo's support_feedback_pending.json, confirmed live
+    # while adding this feature's own tests.
+    bot._SUPPORT_FEEDBACK_STATE_PATH = path + ".support_feedback_pending.json"
+    bot._SUPPORT_FEEDBACK_LOG.clear()
+    bot._SUPPORT_FEEDBACK_NEXT_ID = 1
+
 
 class FakeMessage:
     def __init__(self, text, thread_id=None, reply_to_message=None):
