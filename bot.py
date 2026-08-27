@@ -2972,21 +2972,37 @@ def _turn_announcement(session: sessions.Session) -> str:
     layout, within what Telegram's own plain-text formatting actually
     supports (no real columns/alignment -- Telegram has no fixed-width
     rendering outside a code block, so this doesn't fake one).
+
+    Real live follow-up request (2026-08-27, Coffee, dev-bridge
+    screenshot of this exact roster in a real fight): "For the players
+    party, can you only use first names in the battle. I want the
+    players HP to all be lined up like the enemies. Get rid of any
+    useless text that is taking up too much space." Enemy names
+    (already short/generic, e.g. "Goblin 1") are unaffected -- only
+    named PARTY members get shortened to their first name, which both
+    directly answers "first names only" and gets the party rows closer
+    in width to the enemy rows (real column alignment still isn't
+    possible in plain Telegram text, but shorter names wrap far less).
     """
+    def first_name(name: str) -> str:
+        return name.split(" ", 1)[0]
+
     current = session.current_participant()
-    label = f"{current['name']} (AI)" if current.get("is_ai") else current["name"]
+    current_name = first_name(current["name"]) if session.sides.get(current["telegram_user_id"]) == "party" else current["name"]
+    label = f"{current_name} (AI)" if current.get("is_ai") else current_name
     divider = "▫️▫️▫️▫️▫️▫️▫️▫️▫️▫️"
 
-    def roster_line(p: dict) -> str:
+    def roster_line(p: dict, shorten_name: bool) -> str:
+        name = first_name(p["name"]) if shorten_name else p["name"]
         tag = " (AI)" if p.get("is_ai") else ""
         hp_max = p.get("hp_max", p["hp_current"])
         dot = _hp_status_emoji(p["hp_current"], hp_max)
-        return f"{dot} **{p['name']}**{tag} — {p['hp_current']}/{hp_max} HP"
+        return f"{dot} **{name}**{tag} — {p['hp_current']}/{hp_max} HP"
 
     party_living = session.living_on_side("party")
     enemy_living = session.living_on_side("enemy")
-    party_roster = "\n".join(roster_line(p) for p in party_living) or "none left standing"
-    enemy_roster = "\n".join(roster_line(p) for p in enemy_living) or "none left standing"
+    party_roster = "\n".join(roster_line(p, shorten_name=True) for p in party_living) or "none left standing"
+    enemy_roster = "\n".join(roster_line(p, shorten_name=False) for p in enemy_living) or "none left standing"
 
     # Real live request (2026-08-08, Coffee): the front/back formation
     # split used to only ever get shown once, in the message announcing
@@ -7784,15 +7800,24 @@ def _format_formation_line(combatants: list[dict]) -> str | None:
     "make it clear so characters know who to target") -- shown once
     per fight rather than left implicit, so a player can actually
     decide to focus the back-row caster instead of just attacking
-    whoever the menu defaults to. Omitted entirely when every
-    combatant is front row (a solo fight, or nobody's customized
-    formations yet) -- nothing new to say.
+    whoever the menu defaults to. Omitted entirely when every combatant
+    is on the SAME row -- either all front (a solo fight, or nobody's
+    customized formations yet) or all back -- since there's no real
+    front/back split to describe either way, nothing new to say.
+
+    Real live request (2026-08-27, Coffee, dev-bridge screenshot: "Get
+    rid of any useless text that is taking up too much space in the
+    battle"): the all-back case used to still print a full "Front:
+    (none) — Back: <everyone>" line every single turn -- technically
+    accurate but zero decision-relevant information (there's no front
+    row drawing fire to weigh against), the same kind of clutter the
+    original all-front exemption already existed to avoid.
     """
     back = [c["name"] for c in combatants if c.get("formation_row") == "back"]
-    if not back:
-        return None
     front = [c["name"] for c in combatants if c.get("formation_row", "front") != "back"]
-    front_part = f"🛡️ Front: {', '.join(front)}" if front else "🛡️ Front: (none)"
+    if not back or not front:
+        return None
+    front_part = f"🛡️ Front: {', '.join(front)}"
     back_part = f"🔮 Back: {', '.join(back)}"
     return f"{front_part} — {back_part}"
 

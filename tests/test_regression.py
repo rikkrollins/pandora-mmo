@@ -3254,6 +3254,33 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(_deterministic_item_comparison_answer("How do I check my inventory or my quests?"))
         self.assertIsNone(_deterministic_item_comparison_answer("How do I attack?"))
 
+    def test_support_item_lookup_answers_a_rare_item_deterministically(self):
+        """
+        Real live bug (2026-08-27, Coffee dev-bridge: "You still have
+        not gotten an answer for support" -- traced to Sugar's "What is
+        a Godshard?" coming back "not a recognized element," a flat
+        hallucination even though Godshard is a real items.ITEMS entry
+        already present in the model's own grounding prompt). Bypasses
+        the model entirely for this exact question shape, answering
+        straight from the item's own real fields.
+        """
+        from ai.support_agent import _deterministic_item_lookup_answer, answer_support_question
+        answer = _deterministic_item_lookup_answer("What is a Godshard?")
+        self.assertIsNotNone(answer)
+        self.assertIn("Godshard", answer)
+        self.assertIn("mythic", answer.lower())
+        self.assertIn("never meant to be small enough to hold", answer)
+
+        # Full answer_support_question must also resolve this without
+        # ever reaching the model (no character/party context needed).
+        full_answer = answer_support_question("What is a Godshard?", None, None)
+        self.assertEqual(full_answer, answer)
+
+        # Must not false-positive on an ordinary question naming no real item.
+        self.assertIsNone(_deterministic_item_lookup_answer("What is a good strategy for this fight?"))
+        # Must not guess when the phrase names something that isn't a real item.
+        self.assertIsNone(_deterministic_item_lookup_answer("What is a Vorpal Blade?"))
+
     def test_support_weapon_comparison_uses_real_numbers_not_vague_flavor(self):
         """
         Real dev-bridge report (2026-08-20, Coffee): Charvenna asked
@@ -13496,6 +13523,72 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # One participant per line now, not comma-joined on one line.
         self.assertNotIn("HealthyAlly (AI), BloodiedAlly (AI)", text)
         sessions.end_session(-999)
+
+    def test_turn_announcement_shortens_party_names_but_not_enemy_names(self):
+        """
+        Real live follow-up (2026-08-27, Coffee, dev-bridge screenshot
+        of this exact roster in a real fight): "For the players party,
+        can you only use first names in the battle... Get rid of any
+        useless text that is taking up too much space." Party members
+        get shortened to their first name (both the roster lines and
+        the "whose turn" label when it's a party member's turn);
+        already-short/generic enemy names are untouched.
+        """
+        import sessions
+        sessions.end_session(-999)
+        leader_id = 950608
+        make_basic_character(leader_id, "Pip Thistledown", current_location="crossroads_tavern")
+        ally = {
+            "telegram_user_id": -5100013, "name": "Bram Ashfield", "is_ai": True,
+            "hp_current": 100, "hp_max": 100, "dexterity": 10,
+        }
+        enemy = {
+            "telegram_user_id": -5100014, "name": "The Root That Remembers",
+            "hp_current": 100, "hp_max": 100, "dexterity": 10,
+        }
+        leader = db.get_character(leader_id, -999)
+        leader["telegram_user_id"] = leader_id
+        session = sessions.start_session(
+            -999, [leader, ally, enemy],
+            {leader_id: "party", -5100013: "party", -5100014: "enemy"},
+        )
+        session.turn_order = [leader_id, -5100013, -5100014]
+
+        text = bot._turn_announcement(session)
+        self.assertIn("It's now **Pip**'s turn!", text)
+        self.assertIn("🟢 **Pip** —", text)
+        self.assertIn("🟢 **Bram** (AI) —", text)
+        self.assertNotIn("Thistledown", text)
+        self.assertNotIn("Ashfield", text)
+        # Enemy names stay full -- the request was scoped to the party.
+        self.assertIn("**The Root That Remembers**", text)
+        sessions.end_session(-999)
+
+    def test_formation_line_stays_silent_when_everyone_is_in_the_same_back_row(self):
+        """
+        Real live request (2026-08-27, Coffee, dev-bridge screenshot:
+        "Get rid of any useless text that is taking up too much space
+        in the battle"): the whole-party-in-back-row case used to still
+        print "Front: (none) — Back: <everyone>" every turn -- real
+        text, but zero decision-relevant information (there's no front
+        row to weigh against), the same clutter class the original
+        all-front exemption already existed to avoid.
+        """
+        all_back = [
+            {"name": "A", "formation_row": "back"},
+            {"name": "B", "formation_row": "back"},
+        ]
+        self.assertIsNone(bot._format_formation_line(all_back))
+
+        # A genuine split must still show, unaffected.
+        mixed = [
+            {"name": "A", "formation_row": "front"},
+            {"name": "B", "formation_row": "back"},
+        ]
+        line = bot._format_formation_line(mixed)
+        self.assertIsNotNone(line)
+        self.assertIn("Front: A", line)
+        self.assertIn("Back: B", line)
 
     def test_hp_status_emoji_matches_the_games_own_real_bloodied_threshold(self):
         """Grounded in the same real rules.combat.BLOODIED_HP_THRESHOLD the game already uses for narration, not an invented cutoff."""

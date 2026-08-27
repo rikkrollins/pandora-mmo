@@ -1155,6 +1155,58 @@ def _deterministic_item_comparison_answer(question: str, character: dict | None 
     return f"Neither {missing_text} exists in this game — not real items here."
 
 
+_ITEM_LOOKUP_QUESTION_WORDS = [
+    "what is a ", "what is an ", "what is the ", "what's a ", "what's an ", "what's the ",
+    "tell me about", "describe the", "describe a ", "describe an ",
+]
+
+
+def _deterministic_item_lookup_answer(question: str) -> str | None:
+    """
+    Real live bug (2026-08-27, Coffee dev-bridge: "You still have not
+    gotten an answer for support" -- traced back to Sugar's "What is a
+    Godshard?", which came back "not a recognized element within this
+    game's established mechanics," a flat hallucination even though
+    Godshard is a real items.ITEMS entry, already present in the exact
+    catalog text the model was given). Confirmed live: the grounding
+    prompt itself was correct -- _build_catalog_reference falls back to
+    the FULL items catalog for a question matching none of its topic
+    keywords, and "godshard" matches none of them, so Godshard's own
+    real line WAS in context. The model still missed a single fact
+    buried in a long list -- the same class of failure every other
+    _deterministic_* answer in this file exists to route around, not a
+    grounding-data gap. Bypasses the model entirely for a simple "what
+    is X" single-item lookup, answering straight from that item's own
+    real fields. Returns None (falls through to the LLM) for any
+    question that isn't this exact shape, or that doesn't unambiguously
+    name exactly one real item -- never guesses.
+    """
+    lowered = question.lower()
+    if not any(phrase in lowered for phrase in _ITEM_LOOKUP_QUESTION_WORDS):
+        return None
+    item_id = items_module.find_item_mentioned_in_text(question)
+    if item_id is None:
+        return None
+    item = items_module.get_item(item_id)
+    bits = [f"**{item['name']}** — a {item.get('rarity', 'common')} {item['type']}."]
+    if item.get("description"):
+        bits.append(item["description"])
+    mechanic_bits = []
+    if "damage_dice" in item:
+        mechanic_bits.append(f"deals {item['damage_dice']} damage")
+    if "heal_dice" in item:
+        mechanic_bits.append(f"heals {item['heal_dice']}")
+    if "ac_base" in item:
+        mechanic_bits.append(f"AC {item['ac_base']}")
+    if "ac_bonus" in item:
+        mechanic_bits.append(f"+{item['ac_bonus']} AC")
+    if item.get("price"):
+        mechanic_bits.append(f"worth {item['price']} gold")
+    if mechanic_bits:
+        bits.append(" ".join(mechanic_bits).capitalize() + ".")
+    return " ".join(bits)
+
+
 _QUEST_TASK_QUESTION_WORDS = [
     "next quest", "quest task", "what's my quest", "whats my quest",
     "current quest", "my objective", "what am i supposed to do", "what do i need to do",
@@ -1393,6 +1445,9 @@ def answer_support_question(
     comparison_answer = _deterministic_item_comparison_answer(question, character)
     if comparison_answer is not None:
         return comparison_answer
+    item_lookup_answer = _deterministic_item_lookup_answer(question)
+    if item_lookup_answer is not None:
+        return item_lookup_answer
     if character and any(w in lowered for w in _QUEST_TASK_QUESTION_WORDS):
         quest_answer = _deterministic_quest_task_answer(character)
         if quest_answer is not None:

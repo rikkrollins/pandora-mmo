@@ -2,6 +2,46 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.383] — Fixed a real dropped Support answer + battle roster cleanup
+
+Three real fixes, all from the same evening.
+
+**1. A restart could silently kill an in-flight Support answer.** Real
+live report (Coffee: "You still have not gotten an answer for
+support") -- traced to Sugar's "What is a Godshard?" question: the
+"Looking that up now" heads-up sent, then nothing. Root cause: a v1.27.380
+deploy restart landed WHILE that Ollama call was still in flight, and
+systemd's own default `TimeoutStopSec` (90s) is shorter than a real
+call on this hardware can take (up to ~160s+, and every ai/*.py HTTP
+call already uses a 200s timeout) -- the process got force-SIGKILLed
+mid-answer. `pandora-mmo-bot.service` now sets `TimeoutStopSec=210`,
+exceeding every real call's own ceiling, so a restart either lets an
+in-flight call finish and reply, or lets it hit its own timeout and
+log a real error -- never a silent kill. (Sugar's actual question was
+also answered for real in the Support topic as a one-off follow-up.)
+
+**2. Support could still hallucinate a real catalog item.** Investigating
+the above surfaced the actual reason Sugar's question failed even
+before the restart: the grounding prompt genuinely included Godshard's
+real catalog line, but the model still answered "not a recognized
+element" -- a fact lost in a long list, the same failure class every
+other `_deterministic_*` Support answer in this file exists to route
+around. New `_deterministic_item_lookup_answer`: a plain "what is
+[item]" question now resolves straight from that item's own real
+name/type/rarity/description fields, never reaching the model at all.
+
+**3. Battle roster cleanup.** Real live follow-up (Coffee, screenshot
+of the new v1.27.380 roster in a real fight): "For the players party,
+can you only use first names in the battle... Get rid of any useless
+text that is taking up too much space." Party members (not enemies,
+already short/generic names) now show by first name only, in both the
+roster and the "whose turn" label. The front/back formation line also
+no longer prints when the WHOLE party is in the same row (front-only
+was already silent; all-back printed a real but zero-decision-value
+"Front: (none) — Back: everyone" line every single turn).
+
+All three fail-then-pass verified with real executed tests.
+
 ## [1.27.382] — Trade add/remove names real candidates when genuinely ambiguous
 
 Real live dev-bridge report (Coffee): "I am trying to add items to the
