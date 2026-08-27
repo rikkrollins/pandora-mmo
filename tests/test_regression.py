@@ -2967,6 +2967,63 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                      "what weapons do i have"]:
             self.assertEqual(_keyword_fallback(text, [])["action"], "check_inventory", text)
 
+    async def test_inventory_sort_button_groups_into_the_four_real_categories(self):
+        """
+        Real live request (2026-08-27, Coffee: "create a function so i
+        can sort my inventory, maybe an auto-sort feature?... Battle
+        type, Support type, Magic type, Normal"). Grouping is grounded
+        only in each item's own real 'type' field (weapon/armor/shield
+        -> Battle, consumable -> Support, scroll/ring/amulet/wondrous
+        -> Magic, everything else -> Normal) -- never per-item
+        judgment. Persistent per-character (inventory_sort_mode),
+        toggled from the backpack screen's own Sort button.
+        """
+        user_id = 999930
+        make_basic_character(
+            user_id, "SortTester",
+            inventory={"longsword": 1, "healing_potion": 2, "ring_of_protection": 1, "iron_ore": 3},
+        )
+
+        sink = []
+        await bot._do_check_inventory(FakeUpdate(user_id, "check my inventory", sink))
+        plain = sink[-1]
+        # Default (off) mode: no category headers, just the flat list.
+        # (_safe_send converts **bold** markers into real Telegram
+        # MessageEntity objects and strips the literal asterisks from
+        # the sent text -- see _build_message_entities -- so the
+        # header text itself, not the markdown syntax, is what to check.)
+        self.assertNotIn("⚔️ Battle", plain)
+        self.assertIn("Longsword", plain)
+
+        sink.clear()
+        await bot.item_menu_callback(FakeCallbackUpdate(user_id, "item|sort|type", sink), DummyContext())
+        grouped = sink[-1]
+        battle_idx = grouped.index("⚔️ Battle")
+        support_idx = grouped.index("💚 Support")
+        magic_idx = grouped.index("✨ Magic")
+        normal_idx = grouped.index("📦 Normal")
+        longsword_idx = grouped.index("Longsword")
+        potion_idx = grouped.index("Healing Potion")
+        ring_idx = grouped.index("Ring of Protection")
+        ore_idx = grouped.index("Iron Ore")
+        # Real fixed section order (Battle, Support, Magic, Normal), and
+        # each item actually lands under its own real section.
+        self.assertTrue(battle_idx < support_idx < magic_idx < normal_idx)
+        self.assertTrue(battle_idx < longsword_idx < support_idx)
+        self.assertTrue(support_idx < potion_idx < magic_idx)
+        self.assertTrue(magic_idx < ring_idx < normal_idx)
+        self.assertTrue(normal_idx < ore_idx)
+
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["inventory_sort_mode"], "type")
+
+        # Toggling back off returns to the plain list, and the setting persists.
+        sink.clear()
+        await bot.item_menu_callback(FakeCallbackUpdate(user_id, "item|sort|off", sink), DummyContext())
+        self.assertNotIn("⚔️ Battle", sink[-1])
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["inventory_sort_mode"], "off")
+
     # -- Real live bug (2026-08-10, found via topic-activity monitoring):
     #    "Look at the shard of dim light in my inventory" matched
     #    check_inventory's "my inventory" trigger and dumped the whole

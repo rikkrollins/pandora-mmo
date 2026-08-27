@@ -16768,6 +16768,36 @@ async def _do_check_sheet(update: Update, target_name: str | None = None) -> Non
     )
 
 
+_INVENTORY_SORT_TYPE_TO_CATEGORY = {
+    "weapon": "Battle", "armor": "Battle", "shield": "Battle",
+    "consumable": "Support",
+    "scroll": "Magic", "ring": "Magic", "amulet": "Magic", "wondrous": "Magic",
+}
+_INVENTORY_SORT_CATEGORY_ORDER = ["Battle", "Support", "Magic", "Normal"]
+_INVENTORY_SORT_CATEGORY_ICON = {"Battle": "⚔️", "Support": "💚", "Magic": "✨", "Normal": "📦"}
+
+
+def _inventory_sort_category(item: dict | None) -> str:
+    """
+    Real, grounded 4-bucket mapping from an item's own real 'type'
+    field (2026-08-27, per Coffee: "create a function so i can sort my
+    inventory... Battle type, Support type, Magic type, Normal").
+    Every real item type maps unambiguously (weapon/armor/shield ->
+    Battle, consumable -> Support, scroll/ring/amulet/wondrous ->
+    Magic, everything else -- material/tool/quest_item/book/map ->
+    Normal) -- no per-item judgment calls, so this can never
+    misclassify one item differently than its same-type neighbors.
+    """
+    return _INVENTORY_SORT_TYPE_TO_CATEGORY.get((item or {}).get("type"), "Normal")
+
+
+def _inventory_sort_keyboard(character: dict) -> list[list[InlineKeyboardButton]]:
+    """One-tap toggle for the backpack's persistent grouped view (character.inventory_sort_mode)."""
+    if character.get("inventory_sort_mode") == "type":
+        return [[InlineKeyboardButton("📋 Plain Order", callback_data="item|sort|off")]]
+    return [[InlineKeyboardButton("🔀 Sort by Type", callback_data="item|sort|type")]]
+
+
 async def _do_check_inventory(update: Update) -> None:
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -16780,11 +16810,23 @@ async def _do_check_inventory(update: Update) -> None:
             "Your backpack is empty.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
-    lines = []
-    for item_id, qty in character["inventory"].items():
-        item = items_module.get_item(item_id)
-        name = item["name"] if item else item_id
-        lines.append(f"  {name} x{qty}")
+    if character.get("inventory_sort_mode") == "type":
+        grouped: dict[str, list[str]] = {cat: [] for cat in _INVENTORY_SORT_CATEGORY_ORDER}
+        for item_id, qty in character["inventory"].items():
+            item = items_module.get_item(item_id)
+            name = item["name"] if item else item_id
+            grouped[_inventory_sort_category(item)].append(f"  {name} x{qty}")
+        lines = []
+        for cat in _INVENTORY_SORT_CATEGORY_ORDER:
+            if grouped[cat]:
+                lines.append(f"{_INVENTORY_SORT_CATEGORY_ICON[cat]} **{cat}**")
+                lines.extend(grouped[cat])
+    else:
+        lines = []
+        for item_id, qty in character["inventory"].items():
+            item = items_module.get_item(item_id)
+            name = item["name"] if item else item_id
+            lines.append(f"  {name} x{qty}")
     item_rows = _item_keyboard(character)
     craft_rows = _craft_keyboard(character)
     # Scroll-cast buttons (2026-07-25, per Coffee: "No button for
@@ -16809,7 +16851,8 @@ async def _do_check_inventory(update: Update) -> None:
     # craft_rows non-None), which is the common case. list(...) on each
     # piece normalizes everything to the same type before combining.
     combined_rows = (
-        list(item_rows.inline_keyboard if item_rows else [])
+        _inventory_sort_keyboard(character)
+        + list(item_rows.inline_keyboard if item_rows else [])
         + list(craft_rows.inline_keyboard if craft_rows else [])
         + scroll_rows
         + list(give_rows.inline_keyboard if give_rows else [])
@@ -17016,6 +17059,15 @@ async def item_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
     await _safe_answer(query)
+
+    if action == "sort":
+        mode = parts[2] if len(parts) > 2 else "off"
+        character = db.get_character(update.effective_user.id, update.effective_chat.id)
+        if character is None:
+            return
+        db.update_character(update.effective_user.id, update.effective_chat.id, inventory_sort_mode=mode)
+        await _do_check_inventory(update)
+        return
 
     if action == "use":
         item_id = parts[2] if len(parts) > 2 else None

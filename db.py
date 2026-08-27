@@ -874,6 +874,14 @@ def init_db() -> None:
             conn.execute("ALTER TABLE characters ADD COLUMN spell_mastery_pct TEXT NOT NULL DEFAULT '{}'")
         if "element_mastery_pct" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN element_mastery_pct TEXT NOT NULL DEFAULT '{}'")
+        # Real live request (2026-08-27, Coffee: "create a function so i
+        # can sort my inventory... Battle type, Support type, Magic
+        # type, Normal") -- persistent per-character backpack view
+        # preference, toggled from the backpack screen's own Sort
+        # button. 'off' (plain insertion order) or 'type' (grouped into
+        # the 4 real buckets -- see bot.py's _INVENTORY_SORT_CATEGORY_*).
+        if "inventory_sort_mode" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN inventory_sort_mode TEXT NOT NULL DEFAULT 'off'")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:

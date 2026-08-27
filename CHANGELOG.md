@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.378] — Backpack sort-by-type button
+
+Real live request (Coffee, 2026-08-27): "create a function so i can
+sort my inventory, maybe an auto-sort feature? ... Battle type,
+Support type, Magic type, Normal -- U can sort them so they are
+easily accessable."
+
+The backpack screen now has a real "🔀 Sort by Type" button. Grouping
+is grounded only in each item's own real `type` field -- no per-item
+judgment calls, so nothing can be misclassified relative to its
+same-type neighbors:
+
+- **Battle**: weapon, armor, shield
+- **Support**: consumable
+- **Magic**: scroll, ring, amulet, wondrous
+- **Normal**: everything else (material, tool, quest_item, book, map)
+
+Persistent per-character (`inventory_sort_mode`, new `characters`
+column, default `off`), toggled from the backpack screen itself --
+once turned on, every future "check inventory" stays grouped until
+toggled back off.
+
+Fail-then-pass verified with a new test
+(`test_inventory_sort_button_groups_into_the_four_real_categories`).
+
 ## [1.27.377] — Real "Suggested Level" now shown for Chapters 5-8's quests
 
 Real live request (Coffee, 2026-08-27, from passing through Greymoor
