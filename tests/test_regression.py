@@ -2146,6 +2146,116 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         record = bot._find_trade_for_user(-999, a_id)
         self.assertEqual(record["party_a"]["items"].get("healing_potion"), 1)
 
+    async def test_trade_button_flow_add_item_pick_quantity(self):
+        """
+        Real live request (2026-08-27, Coffee: "can u add a button
+        system for the trades so i can click on the items/materials/
+        gold and choose quanity?"). Tapping Add to Trade -> an item ->
+        a quantity actually adds it, through the exact same
+        _mutate_trade_offer path free text already uses.
+        """
+        import sessions
+        sessions.end_session(-999)
+        a_id, b_id = 951011, 951012
+        make_basic_character(a_id, "ButtonTraderA", current_location="crossroads_tavern")
+        make_basic_character(b_id, "ButtonTraderB", current_location="crossroads_tavern")
+        db.add_item(a_id, -999, "healing_potion", 10)
+
+        sink = []
+        await bot._do_trade_request(FakeUpdate(a_id, "trade with ButtonTraderB", sink), "trade with ButtonTraderB")
+        record = bot._find_trade_for_user(-999, a_id)
+        trade_id = record["trade_id"]
+
+        sink2 = []
+        await bot.trade_menu_callback(FakeCallbackUpdate(a_id, f"trade|{trade_id}|addmenu", sink2), DummyContext())
+        markup = next(m for m in sink2 if m.startswith("<edit_markup:"))
+        self.assertIn("Healing Potion (have 10)", markup)
+
+        sink3 = []
+        await bot.trade_menu_callback(
+            FakeCallbackUpdate(a_id, f"trade|{trade_id}|pick|add|healing_potion", sink3), DummyContext(),
+        )
+        qty_markup = next(m for m in sink3 if m.startswith("<edit_markup:"))
+        self.assertIn(f"trade|{trade_id}|qty|add|healing_potion|10", qty_markup)  # "All" option present
+
+        sink4 = []
+        await bot.trade_menu_callback(
+            FakeCallbackUpdate(a_id, f"trade|{trade_id}|qty|add|healing_potion|5", sink4), DummyContext(),
+        )
+        record = bot._find_trade_for_user(-999, a_id)
+        self.assertEqual(record["party_a"]["items"].get("healing_potion"), 5)
+        after = db.get_character(a_id, -999)
+        self.assertEqual(after["inventory"].get("healing_potion", 0), 5)
+
+    async def test_trade_button_flow_add_and_remove_gold(self):
+        """Same button flow, for gold -- percentage-based amounts since gold totals vary wildly across characters."""
+        import sessions
+        sessions.end_session(-999)
+        a_id, b_id = 951013, 951014
+        make_basic_character(a_id, "GoldTraderA", current_location="crossroads_tavern", gold=1000)
+        make_basic_character(b_id, "GoldTraderB", current_location="crossroads_tavern")
+
+        sink = []
+        await bot._do_trade_request(FakeUpdate(a_id, "trade with GoldTraderB", sink), "trade with GoldTraderB")
+        record = bot._find_trade_for_user(-999, a_id)
+        trade_id = record["trade_id"]
+
+        sink2 = []
+        await bot.trade_menu_callback(FakeCallbackUpdate(a_id, f"trade|{trade_id}|addmenu", sink2), DummyContext())
+        markup = next(m for m in sink2 if m.startswith("<edit_markup:"))
+        self.assertIn("💰 Gold (have 1000)", markup)
+
+        sink3 = []
+        await bot.trade_menu_callback(
+            FakeCallbackUpdate(a_id, f"trade|{trade_id}|pick|add|__gold__", sink3), DummyContext(),
+        )
+        gold_markup = next(m for m in sink3 if m.startswith("<edit_markup:"))
+        self.assertIn(f"trade|{trade_id}|gold|add|1000", gold_markup)  # 100% option
+
+        sink4 = []
+        await bot.trade_menu_callback(
+            FakeCallbackUpdate(a_id, f"trade|{trade_id}|gold|add|250", sink4), DummyContext(),
+        )
+        record = bot._find_trade_for_user(-999, a_id)
+        self.assertEqual(record["party_a"]["gold"], 250)
+        self.assertEqual(db.get_character(a_id, -999)["gold"], 750)
+
+        # Remove flow, from the offer just made.
+        sink5 = []
+        await bot.trade_menu_callback(FakeCallbackUpdate(a_id, f"trade|{trade_id}|removemenu", sink5), DummyContext())
+        remove_markup = next(m for m in sink5 if m.startswith("<edit_markup:"))
+        self.assertIn("💰 Gold (have 250)", remove_markup)
+
+        sink6 = []
+        await bot.trade_menu_callback(
+            FakeCallbackUpdate(a_id, f"trade|{trade_id}|pick|remove|__gold__", sink6), DummyContext(),
+        )
+        sink7 = []
+        await bot.trade_menu_callback(
+            FakeCallbackUpdate(a_id, f"trade|{trade_id}|gold|remove|250", sink7), DummyContext(),
+        )
+        record = bot._find_trade_for_user(-999, a_id)
+        self.assertEqual(record["party_a"]["gold"], 0)
+        self.assertEqual(db.get_character(a_id, -999)["gold"], 1000)
+
+    async def test_trade_button_addmenu_alerts_when_nothing_to_offer(self):
+        """An empty backpack and no gold -> a real alert, not a dead-end empty keyboard."""
+        import sessions
+        sessions.end_session(-999)
+        a_id, b_id = 951015, 951016
+        make_basic_character(a_id, "EmptyTraderA", current_location="crossroads_tavern", gold=0)
+        make_basic_character(b_id, "EmptyTraderB", current_location="crossroads_tavern")
+
+        sink = []
+        await bot._do_trade_request(FakeUpdate(a_id, "trade with EmptyTraderB", sink), "trade with EmptyTraderB")
+        record = bot._find_trade_for_user(-999, a_id)
+        trade_id = record["trade_id"]
+
+        sink2 = []
+        await bot.trade_menu_callback(FakeCallbackUpdate(a_id, f"trade|{trade_id}|addmenu", sink2), DummyContext())
+        self.assertTrue(any("Nothing to add" in m for m in sink2))
+        self.assertFalse(any(m.startswith("<edit_markup:") for m in sink2))
+
     async def test_trade_add_names_real_candidates_when_genuinely_ambiguous(self):
         """
         Real live bug (2026-08-27, Coffee dev-bridge: "I am trying to

@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.384] — Real button-driven trade system
+
+Real live request (Coffee): "can u add a button system for the trades
+so i can click on the items/materials/gold and choose quanity?"
+
+The trade screen's ✅ Accept / ❌ Cancel buttons now have real ➕ Add to
+Trade / ➖ Remove from Trade siblings:
+
+- Tapping Add/Remove opens a real picker listing every real candidate
+  -- your own backpack when adding, or whatever's already sitting in
+  your own offer when removing -- plus a real 💰 Gold option whenever
+  there's gold to move.
+- Tapping an item opens a quantity picker (1/5/10/All, deduped and
+  capped at what's actually available -- same shape as the shop's own
+  quantity buttons).
+- Tapping Gold opens a percentage-based picker (10/25/50/100% of
+  what's available) instead of fixed amounts, since gold totals in
+  this game range from a few coins to hundreds of thousands.
+- Every tap dispatches through the exact same `_mutate_trade_offer`
+  free-text path ("add 5 X to the trade") already handles -- no
+  duplicated trade logic, so button and text stay in perfect sync.
+- An empty backpack with no gold gets a real "nothing to add" alert
+  instead of a dead-end empty keyboard.
+
+The existing free-text flow is completely unchanged -- this is a
+purely additive faster path alongside it.
+
+Fail-then-pass verified with real executed tests.
+
 ## [1.27.383] — Fixed a real dropped Support answer + battle roster cleanup
 
 Three real fixes, all from the same evening.

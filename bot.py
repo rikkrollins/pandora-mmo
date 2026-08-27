@@ -5214,10 +5214,70 @@ def _new_trade_id() -> str:
 
 
 def _trade_keyboard(trade_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Accept", callback_data=f"trade|{trade_id}|accept"),
-        InlineKeyboardButton("❌ Cancel", callback_data=f"trade|{trade_id}|cancel"),
-    ]])
+    """
+    Real live request (2026-08-27, Coffee: "can u add a button system
+    for the trades so i can click on the items/materials/gold and
+    choose quantity?"). Add/Remove open a real item picker (see
+    _trade_item_picker_keyboard) -- both dispatch through the exact
+    same _mutate_trade_offer text handler free-text "add/remove X to/
+    from the trade" already uses, never duplicated trade logic.
+    """
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ Add to Trade", callback_data=f"trade|{trade_id}|addmenu"),
+         InlineKeyboardButton("➖ Remove from Trade", callback_data=f"trade|{trade_id}|removemenu")],
+        [InlineKeyboardButton("✅ Accept", callback_data=f"trade|{trade_id}|accept"),
+         InlineKeyboardButton("❌ Cancel", callback_data=f"trade|{trade_id}|cancel")],
+    ])
+
+
+def _trade_item_picker_keyboard(trade_id: str, mode: str, character: dict, side: dict) -> InlineKeyboardMarkup | None:
+    """
+    One button per real candidate -- the tapper's own carried items (a
+    quantity > 0 in their real inventory) when adding, or whatever's
+    already sitting in their own side of THIS trade when removing --
+    plus a real 💰 Gold option when there's real gold to move. Returns
+    None when there's genuinely nothing to offer (adding with an empty
+    backpack and no gold, or removing from an empty offer) so the
+    caller can give a real "nothing to add" message instead of an
+    empty keyboard.
+    """
+    candidate_ids = list(character["inventory"].keys()) if mode == "add" else list(side["items"].keys())
+    gold_available = character["gold"] if mode == "add" else side["gold"]
+    buttons = []
+    for item_id in candidate_ids:
+        qty = character["inventory"].get(item_id, 0) if mode == "add" else side["items"].get(item_id, 0)
+        if qty <= 0:
+            continue
+        item = items_module.get_item(item_id)
+        name = item["name"] if item else item_id
+        buttons.append([InlineKeyboardButton(f"{name} (have {qty})", callback_data=f"trade|{trade_id}|pick|{mode}|{item_id}")])
+    if gold_available > 0:
+        buttons.append([InlineKeyboardButton(f"💰 Gold (have {gold_available})", callback_data=f"trade|{trade_id}|pick|{mode}|__gold__")])
+    if not buttons:
+        return None
+    buttons.append([InlineKeyboardButton("« Back", callback_data=f"trade|{trade_id}|back")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def _trade_quantity_keyboard(trade_id: str, mode: str, item_id: str, max_qty: int) -> InlineKeyboardMarkup:
+    """1/5/10/All, deduped and capped at what's actually available -- same shape as the shop's own _quantity_keyboard."""
+    options = sorted({q for q in (1, 5, 10) if q < max_qty} | {max_qty})
+    buttons = [[InlineKeyboardButton(str(qty), callback_data=f"trade|{trade_id}|qty|{mode}|{item_id}|{qty}")] for qty in options]
+    buttons.append([InlineKeyboardButton("« Back", callback_data=f"trade|{trade_id}|{mode}menu")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def _trade_gold_keyboard(trade_id: str, mode: str, available_gold: int) -> InlineKeyboardMarkup:
+    """
+    Percentage-based amounts (10/25/50/100%) rather than fixed numbers
+    -- gold totals in this game range from a few coins to hundreds of
+    thousands, so a flat "10/50/100" option set (the item quantity
+    convention) would be meaningless at either extreme.
+    """
+    options = sorted({max(1, round(available_gold * pct)) for pct in (0.1, 0.25, 0.5, 1.0)})
+    buttons = [[InlineKeyboardButton(str(amount), callback_data=f"trade|{trade_id}|gold|{mode}|{amount}")] for amount in options]
+    buttons.append([InlineKeyboardButton("« Back", callback_data=f"trade|{trade_id}|{mode}menu")])
+    return InlineKeyboardMarkup(buttons)
 
 
 def _trade_side_lines(side: dict) -> str:
@@ -5248,8 +5308,9 @@ def _trade_message_text(record: dict) -> str:
         f"🤝 **Trade: {record['party_a']['name']} ↔ {record['party_b']['name']}**\n\n"
         f"{_trade_side_lines(record['party_a'])}\n\n"
         f"{_trade_side_lines(record['party_b'])}\n\n"
-        f"Say \"add X to the trade\" / \"remove X from the trade\", then \"accept the trade\" "
-        f"once you're happy with it — changing an offer un-accepts both sides."
+        f"Tap ➕/➖ below to pick items or gold by button, or say \"add X to the trade\" / "
+        f"\"remove X from the trade\" — then \"accept the trade\" once you're happy with it, "
+        f"changing an offer un-accepts both sides."
     )
 
 
@@ -5580,8 +5641,76 @@ async def trade_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     await _safe_answer(query)
     if action == "accept":
         await _trade_accept_side(update, chat_id, telegram_user_id)
-    elif action == "cancel":
+        return
+    if action == "cancel":
         await _trade_cancel_trade(update, chat_id, telegram_user_id)
+        return
+    if action == "back":
+        await _safe_edit_markup(query, _trade_keyboard(trade_id))
+        return
+
+    # Real live request (2026-08-27, Coffee: "can u add a button system
+    # for the trades so i can click on the items/materials/gold and
+    # choose quanity?"). addmenu/removemenu show a real item picker;
+    # pick opens a quantity (or gold-amount) picker for whatever was
+    # tapped; qty/gold dispatch the actual add/remove through the exact
+    # same _mutate_trade_offer free text already uses ("add 5 X to the
+    # trade"), never duplicated trade logic -- see that function's own
+    # confirmation + refreshed trade card, sent as a normal new message
+    # same as the free-text flow already does.
+    character = db.get_character(telegram_user_id, chat_id)
+    if character is None:
+        return
+    side_key = _trade_side_key(record, telegram_user_id)
+    side = record[side_key]
+
+    if action in ("addmenu", "removemenu"):
+        mode = "add" if action == "addmenu" else "remove"
+        keyboard = _trade_item_picker_keyboard(trade_id, mode, character, side)
+        if keyboard is None:
+            await _safe_answer(
+                query,
+                "Nothing to add — your backpack and gold are both empty." if mode == "add"
+                else "Nothing offered yet to remove.",
+                show_alert=True,
+            )
+            return
+        await _safe_edit_markup(query, keyboard)
+        return
+
+    if action == "pick" and len(parts) >= 5:
+        mode, item_id = parts[3], parts[4]
+        if item_id == "__gold__":
+            available = character["gold"] if mode == "add" else side["gold"]
+            if available <= 0:
+                await _safe_answer(query, "No gold available for that.", show_alert=True)
+                return
+            await _safe_edit_markup(query, _trade_gold_keyboard(trade_id, mode, available))
+            return
+        max_qty = character["inventory"].get(item_id, 0) if mode == "add" else side["items"].get(item_id, 0)
+        if max_qty <= 0:
+            await _safe_answer(query, "You don't have that anymore.", show_alert=True)
+            return
+        await _safe_edit_markup(query, _trade_quantity_keyboard(trade_id, mode, item_id, max_qty))
+        return
+
+    if action == "qty" and len(parts) >= 6:
+        mode, item_id, qty_text = parts[3], parts[4], parts[5]
+        item = items_module.get_item(item_id)
+        if item is None or not qty_text.isdigit():
+            return
+        verb = "add" if mode == "add" else "remove"
+        preposition = "to" if mode == "add" else "from"
+        await _mutate_trade_offer(update, f"{verb} {qty_text} {item['name']} {preposition} the trade", adding=(mode == "add"))
+        return
+
+    if action == "gold" and len(parts) >= 5:
+        mode, amount_text = parts[3], parts[4]
+        if not amount_text.isdigit():
+            return
+        verb = "add" if mode == "add" else "remove"
+        preposition = "to" if mode == "add" else "from"
+        await _mutate_trade_offer(update, f"{verb} {amount_text} gold {preposition} the trade", adding=(mode == "add"))
 
 
 async def _check_pending_trades(bot) -> None:
