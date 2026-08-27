@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.370] — Fix a real 2nd-order bug in the stranded-companion resync itself
+
+Found via a self-improvement monitoring pass (dev-bridge: "Why isn't
+borin in the party?"). The v1.27.367 resync fix excluded any OTHER
+party member currently mid-combat from its location-consensus vote,
+instead of treating that as "can't tell right now." Live DB confirmed
+the real failure: while most of the party fought a boss together, a
+long-untouched human alt (not dead, not benched, just never moved)
+became the ONLY remaining voter and won a false single-location
+consensus, actively resyncing Borin to HER stale location instead of
+the real party's. Fixed: if any other real, non-dead, non-benched
+party member is mid-combat right now, the whole party group is
+skipped that tick rather than trusting a skewed minority vote.
+
 ## [1.27.369] — "Auto equip [companion name]" no longer swallowed as talk_npc
 
 Real dev-bridge report (Coffee): "Auto equip Borin Ironjaw" replied

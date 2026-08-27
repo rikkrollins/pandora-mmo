@@ -15420,6 +15420,59 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         sessions.end_session(chat_id)
 
+    async def test_resync_does_not_let_a_lone_uninvolved_member_decide_while_others_fight(self):
+        """
+        Real live bug (2026-08-27, self-improvement monitoring pass,
+        dev-bridge: "Why isn't borin in the party?"). The original
+        version of this function EXCLUDED any other member currently
+        mid-combat from its "consensus" vote instead of treating that
+        as "can't tell right now" -- live reproduction: most of a real
+        party was fighting a boss together while one long-untouched
+        human alt character (not dead, not benched, just never moved)
+        sat alone at a totally different location. That alt became the
+        ONLY remaining voter and "won" a false single-location
+        consensus, actively resyncing Borin to the WRONG place. Now:
+        any other real, non-dead, non-benched member being mid-combat
+        makes the whole party's location untrustworthy this tick, so
+        nobody in the party gets resynced until things settle.
+        """
+        import sessions
+        from unittest.mock import patch
+        chat_id = -995
+        sessions.end_session(chat_id)
+        user_id = 999923
+        make_basic_character(user_id, "StragglerLeader4", current_location="whispering_wood_deep_glade", chat_id=chat_id)
+        sink = []
+        await bot._do_recruit_npc(FakeUpdate(user_id, "recruit Borin Ironjaw", sink, chat_id=chat_id), "Borin Ironjaw")
+        await bot._do_recruit_npc(FakeUpdate(user_id, "recruit Sarah", sink, chat_id=chat_id), "Sarah")
+        borin = next(p for p in bot._get_party_members(chat_id) if p["name"] == "Borin Ironjaw")
+        sera = next(p for p in bot._get_party_members(chat_id) if p["name"] == "Sarah")
+
+        # Borin is genuinely stranded at a stale location -- the real
+        # scenario this whole function exists to fix.
+        db.move_character(borin["telegram_user_id"], chat_id, "crossroads_tavern")
+        # Sarah ("the lone uninvolved member") never moved either, but
+        # is NOT in combat -- she's the one whose stale location must
+        # NOT be trusted as "the" consensus just because everyone else
+        # (the leader) happens to be busy fighting.
+        db.move_character(sera["telegram_user_id"], chat_id, "stonearch_bridge")
+
+        boss = {"telegram_user_id": -3_500_002, "name": "A Stray Wolf", "dexterity": 12, "is_ai": 1}
+        session = sessions.start_session(
+            chat_id, [db.get_character(user_id, chat_id), boss],
+            {user_id: "party", boss["telegram_user_id"]: "enemy"},
+        )
+        session.turn_order = [user_id, boss["telegram_user_id"]]
+
+        with patch("bot.db.get_all_chat_ids", return_value=[chat_id]):
+            bot._resync_stranded_ai_companions()
+
+        self.assertEqual(
+            db.get_character(borin["telegram_user_id"], chat_id)["current_location"], "crossroads_tavern",
+            "must not resync Borin to Sarah's stale location just because the leader is mid-combat",
+        )
+        sessions.end_session(chat_id)
+
     async def test_resync_skips_when_the_rest_of_the_party_disagrees_on_location(self):
         """If the OTHER active party members aren't even in agreement, there's no single right place to send a straggler -- skip rather than guess."""
         import sessions

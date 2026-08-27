@@ -11618,16 +11618,32 @@ def _resync_stranded_ai_companions() -> None:
                 members_by_party.setdefault(party_id, []).append(character)
 
         for members in members_by_party.values():
+            others_template = [m for m in members if not m.get("is_dead") and not m.get("is_benched")]
+            # Real live bug found 2026-08-27 (self-improvement monitoring
+            # pass, dev-bridge: "Why isn't borin in the party?"): the
+            # original version of this loop EXCLUDED any other member
+            # currently mid-combat from the vote instead of treating
+            # that as "can't tell right now" -- when most of a real
+            # party was off fighting a boss together, the one real but
+            # long-inactive alt character left sitting at a totally
+            # different spot (a forgotten human alt, not dead or
+            # benched) became the ONLY remaining voter and "won" a false
+            # single-location consensus, actively resyncing Borin to
+            # the WRONG place. Now: if ANY other real, non-dead,
+            # non-benched party member is mid-combat right now, the
+            # whole party's location can't be trusted as settled, so
+            # every companion in this party group is skipped this tick
+            # rather than trusting a skewed minority.
+            if any(_in_active_combat(m["telegram_user_id"], chat_id) for m in others_template):
+                continue
             for companion in members:
                 if not companion.get("is_ai") or companion.get("is_dead") or companion.get("is_benched"):
                     continue
                 if _in_active_combat(companion["telegram_user_id"], chat_id):
                     continue
                 others_locations = {
-                    m["current_location"] for m in members
+                    m["current_location"] for m in others_template
                     if m["telegram_user_id"] != companion["telegram_user_id"]
-                    and not m.get("is_dead") and not m.get("is_benched")
-                    and not _in_active_combat(m["telegram_user_id"], chat_id)
                 }
                 if len(others_locations) == 1:
                     consensus_location = next(iter(others_locations))
