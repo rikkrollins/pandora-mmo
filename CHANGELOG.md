@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.371] — "Below the Cairn" no longer renders on top of Market Row
+
+Real live report (Coffee, dev-bridge): "the location below the cairn
+seems to move the tile on top of the market row." Confirmed: Below the
+Cairn's own `layer` field already said "underground", but it was
+filed under campaign.json's top-level "surface" bucket -- the one the
+visual map actually reads for the Surface screen -- and shared the
+placeholder grid_position (0,0) with Crossroads Tavern's own hub. Its
+two deeper siblings in the same descent chain (The Unopened Seal, The
+Last Question) had the identical bucket/coordinate problem.
+
+- All three moved into the real "underground" bucket (matching Below
+  the Cairn's own layer field, and its sibling Sunken Barrow/Barrow
+  Depths' existing placement) with real, non-colliding coordinates.
+  The Unopened Seal/Last Question keep their own `layer: "surface"`
+  field exactly as authored -- only which map they render on changed,
+  not their darkness/weather behavior.
+- Found the same placeholder-(0,0)-collision pattern in ~30 other
+  locations across other zones (Goblin Warrens, Sunken Root Caverns,
+  Wordless Choir, Unmoored Isle) -- not touched in this pass, flagged
+  as a real follow-up: a proper map-wide coordinate pass derived from
+  each location's actual `connections`/`directions` graph.
+
 ## [1.27.370] — Fix a real 2nd-order bug in the stranded-companion resync itself
 
 Found via a self-improvement monitoring pass (dev-bridge: "Why isn't

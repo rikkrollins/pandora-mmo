@@ -15564,6 +15564,53 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             trigger = quest.get("trigger", {})
             self.assertNotEqual(trigger.get("location"), "greymoor_downs_below_the_cairn", quest_id)
 
+    def test_below_the_cairn_lives_in_its_own_real_underground_layer_not_surface(self):
+        """
+        Real live report (2026-08-27, dev-bridge screenshot): "the
+        location below the cairn seems to move the tile on top of the
+        market row" -- confirmed live: greymoor_downs_below_the_cairn's
+        own `layer` field already said "underground", but it was filed
+        under campaign.json's top-level "surface" bucket (the one
+        _do_show_visual_map's map_menu_callback iterates for the
+        Surface map), AND it shared the placeholder grid_position (0,0)
+        with Crossroads Tavern's own hub -- landing its tile squarely
+        on the surface map, one row below Market Row, instead of not
+        appearing there at all. Its two deeper siblings (the_unopened_
+        seal/the_last_question) had the exact same bucket/grid_position
+        problem, just with their own `layer` field already (and still)
+        saying "surface" -- moved to the same "underground" BUCKET for
+        real map-display consistency (this whole shaft shouldn't show
+        up on the overworld map at all) without touching their `layer`
+        FIELD, since that's what actually drives darkness/weather
+        behavior and changing it would be a real, separate gameplay
+        change nobody asked for. Confirms all three real rooms in this
+        descent chain are filed together and none collide with
+        anything else in their bucket.
+        """
+        self.assertIn("greymoor_downs_below_the_cairn", bot.CAMPAIGN["locations"]["underground"])
+        self.assertIn("greymoor_downs_the_unopened_seal", bot.CAMPAIGN["locations"]["underground"])
+        self.assertIn("greymoor_downs_the_last_question", bot.CAMPAIGN["locations"]["underground"])
+        for lid in ("greymoor_downs_below_the_cairn", "greymoor_downs_the_unopened_seal", "greymoor_downs_the_last_question"):
+            self.assertNotIn(lid, bot.CAMPAIGN["locations"]["surface"])
+        # Their own `layer` field (darkness/weather) must be untouched.
+        self.assertEqual(bot.CAMPAIGN["locations"]["underground"]["greymoor_downs_below_the_cairn"]["layer"], "underground")
+        self.assertEqual(bot.CAMPAIGN["locations"]["underground"]["greymoor_downs_the_unopened_seal"]["layer"], "surface")
+        self.assertEqual(bot.CAMPAIGN["locations"]["underground"]["greymoor_downs_the_last_question"]["layer"], "surface")
+
+        for layer_name, layer_locs in bot.CAMPAIGN["locations"].items():
+            coords = {}
+            for lid, loc in layer_locs.items():
+                gp = loc.get("grid_position")
+                if gp is not None:
+                    coords.setdefault((gp["x"], gp["y"]), []).append(lid)
+            for lid in ("greymoor_downs_below_the_cairn", "greymoor_downs_the_unopened_seal", "greymoor_downs_the_last_question"):
+                loc = layer_locs.get(lid)
+                if loc is None:
+                    continue
+                gp = loc["grid_position"]
+                collisions = coords[(gp["x"], gp["y"])]
+                self.assertEqual(collisions, [lid], f"{lid} still collides with {collisions} in the {layer_name} layer")
+
     # -- Racial traits audit (2026-07-16): only Half-Orc's traits were
     #    ever mechanically wired; every other race's signature traits
     #    were pure flavor text in races.py, confirmed inert by grep.

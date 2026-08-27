@@ -490,44 +490,6 @@
           "y": 2
         }
       },
-      "greymoor_downs_below_the_cairn": {
-        "name": "Below the Cairn",
-        "layer": "underground",
-        "description": "A narrow shaft under the cairn's foundation stone, dug by hand and refilled by hand, over and over, by whoever keeps coming back. Nothing down here looks like it's resting.",
-        "connections": [
-          "greymoor_downs_the_unopened_seal"
-        ],
-        "ascends_to": "greymoor_downs_lonely_cairn",
-        "interactables": {
-          "the_refilled_shaft": {
-            "name": "the shaft's carefully refilled walls",
-            "description": "Packed and re-packed so many times the dirt's gone smooth. Somebody keeps digging this back open, and somebody keeps closing it again."
-          },
-          "the_wedged_marker": {
-            "name": "a weather-stained marker, wedged sideways into the shaft wall",
-            "description": "Not local stone — carried here, then left. Scratched into its face, in a hand that matches nothing else down here, is a story about someone called Pandora, who was given a box she never asked for and told only that she must never open it — and who spent the rest of her life proving that being told 'never' isn't the same as being told 'why.' The marker doesn't say what was inside. It doesn't say she opened it, either. It just says she kept the box, and kept asking, until the day she didn't need an answer anymore. Nothing else here explains why it's buried under a cairn on the far side of a world it clearly wasn't carved in."
-          }
-        },
-        "directions": {
-          "down": "greymoor_downs_the_unopened_seal"
-        },
-        "story_gates": {
-          "greymoor_downs_the_unopened_seal": {
-            "requires_defeated_monster": [
-              "the_waiting_shape",
-              "the_unrepeating",
-              "the_unbegun"
-            ]
-          }
-        },
-        "monsters": [
-          "the_waiting_dark"
-        ],
-        "grid_position": {
-          "x": 0,
-          "y": 0
-        }
-      },
       "greymoor_downs_broken_watchtower": {
         "name": "The Broken Watchtower",
         "layer": "surface",
@@ -1043,65 +1005,6 @@
         },
         "grid_position": {
           "x": 3,
-          "y": 0
-        }
-      },
-      "greymoor_downs_the_unopened_seal": {
-        "name": "The Unopened Seal",
-        "layer": "surface",
-        "description": "Past the shaft's carefully refilled walls, past the marker no one still living can properly read, the digging finally reaches something that was never dirt to begin with — a seal, still closed, exactly the way it was left. Whoever kept coming back down here never actually opened it. They just kept checking that it hadn't opened itself.",
-        "connections": [
-          "greymoor_downs_below_the_cairn",
-          "greymoor_downs_the_last_question"
-        ],
-        "directions": {
-          "up": "greymoor_downs_below_the_cairn",
-          "down": "greymoor_downs_the_last_question"
-        },
-        "requires_rebirth_count": 10,
-        "interactables": {
-          "the_seal_itself": {
-            "name": "the still-closed seal",
-            "description": "\"Everyone who opens me finds exactly what they were afraid of, and exactly what they needed. What am I?\" -- worn into the seal's face in the same hand as the marker up above, in a script that has, somehow, gotten easier to read the further down you've come."
-          }
-        },
-        "monsters": [
-          "the_unopened"
-        ],
-        "story_gates": {
-          "greymoor_downs_the_last_question": {
-            "requires_companion_trust": {
-              "pair": ["pip_thistledown", "grask_emberscale"],
-              "min_affinity": 40
-            }
-          }
-        },
-        "grid_position": {
-          "x": 0,
-          "y": 0
-        }
-      },
-      "greymoor_downs_the_last_question": {
-        "name": "The Last Question",
-        "layer": "surface",
-        "description": "Whatever the seal was built to keep in is, impossibly, still exactly what was sealed in the first place — old beyond the world it's buried under, patient beyond every name anyone's ever given the things that came after it, and, for the first time in longer than waiting has meant anything, finally about to be asked something back.",
-        "connections": [
-          "greymoor_downs_the_unopened_seal"
-        ],
-        "directions": {
-          "up": "greymoor_downs_the_unopened_seal"
-        },
-        "monsters": [
-          "the_unasked"
-        ],
-        "interactables": {
-          "the_thing_itself": {
-            "name": "the thing the seal was built to hold",
-            "description": "Every quiet, patient, waiting thing you've ever fought before this was wearing a piece of this. This is the whole of it, finally in one place."
-          }
-        },
-        "grid_position": {
-          "x": 0,
           "y": 0
         }
       }
@@ -2419,6 +2322,103 @@
         "grid_position": {
           "x": 0,
           "y": 3
+        }
+      },
+      "greymoor_downs_below_the_cairn": {
+        "name": "Below the Cairn",
+        "layer": "underground",
+        "description": "A narrow shaft under the cairn's foundation stone, dug by hand and refilled by hand, over and over, by whoever keeps coming back. Nothing down here looks like it's resting.",
+        "connections": [
+          "greymoor_downs_the_unopened_seal"
+        ],
+        "ascends_to": "greymoor_downs_lonely_cairn",
+        "interactables": {
+          "the_refilled_shaft": {
+            "name": "the shaft's carefully refilled walls",
+            "description": "Packed and re-packed so many times the dirt's gone smooth. Somebody keeps digging this back open, and somebody keeps closing it again."
+          },
+          "the_wedged_marker": {
+            "name": "a weather-stained marker, wedged sideways into the shaft wall",
+            "description": "Not local stone — carried here, then left. Scratched into its face, in a hand that matches nothing else down here, is a story about someone called Pandora, who was given a box she never asked for and told only that she must never open it — and who spent the rest of her life proving that being told 'never' isn't the same as being told 'why.' The marker doesn't say what was inside. It doesn't say she opened it, either. It just says she kept the box, and kept asking, until the day she didn't need an answer anymore. Nothing else here explains why it's buried under a cairn on the far side of a world it clearly wasn't carved in."
+          }
+        },
+        "directions": {
+          "down": "greymoor_downs_the_unopened_seal"
+        },
+        "story_gates": {
+          "greymoor_downs_the_unopened_seal": {
+            "requires_defeated_monster": [
+              "the_waiting_shape",
+              "the_unrepeating",
+              "the_unbegun"
+            ]
+          }
+        },
+        "monsters": [
+          "the_waiting_dark"
+        ],
+        "grid_position": {
+          "x": 2,
+          "y": 3
+        }
+      },
+      "greymoor_downs_the_unopened_seal": {
+        "name": "The Unopened Seal",
+        "layer": "surface",
+        "description": "Past the shaft's carefully refilled walls, past the marker no one still living can properly read, the digging finally reaches something that was never dirt to begin with — a seal, still closed, exactly the way it was left. Whoever kept coming back down here never actually opened it. They just kept checking that it hadn't opened itself.",
+        "connections": [
+          "greymoor_downs_below_the_cairn",
+          "greymoor_downs_the_last_question"
+        ],
+        "directions": {
+          "up": "greymoor_downs_below_the_cairn",
+          "down": "greymoor_downs_the_last_question"
+        },
+        "requires_rebirth_count": 10,
+        "interactables": {
+          "the_seal_itself": {
+            "name": "the still-closed seal",
+            "description": "\"Everyone who opens me finds exactly what they were afraid of, and exactly what they needed. What am I?\" -- worn into the seal's face in the same hand as the marker up above, in a script that has, somehow, gotten easier to read the further down you've come."
+          }
+        },
+        "monsters": [
+          "the_unopened"
+        ],
+        "story_gates": {
+          "greymoor_downs_the_last_question": {
+            "requires_companion_trust": {
+              "pair": ["pip_thistledown", "grask_emberscale"],
+              "min_affinity": 40
+            }
+          }
+        },
+        "grid_position": {
+          "x": 2,
+          "y": 4
+        }
+      },
+      "greymoor_downs_the_last_question": {
+        "name": "The Last Question",
+        "layer": "surface",
+        "description": "Whatever the seal was built to keep in is, impossibly, still exactly what was sealed in the first place — old beyond the world it's buried under, patient beyond every name anyone's ever given the things that came after it, and, for the first time in longer than waiting has meant anything, finally about to be asked something back.",
+        "connections": [
+          "greymoor_downs_the_unopened_seal"
+        ],
+        "directions": {
+          "up": "greymoor_downs_the_unopened_seal"
+        },
+        "monsters": [
+          "the_unasked"
+        ],
+        "interactables": {
+          "the_thing_itself": {
+            "name": "the thing the seal was built to hold",
+            "description": "Every quiet, patient, waiting thing you've ever fought before this was wearing a piece of this. This is the whole of it, finally in one place."
+          }
+        },
+        "grid_position": {
+          "x": 2,
+          "y": 5
         }
       },
       "whispering_wood_hollow_threshold": {
