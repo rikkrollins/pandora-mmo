@@ -2,6 +2,39 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.377] — Real "Suggested Level" now shown for Chapters 5-8's quests
+
+Real live request (Coffee, 2026-08-27, from passing through Greymoor
+Downs last night): "quests that would pop up, but no Avg lv was
+posted beside them so it is unclear to the player when they shud do
+them... Maybe post an avg lvl needed to complete the quest?"
+
+Chapters 5-8 (goblin_warrens, sunken_root_caverns, stonearch_gorge,
+greymoor_downs) already have a real, Coffee-confirmed level-band model
+from the 2026-08-19 chapter-leveling pass (v1.27.263-266) -- but their
+`required_level` was left at the 99 placeholder used for genuinely
+unbanded chapters (9-14), so `_quest_suggested_level` fell back to a
+bare "Chapter N" label with no actual number to plan around. Wired the
+real, already-confirmed band floors in:
+
+- Chapter 5 (goblin_warrens): 40+
+- Chapter 6 (sunken_root_caverns): 50+
+- Chapter 7 (stonearch_gorge): 60+
+- Chapter 8 (greymoor_downs): 75+ -- covers Kess's whole quest chain
+
+Chapters 9-14 are untouched -- still genuinely unbanded, future work,
+not something to guess a number for.
+
+(Also asked about: showing a quest's position within a side-quest
+chain. Checked -- there's no real multi-step side-quest chain data
+model to ground that in today; `borins_blackthorn_warning`'s own
+`requires_completed_quest` is the only such link outside the 14 main
+story arcs, which already get their own real "Chapter N" numbering.
+Not adding an invented numbering scheme without real data to back it.)
+
+Fail-then-pass verified with a new test
+(`test_greymoor_downs_quests_now_show_a_real_suggested_level_not_just_a_chapter`).
+
 ## [1.27.376] — Fixed a real soft-lock in companion-offered reach_location quests
 
 Real live dev-bridge report (Coffee, 2026-08-27, minutes after v1.27.375

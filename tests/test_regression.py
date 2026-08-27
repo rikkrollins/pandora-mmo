@@ -938,6 +938,43 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         remnant_quest = bot.CAMPAIGN["quests"][remnant_id]
         self.assertEqual(bot._quest_suggested_level(remnant_id, remnant_quest), "")
 
+    def test_greymoor_downs_quests_now_show_a_real_suggested_level_not_just_a_chapter(self):
+        """
+        Real live report (2026-08-27, Coffee: "quests that would pop
+        up, but no Avg lv was posted beside them so it is unclear to
+        the player when they shud do them... Maybe post an avg lvl
+        needed to complete the quest?"). Chapters 5-8 already have a
+        real, Coffee-confirmed level-band model (2026-08-19,
+        v1.27.263-266: goblin_warrens 40-55, sunken_root_caverns 50-65,
+        stonearch_gorge 60-75, greymoor_downs 75-99) that was never
+        wired into required_level -- it stayed at the 99 placeholder,
+        so these arcs fell back to a bare "Chapter N" label with no
+        real level number, same gap arcs 9-14 still have (those remain
+        unbanded/untouched -- explicitly future work).
+        """
+        for arc_id, expected_level in (
+            ("arc_5_goblin_warrens", 40),
+            ("arc_6_sunken_root_caverns", 50),
+            ("arc_7_stonearch_gorge", 60),
+            ("arc_8_greymoor_downs", 75),
+        ):
+            quest_id = bot.CAMPAIGN["story_arcs"][arc_id]["quests"][0]
+            quest = bot.CAMPAIGN["quests"][quest_id]
+            self.assertEqual(
+                bot._quest_suggested_level(quest_id, quest),
+                f"⭐ **Suggested Level:** {expected_level}+",
+                f"{arc_id} should show its real confirmed band floor, not a bare chapter label",
+            )
+
+        # arc_9 (still unbanded, deliberately untouched) must keep its
+        # existing "Chapter N" fallback -- confirms this fix didn't
+        # accidentally widen past arc_8.
+        arc9_quest_id = bot.CAMPAIGN["story_arcs"]["arc_9_whispering_wood"]["quests"][0]
+        arc9_quest = bot.CAMPAIGN["quests"][arc9_quest_id]
+        level_line = bot._quest_suggested_level(arc9_quest_id, arc9_quest)
+        self.assertIn("Chapter 9", level_line)
+        self.assertNotIn("Suggested Level", level_line)
+
     # -- Spell progression actually reaches every level the unlock table
     #    promises, up to character level 9 (v1.10.3) ---------------------
     def test_every_class_has_real_spells_at_every_promised_tier(self):

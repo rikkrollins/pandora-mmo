@@ -4425,7 +4425,7 @@
         "the_collapsed_tunnels_survivor",
         "deep_larders_elder"
       ],
-      "required_level": 99
+      "required_level": 40
     },
     "arc_6_sunken_root_caverns": {
       "title": "What the Roots Kept",
@@ -4436,7 +4436,7 @@
         "the_channels_keeper",
         "the_hollow_wellsprings_elder"
       ],
-      "required_level": 99
+      "required_level": 50
     },
     "arc_7_stonearch_gorge": {
       "title": "What the Gorge Swallowed",
@@ -4447,7 +4447,7 @@
         "deep_currents_keeper",
         "the_undertows_elder"
       ],
-      "required_level": 99
+      "required_level": 60
     },
     "arc_8_greymoor_downs": {
       "title": "What the Downs Still Watches",
@@ -4460,7 +4460,7 @@
         "kess_first_reckoning",
         "kess_the_unbound_reckoning"
       ],
-      "required_level": 99
+      "required_level": 75
     },
     "arc_9_whispering_wood": {
       "title": "What Was Built, Not Grown",
