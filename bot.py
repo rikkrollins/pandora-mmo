@@ -12688,6 +12688,39 @@ def _meets_quest_prerequisite_requirement(character: dict, quest: dict) -> bool:
     return requires_quest in character["completed_quests"]
 
 
+def _meets_quest_arc_order_requirement(character: dict, quest_id: str) -> bool:
+    """
+    True if every quest earlier than quest_id in ITS OWN story arc's
+    real, hand-authored order is already completed (True if quest_id
+    isn't part of any arc at all -- nothing to order against).
+
+    Real live bug (2026-08-28, Coffee, live-reproduced): a party
+    skipped 4 real, escalating investigation quests (watchtowers_
+    stalker -> the_vantage_belows_alpha -> the_barrow_depths_bound)
+    straight to kess_first_reckoning, because _offerable_companion_
+    quest (unlike _offerable_quest_at_location below) never checked
+    arc order AT ALL -- a giver_npc-based quest had zero ordering
+    enforcement whatsoever, dict order alone decided what showed up.
+
+    Deliberately does NOT also require the quest's own arc to be the
+    character's globally CURRENT arc (_current_story_arc) -- that's
+    _offerable_quest_at_location's own separate, stricter check, kept
+    there unchanged. A companion-offered quest stays reachable "out of
+    sequence" relative to the full 14-arc ladder on purpose: confirmed
+    via real live data that Kess's own arc_8 content was reached while
+    arc_3 through arc_7 were still incomplete, which is how this game
+    has actually been played -- this fix only stops a quest from
+    skipping ahead of its OWN arc-mates, not the whole story.
+    """
+    arc_info = _story_arc_for_quest(quest_id)
+    if arc_info is None:
+        return True
+    _arc_id, arc = arc_info
+    completed = set(character["completed_quests"])
+    prior_quests = arc["quests"][:arc["quests"].index(quest_id)]
+    return completed.issuperset(prior_quests)
+
+
 def _offerable_quest_at_location(character: dict, location_id: str) -> tuple[str, dict] | None:
     """
     The first not-yet-completed, not-yet-active, guild-eligible quest
@@ -12714,7 +12747,6 @@ def _offerable_quest_at_location(character: dict, location_id: str) -> tuple[str
     """
     current = _current_story_arc(character)
     current_arc_id = current[0] if current else None
-    completed = set(character["completed_quests"])
     for quest_id, quest in CAMPAIGN.get("quests", {}).items():
         if quest.get("location") != location_id:
             continue
@@ -12725,13 +12757,23 @@ def _offerable_quest_at_location(character: dict, location_id: str) -> tuple[str
         if not _meets_quest_prerequisite_requirement(character, quest):
             continue
         arc_info = _story_arc_for_quest(quest_id)
-        if arc_info:
-            arc_id, arc = arc_info
+        # A quest with its own explicit requires_completed_quest (e.g.
+        # borins_blackthorn_warning, a deliberate early on-ramp into
+        # arc_8) is exempt from the "must be the globally CURRENT arc"
+        # restriction below -- real live regression (2026-08-28): once
+        # it became a real arc_8 member (to fix its arc-opening
+        # cutscene/order gating), this check wrongly started blocking
+        # it at the tavern for any party that hadn't finished arcs 3-7
+        # yet, even though its own real, explicit gate (first_city_
+        # arrival) was already satisfied. Same "an explicit prerequisite
+        # is a stronger, more precise signal than blanket arc-current-
+        # ness" reasoning _quest_suggested_level already applies.
+        if arc_info and not quest.get("requires_completed_quest"):
+            arc_id, _arc = arc_info
             if arc_id != current_arc_id:
                 continue
-            prior_quests = arc["quests"][:arc["quests"].index(quest_id)]
-            if not completed.issuperset(prior_quests):
-                continue
+        if not _meets_quest_arc_order_requirement(character, quest_id):
+            continue
         return quest_id, quest
     return None
 
@@ -12776,6 +12818,8 @@ def _offerable_companion_quest(character: dict) -> tuple[str, dict] | None:
             continue
         if not _meets_quest_prerequisite_requirement(character, quest):
             continue
+        if not _meets_quest_arc_order_requirement(character, quest_id):
+            continue
         return quest_id, quest
     return None
 
@@ -12798,6 +12842,8 @@ def _offerable_quest_for_specific_companion(character: dict, npc_id: str) -> tup
         if not _meets_quest_guild_requirement(character, quest):
             continue
         if not _meets_quest_prerequisite_requirement(character, quest):
+            continue
+        if not _meets_quest_arc_order_requirement(character, quest_id):
             continue
         return quest_id, quest
     return None
@@ -13156,13 +13202,6 @@ def _quest_suggested_level_core(quest_id: str, quest: dict) -> str:
     if quest_id.startswith("remnant_"):
         return ""
     arc_ids = list(CAMPAIGN.get("story_arcs", {}).keys())
-    arc_info = _story_arc_for_quest(quest_id)
-    if arc_info:
-        arc_id, arc = arc_info
-        required_level = arc.get("required_level", 99)
-        if required_level < 99:
-            return f"⭐ **Suggested Level:** {required_level}+"
-        return f"⭐ **Chapter {arc_ids.index(arc_id) + 1}** of the story"
 
     # Real live bug (2026-08-27, Coffee, dev-bridge screenshot: "Why is
     # it showing a suggested level of 75?!"): borins_blackthorn_warning
@@ -13171,13 +13210,16 @@ def _quest_suggested_level_core(quest_id: str, quest: dict) -> str:
     # trigger is just reaching greymoor_downs' own entrance -- one of
     # the "meet the weak stuff at the front door" zone entrances that
     # deliberately sits BELOW its zone's real difficulty band (chapter-
-    # band model, 2026-08-19). The geographic fallback below correctly
-    # serves The Wayfarer's Circuit (no real gate of its own, so the
-    # deep destination IS the only real signal) but wrongly showed this
-    # quest its much-later zone's full band (75+) instead of its own
-    # actual, explicit, author-placed gate. A real requires_completed_
-    # quest is a stronger, more precise signal than inferring from
-    # geography whenever one exists -- checked first.
+    # band model, 2026-08-19). A real requires_completed_quest is a
+    # stronger, more precise signal than either geography OR this
+    # quest's own arc membership -- checked FIRST, before arc_info
+    # below (2026-08-28: borins_blackthorn_warning was made a real
+    # arc_8 member to fix its arc-opening cutscene/arc-order gating,
+    # which reintroduced this exact "shows 75+" regression by letting
+    # bare arc membership win again -- moving this check first closes
+    # it for good, and produces the identical correct answer for
+    # kess_first_reckoning/kess_the_unbound_reckoning either way, since
+    # their own prereqs resolve to the same arc_8 band anyway).
     prereq_id = quest.get("requires_completed_quest")
     if prereq_id:
         prereq_arc_info = _story_arc_for_quest(prereq_id)
@@ -13187,6 +13229,14 @@ def _quest_suggested_level_core(quest_id: str, quest: dict) -> str:
             if required_level < 99:
                 return f"⭐ **Suggested Level:** {required_level}+"
             return f"⭐ **Around Chapter {arc_ids.index(prereq_arc_id) + 1}**"
+
+    arc_info = _story_arc_for_quest(quest_id)
+    if arc_info:
+        arc_id, arc = arc_info
+        required_level = arc.get("required_level", 99)
+        if required_level < 99:
+            return f"⭐ **Suggested Level:** {required_level}+"
+        return f"⭐ **Chapter {arc_ids.index(arc_id) + 1}** of the story"
 
     # Side/guild quest (no arc, no real prerequisite of its own) -- the
     # real destination matters more than the incidental spot the offer

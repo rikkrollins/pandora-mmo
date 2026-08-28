@@ -1113,13 +1113,22 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         real level number, same gap arcs 9-14 still have (those remain
         unbanded/untouched -- explicitly future work).
         """
-        for arc_id, expected_level in (
-            ("arc_5_goblin_warrens", 40),
-            ("arc_6_sunken_root_caverns", 50),
-            ("arc_7_stonearch_gorge", 60),
-            ("arc_8_greymoor_downs", 75),
+        for arc_id, expected_level, quest_override in (
+            ("arc_5_goblin_warrens", 40, None),
+            ("arc_6_sunken_root_caverns", 50, None),
+            ("arc_7_stonearch_gorge", 60, None),
+            # arc_8's own literal first quest is now borins_blackthorn_
+            # warning (2026-08-28, added as a real arc member to fix its
+            # arc-opening cutscene/order gating) -- a deliberate early
+            # on-ramp that correctly shows ITS OWN lower prereq-derived
+            # level (10+, see test_early_onramp_quest_shows_its_own_
+            # prerequisites_level_not_its_far_off_zones), not the arc's
+            # band. watchtowers_stalker (arc_8's first real wolf quest,
+            # no prereq of its own) is the representative quest for
+            # arc_8's own confirmed band here instead.
+            ("arc_8_greymoor_downs", 75, "watchtowers_stalker"),
         ):
-            quest_id = bot.CAMPAIGN["story_arcs"][arc_id]["quests"][0]
+            quest_id = quest_override or bot.CAMPAIGN["story_arcs"][arc_id]["quests"][0]
             quest = bot.CAMPAIGN["quests"][quest_id]
             self.assertEqual(
                 bot._quest_suggested_level(quest_id, quest),
@@ -16152,6 +16161,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         db.complete_quest(user_id, -999, "borins_blackthorn_warning")
         character = db.get_character(user_id, -999)
+        self.assertIsNone(
+            bot._offerable_companion_quest(character),
+            "kess_first_reckoning must not be offered until the real wolf-chain investigation is done too",
+        )
+
+        for wolf_quest in ("watchtowers_stalker", "the_tower_cellars_pup", "the_vantage_belows_alpha", "the_barrow_depths_bound"):
+            db.complete_quest(user_id, -999, wolf_quest)
+        character = db.get_character(user_id, -999)
         fourth = bot._offerable_companion_quest(character)
         self.assertEqual(fourth[0], "kess_first_reckoning")
 
@@ -16216,7 +16233,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         offerable. Confirmed live: Coffee's own character had exactly
         this active_quests/completed_quests shape.
         """
-        from unittest.mock import patch
+        from unittest.mock import patch, AsyncMock
 
         user_id = 999926
         make_basic_character(user_id, "AlreadyThereSeeker", current_location="crossroads_tavern")
@@ -16235,12 +16252,52 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # targets. Mocked the same way this file's own board-quest-
         # generation tests already do.
         with patch("board_quests.narrate_branching_quest_setup", return_value="A quiet task awaits."), \
-             patch("bot.narrate_reach_location_quest_completion", return_value="You see the Downs for yourselves."):
+             patch("bot.narrate_reach_location_quest_completion", return_value="You see the Downs for yourselves."), \
+             patch("bot.narrate_arc_opening", return_value="A new chapter begins."), \
+             patch("bot._maybe_send_arc_opening_image", new=AsyncMock()):
             await bot._do_accept_quest(FakeUpdate(user_id, "I accept the quest", sink), "I accept the quest")
 
         character = db.get_character(user_id, -999)
         self.assertIn("borins_blackthorn_warning", character["completed_quests"])
         self.assertNotIn("borins_blackthorn_warning", character["active_quests"])
+
+    async def test_kess_first_reckoning_is_not_offered_until_the_wolf_chain_is_done(self):
+        """
+        Real live report (2026-08-28, Coffee: "there is no story build
+        up, no conversation, no investigation" -- confirmed live, his
+        own party skipped all 4 real escalating investigation quests
+        (watchtowers_stalker -> the_vantage_belows_alpha -> the_barrow_
+        depths_bound) straight to kess_first_reckoning). Root cause:
+        _offerable_companion_quest never checked arc order at all --
+        only _offerable_quest_at_location did. kess_first_reckoning is
+        now arc_8's 6th quest (after borins_blackthorn_warning and the
+        4 wolf quests) -- it must not be offerable until the ones
+        ahead of it in that real order are actually done.
+        """
+        user_id = 999927
+        make_basic_character(user_id, "InvestigationSkipTester", current_location="crossroads_tavern")
+        await bot._do_recruit_npc(FakeUpdate(user_id, "recruit Borin Ironjaw", []), "Borin Ironjaw")
+        db.complete_quest(user_id, -999, "borins_vouching_task")
+        db.complete_quest(user_id, -999, "borins_resolution")
+        db.complete_quest(user_id, -999, "first_city_arrival")
+        db.complete_quest(user_id, -999, "borins_blackthorn_warning")
+
+        character = db.get_character(user_id, -999)
+        offer = bot._offerable_companion_quest(character)
+        self.assertIsNone(offer, "kess_first_reckoning must not be offered while the wolf chain is still undone")
+
+        for wolf_quest in ("watchtowers_stalker", "the_tower_cellars_pup", "the_vantage_belows_alpha", "the_barrow_depths_bound"):
+            db.complete_quest(user_id, -999, wolf_quest)
+
+        character = db.get_character(user_id, -999)
+        offer = bot._offerable_companion_quest(character)
+        self.assertIsNotNone(offer, "kess_first_reckoning must become offerable once the real wolf chain is done")
+        self.assertEqual(offer[0], "kess_first_reckoning")
+
+    def test_meets_quest_arc_order_requirement_true_for_a_quest_with_no_arc(self):
+        """Regression guard: a quest that isn't part of any story arc has nothing to order against, so it's always true."""
+        character = {"completed_quests": []}
+        self.assertTrue(bot._meets_quest_arc_order_requirement(character, "wayfarers_circuit"))
 
     async def test_kess_ambush_never_fires_before_the_reckoning_quest_is_accepted(self):
         """

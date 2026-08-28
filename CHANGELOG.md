@@ -2,6 +2,48 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.393] — The Kess Arc, Phase 1: the real investigation is no longer skippable
+
+First deploy of the larger Kess/FF6-style story arc rebuild (full plan
+at `.claude/plans/twinkly-purring-deer.md`, per Coffee: "there is no
+story build up, no conversation, no investigation... the point was for
+this to be a story, not run to Kess and fight the boss"). This pass is
+the foundational data/gating fix; the narration layer (real dialogue,
+Borin's trust-banded reveal, the confrontation choice's real stakes,
+Kess's transformation, the chapter-ending twist) ships next.
+
+**Root cause of the skip, fixed:** `_offerable_companion_quest` (the
+function behind every giver_npc-based quest offer, including Kess's
+own "The Name on the Page") never checked story-arc order at all --
+only location-based offers did. This is exactly how Coffee's own party
+skipped all four real, already-written escalating investigation quests
+(watchtowers_stalker -> the_vantage_belows_alpha -> the_barrow_depths_
+bound, each one's own clue text pointing further up a real chain of
+command) straight to Kess herself. A new shared `_meets_quest_arc_
+order_requirement` now closes this for every companion-offered quest,
+without imposing the stricter "must be the globally current arc"
+rule location-offers use -- confirmed via real live data that Kess's
+own arc was always meant to be reachable ahead of the full 14-arc
+ladder, just not ahead of its OWN four investigation quests.
+
+**Data fixes:** `borins_blackthorn_warning` ("More Than Banditry") is
+now correctly arc_8's real first quest (it was an orphan relative to
+every story arc before this, which also meant its arc-opening cutscene
+never fired); the `blackthorn_raiders` faction's stale `arc_1_
+discovery` tag is corrected to `arc_8_greymoor_downs`. Fixed a
+regression this same change reintroduced along the way: `borins_
+blackthorn_warning` is a deliberate early on-ramp with its own real,
+lower prerequisite (first_city_arrival) -- `_quest_suggested_level`
+and the location-offer path both now correctly prefer that explicit
+prerequisite over bare arc membership, so it still shows "10+" (not
+"75+") and is still offerable at the tavern for a party who hasn't
+finished arcs 3-7.
+
+**Redo it properly:** Ravenloft and Charvenna's Kess-line quest state
+has been reset to a clean pre-investigation state (see deploy notes)
+so the party can play the real, gated chain from the start once the
+narration layer lands.
+
 ## [1.27.392] — "75+" clarified + accepting the Kess quest in place now fires the cutscene
 
 **"Suggested Level: 75+" on the Kess quest was real but alarming.**
