@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.389] — Real narration on reach_location quest completions
+
+Real live report (Coffee, live via Ravenloft/Charvenna: "why did we
+complete the quests?? we went to greymore downs.. what is happening??").
+Traced via the real DB: "More Than Banditry" (a `reach_location`
+quest) completed the instant a character stepped into Greymoor Downs
+-- correct per its own trigger, but silent and anticlimactic despite
+its description promising a real investigation ("he wants the party
+to see the Downs for themselves and judge who's really paying for
+it"). Every non-climactic `reach_location` quest (~20 across the
+campaign; climactic ones like `seras_resolution` already get a real
+flourish via `narrate_chapter_climax`) now gets a real, grounded
+arrival beat -- `narrate_reach_location_quest_completion` (ai/dm_agent.py),
+narrating ONLY the quest's own real title/description/clue, never
+inventing new plot, same discipline as every other narration call in
+this game. Wired into `_complete_quest_and_announce` (bot.py) right
+alongside the existing climactic-narration branch, mutually exclusive
+with it. Reset "More Than Banditry" back to active for Ravenloft and
+Charvenna (both of whom hit the silent version live) so they can walk
+into Greymoor Downs again and get the real payoff -- note this also
+re-grants its small reward (200 XP, a torn ledger page, +10 Borin
+affinity) a second time, a deliberate, harmless side effect of a
+one-time manual redo, not a general replay mechanic.
+
 ## [1.27.388] — Scripted boss confrontation cutscenes + Kess rebalance corrected
 
 **Correction to v1.27.387:** that release's Kess stat rebalance was a

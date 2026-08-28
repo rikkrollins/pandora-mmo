@@ -69,7 +69,7 @@ from ai.dm_agent import (
     narrate_examine, narrate_branching_choice_outcome, narrate_boss_decision,
     narrate_story_so_far, narrate_chapter_climax, narrate_arc_opening, narrate_next_step_hint,
     narrate_boss_intro, narrate_boss_defeat, narrate_boss_summon, narrate_remnant_summon,
-    narrate_boss_confrontation,
+    narrate_boss_confrontation, narrate_reach_location_quest_completion,
     _fallback_hourly_update, _fallback_narration,
     is_narration_call_active,
 )
@@ -13464,6 +13464,22 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
             narrate_chapter_climax, quest["title"], quest["description"], reward_text,
         )
         climax_narration = f"{climax_text}\n\n"
+    elif quest.get("trigger", {}).get("type") == "reach_location":
+        # Real live report (2026-08-28, Coffee: "why did we complete the
+        # quests?? we went to greymore downs.. what is happening??") --
+        # a reach_location quest like "More Than Banditry" completed the
+        # instant a character walked in, with zero payoff even though
+        # its own description promises a real investigation. Every
+        # non-climactic reach_location quest now gets a real, grounded
+        # arrival beat instead of a silent stat-only completion.
+        arrival_location = cl.get_location(CAMPAIGN, quest.get("objective_location") or quest["trigger"]["location"])
+        arrival_text = await asyncio.to_thread(
+            narrate_reach_location_quest_completion,
+            quest["title"], quest["description"],
+            arrival_location["name"] if arrival_location else quest["trigger"]["location"],
+            quest.get("clue"),
+        )
+        climax_narration = f"{arrival_text}\n\n"
 
     # The true ending (2026-07-25, rebirth-3 gated content's climax):
     # every other quest, including every other "climactic"-weighted one

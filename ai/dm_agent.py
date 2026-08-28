@@ -1112,6 +1112,66 @@ def narrate_chapter_climax(quest_title: str, quest_description: str, reward_text
     return f"This was a turning point. {quest_description}"
 
 
+def _reach_location_quest_preamble() -> str:
+    return (
+        "You are the Dungeon Master narrating what a character actually "
+        "finds the moment they arrive somewhere and a quest tied to that "
+        "arrival completes -- a real discovery beat, not a routine travel "
+        "line. You are given the quest's real title, what it was actually "
+        "about, and (when given) a real clue tied to it; narrate ONLY "
+        f"these facts ({scaled_sentences(2, 4)}), describing what the "
+        "character actually sees or learns on arrival, never inventing a "
+        f"new plot detail, character, or twist beyond what's given. "
+        f"{_NAMING_INSTRUCTION} {style_directive()}"
+    )
+
+
+def _build_reach_location_quest_prompt(
+    quest_title: str, quest_description: str, location_name: str, clue: str | None = None,
+) -> str:
+    clue_line = f"A real clue tied to this: {clue}\n" if clue else ""
+    return (
+        f"{_reach_location_quest_preamble()}\n\n"
+        f"Real facts (narrate ONLY these, faithfully):\n"
+        f"Quest just completed: {quest_title}\n"
+        f"What it was about: {quest_description}\n"
+        f"Where they just arrived: {location_name}\n"
+        f"{clue_line}\n"
+        f"Write what they find now:"
+    )
+
+
+def narrate_reach_location_quest_completion(
+    quest_title: str, quest_description: str, location_name: str, clue: str | None = None,
+) -> str:
+    """
+    Real live request (2026-08-28, Coffee: a reach_location quest like
+    "More Than Banditry" completed the instant a character walked into
+    Greymoor Downs with zero real payoff, even though its own
+    description promises an actual investigation -- "why did we
+    complete the quest?? what happened?"). Every non-climactic
+    reach_location quest (climactic ones already get real narration via
+    narrate_chapter_climax) now gets a real, grounded arrival beat here
+    instead of a silent stat-only completion -- grounded ONLY in the
+    quest's own real title/description/clue, never inventing new plot.
+    """
+    prompt = _build_reach_location_quest_prompt(quest_title, quest_description, location_name, clue)
+    try:
+        response = requests.post(
+            f"{config.OLLAMA_BASE_URL}/api/generate",
+            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False, "options": _NARRATION_OPTIONS},
+            timeout=200,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
+        if text and not is_placeholder_text(text):
+            return text
+    except (requests.RequestException, ValueError) as e:
+        print(f"[dm_agent] reach-location quest narration failed, falling back to template: {e}")
+    return quest_description
+
+
 def _boss_intro_preamble() -> str:
     return (
         "You are the Dungeon Master narrating the dramatic ENTRANCE of a "

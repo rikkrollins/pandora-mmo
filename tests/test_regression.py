@@ -4779,11 +4779,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         ordinary chat). A quest with a real giver_npc now grants a
         real, one-time boost on completion -- +10 for a setup quest.
         """
+        from unittest.mock import patch
         user_id = 900950
         make_basic_character(user_id, "TrustBuilder", current_location="crossroads_tavern")
         before = db.get_relationship(user_id, -999, "wren_hollowbrook")["affinity"]
         sink = []
-        await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "wrens_root_worry")
+        with patch("bot.narrate_reach_location_quest_completion", return_value="You find what she meant."):
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "wrens_root_worry")
         after = db.get_relationship(user_id, -999, "wren_hollowbrook")["affinity"]
         self.assertEqual(after - before, 10)
 
@@ -16081,7 +16083,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # narrate_branching_quest_setup), unrelated to what this test
         # targets. Mocked the same way this file's own board-quest-
         # generation tests already do.
-        with patch("board_quests.narrate_branching_quest_setup", return_value="A quiet task awaits."):
+        with patch("board_quests.narrate_branching_quest_setup", return_value="A quiet task awaits."), \
+             patch("bot.narrate_reach_location_quest_completion", return_value="You see the Downs for yourselves."):
             await bot._do_accept_quest(FakeUpdate(user_id, "I accept the quest", sink), "I accept the quest")
 
         character = db.get_character(user_id, -999)
@@ -16316,6 +16319,84 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 "Ravenloft", "Greymoor Downs", escalated=True,
             )
         self.assertIn("SECOND, ESCALATED", captured_prompts[0])
+
+    def test_narrate_reach_location_quest_completion_grounds_the_prompt_in_real_facts(self):
+        """
+        Unit test for the narration function itself (2026-08-28, Coffee:
+        "why did we complete the quests?? we went to greymore downs..
+        what is happening??" -- a reach_location quest completed the
+        instant a character arrived, with no real payoff). Real
+        title/description/location/clue must flow into the prompt, and
+        the clue must be omittable for quests that don't have one.
+        """
+        from unittest.mock import patch
+        import ai.dm_agent as dm_agent_module
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "The Raiders take a toll, but the coin marches off somewhere else entirely."}
+
+        captured_prompts = []
+
+        def spying_post(url, json=None, **kwargs):
+            captured_prompts.append(json["prompt"])
+            return FakeResponse()
+
+        with patch("ai.dm_agent.requests.post", side_effect=spying_post):
+            result = dm_agent_module.narrate_reach_location_quest_completion(
+                "More Than Banditry", "the Blackthorn Raiders working the Greymoor Downs aren't real banditry",
+                "The Greymoor Downs", "a captain who takes tolls but never keeps the coin is working for somebody",
+            )
+        self.assertEqual(result, "The Raiders take a toll, but the coin marches off somewhere else entirely.")
+        prompt = captured_prompts[0]
+        self.assertIn("More Than Banditry", prompt)
+        self.assertIn("Blackthorn Raiders", prompt)
+        self.assertIn("The Greymoor Downs", prompt)
+        self.assertIn("takes tolls but never keeps the coin", prompt)
+
+        captured_prompts.clear()
+        with patch("ai.dm_agent.requests.post", side_effect=spying_post):
+            dm_agent_module.narrate_reach_location_quest_completion(
+                "A Favor for Grimsby", "something's off in the Whispering Wood", "Whispering Wood",
+            )
+        self.assertNotIn("A real clue tied to this", captured_prompts[0])
+
+    async def test_reach_location_quest_completion_includes_real_arrival_narration(self):
+        """
+        Every non-climactic reach_location quest now gets a real,
+        grounded arrival beat instead of a silent stat-only completion
+        -- this is the actual fix for the live report above.
+        """
+        from unittest.mock import patch
+        user_id = 999930
+        make_basic_character(user_id, "ArrivalNarrationTester", current_location="crossroads_tavern")
+        db.accept_quest(user_id, -999, "borins_blackthorn_warning")
+        sink = []
+        with patch(
+            "bot.narrate_reach_location_quest_completion",
+            return_value="You watch the Raiders work the road, too well-fed to be desperate.",
+        ) as mock_narrate:
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "borins_blackthorn_warning")
+        self.assertTrue(mock_narrate.called)
+        self.assertEqual(mock_narrate.call_args.args[0], "More Than Banditry")
+        combined = " ".join(sink)
+        self.assertIn("You watch the Raiders work the road, too well-fed to be desperate.", combined)
+
+    async def test_climactic_reach_location_quest_still_uses_chapter_climax_not_the_new_narration(self):
+        """A reach_location quest that's ALSO weight:climactic (e.g. seras_resolution) must keep using narrate_chapter_climax -- the two narration paths are mutually exclusive, never both fired."""
+        from unittest.mock import patch
+        user_id = 999931
+        make_basic_character(user_id, "ClimacticStillWinsTester", current_location="crossroads_tavern")
+        db.accept_quest(user_id, -999, "seras_resolution")
+        sink = []
+        with patch("bot.narrate_chapter_climax", return_value="Sarah finally stays.") as mock_climax, \
+             patch("bot.narrate_reach_location_quest_completion") as mock_reach:
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "seras_resolution")
+        self.assertTrue(mock_climax.called)
+        self.assertFalse(mock_reach.called)
 
     async def test_defeating_kess_the_unbound_completes_its_own_reckoning_quest(self):
         """Same real _npc_combatant_from_stats/_check_quest_completions_defeat_monster path as the base form, for her evolved stage-2 form."""
