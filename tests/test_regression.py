@@ -4019,6 +4019,41 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             result = intent_parser_module.parse_intent("I try to flee from the goblin", [])
         self.assertEqual(result["action"], "flee")
 
+    def test_model_guessing_dismantle_item_for_a_lost_confused_player_is_never_trusted(self):
+        """
+        Real live topic-activity signal (2026-08-27): a player typed
+        "Which way" and then "I'm lost" -- clearly lost/confused
+        navigation phrasing, not a request to break down gear -- and
+        both got classified as dismantle_item. Same defensive pattern as
+        pass_turn/flee/attack above: dismantle_item is a real, stateful,
+        hard-to-undo action (permanently breaks down a real inventory
+        item), so it's never trusted from the model alone unless the raw
+        text actually contains one of its own real trigger words.
+        """
+        from unittest.mock import patch
+        import ai.intent_parser as intent_parser_module
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": '{"action": "dismantle_item"}'}
+
+        with patch("ai.intent_parser.requests.post", return_value=FakeResponse()):
+            result = intent_parser_module.parse_intent("Which way", [])
+        self.assertEqual(result["action"], "chat")
+
+        with patch("ai.intent_parser.requests.post", return_value=FakeResponse()):
+            result = intent_parser_module.parse_intent("I'm lost", [])
+        self.assertEqual(result["action"], "chat")
+
+        # No regression: a real dismantle phrase the model happens to
+        # agree with still works.
+        with patch("ai.intent_parser.requests.post", return_value=FakeResponse()):
+            result = intent_parser_module.parse_intent("Please dismantle my old sword", [])
+        self.assertEqual(result["action"], "dismantle_item")
+
     def test_bare_take_reclassified_to_examine_when_model_also_says_chat(self):
         """
         Real live bug (2026-08-15, dev-bridge screenshot): "Take the
@@ -16347,11 +16382,12 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("ai.dm_agent.requests.post", side_effect=spying_post):
             result = dm_agent_module.narrate_reach_location_quest_completion(
-                "More Than Banditry", "the Blackthorn Raiders working the Greymoor Downs aren't real banditry",
+                "Ravenloft", "More Than Banditry", "the Blackthorn Raiders working the Greymoor Downs aren't real banditry",
                 "The Greymoor Downs", "a captain who takes tolls but never keeps the coin is working for somebody",
             )
         self.assertEqual(result, "The Raiders take a toll, but the coin marches off somewhere else entirely.")
         prompt = captured_prompts[0]
+        self.assertIn("Ravenloft", prompt)
         self.assertIn("More Than Banditry", prompt)
         self.assertIn("Blackthorn Raiders", prompt)
         self.assertIn("The Greymoor Downs", prompt)
@@ -16360,7 +16396,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         captured_prompts.clear()
         with patch("ai.dm_agent.requests.post", side_effect=spying_post):
             dm_agent_module.narrate_reach_location_quest_completion(
-                "A Favor for Grimsby", "something's off in the Whispering Wood", "Whispering Wood",
+                "Ravenloft", "A Favor for Grimsby", "something's off in the Whispering Wood", "Whispering Wood",
             )
         self.assertNotIn("A real clue tied to this", captured_prompts[0])
 
@@ -16381,7 +16417,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         ) as mock_narrate:
             await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "borins_blackthorn_warning")
         self.assertTrue(mock_narrate.called)
-        self.assertEqual(mock_narrate.call_args.args[0], "More Than Banditry")
+        self.assertEqual(mock_narrate.call_args.args[0], "ArrivalNarrationTester")
+        self.assertEqual(mock_narrate.call_args.args[1], "More Than Banditry")
         combined = " ".join(sink)
         self.assertIn("You watch the Raiders work the road, too well-fed to be desperate.", combined)
 

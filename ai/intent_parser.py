@@ -2624,6 +2624,17 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
             # falls through to that safe, silent default instead.
             if parsed["action"] == "attack" and not re.search(r"[a-zA-Z]", text):
                 return fallback
+            # Same defensive pattern again (2026-08-28, topic-activity
+            # signal): a lost/confused player typing "Which way" and,
+            # moments later, "I'm lost" both got classified as
+            # dismantle_item -- a real, destructive, hard-to-undo action
+            # (permanently breaks down a real inventory item into
+            # materials) with zero relation to either message. Never
+            # trusted from the model alone unless the raw text actually
+            # contains one of its own real trigger words, same reasoning
+            # as start_combat/pass_turn/flee/attack above.
+            if parsed["action"] == "dismantle_item" and not any(w in text.lower() for w in ["dismantle", "salvage"]):
+                return fallback
             # Real live bug (2026-08-15, dev-bridge screenshot): "Take
             # the band" -- a ring the player had just been shown in a
             # quest/reward preview but never actually earned yet -- came

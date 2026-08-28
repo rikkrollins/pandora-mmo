@@ -13475,7 +13475,7 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         arrival_location = cl.get_location(CAMPAIGN, quest.get("objective_location") or quest["trigger"]["location"])
         arrival_text = await asyncio.to_thread(
             narrate_reach_location_quest_completion,
-            quest["title"], quest["description"],
+            character["name"], quest["title"], quest["description"],
             arrival_location["name"] if arrival_location else quest["trigger"]["location"],
             quest.get("clue"),
         )

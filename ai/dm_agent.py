@@ -1117,32 +1117,37 @@ def _reach_location_quest_preamble() -> str:
         "You are the Dungeon Master narrating what a character actually "
         "finds the moment they arrive somewhere and a quest tied to that "
         "arrival completes -- a real discovery beat, not a routine travel "
-        "line. You are given the quest's real title, what it was actually "
-        "about, and (when given) a real clue tied to it; narrate ONLY "
-        f"these facts ({scaled_sentences(2, 4)}), describing what the "
-        "character actually sees or learns on arrival, never inventing a "
-        f"new plot detail, character, or twist beyond what's given. "
-        f"{_NAMING_INSTRUCTION} {style_directive()}"
+        "line. You are given the arriving character's real name, the "
+        "quest's real title, what it was actually about, and (when "
+        "given) a real clue tied to it; the ARRIVING character is always "
+        "the one doing the finding/seeing -- any other named person in "
+        "the quest's own description is backstory (who assigned this, or "
+        "who it's about), never who is physically arriving here now. "
+        f"Narrate ONLY the given facts ({scaled_sentences(2, 4)}), "
+        "describing what the arriving character actually sees or learns, "
+        f"never inventing a new plot detail, character, or twist beyond "
+        f"what's given. {_NAMING_INSTRUCTION} {style_directive()}"
     )
 
 
 def _build_reach_location_quest_prompt(
-    quest_title: str, quest_description: str, location_name: str, clue: str | None = None,
+    character_name: str, quest_title: str, quest_description: str, location_name: str, clue: str | None = None,
 ) -> str:
     clue_line = f"A real clue tied to this: {clue}\n" if clue else ""
     return (
         f"{_reach_location_quest_preamble()}\n\n"
         f"Real facts (narrate ONLY these, faithfully):\n"
+        f"Who just arrived (the one doing the finding): {character_name}\n"
         f"Quest just completed: {quest_title}\n"
         f"What it was about: {quest_description}\n"
         f"Where they just arrived: {location_name}\n"
         f"{clue_line}\n"
-        f"Write what they find now:"
+        f"Write what {character_name} finds now:"
     )
 
 
 def narrate_reach_location_quest_completion(
-    quest_title: str, quest_description: str, location_name: str, clue: str | None = None,
+    character_name: str, quest_title: str, quest_description: str, location_name: str, clue: str | None = None,
 ) -> str:
     """
     Real live request (2026-08-28, Coffee: a reach_location quest like
@@ -1154,8 +1159,16 @@ def narrate_reach_location_quest_completion(
     narrate_chapter_climax) now gets a real, grounded arrival beat here
     instead of a silent stat-only completion -- grounded ONLY in the
     quest's own real title/description/clue, never inventing new plot.
+
+    character_name (2026-08-28, same-day live follow-up: the first
+    version of this omitted who actually arrived, and the model latched
+    onto the quest-giver NPC named in the description instead -- "Borin
+    arrives at Greymoor Downs..." when Borin never left the tavern, the
+    PLAYER did) -- an explicit, unambiguous "who is arriving" fact fixes
+    the model's real, observed subject confusion, same fix shape as
+    narrate_boss_confrontation's own party_names fact.
     """
-    prompt = _build_reach_location_quest_prompt(quest_title, quest_description, location_name, clue)
+    prompt = _build_reach_location_quest_prompt(character_name, quest_title, quest_description, location_name, clue)
     try:
         response = requests.post(
             f"{config.OLLAMA_BASE_URL}/api/generate",

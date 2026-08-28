@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.390] — Two live fixes: arrival narration subject confusion + a lost-player misclassification
+
+**Reach_location narration subject bug (shipped minutes after v1.27.389):**
+live screenshots from Coffee showed the new arrival narration reading
+"Borin arrives at Greymoor Downs..." -- but Borin never left the
+tavern, the PLAYER did. Root cause: `narrate_reach_location_quest_
+completion` (ai/dm_agent.py) never told the model who actually
+arrived, so it latched onto the quest-giver NPC named in the quest's
+own description instead. Fixed by adding an explicit "Who just
+arrived" fact plus a preamble instruction that any other named person
+in the description is backstory, never the subject -- same fix shape
+`narrate_boss_confrontation` already uses via its own `party_names`
+fact. `_complete_quest_and_announce` (bot.py) now passes the real
+character's name through.
+
+**Dismantle_item hallucination (found via routine topic-activity
+scan):** a lost/confused player typed "Which way" and "I'm lost" --
+both got classified as `dismantle_item`, a real, destructive action
+that permanently breaks down an inventory item, with zero relation to
+either message. Same defensive pattern as the existing start_combat/
+pass_turn/flee/attack guards in `ai/intent_parser.py`'s `parse_intent`:
+the model's own `dismantle_item` guess is never trusted unless the raw
+text actually contains "dismantle" or "salvage".
+
 ## [1.27.389] — Real narration on reach_location quest completions
 
 Real live report (Coffee, live via Ravenloft/Charvenna: "why did we
