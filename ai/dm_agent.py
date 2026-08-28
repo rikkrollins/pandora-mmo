@@ -1548,3 +1548,249 @@ def narrate_boss_confrontation(
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] boss confrontation narration failed, falling back to template: {e}")
     return f"**{boss_name}** turns to face the party, {boss_goals.split('--')[0].strip().rstrip('.')}."
+
+
+
+# ---------------------------------------------------------------------
+# The Kess Arc, Phase 2 (2026-08-28, per Coffee, after live-testing the
+# AI-generated versions of these exact beats and finding them genuinely
+# unreliable -- wrong pronouns for Kess, empty responses, invented
+# details like "a clock struck three" that violated the "never invent"
+# instruction anyway): "you dont need to use ollama calls for an
+# outcome or response that we have already determined via story line."
+#
+# Every beat below is a REAL, one-time, fully-determined story moment
+# (there is exactly one "party confronts Kess for the first time,"
+# exactly one "Kess flees and something else answers," exactly one
+# real ending to this chapter) -- so it's hand-written here, the same
+# way `the_unasked`/`the_unbegun`'s own bespoke endings in bot.py are
+# already fully hand-written prose with zero Ollama calls. This
+# guarantees the FF6-style script format, the Kafka-inspired calm/
+# philosophical voice for Kess (2026-08-28 dev-bridge reference: "Use
+# this as an example on how to characteristically build Kess"), and
+# the exact tone Coffee approved live, 100% of the time -- no risk of
+# a wrong pronoun, an empty response, or an invented detail. Only
+# `{character_name}`/party facts are ever substituted in, via plain
+# Python formatting, never an LLM call.
+# ---------------------------------------------------------------------
+
+_BORIN_KESS_ARC_LINES = {
+    "borins_blackthorn_warning": {
+        "low": "\"You want to know why I'm sending you out there? Go look. You'll see it yourselves, or you won't.\"",
+        "mid": "\"The Blackthorn Raiders aren't just bandits -- too well-fed, too well-armed, and the coin never stays with them. Go see for yourselves.\"",
+        "high": "\"I've watched that road for years, {name}. Real banditry doesn't look like that -- well-fed, well-armed, throwing away coin they never keep. Someone's paying for it. I need eyes I trust out there.\"",
+    },
+    "kess_first_reckoning": {
+        "low": "\"There's a name on this page. Not one I know. That's all you need.\"",
+        "mid": "\"This ledger names someone I don't recognize -- real proof Kess answers to somebody else. Stop her, question her, before whatever she's funding gets any further.\"",
+        "high": "\"{name}, look at this. A name I don't recognize, but real proof -- Kess answers to someone else entirely. Whoever's holding her leash won't show themselves while she's still standing. I need her stopped. I need her questioned. And I trust you to do both.\"",
+    },
+    "kess_the_unbound_reckoning": {
+        "low": "\"Finish it. That's all I've got.\"",
+        "mid": "\"Whatever we questioned back there -- it's gone. What's left has to be finished before it remembers how to run.\"",
+        "high": "\"{name}... that was never just a bandit captain. I should have seen it sooner. Go. Finish it -- and come back.\"",
+    },
+}
+
+
+def narrate_borin_dialogue(
+    character_name: str, trust_band: str, quest_title: str, quest_description: str, quest_clue: str | None = None,
+) -> str:
+    """
+    Real live report (2026-08-28, Coffee, dev-bridge screenshot): Borin
+    hallucinated a blended, nonsensical line ("the Name on the Page
+    task needs vouchering for Kess... seek Charvenna... stop your
+    oversight") via the generic talk_to_npc path's own cross-topic
+    conversation memory.
+
+    Hand-written, not AI-generated (Kess Arc Phase 2, per Coffee: "you
+    dont need to use ollama calls for an outcome or response that we
+    have already determined via story line") -- Borin's real line for
+    each of the three real Kess-arc quest stages, banded by his own
+    real companion trust (_companion_trust_band, the SAME stat borins_
+    resolution already uses), with only the speaking character's name
+    substituted in. Falls back to the quest's own real description if
+    somehow called for a quest_id outside this real three-quest chain
+    (should never happen in practice -- _active_kess_arc_quest only
+    ever returns one of these three).
+    """
+    lines_by_band = _BORIN_KESS_ARC_LINES.get(
+        _kess_arc_quest_id_for_title(quest_title),
+    )
+    if lines_by_band is None:
+        return quest_description
+    return lines_by_band[trust_band].format(name=character_name)
+
+
+def _kess_arc_quest_id_for_title(quest_title: str) -> str | None:
+    """Reverse lookup from a quest's real title back to its id -- avoids a second parameter just for this internal dict key."""
+    titles = {
+        "More Than Banditry": "borins_blackthorn_warning",
+        "The Name on the Page": "kess_first_reckoning",
+        "What Answered Instead": "kess_the_unbound_reckoning",
+    }
+    return titles.get(quest_title)
+
+
+def kess_first_confrontation_script(character_name: str) -> str:
+    """
+    Hand-written FF6-style confrontation script for the party's FIRST
+    real meeting with Kess (Kess Arc Phase 2) -- the Kafka (Honkai:
+    Star Rail) voice reference Coffee gave (2026-08-28 dev-bridge:
+    "Use this as an example on how to characteristically build Kess"):
+    calm manipulation over snarling threats, references to a script
+    she's following that isn't her own. Grounded in her real,
+    already-written campaign.json goals ("collecting tolls to fund
+    something far bigger than banditry") -- the ledger reference is
+    the party's own real earned knowledge (torn_ledger_page), not
+    invented here.
+
+    Per Coffee (2026-08-28): "I want to see a progression showing her
+    as a human... make it seem like the players can save her or offer
+    hope." This is the FIRST beat of that arc -- still visibly a
+    person, still capable of a real choice, the strain of that only
+    barely showing. Fires once, right as her fight actually begins.
+    """
+    return (
+        "*The road narrows here. A woman is already waiting at the crossing, "
+        "unhurried, like she's been expecting exactly this arrival and no other.*\n\n"
+        "**Kess:** \"You found the ledger. I wondered how long that would take.\"\n\n"
+        "*She doesn't reach for a weapon yet -- for a moment she just looks tired, "
+        "like someone who stopped being able to remember why she started.*\n\n"
+        "**Kess:** \"Everyone who crosses here pays a toll. You're about to learn "
+        "mine was never really the point.\""
+    )
+
+
+def kess_unbound_confrontation_script(character_name: str) -> str:
+    """
+    The second, escalated confrontation script -- Kess the Unbound's
+    own real, changed voice (calculation gone, something else
+    deciding), same hand-written discipline as kess_first_
+    confrontation_script. Per Coffee (2026-08-28): the party's own
+    Remnants ("Whispers of the Universe" -- the in-fiction name this
+    arc uses for them) are what she's been reaching for the whole
+    time; the more the party carries, the further gone she already is.
+    """
+    return (
+        "*What's left of Kess is still standing where she fell -- taller now, "
+        "waiting, in no hurry at all. The air around her hums, the same low "
+        "note a Whisper of the Universe makes right before it answers.*\n\n"
+        "**???:** \"She said this was where it ended. She was almost right.\"\n\n"
+        "*Its voice still has the shape of hers. Nothing else does.*\n\n"
+        "**???:** \"You carry the same voices I do. I can hear them from here. "
+        "Finish it, then -- she would have wanted someone to.\""
+    )
+
+
+_CONFRONTATION_CHOICE_SCRIPTS = {
+    "confront": (
+        "**{name}:** \"Whoever you're funding -- it ends here.\"\n\n"
+        "**Kess:** \"Ends. That's an interesting word for someone who doesn't know what they're ending.\"\n\n"
+        "*The party presses the advantage while she's still talking -- {mechanical_outcome}*"
+    ),
+    "reason": (
+        "**{name}:** \"You don't have to do this. Whoever's pulling the strings -- you could still walk away.\"\n\n"
+        "*For just a moment, something flickers behind her eyes -- gone as fast as it came.*\n\n"
+        "**Kess:** \"...No. I don't think I could.\"\n\n"
+        "*{mechanical_outcome}*"
+    ),
+}
+
+
+def narrate_confrontation_choice_outcome(
+    choice: str, character_name: str, mechanical_outcome: str,
+) -> str:
+    """
+    Hand-written, not AI-generated (Kess Arc Phase 2) -- real live
+    testing found the AI version genuinely unreliable for a moment this
+    important (wrong pronouns, empty responses). Both real branches
+    ("confront"/"reason") are fully determined by which button the
+    player actually tapped, so there's nothing here an LLM call could
+    legitimately vary; `mechanical_outcome` is the one real, already-
+    decided fact (bot.py computes it BEFORE this is ever called) woven
+    into the fixed script as a plain sentence.
+    """
+    script = _CONFRONTATION_CHOICE_SCRIPTS.get(choice, _CONFRONTATION_CHOICE_SCRIPTS["confront"])
+    return script.format(name=character_name, mechanical_outcome=mechanical_outcome)
+
+
+def kess_flees_line() -> str:
+    """
+    Hand-written (Kess Arc Phase 2, per Coffee: "if KESS is not
+    supposed to be killed, make sure they leave the battle -- you can
+    continue any cut-scene also after battle ends"). Kess's first form
+    flees at 0 HP rather than dying outright -- sets up the real
+    transformation beat (narrate_kess_transformation) as something
+    that happens to her after she runs, not a corpse reanimating.
+    """
+    return (
+        "*Kess staggers back, blade dropping from her grip.*\n\n"
+        "**Kess:** \"This isn't -- this was never supposed --\"\n\n"
+        "*She turns and bolts into the fog before anyone can stop her. "
+        "Whatever she was about to say, she didn't get to finish it.*"
+    )
+
+
+def narrate_kess_transformation(
+    boss_name: str, before_personality: str, before_goals: str,
+    after_name: str, after_personality: str, after_goals: str, party_names: str,
+) -> str:
+    """
+    Hand-written, not AI-generated (Kess Arc Phase 2) -- the real
+    Kefka-style "she breaks, something else answers" beat, picked back
+    up right after Kess flees the first fight (kess_flees_line above),
+    not a corpse reanimating. Fires once, as kess_first_reckoning's own
+    real completion flourish, grounded in kess_the_unbound's own
+    already-written campaign.json personality/goals (never invented
+    here) -- before_personality/before_goals/after_personality/
+    after_goals are kept as real parameters for API consistency with
+    the rest of this arc's functions, even though this hand-written
+    version only ever uses the fixed script below.
+    """
+    return (
+        "*Word comes back from where Kess fled: she never stopped running -- "
+        "and something caught up with her.*\n\n"
+        "*What returns to the Downs still wears her face. It's taller now, "
+        "wrong in the joints, and it isn't bothering to sound like her anymore.*\n\n"
+        "**???:** \"She served her purpose. I'll serve mine better.\""
+    )
+
+
+def narrate_chapter_8_epilogue(boss_name: str, party_names: str, plan_succeeded_fact: str) -> str:
+    """
+    Hand-written, not AI-generated (Kess Arc Phase 2) -- the bespoke,
+    `the_unasked`-tier unique ending treatment for kess_the_unbound_
+    reckoning (Kess is "the boss of the game" per Coffee), same real
+    "hand-write the true ending" discipline bot.py already uses for
+    the_unasked/the_unbegun. The FF6 "the Fall" beat: winning the fight
+    doesn't mean winning the war. `plan_succeeded_fact` is the one
+    real, already-decided fact bot.py computes and folds in verbatim.
+
+    Per Coffee (2026-08-28): Kess stays the ENTIRE focus of this
+    chapter -- the true identity of whatever finally answers through
+    her body is never named here (deliberately deferred to the actual
+    final battle/cutscenes of the eventual Chapter 14). This is her
+    real death and something else's real arrival, in the same body, in
+    the same breath -- not a separate third boss fight, a single
+    unbroken image. Also hints at Evolution/rebirth (a real, already-
+    built mechanic, EVOLUTION_HP_MULTIPLIER/rules/leveling.py --
+    "players may not have heard of this up to this point," per Coffee,
+    and should want to now) as the real, grounded answer to "how do we
+    get strong enough for whatever comes next."
+    """
+    return (
+        f"*{boss_name} finally falls -- and this time she doesn't get back up.*\n\n"
+        f"*But something else does. It rises through her, wearing what's left of "
+        f"her the way water wears a shape it was never built to hold, and for one "
+        f"unbearable second the whole battlefield feels far too small to be standing in.*\n\n"
+        f"*Then it's gone -- folded away somewhere the party can't follow, taking "
+        f"whatever it needed from her and leaving the rest behind.*\n\n"
+        f"{plan_succeeded_fact}\n\n"
+        f"*Kess's own \"Divine Purpose\" was never really hers to answer -- she was "
+        f"only ever the door. Something used her, and the door is closed now, but "
+        f"a door having been used once means it can be found again.*\n\n"
+        f"*Ordinary strength won't be enough for whatever that was. Something in "
+        f"{party_names.split(',')[0].strip()} already senses it -- the way forward "
+        f"isn't just levels anymore. It's evolution.*"
+    )

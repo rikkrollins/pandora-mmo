@@ -70,6 +70,9 @@ from ai.dm_agent import (
     narrate_story_so_far, narrate_chapter_climax, narrate_arc_opening, narrate_next_step_hint,
     narrate_boss_intro, narrate_boss_defeat, narrate_boss_summon, narrate_remnant_summon,
     narrate_boss_confrontation, narrate_reach_location_quest_completion,
+    narrate_borin_dialogue, narrate_confrontation_choice_outcome,
+    narrate_kess_transformation, narrate_chapter_8_epilogue,
+    kess_first_confrontation_script, kess_unbound_confrontation_script, kess_flees_line,
     _fallback_hourly_update, _fallback_narration,
     is_narration_call_active,
 )
@@ -933,18 +936,59 @@ def _boss_confrontation_dialog_keyboard() -> InlineKeyboardMarkup:
 
 
 async def boss_confrontation_dialog_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles taps on _boss_confrontation_dialog_keyboard -- pure roleplay flavor, never touches real combat state."""
+    """
+    Handles taps on _boss_confrontation_dialog_keyboard. Real mechanical
+    branch now (Kess Arc plan, 2026-08-28, per Coffee: the old always-
+    identical-outcome version "doesn't feel like there's any
+    conversation at all") -- the rules layer decides a real, small,
+    bounded effect FIRST, then narrate_confrontation_choice_outcome
+    only ever narrates that already-fixed result, same discipline as
+    every other real reaction in this game. Falls back to the old pure-
+    flavor behavior if no live session/boss is found (a stale button
+    tap on an old message after the fight already ended).
+    """
     query = update.callback_query
     parts = (query.data or "").split("|")
     choice = parts[1] if len(parts) > 1 else ""
     await _safe_answer(query)
     await _safe_edit_markup(query, None)
-    line = (
-        "The party moves to confront her directly, weapons already drawn."
-        if choice == "confront" else
-        "The party holds a moment, searching for words that might still reach whoever she used to be."
+
+    telegram_user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    session = sessions.get_session_for_user(chat_id, telegram_user_id)
+    boss = next(
+        (p for p in (session.living_on_side("enemy") if session else [])
+         if (p.get("monster_key") or "").startswith("kess_")),
+        None,
     )
-    await _safe_send(update, f"> *{line}*", speak=False)
+    if session is None or boss is None:
+        line = (
+            "The party moves to confront her directly, weapons already drawn."
+            if choice == "confront" else
+            "The party holds a moment, searching for words that might still reach whoever she used to be."
+        )
+        await _safe_send(update, f"> *{line}*", speak=False)
+        return
+
+    speaker = db.get_character(telegram_user_id, chat_id)
+    character_name = speaker["name"] if speaker else "The party"
+
+    if choice == "reason":
+        boss["confrontation_hesitation"] = True
+        mechanical_outcome = f"{boss['name']} hesitates -- her first action this fight is lost to it."
+    else:
+        # A real, bounded opening strike -- 8% of her current max HP,
+        # floored at 1, same "never a coincidence, never invented"
+        # discipline as every other real damage number in this game.
+        bonus_damage = max(1, round(boss.get("hp_max", boss["hp_current"]) * 0.08))
+        boss["hp_current"] = max(boss["hp_current"] - bonus_damage, 0)
+        mechanical_outcome = f"The party's aggressive opening catches {boss['name']} off guard for {bonus_damage} real damage."
+
+    outcome_text = narrate_confrontation_choice_outcome(choice, character_name, mechanical_outcome)
+    await _safe_send(update, f"> *{outcome_text}*", speak=False)
+    if boss["hp_current"] <= 0:
+        removed = session.remove_defeated()
+        await _announce_defeats(update, session, removed)
 
 
 # ---------------------------------------------------------------------
@@ -4104,6 +4148,22 @@ async def _announce_defeats(update: Update, session: sessions.Session, removed: 
     genuine companions.
     """
     for entry in removed:
+        # Kess Arc Phase 2 (2026-08-28, per Coffee: "if KESS is not
+        # supposed to be killed, make sure they leave the battle -- you
+        # can continue any cut-scene also after battle ends"). Her
+        # FIRST form flees at 0 HP instead of dying outright, so the
+        # real transformation beat (narrate_kess_transformation, fired
+        # from kess_first_reckoning's own completion right after this)
+        # reads as something that happens to her after she runs, not a
+        # corpse reanimating. Looked up by real monster_key on the
+        # original participant dict (removed's own entries never carry
+        # it) -- kess_the_unbound, her second/final form, is NOT
+        # exempted here; she really is finished for good.
+        original = next((p for p in session.participants if p["telegram_user_id"] == entry["telegram_user_id"]), None)
+        if original and original.get("monster_key") == "kess_the_bandit":
+            session.log_event(f"{entry['name']} flees the battle!")
+            await _safe_send(update, f"> *{kess_flees_line()}*", speak=False)
+            continue
         session.log_event(f"{entry['name']} has been defeated!")
         if not entry["is_ai"] and session.sides.get(entry["telegram_user_id"]) == "party":
             await _safe_send(
@@ -7408,6 +7468,19 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
         # per turn, reused by every attack_num sub-attack below.
         preferred_damage_type = _guidance_preferred_damage_type(guidance)
 
+        # Real mechanical effect of the boss-confrontation yes/no choice
+        # (Kess Arc plan, 2026-08-28, per Coffee: the existing choice
+        # "doesn't feel like there's any conversation at all" because
+        # both options led to the identical fight). "Try to reach her
+        # first" sets this real, one-time flag (boss_confrontation_
+        # dialog_callback) -- her very first turn this fight is skipped
+        # entirely as she genuinely hesitates, popped so it only ever
+        # fires once.
+        if current.pop("confrontation_hesitation", False):
+            await _safe_send(update, f"🗣️ **{current['name']}** hesitates, searching for words instead of striking.")
+            session.advance_turn()
+            continue
+
         # Boss Multiattack (2026-07-15) / Extra Attack (2026-07-16): every
         # is_boss monster gets 2 attacks/turn; separately, an AI-controlled
         # PARTY member (a recruited companion or autonomous AI player, real
@@ -9101,12 +9174,23 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
                 return
 
             if npc_id == scripted_boss_id:
-                taunt = await asyncio.to_thread(
-                    narrate_boss_confrontation,
-                    npc_data["name"], npc_data.get("personality", ""), npc_data.get("goals", ""),
-                    _format_party_names(party), location.get("name", location["id"]),
-                    escalated=bool(npc_data.get("escalated_encounter")),
-                )
+                # Kess Arc Phase 2 (2026-08-28): her own two confrontations
+                # are hand-written, not AI-generated (real live testing
+                # found the AI version unreliable for a moment this
+                # important -- wrong pronouns, empty responses, invented
+                # details). Every OTHER future scripted boss still uses
+                # the generic AI-based narrate_boss_confrontation below.
+                if npc_id == "kess_the_bandit":
+                    taunt = kess_first_confrontation_script(character["name"])
+                elif npc_id == "kess_the_unbound":
+                    taunt = kess_unbound_confrontation_script(character["name"])
+                else:
+                    taunt = await asyncio.to_thread(
+                        narrate_boss_confrontation,
+                        npc_data["name"], npc_data.get("personality", ""), npc_data.get("goals", ""),
+                        _format_party_names(party), location.get("name", location["id"]),
+                        escalated=bool(npc_data.get("escalated_encounter")),
+                    )
                 await _safe_send(
                     update, f"🎬 **{npc_data['name']}**\n\n{taunt}",
                     reply_markup=_boss_confrontation_dialog_keyboard(), speak=False,
@@ -9117,6 +9201,8 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
                     generate_ambient_line, npc_id, character["name"], "arrives, about to be attacked", memory_facts
                 )
             enemy = _npc_combatant_from_stats(npc_id, npc_data, party_levels=[p.get("level", 1) for p in party])
+            if npc_id in ("kess_the_bandit", "kess_the_unbound"):
+                _apply_kess_remnant_mirroring(enemy, party)
             sides = {p["telegram_user_id"]: "party" for p in party}
             sides[enemy["telegram_user_id"]] = "enemy"
             session = sessions.start_session(chat_id, party + [enemy], sides=sides)
@@ -9939,7 +10025,15 @@ async def _maybe_monster_cast_spell(
     # backlash) is already hardcoded False/0 for a spell-cast result
     # above -- there's genuinely nothing there for an extra target to
     # need, just its own damage + narration.
-    if spell.get("aoe"):
+    # forces_spell_aoe (Kess Arc plan, 2026-08-28, per Coffee: her
+    # mirrored Remnant spells need "multi targetting for the
+    # challenge") -- a real, caster-side-only override for a monster
+    # that mirrors a player's own real Remnant-taught spell but doesn't
+    # happen to be one of the ones already flagged aoe globally
+    # (spiritual_weapon/voidcall/vicious_mockery/starfall_lance). Never
+    # touches the global spell definition a real player's own cast of
+    # the exact same spell still resolves against elsewhere.
+    if spell.get("aoe") or caster.get("forces_spell_aoe"):
         for extra in session.living_on_side(session.opposing_side(caster["telegram_user_id"])):
             if extra is target:
                 continue
@@ -13176,10 +13270,29 @@ def _quest_suggested_level(quest_id: str, quest: dict) -> str:
     every other quest's suggested level stays an honest, unscaled
     difficulty signal, not softened by a note that wouldn't be true.
     """
+    trigger = quest.get("trigger", {})
+    if trigger.get("type") == "defeat_monster" and trigger.get("monster") in CAMPAIGN.get("npcs", {}):
+        # Real live follow-up (2026-08-28, Coffee: "the suggested lv 75
+        # needs to be changed so players dont avoid the quest, use the
+        # actual suggest lv for the quests"). kess_first_reckoning/
+        # kess_the_unbound_reckoning inherited arc_8's blanket 75+ band
+        # from _quest_suggested_level_core below, even though Kess's
+        # own real stats never use that number at all -- her actual
+        # difficulty comes entirely from undertuned_monster_stat_
+        # multiplier scaling to the party's real level (confirmed
+        # earlier this session: ~9,000 effective HP at a real level-24
+        # party). Her own NPC stats.level (23/25) is a far more honest,
+        # far less scary real fact than the arc's own static band, so
+        # it wins outright for this dynamic-scaling case specifically
+        # -- every other quest's suggested level is untouched.
+        npc_data = CAMPAIGN["npcs"][trigger["monster"]]
+        npc_level = npc_data.get("stats", {}).get("level")
+        if npc_level is not None:
+            return f"⭐ **Suggested Level:** {npc_level}+ (this fight scales to your own party's level)"
+
     base = _quest_suggested_level_core(quest_id, quest)
     if not base:
         return base
-    trigger = quest.get("trigger", {})
     if trigger.get("type") == "defeat_monster" and trigger.get("monster") in CAMPAIGN.get("npcs", {}):
         return f"{base} (this fight scales to your own party's level)"
     return base
@@ -13516,6 +13629,20 @@ def _companion_trust_band(telegram_user_id: int, chat_id: int, npc_id: str) -> s
     return "mid"
 
 
+# Kess Arc plan (2026-08-28) -- the real chain, most-advanced-first, so
+# a character with the later quest active is grounded in THAT one, not
+# an earlier one they've already moved past.
+_KESS_ARC_QUEST_IDS = ("kess_the_unbound_reckoning", "kess_first_reckoning", "borins_blackthorn_warning")
+
+
+def _active_kess_arc_quest(character: dict) -> tuple[str, dict] | None:
+    """The most-advanced Kess-arc quest this character currently has active, if any -- used to ground Borin's dedicated dialogue function."""
+    for quest_id in _KESS_ARC_QUEST_IDS:
+        if quest_id in character["active_quests"]:
+            return quest_id, CAMPAIGN["quests"][quest_id]
+    return None
+
+
 def _trust_tier_label(affinity: int) -> str:
     """
     Cosmetic-only 5-tier label for the Affinity Menu (2026-08-23, per
@@ -13616,7 +13743,25 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
     # decided fact (the quest's own title/description/reward), never
     # invented by the model.
     climax_narration = ""
-    if quest.get("weight") == "climactic":
+    if quest_id == "kess_first_reckoning":
+        # Kess Arc Phase 2 (2026-08-28): the real Kefka-style
+        # transformation beat -- hand-written, not the generic
+        # climactic AI flourish below. She doesn't die in this fight
+        # (see _announce_defeats' real flee mechanic); this picks the
+        # cutscene back up right after combat ends, per Coffee: "you
+        # can continue any cut-scene also after battle ends to
+        # culminate the scene."
+        kess_data = CAMPAIGN["npcs"]["kess_the_bandit"]
+        unbound_data = CAMPAIGN["npcs"]["kess_the_unbound"]
+        transformation_text = narrate_kess_transformation(
+            kess_data["name"], kess_data.get("personality", ""), kess_data.get("goals", ""),
+            unbound_data["name"], unbound_data.get("personality", ""), unbound_data.get("goals", ""),
+            character["name"],
+        )
+        climax_narration = f"{transformation_text}\n\n"
+    elif quest_id == "kess_the_unbound_reckoning":
+        pass  # its own fully hand-written bespoke ending below needs no separate climax_narration prefix
+    elif quest.get("weight") == "climactic":
         climax_text = await asyncio.to_thread(
             narrate_chapter_climax, quest["title"], quest["description"], reward_text,
         )
@@ -13685,6 +13830,32 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         )
         await _notify_main_topic(
             update_like, f"🌌 **{character['name']}** has done something no one else has: ended the cycle.",
+        )
+    elif quest_id == "kess_the_unbound_reckoning":
+        # Kess Arc Phase 2 (2026-08-28, per Coffee: Kess is "the boss of
+        # the game" -- she gets the same bespoke, one-of-a-kind ending
+        # weight as the_unasked/the_unbegun above, not the generic
+        # reused "climactic quest" wrapper). The FF6 "the Fall" beat:
+        # the fight is won, the war isn't -- plan_succeeded_fact is the
+        # one real, already-decided consequence, hand-written here (not
+        # a mechanical world-state flag; her defeat being in this
+        # character's own real completed_quests IS the queryable fact
+        # a future chapter can check).
+        plan_succeeded_fact = (
+            "Whatever she was funneling those Whispers of the Universe toward already left this world "
+            "changed -- somewhere far past the Downs, something that was supposed to stay asleep just opened its eyes."
+        )
+        epilogue_text = narrate_chapter_8_epilogue(
+            CAMPAIGN["npcs"]["kess_the_unbound"]["name"], character["name"], plan_succeeded_fact,
+        )
+        await _safe_send(
+            update_like,
+            f"🌌 **What the Downs Still Watches — The True Ending**\n\n{epilogue_text}\n\n"
+            f"You've earned: {reward_text}.{chapter_note}{resolution_note}",
+        )
+        await _notify_main_topic(
+            update_like,
+            f"🌌 **{character['name']}** defeated Kess the Unbound — but the real cost is only beginning to show.",
         )
     else:
         await _safe_send(
@@ -13808,6 +13979,61 @@ REMNANT_ELEMENT_TAUGHT_SPELL = {
     "psychic": "vicious_mockery",
     "radiant": "starfall_lance",
 }
+# Real per-element damage_bonus % Kess gains for every unique Remnant
+# element the party has already bound, capped so this stays a real
+# challenge rather than an unbeatable wall -- see _apply_kess_remnant_
+# mirroring's own docstring.
+KESS_REMNANT_POWER_PCT_PER_ELEMENT = 8
+KESS_REMNANT_POWER_PCT_CAP = 64
+
+
+def _apply_kess_remnant_mirroring(kess: dict, party: list[dict]) -> None:
+    """
+    Real live request (2026-08-28, Kess Arc plan, per Coffee: "the more
+    Remnants the party has increases her magic power, and she also has
+    the same Remnants and spells as the party and can use them against
+    the party (her spells have multi targetting for the challenge)").
+    Mirrors the party's own real, already-bound Remnants (`bound_
+    remnants`, real per-character DB field) back at them through Kess:
+
+    - Her `known_spells` becomes exactly the set of REMNANT_ELEMENT_
+      TAUGHT_SPELL entries for every unique element ANY real party
+      member has actually bound -- the exact same spells a player who
+      bound that Remnant would themselves know, never invented.
+    - Her `damage_bonus` grows by KESS_REMNANT_POWER_PCT_PER_ELEMENT
+      per unique element (capped at KESS_REMNANT_POWER_PCT_CAP) --
+      real, bounded, and grounded in something the party actually did
+      (collected Remnants), not an arbitrary difficulty slider.
+    - `forces_spell_aoe` is set so EVERY spell she casts this way hits
+      every living party member, even the 4 of 8 real taught spells
+      that aren't normally AOE for a player (spiritual_weapon/voidcall/
+      vicious_mockery/starfall_lance) -- read by _maybe_monster_cast_
+      spell's own AOE check, which already exists for the 4 that are.
+      This never touches the global spell definitions those same
+      spells still resolve to for a real player's own cast elsewhere.
+
+    Called once, at the exact moment either of her two real fights
+    actually starts -- never mutates a player's own real Remnant
+    progress or spell list, only reads it.
+    """
+    bound_elements = set()
+    for member in party:
+        for remnant_id in member.get("bound_remnants") or []:
+            remnant = remnants_module.REMNANTS.get(remnant_id)
+            if remnant:
+                bound_elements.add(remnant["element"])
+    if not bound_elements:
+        return
+    taught_spells = [
+        REMNANT_ELEMENT_TAUGHT_SPELL[element] for element in bound_elements
+        if element in REMNANT_ELEMENT_TAUGHT_SPELL
+    ]
+    if not taught_spells:
+        return
+    kess["known_spells"] = list(set(kess.get("known_spells") or []) | set(taught_spells))
+    kess["forces_spell_aoe"] = True
+    power_pct = min(len(bound_elements) * KESS_REMNANT_POWER_PCT_PER_ELEMENT, KESS_REMNANT_POWER_PCT_CAP)
+    kess["damage_bonus"] = round(kess.get("damage_bonus", 0) * (1 + power_pct / 100))
 
 
 async def _check_quest_completions_defeat_monster(update_like, session: sessions.Session) -> None:
@@ -29445,12 +29671,32 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
                 )
                 return
             character_name = character["name"] if character else "the player"
-            relationship = db.get_relationship(update.effective_user.id, update.effective_chat.id, npc_id)
-            quest_facts = _npc_quest_facts(character, npc_id) if character else None
-            reply = await asyncio.to_thread(
-                talk_to_npc, npc_id, text, character_name, relationship["memory_events"], quest_facts,
-                _npc_identity_facts(character),
-            )
+            # Real live report (2026-08-28, Coffee, dev-bridge screenshot):
+            # Borin hallucinated a blended, nonsensical line ("the Name
+            # on the Page task needs vouchering for Kess... stop your
+            # oversight") via the generic talk_to_npc path's own
+            # cross-topic conversation memory. Borin is "a main
+            # character in this quest" (Coffee) -- while a real Kess-arc
+            # quest is active, he gets a dedicated, narrower dialogue
+            # function instead, grounded ONLY in that exact quest's own
+            # real facts, with his own real companion trust band
+            # (_companion_trust_band, the same stat borins_resolution
+            # already uses) shaping how much he actually reveals.
+            kess_arc_quest = _active_kess_arc_quest(character) if character and npc_id == "borin_ironjaw" else None
+            if kess_arc_quest is not None:
+                _, kess_quest = kess_arc_quest
+                trust_band = _companion_trust_band(update.effective_user.id, update.effective_chat.id, npc_id)
+                reply = await asyncio.to_thread(
+                    narrate_borin_dialogue, character_name, trust_band,
+                    kess_quest["title"], kess_quest["description"], kess_quest.get("clue"),
+                )
+            else:
+                relationship = db.get_relationship(update.effective_user.id, update.effective_chat.id, npc_id)
+                quest_facts = _npc_quest_facts(character, npc_id) if character else None
+                reply = await asyncio.to_thread(
+                    talk_to_npc, npc_id, text, character_name, relationship["memory_events"], quest_facts,
+                    _npc_identity_facts(character),
+                )
             npc_data = CAMPAIGN["npcs"].get(npc_id, {})
             npc_display_name = npc_data.get("name", intent["npc_name"])
             await _safe_send(update, f"💬 **{npc_display_name}:** {reply}")

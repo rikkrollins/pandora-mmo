@@ -2,6 +2,61 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.394] — The Kess Arc, Phase 2: real, hand-written cutscenes + Remnant mirroring
+
+The narration layer for the Kess arc (full plan at
+`.claude/plans/twinkly-purring-deer.md`). Live-tested the AI-generated
+version of every one of these beats first and found it genuinely
+unreliable for content this important -- wrong pronouns for Kess,
+empty responses, invented details ("a clock struck three") that broke
+its own "never invent" instruction. Per Coffee: "you dont need to use
+ollama calls for an outcome or response that we have already
+determined via story line." Every beat below is now 100%-reliable
+hand-written text (plain Python string formatting, zero network
+calls), the same "hand-write the true ending" discipline this
+codebase already used for `the_unasked`/`the_unbegun`.
+
+**New, real story beats:**
+- Borin's dialogue for all 3 real Kess-arc quest stages, banded by his
+  own real companion trust (`_companion_trust_band`) -- a high-trust
+  Borin levels with the party; low-trust makes them work for it. Fixes
+  the live hallucination bug (Borin blending two unrelated quests into
+  nonsense) at the root, by routing this specific quest chain away
+  from the general free-form NPC chat memory entirely.
+- Kess's own two confrontation cutscenes, in a real script format
+  (narration + quoted dialogue, not a prose paragraph) -- her voice
+  leans into the Kafka (Honkai: Star Rail) reference Coffee gave:
+  calm and controlled rather than snarling, hinting at a script she
+  didn't write for herself. Shows a real, human crack in her
+  composure in the first meeting -- the party can genuinely try to
+  reach her (a real "try to save her" choice), though the story
+  already knows how that goes.
+- The confrontation choice ("Confront her" / "Try to reach her
+  first") now has a REAL mechanical effect, not just different text:
+  confronting lands real bonus damage (8% of her current HP) before
+  she's ready; reaching out makes her hesitate and lose her first
+  action. Both outcomes get their own real spoken exchange.
+- Kess's first form flees at 0 HP instead of dying -- she's not meant
+  to be killed here. The real transformation ("something else answers
+  through her body") picks the cutscene back up right after combat
+  ends, not a corpse reanimating.
+- A real, bespoke true ending for `kess_the_unbound_reckoning` (same
+  one-of-a-kind tier `the_unasked`/`the_unbegun` already get) -- the
+  FF6 "the Fall" beat: the fight is won, the war isn't. Something
+  unnamed takes what it needs from her body and disappears -- her own
+  identity is never revealed as anything more than the door it used
+  (the true reveal is saved for the actual final chapter). Hints at
+  the game's real Evolution/rebirth mechanic as the honest answer to
+  "how do we get strong enough for what's coming."
+
+**New real mechanic: Remnant mirroring.** The more Remnants ("Whispers
+of the Universe") the party has actually bound, the stronger Kess
+gets -- her `known_spells` becomes exactly the real spells those same
+Remnants would teach a player, and her damage grows 8% per unique
+element (capped). Every mirrored spell hits the whole party (a new
+`forces_spell_aoe` flag, scoped to her alone -- never touches the
+same spells' normal behavior for a real player's own cast).
+
 ## [1.27.393] — The Kess Arc, Phase 1: the real investigation is no longer skippable
 
 First deploy of the larger Kess/FF6-style story arc rebuild (full plan

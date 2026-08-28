@@ -1048,16 +1048,18 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         quest = bot.CAMPAIGN["quests"]["borins_blackthorn_warning"]
         self.assertEqual(bot._quest_suggested_level("borins_blackthorn_warning", quest), "⭐ **Suggested Level:** 10+")
 
-        # kess_first_reckoning itself is IN arc_8 (unaffected by this
-        # fix -- still correctly shows the zone's real 75+ band, since
-        # that's genuinely when you're meant to actually fight Kess).
-        # Now also carries the real dynamic-scaling note (2026-08-28),
-        # see test_suggested_level_notes_dynamic_scaling_only_for_a_
-        # real_npc_dict_boss below for the dedicated test of that.
+        # kess_first_reckoning itself is IN arc_8, but as a dynamic-
+        # scaling NPC-dict boss quest it now shows Kess's own real,
+        # far-less-alarming NPC level (23+) instead of the arc's static
+        # 75+ band (2026-08-28, per Coffee: "use the actual suggest lv
+        # for the quests" -- the 75+ label was scaring a real level-24
+        # party away from a fight that actually scales to match them).
+        # See test_suggested_level_notes_dynamic_scaling_only_for_a_
+        # real_npc_dict_boss below for the dedicated test of this.
         kess_quest = bot.CAMPAIGN["quests"]["kess_first_reckoning"]
         self.assertEqual(
             bot._quest_suggested_level("kess_first_reckoning", kess_quest),
-            "⭐ **Suggested Level:** 75+ (this fight scales to your own party's level)",
+            "⭐ **Suggested Level:** 23+ (this fight scales to your own party's level)",
         )
 
         # The Wayfarer's Circuit has no requires_completed_quest of its
@@ -1082,10 +1084,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         be true for them).
         """
         kess_quest = bot.CAMPAIGN["quests"]["kess_first_reckoning"]
-        self.assertIn("scales to your own party's level", bot._quest_suggested_level("kess_first_reckoning", kess_quest))
+        kess_level_line = bot._quest_suggested_level("kess_first_reckoning", kess_quest)
+        self.assertIn("scales to your own party's level", kess_level_line)
+        # Real live follow-up (2026-08-28, "use the actual suggest lv
+        # for the quests"): Kess's own real NPC level (23), not arc_8's
+        # static 75+ band, which was never actually true for her.
+        self.assertIn("Suggested Level:** 23+", kess_level_line)
 
         unbound_quest = bot.CAMPAIGN["quests"]["kess_the_unbound_reckoning"]
-        self.assertIn("scales to your own party's level", bot._quest_suggested_level("kess_the_unbound_reckoning", unbound_quest))
+        unbound_level_line = bot._quest_suggested_level("kess_the_unbound_reckoning", unbound_quest)
+        self.assertIn("scales to your own party's level", unbound_level_line)
+        self.assertIn("Suggested Level:** 25+", unbound_level_line)
 
         # A real static-monster defeat_monster quest (goblin_boss lives
         # in the "monsters" dict, not "npcs") must NOT get the note.
@@ -16429,7 +16438,12 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sessions.end_session(-996)
 
     async def test_scripted_boss_confrontation_sends_a_real_cutscene_with_dialog_buttons(self):
-        """The cutscene message itself: real grounded facts passed to narrate_boss_confrontation, sent with the yes/no dialog keyboard attached."""
+        """
+        The cutscene message itself: Kess's own real, hand-written
+        confrontation script (Kess Arc Phase 2 -- no longer AI-
+        generated, per live-testing finding that version unreliable),
+        sent with the yes/no dialog keyboard attached.
+        """
         from unittest.mock import patch, Mock, AsyncMock
         import sessions
         bot.setup_default_npcs()
@@ -16453,7 +16467,6 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
              patch("bot.random.random", return_value=0.0), \
              patch("bot._npcs_at_location", return_value=["kess_the_bandit"]), \
              patch("bot._effective_disposition", return_value="hostile"), \
-             patch("bot.narrate_boss_confrontation", return_value="Kess steps out from the treeline, blade drawn.") as mock_confrontation, \
              patch("bot.narrate_boss_decision", new=Mock(return_value="Kess sizes you up.")), \
              patch("bot.narrate_action", new=Mock(return_value="Kess strikes.")), \
              patch("bot._safe_send", side_effect=spying_safe_send), \
@@ -16461,25 +16474,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot._maybe_trigger_npc_encounter(update, character, location)
             await _drain_narration_queue(-997)
 
-        # narrate_boss_confrontation was called with real, grounded facts.
-        mock_confrontation.assert_called_once()
-        call_args = mock_confrontation.call_args[0]
-        self.assertEqual(call_args[0], "Kess")
-        self.assertIn("highwaywoman", call_args[1])
-        self.assertIn("banditry", call_args[2])
-        self.assertIn("CutsceneWitness", call_args[3])
-        self.assertFalse(mock_confrontation.call_args.kwargs.get("escalated", False))
-
-        cutscene_msg = next((t, m) for t, m in captured_markups if "Kess steps out from the treeline" in t)
+        cutscene_msg = next((t, m) for t, m in captured_markups if "You found the ledger" in t)
         self.assertIn("🎬", cutscene_msg[0])
+        self.assertIn("Kess:", cutscene_msg[0])
         self.assertIsNotNone(cutscene_msg[1])
         callback_datas = [btn.callback_data for row in cutscene_msg[1].inline_keyboard for btn in row]
         self.assertIn("bossdlg|confront", callback_datas)
         self.assertIn("bossdlg|reason", callback_datas)
         sessions.end_session(-997)
 
-    async def test_boss_confrontation_dialog_callback_is_pure_flavor(self):
-        """Tapping either choice sends a real reaction line and clears the buttons -- never touches combat/session state."""
+    async def test_boss_confrontation_dialog_callback_falls_back_to_flavor_with_no_live_session(self):
+        """A stale button tap with no live Kess fight left (session already ended) stays pure flavor, same as before this fix."""
         sink = []
         await bot.boss_confrontation_dialog_callback(FakeCallbackUpdate(900945, "bossdlg|confront", sink), DummyContext())
         self.assertTrue(any("weapons already drawn" in m for m in sink))
@@ -16488,6 +16493,245 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink2 = []
         await bot.boss_confrontation_dialog_callback(FakeCallbackUpdate(900946, "bossdlg|reason", sink2), DummyContext())
         self.assertTrue(any("reach whoever she used to be" in m for m in sink2))
+
+    async def test_confront_choice_deals_real_bonus_damage_to_kess(self):
+        """
+        Real live fix (Kess Arc plan, 2026-08-28, per Coffee: the old
+        yes/no confrontation choice "doesn't feel like there's any
+        conversation at all" since both options led to the identical
+        fight). "Confront her" now deals real, immediate bonus damage
+        (8% of her current max HP) -- a real mechanical stake, not just
+        different text.
+        """
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        player_id = 999950
+        make_basic_character(player_id, "ConfrontChoiceTester", current_location="greymoor_downs")
+        kess = {
+            "telegram_user_id": -700950, "name": "Kess", "monster_key": "kess_the_bandit", "is_ai": 1,
+            "hp_current": 600, "hp_max": 600, "dexterity": 16, "strength": 13,
+            "resistances": [], "vulnerabilities": [], "immunities": [],
+        }
+        session = sessions.start_session(-999, [db.get_character(player_id, -999), kess], {player_id: "party", -700950: "enemy"})
+        sink = []
+        with patch("bot.narrate_confrontation_choice_outcome", return_value="The party's blades find her before she's ready."):
+            await bot.boss_confrontation_dialog_callback(FakeCallbackUpdate(player_id, "bossdlg|confront", sink), DummyContext())
+        live_kess = next(p for p in session.participants if p["telegram_user_id"] == -700950)
+        self.assertEqual(live_kess["hp_current"], 552, "8% of 600 max HP = 48 real bonus damage")
+        self.assertTrue(any("blades find her before she's ready" in m for m in sink))
+        sessions.end_session(-999)
+
+    async def test_reason_choice_makes_kess_hesitate_and_lose_her_first_turn(self):
+        """"Try to reach her first" gives Kess a real, one-time hesitation -- her very first turn this fight is skipped entirely."""
+        import sessions
+        from unittest.mock import patch, Mock, AsyncMock
+        sessions.end_session(-999)
+        player_id = 999951
+        make_basic_character(player_id, "ReasonChoiceTester", current_location="greymoor_downs", hp_max=999999)
+        db.update_character(player_id, -999, hp_current=999999)
+        kess = {
+            "telegram_user_id": -700951, "name": "Kess", "monster_key": "kess_the_bandit", "is_ai": 1,
+            "hp_current": 600, "hp_max": 600, "dexterity": 16, "strength": 13,
+            "resistances": [], "vulnerabilities": [], "immunities": [],
+        }
+        session = sessions.start_session(-999, [db.get_character(player_id, -999), kess], {player_id: "party", -700951: "enemy"})
+        session.turn_order = [-700951, player_id]
+        session.current_turn_index = 0
+        sink = []
+        with patch("bot.narrate_confrontation_choice_outcome", return_value="She hesitates, searching for something to say."):
+            await bot.boss_confrontation_dialog_callback(FakeCallbackUpdate(player_id, "bossdlg|reason", sink), DummyContext())
+        live_kess = next(p for p in session.participants if p["telegram_user_id"] == -700951)
+        self.assertTrue(live_kess.get("confrontation_hesitation"))
+
+        with patch("bot.narrate_action", new=Mock(return_value="Kess strikes.")), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._resolve_ai_turns(FakeUpdate(player_id, "irrelevant", sink), session)
+        self.assertTrue(any("hesitates, searching for words instead of striking" in m for m in sink))
+        self.assertFalse(live_kess.get("confrontation_hesitation"), "the flag must be consumed, never fire twice")
+        sessions.end_session(-999)
+
+    def test_narrate_borin_dialogue_is_hand_written_and_reflects_trust_band(self):
+        """
+        Real live finding (2026-08-28, Kess Arc Phase 2): live-testing
+        the AI-generated version of this exact beat found it genuinely
+        unreliable (wrong pronouns, empty responses, invented details)
+        -- per Coffee, "you dont need to use ollama calls for an
+        outcome or response that we have already determined via story
+        line." Borin's real line for each of the 3 real Kess-arc quest
+        stages is now hand-written, banded by his own real trust, with
+        zero network calls -- 100% reliable by construction.
+        """
+        import ai.dm_agent as dm_agent_module
+
+        high = dm_agent_module.narrate_borin_dialogue(
+            "Ravenloft", "high", "The Name on the Page",
+            "The ledger page names no one Borin recognizes, but it's real proof.",
+            "Whoever's holding her leash won't show themselves while she's still standing.",
+        )
+        self.assertIn("Ravenloft", high)
+        self.assertIn("leash", high)
+
+        low = dm_agent_module.narrate_borin_dialogue("Ravenloft", "low", "The Name on the Page", "desc")
+        self.assertNotEqual(low, high, "a different trust band must produce genuinely different real text")
+        self.assertIn("name on this page", low.lower())
+
+        # Same real function correctly picks the right hand-written line for each of the other two real stages too.
+        warning = dm_agent_module.narrate_borin_dialogue("Ravenloft", "high", "More Than Banditry", "desc")
+        self.assertIn("Ravenloft", warning)
+        unbound = dm_agent_module.narrate_borin_dialogue("Ravenloft", "high", "What Answered Instead", "desc")
+        self.assertIn("Ravenloft", unbound)
+
+    def test_narrate_confrontation_choice_outcome_is_hand_written_per_choice(self):
+        """The AI version of this was found unreliable live -- both real branches are now hand-written, only the real mechanical fact is substituted in."""
+        import ai.dm_agent as dm_agent_module
+
+        confront = dm_agent_module.narrate_confrontation_choice_outcome(
+            "confront", "Ravenloft", "The party's aggressive opening catches Kess off guard for 48 real damage.",
+        )
+        self.assertIn("Ravenloft", confront)
+        self.assertIn("48 real damage", confront)
+        self.assertIn("Kess", confront)
+
+        reason = dm_agent_module.narrate_confrontation_choice_outcome(
+            "reason", "Ravenloft", "Kess hesitates -- her first action this fight is lost to it.",
+        )
+        self.assertNotEqual(confront, reason, "the two real choices must produce genuinely different text")
+        self.assertIn("Ravenloft", reason)
+        self.assertIn("hesitates", reason)
+
+    def test_narrate_kess_transformation_is_hand_written(self):
+        """The real Kefka-style transformation beat is hand-written (Kess Arc Phase 2) -- always the same real, reliable scene, no network call."""
+        import ai.dm_agent as dm_agent_module
+
+        result = dm_agent_module.narrate_kess_transformation(
+            "Kess", "a cold, calculating highwaywoman", "collecting tolls to fund something far bigger than banditry",
+            "Kess, the Unbound", "the calculation is gone, something underneath is doing the deciding now",
+            "it wants what's left of the party standing between it and whatever it was promised",
+            "Ravenloft, Charvenna",
+        )
+        self.assertIn("Kess", result)
+        self.assertIn("wears her face", result)
+
+    def test_narrate_chapter_8_epilogue_is_hand_written_and_includes_the_real_fact(self):
+        """The bespoke true ending is hand-written (Kess Arc Phase 2) -- the one real, already-decided plan_succeeded_fact is folded in verbatim, never invented."""
+        import ai.dm_agent as dm_agent_module
+
+        result = dm_agent_module.narrate_chapter_8_epilogue(
+            "Kess, the Unbound", "Ravenloft, Charvenna", "Whatever she was promised was already delivered.",
+        )
+        self.assertIn("Kess, the Unbound", result)
+        self.assertIn("Whatever she was promised was already delivered.", result)
+        # Real live follow-up (2026-08-28, Coffee: hint at Evolution here "so players want to evolve").
+        self.assertIn("evolution", result.lower())
+
+    def test_kess_first_confrontation_script_is_hand_written(self):
+        """Kess's own first-confrontation cutscene is hand-written (Kess Arc Phase 2, per live-testing finding the AI version unreliable) -- real, 100%-reliable script text."""
+        import ai.dm_agent as dm_agent_module
+
+        result = dm_agent_module.kess_first_confrontation_script("Ravenloft")
+        self.assertIn("Kess:", result)
+        self.assertIn("ledger", result)
+
+    def test_kess_unbound_confrontation_script_is_hand_written(self):
+        """The second, escalated confrontation script is hand-written too, and genuinely different text from the first."""
+        import ai.dm_agent as dm_agent_module
+
+        first = dm_agent_module.kess_first_confrontation_script("Ravenloft")
+        unbound = dm_agent_module.kess_unbound_confrontation_script("Ravenloft")
+        self.assertNotEqual(first, unbound)
+        self.assertIn("Whisper", unbound)
+
+    def test_kess_flees_line_is_hand_written(self):
+        """The real flee-not-die line (Kess Arc Phase 2, per Coffee: 'if KESS is not supposed to be killed, make sure they leave the battle')."""
+        import ai.dm_agent as dm_agent_module
+
+        result = dm_agent_module.kess_flees_line()
+        self.assertIn("Kess", result)
+        self.assertIn("fog", result)
+
+    def test_kess_gains_no_remnant_power_with_an_empty_handed_party(self):
+        """Regression guard: a party with zero bound Remnants must leave Kess's real stats completely untouched."""
+        kess = {"damage_bonus": 15, "known_spells": []}
+        party = [{"bound_remnants": []}, {"bound_remnants": None}]
+        bot._apply_kess_remnant_mirroring(kess, party)
+        self.assertEqual(kess["damage_bonus"], 15)
+        self.assertEqual(kess["known_spells"], [])
+        self.assertNotIn("forces_spell_aoe", kess)
+
+    def test_kess_mirrors_one_bound_remnants_real_taught_spell_and_power(self):
+        """
+        Real live request (2026-08-28, Kess Arc plan, per Coffee: "the
+        more Remnants the party has increases her magic power, and she
+        also has the same Remnants and spells as the party and can use
+        them against the party"). One real bound Remnant (fire element)
+        grants Kess exactly the real fireball spell a player who bound
+        it would themselves know, plus a real, bounded power increase.
+        """
+        kess = {"damage_bonus": 100, "known_spells": []}
+        party = [{"bound_remnants": ["the_wrathflame_unbound"]}]  # real fire-element Remnant
+        bot._apply_kess_remnant_mirroring(kess, party)
+        self.assertEqual(kess["known_spells"], ["fireball"])
+        self.assertTrue(kess["forces_spell_aoe"], "her mirrored spells must hit multiple targets, per Coffee's own request")
+        self.assertEqual(kess["damage_bonus"], 108)  # 100 * (1 + 8%)
+
+    def test_kess_mirrors_remnants_bound_by_any_real_party_member(self):
+        """Two different party members' own real bound Remnants (different elements) both count toward Kess's mirrored power."""
+        kess = {"damage_bonus": 100, "known_spells": []}
+        party = [
+            {"bound_remnants": ["the_wrathflame_unbound"]},  # fire
+            {"bound_remnants": ["the_drowned_choir"]},  # poison
+        ]
+        bot._apply_kess_remnant_mirroring(kess, party)
+        self.assertEqual(set(kess["known_spells"]), {"fireball", "insect_plague"})
+        self.assertEqual(kess["damage_bonus"], 116)  # 100 * (1 + 16%), 2 unique elements
+
+    async def test_kess_the_bandit_flees_instead_of_dying_at_zero_hp(self):
+        """
+        Real live fix (Kess Arc Phase 2, per Coffee: "if KESS is not
+        supposed to be killed, make sure they leave the battle -- you
+        can continue any cut-scene also after battle ends"). Her first
+        form flees at 0 HP -- no death announcement, no is_dead DB
+        write, just the real hand-written flee line.
+        """
+        import sessions
+        sessions.end_session(-999)
+        player_id = 999952
+        make_basic_character(player_id, "FleeWitnessTester", current_location="greymoor_downs")
+        kess = {
+            "telegram_user_id": -700952, "name": "Kess", "monster_key": "kess_the_bandit", "is_ai": 1,
+            "hp_current": 0, "hp_max": 600, "dexterity": 16, "strength": 13,
+            "resistances": [], "vulnerabilities": [], "immunities": [],
+        }
+        session = sessions.start_session(-999, [db.get_character(player_id, -999), kess], {player_id: "party", -700952: "enemy"})
+        removed = session.remove_defeated()
+        self.assertEqual(len(removed), 1)
+        sink = []
+        await bot._announce_defeats(FakeUpdate(player_id, "irrelevant", sink), session, removed)
+        combined = " ".join(sink)
+        self.assertIn("bolts into the fog", combined)
+        self.assertNotIn("has been defeated", combined)
+        sessions.end_session(-999)
+
+    async def test_kess_the_unbound_still_dies_normally_not_a_flee(self):
+        """Regression guard: only her FIRST form flees -- kess_the_unbound (her real, final form) is genuinely defeated, same as any other monster."""
+        import sessions
+        sessions.end_session(-999)
+        player_id = 999953
+        make_basic_character(player_id, "UnboundDeathWitnessTester", current_location="greymoor_downs")
+        unbound = {
+            "telegram_user_id": -700953, "name": "Kess, the Unbound", "monster_key": "kess_the_unbound", "is_ai": 1,
+            "hp_current": 0, "hp_max": 900, "dexterity": 18, "strength": 15,
+            "resistances": [], "vulnerabilities": [], "immunities": [],
+        }
+        session = sessions.start_session(-999, [db.get_character(player_id, -999), unbound], {player_id: "party", -700953: "enemy"})
+        removed = session.remove_defeated()
+        sink = []
+        await bot._announce_defeats(FakeUpdate(player_id, "irrelevant", sink), session, removed)
+        combined = " ".join(sink)
+        self.assertIn("has been defeated", combined)
+        self.assertNotIn("bolts into the fog", combined)
+        sessions.end_session(-999)
 
     async def test_accepting_the_scripted_bosss_own_quest_fires_the_cutscene_immediately(self):
         """
@@ -16698,11 +16942,16 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         original_quests = {
             "watchtowers_stalker", "the_tower_cellars_pup", "the_vantage_belows_alpha", "the_barrow_depths_bound",
         }
-        self.assertTrue(original_quests.issubset(set(arc["quests"])))
+        # borins_blackthorn_warning joined this list 2026-08-28 (Kess
+        # Arc Phase 1) as arc_8's real first quest -- was an orphan
+        # relative to every story arc before that, which meant its own
+        # arc-opening cutscene never fired.
+        known_quests = original_quests | {"borins_blackthorn_warning"}
+        self.assertTrue(known_quests.issubset(set(arc["quests"])))
         self.assertIn("kess_first_reckoning", arc["quests"])
         self.assertIn("kess_the_unbound_reckoning", arc["quests"])
-        self.assertFalse(set(arc["quests"]).issubset(original_quests), "arc 8 should NOT read complete without both Kess fights")
-        self.assertTrue(set(arc["quests"]).issubset(original_quests | {"kess_first_reckoning", "kess_the_unbound_reckoning"}))
+        self.assertFalse(set(arc["quests"]).issubset(known_quests), "arc 8 should NOT read complete without both Kess fights")
+        self.assertTrue(set(arc["quests"]).issubset(known_quests | {"kess_first_reckoning", "kess_the_unbound_reckoning"}))
 
     # -- Stranded AI companion resync (2026-08-26, real live gap: Borin
     #    Ironjaw missed a real Wrathflame Unbound Remnant bind because
