@@ -2,6 +2,41 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.391] — message_ai actually does something now + talk_npc surfaces real quest offers
+
+**"Tell wren hollowbrook to use ice and cold to damage the ember" now
+actually works.** Real dev-bridge report (Coffee: "I really liked that
+this player tried to use this action. Make sure it works.", re:
+Sugar's own real tactical order mid-fight against The Waking Ember).
+Traced the full path: `human_guidance` (`_do_message_ai`) was ONLY
+ever checked for retreat phrasing in `_resolve_ai_turns_inner` -- any
+other real order, including a specific damage-type directive, was
+popped and silently discarded, with zero mechanical effect. A new
+`_guidance_preferred_damage_type` (bot.py) recognizes the real natural
+words a player would actually type ("ice"/"cold"/"frost" -> `cold`,
+etc., covering every real `damage_type` `spells.SPELLS` uses) and
+`_decide_monster_spell` now honors it outright when the addressed
+companion actually knows a matching damage spell -- guaranteed this
+turn, bypassing the usual random per-turn chance and random choice.
+Separately, Sugar's OTHER real message, "Tell party to use cold and
+ice damage," never worked at all -- "party" isn't any one member's
+name, so `_do_message_ai` always fell through to "not sure who you're
+talking to." A broadcast word (party/everyone/everybody/team/all) now
+stores the same guidance on every AI party member instead.
+
+**Talking to a companion with a real quest now actually offers it.**
+Real dev-bridge report (Coffee: "Why isnt it working?!", right after
+the location hint said "Borin Ironjaw has something to ask of you --
+try talking to them"). Root cause: that hint is real
+(`_offerable_companion_quest`), but `talk_npc` never actually checked
+for it -- it only ever produced ambient AI chat, so the hint's own
+promise was never kept, and a giver_npc-only quest with no `location`
+field (like `kess_first_reckoning`, the real quest that unlocks Kess)
+could only ever be received by already knowing to type "I accept the
+quest" unprompted. Talking to the specific NPC who holds a real offer
+now pushes the same real Accept/Not now card arrival already gets via
+`_maybe_push_quest_offer`.
+
 ## [1.27.390] — Two live fixes: arrival narration subject confusion + a lost-player misclassification
 
 **Reach_location narration subject bug (shipped minutes after v1.27.389):**

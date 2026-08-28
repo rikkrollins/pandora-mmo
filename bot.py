@@ -7398,6 +7398,15 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
             await _safe_send(update, f"🗣️ **{current['name']}** hears you and breaks for it!")
             await _resolve_flee_attempt(update, session, guidance)
             return
+        # Real live report (2026-08-27, Coffee, dev-bridge, re: Sugar's
+        # own "Tell wren hollowbrook to use ice and cold to damage the
+        # ember" -- "I really liked that this player tried to use this
+        # action. Make sure it works."). Confirmed by tracing: until
+        # now, guidance that WASN'T a retreat order was simply popped
+        # and discarded above -- a real tactical order had zero actual
+        # effect on which spell an AI companion cast. Extracted once
+        # per turn, reused by every attack_num sub-attack below.
+        preferred_damage_type = _guidance_preferred_damage_type(guidance)
 
         # Boss Multiattack (2026-07-15) / Extra Attack (2026-07-16): every
         # is_boss monster gets 2 attacks/turn; separately, an AI-controlled
@@ -7515,7 +7524,8 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
             # swing, in which case _maybe_monster_cast_spell below rolls
             # its own fresh decision, unchanged from before.
             pre_decided_spell_id = (
-                _decide_monster_spell(current) if current.get("is_boss") and attack_num == 0 else None
+                _decide_monster_spell(current, preferred_damage_type)
+                if current.get("is_boss") and attack_num == 0 else None
             )
             # Real live bug (2026-08-05, same family as the multiattack/
             # turn-prompt duplicates fixed this session): a retry of
@@ -7557,7 +7567,9 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
             # the extra-attack-countered guard above.
             if await _maybe_monster_cast_heal(update, session, current):
                 continue
-            result = await _maybe_monster_cast_spell(update, session, current, target, spell_id=pre_decided_spell_id)
+            result = await _maybe_monster_cast_spell(
+                update, session, current, target, spell_id=pre_decided_spell_id, preferred_damage_type=preferred_damage_type,
+            )
             if result is None:
                 result = await _maybe_use_breath_weapon(update, session, current, target)
             if result is None:
@@ -9529,7 +9541,44 @@ def _rebirth_unlocked_heal_spell(known_spells: list[str], world_avg_rebirth: flo
 MONSTER_SPELLCAST_CHANCE = 0.4
 
 
-def _decide_monster_spell(caster: dict) -> str | None:
+_GUIDANCE_DAMAGE_TYPE_WORDS = {
+    "cold": "cold", "ice": "cold", "icy": "cold", "frost": "cold", "freeze": "cold", "freezing": "cold",
+    "fire": "fire", "flame": "fire", "flames": "fire", "burn": "fire", "burning": "fire",
+    "lightning": "lightning", "electric": "lightning", "electricity": "lightning", "shock": "lightning",
+    "poison": "poison", "toxic": "poison", "venom": "poison",
+    "necrotic": "necrotic", "death": "necrotic", "decay": "necrotic",
+    "radiant": "radiant", "holy": "radiant",
+    "psychic": "psychic",
+    "force": "force",
+}
+# Real spell damage_type values this game actually uses (spells.SPELLS)
+# -- confirmed by audit: cold/fire/force/lightning/necrotic/poison/
+# psychic/radiant. The synonym table above maps the real, natural words
+# a player would actually type ("ice", "burning") onto these.
+
+
+def _guidance_preferred_damage_type(guidance: str | None) -> str | None:
+    """
+    Real live report (2026-08-27, Coffee, dev-bridge, re: Sugar's own
+    "Tell wren hollowbrook to use ice and cold to damage the ember" --
+    "I really liked that this player tried to use this action. Make
+    sure it works."). Confirmed by tracing _resolve_ai_turns_inner:
+    human_guidance (_do_message_ai) was ONLY ever checked for retreat
+    phrasing -- any other real tactical order was popped and silently
+    discarded, with zero effect on which spell an AI companion cast.
+    Extracts a real spell damage_type from the human's own free text,
+    if any of its natural-language synonyms appear as a whole word.
+    """
+    if not guidance:
+        return None
+    lowered = guidance.lower()
+    for word, damage_type in _GUIDANCE_DAMAGE_TYPE_WORDS.items():
+        if re.search(r"\b" + word + r"\b", lowered):
+            return damage_type
+    return None
+
+
+def _decide_monster_spell(caster: dict, preferred_damage_type: str | None = None) -> str | None:
     """
     Pure, no-side-effect decision: does this monster cast a real known
     damage spell this turn? Split out (2026-08-13, per Coffee: "bosses
@@ -9539,12 +9588,25 @@ def _decide_monster_spell(caster: dict) -> str | None:
     narrated, instead of staying silent about magic until after the
     fact -- matches this game's "AI narrates what's already decided"
     rule exactly, just moving the decision point earlier for bosses.
+
+    preferred_damage_type (2026-08-28, see _guidance_preferred_damage_
+    type above): a human ally's real tactical order naming a damage
+    type this caster actually knows is honored outright -- bypasses
+    both the random per-turn chance below AND the random spell choice,
+    same as a player deliberately choosing their own spell rather than
+    leaving it to the AI's usual undirected roll.
     """
     known_spells = [
         sid for sid in (caster.get("known_spells") or [])
         if spells_module.get_spell(sid) and spells_module.get_spell(sid)["effect"] == "damage"
     ]
-    if not known_spells or random.random() > MONSTER_SPELLCAST_CHANCE:
+    if not known_spells:
+        return None
+    if preferred_damage_type:
+        matching = [sid for sid in known_spells if spells_module.get_spell(sid)["damage_type"] == preferred_damage_type]
+        if matching:
+            return random.choice(matching)
+    if random.random() > MONSTER_SPELLCAST_CHANCE:
         return None
     return random.choice(known_spells)
 
@@ -9748,6 +9810,7 @@ async def _resolve_attack_with_reaction_check(
 
 async def _maybe_monster_cast_spell(
     update: Update, session: sessions.Session, caster: dict, target: dict, spell_id: str | None = None,
+    preferred_damage_type: str | None = None,
 ) -> dict | None:
     """
     Real monster spellcasting (2026-08-13, per Coffee, dev-bridge: "Certain
@@ -9786,7 +9849,7 @@ async def _maybe_monster_cast_spell(
     wording for a countered spell.
     """
     if spell_id is None:
-        spell_id = _decide_monster_spell(caster)
+        spell_id = _decide_monster_spell(caster, preferred_damage_type)
     if spell_id is None:
         return None
     spell = spells_module.get_spell(spell_id)
@@ -11949,6 +12012,23 @@ async def _do_message_ai(update: Update, text: str) -> None:
 
     target = _match_member_by_name_or_username(text, candidates)
     if target is None:
+        # Real live report (2026-08-27, Coffee, dev-bridge screenshot):
+        # Sugar's own "Tell party to use cold and ice damage" -- "party"
+        # isn't any one member's name, so this used to always fall
+        # through to the "not sure who" error below even though the
+        # intent (address the whole party at once) is completely
+        # unambiguous. A broadcast word now stores the same real
+        # guidance on every AI-controlled party member instead of
+        # requiring one specific name.
+        ai_candidates = [p for p in candidates if p.get("is_ai")]
+        if ai_candidates and re.search(r"\b(party|everyone|everybody|team|all)\b", text.lower()):
+            for member in ai_candidates:
+                context_like = _chat_scoped_dict(_AI_PLAYER_CONTEXTS, update.effective_chat.id).setdefault(
+                    member["telegram_user_id"], _AiPlayerContext(),
+                )
+                context_like.user_data["human_guidance"] = text
+            await _safe_send(update, f"🗣️ **{character['name']}** tells the party: \"{text}\"")
+            return
         await update.effective_chat.send_message(
             "Not sure who you're talking to — name a party member, or tag them with @username.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
@@ -29291,6 +29371,27 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
             await _check_guild_curriculum_progress(
                 update, update.effective_user.id, update.effective_chat.id, "npc_dialogue", npc_id=npc_id, text=text,
             )
+            # Real live report (2026-08-28, Coffee, dev-bridge: "Why isnt
+            # it working?!" -- talked to Borin Ironjaw right after the
+            # location hint said "has something to ask of you -- try
+            # talking to them," and got only ambient chat, no quest).
+            # Root cause: talk_npc never actually checked for a real
+            # companion-offered quest at all -- that hint (_location_
+            # extra_detail, driven by _offerable_companion_quest) was a
+            # real promise this code never kept; the ONLY way to
+            # actually receive a giver_npc-only quest (no "location"
+            # field, e.g. kess_first_reckoning) was to already know to
+            # type "I accept the quest" unprompted. Now talking to the
+            # specific NPC who actually holds a real offer for this
+            # character surfaces the real Accept/Not now card, same as
+            # arriving at a location-based quest's own spot already
+            # does via _maybe_push_quest_offer -- real players only,
+            # same convention _do_move's own equivalent push uses.
+            if character and not character.get("is_ai"):
+                companion_offer = _offerable_quest_for_specific_companion(character, npc_id)
+                if companion_offer:
+                    offer_quest_id, offer_quest = companion_offer
+                    await _maybe_push_quest_offer(update, character, offer_quest_id, offer_quest)
     elif action == "talk_party":
         await _do_talk_party(update, text)
     elif action == "use_environment":

@@ -11962,6 +11962,85 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(goblin["hp_current"], 20 - result["damage_dealt"])
         sessions.end_session(-999)
 
+    def test_guidance_preferred_damage_type_recognizes_real_natural_synonyms(self):
+        """Unit test for the new synonym extraction -- 'ice'/'cold' both map to the real 'cold' damage_type spells.SPELLS actually uses."""
+        self.assertEqual(bot._guidance_preferred_damage_type("Tell wren hollowbrook to use ice and cold to damage the ember"), "cold")
+        self.assertEqual(bot._guidance_preferred_damage_type("use fire on it"), "fire")
+        self.assertIsNone(bot._guidance_preferred_damage_type("fall back and retreat"))
+        self.assertIsNone(bot._guidance_preferred_damage_type(None))
+
+    async def test_human_guidance_naming_a_damage_type_is_actually_honored_now(self):
+        """
+        Real live report (2026-08-27, Coffee, dev-bridge: "I really
+        liked that this player tried to use this action. Make sure it
+        works" -- re: Sugar's "Tell wren hollowbrook to use ice and cold
+        to damage the ember"). Confirmed live: human_guidance was only
+        ever checked for retreat phrasing, so a real tactical damage-
+        type order had zero mechanical effect. A companion who knows a
+        matching damage spell now actually casts THAT one, guaranteed,
+        instead of the usual random per-turn chance/choice.
+        """
+        from unittest.mock import patch
+        import sessions
+        companion = {
+            "telegram_user_id": -1501, "name": "Wren Hollowbrook", "hp_current": 30, "hp_max": 30,
+            "known_spells": ["fire_bolt", "ray_of_frost"], "resistances": [], "vulnerabilities": [], "immunities": [],
+            "dexterity": 12, "strength": 8, "char_class": "Wizard",
+        }
+        ember = {
+            "telegram_user_id": -700931, "name": "The Waking Ember", "hp_current": 100, "hp_max": 100,
+            "dexterity": 10, "strength": 10, "resistances": [], "vulnerabilities": [], "immunities": [],
+        }
+        session = sessions.start_session(-999, [companion, ember], {-1501: "party", -700931: "enemy"})
+        sink = []
+        update = FakeUpdate(996098, "look", sink)
+        # random.random forced high so the undirected MONSTER_SPELLCAST_CHANCE roll would normally MISS entirely.
+        with patch("random.random", return_value=0.99):
+            result = await bot._maybe_monster_cast_spell(
+                update, session, companion, ember, preferred_damage_type="cold",
+            )
+        self.assertIsNotNone(result, "a matching known spell must be cast even when the undirected chance roll would have missed")
+        self.assertEqual(result["spell_name"], "Ray of Frost")
+        sessions.end_session(-999)
+
+    async def test_message_ai_can_broadcast_to_the_whole_party(self):
+        """
+        Real live report (2026-08-27, Coffee, dev-bridge screenshot):
+        Sugar's "Tell party to use cold and ice damage" -- "party" isn't
+        any one member's name, so this used to fall through to "not
+        sure who you're talking to" even though the intent is
+        unambiguous. A broadcast word now stores the guidance on every
+        AI party member.
+        """
+        import sessions
+        sessions.end_session(-999)
+        user_id = 999940
+        make_basic_character(user_id, "BroadcastTester", current_location="crossroads_tavern")
+        companion1 = db.create_ai_companion(
+            -999, "BroadcastCompanionOne", "Elf", "Ranger",
+            ability_scores={"strength": 12, "dexterity": 17, "constitution": 13,
+                             "intelligence": 11, "wisdom": 15, "charisma": 10},
+            hp_max=30, armor_class=14, gold=0, inventory={},
+        )
+        companion2 = db.create_ai_companion(
+            -999, "BroadcastCompanionTwo", "Human", "Wizard",
+            ability_scores={"strength": 10, "dexterity": 14, "constitution": 12,
+                             "intelligence": 17, "wisdom": 11, "charisma": 10},
+            hp_max=24, armor_class=12, gold=0, inventory={},
+        )
+        party_id = db.create_party(user_id, -999)
+        db.add_ai_companion_to_party(companion1["telegram_user_id"], -999, party_id)
+        db.add_ai_companion_to_party(companion2["telegram_user_id"], -999, party_id)
+
+        sink = []
+        await bot._do_message_ai(FakeUpdate(user_id, "", sink), "Tell party to use cold and ice damage")
+        combined = " ".join(sink)
+        self.assertIn("tells the party", combined)
+        for member_id in (companion1["telegram_user_id"], companion2["telegram_user_id"]):
+            context_like = bot._chat_scoped_dict(bot._AI_PLAYER_CONTEXTS, -999).get(member_id)
+            self.assertIsNotNone(context_like)
+            self.assertEqual(context_like.user_data.get("human_guidance"), "Tell party to use cold and ice damage")
+
     # -- Real AI class-ability usage (2026-08-13, per Coffee: "I want AI
     #    to be able to use all thier abilities, spells cantrips and
     #    anything that there character has or levels up"). db.use_feature
@@ -26425,6 +26504,61 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         mock_post.assert_not_called()
         self.assertTrue(any("isn't interested in talking" in msg for msg in sink), sink)
+
+    async def test_talking_to_a_companion_surfaces_their_own_real_quest_offer(self):
+        """
+        Real live report (2026-08-28, Coffee, dev-bridge: "Why isnt it
+        working?!"). Root cause, confirmed by tracing: the location hint
+        ("Borin Ironjaw has something to ask of you -- try talking to
+        them") is real (_offerable_companion_quest), but talk_npc itself
+        never actually checked for or surfaced that offer -- it only
+        ever produced ambient chat, so the hint's own promise was never
+        kept. Now talking to the specific NPC who holds a real offer for
+        this character pushes the real Accept/Not now card.
+        """
+        from unittest.mock import patch, AsyncMock
+        bot.setup_default_npcs()
+        user_id = 950942
+        make_basic_character(user_id, "CompanionOfferTalkTester", current_location="crossroads_tavern")
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "A real reply."}
+
+        sink = []
+        with patch("ai.npc_agent.requests.post", return_value=FakeResponse()), \
+             patch("bot._find_npc_id_by_name", return_value="borin_ironjaw"), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            intent = {"action": "talk_npc", "npc_name": "Borin Ironjaw", "raw_text": "hello"}
+            await bot._dispatch_intent(FakeUpdate(user_id, "hello", sink), DummyContext(), intent, "hello")
+
+        self.assertTrue(any("A Name Worth Vouching For" in s for s in sink), sink)
+
+    async def test_talking_to_a_companion_with_no_real_offer_stays_plain_chat(self):
+        """Regression guard: an NPC with no giver_npc quest at all (e.g. Grimsby) must NOT get a spurious quest card -- only ambient dialogue."""
+        from unittest.mock import patch, AsyncMock
+        bot.setup_default_npcs()
+        user_id = 950943
+        make_basic_character(user_id, "NoOfferTalkTester", current_location="crossroads_tavern")
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "A real reply."}
+
+        sink = []
+        with patch("ai.npc_agent.requests.post", return_value=FakeResponse()), \
+             patch("bot._find_npc_id_by_name", return_value="grimsby"), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            intent = {"action": "talk_npc", "npc_name": "Grimsby", "raw_text": "hello"}
+            await bot._dispatch_intent(FakeUpdate(user_id, "hello", sink), DummyContext(), intent, "hello")
+
+        self.assertEqual(len(sink), 1, "only the plain chat reply should be sent, no quest card")
 
     def test_look_action_travel_buttons_use_real_directional_emoji(self):
         """
