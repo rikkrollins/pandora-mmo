@@ -1051,8 +1051,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # kess_first_reckoning itself is IN arc_8 (unaffected by this
         # fix -- still correctly shows the zone's real 75+ band, since
         # that's genuinely when you're meant to actually fight Kess).
+        # Now also carries the real dynamic-scaling note (2026-08-28),
+        # see test_suggested_level_notes_dynamic_scaling_only_for_a_
+        # real_npc_dict_boss below for the dedicated test of that.
         kess_quest = bot.CAMPAIGN["quests"]["kess_first_reckoning"]
-        self.assertEqual(bot._quest_suggested_level("kess_first_reckoning", kess_quest), "⭐ **Suggested Level:** 75+")
+        self.assertEqual(
+            bot._quest_suggested_level("kess_first_reckoning", kess_quest),
+            "⭐ **Suggested Level:** 75+ (this fight scales to your own party's level)",
+        )
 
         # The Wayfarer's Circuit has no requires_completed_quest of its
         # own -- must be completely unaffected by this fix, still
@@ -1061,6 +1067,37 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(wayfarers.get("requires_completed_quest"))
         level_line = bot._quest_suggested_level("wayfarers_circuit", wayfarers)
         self.assertIn("Chapter 9", level_line)
+
+    def test_suggested_level_notes_dynamic_scaling_only_for_a_real_npc_dict_boss(self):
+        """
+        Real live follow-up (2026-08-28, Coffee: "add that note check
+        the level suggestion for future users" -- re: kess_first_
+        reckoning's real "Suggested Level: 75+" alarming a much-lower-
+        level party into thinking it was a hard wall, when Kess's own
+        stats actually dynamically rescale to the party). Confirmed by
+        audit: exactly two quests target a real NPC-dict boss
+        (kess_the_bandit/kess_the_unbound) -- every other defeat_monster
+        quest targets a static "monsters"-dict template with a fixed
+        final stat block, so those must NOT get this note (it wouldn't
+        be true for them).
+        """
+        kess_quest = bot.CAMPAIGN["quests"]["kess_first_reckoning"]
+        self.assertIn("scales to your own party's level", bot._quest_suggested_level("kess_first_reckoning", kess_quest))
+
+        unbound_quest = bot.CAMPAIGN["quests"]["kess_the_unbound_reckoning"]
+        self.assertIn("scales to your own party's level", bot._quest_suggested_level("kess_the_unbound_reckoning", unbound_quest))
+
+        # A real static-monster defeat_monster quest (goblin_boss lives
+        # in the "monsters" dict, not "npcs") must NOT get the note.
+        static_quest = bot.CAMPAIGN["quests"]["clear_the_warrens"]
+        self.assertEqual(static_quest["trigger"]["type"], "defeat_monster")
+        self.assertNotIn("scales to your own party's level", bot._quest_suggested_level("clear_the_warrens", static_quest))
+
+        # A non-defeat_monster quest (reach_location) must also be unaffected.
+        self.assertNotIn(
+            "scales to your own party's level",
+            bot._quest_suggested_level("borins_blackthorn_warning", bot.CAMPAIGN["quests"]["borins_blackthorn_warning"]),
+        )
 
     def test_greymoor_downs_quests_now_show_a_real_suggested_level_not_just_a_chapter(self):
         """
@@ -16394,6 +16431,59 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink2 = []
         await bot.boss_confrontation_dialog_callback(FakeCallbackUpdate(900946, "bossdlg|reason", sink2), DummyContext())
         self.assertTrue(any("reach whoever she used to be" in m for m in sink2))
+
+    async def test_accepting_the_scripted_bosss_own_quest_fires_the_cutscene_immediately(self):
+        """
+        Real live report (2026-08-28, Coffee: "we missed that" / "but
+        why didnt we get the question narrations we planned ?").
+        Confirmed live: accepting kess_first_reckoning's own offer card
+        via the button while ALREADY standing at Greymoor Downs never
+        triggered the scripted confrontation cutscene -- that check only
+        ever ran from a fresh "arrival" event (_do_move/_do_fast_
+        travel), so a quest accepted in place had no later arrival to
+        ever trigger it. Same soft-lock shape as the reach_location
+        completion fix right above this call site, just for the
+        scripted-boss consumer instead.
+        """
+        from unittest.mock import patch, Mock, AsyncMock
+        import sessions
+        bot.setup_default_npcs()
+        sessions.end_session(-996)
+        user_id = 900947
+        make_basic_character(user_id, "AcceptTriggersCutscene", chat_id=-996, current_location="greymoor_downs")
+        db.update_character(user_id, -996, level=20, hp_current=772, hp_max=772)
+        character = db.get_character(user_id, -996)
+        quest = bot.CAMPAIGN["quests"]["kess_first_reckoning"]
+        sink = []
+        update = FakeUpdate(user_id, "irrelevant", sink, chat_id=-996)
+        with patch("bot._npcs_at_location", return_value=["kess_the_bandit"]), \
+             patch("bot._effective_disposition", return_value="hostile"), \
+             patch("bot.narrate_boss_confrontation", return_value="Kess blocks the road.") as mock_taunt, \
+             patch("bot.narrate_boss_decision", new=Mock(return_value="Kess sizes you up.")), \
+             patch("bot.narrate_action", new=Mock(return_value="Kess strikes.")), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            result = await bot._accept_offered_story_quest(update, "kess_first_reckoning", quest)
+            await _drain_narration_queue(-996)
+        self.assertTrue(result)
+        self.assertTrue(mock_taunt.called, "the scripted cutscene narration must fire the instant the quest is accepted in place")
+        session = sessions.get_session_for_user(-996, user_id)
+        self.assertIsNotNone(session, "combat against the scripted boss must start immediately, not wait for a later arrival")
+        sessions.end_session(-996)
+
+    async def test_accepting_an_ordinary_quest_never_risks_an_unrelated_encounter(self):
+        """Regression guard: accepting a quest with no scripted boss tied to this location must never call _maybe_trigger_npc_encounter at all -- no risk of an unrelated random ambush."""
+        from unittest.mock import patch, AsyncMock
+        user_id = 900948
+        make_basic_character(user_id, "OrdinaryAcceptTester", current_location="crossroads_tavern")
+        quest = bot.CAMPAIGN["quests"]["welcome_to_the_crossroads"]
+        sink = []
+        update = FakeUpdate(user_id, "irrelevant", sink, chat_id=-999)
+        with patch("bot._maybe_trigger_npc_encounter", new=AsyncMock()) as mock_encounter, \
+             patch("bot.narrate_arc_opening", return_value="A new chapter begins."), \
+             patch("bot._maybe_send_arc_opening_image", new=AsyncMock()):
+            result = await bot._accept_offered_story_quest(update, "welcome_to_the_crossroads", quest)
+        self.assertTrue(result)
+        mock_encounter.assert_not_called()
 
     def test_narrate_boss_confrontation_grounds_the_prompt_in_real_facts(self):
         """Unit test for the narration function itself -- real facts flow into the prompt, escalated flag changes the framing."""

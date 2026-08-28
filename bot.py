@@ -13114,6 +13114,33 @@ def _location_chapter_arc_index(location_id: str | None) -> int | None:
 
 def _quest_suggested_level(quest_id: str, quest: dict) -> str:
     """
+    Thin wrapper over _quest_suggested_level_core: appends a real
+    dynamic-scaling clarification (2026-08-28, Coffee, dev-bridge:
+    kess_first_reckoning's own real "Suggested Level: 75+" -- an
+    honest, correct read of arc_8_greymoor_downs' own authored band --
+    alarmed a much-lower-level party into thinking it was a hard wall.
+    "add that note check the level suggestion for future users"). Only
+    a quest whose real defeat_monster trigger targets an NPC-dict boss
+    (kess_the_bandit/kess_the_unbound today -- confirmed by audit the
+    ONLY two; every other defeat_monster quest targets a static
+    "monsters"-dict template with a fixed final stat block, per
+    _npc_combatant_from_stats vs _do_start_combat's own separate,
+    already-established scaling rules) actually rescales to the
+    party's own level at fight time, so only those two get the note --
+    every other quest's suggested level stays an honest, unscaled
+    difficulty signal, not softened by a note that wouldn't be true.
+    """
+    base = _quest_suggested_level_core(quest_id, quest)
+    if not base:
+        return base
+    trigger = quest.get("trigger", {})
+    if trigger.get("type") == "defeat_monster" and trigger.get("monster") in CAMPAIGN.get("npcs", {}):
+        return f"{base} (this fight scales to your own party's level)"
+    return base
+
+
+def _quest_suggested_level_core(quest_id: str, quest: dict) -> str:
+    """
     Real dev-bridge request (2026-08-23, Coffee, screenshot of The
     Wayfarer's Circuit's offer card): "can you please put the preferred
     or suggested level for these quest so the player knows?!" Grounded
@@ -13935,6 +13962,25 @@ async def _accept_offered_story_quest(update: Update, quest_id: str, quest: dict
     await _safe_send(update, f"{opening_note}📜 **{character['name']}** accepts Quest: {quest['title']}\n{quest['description']}")
     await _notify_main_topic(update, f"📜 **{character['name']}** accepted a quest: {quest['title']}")
     await _check_quest_completions_reach_location(update, telegram_user_id, character["current_location"])
+    # Real live report (2026-08-28, Coffee: "we missed that" / "why
+    # didn't we get the question narrations we planned" -- accepting
+    # kess_first_reckoning's own offer card while ALREADY standing at
+    # Greymoor Downs never triggered the scripted confrontation
+    # cutscene, since that check only ever ran from a fresh "arrival"
+    # event (_do_move/_do_fast_travel's own call to _maybe_trigger_npc_
+    # encounter) -- same soft-lock shape the _check_quest_completions_
+    # reach_location call just above already exists to close, just for
+    # a different real consumer. Checked cheaply first (the same real
+    # gate _maybe_trigger_npc_encounter itself re-checks) so an
+    # ordinary quest accept elsewhere never risks rolling into an
+    # unrelated ambient/hostile encounter -- this only ever fires when
+    # the quest JUST accepted is exactly what a real scripted boss here
+    # was waiting on.
+    updated_character = db.get_character(telegram_user_id, update.effective_chat.id)
+    current_location = cl.get_location(CAMPAIGN, updated_character["current_location"]) if updated_character else None
+    if (updated_character and not updated_character.get("is_ai") and current_location
+            and _scripted_boss_npc_at_location(updated_character, current_location, update.effective_chat.id) is not None):
+        await _maybe_trigger_npc_encounter(update, updated_character, current_location)
     return True
 
 

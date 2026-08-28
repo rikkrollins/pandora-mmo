@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.392] — "75+" clarified + accepting the Kess quest in place now fires the cutscene
+
+**"Suggested Level: 75+" on the Kess quest was real but alarming.**
+Live report right after v1.27.391 shipped: Greymoor Downs is genuinely
+Story Arc 8 (required_level 75), and Kess's own two quests are fully
+part of that arc -- not a display bug. But her actual combat stats
+dynamically rescale to the party's real level (confirmed earlier
+tonight: ~9,000 effective HP / ~62 avg damage at level 24, already in
+the "respectful" range), so "75+" alone reads as a hard wall it isn't.
+`_quest_suggested_level` now appends "(this fight scales to your own
+party's level)" specifically for the two quests that target a real
+NPC-dict boss (kess_the_bandit/kess_the_unbound) -- confirmed by audit
+the ONLY two; every other quest's suggested level is unaffected, since
+every other defeat_monster quest targets a static, non-rescaling
+monster template.
+
+**Accepting the Kess quest while already standing at Greymoor Downs
+never fired the scripted cutscene.** Real live report ("we missed
+that" / "why didn't we get the narrations we planned"): the scripted
+boss confrontation only ever ran off a fresh arrival event
+(`_do_move`/`_do_fast_travel`), so tapping Accept on an already-visible
+offer card -- the exact case the new talk_npc fix just created --
+never triggered it, same soft-lock shape the reach_location
+"already-there" fix from weeks ago exists to close, just for this
+newer consumer. `_accept_offered_story_quest` now checks (cheaply,
+only when a real scripted boss is actually gated on the quest just
+accepted) and fires the same cutscene immediately.
+
 ## [1.27.391] — message_ai actually does something now + talk_npc surfaces real quest offers
 
 **"Tell wren hollowbrook to use ice and cold to damage the ember" now
