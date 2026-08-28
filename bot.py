@@ -69,6 +69,7 @@ from ai.dm_agent import (
     narrate_examine, narrate_branching_choice_outcome, narrate_boss_decision,
     narrate_story_so_far, narrate_chapter_climax, narrate_arc_opening, narrate_next_step_hint,
     narrate_boss_intro, narrate_boss_defeat, narrate_boss_summon, narrate_remnant_summon,
+    narrate_boss_confrontation,
     _fallback_hourly_update, _fallback_narration,
     is_narration_call_active,
 )
@@ -908,6 +909,42 @@ async def support_vote_callback(update: Update, context: ContextTypes.DEFAULT_TY
     toast = "Thanks — marked helpful!" if vote == "up" else "Thanks — flagged for review."
     await _safe_answer(query, toast)
     await _safe_edit_markup(query, None)
+
+
+def _boss_confrontation_dialog_keyboard() -> InlineKeyboardMarkup:
+    """
+    Real live request (2026-08-27, Coffee: "use the Kess sequences to
+    really tell a story... be super dramatic, use yes and no
+    questions"). A real, single-use flavor choice on a scripted boss
+    confrontation cutscene (see _maybe_trigger_npc_encounter) --
+    deliberately NEVER gates or changes the real fight that follows
+    (both options lead into the exact same combat, already started by
+    the time this shows) -- this is player voice/roleplay, not a
+    hidden mechanical branch, same "AI narration never decides a real
+    game fact" discipline as everywhere else. Its own dedicated
+    callback prefix (not "bm|") so it needs no turn-order gating at
+    all -- unlike the real battle menu, this is available to tap
+    immediately regardless of whose turn it actually is.
+    """
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("⚔️ Confront her", callback_data="bossdlg|confront"),
+        InlineKeyboardButton("🗣️ Try to reach her first", callback_data="bossdlg|reason"),
+    ]])
+
+
+async def boss_confrontation_dialog_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _boss_confrontation_dialog_keyboard -- pure roleplay flavor, never touches real combat state."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    choice = parts[1] if len(parts) > 1 else ""
+    await _safe_answer(query)
+    await _safe_edit_markup(query, None)
+    line = (
+        "The party moves to confront her directly, weapons already drawn."
+        if choice == "confront" else
+        "The party holds a moment, searching for words that might still reach whoever she used to be."
+    )
+    await _safe_send(update, f"> *{line}*", speak=False)
 
 
 # ---------------------------------------------------------------------
@@ -8947,6 +8984,37 @@ def _effective_disposition(telegram_user_id: int, chat_id: int, npc_id: str, npc
     return disposition
 
 
+def _scripted_boss_npc_at_location(character: dict, location: dict, chat_id: int) -> str | None:
+    """
+    A hostile, quest-gated boss NPC (is_boss + requires_active_quest,
+    e.g. Kess) whose own real gate is satisfied for this character right
+    now, if any is present at this location. Real live request
+    (2026-08-27, Coffee: "I want this to feel like the players have to
+    walk in... make it feel epic"). A scripted story confrontation
+    isn't ambient world noise -- it shouldn't be left to the same random
+    roll a background hostile encounter uses (see
+    _maybe_trigger_npc_encounter's own docstring for that RNG). Every
+    OTHER NPC (no requires_active_quest, or not is_boss) is untouched by
+    this function entirely and stays on the random path exactly as
+    before.
+    """
+    telegram_user_id = character["telegram_user_id"]
+    for candidate_id in _npcs_at_location(location["id"], chat_id):
+        candidate_data = CAMPAIGN["npcs"].get(candidate_id)
+        if not candidate_data or candidate_id not in _NPCS or "stats" not in candidate_data:
+            continue
+        if not candidate_data.get("is_boss") or not candidate_data.get("requires_active_quest"):
+            continue
+        if candidate_id in _chat_scoped_set(_DEFEATED_NPCS, chat_id):
+            continue
+        if _effective_disposition(telegram_user_id, chat_id, candidate_id, candidate_data) != "hostile":
+            continue
+        if candidate_data["requires_active_quest"] not in character["active_quests"]:
+            continue
+        return candidate_id
+    return None
+
+
 async def _maybe_trigger_npc_encounter(update: Update, character: dict, location: dict) -> None:
     """
     Living-world ambient encounters: an alignment-driven NPC placed at
@@ -8959,16 +9027,33 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
     through the exact same rules engine as any other fight
     (sessions.start_session, real dice) — the AI only narrates the
     provocation, never the fight's outcome.
+
+    Real live request (2026-08-27, Coffee: "I want this to feel like
+    the players have to walk in and the other AI players can narrate
+    and act out the dialog sequences and cutscenes. make it feel epic
+    for the player"): a scripted, quest-gated boss (_scripted_boss_npc_
+    at_location) fires DETERMINISTICALLY the moment its own real gate
+    is satisfied, bypassing the random ambient roll below entirely --
+    a real story confrontation shouldn't be left to chance. Every other
+    NPC is completely unaffected, still gated by that same roll exactly
+    as before this change.
     """
     chat_id = update.effective_chat.id
     if sessions.get_session_for_user(chat_id, character["telegram_user_id"]) is not None:
         return  # never interrupt combat this character is already in
 
     npc_ids = _npcs_at_location(location["id"], chat_id)
-    if not npc_ids or random.random() > AMBIENT_NPC_ENCOUNTER_CHANCE:
+    if not npc_ids:
         return
 
-    npc_id = random.choice(npc_ids)
+    scripted_boss_id = _scripted_boss_npc_at_location(character, location, chat_id)
+    if scripted_boss_id is not None:
+        npc_id = scripted_boss_id
+    else:
+        if random.random() > AMBIENT_NPC_ENCOUNTER_CHANCE:
+            return
+        npc_id = random.choice(npc_ids)
+
     npc_data = CAMPAIGN["npcs"].get(npc_id)
     if npc_data is None or npc_id not in _NPCS:
         return
@@ -9003,9 +9088,22 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
             if not party:
                 return
 
-            taunt = await asyncio.to_thread(
-                generate_ambient_line, npc_id, character["name"], "arrives, about to be attacked", memory_facts
-            )
+            if npc_id == scripted_boss_id:
+                taunt = await asyncio.to_thread(
+                    narrate_boss_confrontation,
+                    npc_data["name"], npc_data.get("personality", ""), npc_data.get("goals", ""),
+                    _format_party_names(party), location.get("name", location["id"]),
+                    escalated=bool(npc_data.get("escalated_encounter")),
+                )
+                await _safe_send(
+                    update, f"🎬 **{npc_data['name']}**\n\n{taunt}",
+                    reply_markup=_boss_confrontation_dialog_keyboard(), speak=False,
+                )
+                taunt = None  # already sent above as its own cutscene message, not the inline taunt_line below
+            else:
+                taunt = await asyncio.to_thread(
+                    generate_ambient_line, npc_id, character["name"], "arrives, about to be attacked", memory_facts
+                )
             enemy = _npc_combatant_from_stats(npc_id, npc_data, party_levels=[p.get("level", 1) for p in party])
             sides = {p["telegram_user_id"]: "party" for p in party}
             sides[enemy["telegram_user_id"]] = "enemy"
@@ -32769,6 +32867,7 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(quest_menu_callback, pattern=r"^quest\|"))
     application.add_handler(CallbackQueryHandler(item_menu_callback, pattern=r"^item\|"))
     application.add_handler(CallbackQueryHandler(support_vote_callback, pattern=r"^supportvote\|"))
+    application.add_handler(CallbackQueryHandler(boss_confrontation_dialog_callback, pattern=r"^bossdlg\|"))
     application.add_handler(CallbackQueryHandler(craft_menu_callback, pattern=r"^craft\|"))
     application.add_handler(CallbackQueryHandler(give_menu_callback, pattern=r"^give\|"))
     application.add_handler(CallbackQueryHandler(member_level_callback, pattern=r"^memberlvl\|"))

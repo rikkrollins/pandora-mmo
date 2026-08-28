@@ -2,6 +2,48 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.388] — Scripted boss confrontation cutscenes + Kess rebalance corrected
+
+**Correction to v1.27.387:** that release's Kess stat rebalance was a
+real mistake, caught before it caused any harm. Kess's stats aren't a
+static final stat block like the bosses I compared her against --
+they're seed values for the same `undertuned_monster_stat_multiplier`
+system regular monsters use, already tuned and confirmed by Coffee on
+2026-08-19 (documented in this suite's own `test_kess_base_stats_
+raised_per_coffee`/`test_kess_hp_revised_down_per_coffee_after_seeing_
+the_scaled_result`/`test_kess_damage_bonus_raised_per_coffee_party_
+not_getting_hurt`). Running the real math for the party's current
+level (avg 24): Kess scales to ~9,000 effective HP / ~62 avg damage
+per hit, Kess the Unbound to ~13,500 HP / ~82 per hit -- squarely in
+Coffee's own previously-confirmed "respectful, meaningful, not
+lethal" range. Reverted `kess_the_bandit`/`kess_the_unbound` back to
+their original, correct values (level 23/25, HP 600/900, damage_bonus
+15/20).
+
+**New: scripted boss confrontation cutscenes.** Real live request
+(Coffee: "I want this to feel like the players have to walk in and
+the other AI players can narrate and act out the dialog sequences and
+cutscenes. make it feel epic for the player... use the Kess sequences
+to really tell a story... be super dramatic, use yes and no
+questions"). A quest-gated boss NPC (is_boss + requires_active_quest,
+e.g. Kess) now fires its encounter DETERMINISTICALLY the moment its
+gate is satisfied, instead of being left to the same random ambient
+chance a background hostile encounter uses. New `narrate_boss_
+confrontation` (ai/dm_agent.py) gives it a real, dramatic pre-fight
+cutscene grounded in the boss's own real personality/goals fields
+(already hand-authored -- Kess the Unbound's "the calculation is gone,
+something underneath is doing the deciding now" was already written,
+just never given a real spotlight moment before combat). A real,
+single-use "⚔️ Confront her / 🗣️ Try to reach her first" yes/no choice
+accompanies the cutscene -- pure roleplay flavor, deliberately never
+gates or changes the fight that follows, same "AI narration never
+decides a real game fact" discipline as everywhere else in this game.
+Every other ambient NPC is completely unaffected, still governed by
+the same random chance as before.
+
+Fail-then-pass verified with real executed tests, plus a full
+collateral sweep of the existing Kess regression suite.
+
 ## [1.27.387] — Kess rebalanced to a real challenge + battle roster status emoji + Support LaTeX leak fix
 
 Three real fixes, requested/found while checking the party's setup right

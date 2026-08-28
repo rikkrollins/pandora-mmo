@@ -16139,6 +16139,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
              patch("bot._npcs_at_location", return_value=["kess_the_bandit"]), \
              patch("bot._effective_disposition", return_value="hostile"), \
              patch("bot.generate_ambient_line", return_value="You won't escape!"), \
+             patch("bot.narrate_boss_confrontation", return_value="Kess blocks the road, blade already drawn."), \
              patch("bot.narrate_boss_decision", new=Mock(return_value="Kess sizes you up.")), \
              patch("bot.narrate_action", new=Mock(return_value="Kess strikes.")), \
              patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
@@ -16147,6 +16148,174 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session = sessions.get_session_for_user(-994, user_id)
         self.assertIsNotNone(session, "ambush should fire once kess_first_reckoning is active")
         sessions.end_session(-994)
+
+    async def test_scripted_boss_confrontation_fires_deterministically_not_by_random_chance(self):
+        """
+        Real live request (2026-08-27, Coffee: "I want this to feel
+        like the players have to walk in... make it feel epic for the
+        player"). A scripted, quest-gated boss (Kess) must fire the
+        moment its own gate is satisfied, even on the WORST possible
+        random roll -- a real story confrontation isn't ambient world
+        noise subject to the same chance an ordinary hostile uses.
+        """
+        from unittest.mock import patch, Mock, AsyncMock
+        import sessions
+        bot.setup_default_npcs()
+        sessions.end_session(-995)
+        user_id = 900942
+        character = make_basic_character(user_id, "DeterministicKess", chat_id=-995, current_location="crossroads_tavern")
+        db.update_character(user_id, -995, level=20, hp_current=772, hp_max=772)
+        db.accept_quest(user_id, -995, "kess_first_reckoning")
+        character = db.get_character(user_id, -995)
+        location = cl.get_location(bot.CAMPAIGN, "crossroads_tavern")
+        sink = []
+        update = FakeUpdate(user_id, "irrelevant", sink, chat_id=-995)
+        with patch("bot.AMBIENT_NPC_ENCOUNTER_CHANCE", 0.0001), \
+             patch("bot.random.random", return_value=0.9999), \
+             patch("bot._npcs_at_location", return_value=["kess_the_bandit"]), \
+             patch("bot._effective_disposition", return_value="hostile"), \
+             patch("bot.narrate_boss_confrontation", return_value="Kess blocks the road."), \
+             patch("bot.narrate_boss_decision", new=Mock(return_value="Kess sizes you up.")), \
+             patch("bot.narrate_action", new=Mock(return_value="Kess strikes.")), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._maybe_trigger_npc_encounter(update, character, location)
+            await _drain_narration_queue(-995)
+        session = sessions.get_session_for_user(-995, user_id)
+        self.assertIsNotNone(
+            session, "a scripted boss confrontation must fire even on a random roll that would fail the ambient chance",
+        )
+        sessions.end_session(-995)
+
+    async def test_ordinary_hostile_npc_still_uses_the_random_ambient_roll(self):
+        """
+        Regression guard for the change above: an ordinary hostile NPC
+        (no is_boss/requires_active_quest) must be completely
+        unaffected -- still gated by the same random ambient roll as
+        always, never deterministic.
+        """
+        from unittest.mock import patch
+        import sessions
+        bot.setup_default_npcs()
+        sessions.end_session(-996)
+        user_id = 900943
+        character = make_basic_character(user_id, "OrdinaryHostileTarget", chat_id=-996, current_location="crossroads_tavern")
+        location = cl.get_location(bot.CAMPAIGN, "crossroads_tavern")
+        sink = []
+        update = FakeUpdate(user_id, "irrelevant", sink, chat_id=-996)
+        # An ordinary NPC with no is_boss/requires_active_quest field at
+        # all -- _scripted_boss_npc_at_location must return None for it,
+        # leaving the existing random-roll behavior completely untouched.
+        with patch("bot.AMBIENT_NPC_ENCOUNTER_CHANCE", 0.0001), \
+             patch("bot.random.random", return_value=0.9999), \
+             patch("bot._npcs_at_location", return_value=["kess_the_bandit"]), \
+             patch("bot._effective_disposition", return_value="hostile"), \
+             patch.dict(bot.CAMPAIGN["npcs"]["kess_the_bandit"], {"is_boss": False, "requires_active_quest": None}):
+            await bot._maybe_trigger_npc_encounter(update, character, location)
+        self.assertIsNone(
+            sessions.get_session_for_user(-996, user_id),
+            "a plain hostile NPC (no boss/quest gate) must still respect the random ambient roll",
+        )
+        sessions.end_session(-996)
+
+    async def test_scripted_boss_confrontation_sends_a_real_cutscene_with_dialog_buttons(self):
+        """The cutscene message itself: real grounded facts passed to narrate_boss_confrontation, sent with the yes/no dialog keyboard attached."""
+        from unittest.mock import patch, Mock, AsyncMock
+        import sessions
+        bot.setup_default_npcs()
+        sessions.end_session(-997)
+        user_id = 900944
+        character = make_basic_character(user_id, "CutsceneWitness", chat_id=-997, current_location="crossroads_tavern")
+        db.update_character(user_id, -997, level=20, hp_current=772, hp_max=772)
+        db.accept_quest(user_id, -997, "kess_first_reckoning")
+        character = db.get_character(user_id, -997)
+        location = cl.get_location(bot.CAMPAIGN, "crossroads_tavern")
+        sink = []
+        update = FakeUpdate(user_id, "irrelevant", sink, chat_id=-997)
+        captured_markups = []
+        real_safe_send = bot._safe_send
+
+        async def spying_safe_send(upd, text, **kwargs):
+            captured_markups.append((text, kwargs.get("reply_markup")))
+            return await real_safe_send(upd, text, **kwargs)
+
+        with patch("bot.AMBIENT_NPC_ENCOUNTER_CHANCE", 1.0), \
+             patch("bot.random.random", return_value=0.0), \
+             patch("bot._npcs_at_location", return_value=["kess_the_bandit"]), \
+             patch("bot._effective_disposition", return_value="hostile"), \
+             patch("bot.narrate_boss_confrontation", return_value="Kess steps out from the treeline, blade drawn.") as mock_confrontation, \
+             patch("bot.narrate_boss_decision", new=Mock(return_value="Kess sizes you up.")), \
+             patch("bot.narrate_action", new=Mock(return_value="Kess strikes.")), \
+             patch("bot._safe_send", side_effect=spying_safe_send), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._maybe_trigger_npc_encounter(update, character, location)
+            await _drain_narration_queue(-997)
+
+        # narrate_boss_confrontation was called with real, grounded facts.
+        mock_confrontation.assert_called_once()
+        call_args = mock_confrontation.call_args[0]
+        self.assertEqual(call_args[0], "Kess")
+        self.assertIn("highwaywoman", call_args[1])
+        self.assertIn("banditry", call_args[2])
+        self.assertIn("CutsceneWitness", call_args[3])
+        self.assertFalse(mock_confrontation.call_args.kwargs.get("escalated", False))
+
+        cutscene_msg = next((t, m) for t, m in captured_markups if "Kess steps out from the treeline" in t)
+        self.assertIn("🎬", cutscene_msg[0])
+        self.assertIsNotNone(cutscene_msg[1])
+        callback_datas = [btn.callback_data for row in cutscene_msg[1].inline_keyboard for btn in row]
+        self.assertIn("bossdlg|confront", callback_datas)
+        self.assertIn("bossdlg|reason", callback_datas)
+        sessions.end_session(-997)
+
+    async def test_boss_confrontation_dialog_callback_is_pure_flavor(self):
+        """Tapping either choice sends a real reaction line and clears the buttons -- never touches combat/session state."""
+        sink = []
+        await bot.boss_confrontation_dialog_callback(FakeCallbackUpdate(900945, "bossdlg|confront", sink), DummyContext())
+        self.assertTrue(any("weapons already drawn" in m for m in sink))
+        self.assertTrue(any("<edit_markup:None>" in m for m in sink))
+
+        sink2 = []
+        await bot.boss_confrontation_dialog_callback(FakeCallbackUpdate(900946, "bossdlg|reason", sink2), DummyContext())
+        self.assertTrue(any("reach whoever she used to be" in m for m in sink2))
+
+    def test_narrate_boss_confrontation_grounds_the_prompt_in_real_facts(self):
+        """Unit test for the narration function itself -- real facts flow into the prompt, escalated flag changes the framing."""
+        from unittest.mock import patch
+        import ai.dm_agent as dm_agent_module
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "Kess steps from the shadows, cold and certain."}
+
+        captured_prompts = []
+
+        def spying_post(url, json=None, **kwargs):
+            captured_prompts.append(json["prompt"])
+            return FakeResponse()
+
+        with patch("ai.dm_agent.requests.post", side_effect=spying_post):
+            result = dm_agent_module.narrate_boss_confrontation(
+                "Kess", "a cold, calculating highwaywoman", "collecting tolls to fund something far bigger than banditry",
+                "Ravenloft, Borin Ironjaw", "Greymoor Downs", escalated=False,
+            )
+        self.assertEqual(result, "Kess steps from the shadows, cold and certain.")
+        prompt = captured_prompts[0]
+        self.assertIn("Kess", prompt)
+        self.assertIn("cold, calculating highwaywoman", prompt)
+        self.assertIn("Ravenloft, Borin Ironjaw", prompt)
+        self.assertIn("Greymoor Downs", prompt)
+        self.assertIn("FIRST real confrontation", prompt)
+
+        captured_prompts.clear()
+        with patch("ai.dm_agent.requests.post", side_effect=spying_post):
+            dm_agent_module.narrate_boss_confrontation(
+                "Kess, the Unbound", "something underneath is doing the deciding now", "it wants what's left of the party",
+                "Ravenloft", "Greymoor Downs", escalated=True,
+            )
+        self.assertIn("SECOND, ESCALATED", captured_prompts[0])
 
     async def test_defeating_kess_the_unbound_completes_its_own_reckoning_quest(self):
         """Same real _npc_combatant_from_stats/_check_quest_completions_defeat_monster path as the base form, for her evolved stage-2 form."""
@@ -17054,6 +17223,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
              patch("bot._npcs_at_location", return_value=["kess_the_bandit"]), \
              patch("bot._effective_disposition", return_value="hostile"), \
              patch("bot.generate_ambient_line", return_value="You won't escape!"), \
+             patch("bot.narrate_boss_confrontation", return_value="Kess blocks the road, blade already drawn."), \
              patch("bot.narrate_boss_decision", new=Mock(return_value="Kess sizes you up.")), \
              patch("bot.narrate_action", new=Mock(return_value="Kess strikes.")), \
              patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
@@ -23961,6 +24131,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
              patch("bot._npcs_at_location", return_value=[hostile_npc_id]), \
              patch("bot._effective_disposition", return_value="hostile"), \
              patch("bot.generate_ambient_line", return_value="You won't escape!"), \
+             patch("bot.narrate_boss_confrontation", return_value="Kess blocks the road."), \
              patch("bot.narrate_action", return_value="Kess lunges in."), \
              patch("bot.narrate_boss_decision", new=Mock(return_value="Kess sizes you up.")):
             await bot._maybe_trigger_npc_encounter(update, character, location)

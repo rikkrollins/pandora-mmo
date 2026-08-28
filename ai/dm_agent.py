@@ -1396,3 +1396,82 @@ def narrate_arc_opening(arc_title: str, arc_description: str, quest_title: str, 
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] arc opening narration failed, falling back to template: {e}")
     return f"A new chapter begins. {arc_description}"
+
+
+def _boss_confrontation_preamble(escalated: bool) -> str:
+    stage = (
+        "This is the SECOND, ESCALATED confrontation -- the boss has "
+        "changed since the party last faced them, per the real facts "
+        "given below. Make the change felt: this is no longer the same "
+        "threat it was, without inventing any detail beyond what's given."
+        if escalated else
+        "This is the FIRST real confrontation with this boss -- a "
+        "dramatic, cinematic entrance, not a routine ambush."
+    )
+    return (
+        "You are the Dungeon Master narrating a real, high-stakes "
+        "confrontation cutscene, right before combat begins. You are "
+        f"given the boss's real personality and goals, the real party "
+        f"members present, and the real location. {stage} Narrate ONLY "
+        f"these facts ({scaled_sentences(4, 6, boost=2)}) -- epic and "
+        "cinematic in tone, making the stakes and the boss's own "
+        "menace felt, but never inventing a new plot detail, twist, or "
+        "backstory beyond what's given, and never deciding or "
+        "describing the fight's outcome (that hasn't happened yet). "
+        f"{style_directive(boost=2)}"
+    )
+
+
+def _build_boss_confrontation_prompt(
+    boss_name: str, boss_personality: str, boss_goals: str,
+    party_names: str, location_name: str, escalated: bool,
+) -> str:
+    return (
+        f"{_boss_confrontation_preamble(escalated)}\n\n"
+        f"Real facts (narrate ONLY these, faithfully):\n"
+        f"The boss: {boss_name}\n"
+        f"Their real personality: {boss_personality}\n"
+        f"Their real goals: {boss_goals}\n"
+        f"The party present: {party_names}\n"
+        f"Location: {location_name}\n\n"
+        f"Write the confrontation now:"
+    )
+
+
+def narrate_boss_confrontation(
+    boss_name: str, boss_personality: str, boss_goals: str,
+    party_names: str, location_name: str, escalated: bool = False,
+) -> str:
+    """
+    Real live request (2026-08-27, Coffee: "I want this to feel like
+    the players have to walk in and the other AI players can narrate
+    and act out the dialog sequences and cutscenes. make it feel epic
+    for the player" -- "use the Kess sequences to really tell a story
+    ... make them WANT to save the world"). A real, dedicated pre-fight
+    cutscene beat, same rules-decide/AI-narrates split as
+    narrate_arc_opening right above -- the boss's own real personality/
+    goals fields (already hand-authored in campaign.json, e.g. Kess's
+    "collecting tolls to fund something far bigger than banditry", or
+    Kess the Unbound's "the calculation is gone, something underneath
+    is doing the deciding now") are the only real facts given; this
+    just gives them a genuine dramatic spotlight instead of staying
+    buried in data nobody ever sees narrated. `escalated=True` for a
+    boss's SECOND, changed appearance (e.g. Kess the Unbound) --
+    without it, this call would have no way to know the boss it's
+    narrating isn't being met for the first time.
+    """
+    prompt = _build_boss_confrontation_prompt(boss_name, boss_personality, boss_goals, party_names, location_name, escalated)
+    try:
+        response = requests.post(
+            f"{config.OLLAMA_BASE_URL}/api/generate",
+            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False, "options": _NARRATION_OPTIONS},
+            timeout=200,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
+        if text and not is_placeholder_text(text):
+            return text
+    except (requests.RequestException, ValueError) as e:
+        print(f"[dm_agent] boss confrontation narration failed, falling back to template: {e}")
+    return f"**{boss_name}** turns to face the party, {boss_goals.split('--')[0].strip().rstrip('.')}."
