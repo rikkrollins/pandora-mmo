@@ -7626,7 +7626,20 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
             # that identical picture once total, not once per spider.
             if (attack_num == 0 and current.get("monster_key")
                     and current["monster_key"] not in session.shown_monster_keys):
-                monster_template = cl.get_monster_template(CAMPAIGN, current["monster_key"])
+                # Real live report (2026-08-28, Coffee: "Kess didn't have
+                # a picture in the battle, images def need to be used
+                # for the story and battles"). Root cause: cl.get_
+                # monster_template only ever checks CAMPAIGN["monsters"]
+                # -- Kess (and every other NPC-dict boss, e.g. kess_the_
+                # unbound) lives in CAMPAIGN["npcs"] instead, so this
+                # always silently found nothing and never sent her art
+                # at all. An NPC entry already carries the exact 2 real
+                # fields _monster_image_prompt needs (name/is_boss), so
+                # it's a safe, real fallback here, not a fabricated one.
+                monster_template = (
+                    cl.get_monster_template(CAMPAIGN, current["monster_key"])
+                    or CAMPAIGN["npcs"].get(current["monster_key"])
+                )
                 if monster_template:
                     session.shown_monster_keys.add(current["monster_key"])
                     await _maybe_send_monster_image(update, current["monster_key"], monster_template)
@@ -9195,6 +9208,14 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
                     update, f"🎬 **{npc_data['name']}**\n\n{taunt}",
                     reply_markup=_boss_confrontation_dialog_keyboard(), speak=False,
                 )
+                # Real live report (2026-08-28, Coffee: "images def need
+                # to be used for the story and battles") -- the
+                # scripted confrontation cutscene never sent any real
+                # art at all. Reuses the same real NPC portrait system
+                # (deterministic per-npc seed) every ordinary talk_npc
+                # dialogue already gets, so Kess's own two confrontation
+                # beats finally show her, not just describe her.
+                await _maybe_send_npc_portrait(update, npc_id, npc_data)
                 taunt = None  # already sent above as its own cutscene message, not the inline taunt_line below
             else:
                 taunt = await asyncio.to_thread(
@@ -13765,6 +13786,19 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         climax_text = await asyncio.to_thread(
             narrate_chapter_climax, quest["title"], quest["description"], reward_text,
         )
+        if quest_id == "the_first_city_quest":
+            # Kess Arc plan (2026-08-28): the very first seed of the
+            # whole arc, planted right at "we went to the city" (per
+            # Coffee's own framing) -- the real brass_key_no_lock
+            # reward (already-existing, previously unused mystery item)
+            # gets a real, hand-written line calling it out explicitly,
+            # so its Chapter 8 payoff actually lands later. Hand-
+            # written, not AI-generated, same discipline as the rest of
+            # this arc -- a one-time, fully-determined beat.
+            climax_text += (
+                "\n\nThe brass key stays warm in your hand a moment longer than it should, "
+                "like it's still deciding whether anything down here was ever what it was looking for."
+            )
         climax_narration = f"{climax_text}\n\n"
     elif quest.get("trigger", {}).get("type") == "reach_location":
         # Real live report (2026-08-28, Coffee: "why did we complete the
@@ -13782,6 +13816,12 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
             quest.get("clue"),
         )
         climax_narration = f"{arrival_text}\n\n"
+        if quest_id == "conflict_at_crossroads_tavern":
+            # Kess Arc plan (2026-08-28, Coffee: explicit bridging quest
+            # request) -- a fully-determined, hand-written follow-on line
+            # (not AI-generated) pointing the party straight at Borin,
+            # the same discipline as the rest of this arc's fixed beats.
+            climax_narration += "**Talk to Borin about his concerns.**\n\n"
 
     # The true ending (2026-07-25, rebirth-3 gated content's climax):
     # every other quest, including every other "climactic"-weighted one

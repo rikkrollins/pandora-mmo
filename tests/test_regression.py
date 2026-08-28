@@ -16085,6 +16085,76 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("the_first_city_quest", character["active_quests"])
         sessions.end_session(-999)
 
+    async def test_conflict_at_crossroads_tavern_is_not_offerable_until_the_first_city_quest_is_done(self):
+        """
+        Real request (2026-08-28, Coffee: "put a quest in the First
+        City called 'Conflict at Crossroads Tavern' that tells the
+        players to goto the crossroads tavern and talk to the Paladin
+        about 'Rising Concerns'"). This is the new real bridge quest
+        between the First City climax and the whole Kess arc -- it
+        must not be offerable at the_first_city until the_first_city_
+        quest has actually been completed.
+        """
+        user_id = 999931
+        character = make_basic_character(user_id, "BridgeQuestSeeker", current_location="the_first_city")
+        self.assertIsNone(bot._offerable_quest_at_location(character, "the_first_city"))
+
+        db.complete_quest(user_id, -999, "first_city_arrival")
+        db.complete_quest(user_id, -999, "the_archives_recess")
+        db.complete_quest(user_id, -999, "the_first_city_quest")
+        character = db.get_character(user_id, -999)
+        offer = bot._offerable_quest_at_location(character, "the_first_city")
+        self.assertIsNotNone(offer)
+        self.assertEqual(offer[0], "conflict_at_crossroads_tavern")
+
+    async def test_reaching_crossroads_tavern_completes_the_bridge_quest_and_points_to_borin(self):
+        """
+        The quest completes the instant the party reaches the tavern
+        (per Coffee's own framing), and the completion message then
+        tells them, in a fixed hand-written line (not AI-generated,
+        same discipline as the rest of the Kess arc), to talk to Borin
+        -- who's the one who actually hands off the real Kess quest.
+        """
+        from unittest.mock import patch
+        user_id = 999932
+        make_basic_character(user_id, "BridgeQuestArriver", current_location="the_first_city")
+        db.complete_quest(user_id, -999, "the_first_city_quest")
+        db.accept_quest(user_id, -999, "conflict_at_crossroads_tavern")
+        sink = []
+        with patch(
+            "bot.narrate_reach_location_quest_completion",
+            return_value="The tavern's noise swallows you whole the moment you step inside.",
+        ):
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "conflict_at_crossroads_tavern")
+        character = db.get_character(user_id, -999)
+        self.assertIn("conflict_at_crossroads_tavern", character["completed_quests"])
+        combined = "\n".join(sink)
+        self.assertIn("Talk to Borin about his concerns.", combined)
+
+    async def test_borins_blackthorn_warning_still_gated_behind_the_new_bridge_quest(self):
+        """
+        Completing first_city_arrival alone (the OLD prerequisite,
+        before the 2026-08-28 bridge-quest request) must no longer be
+        enough on its own -- borins_blackthorn_warning now requires
+        the real conflict_at_crossroads_tavern quest specifically.
+        """
+        user_id = 999933
+        make_basic_character(user_id, "OldPrereqSeeker", current_location="crossroads_tavern")
+        await bot._do_recruit_npc(FakeUpdate(user_id, "recruit Borin Ironjaw", []), "Borin Ironjaw")
+        db.complete_quest(user_id, -999, "borins_vouching_task")
+        db.complete_quest(user_id, -999, "borins_resolution")
+        db.complete_quest(user_id, -999, "first_city_arrival")
+        character = db.get_character(user_id, -999)
+        self.assertIsNone(
+            bot._offerable_companion_quest(character),
+            "first_city_arrival alone should no longer satisfy Borin's real prerequisite",
+        )
+
+        db.complete_quest(user_id, -999, "conflict_at_crossroads_tavern")
+        character = db.get_character(user_id, -999)
+        offer = bot._offerable_companion_quest(character)
+        self.assertEqual(offer[0], "borins_blackthorn_warning")
+
     # -- Real live request (2026-08-26, per Coffee: evolve Kess the
     #    Bandit from a bare random ambush into a real recurring
     #    antagonist arc, starting with a reveal quest from Borin
@@ -16138,9 +16208,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         start after the players reach 'the first city' to give players
         time to build characters and learn the game") -- even with
         Borin's own arc resolved, borins_blackthorn_warning must NOT be
-        offered until requires_completed_quest ("first_city_arrival")
-        is actually satisfied, and the full chain through her first
-        two named encounters follows in real sequence after that.
+        offered until requires_completed_quest ("conflict_at_crossroads_
+        tavern", the real bridging quest added 2026-08-28 per Coffee's
+        explicit request) is actually satisfied, and the full chain
+        through her first two named encounters follows in real sequence
+        after that.
         """
         user_id = 999913
         make_basic_character(user_id, "BorinQuestSeeker", current_location="crossroads_tavern")
@@ -16164,6 +16236,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
 
         db.complete_quest(user_id, -999, "first_city_arrival")
+        db.complete_quest(user_id, -999, "conflict_at_crossroads_tavern")
         character = db.get_character(user_id, -999)
         third = bot._offerable_companion_quest(character)
         self.assertEqual(third[0], "borins_blackthorn_warning")
@@ -16207,6 +16280,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # borins_blackthorn_warning specifically.
         db.complete_quest(user_id, -999, "welcome_to_the_crossroads")
         db.complete_quest(user_id, -999, "first_city_arrival")
+        db.complete_quest(user_id, -999, "conflict_at_crossroads_tavern")
         character = db.get_character(user_id, -999)
 
         offer = bot._offerable_quest_at_location(character, "crossroads_tavern")
@@ -16251,6 +16325,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         db.complete_quest(user_id, -999, "borins_vouching_task")
         db.complete_quest(user_id, -999, "borins_resolution")
         db.complete_quest(user_id, -999, "first_city_arrival")
+        db.complete_quest(user_id, -999, "conflict_at_crossroads_tavern")
         db.update_character(user_id, -999, current_location="greymoor_downs")
 
         sink = []
@@ -16732,6 +16807,82 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("has been defeated", combined)
         self.assertNotIn("bolts into the fog", combined)
         sessions.end_session(-999)
+
+    async def test_kess_gets_real_monster_art_mid_combat_despite_living_in_the_npc_dict(self):
+        """
+        Real live report (2026-08-28, Coffee: "Kess didnt have a
+        picture int he battle, images def need to be used for the
+        story and battles"). Root cause: cl.get_monster_template only
+        ever checks CAMPAIGN["monsters"] -- Kess (an NPC-dict boss)
+        always came back None there, so her real combat art never sent
+        at all. Now falls back to CAMPAIGN["npcs"], which already
+        carries the exact 2 real fields the image prompt needs.
+        """
+        import asyncio
+        import sessions
+        from unittest.mock import patch, Mock, AsyncMock
+        sessions.end_session(-999)
+        player_id = 999954
+        make_basic_character(player_id, "MonsterArtWitnessTester", current_location="greymoor_downs")
+        kess = {
+            "telegram_user_id": -700954, "name": "Kess", "monster_key": "kess_the_bandit", "is_ai": 1,
+            "hp_current": 600, "hp_max": 600, "dexterity": 16, "strength": 13,
+            "resistances": [], "vulnerabilities": [], "immunities": [],
+        }
+        player = db.get_character(player_id, -999)
+        session = sessions.start_session(-999, [player, kess], {player_id: "party", -700954: "enemy"})
+        session.turn_order = [-700954, player_id]
+        session.current_turn_index = 0
+        sink = []
+        with patch("bot.narrate_action", new=Mock(return_value="Kess strikes.")), \
+             patch("bot.narrate_boss_decision", new=Mock(return_value="Kess sizes you up.")), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()) as mock_image:
+            await bot._resolve_ai_turns(FakeUpdate(player_id, "irrelevant", sink), session)
+            # A real fire-and-forget "_deliver_real_flavor" background task
+            # may have been scheduled (asyncio.create_task) but not yet run
+            # by the time this coroutine returns. If it survives past this
+            # `with` block, it looks up bot.narrate_action AFTER the patch
+            # above has been reverted and fires a REAL Ollama HTTP call,
+            # which then hangs event-loop teardown for up to 200s. Cancel
+            # any such stragglers while narrate_action is still mocked.
+            pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task() and not t.done()]
+            for t in pending:
+                t.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+        mock_image.assert_called_once()
+        call_args = mock_image.call_args[0]
+        self.assertEqual(call_args[1], "kess_the_bandit")
+        self.assertEqual(call_args[2]["name"], "Kess")
+        sessions.end_session(-999)
+
+    async def test_scripted_kess_confrontation_sends_her_real_portrait(self):
+        """Real live report (2026-08-28, Coffee: "images def need to be used for the story and battles") -- the confrontation cutscene now sends Kess's own real NPC portrait, same system talk_npc dialogue already uses."""
+        from unittest.mock import patch, Mock, AsyncMock
+        import sessions
+        bot.setup_default_npcs()
+        sessions.end_session(-998)
+        user_id = 999955
+        character = make_basic_character(user_id, "PortraitWitnessTester", chat_id=-998, current_location="crossroads_tavern")
+        db.update_character(user_id, -998, level=20, hp_current=772, hp_max=772)
+        db.accept_quest(user_id, -998, "kess_first_reckoning")
+        character = db.get_character(user_id, -998)
+        location = cl.get_location(bot.CAMPAIGN, "crossroads_tavern")
+        sink = []
+        update = FakeUpdate(user_id, "irrelevant", sink, chat_id=-998)
+        with patch("bot.AMBIENT_NPC_ENCOUNTER_CHANCE", 1.0), \
+             patch("bot.random.random", return_value=0.0), \
+             patch("bot._npcs_at_location", return_value=["kess_the_bandit"]), \
+             patch("bot._effective_disposition", return_value="hostile"), \
+             patch("bot.narrate_boss_decision", new=Mock(return_value="Kess sizes you up.")), \
+             patch("bot.narrate_action", new=Mock(return_value="Kess strikes.")), \
+             patch("bot._maybe_send_npc_portrait", new=AsyncMock()) as mock_portrait, \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._maybe_trigger_npc_encounter(update, character, location)
+            await _drain_narration_queue(-998)
+        mock_portrait.assert_called_once_with(update, "kess_the_bandit", bot.CAMPAIGN["npcs"]["kess_the_bandit"])
+        sessions.end_session(-998)
 
     async def test_accepting_the_scripted_bosss_own_quest_fires_the_cutscene_immediately(self):
         """

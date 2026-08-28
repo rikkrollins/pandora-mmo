@@ -2,6 +2,42 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.395] — The Kess Arc, Phase 3: Chapters 5-7 foreshadowing, the Crossroads bridge quest, and real combat art
+
+Closes out the Kess Arc plan (`.claude/plans/twinkly-purring-deer.md`)
+short of the deferred Chapters 9-14 planning item.
+
+**New quest, per Coffee's explicit request:** "Conflict at Crossroads
+Tavern," offered at the First City right after `the_first_city_quest`
+completes. Reaching the Crossroads Tavern completes it and points the
+party straight at Borin Ironjaw (the tavern's paladin) — the real,
+discoverable on-ramp into the whole Kess arc, so nobody stumbles into
+"More Than Banditry" by accident. `borins_blackthorn_warning`'s
+prerequisite moved from `first_city_arrival` to this new quest.
+
+**Chapters 5-7 foreshadowing (Option C scope, per Coffee: "I don't
+want anything left out"):** light-touch, hand-written additions to
+already-existing interactables and quest clues — never new NPCs, never
+touching the zone's separate cosmic-horror thread (the breathing wall,
+the cistern's dry channels) — tying the goblin warrens' long-dangling
+"something bigger" mystery, the rubble-choked smuggling passage
+between the Sunken Root Caverns and Stonearch Gorge, and Sera's/Wren's
+own existing suspicions back to the same coin-funded operation Borin
+uncovers at Greymoor Downs. The First City's own `brass_key_no_lock`
+reward gets a one-line callout at `the_first_city_quest`'s completion,
+planting the item's Chapter 8 payoff explicitly.
+
+**Real combat art for Kess (live report, Coffee: "Kess didnt have a
+picture int he battle, images def need to be used for the story and
+battles"):** root cause was `campaign_loader.get_monster_template`
+only ever checking `CAMPAIGN["monsters"]` — Kess and every other
+NPC-dict boss always came back empty there, so her mid-combat art
+never sent at all. Now falls back to `CAMPAIGN["npcs"]`, which already
+carries the two real fields the image prompt needs. Separately, her
+two scripted confrontation cutscenes never sent any art either — both
+now send her real NPC portrait, the same system ordinary `talk_npc`
+dialogue already uses.
+
 ## [1.27.394] — The Kess Arc, Phase 2: real, hand-written cutscenes + Remnant mirroring
 
 The narration layer for the Kess arc (full plan at

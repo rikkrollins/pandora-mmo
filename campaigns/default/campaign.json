@@ -600,7 +600,7 @@
         "interactables": {
           "far_end_marker": {
             "name": "a single carved marker stone",
-            "description": "Newer than the bridge itself by centuries, but already weathering to match — someone wanted it to look like it had always been here."
+            "description": "Newer than the bridge itself by centuries, but already weathering to match — someone wanted it to look like it had always been here. A small toll-mark is scratched into its base, low enough to miss unless you're looking."
           }
         },
         "monsters": [
@@ -1105,11 +1105,11 @@
         "interactables": {
           "chalk_markings": {
             "name": "chalk markings on the tunnel walls",
-            "description": "Goblin scrawl, but organized — arrows, tallies, what might be a crude map — in a hand far steadier than goblins are known for."
+            "description": "Goblin scrawl, but organized — arrows, tallies, what might be a crude map — in a hand far steadier than goblins are known for. One tally column keeps a running count in coin, not kills."
           },
           "makeshift_totem": {
             "name": "a crude bone totem",
-            "description": "Lashed together from bits of scavenged bone and wire, and kept in far better repair than anything else the goblins have bothered to maintain."
+            "description": "Lashed together from bits of scavenged bone and wire, and kept in far better repair than anything else the goblins have bothered to maintain. A few of the wire loops are strung with the same cheap toll-tokens the Blackthorn Raiders hand travelers at Greymoor Downs."
           }
         },
         "story_gates": {
@@ -1199,7 +1199,7 @@
         "interactables": {
           "tunnel_rubble_choke": {
             "name": "a passage nearly sealed by old rubble",
-            "description": "Almost fully collapsed, but not quite — cleared enough times, by something or someone, to still be worth clearing again. Air moves through it from somewhere else entirely."
+            "description": "Almost fully collapsed, but not quite — cleared enough times, by something or someone, to still be worth clearing again. Air moves through it from somewhere else entirely. A scrap of oiled cloth, the kind used to keep coin dry underground, is snagged on the rubble's edge."
           }
         },
         "story_gates": {
@@ -1241,6 +1241,10 @@
           "cistern_dry_channels": {
             "name": "the cistern's dry drainage channels",
             "description": "Cut with real precision, leading nowhere any water could reach anymore. Someone built this to hold something other than water."
+          },
+          "stashed_toll_crate": {
+            "name": "a crate wedged into a dry alcove",
+            "description": "Empty now, but the inside still smells faintly of coin — the same close, metal smell as a toll booth's strongbox, kept somewhere no one would ever think to look for one."
           }
         },
         "monsters": [
@@ -1802,6 +1806,10 @@
           "depths_breathing_wall": {
             "name": "a wide stretch of rock wall, faintly warm",
             "description": "It rises and falls under your palm, slow and even — the same rhythm audible from the bridge far above, only close enough now to feel."
+          },
+          "worn_footpath": {
+            "name": "a worn footpath near the rubble-choked passage",
+            "description": "Boot prints, pressed into the dust again and again by the same few feet, all leading the same direction — toward the Downs, not away from them."
           }
         },
         "story_gates": {
@@ -3167,7 +3175,7 @@
         "type": "reach_location",
         "location": "stonearch_bridge"
       },
-      "clue": "Sarah says she'll feel better about the bridge once someone's actually walked it with her."
+      "clue": "Sarah says she'll feel better about the bridge once someone's actually walked it with her -- whoever's been crossing at night always seems to be heading toward the Downs."
     },
     "seras_resolution": {
       "title": "Worth Traveling With",
@@ -3216,7 +3224,7 @@
       "objective_location": "greymoor_downs",
       "location": "crossroads_tavern",
       "giver_npc": "borin_ironjaw",
-      "requires_completed_quest": "first_city_arrival",
+      "requires_completed_quest": "conflict_at_crossroads_tavern",
       "reward_xp": 200,
       "reward_gold": 0,
       "reward_item": "torn_ledger_page",
@@ -3267,7 +3275,7 @@
         "type": "reach_location",
         "location": "sunken_root_caverns"
       },
-      "clue": "Wren says the shrine's garden has been restless the same way it was the last time something changed down below."
+      "clue": "Wren says the shrine's garden has been restless the same way it was the last time something changed down below -- and that whatever's disturbing it smells faintly of coin, of all things."
     },
     "wrens_resolution": {
       "title": "Roots Worth Trusting",
@@ -3468,6 +3476,19 @@
       },
       "clue": "Everything so far has felt like the edge of something older, further down.",
       "weight": "climactic"
+    },
+    "conflict_at_crossroads_tavern": {
+      "title": "Conflict at Crossroads Tavern",
+      "description": "Word of what you found beneath the First City won't stay buried for long, and it isn't the only thing stirring. Rising concerns are already being talked about back on the surface — the Crossroads Tavern is where the roads still meet, and the paladin stationed there has never let real trouble past unremarked.",
+      "location": "the_first_city",
+      "requires_completed_quest": "the_first_city_quest",
+      "reward_xp": 100,
+      "reward_gold": 0,
+      "trigger": {
+        "type": "reach_location",
+        "location": "crossroads_tavern"
+      },
+      "clue": "Find the paladin at the Crossroads Tavern and ask about the Rising Concerns."
     },
     "unmoored_isle_arrival": {
       "title": "What the Sky Was Hiding",
@@ -3840,7 +3861,7 @@
         "type": "defeat_monster",
         "monster": "veteran_goblin"
       },
-      "clue": "It fights smarter than anything else in the warren -- like it's actually been trained, not just armed."
+      "clue": "It fights smarter than anything else in the warren -- like it's actually been trained, not just armed. A coin purse on its belt is too fine to be its own."
     },
     "deep_larders_elder": {
       "title": "The Deep Larder's Elder",
@@ -3853,7 +3874,7 @@
         "type": "defeat_monster",
         "monster": "goblin_shaman_elder"
       },
-      "clue": "It keeps glancing at the stockpile like it's protecting the supplies, not itself -- and for one long second before it moves, it looks right at you like it already knew you'd come."
+      "clue": "It keeps glancing at the stockpile like it's protecting the supplies, not itself -- and for one long second before it moves, it looks right at you like it already knew you'd come. Whoever's really paying for all this clearly isn't the goblins."
     },
     "the_collapsed_tunnels_survivor": {
       "title": "The Collapsed Tunnel's Survivor",
@@ -4405,7 +4426,8 @@
       "quests": [
         "first_city_arrival",
         "the_archives_recess",
-        "the_first_city_quest"
+        "the_first_city_quest",
+        "conflict_at_crossroads_tavern"
       ],
       "required_level": 10
     },
