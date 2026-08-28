@@ -16131,6 +16131,79 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         combined = "\n".join(sink)
         self.assertIn("Talk to Borin about his concerns.", combined)
 
+    async def test_next_step_hint_surfaces_the_bridge_quest_once_its_arc_mates_are_done(self):
+        """
+        Verification the Kess Arc plan explicitly called for ("verify
+        this via a real test, don't just assume it"): once a character
+        has finished the rest of arc_3 but not conflict_at_crossroads_
+        tavern, _current_story_arc must still report arc_3 as current
+        (it's a real, general mechanism -- no special-casing needed,
+        since the new quest is just arc_3's own real 4th member), and
+        _next_step_hint_facts must surface its real location/clue.
+        """
+        user_id = 999934
+        character = make_basic_character(user_id, "NextStepHintSeeker", current_location="the_first_city")
+        for qid in (
+            "welcome_to_the_crossroads", "the_hollow_stump", "clear_the_warrens",
+            "the_wrong_color", "the_hush_stage1_signs", "the_hush_stage2_the_wisp",
+            "the_hush_stage3_the_unspoken",
+            "first_city_arrival", "the_archives_recess", "the_first_city_quest",
+        ):
+            db.complete_quest(user_id, -999, qid)
+        character = db.get_character(user_id, -999)
+
+        arc = bot._current_story_arc(character)
+        self.assertIsNotNone(arc)
+        self.assertEqual(arc[0], "arc_3_revelation")
+
+        hint = bot._next_step_hint_facts(character)
+        self.assertIsNotNone(hint)
+        self.assertEqual(hint["location_name"], "The First City")
+        self.assertEqual(
+            hint["clue"], "Find the paladin at the Crossroads Tavern and ask about the Rising Concerns.",
+        )
+
+    async def test_grask_reacts_to_the_supply_tunnels_and_deep_larder_beats_when_present(self):
+        """
+        Kess Arc plan, party-composition requirement: Grask Emberscale
+        (a real captive of these exact Goblin Warrens, per his own
+        campaign.json backstory) gets a real reactive line at the two
+        Chapter 5 beats that carry the "someone bigger" foreshadowing
+        thread -- only when he's an actual, present party member.
+        """
+        from unittest.mock import patch
+        user_id = 999935
+        make_basic_character(user_id, "GraskWitnessTester", current_location="goblin_warrens")
+        await bot._do_recruit_npc(FakeUpdate(user_id, "recruit Grask Emberscale", []), "Grask Emberscale")
+        db.accept_quest(user_id, -999, "supply_tunnels_veteran")
+        db.accept_quest(user_id, -999, "deep_larders_elder")
+
+        sink = []
+        with patch("bot._chapter_complete_note", return_value=""):
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "supply_tunnels_veteran")
+        combined = "\n".join(sink)
+        self.assertIn("Never once thought to ask who they were handing it to.", combined)
+
+        sink2 = []
+        with patch("bot._chapter_complete_note", return_value=""):
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink2), user_id, "deep_larders_elder")
+        combined2 = "\n".join(sink2)
+        self.assertIn("Someone's been feeding this place on purpose", combined2)
+
+    async def test_grask_reaction_does_not_fire_when_hes_not_in_the_party(self):
+        """Negative case -- the same two beats, no Grask recruited, no reactive line."""
+        from unittest.mock import patch
+        user_id = 999936
+        make_basic_character(user_id, "SoloWarrensDelver", current_location="goblin_warrens")
+        db.accept_quest(user_id, -999, "supply_tunnels_veteran")
+
+        sink = []
+        with patch("bot._chapter_complete_note", return_value=""):
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "supply_tunnels_veteran")
+        combined = "\n".join(sink)
+        self.assertNotIn("Never once thought to ask who they were handing it to.", combined)
+        self.assertNotIn("Grask", combined)
+
     async def test_borins_blackthorn_warning_still_gated_behind_the_new_bridge_quest(self):
         """
         Completing first_city_arrival alone (the OLD prerequisite,

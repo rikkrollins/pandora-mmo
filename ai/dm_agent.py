@@ -1732,6 +1732,38 @@ def kess_flees_line() -> str:
     )
 
 
+def grask_supply_tunnels_reaction() -> str:
+    """
+    Hand-written (Kess Arc plan, party-composition requirement: a short
+    curated list of companions get a real reactive line when present
+    for a beat that's actually about them -- Grask Emberscale was
+    explicitly named for Chapter 5's own "someone bigger" thread, since
+    he was a real captive of these exact Goblin Warrens, per his own
+    campaign.json personality/goals). Fires when the party finds the
+    veteran goblin's too-fine coin purse -- grounded in his own real
+    "never quite managed to break him" backstory, not invented.
+    """
+    return (
+        "*Grask goes quiet at the sight of the purse, turning it over once in his claws.*\n\n"
+        "**Grask:** \"I watched them hand off coin like that more than once, back when I still had "
+        "a cell to watch it from. Never once thought to ask who they were handing it to.\""
+    )
+
+
+def grask_deep_larders_reaction() -> str:
+    """
+    Companion piece to grask_supply_tunnels_reaction() above -- fires
+    at the deep larder elder's beat, grounded in his own real "getting
+    out of these warrens and putting them a long way behind him" goal.
+    """
+    return (
+        "*Grask stares at the oversized stockpile longer than anyone else bothers to.*\n\n"
+        "**Grask:** \"That's not goblin thinking. Goblins don't plan past the next meal. "
+        "Someone's been feeding this place on purpose -- and I spent longer in here than I'd like, "
+        "never once wondering why it never ran dry.\""
+    )
+
+
 def narrate_kess_transformation(
     boss_name: str, before_personality: str, before_goals: str,
     after_name: str, after_personality: str, after_goals: str, party_names: str,

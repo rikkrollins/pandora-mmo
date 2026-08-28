@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.396] — The Kess Arc, Phase 3 follow-up: Grask's reaction + a real verification test
+
+Two gaps closed after a post-Phase-3 review of the arc plan
+(`.claude/plans/twinkly-purring-deer.md`):
+
+- **Grask Emberscale gets his own real reactive line** at the two
+  Chapter 5 beats that carry the "someone bigger" foreshadowing thread
+  (`supply_tunnels_veteran`, `deep_larders_elder`) — hand-written,
+  grounded in his own real campaign.json backstory as an escaped
+  captive of these exact Goblin Warrens, and only fires when he's
+  actually a present, combat-eligible party member (uses
+  `_get_real_party_combatants`, not just "recruited somewhere in this
+  chat" — a real bug caught by the negative test below before it ever
+  shipped).
+- **Added the real verification test** the plan explicitly called for
+  and a prior pass skipped: confirms `_next_step_hint_facts` correctly
+  surfaces "Conflict at Crossroads Tavern" once the rest of arc_3 is
+  done, with zero special-casing needed (it's already a general,
+  reusable mechanism).
+- Reviewed and deliberately did NOT add a separate "world-state flag"
+  for Kess's defeat — an existing code comment at the
+  `kess_the_unbound_reckoning` bespoke ending already explains this
+  was a considered decision (a character's own `completed_quests`
+  entry is the intended queryable fact for future chapters, same as
+  every other arc gate in this game), so a second mechanism would've
+  been redundant.
+
 ## [1.27.395] — The Kess Arc, Phase 3: Chapters 5-7 foreshadowing, the Crossroads bridge quest, and real combat art
 
 Closes out the Kess Arc plan (`.claude/plans/twinkly-purring-deer.md`)

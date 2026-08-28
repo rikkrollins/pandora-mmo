@@ -73,6 +73,7 @@ from ai.dm_agent import (
     narrate_borin_dialogue, narrate_confrontation_choice_outcome,
     narrate_kess_transformation, narrate_chapter_8_epilogue,
     kess_first_confrontation_script, kess_unbound_confrontation_script, kess_flees_line,
+    grask_supply_tunnels_reaction, grask_deep_larders_reaction,
     _fallback_hourly_update, _fallback_narration,
     is_narration_call_active,
 )
@@ -13822,6 +13823,25 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
             # (not AI-generated) pointing the party straight at Borin,
             # the same discipline as the rest of this arc's fixed beats.
             climax_narration += "**Talk to Borin about his concerns.**\n\n"
+
+    if quest_id in ("supply_tunnels_veteran", "deep_larders_elder"):
+        # Kess Arc plan, party-composition requirement: Grask Emberscale
+        # was explicitly named for a real reactive line during Chapter
+        # 5's own "someone bigger" thread, since he was a real captive
+        # of these exact Goblin Warrens (his own campaign.json
+        # personality/goals). Only fires when he's an actual, present
+        # party member for the beat -- never invented, never shown to
+        # a party that doesn't have him.
+        grask_present = any(
+            member["name"] == "Grask Emberscale" and member.get("is_ai")
+            for member in _get_real_party_combatants(character)
+        )
+        if grask_present:
+            grask_line = (
+                grask_supply_tunnels_reaction() if quest_id == "supply_tunnels_veteran"
+                else grask_deep_larders_reaction()
+            )
+            climax_narration += f"{grask_line}\n\n"
 
     # The true ending (2026-07-25, rebirth-3 gated content's climax):
     # every other quest, including every other "climactic"-weighted one
