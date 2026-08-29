@@ -4330,15 +4330,15 @@
     },
     "a_wardens_vigil": {
       "title": "A Warden's Vigil",
-      "description": "The Silver Wardens noticed the world's darkening edges and organized against it -- a young cairn watcher stirring is exactly the kind of edge they mean.",
-      "location": "greymoor_downs_sunken_barrow",
+      "description": "The Silver Wardens noticed the world's darkening edges and organized against it -- a cairn watcher stirring is exactly the kind of edge they mean.",
+      "location": "hollow_verge_sealed_cairn",
       "reward_xp": 200,
       "reward_gold": 90,
       "trigger": {
         "type": "defeat_monster",
-        "monster": "young_cairn_watcher"
+        "monster": "cairn_watcher"
       },
-      "clue": "The Wardens keep a real watch on anything undead stirring -- a young cairn watcher's restlessness is worth answering before it settles into something worse.",
+      "clue": "The Wardens keep a real watch on anything undead stirring -- a cairn watcher's restlessness is worth answering before it settles into something worse.",
       "requires_guild": "silver_wardens"
     },
     "the_quiet_climb": {

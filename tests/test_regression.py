@@ -16085,6 +16085,58 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("the_first_city_quest", character["active_quests"])
         sessions.end_session(-999)
 
+    def test_a_wardens_vigil_targets_a_monster_that_actually_spawns_at_its_own_location(self):
+        """
+        Real data bug found during a 2026-08-29 audit of every
+        defeat_monster quest lacking a giver_npc (the same shape that
+        caused the live Waking Ember quest-credit bug): a_wardens_vigil
+        targeted "young_cairn_watcher" while its own quest.location
+        ("greymoor_downs_sunken_barrow") only ever spawns "wolf" --
+        young_cairn_watcher only exists at a totally different,
+        unrelated location (hollow_verge_forgotten_nook, already
+        the_forgotten_nooks_secret's own target). The quest was
+        unwinnable at the location it names. the_forgotten_nooks_
+        secret's own clue text ("smaller and quicker than its kin at
+        the cairn") confirms the real adult monster, cairn_watcher,
+        was always the intended target -- and it spawns exactly at
+        hollow_verge_sealed_cairn, confirmed below against the real
+        campaign data, not just the quest's own claim about itself.
+        """
+        quest = bot.CAMPAIGN["quests"]["a_wardens_vigil"]
+        monster_key = quest["trigger"]["monster"]
+        quest_location_id = quest["location"]
+        self.assertIn(monster_key, bot.CAMPAIGN["monsters"], "trigger.monster must be a real monster")
+        location = cl.get_location(bot.CAMPAIGN, quest_location_id)
+        self.assertIsNotNone(location, "quest.location must be a real location")
+        self.assertIn(
+            monster_key, location.get("monsters", []),
+            f"{monster_key!r} must actually spawn at {quest_location_id!r}, or this quest can never be completed there",
+        )
+
+    async def test_a_wardens_vigil_completes_on_defeating_the_real_cairn_watcher(self):
+        import sessions
+        sessions.end_session(-999)
+
+        player_id = 999937
+        make_basic_character(player_id, "WardenVigilKeeper", current_location="hollow_verge_sealed_cairn")
+        db.accept_quest(player_id, -999, "a_wardens_vigil")
+
+        boss_id = -2_500_012
+        boss = {
+            "telegram_user_id": boss_id, "name": "Cairn Watcher", "dexterity": 12,
+            "is_ai": 1, "monster_key": "cairn_watcher",
+        }
+        session = sessions.start_session(-999, [boss], {boss_id: "enemy", player_id: "party"})
+        session.turn_order = [boss_id, player_id]
+
+        sink = []
+        await bot._check_quest_completions_defeat_monster(FakeUpdate(player_id, "irrelevant", sink), session)
+
+        character = db.get_character(player_id, -999)
+        self.assertIn("a_wardens_vigil", character["completed_quests"])
+        self.assertNotIn("a_wardens_vigil", character["active_quests"])
+        sessions.end_session(-999)
+
     async def test_conflict_at_crossroads_tavern_is_not_offerable_until_the_first_city_quest_is_done(self):
         """
         Real request (2026-08-28, Coffee: "put a quest in the First

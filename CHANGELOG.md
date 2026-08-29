@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.397] — Audited 60 quests for the Waking Ember bug's shape; fixed a real unwinnable quest
+
+Followed up on the Waking Ember quest-credit bug (a wandering monster
+killed before its quest was ever accepted, silently losing credit —
+two real players' `the_first_city_quest` was manually re-credited
+after this was found) by auditing every other `defeat_monster` quest
+with no `giver_npc` for the same shape (60 candidates). Checked each
+one's target monster against its REAL spawn locations, not just its
+own claimed location.
+
+- **57 of 60 are low-risk**: single-location monsters, where combat
+  requires the player to explicitly name the monster while standing
+  exactly where the quest is offered — the quest offer already fires
+  synchronously on arrival, before the player's next message.
+- **2 share the real cross-location risk** (the monster also spawns in
+  a separate, connected location): `the_first_city_quest` (already
+  fixed for the two affected real characters) and `verge_wraiths_
+  unrest` (`verge_wraith` also spawns in the connected `hollow_verge_
+  bonefield` — no evidence yet it's actually been hit, left as a known
+  risk rather than a confirmed bug).
+- **Found and fixed a worse, unrelated bug along the way**:
+  `a_wardens_vigil` targeted `young_cairn_watcher`, a monster that
+  doesn't spawn at the quest's own location at all (only `wolf` does
+  there) — the quest was unwinnable as written. The real adult
+  `cairn_watcher` monster, which spawns at `hollow_verge_sealed_cairn`,
+  was clearly the intended target (confirmed by `the_forgotten_nooks_
+  secret`'s own clue text distinguishing its own smaller monster "from
+  its kin at the cairn"). No real player had this quest active, so the
+  fix is a clean data correction with no migration needed.
+
 ## [1.27.396] — The Kess Arc, Phase 3 follow-up: Grask's reaction + a real verification test
 
 Two gaps closed after a post-Phase-3 review of the arc plan
