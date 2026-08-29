@@ -2,6 +2,38 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.401] — Board quests can no longer target a story boss (the next step after v1.27.400)
+
+Per Coffee, immediately following yesterday's quest-monster visibility
+fix: "There shouldn't be these type quests for bosses... after the
+boss is beaten the boss should disappear so there is no opportunity to
+kill two of them. Let alone 50 of them... This is a perfect example of
+what you just deployed and fixed. This is the next step."
+
+- Root cause: `board_quests.py`'s daily/weekly/monthly bounty
+  generator and its moral-choice-bounty sibling both picked a target
+  monster from a location's RAW monster list, no exclusion at all.
+  Confirmed live: this had genuinely produced "Defeat 53x The Waking
+  Ember," a unique, one-time 7000 HP story boss.
+- Companion Favors already excluded `is_boss`-flagged monsters, but
+  cross-checking that flag against every real quest-tied monster in
+  this campaign (62 total) showed it only caught 21 of them — the
+  other 41 (Verge Wraith, Cairn Watcher, Watchtower Stalker, and most
+  of the rest of the earlier 60-quest audit) were never flagged
+  `is_boss` at all.
+- Renamed the shared exclusion helper `_non_boss_monster_keys` →
+  `_repeatable_monster_keys`, extended to also exclude every monster
+  that's the real target of any `defeat_monster` story/side quest, and
+  wired it into all three generators.
+- Live-DB cleanup: deleted the 29 current-period board-quest rows
+  (across several real locations) that already targeted one of these
+  monsters, including one already accepted by a real player ("kill 2
+  Waking Embers" — permanently unwinnable). 139 older, already-inert
+  rows from past periods were left alone (harmless, never re-surfaced).
+- Confirmed with real fail-then-pass tests, a smoke-test regeneration
+  against the live database, and a full re-run of the board-quest/
+  Companion Favor test suite.
+
 ## [1.27.400] — Quest-monster visibility gating: bosses no longer show up before you're supposed to face them
 
 Per Coffee: "why are bosses show on the location list if we are not

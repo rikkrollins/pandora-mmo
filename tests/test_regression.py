@@ -1774,11 +1774,18 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         all), so this reliably reproduces the exact live report.
         Forces the "defeat" branch and count=2 (real English
         pluralization only matters at count != 1) deterministically.
+        _repeatable_monster_keys mocked (2026-08-29, real live fix --
+        see its own docstring) so this test can keep isolating the
+        UNRELATED article/pluralization bug, independent of The Root
+        That Remembers now being correctly excluded as a quest-tied
+        monster from ordinary bounty generation (covered by its own
+        dedicated test).
         """
         import board_quests
         from unittest.mock import patch
 
-        with patch("board_quests.random.choice", side_effect=lambda seq: seq[0]), \
+        with patch("board_quests._repeatable_monster_keys", return_value=["the_root_that_remembers"]), \
+             patch("board_quests.random.choice", side_effect=lambda seq: seq[0]), \
              patch("board_quests.random.randint", return_value=2), \
              patch("board_quests.narrate_branching_quest_setup", return_value="A quiet request awaits."):
             quest = board_quests._generate_branching_quest_for_location(
@@ -1799,23 +1806,61 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         """
         Same live bug class as the branching-quest test above, but for
         the REGULAR (non-branching) daily/weekly/monthly board quest
-        generator (_generate_for_location) -- this one, unlike Companion
-        Favors, never excludes boss-tier monsters, so "Thin the
-        {plural}"/"Clear out the {plural}" were just as reachable for a
-        "The X"-named boss/Remnant. whispering_wood_deep_glade's only
-        monster is The Root That Remembers, so this reliably reproduces
-        the same real collision through the OTHER generator.
+        generator (_generate_for_location) -- "Thin the {plural}"/
+        "Clear out the {plural}" must never double into "the The X" for
+        a "The X"-named boss/Remnant.
+
+        whispering_wood_deep_glade's only real monster, The Root That
+        Remembers, is now itself excluded from ordinary bounty
+        generation (2026-08-29, real live fix -- see _repeatable_
+        monster_keys' own docstring: a quest-tied monster is never a
+        fair repeatable bounty target). _repeatable_monster_keys is
+        mocked here specifically so this test can keep isolating the
+        UNRELATED article-doubling logic, independent of that real
+        exclusion (covered by its own dedicated test below).
         """
         import board_quests
         from unittest.mock import patch
 
-        with patch("board_quests.random.choice", side_effect=lambda seq: seq[0]), \
+        with patch("board_quests._repeatable_monster_keys", return_value=["the_root_that_remembers"]), \
+             patch("board_quests.random.choice", side_effect=lambda seq: seq[0]), \
              patch("board_quests.random.randint", return_value=2):
             quest = board_quests._generate_for_location(bot.CAMPAIGN, "whispering_wood_deep_glade", -999, set())
         self.assertIsNotNone(quest)
         self.assertNotIn("the The", quest["title"])
         self.assertNotIn("Rememberss", quest["title"])
         self.assertEqual(quest["title"], "Thin The Root That Rememberses")
+
+    def test_regular_board_quest_generator_never_assigns_a_real_quest_tied_monster(self):
+        """
+        Real live report (2026-08-29, dev-bridge, Coffee: "There
+        shouldn't be these type quests for bosses... after the boss is
+        beaten the boss should disappear so there is no opportunity to
+        kill two of them. Let alone 50 of them"): _generate_for_location
+        used to read a location's RAW monster list with zero exclusion
+        -- confirmed live, it had genuinely generated "Defeat 50x The
+        Waking Ember," a unique, one-time 7000 HP story boss. Uses
+        whispering_wood_deep_glade for real (no mocking of the
+        exclusion itself) -- its only real monster is a quest-tied
+        Remnant target, so with the fix, a "defeat" bounty here must
+        fall back to the location's real gather option instead.
+        """
+        import board_quests
+        quest = board_quests._generate_for_location(bot.CAMPAIGN, "whispering_wood_deep_glade", -999, set())
+        self.assertIsNotNone(quest)
+        self.assertEqual(quest["objective_type"], "gather_material")
+
+    def test_repeatable_monster_keys_excludes_quest_tied_monsters_even_without_is_boss(self):
+        """
+        The real gap this whole fix closes: verge_wraith (verge_wraiths_
+        unrest's own real target) was never flagged is_boss at all, so
+        the OLD is_boss-only filter (_non_boss_monster_keys) would have
+        let it straight through as a repeatable bounty target.
+        """
+        import board_quests
+        self.assertFalse(bot.CAMPAIGN["monsters"]["verge_wraith"].get("is_boss"))
+        location = cl.get_location(bot.CAMPAIGN, "hollow_verge_threshold")
+        self.assertNotIn("verge_wraith", board_quests._repeatable_monster_keys(bot.CAMPAIGN, location))
 
     def test_plural_handles_names_already_ending_in_s(self):
         """Real English rule: a name ending in s/x/z/ch/sh takes "es", not a doubled bare "s" -- see the live board-quest-title bug above."""

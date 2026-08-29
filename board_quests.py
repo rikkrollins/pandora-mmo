@@ -127,7 +127,11 @@ def _generate_for_location(
     if not location:
         return None
 
-    monsters = location.get("monsters", [])
+    # Real live report (2026-08-29, dev-bridge): this used to read the
+    # location's RAW monster list, with zero exclusion -- see
+    # _repeatable_monster_keys' own docstring for the exact live bug
+    # ("Defeat 50x The Waking Ember," a unique story boss) this closes.
+    monsters = _repeatable_monster_keys(campaign_data, location)
     nodes = location.get("resource_nodes", [])
 
     monster_options = [m for m in monsters if ("defeat_monster", m) not in avoid] or list(monsters)
@@ -218,11 +222,49 @@ def _recruit_location_for_npc(campaign_data: dict, npc_id: str) -> dict | None:
     return None
 
 
-def _non_boss_monster_keys(campaign_data: dict, location: dict) -> list[str]:
-    """Companion Favors stay "easy and attainable" (per Coffee's explicit request) -- never assigns a real boss-tier monster as the defeat target."""
+def _quest_tied_monster_keys(campaign_data: dict) -> set[str]:
+    """
+    Real monster keys that are the actual target of any defeat_monster
+    story/side quest -- deliberately mirrors bot.py's own _QUEST_
+    MONSTER_INDEX (kept as a separate, small computation here rather
+    than imported, to avoid a circular import -- bot.py already
+    imports this module). These are one-time (or arc/guild-gated)
+    story encounters, never a fair repeatable bounty target.
+    """
+    keys = set()
+    for quest in campaign_data.get("quests", {}).values():
+        trigger = quest.get("trigger", {})
+        if trigger.get("type") == "defeat_monster" and trigger.get("monster"):
+            keys.add(trigger["monster"])
+    return keys
+
+
+def _repeatable_monster_keys(campaign_data: dict, location: dict) -> list[str]:
+    """
+    Monsters at this location that are fair game for a repeatable board
+    quest/Companion Favor -- excludes real boss-flagged monsters
+    (Companion Favors stay "easy and attainable" per Coffee's explicit
+    request) AND every monster that's the real target of some
+    defeat_monster story/side quest, even one never flagged is_boss.
+
+    Real live report (2026-08-29, dev-bridge, Coffee: "There shouldn't
+    be these type quests for bosses... after the boss is beaten the
+    boss should disappear so there is no opportunity to kill two of
+    them. Let alone 50 of them"): the daily/weekly/monthly board-quest
+    generator (_generate_for_location) picked from a location's RAW
+    monster list with zero exclusion at all -- confirmed live, it could
+    genuinely ask a player to "Defeat 50x The Waking Ember," a unique,
+    one-time 7000 HP story boss. Renamed from _non_boss_monster_keys
+    (its old is_boss-only exclusion, still used by Companion Favors,
+    turned out to catch only 21 of the 62 real quest-tied monsters in
+    this campaign -- most of them, like Verge Wraith and Cairn Watcher,
+    were never actually flagged is_boss at all).
+    """
+    quest_tied = _quest_tied_monster_keys(campaign_data)
     return [
         m for m in location.get("monsters", [])
         if not (campaign_data["monsters"].get(m) or {}).get("is_boss")
+        and m not in quest_tied
     ]
 
 
@@ -245,7 +287,7 @@ def get_or_generate_companion_favor(campaign_data: dict, npc_id: str, chat_id: i
     location = _recruit_location_for_npc(campaign_data, npc_id)
 
     def _has_favor_content(loc: dict | None) -> bool:
-        return bool(loc) and bool(_non_boss_monster_keys(campaign_data, loc) or loc.get("resource_nodes"))
+        return bool(loc) and bool(_repeatable_monster_keys(campaign_data, loc) or loc.get("resource_nodes"))
 
     # Falls back to any location with real non-boss monsters/resource
     # nodes if this companion's own recruit spot has neither (or
@@ -263,7 +305,7 @@ def get_or_generate_companion_favor(campaign_data: dict, npc_id: str, chat_id: i
     monster_options, node_options = [], []
     for loc in candidate_locations:
         if loc:
-            monster_options = monster_options or _non_boss_monster_keys(campaign_data, loc)
+            monster_options = monster_options or _repeatable_monster_keys(campaign_data, loc)
             node_options = node_options or loc.get("resource_nodes", [])
 
     options = []
@@ -281,7 +323,7 @@ def get_or_generate_companion_favor(campaign_data: dict, npc_id: str, chat_id: i
         count = random.randint(*COMPANION_FAVOR_COUNT_RANGE["defeat"])
         # _the() (2026-08-25 dev-bridge report, same root cause as
         # _generate_for_location's own fix): not currently reachable in
-        # practice since _non_boss_monster_keys already excludes every
+        # practice since _repeatable_monster_keys already excludes every
         # "The X"-named boss/Remnant from candidates here, but fixed for
         # consistency/defense-in-depth in case that exclusion ever loosens.
         title = random.choice(FAVOR_DEFEAT_TITLES).format(plural=_the(_plural(monster_data["name"])))
@@ -331,7 +373,10 @@ def _generate_branching_quest_for_location(campaign_data: dict, location_id: str
     if not location:
         return None
 
-    monsters = location.get("monsters", [])
+    # Real live report (2026-08-29, dev-bridge): same raw-monster-list
+    # bug as _generate_for_location's own fix -- see
+    # _repeatable_monster_keys' own docstring.
+    monsters = _repeatable_monster_keys(campaign_data, location)
     nodes = location.get("resource_nodes", [])
     monster_options = [m for m in monsters if ("defeat_monster", m) not in avoid] or list(monsters)
     node_options = [n for n in nodes if ("gather_material", n["material"]) not in avoid] or list(nodes)
