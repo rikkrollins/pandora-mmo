@@ -22073,6 +22073,55 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await _safe_send(update, f"🤝 **{character['name']}** gives the {item['name']} to **{recipient_name}**.")
 
 
+async def _do_examine_owned_item(update: Update, character: dict, location: dict, item_match: str | None) -> bool:
+    """
+    Narrates examining a real owned inventory item, given an already-
+    resolved item_match id (or None). Returns True if it actually
+    handled the examine (an item was found), False otherwise, so both
+    of _do_examine's call sites (the explicit "in my inventory" fast
+    path, and the ordinary interactable-miss fallback) share one real
+    implementation instead of two copies drifting apart over time.
+    """
+    if not item_match:
+        return False
+    item_data = items_module.get_item(item_match)
+    # Real live report (2026-08-12, dev-bridge screenshot, same player
+    # who hit the "view" misclassification gap): "Looking at the
+    # herbalism guide didn't work we need to be able to read it so we
+    # can see the contents of the book the recipes" -- examining a
+    # recipe book (Cook Book/Herbalism Guide/Crafting Book, 2026-08-11)
+    # only ever gave generic flavor narration from the item's own
+    # description field, never its real recipe contents -- those
+    # already exist, real and grounded (_do_read_recipe_book, built
+    # from rules.crafting.RECIPES), but were only ever reachable via
+    # "use the X", not the far more natural "examine"/"view"/"look
+    # at"/"read" phrasing a player actually reaches for when they want
+    # to see what's written in a book they own. Routes book-type items
+    # here instead of falling through to the generic description path.
+    if item_data.get("type") == "book":
+        await _do_read_recipe_book(update, item_data)
+        return True
+    # Real live crash (2026-08-02, caught via a Development-topic
+    # report): a generated magic item (rules/item_generator.py, e.g.
+    # "Runed Dagger of Embers") has no "description" field at all --
+    # only hand-authored items.py entries ever set one. Direct indexing
+    # here KeyError'd on every attempt to examine any generated item,
+    # the exact case this whole system exists to make keepable. Falls
+    # back to the generator's own "note" field, then a bare generic
+    # line, rather than assuming either key exists.
+    description = item_data.get("description") or item_data.get("note") \
+        or f"a {(item_data.get('type') or 'item')}, worked with real craftsmanship."
+    narration = await asyncio.to_thread(
+        narrate_examine, character, location["name"], item_data["name"], description
+    )
+    message = f"🔍 **{character['name']}** examines their {item_data['name']}: {narration}"
+    stats_line = _format_item_stats_line(item_data)
+    if stats_line:
+        message += f"\n\n📊 **Stats:** {stats_line}"
+    await _safe_send(update, message)
+    return True
+
+
 async def _do_examine(update: Update, target_text: str) -> None:
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -22126,6 +22175,27 @@ async def _do_examine(update: Update, target_text: str) -> None:
             )
         return
 
+    # Real live report (2026-08-28, dev-bridge, Charvenna: "That's not
+    # what I asked for") -- "Look at torn ledger pages in my inventory"
+    # matched crossroads_tavern's own "the heavy ledger behind the bar"
+    # interactable instead, since _find_interactable ran BEFORE the
+    # inventory-item fallback below and both real names share the word
+    # "ledger". Same shape as the enemy-name/weapon-name collision fixed
+    # in _do_attack this same day. An explicit "in my inventory" (or
+    # "in/from inventory") is an unambiguous signal of real player
+    # intent -- checked first, so it can never be shadowed by a
+    # same-word location interactable again.
+    lowered_target_text = target_text.lower()
+    if any(phrase in lowered_target_text for phrase in ("in my inventory", "in inventory", "from my inventory", "from inventory")):
+        owned_item_ids = list((character.get("inventory") or {}).keys())
+        item_match = items_module.find_item_mentioned_in_text(target_text, candidate_ids=owned_item_ids)
+        if await _do_examine_owned_item(update, character, location, item_match):
+            return
+        await _safe_send(
+            update, f"🔍 **{character['name']}** checks their inventory, but isn't carrying anything like that.",
+        )
+        return
+
     found = _find_interactable(location, target_text)
     if found is None:
         # Real bug, caught live 2026-07-17 (Coffee): "Look at the wolves
@@ -22174,45 +22244,7 @@ async def _do_examine(update: Update, target_text: str) -> None:
         # description (every item in items.py now has one).
         owned_item_ids = list((character.get("inventory") or {}).keys())
         item_match = items_module.find_item_mentioned_in_text(target_text, candidate_ids=owned_item_ids)
-        if item_match:
-            item_data = items_module.get_item(item_match)
-            # Real live report (2026-08-12, dev-bridge screenshot,
-            # same player who hit the "view" misclassification gap):
-            # "Looking at the herbalism guide didn't work we need to be
-            # able to read it so we can see the contents of the book
-            # the recipes" -- examining a recipe book (Cook Book/
-            # Herbalism Guide/Crafting Book, 2026-08-11) only ever gave
-            # generic flavor narration from the item's own description
-            # field, never its real recipe contents -- those already
-            # exist, real and grounded (_do_read_recipe_book, built
-            # from rules.crafting.RECIPES), but were only ever reachable
-            # via "use the X", not the far more natural "examine"/
-            # "view"/"look at"/"read" phrasing a player actually reaches
-            # for when they want to see what's written in a book they
-            # own. Routes book-type items here instead of falling
-            # through to the generic description path below.
-            if item_data.get("type") == "book":
-                await _do_read_recipe_book(update, item_data)
-                return
-            # Real live crash (2026-08-02, caught via a Development-topic
-            # report): a generated magic item (rules/item_generator.py,
-            # e.g. "Runed Dagger of Embers") has no "description" field
-            # at all -- only hand-authored items.py entries ever set
-            # one. Direct indexing here KeyError'd on every attempt to
-            # examine any generated item, the exact case this whole
-            # system exists to make keepable. Falls back to the
-            # generator's own "note" field, then a bare generic line,
-            # rather than assuming either key exists.
-            description = item_data.get("description") or item_data.get("note") \
-                or f"a {(item_data.get('type') or 'item')}, worked with real craftsmanship."
-            narration = await asyncio.to_thread(
-                narrate_examine, character, location["name"], item_data["name"], description
-            )
-            message = f"🔍 **{character['name']}** examines their {item_data['name']}: {narration}"
-            stats_line = _format_item_stats_line(item_data)
-            if stats_line:
-                message += f"\n\n📊 **Stats:** {stats_line}"
-            await _safe_send(update, message)
+        if await _do_examine_owned_item(update, character, location, item_match):
             return
 
         names = [i["name"] for i in interactables.values()]
@@ -23322,6 +23354,47 @@ async def guild_curriculum_callback(update: Update, context: ContextTypes.DEFAUL
         update, update.effective_user.id, update.effective_chat.id, resolved_step,
         extra_note=f"\n{choice['outcome']}", guild_id=guild_id,
     )
+
+
+async def _maybe_resolve_guild_curriculum_from_text(update: Update, character: dict, text: str) -> bool:
+    """
+    Real live report (2026-08-29, dev-bridge, Charvenna: "Why isn't
+    this working?" after saying "Try my luck" four separate times over
+    ~90 minutes, each one silently classified as 'chat'). Root cause:
+    a guild curriculum dice-trial/riddle step's own "try my luck"/
+    riddle-answer handling only ever existed in guild_topic_handler
+    below -- reachable ONLY when the message is sent in that guild's
+    OWN dedicated topic. But the quest card announcing the step (e.g.
+    "Reading the Odds ... say 'try my luck' here when you're ready to
+    roll") is shown and answered right in Adventure, with no hint a
+    different topic is required -- so the exact phrase the game itself
+    told her to type just fell through to ordinary intent
+    classification and read as small talk, forever.
+    Checked from adventure_master_handler, before ordinary intent
+    classification, for every guild the character actually holds (not
+    just their primary) -- same logic as guild_topic_handler's own
+    riddle/dice-trial block, just reachable from wherever the player
+    actually replies. Returns True (message handled) only when a real
+    current curriculum step's own trigger actually matches; otherwise
+    False, so ordinary classification proceeds untouched.
+    """
+    lowered = text.lower()
+    for guild_id in held_guild_ids(character):
+        current_step = guild_curriculum_module.get_step(guild_id, _guild_curriculum_step_index(character, guild_id))
+        if current_step is None or character["level"] < current_step["min_level"]:
+            continue
+        trigger = current_step["trigger"]
+        if trigger["type"] == "solve_puzzle" and _guild_curriculum_riddle_answer_matches(text, trigger["accepted_answers"]):
+            if _guild_curriculum_step_ready(character, guild_id):
+                await _complete_guild_curriculum_step(update, update.effective_user.id, update.effective_chat.id, current_step, guild_id=guild_id)
+            else:
+                remaining = _guild_curriculum_time_remaining_note(character, guild_id)
+                await _safe_send(update, f"That's the right answer — but the guild won't credit it for another {remaining}.")
+            return True
+        if trigger["type"] == "dice_challenge" and any(w in lowered for w in GUILD_CURRICULUM_DICE_KEYWORDS):
+            await _do_guild_curriculum_dice_challenge(update, current_step, guild_id)
+            return True
+    return False
 
 
 async def guild_topic_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, guild_id: str) -> None:
@@ -29113,6 +29186,21 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # before ordinary intent classification so a pending reaction's
     # answer is never misread as unrelated chat.
     if await _maybe_resolve_pending_reaction_from_text(update, update.message.text):
+        return
+
+    # Real live report (2026-08-29, dev-bridge): a guild curriculum
+    # dice-trial/riddle step's own required exact phrase ("try my
+    # luck") is announced and answered right here in Adventure, but
+    # was previously only ever recognized in the guild's OWN topic --
+    # see _maybe_resolve_guild_curriculum_from_text's own docstring.
+    # Checked before ordinary intent classification, same as the
+    # pending-reaction check just above, so it's never misread as chat.
+    character_for_curriculum = await asyncio.to_thread(
+        db.get_character, update.effective_user.id, update.effective_chat.id,
+    )
+    if character_for_curriculum and await _maybe_resolve_guild_curriculum_from_text(
+        update, character_for_curriculum, update.message.text,
+    ):
         return
 
     global _LAST_KNOWN_CHAT_ID

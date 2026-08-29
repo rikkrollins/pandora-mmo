@@ -11101,6 +11101,32 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(len(transcript) > 0)
         self.assertIn("Stats:", transcript)
 
+    async def test_examine_inventory_item_wins_over_a_same_word_location_interactable(self):
+        """
+        Real live report (2026-08-28, dev-bridge, Charvenna: "That's
+        not what I asked for"): "Look at torn ledger pages in my
+        inventory" examined crossroads_tavern's own "the heavy ledger
+        behind the bar" interactable instead of her real, owned Torn
+        Ledger Page item -- both real names share the word "ledger",
+        and location interactables were checked before inventory items
+        even with an explicit "in my inventory" qualifier. Same shape
+        as the enemy-name/weapon-name collision fixed in _do_attack the
+        same day -- an explicit "in my inventory" is now checked first.
+        """
+        from unittest.mock import patch
+        user_id = 993002
+        make_basic_character(user_id, "LedgerReader", current_location="crossroads_tavern",
+                              inventory={"torn_ledger_page": 1})
+        sink = []
+        with patch("bot.narrate_examine", return_value="Real proof, real weight in the hand."):
+            await bot._do_examine(
+                FakeUpdate(user_id, "Look at torn ledger pages in my inventory", sink),
+                "Look at torn ledger pages in my inventory",
+            )
+        transcript = "\n".join(sink)
+        self.assertIn("Torn Ledger Page", transcript)
+        self.assertNotIn("heavy ledger behind the bar", transcript)
+
     async def test_examine_an_owned_recipe_book_shows_its_real_recipes(self):
         """
         Real live report (2026-08-12, dev-bridge screenshot, same player
@@ -25844,6 +25870,36 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(char["secondary_guild_curriculum_steps"]["adventurers_guild"], 4)
             self.assertEqual(char["alignment_law_chaos"], law_chaos_before + 5)
             self.assertEqual(char["alignment_good_evil"], good_evil_before + 5)
+
+    async def test_try_my_luck_now_works_from_adventure_not_just_the_guild_topic(self):
+        """
+        Real live report (2026-08-29, dev-bridge, Charvenna: "Why isn't
+        this working?" after typing "Try my luck" four separate times
+        over ~90 minutes, each one silently classified as 'chat'). The
+        quest card announcing the dice-trial step ("Reading the Odds
+        ... say 'try my luck' here when you're ready to roll") is shown
+        and answered right in Adventure -- but the actual handling only
+        ever existed in guild_topic_handler, reachable ONLY from that
+        guild's own dedicated topic. _maybe_resolve_guild_curriculum_
+        from_text now catches this from Adventure too, before ordinary
+        intent classification ever sees it.
+        """
+        from unittest.mock import patch
+        import guild_curriculum as gc
+        user_id = 700310
+        make_basic_character(user_id, "AdventureLuckTester", char_class="Fighter")
+        db.update_character(user_id, -999, guild="forge_guild", guild_curriculum_step=3, level=10)
+
+        with patch.object(gc, "GUILD_CURRICULUM_STEP_COOLDOWN_HOURS", 0):
+            sink = []
+            with patch("bot.roll", return_value=[6, 6]):
+                character = db.get_character(user_id, -999)
+                handled = await bot._maybe_resolve_guild_curriculum_from_text(
+                    FakeUpdate(user_id, "Try my luck", sink), character, "Try my luck",
+                )
+            self.assertTrue(handled)
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 4)
 
     async def test_secondary_guild_solve_puzzle_step_credits_correctly(self):
         """

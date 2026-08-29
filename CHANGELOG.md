@@ -2,6 +2,38 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.399] — "Try my luck" now works from Adventure; fixed a real examine-collision bug
+
+Two more real, dev-bridge-sourced fixes:
+
+- **Guild curriculum dice trials/riddles now work from Adventure, not
+  just the guild's own topic.** Real report (Charvenna: "Why isn't
+  this working?" after typing "Try my luck" four times over ~90
+  minutes, silently read as chat each time). The quest card announcing
+  a dice-trial step is shown and answered right in Adventure, but the
+  actual "try my luck"/riddle-answer handling only ever existed in
+  `guild_topic_handler`, reachable only from that guild's own
+  dedicated topic. `_maybe_resolve_guild_curriculum_from_text` now
+  catches this from Adventure too, checked before ordinary intent
+  classification, for every guild the character actually holds.
+- **Fixed the same enemy/target-name word-collision bug shape found in
+  v1.27.398, this time in `/examine`.** Real report (Charvenna:
+  "That's not what I asked for"): "Look at torn ledger pages in my
+  inventory" examined crossroads_tavern's own "the heavy ledger behind
+  the bar" interactable instead of her actual, owned Torn Ledger Page
+  item -- both share the word "ledger," and location interactables
+  were checked before inventory items even with an explicit "in my
+  inventory" qualifier. An explicit "in my inventory" (or "in/from
+  inventory") is now checked first, going straight to the real
+  inventory-item lookup. The shared item-examine logic (book-reading,
+  generated-item stats, description fallback) was factored into one
+  real helper, `_do_examine_owned_item`, used by both the new fast
+  path and the existing fallback, instead of two copies.
+
+Both confirmed with real fail-then-pass tests against the old code,
+plus a full re-run of the existing guild-curriculum and examine test
+suites to confirm no regressions.
+
 ## [1.27.398] — Fixed a false "weapon switch" during combat (enemy-name word collision)
 
 Real live report, dev-bridge (2026-08-29, Laurienna's own player:
