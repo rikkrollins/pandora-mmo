@@ -2,6 +2,42 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.403] — New-player onboarding audit: fixed the game's very first quest
+
+Per Coffee: "make sure a new player can go from game creation to the
+first city before we go any further." Simulated the real path — a
+fresh character through character creation, arc_1, and arc_2, via the
+actual game handlers — and found a real, live-breaking bug plus two
+UX gaps.
+
+- **Critical bug**: the game's own very first quest ("A Favor for
+  Grimsby," reach `whispering_wood`) could be silently missed by every
+  new player who does the obvious thing — reads the tavern's own room
+  description (which points toward the Whispering Wood) and walks
+  there before explicitly accepting the offer card. Same root cause as
+  the Waking Ember bug from two days ago, just never extended past
+  `defeat_monster` triggers: `_check_quest_completions_reach_location`
+  only checks already-active quests, so arriving at the target before
+  accepting gives zero credit — the player would have to notice
+  nothing happened, walk away, and walk back. `_maybe_push_quest_offer`
+  now auto-completes a `reach_location` quest whose target is already
+  in `visited_locations`, mirroring yesterday's `defeat_monster` fix.
+- **Caught before shipping**: that same fix would have silently broken
+  yesterday's own "Conflict at Crossroads Tavern" quest, since
+  `crossroads_tavern` is this game's `starting_location` — every
+  character has "visited" it since their very first action, completely
+  unrelated to a later deliberate return trip. Excluded the starting
+  location from the auto-complete check specifically, confirmed with a
+  dedicated test (and the pre-fix version genuinely hung on a real,
+  unmocked Ollama call instead of showing the ordinary offer card —
+  proof the flaw was real).
+- **UX gap closed**: the companion-trust wall gating entry to The First
+  City (`min_affinity: 40`) had zero advance warning anywhere in arc_2.
+  Added one foreshadowing line to `the_hush_stage3_the_unspoken`'s own
+  clue text.
+- Confirmed with real fail-then-pass tests throughout, plus a full
+  re-run of the quest-offer/reach-location test group.
+
 ## [1.27.402] — Fixed a genuine soft-lock in arc_3 introduced by v1.27.400
 
 Found live, walking a real fresh character (Pan) through the story:

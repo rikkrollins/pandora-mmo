@@ -2075,6 +2075,88 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         char = db.get_character(user_id, -999)
         self.assertNotIn("verge_wraiths_unrest", char["completed_quests"])
 
+    async def test_maybe_push_quest_offer_auto_completes_an_already_visited_reach_location_target(self):
+        """
+        Real live bug found 2026-08-29 (new-player onboarding
+        simulation): the game's own VERY FIRST quest, "A Favor for
+        Grimsby" (welcome_to_the_crossroads, reach_location: whispering_
+        wood), is offered right as the player arrives at the tavern --
+        but a player who does the obvious thing (reads the room, walks
+        west to the Whispering Wood BEFORE ever accepting) gets zero
+        credit: _check_quest_completions_reach_location already ran
+        earlier in that same _do_move call, before the quest was in
+        active_quests. Same shape as yesterday's defeat_monster fix --
+        a reach_location quest whose target is already in visited_
+        locations is now auto-completed the instant it becomes
+        offerable, instead of a dead-end offer card for a place the
+        player has already, genuinely been to.
+        """
+        from unittest.mock import patch, AsyncMock
+        use_test_db("tests/tmp/quest_reachloc_autocred_test.db")
+        user_id = 900709
+        character = make_basic_character(user_id, "AlreadyWanderedTester", current_location="crossroads_tavern")
+        character["visited_locations"] = ["crossroads_tavern", "whispering_wood"]
+        db.update_character(user_id, -999, visited_locations=["crossroads_tavern", "whispering_wood"])
+        quest_id, quest = "welcome_to_the_crossroads", bot.CAMPAIGN["quests"]["welcome_to_the_crossroads"]
+        sink = []
+        update = FakeUpdate(user_id, "", sink, chat_id=-999)
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)) as mock_image, \
+             patch("bot.narrate_reach_location_quest_completion", return_value="You see the wood for yourself."):
+            await bot._maybe_push_quest_offer(update, character, quest_id, quest)
+        self.assertFalse(mock_image.called, "should never show an offer card for a place the player has already been")
+        char = db.get_character(user_id, -999)
+        self.assertIn("welcome_to_the_crossroads", char["completed_quests"])
+        self.assertTrue(any("Quest complete" in s or "100 xp" in s.lower() or "50 gold" in s.lower() for s in sink), sink)
+
+    async def test_maybe_push_quest_offer_still_offers_reach_location_normally_when_not_yet_visited(self):
+        """No-regression companion to the test above -- a real, not-yet-visited target still gets the ordinary offer card."""
+        from unittest.mock import patch, AsyncMock
+        use_test_db("tests/tmp/quest_reachloc_negative_test.db")
+        user_id = 900710
+        character = make_basic_character(user_id, "NotYetWanderedTester", current_location="crossroads_tavern")
+        quest_id, quest = "welcome_to_the_crossroads", bot.CAMPAIGN["quests"]["welcome_to_the_crossroads"]
+        sink = []
+        update = FakeUpdate(user_id, "", sink, chat_id=-999)
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)) as mock_image:
+            await bot._maybe_push_quest_offer(update, character, quest_id, quest)
+        self.assertTrue(mock_image.called)
+        char = db.get_character(user_id, -999)
+        self.assertNotIn("welcome_to_the_crossroads", char["completed_quests"])
+
+    async def test_reach_location_autocomplete_never_fires_for_the_starting_location(self):
+        """
+        Real design flaw caught before shipping (2026-08-29), while
+        auditing the reach_location auto-complete fix above against
+        every real quest in the live database: crossroads_tavern is
+        the game's own starting_location -- EVERY character has
+        "visited" it since their very first action, completely
+        unrelated to conflict_at_crossroads_tavern's own real intent
+        (a deliberate return trip after the_first_city_quest). Auto-
+        completing here would have silently skipped that entire
+        travel-back story beat for every single player, every time.
+        """
+        from unittest.mock import patch, AsyncMock
+        use_test_db("tests/tmp/quest_startloc_test.db")
+        user_id = 900711
+        character = make_basic_character(user_id, "AlwaysAtTheTavernTester", current_location="the_first_city")
+        db.complete_quest(user_id, -999, "the_first_city_quest")
+        # Real characters start at crossroads_tavern (this game's real
+        # starting_location) and accumulate it in visited_locations from
+        # their very first action -- make_basic_character's own
+        # current_location override bypasses that real flow, so it's
+        # added explicitly here to reproduce the real, universal case.
+        db.update_character(user_id, -999, visited_locations=["crossroads_tavern", "the_first_city"])
+        character = db.get_character(user_id, -999)
+        self.assertIn("crossroads_tavern", character["visited_locations"], "every character starts here")
+        quest_id, quest = "conflict_at_crossroads_tavern", bot.CAMPAIGN["quests"]["conflict_at_crossroads_tavern"]
+        sink = []
+        update = FakeUpdate(user_id, "", sink, chat_id=-999)
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)) as mock_image:
+            await bot._maybe_push_quest_offer(update, character, quest_id, quest)
+        self.assertTrue(mock_image.called, "must still show the real offer card, not silently auto-complete")
+        char = db.get_character(user_id, -999)
+        self.assertNotIn("conflict_at_crossroads_tavern", char["completed_quests"])
+
     async def test_dismiss_quest_offer_is_a_soft_gate_not_a_real_skip(self):
         """
         Real live instruction (2026-08-20, Coffee): Decline is a soft

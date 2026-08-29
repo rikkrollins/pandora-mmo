@@ -3448,7 +3448,7 @@
         "type": "defeat_monster",
         "monster": "the_unspoken"
       },
-      "clue": "An old iron door, ajar, wasn't open a moment ago — whatever moved it wants to be found now.",
+      "clue": "An old iron door, ajar, wasn't open a moment ago — whatever moved it wants to be found now. Whatever's past that door, you won't want to face it with anyone you don't genuinely trust at your back.",
       "weight": "climactic"
     },
     "first_city_arrival": {

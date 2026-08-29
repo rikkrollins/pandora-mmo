@@ -13596,6 +13596,38 @@ async def _maybe_push_quest_offer(update: Update, character: dict, quest_id: str
         await _complete_quest_and_announce(update, character["telegram_user_id"], quest_id)
         return
 
+    # Real live bug found 2026-08-29 (new-player onboarding simulation):
+    # the exact same shape as the defeat_monster fix just above, but for
+    # reach_location -- the game's own VERY FIRST quest, "A Favor for
+    # Grimsby" (reach whispering_wood), is offered here on arrival, but
+    # _check_quest_completions_reach_location already ran earlier in
+    # this same _do_move call, BEFORE the quest existed in active_
+    # quests, so accepting the offer card now (already standing at the
+    # target) never retroactively completes it -- the player has to
+    # notice nothing happened, walk away, and walk back. A reach_
+    # location quest whose target is already in visited_locations is
+    # auto-completed here instead, same "check real history" philosophy.
+    #
+    # EXCEPT the game's own starting_location (crossroads_tavern):
+    # every character has "visited" it since their very first action,
+    # completely unrelated to whichever LATER quest eventually asks
+    # them to deliberately travel back there (e.g. conflict_at_
+    # crossroads_tavern, offered at the_first_city once the player is
+    # meant to make a real return trip and talk to Borin) -- for a
+    # location this trivially pre-visited, "already been there" carries
+    # no real signal at all, and auto-completing here would silently
+    # skip the entire intended travel-back story beat for every player,
+    # every time. Found and caught before ever shipping, while auditing
+    # this exact fix against every real reach_location quest in the
+    # live database.
+    if (
+        trigger.get("type") == "reach_location"
+        and trigger.get("location") != CAMPAIGN.get("starting_location")
+        and trigger.get("location") in (character.get("visited_locations") or [])
+    ):
+        await _complete_quest_and_announce(update, character["telegram_user_id"], quest_id)
+        return
+
     if quest_id in (character.get("dismissed_quest_ids") or []):
         return
     already_pushed = _chat_scoped_set(_PUSHED_QUEST_OFFERS, update.effective_chat.id)
