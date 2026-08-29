@@ -4425,8 +4425,8 @@
       "description": "The truth of what the surface world was built on top of.",
       "quests": [
         "first_city_arrival",
-        "the_archives_recess",
         "the_first_city_quest",
+        "the_archives_recess",
         "conflict_at_crossroads_tavern"
       ],
       "required_level": 10

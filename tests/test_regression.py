@@ -16367,6 +16367,38 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # No-regression: without a character (backward-compat default), the old unfiltered behavior is unchanged.
         self.assertIsNotNone(bot._find_monster_mentioned_in_text(location, "attack the waking ember"))
 
+    async def test_the_waking_ember_is_visible_at_the_start_of_arc_3_no_circular_softlock(self):
+        """
+        Real live soft-lock found 2026-08-29 (Coffee's own character
+        Pan, walked through it live -- "so pan is trying to reach the
+        sunken archives"): the_archives_recess's own real location
+        (the_first_city_sunken_archive) has requires_cleared_location:
+        "the_first_city" -- which normally only happens by defeating
+        The Waking Ember. But arc_3_revelation's quest list used to put
+        the_archives_recess BEFORE the_first_city_quest, so _monster_
+        visible_to_character's own arc-order check kept the Ember
+        invisible/unfightable until the_archives_recess was ALREADY
+        done -- a genuine circular dependency no fresh player could
+        ever escape (can't reach the archive without clearing the
+        city; can't clear the city without fighting a monster the game
+        won't let you see yet). Fixed by reordering arc_3's real quest
+        list so the_first_city_quest (which clears the location) comes
+        before the_archives_recess.
+        """
+        character = make_basic_character(999946, "FreshArc3Starter", current_location="the_first_city")
+        for qid in (
+            "welcome_to_the_crossroads", "the_hollow_stump", "clear_the_warrens",
+            "the_wrong_color", "the_hush_stage1_signs", "the_hush_stage2_the_wisp",
+            "the_hush_stage3_the_unspoken", "first_city_arrival",
+        ):
+            db.complete_quest(999946, -999, qid)
+        character = db.get_character(999946, -999)
+        self.assertEqual(bot._current_story_arc(character)[0], "arc_3_revelation")
+        self.assertTrue(
+            bot._monster_visible_to_character("the_waking_ember", character),
+            "the Waking Ember must be fightable as soon as arc_3 starts, with no other arc_3 quest required first",
+        )
+
     async def test_conflict_at_crossroads_tavern_is_not_offerable_until_the_first_city_quest_is_done(self):
         """
         Real request (2026-08-28, Coffee: "put a quest in the First

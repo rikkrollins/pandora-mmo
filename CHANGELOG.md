@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.402] — Fixed a genuine soft-lock in arc_3 introduced by v1.27.400
+
+Found live, walking a real fresh character (Pan) through the story:
+arc_3's own quest order put `the_archives_recess` BEFORE
+`the_first_city_quest`. The Sunken Archive's own location
+(`the_first_city_sunken_archive`) requires `the_first_city` cleared —
+which normally only happens by defeating The Waking Ember. But
+yesterday's quest-monster visibility fix (v1.27.400) made the Ember
+invisible/unfightable until `the_archives_recess` was already done,
+per that same arc-order rule. That's a genuine circular dependency: no
+fresh player could ever escape it — can't reach the archive without
+clearing the city, can't clear the city without fighting a monster the
+game won't let you see yet.
+
+Fixed by reordering `arc_3_revelation`'s real quest list so
+`the_first_city_quest` (which clears the location) comes before
+`the_archives_recess`. Confirmed with a real fail-then-pass test, plus
+a re-run of the surrounding arc_3/Kess-bridge test group.
+
 ## [1.27.401] — Board quests can no longer target a story boss (the next step after v1.27.400)
 
 Per Coffee, immediately following yesterday's quest-monster visibility
