@@ -2,6 +2,41 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.400] — Quest-monster visibility gating: bosses no longer show up before you're supposed to face them
+
+Per Coffee: "why are bosses show on the location list if we are not
+supposed to be facing them yet? it spoils the game IMHO and confuses
+the player... if we need a quest to face them the quest shud trigger
+the event so its visable, when beaten remove the enemy from location
+list for that player." A root-cause fix, not just a safety net --
+closes the whole bug class behind today's earlier the_first_city_quest/
+a_wardens_vigil/verge_wraiths_unrest credit-loss findings.
+
+- New `_monster_visible_to_character`: any monster that's the real
+  target of a `defeat_monster` story/side quest is hidden from a
+  specific character until at least one linked quest is genuinely
+  reachable for them (reuses the exact same guild/prerequisite/arc-
+  order gating `_offerable_quest_at_location` already applies), and
+  hidden again, permanently, once that character has actually defeated
+  it. Per-character, not global -- one player beating a boss never
+  hides it from a party member who hasn't.
+- Wired into every real place a location's monster roster reaches a
+  player: attack/throw-weapon auto-start-combat matching, the
+  "fight the X" dispatch path, `/examine`'s monster fallback,
+  perception-check grounding, the "you sense danger here" line shown
+  on every look/arrival, `_do_start_combat`'s implicit-monster
+  default-pick, and the one-time welcome narration's location facts.
+  Ordinary, non-quest-tied monsters (the vast majority of every
+  roster) are completely unaffected.
+- Confirmed with real fail-then-pass tests, plus a full re-run of the
+  attack/examine/skill-check/quest-offer test groups. A spot-check
+  found 46 of the 60 previously-audited quest locations are
+  single-monster boss rooms whose entire roster is now hidden pre-
+  quest -- flagged, not fixed: every one is a dedicated dungeon-room
+  encounter, not a general exploration hub, so an empty "nothing
+  dangerous here" read before the quest unlocks is the intended
+  outcome, not a new gap.
+
 ## [1.27.399] — "Try my luck" now works from Adventure; fixed a real examine-collision bug
 
 Two more real, dev-bridge-sourced fixes:

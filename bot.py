@@ -2493,7 +2493,7 @@ async def _send_welcome_narration(update: Update, character: dict) -> None:
         "layer": location.get("layer", "surface"),
         "description": location["description"],
         "npc_names": npc_names,
-        "monster_names": location.get("monsters", []),
+        "monster_names": [k for k in location.get("monsters", []) if _monster_visible_to_character(k, character)],
         "connection_names": connection_names,
     }
 
@@ -8272,6 +8272,11 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             player = next((p for p in party if not p.get("is_ai")), party[0])
             location = cl.get_location(CAMPAIGN, player["current_location"])
             local_monsters = location.get("monsters", []) if location else []
+            # Real live request (2026-08-29, Coffee: bosses shouldn't be
+            # picked as a bare, unspecified wandering encounter before
+            # their own quest can be reached -- see _monster_visible_
+            # to_character's own docstring).
+            local_monsters = [k for k in local_monsters if _monster_visible_to_character(k, player)]
             monster_key = local_monsters[0] if local_monsters else "goblin"
 
         template = cl.get_monster_template(CAMPAIGN, monster_key)
@@ -10364,6 +10369,14 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
         character = db.get_character(update.effective_user.id, update.effective_chat.id)
         location = cl.get_location(CAMPAIGN, character["current_location"]) if character else None
         local_monsters = location.get("monsters", []) if location else []
+        # Real live request (2026-08-29, Coffee: bosses shouldn't be
+        # fightable before their own quest can be reached -- see
+        # _monster_visible_to_character's own docstring). Filtered here
+        # too, not just in _find_monster_mentioned_in_text below, since
+        # this single-monster-location fallback bypasses that matcher
+        # entirely.
+        if character:
+            local_monsters = [k for k in local_monsters if _monster_visible_to_character(k, character)]
         # Real live bug (caught by the full-playthrough simulation,
         # 2026-07-23): "I attack the goblin boss" at the Goblin Warrens
         # (monsters: goblin, goblin_shaman, goblin_boss) started a fight
@@ -10380,7 +10393,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
         # descending, so "Goblin Boss"/"Goblin Shaman" both win over the
         # bare "Goblin") -- reusing it here instead of duplicating a
         # second, less careful matcher.
-        match = _find_monster_mentioned_in_text(location, action_text) if location else None
+        match = _find_monster_mentioned_in_text(location, action_text, character) if location else None
         matched_monster = match[0] if match else (local_monsters[0] if len(local_monsters) == 1 else None)
         if matched_monster is not None:
             await _do_start_combat(update, monster_key=matched_monster)
@@ -10776,7 +10789,9 @@ async def _do_throw_weapon(update: Update, action_text: str) -> None:
         character = db.get_character(user_id, chat_id)
         location = cl.get_location(CAMPAIGN, character["current_location"]) if character else None
         local_monsters = location.get("monsters", []) if location else []
-        match = _find_monster_mentioned_in_text(location, action_text) if location else None
+        if character:
+            local_monsters = [k for k in local_monsters if _monster_visible_to_character(k, character)]
+        match = _find_monster_mentioned_in_text(location, action_text, character) if location else None
         matched_monster = match[0] if match else (local_monsters[0] if len(local_monsters) == 1 else None)
         if matched_monster is not None:
             await _do_start_combat(update, monster_key=matched_monster)
@@ -11514,7 +11529,7 @@ async def _do_skill_check(update: Update, ability: str, action_text: str, forced
     # sense/track bucket (see intent_parser's skill_check_verb_abilities).
     grounded_fact = None
     if ability == "wisdom" and location is not None:
-        monster_match = _find_monster_mentioned_in_text(location, action_text)
+        monster_match = _find_monster_mentioned_in_text(location, action_text, character)
         if monster_match:
             monster_key, template = monster_match
             grounded_fact = (
@@ -12859,6 +12874,80 @@ def _meets_quest_arc_order_requirement(character: dict, quest_id: str) -> bool:
     return completed.issuperset(prior_quests)
 
 
+def _build_quest_monster_index() -> dict[str, list[str]]:
+    """Maps a defeat_monster quest's target monster_key to every real quest_id targeting it (built once, CAMPAIGN never changes at runtime)."""
+    index: dict[str, list[str]] = {}
+    for quest_id, quest in CAMPAIGN.get("quests", {}).items():
+        trigger = quest.get("trigger", {})
+        if trigger.get("type") == "defeat_monster" and trigger.get("monster"):
+            index.setdefault(trigger["monster"], []).append(quest_id)
+    return index
+
+
+_QUEST_MONSTER_INDEX = _build_quest_monster_index()
+
+
+def _monster_visible_to_character(monster_key: str, character: dict) -> bool:
+    """
+    Real live request (2026-08-29, Coffee: "why are bosses show on the
+    location list if we are not supposed to be facing them yet? it
+    spoils the game IMHO and confuses the player... if we need a quest
+    to face them the quest shud trigger the event so its visable, when
+    beaten remove the enemy from location list for that player").
+    Root cause of a real live credit-loss bug (Ravenloft/Charvenna
+    killed the_first_city_quest's own target, The Waking Ember, before
+    that quest could ever be offered -- an unrelated arc_3 quest wasn't
+    done yet, but the location itself was already reachable): a
+    location's wandering "monsters" list has zero connection to
+    whether the matching story quest is actually reachable.
+
+    A monster with no real defeat_monster quest targeting it (the vast
+    majority of every roster) is always visible -- zero behavior
+    change. A quest-tied monster this character has ALREADY defeated
+    is hidden permanently for THEM specifically (per-character, not a
+    global removal -- a shared multiplayer world where one player beat
+    it must never hide it from a party member who hasn't). Otherwise
+    visible only once at least one linked quest is reachable -- reuses
+    the exact same per-quest gating _offerable_quest_at_location
+    already applies (guild/prerequisite/arc-order, with the same
+    "requires_completed_quest is a stronger, more precise signal than
+    blanket arc-current-ness" on-ramp exemption), just without that
+    function's own "must already be standing at this location" check,
+    since the whole point here is deciding visibility before arrival.
+    A monster can map to more than one quest (e.g. goblin_boss is both
+    clear_the_warrens' and grasks_freedom's real target) -- visible if
+    ANY linked quest is reachable, not just the first one checked.
+    """
+    quest_ids = _QUEST_MONSTER_INDEX.get(monster_key)
+    if not quest_ids:
+        return True
+    if monster_key in (character.get("defeated_monsters") or []):
+        return False
+    completed = set(character["completed_quests"])
+    active = character.get("active_quests", {})
+    current = _current_story_arc(character)
+    current_arc_id = current[0] if current else None
+    for quest_id in quest_ids:
+        if quest_id in active:
+            return True
+        if quest_id in completed:
+            continue
+        quest = CAMPAIGN["quests"][quest_id]
+        if not _meets_quest_guild_requirement(character, quest):
+            continue
+        if not _meets_quest_prerequisite_requirement(character, quest):
+            continue
+        arc_info = _story_arc_for_quest(quest_id)
+        if arc_info and not quest.get("requires_completed_quest"):
+            arc_id, _arc = arc_info
+            if arc_id != current_arc_id:
+                continue
+        if not _meets_quest_arc_order_requirement(character, quest_id):
+            continue
+        return True
+    return False
+
+
 def _offerable_quest_at_location(character: dict, location_id: str) -> tuple[str, dict] | None:
     """
     The first not-yet-completed, not-yet-active, guild-eligible quest
@@ -13482,7 +13571,31 @@ async def _maybe_push_quest_offer(update: Update, character: dict, quest_id: str
     below, and _do_dismiss_quest_offer's own "soft gate" comment for why
     a real Decline never removes it from the quest board/My Quests/
     plain-text accept path, only from getting pushed again unprompted).
+
+    Real live bug, root-caused 2026-08-29 (Ravenloft/Charvenna both had
+    the_first_city_quest's own target, the Waking Ember, already in
+    their real defeated_monsters -- but the quest itself was never
+    offerable until arc_3's earlier quests were done, and location
+    reachability doesn't wait for a quest's own arc-gate to catch up.
+    A defeat_monster story quest with no giver_npc is offerable purely
+    by standing at the right location -- but a player can reach that
+    location, and fight whatever wanders there, LONG before the arc
+    gate makes the matching quest offerable, permanently losing credit
+    for a real, already-fought, often unrepeatable boss fight). Same
+    "check real history, not just this instant" philosophy already
+    used for guild curriculum's own auto-credit fix -- a defeat_monster
+    quest whose target is already dead is auto-completed the moment
+    it becomes offerable, instead of dead-ending behind an offer card
+    for a fight that can never happen again. Checked before the
+    dismissed_quest_ids gate below: the player already did the real
+    work this quest asks for, so an earlier "Not now" on the offer
+    card should never be what keeps them from ever getting credit.
     """
+    trigger = quest.get("trigger", {})
+    if trigger.get("type") == "defeat_monster" and trigger.get("monster") in (character.get("defeated_monsters") or []):
+        await _complete_quest_and_announce(update, character["telegram_user_id"], quest_id)
+        return
+
     if quest_id in (character.get("dismissed_quest_ids") or []):
         return
     already_pushed = _chat_scoped_set(_PUSHED_QUEST_OFFERS, update.effective_chat.id)
@@ -21337,7 +21450,10 @@ def _location_extra_detail(character: dict, location: dict, location_id: str, ch
     people_names = list(dict.fromkeys(npc_names + other_people_here))
     if people_names:
         lines.append(f"People here: {', '.join(people_names)}")
-    monsters_here = location.get("monsters", [])
+    # Real live request (2026-08-29, Coffee: bosses shouldn't even show
+    # up as "danger here" before their own quest can be reached -- see
+    # _monster_visible_to_character's own docstring).
+    monsters_here = [k for k in location.get("monsters", []) if _monster_visible_to_character(k, character)]
     if monsters_here:
         lines.append(f"You sense danger here: {_monster_danger_line(monsters_here)}")
     connections = location.get("connections", [])
@@ -21653,7 +21769,7 @@ def _plural_forms(word: str) -> list[str]:
     return forms
 
 
-def _find_monster_mentioned_in_text(location: dict, text: str) -> tuple[str, dict] | None:
+def _find_monster_mentioned_in_text(location: dict, text: str, character: dict | None = None) -> tuple[str, dict] | None:
     """
     Matches a real monster type actually present at this location
     (location["monsters"], a list of monster_keys) against free text --
@@ -21674,9 +21790,17 @@ def _find_monster_mentioned_in_text(location: dict, text: str) -> tuple[str, dic
     this location's own monsters, so "the boss" can't accidentally
     guess between two different, differently-typed bosses if this
     location ever has more than one.
+
+    `character` is optional (backward-compatible for any caller with
+    no character in scope) -- when given, a quest-tied monster this
+    character can't legitimately face yet (or has already defeated) is
+    filtered out before matching at all, see _monster_visible_to_
+    character's own docstring for the real live bug this closes.
     """
     lowered = text.strip().lower()
     monster_keys = location.get("monsters", [])
+    if character is not None:
+        monster_keys = [k for k in monster_keys if _monster_visible_to_character(k, character)]
     templates = [(key, cl.get_monster_template(CAMPAIGN, key)) for key in monster_keys]
     templates = [(key, t) for key, t in templates if t is not None]
     templates.sort(key=lambda kt: -len(kt[1]["name"]))
@@ -22209,7 +22333,7 @@ async def _do_examine(update: Update, target_text: str) -> None:
         # "here, but not yet known" line if not -- same fog-of-war
         # boundary the bestiary itself already keeps, never inventing
         # stats the player hasn't actually earned by fighting it.
-        monster_match = _find_monster_mentioned_in_text(location, target_text)
+        monster_match = _find_monster_mentioned_in_text(location, target_text, character)
         if monster_match:
             monster_key, template = monster_match
             if monster_key in (character.get("known_monsters") or []):
@@ -29738,7 +29862,7 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         # cover is unchanged from before.
         requester = db.get_character(update.effective_user.id, update.effective_chat.id)
         location = cl.get_location(CAMPAIGN, requester["current_location"]) if requester else None
-        match = _find_monster_mentioned_in_text(location, text) if location else None
+        match = _find_monster_mentioned_in_text(location, text, requester) if location else None
         if match:
             monster_key = match[0]
         else:

@@ -1983,6 +1983,53 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(mock_image.called)
         self.assertEqual(sink, [])
 
+    async def test_maybe_push_quest_offer_auto_completes_an_already_defeated_target(self):
+        """
+        Real live bug, root-caused 2026-08-29 (Ravenloft/Charvenna both
+        had the_first_city_quest's own target monster already in their
+        real defeated_monsters, but the quest itself only became
+        offerable after finishing an unrelated earlier arc_3 quest --
+        location reachability doesn't wait for a quest's own arc-gate
+        to catch up, so a player can fight and kill the target long
+        before the matching quest can ever be offered, permanently
+        losing credit for a real, often-unrepeatable boss fight). A
+        defeat_monster quest whose target is already in defeated_
+        monsters is now auto-completed the instant it becomes
+        offerable, instead of showing a dead-end offer card for a fight
+        that can never happen again. Uses verge_wraiths_unrest, the
+        quest actually flagged by this same-shaped audit.
+        """
+        from unittest.mock import patch, AsyncMock
+        use_test_db("tests/tmp/quest_autocred_test.db")
+        user_id = 900707
+        character = make_basic_character(user_id, "AlreadySlainWraithTester", current_location="hollow_verge_threshold")
+        character["defeated_monsters"] = ["verge_wraith"]
+        db.update_character(user_id, -999, defeated_monsters=["verge_wraith"])
+        quest_id, quest = "verge_wraiths_unrest", bot.CAMPAIGN["quests"]["verge_wraiths_unrest"]
+        sink = []
+        update = FakeUpdate(user_id, "", sink, chat_id=-999)
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)) as mock_image:
+            await bot._maybe_push_quest_offer(update, character, quest_id, quest)
+        self.assertFalse(mock_image.called, "should never show an offer card for an already-settled fight")
+        char = db.get_character(user_id, -999)
+        self.assertIn("verge_wraiths_unrest", char["completed_quests"])
+        self.assertTrue(any("Quest complete" in s or "verge_ashbound_band" in s.lower() or "300 gold" in s for s in sink), sink)
+
+    async def test_maybe_push_quest_offer_still_offers_normally_when_target_is_alive(self):
+        """No-regression companion to the test above -- a real, not-yet-fought target still gets the ordinary offer card."""
+        from unittest.mock import patch, AsyncMock
+        use_test_db("tests/tmp/quest_autocred_negative_test.db")
+        user_id = 900708
+        character = make_basic_character(user_id, "StillAliveWraithTester", current_location="hollow_verge_threshold")
+        quest_id, quest = "verge_wraiths_unrest", bot.CAMPAIGN["quests"]["verge_wraiths_unrest"]
+        sink = []
+        update = FakeUpdate(user_id, "", sink, chat_id=-999)
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)) as mock_image:
+            await bot._maybe_push_quest_offer(update, character, quest_id, quest)
+        self.assertTrue(mock_image.called)
+        char = db.get_character(user_id, -999)
+        self.assertNotIn("verge_wraiths_unrest", char["completed_quests"])
+
     async def test_dismiss_quest_offer_is_a_soft_gate_not_a_real_skip(self):
         """
         Real live instruction (2026-08-20, Coffee): Decline is a soft
@@ -16210,6 +16257,70 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("a_wardens_vigil", character["completed_quests"])
         self.assertNotIn("a_wardens_vigil", character["active_quests"])
         sessions.end_session(-999)
+
+    # -- Quest-monster visibility gating (2026-08-29, per Coffee: "why
+    #    are bosses show on the location list if we are not supposed
+    #    to be facing them yet? it spoils the game IMHO and confuses
+    #    the player... if we need a quest to face them the quest shud
+    #    trigger the event so its visable, when beaten remove the
+    #    enemy from location list for that player"). Root fix for the
+    #    same bug class as the_first_city_quest/a_wardens_vigil/
+    #    verge_wraiths_unrest above -- a quest-tied monster is no
+    #    longer visible/fightable at all until its own quest is
+    #    genuinely reachable, or after this specific character has
+    #    already defeated it. ------------------------------------
+    def test_monster_visible_to_character_ordinary_monster_always_visible(self):
+        """A monster with no real defeat_monster quest targeting it (the vast majority) is never affected."""
+        character = make_basic_character(999940, "OrdinaryMonsterWitness")
+        self.assertNotIn("wolf", bot._QUEST_MONSTER_INDEX)
+        self.assertTrue(bot._monster_visible_to_character("wolf", character))
+
+    def test_monster_visible_to_character_hidden_once_already_defeated(self):
+        """A quest-tied monster this exact character already beat is hidden for them, permanently."""
+        character = make_basic_character(999941, "AlreadyBeatEmberWitness")
+        db.update_character(999941, -999, defeated_monsters=["the_waking_ember"])
+        character = db.get_character(999941, -999)
+        self.assertFalse(bot._monster_visible_to_character("the_waking_ember", character))
+
+    def test_monster_visible_to_character_hidden_before_its_quest_is_reachable(self):
+        """
+        verge_wraiths_unrest (arc_11) requires every earlier arc fully
+        complete -- a fresh character hasn't touched any of that, so
+        verge_wraith must stay hidden even though nothing blocks them
+        from physically walking up to hollow_verge_threshold.
+        """
+        character = make_basic_character(999942, "TooEarlyForWraithWitness")
+        self.assertFalse(bot._monster_visible_to_character("verge_wraith", character))
+
+    def test_monster_visible_to_character_visible_once_its_quest_is_reachable(self):
+        """cairn_watcher (a_wardens_vigil) becomes visible the moment its own real gate (Silver Wardens membership) is met -- no arc involved, matches _offerable_quest_at_location's own real handling of non-arc side/guild quests."""
+        character = make_basic_character(999943, "GuildReadyForCairnWitness")
+        db.update_character(999943, -999, guild="silver_wardens")
+        character = db.get_character(999943, -999)
+        self.assertTrue(bot._monster_visible_to_character("cairn_watcher", character))
+
+    def test_monster_visible_to_character_visible_when_quest_already_active(self):
+        """Already having accepted the linked quest is its own, independent reason to stay visible."""
+        character = make_basic_character(999944, "AlreadyOnTheHuntWitness")
+        db.update_character(999944, -999, guild="silver_wardens")
+        db.accept_quest(999944, -999, "a_wardens_vigil")
+        character = db.get_character(999944, -999)
+        self.assertTrue(bot._monster_visible_to_character("cairn_watcher", character))
+
+    async def test_attack_text_cannot_resolve_a_not_yet_reachable_quest_boss(self):
+        """
+        Integration-level: _find_monster_mentioned_in_text (and so
+        _do_attack's own auto-start-combat path) must not resolve a
+        quest-tied monster's name at all before its quest is reachable
+        -- closes the exact live gap that let Ravenloft/Charvenna kill
+        The Waking Ember before the_first_city_quest could ever be
+        offered.
+        """
+        character = make_basic_character(999945, "TooEarlyAttackerWitness", current_location="the_first_city")
+        location = cl.get_location(bot.CAMPAIGN, "the_first_city")
+        self.assertIsNone(bot._find_monster_mentioned_in_text(location, "attack the waking ember", character))
+        # No-regression: without a character (backward-compat default), the old unfiltered behavior is unchanged.
+        self.assertIsNotNone(bot._find_monster_mentioned_in_text(location, "attack the waking ember"))
 
     async def test_conflict_at_crossroads_tavern_is_not_offerable_until_the_first_city_quest_is_done(self):
         """
