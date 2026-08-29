@@ -7607,6 +7607,54 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.get_character(user_id2, -999).get("equipped_weapon"), equipped_before)
         sessions.end_session(-999)
 
+    async def test_attacking_an_enemy_whose_name_coincidentally_matches_a_weapon_does_not_auto_swap(self):
+        """
+        Real live bug, dev-bridge (2026-08-29, Laurienna's own player:
+        "I didn't ask it to switch my weapon"): the Attack button
+        synthesizes action_text as "attack {target's own name}" (see
+        _do_attack's own call sites at bot.py, e.g. `f"attack
+        {opposing[0]['name']}"`), with no "with <weapon>" clause at all.
+        Her owned-but-not-equipped "Stormwrought Longbow of Embers" has
+        head word "ember" -- attacking "The Waking Ember" silently
+        equipped that bow purely because the ENEMY's own name shared a
+        word with it, never because she named a weapon. Reproduced here
+        with a real stock weapon (Silvered Dagger, head word "dagger")
+        and an enemy deliberately named to collide with it.
+        """
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900485
+        make_basic_character(user_id, "ColdReader", current_location="crossroads_tavern",
+                              inventory={"shortsword": 1, "silvered_dagger": 1})
+        db.equip_item(user_id, -999, "shortsword")
+        enemy_id = -2_500_056
+        enemy = {
+            "telegram_user_id": enemy_id, "name": "The Ancient Dagger Wraith", "strength": 10, "dexterity": 10,
+            "armor_class": 20, "hp_current": 50, "hp_max": 50, "is_ai": 1, "monster_key": "goblin",
+        }
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", enemy_id: "enemy"})
+        session.turn_order = [user_id, enemy_id]
+        session.current_turn_index = 0
+
+        from unittest.mock import patch, AsyncMock
+        sink = []
+        with patch("bot.narrate_action", return_value="The attack goes wide."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            # Exactly the shape the Attack button produces -- naming
+            # only the TARGET, never a weapon.
+            await bot._do_attack(
+                FakeUpdate(user_id, "attack The Ancient Dagger Wraith", sink),
+                "attack The Ancient Dagger Wraith", forced_roll=1,
+            )
+            await _drain_narration_queue()
+        live = next(p for p in session.participants if p["telegram_user_id"] == user_id)
+        self.assertEqual(live.get("equipped_weapon"), "shortsword")
+        self.assertEqual(db.get_character(user_id, -999).get("equipped_weapon"), "shortsword")
+        self.assertFalse(any("switches to their" in line.lower() for line in sink), sink)
+        sessions.end_session(-999)
+
     async def test_equip_command_mid_combat_updates_the_live_session_not_just_the_db(self):
         """
         Real live bug (2026-08-20, dev-bridge, Charvenna, two separate

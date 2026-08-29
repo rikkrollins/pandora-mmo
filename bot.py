@@ -10424,6 +10424,8 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
             )
             return
 
+        opposing = session.living_on_side(session.opposing_side(user_id))
+
         # Real live bug (2026-08-08, dev-topic screenshot: "Attack
         # spider 4 with silvered dagger" -- "Was supposed to use the
         # silvered dagger not shortsword"): _weapon_for_attacker only
@@ -10436,11 +10438,32 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
         # gives "equip Sarah with the longbow" -- narrated so the swap
         # is never a silent surprise. No-ops when no weapon is named, the
         # named one isn't actually carried, or it's already equipped.
+        #
+        # Real live bug (2026-08-29, dev-bridge, Laurienna's own player:
+        # "I didn't ask it to switch my weapon"): the Attack button
+        # synthesizes action_text as "attack {target's own name}" (see
+        # this function's call sites), and find_item_mentioned_in_text's
+        # own head-word matching doesn't know the difference between a
+        # word that names the TARGET and one that names a WEAPON. Her
+        # "Stormwrought Longbow of Embers" has head word "ember" (plural
+        # stripped) -- attacking "The Waking Ember" silently "matched"
+        # that weapon on pure word coincidence with the ENEMY's name,
+        # not anything she typed about a weapon. Stripping every word
+        # that appears in any live opposing participant's own name from
+        # the search text before matching closes this at the root,
+        # without narrowing the real "with <weapon>" feature this was
+        # built for.
+        enemy_name_words = {
+            w.lower() for p in opposing for w in re.findall(r"\w+", p.get("name", ""))
+        }
+        weapon_search_text = " ".join(
+            w for w in re.findall(r"\S+", action_text) if w.strip(".,!?").lower() not in enemy_name_words
+        )
         owned_weapon_ids = [
             item_id for item_id, qty in attacker.get("inventory", {}).items()
             if qty > 0 and (items_module.get_item(item_id) or {}).get("type") == "weapon"
         ]
-        named_weapon_id = items_module.find_item_mentioned_in_text(action_text, candidate_ids=owned_weapon_ids)
+        named_weapon_id = items_module.find_item_mentioned_in_text(weapon_search_text, candidate_ids=owned_weapon_ids)
         if named_weapon_id and named_weapon_id != attacker.get("equipped_weapon"):
             equip_ok, _equip_msg, _updated = db.equip_item(user_id, chat_id, named_weapon_id)
             if equip_ok:
@@ -10449,7 +10472,6 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                     update, f"🗡️ **{attacker['name']}** switches to their **{items_module.get_item(named_weapon_id)['name']}**.",
                 )
 
-        opposing = session.living_on_side(session.opposing_side(user_id))
         if not opposing:
             if not await _try_end_stale_combat(update, session):
                 await update.effective_chat.send_message(

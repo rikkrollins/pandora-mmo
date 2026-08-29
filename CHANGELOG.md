@@ -2,6 +2,28 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.398] — Fixed a false "weapon switch" during combat (enemy-name word collision)
+
+Real live report, dev-bridge (2026-08-29, Laurienna's own player:
+"I didn't ask it to switch my weapon"): the Attack button synthesizes
+its action text as `"attack {target's own name}"` -- no weapon named
+at all. The existing "name a weapon inline, it gets auto-equipped"
+feature (`_do_attack`, shipped 2026-08-08) scanned that whole string
+for any owned weapon's name, with no way to tell a word that names the
+TARGET apart from one that names a WEAPON. Her owned-but-unequipped
+"Stormwrought Longbow of Embers" has head word "ember" -- attacking
+"The Waking Ember" silently equipped it purely because the ENEMY's own
+name happened to share a word with a weapon she owns, never because
+she asked to switch anything.
+
+Fixed by stripping every word that belongs to the current opposing
+side's own names out of the search text before checking for a named
+weapon -- confirmed with a real fail-then-pass test (reproduces the
+exact collision shape against the old code, passes clean against the
+fix) and the original "attack X with Y" feature still works
+unchanged. Her live character record was also manually reset back to
+her actual Greataxe.
+
 ## [1.27.397] — Audited 60 quests for the Waking Ember bug's shape; fixed a real unwinnable quest
 
 Followed up on the Waking Ember quest-credit bug (a wandering monster
