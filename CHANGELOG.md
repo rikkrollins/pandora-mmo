@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.404] — The real story quest now looks different from a random bounty
+
+Last item from the new-player onboarding audit: the "Quest board"
+section showed the one real main-story quest ("A Favor for Grimsby")
+using the exact same 📜 icon as every procedurally-generated filler
+bounty next to it — bot.py's own `_QUEST_KIND_ICON` already defines
+`"board": "📋"` separately from `"story": "📜"`, but `board_quests.py`'s
+own listing formatter never used it. A new player had no visual way to
+tell which card was the one that actually mattered. Board bounty
+listings now consistently use 📋, matching the section's own header;
+the real story quest keeps its distinct 📜 "WANTED:" poster. Confirmed
+with a real fail-then-pass test and a re-run of the board-quest suite.
+
 ## [1.27.403] — New-player onboarding audit: fixed the game's very first quest
 
 Per Coffee: "make sure a new player can go from game creation to the

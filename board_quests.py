@@ -550,13 +550,26 @@ def get_todays_board_quest(location_id: str, chat_id: int) -> dict | None:
 
 
 def format_board_listing(board_quest: dict) -> str:
+    """
+    Real live UX gap found 2026-08-29 (new-player onboarding
+    simulation): every listing here used to lead with the same "📜"
+    scroll icon bot.py's own _format_story_quest_poster uses for a real
+    STORY quest's "WANTED:" poster (see bot.py's _QUEST_KIND_ICON,
+    which already defines "board": "📋" separately from "story": "📜" --
+    this function just never used it). A new player scanning the same
+    "📋 Quest board" section couldn't tell the one real main-story quest
+    apart from a page of procedurally-generated filler bounties at a
+    glance -- both used the identical icon. Now uses the clipboard icon
+    consistently, matching the section's own header and the already-
+    established story/board icon distinction elsewhere in this game.
+    """
     branch = board_quest.get("branch_data")
 
     if board_quest.get("completed_at"):
         if branch and branch.get("resolved_choice"):
             label = branch["choices"][branch["resolved_choice"]]["label"]
-            return f"📜 **{board_quest['title']}** — resolved ({label}), nothing posted right now."
-        return f"📜 **{board_quest['title']}** — completed today, nothing posted right now."
+            return f"📋 **{board_quest['title']}** — resolved ({label}), nothing posted right now."
+        return f"📋 **{board_quest['title']}** — completed today, nothing posted right now."
 
     if branch:
         setup = branch["setup_narration"]
@@ -564,12 +577,12 @@ def format_board_listing(board_quest: dict) -> str:
             if board_quest["progress_count"] >= board_quest["objective_count"]:
                 choice_lines = "\n".join(f'  • "{c["label"]}"' for c in branch["choices"].values())
                 return (
-                    f"📜 **{board_quest['title']}**\n{setup}\n\n"
+                    f"📋 **{board_quest['title']}**\n{setup}\n\n"
                     f"Ready to decide — say which one:\n{choice_lines}"
                 )
             progress = f"{board_quest['progress_count']}/{board_quest['objective_count']}"
             return (
-                f"📜 **{board_quest['title']}** ({progress})\n{setup}\n"
+                f"📋 **{board_quest['title']}** ({progress})\n{setup}\n"
                 f"Already accepted, expires within 24h if not finished."
             )
         giver_line = (
@@ -586,7 +599,7 @@ def format_board_listing(board_quest: dict) -> str:
             f"\"{c['label']}\" ({c['reward_xp']} XP, {c['reward_gold']} gold)"
             for c in branch["choices"].values()
         )
-        return f"📜 **{board_quest['title']}**\n{setup}\nPossible rewards: {choice_rewards}.{giver_line}"
+        return f"📋 **{board_quest['title']}**\n{setup}\nPossible rewards: {choice_rewards}.{giver_line}"
 
     if board_quest.get("accepted_by"):
         # Task #150, 2026-07-17: this used to drop the description
@@ -595,12 +608,12 @@ def format_board_listing(board_quest: dict) -> str:
         # accepting, exactly when they'd need it most.
         progress = f"{board_quest['progress_count']}/{board_quest['objective_count']}"
         return (
-            f"📜 **{board_quest['title']}** ({progress})\n{board_quest['description']}\n"
+            f"📋 **{board_quest['title']}** ({progress})\n{board_quest['description']}\n"
             f"Already accepted by a party, expires within 24h if not finished."
         )
     giver_line = f" Ask at: {board_quest['giver_npc'].replace('_', ' ').title()}." if board_quest.get("giver_npc") else ""
     return (
-        f"📜 **{board_quest['title']}**\n"
+        f"📋 **{board_quest['title']}**\n"
         f"{board_quest['description']}\n"
         f"Reward: {board_quest['reward_xp']} XP, {board_quest['reward_gold']} gold.{giver_line}"
     )

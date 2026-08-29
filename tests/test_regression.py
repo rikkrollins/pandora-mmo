@@ -1796,6 +1796,31 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Rememberss", quest["title"])
         self.assertEqual(quest["title"], "A Quiet Word About The Root That Rememberses")
 
+    def test_board_bounty_listing_uses_a_different_icon_than_the_real_story_quest_poster(self):
+        """
+        Real live UX gap found 2026-08-29 (new-player onboarding
+        simulation): a new player scanning the "Quest board" section
+        couldn't tell the one real main-story quest apart from a page
+        of procedural filler bounties -- both used the identical "📜"
+        icon. bot.py's own _QUEST_KIND_ICON already defines "board":
+        "📋" separately from "story": "📜"; format_board_listing just
+        never used it. Confirms the two are now visually distinct.
+        """
+        import board_quests
+        bounty = {
+            "title": "Thin the Wolves", "description": "Do a thing.", "reward_xp": 50, "reward_gold": 20,
+            "objective_type": "defeat_monster", "objective_target": "wolf", "objective_count": 3,
+            "progress_count": 0, "accepted_by": None, "completed_at": None, "giver_npc": None,
+        }
+        listing = board_quests.format_board_listing(bounty)
+        self.assertTrue(listing.startswith("📋"))
+        self.assertFalse(listing.startswith("📜"))
+
+        poster = bot._format_story_quest_poster(
+            "welcome_to_the_crossroads", bot.CAMPAIGN["quests"]["welcome_to_the_crossroads"], "crossroads_tavern",
+        )
+        self.assertTrue(poster.startswith("📜"))
+
     def test_the_never_doubles_an_existing_article(self):
         """The shared article-prefix helper behind the fix above -- never prepends a second 'the' when the name already carries its own."""
         import board_quests
