@@ -1767,6 +1767,51 @@ def kess_flees_line() -> str:
     )
 
 
+def kess_scouting_confrontation_script(character_name: str) -> str:
+    """
+    Chapter 7 expansion, Phase 5 (2026-08-30, per the approved plan's
+    "Beat 3 -- A Warning Shot") -- the party's first PHYSICAL
+    confrontation with Kess, deliberately short and one-sided in her
+    favor tonally even though the fight itself is short and one-sided
+    in the party's favor mechanically (her real hp_max is set low on
+    purpose). First real taunting, capable Kess, not the calm toll-
+    collector or the tired woman at the shrine -- she's enjoying this.
+    Hand-written, zero Ollama calls, same voice discipline as every
+    other Kess beat.
+    """
+    return (
+        "*She's waiting in the open this time, no crossing to hide behind, no crowd to blend into -- "
+        "just her, clearly amused that it took this long.*\n\n"
+        f"**Kess:** \"You've been very thorough, {character_name}. The warrens, the caverns, all that "
+        "counting. I almost feel bad about how little of it was actually about you.\"\n\n"
+        "*She draws a real blade this time, unhurried, still talking.*\n\n"
+        "**Kess:** \"Let's see what you're actually carrying, then. Consider this a professional courtesy -- "
+        "I like to know what I'm dealing with before it matters.\""
+    )
+
+
+def kess_scouting_flees_line() -> str:
+    """
+    Companion piece to kess_flees_line() above, for her Chapter 7
+    scouting form specifically -- per the approved plan, ends on "a
+    genuine crack in her composure... visibly costs her control for a
+    half-second before she flees," the clearest "insanity is already
+    setting in" beat before Chapter 8's transformation makes it
+    literal. Deliberately references the Whispers of the Universe (the
+    same in-fiction Remnant term her other scenes already use) without
+    checking what the party actually carries -- the crack is in HER,
+    not a reaction to a specific real fact.
+    """
+    return (
+        "*Kess breaks off before it's even close, faster than the fight itself really demanded.*\n\n"
+        "**Kess:** \"That's -- \" *For half a second something genuinely slips, the calm cracking straight "
+        "through.* \"-- that's enough for today. The Whispers are loud enough without you adding to it.\"\n\n"
+        "*She catches herself, and the crack seals back over almost as fast as it opened -- almost.*\n\n"
+        "**Kess:** \"Professional courtesy only extends so far. Next time won't be a warning.\"\n\n"
+        "*She's already gone, faster than anyone can follow.*"
+    )
+
+
 def grask_supply_tunnels_reaction() -> str:
     """
     Hand-written (Kess Arc plan, party-composition requirement: a short

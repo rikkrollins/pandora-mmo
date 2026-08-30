@@ -550,13 +550,15 @@
           "crossroads_tavern",
           "greymoor_downs",
           "the_weeping_well",
-          "stonearch_bridge_far_end"
+          "stonearch_bridge_far_end",
+          "stonearch_bridge_the_lower_battlement"
         ],
         "descends_to": "stonearch_bridge_gorge_depths",
         "directions": {
           "north": "crossroads_tavern",
           "south": "the_weeping_well",
-          "west": "stonearch_bridge_far_end"
+          "west": "stonearch_bridge_far_end",
+          "up": "stonearch_bridge_the_lower_battlement"
         },
         "npcs": [
           "pip_thistledown"
@@ -1016,6 +1018,304 @@
         "grid_position": {
           "x": 3,
           "y": 0
+        }
+      },
+      "stonearch_bridge_the_lower_battlement": {
+        "name": "The Lower Battlement",
+        "layer": "surface",
+        "description": "Real fortification, cut into the gorge wall above the bridge -- whoever built this crossing meant to defend it.",
+        "connections": [
+          "stonearch_bridge",
+          "stonearch_bridge_the_watch_stair"
+        ],
+        "directions": {
+          "down": "stonearch_bridge",
+          "up": "stonearch_bridge_the_watch_stair"
+        },
+        "monsters": [
+          "battlement_watchman"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": -3
+        }
+      },
+      "stonearch_bridge_the_watch_stair": {
+        "name": "The Watch Stair",
+        "layer": "surface",
+        "description": "Steps cut straight up the gorge wall, real and deliberate, worn smooth by generations of real boots.",
+        "connections": [
+          "stonearch_bridge_the_lower_battlement",
+          "stonearch_bridge_the_sealed_armory",
+          "stonearch_bridge_the_upper_battlement",
+          "stonearch_bridge_the_watch_stairs_landing"
+        ],
+        "directions": {
+          "down": "stonearch_bridge_the_lower_battlement",
+          "east": "stonearch_bridge_the_sealed_armory",
+          "up": "stonearch_bridge_the_upper_battlement",
+          "west": "stonearch_bridge_the_watch_stairs_landing"
+        },
+        "grid_position": {
+          "x": 0,
+          "y": -4
+        }
+      },
+      "stonearch_bridge_the_sealed_armory": {
+        "name": "The Sealed Armory",
+        "layer": "surface",
+        "description": "A real armory, sealed shut since long before anyone alive would remember why.",
+        "connections": [
+          "stonearch_bridge_the_watch_stair",
+          "stonearch_bridge_the_armory_annex"
+        ],
+        "directions": {
+          "west": "stonearch_bridge_the_watch_stair",
+          "east": "stonearch_bridge_the_armory_annex"
+        },
+        "lockables": [
+          {
+            "id": "sealed_armory_cache",
+            "kind": "chest",
+            "name": "the sealed armory's own real cache",
+            "loot": {
+              "greater_healing_potion": 1
+            },
+            "gold": 180
+          }
+        ],
+        "grid_position": {
+          "x": 1,
+          "y": -4
+        }
+      },
+      "stonearch_bridge_the_upper_battlement": {
+        "name": "The Upper Battlement",
+        "layer": "surface",
+        "description": "Higher fortification, real stonework, the gorge wind loud enough here to cover most other sound.",
+        "connections": [
+          "stonearch_bridge_the_watch_stair",
+          "stonearch_bridge_the_quiet_rampart"
+        ],
+        "directions": {
+          "down": "stonearch_bridge_the_watch_stair",
+          "up": "stonearch_bridge_the_quiet_rampart"
+        },
+        "monsters": [
+          "battlement_sentry"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": -5
+        }
+      },
+      "stonearch_bridge_the_quiet_rampart": {
+        "name": "The Quiet Rampart",
+        "layer": "surface",
+        "description": "A stretch of rampart kept deliberately clear -- the one genuinely calm room this high up the gorge wall.",
+        "connections": [
+          "stonearch_bridge_the_upper_battlement",
+          "stonearch_bridge_the_signal_tower"
+        ],
+        "directions": {
+          "down": "stonearch_bridge_the_upper_battlement",
+          "up": "stonearch_bridge_the_signal_tower"
+        },
+        "grid_position": {
+          "x": 0,
+          "y": -6
+        }
+      },
+      "stonearch_bridge_the_signal_tower": {
+        "name": "The Signal Tower",
+        "layer": "surface",
+        "description": "A real signal tower, built to be seen from the crossroads -- whoever manned it had a real reason to watch this crossing.",
+        "connections": [
+          "stonearch_bridge_the_quiet_rampart",
+          "stonearch_bridge_the_carved_gate"
+        ],
+        "directions": {
+          "down": "stonearch_bridge_the_quiet_rampart",
+          "up": "stonearch_bridge_the_carved_gate"
+        },
+        "resource_nodes": [
+          {
+            "id": "signal_tower_ore_vein",
+            "name": "a real ore vein exposed by old stonework",
+            "material": "iron_ore",
+            "ability": "strength",
+            "skill": "mining"
+          }
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": -7
+        }
+      },
+      "stonearch_bridge_the_carved_gate": {
+        "name": "The Carved Gate",
+        "layer": "surface",
+        "description": "A real gate, carved with the same worn script as the bridge's own rail -- older than the fortification built around it.",
+        "connections": [
+          "stonearch_bridge_the_signal_tower",
+          "stonearch_bridge_the_gatehouse"
+        ],
+        "directions": {
+          "down": "stonearch_bridge_the_signal_tower",
+          "up": "stonearch_bridge_the_gatehouse"
+        },
+        "npcs": [
+          "the_gate_carving"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": -8
+        }
+      },
+      "stonearch_bridge_the_gatehouse": {
+        "name": "The Gatehouse",
+        "layer": "surface",
+        "description": "A real gatehouse, still standing, still real enough to have once housed a real garrison.",
+        "connections": [
+          "stonearch_bridge_the_carved_gate",
+          "stonearch_bridge_the_high_guard"
+        ],
+        "directions": {
+          "down": "stonearch_bridge_the_carved_gate",
+          "up": "stonearch_bridge_the_high_guard"
+        },
+        "interactables": {
+          "gatehouse_garrison_record": {
+            "name": "a real, worn garrison record",
+            "description": "Names, dates, a real roster -- whoever kept this crossing fortified took it seriously, right up until they clearly stopped needing to."
+          }
+        },
+        "grid_position": {
+          "x": 0,
+          "y": -9
+        }
+      },
+      "stonearch_bridge_the_high_guard": {
+        "name": "The High Guard",
+        "layer": "surface",
+        "description": "The highest real guard post on the whole gorge wall -- and something's clearly still standing watch.",
+        "connections": [
+          "stonearch_bridge_the_gatehouse",
+          "stonearch_bridge_the_towers_crown"
+        ],
+        "directions": {
+          "down": "stonearch_bridge_the_gatehouse",
+          "up": "stonearch_bridge_the_towers_crown"
+        },
+        "monsters": [
+          "rampart_guardian"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": -10
+        }
+      },
+      "stonearch_bridge_the_towers_crown": {
+        "name": "The Tower's Crown",
+        "layer": "surface",
+        "description": "The very top of the old fortification -- from here, the whole gorge crossing is visible at once.",
+        "connections": [
+          "stonearch_bridge_the_high_guard",
+          "stonearch_bridge_the_keepers_hall"
+        ],
+        "directions": {
+          "down": "stonearch_bridge_the_high_guard",
+          "up": "stonearch_bridge_the_keepers_hall"
+        },
+        "monsters": [
+          "keep_watcher"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": -11
+        }
+      },
+      "stonearch_bridge_the_keepers_hall": {
+        "name": "The Keeper's Hall",
+        "layer": "surface",
+        "description": "A real hall, built for whoever actually kept this whole fortification -- the last real room before the keep proper.",
+        "connections": [
+          "stonearch_bridge_the_towers_crown",
+          "stonearch_bridge_the_old_keep"
+        ],
+        "directions": {
+          "down": "stonearch_bridge_the_towers_crown",
+          "up": "stonearch_bridge_the_old_keep"
+        },
+        "story_gates": {
+          "stonearch_bridge_the_old_keep": {
+            "requires_companion_trust": {
+              "min_affinity": 40
+            }
+          }
+        },
+        "grid_position": {
+          "x": 0,
+          "y": -12
+        }
+      },
+      "stonearch_bridge_the_old_keep": {
+        "name": "The Old Keep",
+        "layer": "surface",
+        "description": "The real keep at the top of it all -- and whatever's actually still keeping it has been waiting a long time to be found.",
+        "connections": [
+          "stonearch_bridge_the_keepers_hall"
+        ],
+        "directions": {
+          "down": "stonearch_bridge_the_keepers_hall"
+        },
+        "monsters": [
+          "the_keeps_warden"
+        ],
+        "combat_environment": {
+          "name": "the old keep's own real, crumbling battlements",
+          "description": "Real stone, real age -- fighting hard enough near the edge risks bringing a real piece of the wall down on everyone nearby.",
+          "damage_dice": "4d6"
+        },
+        "grid_position": {
+          "x": 0,
+          "y": -13
+        }
+      },
+      "stonearch_bridge_the_armory_annex": {
+        "name": "The Armory Annex",
+        "layer": "surface",
+        "description": "A small side room off the sealed armory, real weapon racks still standing, mostly empty now.",
+        "connections": [
+          "stonearch_bridge_the_sealed_armory"
+        ],
+        "directions": {
+          "west": "stonearch_bridge_the_sealed_armory"
+        },
+        "interactables": {
+          "annex_racks": {
+            "name": "real, mostly-empty weapon racks",
+            "description": "A few real blades remain, rusted past any use, but placed with real care once."
+          }
+        },
+        "grid_position": {
+          "x": 2,
+          "y": -4
+        }
+      },
+      "stonearch_bridge_the_watch_stairs_landing": {
+        "name": "The Watch Stair's Landing",
+        "layer": "surface",
+        "description": "A small landing partway up the watch stair, real and deliberate, clearly meant as a resting point.",
+        "connections": [
+          "stonearch_bridge_the_watch_stair"
+        ],
+        "directions": {
+          "east": "stonearch_bridge_the_watch_stair"
+        },
+        "grid_position": {
+          "x": -1,
+          "y": -4
         }
       }
     },
@@ -2290,10 +2590,12 @@
         "layer": "underground",
         "description": "Past the deep current, the water finally drags at something solid \u2014 a den built low against the pull, exactly where nothing swept downstream would ever be able to climb back out.",
         "connections": [
-          "stonearch_bridge_deep_current"
+          "stonearch_bridge_deep_current",
+          "stonearch_bridge_the_undertows_reach"
         ],
         "directions": {
-          "west": "stonearch_bridge_deep_current"
+          "west": "stonearch_bridge_deep_current",
+          "east": "stonearch_bridge_the_undertows_reach"
         },
         "monsters": [
           "elder_web_spider"
@@ -4452,6 +4754,321 @@
           "x": -2,
           "y": 3
         }
+      },
+      "stonearch_bridge_the_undertows_reach": {
+        "name": "The Undertow's Reach",
+        "layer": "underground",
+        "description": "The pull keeps going east past the undertow's own den, further than anything swept downstream should reach.",
+        "connections": [
+          "stonearch_bridge_undertow",
+          "stonearch_bridge_the_silent_current"
+        ],
+        "directions": {
+          "west": "stonearch_bridge_undertow",
+          "east": "stonearch_bridge_the_silent_current"
+        },
+        "monsters": [
+          "gorge_reach_spider"
+        ],
+        "grid_position": {
+          "x": 8,
+          "y": -6
+        }
+      },
+      "stonearch_bridge_the_silent_current": {
+        "name": "The Silent Current",
+        "layer": "underground",
+        "description": "The water here moves without a sound at all, which is somehow worse than the noise everywhere else in the gorge.",
+        "connections": [
+          "stonearch_bridge_the_undertows_reach",
+          "stonearch_bridge_the_gorge_throat"
+        ],
+        "directions": {
+          "west": "stonearch_bridge_the_undertows_reach",
+          "east": "stonearch_bridge_the_gorge_throat"
+        },
+        "lockables": [
+          {
+            "id": "silent_current_cache",
+            "kind": "chest",
+            "name": "a cache resting in the silent current",
+            "loot": {
+              "greater_healing_potion": 1
+            },
+            "gold": 190
+          }
+        ],
+        "grid_position": {
+          "x": 9,
+          "y": -6
+        }
+      },
+      "stonearch_bridge_the_gorge_throat": {
+        "name": "The Gorge Throat",
+        "layer": "underground",
+        "description": "The gorge narrows to almost nothing here -- a real chokepoint, clearly used as one.",
+        "connections": [
+          "stonearch_bridge_the_silent_current",
+          "stonearch_bridge_the_hanging_web",
+          "stonearch_bridge_the_broken_watch"
+        ],
+        "directions": {
+          "west": "stonearch_bridge_the_silent_current",
+          "east": "stonearch_bridge_the_hanging_web",
+          "south": "stonearch_bridge_the_broken_watch"
+        },
+        "monsters": [
+          "gorge_throat_spider"
+        ],
+        "grid_position": {
+          "x": 10,
+          "y": -6
+        }
+      },
+      "stonearch_bridge_the_hanging_web": {
+        "name": "The Hanging Web",
+        "layer": "underground",
+        "description": "Silk strung wall to wall here, thick enough to walk on if you're careful -- the one genuinely still room this deep in the gorge.",
+        "connections": [
+          "stonearch_bridge_the_gorge_throat",
+          "stonearch_bridge_the_deep_nest",
+          "stonearch_bridge_the_silent_shrine"
+        ],
+        "directions": {
+          "west": "stonearch_bridge_the_gorge_throat",
+          "east": "stonearch_bridge_the_deep_nest",
+          "south": "stonearch_bridge_the_silent_shrine"
+        },
+        "grid_position": {
+          "x": 11,
+          "y": -6
+        }
+      },
+      "stonearch_bridge_the_deep_nest": {
+        "name": "The Deep Nest",
+        "layer": "underground",
+        "description": "A real nest, ancient, layered thick enough that whatever built it has clearly been here a very long time.",
+        "connections": [
+          "stonearch_bridge_the_hanging_web",
+          "stonearch_bridge_the_watchers_perch"
+        ],
+        "directions": {
+          "west": "stonearch_bridge_the_hanging_web",
+          "east": "stonearch_bridge_the_watchers_perch"
+        },
+        "monsters": [
+          "deep_nest_spider"
+        ],
+        "resource_nodes": [
+          {
+            "id": "deep_nest_herb_growth",
+            "name": "a growth of rare cave herbs",
+            "material": "silverleaf_herb",
+            "ability": "wisdom",
+            "skill": "herbalism"
+          }
+        ],
+        "interactables": {
+          "deep_nest_record": {
+            "name": "an old marker driven into the nest's own wall",
+            "description": "Someone's been mapping this gorge for longer than the bridge above has had real fortifications -- the marks match the same hand found at the goblin warrens' ledger."
+          }
+        },
+        "grid_position": {
+          "x": 12,
+          "y": -6
+        }
+      },
+      "stonearch_bridge_the_watchers_perch": {
+        "name": "The Watcher's Perch",
+        "layer": "underground",
+        "description": "A real perch, high enough in the gorge wall to see every approach at once -- whoever built it wanted to watch, not be watched.",
+        "connections": [
+          "stonearch_bridge_the_deep_nest",
+          "stonearch_bridge_the_lower_span"
+        ],
+        "directions": {
+          "west": "stonearch_bridge_the_deep_nest",
+          "east": "stonearch_bridge_the_lower_span"
+        },
+        "npcs": [
+          "the_watchers_perch_voice"
+        ],
+        "grid_position": {
+          "x": 13,
+          "y": -6
+        }
+      },
+      "stonearch_bridge_the_lower_span": {
+        "name": "The Lower Span",
+        "layer": "underground",
+        "description": "A real, lower span of the gorge, well below the bridge itself -- something old has clearly claimed it.",
+        "connections": [
+          "stonearch_bridge_the_watchers_perch",
+          "stonearch_bridge_the_far_approach"
+        ],
+        "directions": {
+          "west": "stonearch_bridge_the_watchers_perch",
+          "east": "stonearch_bridge_the_far_approach"
+        },
+        "monsters": [
+          "the_lower_span_widow"
+        ],
+        "grid_position": {
+          "x": 14,
+          "y": -6
+        }
+      },
+      "stonearch_bridge_the_far_approach": {
+        "name": "The Far Approach",
+        "layer": "underground",
+        "description": "The gorge finally starts to open up here -- whatever's using this whole stretch as a route is close now.",
+        "connections": [
+          "stonearch_bridge_the_lower_span",
+          "stonearch_bridge_the_scouts_ledge",
+          "stonearch_bridge_the_far_markers"
+        ],
+        "directions": {
+          "west": "stonearch_bridge_the_lower_span",
+          "east": "stonearch_bridge_the_scouts_ledge",
+          "south": "stonearch_bridge_the_far_markers"
+        },
+        "interactables": {
+          "far_approach_toll_marks": {
+            "name": "the same toll-token marks found strung at the goblin warrens",
+            "description": "This far from any road, and the same cheap tokens still turn up -- whoever's running this whole operation uses the gorge as a real route, not just a shortcut."
+          }
+        },
+        "grid_position": {
+          "x": 15,
+          "y": -6
+        }
+      },
+      "stonearch_bridge_the_scouts_ledge": {
+        "name": "The Scout's Ledge",
+        "layer": "underground",
+        "description": "A real ledge, recently used -- footprints in the dust, still fresh, leading further east.",
+        "connections": [
+          "stonearch_bridge_the_far_approach",
+          "stonearch_bridge_the_scouting_ground",
+          "stonearch_bridge_the_scouts_camp"
+        ],
+        "directions": {
+          "west": "stonearch_bridge_the_far_approach",
+          "east": "stonearch_bridge_the_scouting_ground",
+          "south": "stonearch_bridge_the_scouts_camp"
+        },
+        "grid_position": {
+          "x": 16,
+          "y": -6
+        }
+      },
+      "stonearch_bridge_the_scouting_ground": {
+        "name": "The Scouting Ground",
+        "layer": "underground",
+        "description": "The gorge finally opens onto real, level ground here -- and someone's clearly been using it to watch the whole crossing from a real distance.",
+        "connections": [
+          "stonearch_bridge_the_scouts_ledge"
+        ],
+        "directions": {
+          "west": "stonearch_bridge_the_scouts_ledge"
+        },
+        "grid_position": {
+          "x": 17,
+          "y": -6
+        },
+        "npcs": [
+          "kess_scouting"
+        ]
+      },
+      "stonearch_bridge_the_broken_watch": {
+        "name": "The Broken Watch",
+        "layer": "underground",
+        "description": "A collapsed watch post, real stonework, fallen long before anyone currently using this gorge was born.",
+        "connections": [
+          "stonearch_bridge_the_gorge_throat"
+        ],
+        "directions": {
+          "north": "stonearch_bridge_the_gorge_throat"
+        },
+        "lockables": [
+          {
+            "id": "broken_watch_cache",
+            "kind": "chest",
+            "name": "a cache buried in the broken watch post",
+            "loot": {
+              "scroll_invisibility": 1
+            },
+            "gold": 200
+          }
+        ],
+        "grid_position": {
+          "x": 10,
+          "y": -7
+        }
+      },
+      "stonearch_bridge_the_silent_shrine": {
+        "name": "The Silent Shrine",
+        "layer": "underground",
+        "description": "A small real shrine, tucked below the hanging web, kept clear of silk by someone who still visits.",
+        "connections": [
+          "stonearch_bridge_the_hanging_web"
+        ],
+        "directions": {
+          "north": "stonearch_bridge_the_hanging_web"
+        },
+        "interactables": {
+          "silent_shrine_stone": {
+            "name": "a small, clean shrine stone",
+            "description": "Someone keeps the silk off this one spot, on purpose, the same way the deeper caverns' own shrine was kept."
+          }
+        },
+        "grid_position": {
+          "x": 11,
+          "y": -7
+        }
+      },
+      "stonearch_bridge_the_far_markers": {
+        "name": "The Far Markers",
+        "layer": "underground",
+        "description": "A small cluster of real trail markers, recently placed -- whoever is using this route wants to find their own way back.",
+        "connections": [
+          "stonearch_bridge_the_far_approach"
+        ],
+        "directions": {
+          "north": "stonearch_bridge_the_far_approach"
+        },
+        "interactables": {
+          "far_markers_trail": {
+            "name": "real, recent trail markers",
+            "description": "Placed with real care, recently -- someone comes through here often enough to need them."
+          }
+        },
+        "grid_position": {
+          "x": 15,
+          "y": -7
+        }
+      },
+      "stonearch_bridge_the_scouts_camp": {
+        "name": "The Scout's Camp",
+        "layer": "underground",
+        "description": "A real, recently-used camp -- cold ashes, a bedroll, nothing left behind by accident.",
+        "connections": [
+          "stonearch_bridge_the_scouts_ledge"
+        ],
+        "directions": {
+          "north": "stonearch_bridge_the_scouts_ledge"
+        },
+        "interactables": {
+          "scouts_camp_ashes": {
+            "name": "a real, recently cold firepit",
+            "description": "Whoever was here left in a hurry, but not in a panic -- packed up properly, just fast."
+          }
+        },
+        "grid_position": {
+          "x": 16,
+          "y": -7
+        }
       }
     },
     "sky": {
@@ -5542,6 +6159,45 @@
       "recruitable": false,
       "alignment": "True Neutral",
       "disposition": "neutral"
+    },
+    "the_gate_carving": {
+      "name": "The Gate Carving",
+      "role": "puzzle_guardian",
+      "personality": "speaks in the same worn, half-legible cadence as the bridge's own rail carvings",
+      "goals": "has been guarding the carved gate since before the bridge had a name worth remembering",
+      "recruitable": false,
+      "alignment": "True Neutral",
+      "disposition": "neutral"
+    },
+    "the_watchers_perch_voice": {
+      "name": "The Watcher's Perch",
+      "role": "puzzle_guardian",
+      "personality": "watches everything that crosses the gorge below and has never once looked away first",
+      "goals": "has been keeping the same real count of everyone who's ever tried to cross unseen",
+      "recruitable": false,
+      "alignment": "True Neutral",
+      "disposition": "neutral"
+    },
+    "kess_scouting": {
+      "name": "Kess",
+      "role": "bandit_scout",
+      "personality": "the same calm, calculating woman from the crossroads toll, clearly enjoying herself now that she has real room to move",
+      "goals": "testing whoever's been closing in on her operation, and seeing exactly what they're carrying while she does it",
+      "alignment": "Chaotic Evil",
+      "disposition": "hostile",
+      "is_boss": true,
+      "requires_active_quest": "the_scouting_grounds_warning",
+      "stats": {
+        "level": 58,
+        "dexterity": 18,
+        "strength": 13,
+        "armor_class": 17,
+        "hp_max": 1800,
+        "proficiency_bonus": 12,
+        "xp_reward": 1200,
+        "damage_dice": "1d8",
+        "damage_bonus": 60
+      }
     }
   },
   "shops": {
@@ -7249,6 +7905,81 @@
       },
       "clue": "The Deepest Approach, past the Last Root, leads straight to the true source of every current in these caverns.",
       "weight": "climactic"
+    },
+    "the_lower_battlements_watchman": {
+      "title": "Someone Still Watches the Crossing",
+      "description": "Real fortification, cut into the gorge wall above the bridge -- whoever built this crossing meant to defend it, and something's still standing watch.",
+      "location": "stonearch_bridge_the_lower_battlement",
+      "reward_xp": 900,
+      "reward_gold": 300,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "battlement_watchman"
+      },
+      "clue": "Real fortification climbs the gorge wall above the bridge itself."
+    },
+    "the_carved_gates_riddle": {
+      "title": "Older Than the Gate Around It",
+      "description": "A real gate, carved with the same worn script as the bridge's own rail -- and it won't let anyone through without a real answer.",
+      "location": "stonearch_bridge_the_carved_gate",
+      "trigger": {
+        "type": "solve_puzzle",
+        "puzzle_id": "carved_gates_riddle"
+      },
+      "reward_xp": 950,
+      "reward_gold": 320,
+      "clue": "The Gate Carving poses a real question: \"I have stood here longer than the bridge, and I will still be standing after it falls. What am I?\""
+    },
+    "the_old_keeps_warden": {
+      "title": "The Old Keep",
+      "description": "The real keep at the top of the fortification -- and whatever's actually still keeping it has been waiting a long time to be found.",
+      "location": "stonearch_bridge_the_old_keep",
+      "reward_xp": 1700,
+      "reward_gold": 600,
+      "reward_item": "the_keeps_wardens_crown",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_keeps_warden"
+      },
+      "clue": "The Keeper's Hall, past the Tower's Crown, is the last real room before the keep proper.",
+      "weight": "climactic"
+    },
+    "the_watchers_perchs_answer": {
+      "title": "What the Perch Has Seen",
+      "description": "A real perch, high enough in the gorge wall to see every approach at once -- and it's been keeping a real count of everyone who's crossed unseen.",
+      "location": "stonearch_bridge_the_watchers_perch",
+      "trigger": {
+        "type": "solve_puzzle",
+        "puzzle_id": "watchers_perch_riddle"
+      },
+      "reward_xp": 970,
+      "reward_gold": 330,
+      "clue": "The Watcher's Perch poses a real question: \"I see everyone who crosses, and I am never the one who's seen. What am I?\""
+    },
+    "the_lower_spans_widow": {
+      "title": "What Claimed the Lower Span",
+      "description": "A real, lower span of the gorge, well below the bridge itself -- something old has clearly claimed it.",
+      "location": "stonearch_bridge_the_lower_span",
+      "reward_xp": 1050,
+      "reward_gold": 360,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_lower_span_widow"
+      },
+      "clue": "The Lower Span lies east past the Watcher's Perch."
+    },
+    "the_scouting_grounds_warning": {
+      "title": "Fresh Tracks",
+      "description": "Footprints in the dust, still fresh, lead further east onto real, level ground -- someone's been watching this whole crossing from a real distance, and recently.",
+      "location": "stonearch_bridge_the_scouts_camp",
+      "reward_xp": 1100,
+      "reward_gold": 380,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "kess_scouting"
+      },
+      "clue": "The tracks lead east from the Scout's Camp, onto open ground.",
+      "weight": "climactic"
     }
   },
   "story_arcs": {
@@ -7348,7 +8079,13 @@
         "web_hollows_brood",
         "silked_nooks_hatchling",
         "deep_currents_keeper",
-        "the_undertows_elder"
+        "the_undertows_elder",
+        "the_lower_battlements_watchman",
+        "the_carved_gates_riddle",
+        "the_old_keeps_warden",
+        "the_watchers_perchs_answer",
+        "the_lower_spans_widow",
+        "the_scouting_grounds_warning"
       ],
       "required_level": 60
     },
@@ -10040,6 +10777,156 @@
           "weight": 20
         }
       ]
+    },
+    "battlement_watchman": {
+      "name": "Battlement Watchman",
+      "level": 60,
+      "dexterity": 15,
+      "strength": 17,
+      "armor_class": 20,
+      "hp_max": 3800,
+      "proficiency_bonus": 13,
+      "xp_reward": 2500,
+      "damage_dice": "1d8",
+      "damage_bonus": 210,
+      "damage_type": "physical"
+    },
+    "battlement_sentry": {
+      "name": "Battlement Sentry",
+      "level": 63,
+      "dexterity": 16,
+      "strength": 16,
+      "armor_class": 20,
+      "hp_max": 4200,
+      "proficiency_bonus": 13,
+      "xp_reward": 2700,
+      "damage_dice": "1d8",
+      "damage_bonus": 220,
+      "damage_type": "lightning"
+    },
+    "rampart_guardian": {
+      "name": "Rampart Guardian",
+      "level": 66,
+      "dexterity": 14,
+      "strength": 20,
+      "armor_class": 22,
+      "hp_max": 6000,
+      "proficiency_bonus": 14,
+      "xp_reward": 3200,
+      "damage_dice": "1d8",
+      "damage_bonus": 240,
+      "damage_type": "physical",
+      "is_boss": false,
+      "stealable_items": [
+        {
+          "item_id": "greater_spell_tonic",
+          "weight": 90
+        }
+      ]
+    },
+    "keep_watcher": {
+      "name": "Keep Watcher",
+      "level": 68,
+      "dexterity": 15,
+      "strength": 19,
+      "armor_class": 21,
+      "hp_max": 4800,
+      "proficiency_bonus": 14,
+      "xp_reward": 3000,
+      "damage_dice": "1d8",
+      "damage_bonus": 250,
+      "damage_type": "lightning"
+    },
+    "the_keeps_warden": {
+      "name": "The Keep's Warden",
+      "level": 70,
+      "dexterity": 15,
+      "strength": 21,
+      "armor_class": 23,
+      "hp_max": 11000,
+      "proficiency_bonus": 15,
+      "xp_reward": 3800,
+      "damage_dice": "1d8",
+      "damage_bonus": 270,
+      "damage_type": "lightning",
+      "is_boss": true,
+      "known_spells": [
+        "call_lightning"
+      ],
+      "counters_sneak_attack": true,
+      "extra_attack_when_enraged": true,
+      "vulnerabilities": [
+        "earth"
+      ],
+      "stealable_items": [
+        {
+          "item_id": "greater_spell_tonic",
+          "weight": 60
+        },
+        {
+          "item_id": "supreme_spell_tonic",
+          "weight": 20
+        }
+      ]
+    },
+    "gorge_reach_spider": {
+      "name": "Gorge Reach Spider",
+      "level": 61,
+      "dexterity": 17,
+      "strength": 14,
+      "armor_class": 19,
+      "hp_max": 3900,
+      "proficiency_bonus": 13,
+      "xp_reward": 2550,
+      "damage_dice": "1d8",
+      "damage_bonus": 213,
+      "damage_type": "poison"
+    },
+    "gorge_throat_spider": {
+      "name": "Gorge Throat Spider",
+      "level": 64,
+      "dexterity": 17,
+      "strength": 15,
+      "armor_class": 20,
+      "hp_max": 4300,
+      "proficiency_bonus": 14,
+      "xp_reward": 2750,
+      "damage_dice": "1d8",
+      "damage_bonus": 225,
+      "damage_type": "poison"
+    },
+    "the_lower_span_widow": {
+      "name": "The Lower Span Widow",
+      "level": 67,
+      "dexterity": 18,
+      "strength": 16,
+      "armor_class": 21,
+      "hp_max": 6200,
+      "proficiency_bonus": 14,
+      "xp_reward": 3300,
+      "damage_dice": "1d8",
+      "damage_bonus": 244,
+      "damage_type": "poison",
+      "is_boss": false,
+      "stealable_items": [
+        {
+          "item_id": "greater_healing_potion",
+          "weight": 90
+        }
+      ]
+    },
+    "deep_nest_spider": {
+      "name": "Deep Nest Spider",
+      "level": 69,
+      "dexterity": 17,
+      "strength": 17,
+      "armor_class": 21,
+      "hp_max": 4900,
+      "proficiency_bonus": 15,
+      "xp_reward": 3100,
+      "damage_dice": "1d8",
+      "damage_bonus": 255,
+      "damage_type": "poison"
     }
   },
   "factions": {
@@ -10204,6 +11091,22 @@
         "water",
         "a river",
         "a current"
+      ]
+    },
+    "carved_gates_riddle": {
+      "riddle": "I have stood here longer than the bridge, and I will still be standing after it falls. What am I?",
+      "accepted_answers": [
+        "stone",
+        "the gorge",
+        "the mountain"
+      ]
+    },
+    "watchers_perch_riddle": {
+      "riddle": "I see everyone who crosses, and I am never the one who's seen. What am I?",
+      "accepted_answers": [
+        "a shadow",
+        "the gorge below",
+        "the watcher"
       ]
     }
   },

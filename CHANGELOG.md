@@ -2,6 +2,41 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.414] — Chapter 7 expansion, Phase 5: Stonearch Gorge grows to 36 rooms, Kess's first real fight
+
+Fifth installment of the approved Chapter 3-8 expansion plan, and the
+one carrying the Toll Road plan's "A Warning Shot" beat. Stonearch
+Bridge/Gorge had only 8 real rooms and 4 quests -- grown to 36 rooms
+and 10 quests across two new branches. Both Remnants (The Farthest
+Span, The Drowned Choir) were already here, no relocation needed.
+
+- **The Battlements** (up from the bridge itself, 18 new rooms): real
+  castle fortification climbing the gorge wall, ending in a new
+  level-70 boss, The Keep's Warden (real Call Lightning spellcasting,
+  counters_sneak_attack, an enrage shift, and a unique reward). Gated
+  behind companion trust.
+- **The Deeper Gorge** (east from the Undertow, 18 new rooms): the
+  mountain/spider-den side of the gorge, culminating in the real
+  `kess_scouting` encounter -- her first PHYSICAL confrontation with
+  the party. Deliberately short (low HP relative to a real Chapter 7
+  party) and non-lethal by design: she flees the instant she'd
+  otherwise go down, reusing her existing flee-instead-of-dying
+  mechanism, ending on a real crack in her composure (the clearest
+  "insanity is already setting in" beat before Chapter 8 makes it
+  literal). Fully hand-written confrontation and flee scripts, wired
+  through the same real `_scripted_boss_npc_at_location` mechanism her
+  other two forms already use -- gated on a new quest,
+  `the_scouting_grounds_warning`, not a companion offer (a 3rd
+  giver_npc=pip_thistledown quest was considered and skipped after
+  Phase 1/3 already proved that pattern risks breaking a companion's
+  fixed arc).
+- Verified with real executed tests: all 36 rooms reciprocated, the
+  scripted encounter confirmed to only fire once its quest is genuinely
+  active (not before), her confrontation script confirmed distinct
+  from her other two forms, her flee line confirmed distinct from
+  kess_the_bandit's -- plus a full re-run of the Kess-sequencing/Borin/
+  Blackthorn/Grask/Wren suites. Zero regressions.
+
 ## [1.27.413] — Chapter 6 expansion, Phase 4: Sunken Root Caverns grows to 32 rooms, Kess's first spoken beat
 
 Fourth installment of the approved Chapter 3-8 expansion plan, and the

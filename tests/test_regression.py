@@ -5949,6 +5949,137 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(npc.get("recruitable"))
             self.assertIn(npc_id, cl.get_location(bot.CAMPAIGN, loc_id)["npcs"])
 
+    # -- Chapter 7 expansion, Phase 5 (2026-08-30): Stonearch Bridge/
+    #    Gorge grows from 8 real rooms/4 quests to 36 rooms/10 quests,
+    #    culminating in the real kess_scouting encounter -------------
+    def test_arc_7_now_has_ten_quests_original_four_completely_undisturbed(self):
+        quests = bot.CAMPAIGN["story_arcs"]["arc_7_stonearch_gorge"]["quests"]
+        self.assertEqual(len(quests), 10)
+        self.assertEqual(
+            quests[:4],
+            ["web_hollows_brood", "silked_nooks_hatchling", "deep_currents_keeper", "the_undertows_elder"],
+        )
+
+    def test_stonearch_gorge_grows_to_36_rooms(self):
+        locs = {}
+        for layer, d in bot.CAMPAIGN["locations"].items():
+            locs.update(d)
+        core_ids = {
+            "stonearch_bridge", "stonearch_bridge_deep_current", "stonearch_bridge_far_end",
+            "stonearch_bridge_gorge_depths", "stonearch_bridge_silked_nook", "stonearch_bridge_undertow",
+            "stonearch_bridge_web_hollow", "the_weeping_well",
+        }
+        new_ids = {k for k in locs if (k.startswith("stonearch_bridge_") or k == "the_weeping_well") and k not in core_ids}
+        self.assertEqual(len(core_ids) + len(new_ids), 36)
+
+    def test_stonearch_gorge_new_rooms_are_fully_connected_and_reciprocated(self):
+        locs = {}
+        for layer, d in bot.CAMPAIGN["locations"].items():
+            locs.update(d)
+        core_ids = {
+            "stonearch_bridge", "stonearch_bridge_deep_current", "stonearch_bridge_far_end",
+            "stonearch_bridge_gorge_depths", "stonearch_bridge_silked_nook", "stonearch_bridge_undertow",
+            "stonearch_bridge_web_hollow", "the_weeping_well",
+        }
+        new_ids = [k for k in locs if (k.startswith("stonearch_bridge_") or k == "the_weeping_well") and k not in core_ids]
+        self.assertGreaterEqual(len(new_ids), 28)
+        for loc_id in new_ids:
+            loc = locs[loc_id]
+            for direction, dest_id in loc.get("directions", {}).items():
+                dest = cl.get_location(bot.CAMPAIGN, dest_id)
+                self.assertIsNotNone(dest, f"{loc_id} -> {dest_id} via {direction} is a dead end")
+                self.assertIn(loc_id, dest.get("connections", []), f"{dest_id} doesn't connect back to {loc_id}")
+
+    def test_the_keeps_warden_uses_the_real_new_systems_not_a_generic_statstick(self):
+        boss = bot.CAMPAIGN["monsters"]["the_keeps_warden"]
+        self.assertTrue(boss["is_boss"])
+        self.assertIn("call_lightning", boss["known_spells"])
+        self.assertTrue(boss.get("counters_sneak_attack"))
+        self.assertTrue(boss.get("extra_attack_when_enraged"))
+        self.assertTrue(boss.get("stealable_items"))
+        self.assertIn("the_old_keeps_warden", bot._QUEST_MONSTER_INDEX.get("the_keeps_warden", []))
+        quest = bot.CAMPAIGN["quests"]["the_old_keeps_warden"]
+        self.assertEqual(quest["reward_item"], "the_keeps_wardens_crown")
+
+    def test_old_keep_is_gated_behind_companion_trust(self):
+        location = cl.get_location(bot.CAMPAIGN, "stonearch_bridge_the_keepers_hall")
+        current_dict = {"story_gates": location["story_gates"]}
+        character = {"party_id": None, "completed_quests": []}
+        self.assertIsNotNone(bot._check_story_gate(character, current_dict, "stonearch_bridge_the_old_keep"))
+
+    def test_kess_scouting_is_real_and_placed_at_the_scouting_ground(self):
+        npc = bot.CAMPAIGN["npcs"]["kess_scouting"]
+        self.assertEqual(npc["name"], "Kess")
+        self.assertTrue(npc["is_boss"])
+        self.assertEqual(npc["requires_active_quest"], "the_scouting_grounds_warning")
+        # Deliberately short and weak relative to a real Chapter 7 party
+        # -- "a warning shot," not a real threat, per the approved plan.
+        self.assertLess(npc["stats"]["hp_max"], 2500)
+        loc = cl.get_location(bot.CAMPAIGN, "stonearch_bridge_the_scouting_ground")
+        self.assertIn("kess_scouting", loc["npcs"])
+        quest = bot.CAMPAIGN["quests"]["the_scouting_grounds_warning"]
+        self.assertEqual(quest["trigger"], {"type": "defeat_monster", "monster": "kess_scouting"})
+
+    def test_kess_scouting_fires_via_the_real_scripted_boss_mechanism(self):
+        """Same real _scripted_boss_npc_at_location gate her other two forms already use -- only fires once the gating quest is genuinely active."""
+        from unittest.mock import patch
+        bot.setup_default_npcs()
+        character = {
+            "telegram_user_id": 1, "active_quests": {}, "completed_quests": [],
+        }
+        location = {"id": "stonearch_bridge_the_scouting_ground"}
+        with patch("bot._npcs_at_location", return_value=["kess_scouting"]), \
+             patch("bot._effective_disposition", return_value="hostile"):
+            self.assertIsNone(bot._scripted_boss_npc_at_location(character, location, -999))
+            character["active_quests"] = {"the_scouting_grounds_warning": {}}
+            self.assertEqual(bot._scripted_boss_npc_at_location(character, location, -999), "kess_scouting")
+
+    def test_kess_scouting_confrontation_script_is_hand_written_and_distinct(self):
+        import ai.dm_agent as dm_agent_module
+        result = dm_agent_module.kess_scouting_confrontation_script("Ravenloft")
+        self.assertIn("Kess:", result)
+        self.assertIn("Ravenloft", result)
+        first_form = dm_agent_module.kess_first_confrontation_script("Ravenloft")
+        self.assertNotEqual(result, first_form)
+
+    async def test_kess_scouting_flees_instead_of_dying_and_the_line_is_distinct(self):
+        """Same real flee-not-die mechanism as kess_the_bandit -- her own distinct line, ending on the real crack in her composure."""
+        import sessions
+        sessions.end_session(-999)
+        player_id = 999953
+        make_basic_character(player_id, "ScoutingWitness", current_location="stonearch_bridge_the_scouting_ground")
+        kess = {
+            "telegram_user_id": -700953, "name": "Kess", "monster_key": "kess_scouting", "is_ai": 1,
+            "hp_current": 0, "hp_max": 1800, "dexterity": 18, "strength": 13,
+            "resistances": [], "vulnerabilities": [], "immunities": [],
+        }
+        session = sessions.start_session(-999, [db.get_character(player_id, -999), kess], {player_id: "party", -700953: "enemy"})
+        removed = session.remove_defeated()
+        self.assertEqual(len(removed), 1)
+        sink = []
+        await bot._announce_defeats(FakeUpdate(player_id, "irrelevant", sink), session, removed)
+        combined = " ".join(sink)
+        self.assertIn("Whispers", combined)
+        self.assertNotIn("has been defeated", combined)
+        self.assertNotIn("bolts into the fog", combined)  # her OWN distinct line, not the bandit form's
+        sessions.end_session(-999)
+
+    def test_stonearch_gorge_lockable_chests_grant_real_loot(self):
+        for loc_id in ("stonearch_bridge_the_sealed_armory", "stonearch_bridge_the_silent_current", "stonearch_bridge_the_broken_watch"):
+            loc = cl.get_location(bot.CAMPAIGN, loc_id)
+            chest = loc["lockables"][0]
+            self.assertEqual(chest["kind"], "chest")
+            self.assertTrue(chest["loot"])
+
+    def test_new_stonearch_gorge_npcs_are_real_and_non_recruitable(self):
+        for npc_id, loc_id in (
+            ("the_gate_carving", "stonearch_bridge_the_carved_gate"),
+            ("the_watchers_perch_voice", "stonearch_bridge_the_watchers_perch"),
+        ):
+            npc = bot.CAMPAIGN["npcs"][npc_id]
+            self.assertFalse(npc.get("recruitable"))
+            self.assertIn(npc_id, cl.get_location(bot.CAMPAIGN, loc_id)["npcs"])
+
     def test_companion_favor_pays_more_affinity_once_the_companion_already_trusts_you(self):
         """
         Real live request (2026-08-23, Coffee: "give the affinity real

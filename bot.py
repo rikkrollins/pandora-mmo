@@ -73,7 +73,7 @@ from ai.dm_agent import (
     narrate_borin_dialogue, narrate_confrontation_choice_outcome,
     narrate_kess_transformation, narrate_chapter_8_epilogue,
     kess_first_confrontation_script, kess_unbound_confrontation_script, kess_flees_line,
-    kess_shrine_vigil_script,
+    kess_shrine_vigil_script, kess_scouting_confrontation_script, kess_scouting_flees_line,
     grask_supply_tunnels_reaction, grask_deep_larders_reaction,
     _fallback_hourly_update, _fallback_narration,
     is_narration_call_active,
@@ -4206,6 +4206,15 @@ async def _announce_defeats(update: Update, session: sessions.Session, removed: 
         if original and original.get("monster_key") == "kess_the_bandit":
             session.log_event(f"{entry['name']} flees the battle!")
             await _safe_send(update, f"> *{kess_flees_line()}*", speak=False)
+            continue
+        if original and original.get("monster_key") == "kess_scouting":
+            # Chapter 7 expansion, Phase 5 (2026-08-30): her scouting
+            # form flees the instant it would otherwise go down too,
+            # same real mechanism as kess_the_bandit above -- her own
+            # distinct flee line instead, ending on the real crack in
+            # her composure the approved plan calls for.
+            session.log_event(f"{entry['name']} flees the battle!")
+            await _safe_send(update, f"> *{kess_scouting_flees_line()}*", speak=False)
             continue
         session.log_event(f"{entry['name']} has been defeated!")
         if not entry["is_ai"] and session.sides.get(entry["telegram_user_id"]) == "party":
@@ -9245,6 +9254,8 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
                     taunt = kess_first_confrontation_script(character["name"])
                 elif npc_id == "kess_the_unbound":
                     taunt = kess_unbound_confrontation_script(character["name"])
+                elif npc_id == "kess_scouting":
+                    taunt = kess_scouting_confrontation_script(character["name"])
                 else:
                     taunt = await asyncio.to_thread(
                         narrate_boss_confrontation,

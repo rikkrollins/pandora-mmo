@@ -290,6 +290,8 @@ ARCS_1_THROUGH_7_QUEST_IDS = (
     "the_cleared_chokes_stalker", "the_smugglers_cuts_lurker", "the_smugglers_ends_warden",
     "the_deep_currents_shard", "the_kept_shrines_vigil", "the_sources_reckoning",
     "web_hollows_brood", "silked_nooks_hatchling", "deep_currents_keeper", "the_undertows_elder",
+    "the_lower_battlements_watchman", "the_carved_gates_riddle", "the_old_keeps_warden",
+    "the_watchers_perchs_answer", "the_lower_spans_widow", "the_scouting_grounds_warning",
 )
 
 
