@@ -25398,10 +25398,21 @@ async def _do_give_offering(update: Update, text: str) -> None:
             "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
-    if character["current_location"] != "hollow_stump_shrine":
+    # Real live follow-up (2026-08-30, dev-bridge, Coffee: "shudnt i be
+    # able to pray at it?" -- the Ember Font, right after the drink_
+    # water fix landed): this used to hardcode ONE literal location id,
+    # but the Chapter 3-8 expansion has since built several other real,
+    # hand-authored shrine rooms (the Weeping Spring, the Kept Shrine,
+    # the Silent Shrine) with the same restorative purpose in their own
+    # flavor text -- there's no real reason revival stays exclusive to
+    # the original one. Generalized to a real "real_shrine" location
+    # flag, same shape as drink_water's own "healing_water" flag, so
+    # any future shrine just opts in with one line of data instead of
+    # needing this function touched again.
+    location = cl.get_location(CAMPAIGN, character["current_location"])
+    if location is None or not location.get("real_shrine"):
         await update.effective_chat.send_message(
-            "There's no shrine to give an offering at here — the Hollow Stump Shrine, "
-            "back in the Whispering Wood, is the place for that.",
+            "There's no shrine to give an offering at here.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
@@ -25487,10 +25498,10 @@ async def _do_shrine_offering_menu(update: Update) -> None:
             "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
-    if character["current_location"] != "hollow_stump_shrine":
+    location = cl.get_location(CAMPAIGN, character["current_location"])
+    if location is None or not location.get("real_shrine"):
         await update.effective_chat.send_message(
-            "There's no shrine to give an offering at here — the Hollow Stump Shrine, "
-            "back in the Whispering Wood, is the place for that.",
+            "There's no shrine to give an offering at here.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return

@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.416] — generalize shrine prayer/revival beyond Hollow Stump Shrine
+
+Real live follow-up (2026-08-30, dev-bridge, Coffee, right after the
+drink_water fix: "shudnt i be able to pray at it? the shrine in
+emberfont"). `_do_give_offering`/`_do_shrine_offering_menu` (the real
+pray-to-revive-a-fallen-ally mechanic) hardcoded ONE literal location
+id, `hollow_stump_shrine` -- every other real, hand-authored shrine the
+Chapter 3-8 expansion has since built (the Wrathflame Vault's Ember
+Font, the Deep Root Vault's Weeping Spring, Chapter 6's Kept Shrine,
+Chapter 7's Silent Shrine) rejected prayer outright, even though their
+own flavor text describes them the same way.
+
+Generalized to a real `real_shrine` location flag, the same shape as
+`drink_water`'s own `healing_water` flag -- any future shrine now opts
+in with one line of data instead of this function needing touched
+again. Applied to Hollow Stump Shrine (already real) and all four new
+shrines. Revival still costs the same real gold and still only brings
+someone back at 1 HP, same balance as before -- just no longer
+artificially exclusive to one location.
+
+Verified with real executed tests: the flag is present on all five
+shrines, a real end-to-end revival at a new shrine, and a plain
+non-shrine location still correctly rejects prayer. No regressions in
+the existing offering/shrine/revival test suite.
+
 ## [1.27.415] — fix "drink from the spring" misrouting to the item-use error
 
 Real live bug (2026-08-30, dev-bridge, Coffee/Elduinn: "Drink from the

@@ -384,7 +384,8 @@
           "wrathflame_vault_threshold": {
             "requires_defeated_monster": "wolf"
           }
-        }
+        },
+        "real_shrine": true
       },
       "greymoor_downs": {
         "name": "The Greymoor Downs",
@@ -3008,7 +3009,8 @@
           "x": 2,
           "y": 5
         },
-        "healing_water": true
+        "healing_water": true,
+        "real_shrine": true
       },
       "wrathflame_vault_smoldering_stair": {
         "name": "The Smoldering Stair",
@@ -3228,7 +3230,8 @@
           "x": 0,
           "y": -6
         },
-        "healing_water": true
+        "healing_water": true,
+        "real_shrine": true
       },
       "deep_root_vault_sentinel_hollow": {
         "name": "The Sentinel Hollow",
@@ -4546,7 +4549,8 @@
           "x": 0,
           "y": 9
         },
-        "healing_water": true
+        "healing_water": true,
+        "real_shrine": true
       },
       "sunken_root_caverns_the_shrines_after": {
         "name": "Past the Kept Shrine",
@@ -5029,7 +5033,8 @@
         "grid_position": {
           "x": 11,
           "y": -7
-        }
+        },
+        "real_shrine": true
       },
       "stonearch_bridge_the_far_markers": {
         "name": "The Far Markers",

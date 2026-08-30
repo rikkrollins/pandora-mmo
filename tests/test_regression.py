@@ -5608,6 +5608,43 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id, -999)
         self.assertGreater(character["hp_current"], 1)
 
+    def test_real_shrine_flag_generalized_beyond_hollow_stump_shrine(self):
+        """
+        Real live follow-up (2026-08-30, dev-bridge, Coffee: "shudnt i be
+        able to pray at it?" -- the Ember Font). _do_give_offering/_do_
+        shrine_offering_menu used to hardcode ONE literal location id;
+        generalized to a real "real_shrine" flag any location can carry.
+        """
+        for loc_id in (
+            "hollow_stump_shrine", "wrathflame_vault_ember_font", "deep_root_vault_weeping_spring",
+            "sunken_root_caverns_the_kept_shrine", "stonearch_bridge_the_silent_shrine",
+        ):
+            loc = cl.get_location(bot.CAMPAIGN, loc_id)
+            self.assertTrue(loc.get("real_shrine"), f"{loc_id} should be a real shrine")
+
+    async def test_praying_at_a_new_shrine_actually_revives(self):
+        """End-to-end: the real _do_give_offering handler works at a NEW shrine, not just Hollow Stump."""
+        uid = 900971
+        make_basic_character(uid, "EmberPraying", current_location="wrathflame_vault_ember_font", gold=500)
+        dead = make_basic_character(uid + 1, "FallenAlly", current_location="wrathflame_vault_ember_font")
+        db.update_character_by_id(dead["character_id"], is_dead=1, hp_current=0)
+        party_id = db.create_party(uid, -999)
+        db.update_character(uid, -999, party_id=party_id)
+        db.update_character_by_id(dead["character_id"], party_id=party_id)
+
+        sink = []
+        await bot._do_give_offering(FakeUpdate(uid, "pray for FallenAlly", sink), "pray for FallenAlly")
+        after = db.get_character_by_id(dead["character_id"])
+        self.assertEqual(after["is_dead"], 0)
+
+    async def test_praying_still_rejected_at_a_plain_non_shrine_location(self):
+        uid = 900972
+        make_basic_character(uid, "NoShrineHere", current_location="crossroads_tavern")
+        sink = []
+        await bot._do_give_offering(FakeUpdate(uid, "pray", sink), "pray")
+        combined = " ".join(sink)
+        self.assertIn("no shrine", combined.lower())
+
     def test_bonus_vault_map_item_quests_are_real_and_grant_the_right_map(self):
         forge_quest = bot.CAMPAIGN["quests"]["the_deep_forges_cinder_map"]
         self.assertEqual(forge_quest["trigger"], {"type": "defeat_monster", "monster": "molten_sentinel"})
