@@ -2,6 +2,55 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.419] — each of the 8 new dungeons gets its own real minimap
+
+Real live request (2026-08-30, Coffee, right after the fast-travel/
+checkpoint-achievement work above: "i want each dungeon to have its
+own minimap"). Until now `/visual_map` only ever rendered one giant
+image per whole real layer (`surface`/`underground`/`sky`) -- workable
+for the original, sparser world, but this session's Chapter 3-8
+expansion just added 201 rooms across 8 dungeons sharing those same
+two layers, several with local `grid_position` coordinates chosen
+independently per dungeon and colliding with each other's cells (and,
+in Greymoor Downs' case, with 3 pre-existing rooms) once drawn on one
+shared grid.
+
+- Every room belonging to one of the 8 dungeons (core rooms and
+  interior rooms alike, 201 total, spanning both `surface` and
+  `underground` for the two dungeons that cross layers -- Stonearch
+  Gorge's Weeping Well branch, and Greymoor Downs' own vantage-reach
+  branch) now carries a real `dungeon_id` field.
+- Fixed 3 real internal `grid_position` collisions this surfaced in
+  Greymoor Downs (the new "Vantage Reach" branch sat on top of 3
+  pre-existing rooms -- `tower_cellar`, `tower_vantage_below`,
+  `broken_watchtower`) by shifting that branch's 16 rooms `+3` on the
+  x-axis; re-verified zero collisions remain, both within every
+  dungeon's own `dungeon_id` group and (now moot, since each dungeon
+  renders on its own canvas) across dungeons.
+- New `map_render.render_dungeon_map(dungeon_id, display_name,
+  dungeon_locations, ...)`, a thin wrapper around the existing
+  `render_layer_map` pipeline (same real fog-of-war, floor badges,
+  boss/monster/shop/npc/quest icon overlays, legend -- nothing about
+  the actual rendering logic changed) scoped to just one dungeon's
+  merged rooms instead of a whole layer, with its own real title.
+- `bot.py`: `/visual_map` (and plain "show me the map" phrasing) now
+  checks whether the character's *current* location carries a
+  `dungeon_id` -- if so, it renders that dungeon's own scoped minimap
+  (via new `_send_dungeon_map`/`_dungeon_locations`) instead of the
+  whole layer, with a "Full [Layer] Map" button to still reach the
+  original whole-layer view. Standing anywhere outside a dungeon
+  behaves exactly as before -- zero change for the rest of the game.
+
+Tested: `_dungeon_locations` genuinely merges a cross-layer dungeon's
+rooms (Stonearch Gorge, surface + underground) into one dict; all 8
+registered dungeons resolve to at least one real tagged room;
+`render_dungeon_map` produces a valid PNG scoped to one dungeon;
+standing inside a dungeon room end-to-end sends the dungeon-scoped map
+with the right caption and a working "back to the full layer map"
+button; standing outside any dungeon still sends the original
+whole-layer map unchanged. Full related map-rendering test slice
+re-run clean (14/14) alongside the 5 new tests.
+
 ## [1.27.418] — dungeon fast-travel restricted to real safe waypoints, plus a real achievement for reaching one
 
 Real live request (2026-08-30, dev-bridge, Coffee: "make sure players

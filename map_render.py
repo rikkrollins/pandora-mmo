@@ -321,6 +321,7 @@ def render_layer_map(
     current_location_id: str | None,
     monsters: dict | None = None,
     quests: dict | None = None,
+    title_override: str | None = None,
 ) -> bytes:
     """
     layer_locations: CAMPAIGN["locations"][layer_name] verbatim.
@@ -332,6 +333,9 @@ def render_layer_map(
     location at its own real grid_position, solid black for anywhere
     unvisited or nonexistent, red-outlined for the character's current
     location -- never a physics layout, never a guess.
+
+    title_override: used by render_dungeon_map below to show a real
+    dungeon display name instead of the raw layer_name.
     """
     monsters = monsters or {}
     quests = quests or {}
@@ -364,7 +368,7 @@ def render_layer_map(
     _draw_background(draw, width, height)
 
     title_font = _load_font(24, bold=True)
-    title = f"MAP — {layer_name.title()}"
+    title = title_override or f"MAP — {layer_name.title()}"
     title_bbox = draw.textbbox((0, 0), title, font=title_font)
     draw.text(((width - (title_bbox[2] - title_bbox[0])) / 2, 10), title, font=title_font, fill=_TITLE_COLOR)
 
@@ -494,3 +498,32 @@ def _draw_cell(
             bx, by = px + 2, py + CELL_SIZE - lh - 8 - bh - 2
             draw.rectangle([bx, by, bx + bw, by + bh], fill=_FLOOR_BADGE_FILL, outline=(0, 0, 0))
             draw.text((bx + 3, by + 1), floor_text, font=badge_font, fill=_FLOOR_BADGE_TEXT)
+
+
+def render_dungeon_map(
+    dungeon_id: str,
+    display_name: str,
+    dungeon_locations: dict,
+    visited_ids: set[str],
+    revealed_ids: set[str],
+    current_location_id: str | None,
+    monsters: dict | None = None,
+    quests: dict | None = None,
+) -> bytes:
+    """
+    Real live request (2026-08-30, Coffee: "i want each dungeon to have
+    its own minimap"). dungeon_locations: every real CAMPAIGN["locations"]
+    entry carrying this dungeon's real `dungeon_id` field, merged across
+    layers by the caller -- a dungeon can span more than one real layer
+    (Stonearch Gorge: surface + underground), and location ids are
+    globally unique so a plain merge is safe. Reuses render_layer_map's
+    exact grid/fog-of-war/floor-badge/icon pipeline unchanged -- a
+    dungeon's own local grid_position coordinates only need to be
+    collision-free among each other (confirmed for all 8 real dungeons),
+    not against the rest of that dungeon's real layer, which is exactly
+    what scoping the render to just this dungeon's rooms buys.
+    """
+    return render_layer_map(
+        dungeon_id, dungeon_locations, visited_ids, revealed_ids, current_location_id,
+        monsters=monsters, quests=quests, title_override=f"MAP — {display_name}",
+    )

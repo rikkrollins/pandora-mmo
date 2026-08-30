@@ -22620,6 +22620,66 @@ def _map_layer_keyboard(character: dict, current_layer: str) -> InlineKeyboardMa
     return InlineKeyboardMarkup(buttons)
 
 
+# Real live request (2026-08-30, Coffee: "i want each dungeon to have
+# its own minimap"), display names only -- membership itself is read
+# straight off each location's real `dungeon_id` field (see
+# _dungeon_locations), never duplicated here as a prefix/exclude list.
+_DUNGEON_DISPLAY_NAMES = {
+    "wrathflame_vault": "The Wrathflame Vault",
+    "deep_root_vault": "The Deep Root Vault",
+    "the_first_city": "The First City",
+    "unmoored_isle": "The Unmoored Isle",
+    "goblin_warrens": "The Goblin Warrens",
+    "sunken_root_caverns": "The Sunken Root Caverns",
+    "stonearch_bridge": "Stonearch Gorge",
+    "greymoor_downs": "Greymoor Downs",
+}
+
+
+def _dungeon_locations(dungeon_id: str) -> dict:
+    """Every CAMPAIGN["locations"][layer] entry carrying this dungeon_id, merged across whichever real layer(s) it spans (Stonearch Gorge: surface + underground) -- location ids are globally unique so a plain merge is safe."""
+    merged = {}
+    for layer_locs in CAMPAIGN["locations"].values():
+        for loc_id, loc in layer_locs.items():
+            if loc.get("dungeon_id") == dungeon_id:
+                merged[loc_id] = loc
+    return merged
+
+
+def _dungeon_map_keyboard(layer_name: str) -> InlineKeyboardMarkup:
+    """One button back to the whole layer map -- reuses map_menu_callback/_send_layer_map exactly as the layer-switch buttons already do."""
+    return InlineKeyboardMarkup([[InlineKeyboardButton(f"🗺️ Full {layer_name.title()} Map", callback_data=f"map|{layer_name}")]])
+
+
+async def _send_dungeon_map(update: Update, character: dict, dungeon_id: str) -> None:
+    """Real render (map_render.render_dungeon_map), scoped to just one dungeon's rooms -- see _send_layer_map for the whole-layer equivalent this mirrors."""
+    dungeon_locations = _dungeon_locations(dungeon_id)
+    visited = set(character.get("visited_locations") or [])
+    revealed = set(character.get("map_revealed_locations") or [])
+    display_name = _DUNGEON_DISPLAY_NAMES.get(dungeon_id, dungeon_id.replace("_", " ").title())
+    current_location_id = character.get("current_location")
+    layer_name = next(
+        (layer for layer, locs in CAMPAIGN["locations"].items() if current_location_id in locs),
+        "surface",
+    )
+    try:
+        png_bytes = await asyncio.to_thread(
+            map_render.render_dungeon_map, dungeon_id, display_name, dungeon_locations, visited, revealed,
+            current_location_id, CAMPAIGN["monsters"], CAMPAIGN["quests"],
+        )
+    except Exception as e:
+        logger.warning(f"[map_render] dungeon map failed: {e!r}")
+        await update.effective_chat.send_message(
+            "Couldn't render the map right now.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    await update.effective_chat.send_photo(
+        photo=png_bytes, caption=f"🗺️ {display_name} — explored so far.",
+        message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        reply_markup=_dungeon_map_keyboard(layer_name),
+    )
+
+
 async def _send_layer_map(update: Update, character: dict, layer_name: str) -> None:
     """Real render (map_render.render_layer_map), shared by the initial /visual_map send and the layer-switch button tap."""
     layer_locations = CAMPAIGN["locations"].get(layer_name, {})
@@ -22673,6 +22733,10 @@ async def _do_show_visual_map(update: Update) -> None:
         )
         return
     current_location_id = character.get("current_location")
+    current_location = cl.get_location(CAMPAIGN, current_location_id) if current_location_id else None
+    if current_location and current_location.get("dungeon_id"):
+        await _send_dungeon_map(update, character, current_location["dungeon_id"])
+        return
     current_layer = next(
         (layer for layer, locs in CAMPAIGN["locations"].items() if current_location_id in locs and layer in content),
         next(iter(content)),

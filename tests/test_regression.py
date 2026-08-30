@@ -27031,6 +27031,74 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("haven't explored" in s.lower() for s in sink), sink)
         self.assertEqual(len(update.effective_chat.sent_photos), 0)
 
+    # -- Per-dungeon minimaps (2026-08-30, Coffee: "i want each dungeon
+    #    to have its own minimap") -- see bot._dungeon_locations/
+    #    _send_dungeon_map and map_render.render_dungeon_map.
+    def test_dungeon_locations_merges_across_real_layers(self):
+        """Stonearch Gorge's own dungeon_id spans both surface and underground -- _dungeon_locations must merge both, not just the layer the hub room sits in."""
+        merged = bot._dungeon_locations("stonearch_bridge")
+        self.assertIn("the_weeping_well", merged)  # surface
+        self.assertIn("stonearch_bridge_the_silent_shrine", merged)  # underground
+        self.assertTrue(all(loc.get("dungeon_id") == "stonearch_bridge" for loc in merged.values()))
+
+    def test_every_registered_dungeon_display_name_has_real_tagged_rooms(self):
+        for dungeon_id in bot._DUNGEON_DISPLAY_NAMES:
+            merged = bot._dungeon_locations(dungeon_id)
+            self.assertGreater(len(merged), 0, f"{dungeon_id} has no rooms tagged with its own dungeon_id")
+
+    def test_render_dungeon_map_produces_a_valid_png_scoped_to_one_dungeon(self):
+        from unittest.mock import patch
+        import io
+        import map_render
+        from PIL import Image
+        dungeon_locations = bot._dungeon_locations("wrathflame_vault")
+        visited = set(dungeon_locations.keys())
+        with patch("map_render._fetch_location_tile", return_value=None):
+            png = map_render.render_dungeon_map(
+                "wrathflame_vault", "The Wrathflame Vault", dungeon_locations, visited, set(),
+                "wrathflame_vault_ember_font",
+            )
+        image = Image.open(io.BytesIO(png))
+        self.assertEqual(image.format, "PNG")
+
+    async def test_visual_map_inside_a_dungeon_renders_the_dungeon_scoped_map_not_the_whole_layer(self):
+        from unittest.mock import patch
+        import sessions
+        sessions.end_session(-984)
+        user_id = 900945
+        dungeon_locations = bot._dungeon_locations("wrathflame_vault")
+        make_basic_character(user_id, "DungeonMapTester", chat_id=-984, current_location="wrathflame_vault_ember_font")
+        db.update_character(user_id, -984, visited_locations=list(dungeon_locations.keys()))
+
+        sink = []
+        update = FakeUpdate(user_id, "show me the map", sink, chat_id=-984)
+        with patch("map_render._fetch_location_tile", return_value=None):
+            await bot._do_show_visual_map(update)
+
+        self.assertEqual(len(update.effective_chat.sent_photos), 1)
+        photo = update.effective_chat.sent_photos[0]
+        self.assertIn("wrathflame vault", photo["caption"].lower())
+        callback_data = [btn.callback_data for row in photo["reply_markup"].inline_keyboard for btn in row]
+        self.assertEqual(callback_data, ["map|underground"])
+        sessions.end_session(-984)
+
+    async def test_visual_map_outside_a_dungeon_still_renders_the_whole_layer_map(self):
+        """Regression guard: a location with no dungeon_id at all must keep using the original whole-layer render, unaffected by the new dungeon-map dispatch."""
+        import sessions
+        sessions.end_session(-983)
+        user_id = 900946
+        make_basic_character(user_id, "NonDungeonMapTester", chat_id=-983, current_location="crossroads_tavern")
+        db.update_character(user_id, -983, visited_locations=["crossroads_tavern", "market_row"])
+
+        sink = []
+        update = FakeUpdate(user_id, "show me the map", sink, chat_id=-983)
+        await bot._do_show_visual_map(update)
+
+        self.assertEqual(len(update.effective_chat.sent_photos), 1)
+        photo = update.effective_chat.sent_photos[0]
+        self.assertIn("explored world", photo["caption"].lower())
+        sessions.end_session(-983)
+
     # -- Battle-menu formation submenu only showed the tapper's own row
     #    (2026-08-09, Coffee, dev-topic screenshot: "I wanted to show
     #    all of my party that is in battle so I can actively move
