@@ -2,6 +2,45 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.417] — Chapter 8 expansion, Phase 6 (FINAL): Greymoor Downs grows to 40 rooms, closing the Chapter 3-8 expansion
+
+Sixth and final installment of the approved Chapter 3-8 dungeon
+expansion plan. Greymoor Downs had 8 real core rooms and 7 quests --
+grown to 40 rooms and 10 quests, light touch as planned: the existing
+Kess climax (both her forms, both confrontation scripts, the
+transformation beat, the epilogue) and the Cairnbound Remnant are
+completely untouched.
+
+- **The Sunken Cellars** (down from the Tower Cellar, 16 new rooms):
+  real fortification beneath the tower's own foundation, ending in a
+  new level-95 boss, The Downs' Last Watch (real Insect Plague
+  spellcasting, counters_backstab, an enrage shift, a unique reward).
+- **The Vantage Reach** (east from Beneath the Vantage, 16 new rooms):
+  the windswept ridge extending further than the watchtower's real
+  sightline, ending in a real mini-boss. Both new deep rooms gated
+  behind companion trust.
+- 3 new arc_8 quests appended strictly after the original 7 (including
+  both real Kess quests), so they only ever become offerable after the
+  climax is genuinely done -- a fitting epilogue, not a distraction
+  from it.
+- An existing test (`test_arc_8_climax_now_requires_defeating_both_
+  kess_forms`) asserted arc_8's quest list as an exact, exclusive set
+  of 7 -- updated to recognize the 3 new legitimate quests by name,
+  since this expansion was an intentional, planned addition, not a
+  regression to guard against.
+- Verified with real executed tests: all 40 rooms reciprocated (one
+  real non-reciprocated connection caught and fixed during
+  verification), the new boss's mechanics real, the Kess climax and
+  Cairnbound confirmed completely unchanged -- plus a full re-run of
+  the Kess-sequencing/Borin/Blackthorn/Grask/Wren suites and every
+  prior phase's own arc-quest-count guard. Zero regressions.
+
+This closes the full Chapter 3-8 expansion: Elemental Foundations,
+two gated bonus vaults, and all six main chapters now have real,
+escalating 20-to-40-room dungeons with genuine story development, and
+Kess has a complete build-up arc from a distant name to a real,
+evolving threat across Chapters 5-8.
+
 ## [1.27.416] — generalize shrine prayer/revival beyond Hollow Stump Shrine
 
 Real live follow-up (2026-08-30, dev-bridge, Coffee, right after the

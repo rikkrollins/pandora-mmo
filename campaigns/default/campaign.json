@@ -978,10 +978,12 @@
         "layer": "surface",
         "description": "The watchtower's collapsed base opens further down than it looks from the ridge \u2014 whatever's been using the ruin as a perch clearly isn't alone up there.",
         "connections": [
-          "greymoor_downs_broken_watchtower"
+          "greymoor_downs_broken_watchtower",
+          "greymoor_downs_the_vantage_reach"
         ],
         "directions": {
-          "west": "greymoor_downs_broken_watchtower"
+          "west": "greymoor_downs_broken_watchtower",
+          "east": "greymoor_downs_the_vantage_reach"
         },
         "monsters": [
           "alpha_wolf"
@@ -1002,10 +1004,12 @@
         "layer": "surface",
         "description": "A half-buried storeroom under the watchtower's foundation, easy to miss beneath the rubble \u2014 something small has been using it to stay out of the wind.",
         "connections": [
-          "greymoor_downs_broken_watchtower"
+          "greymoor_downs_broken_watchtower",
+          "greymoor_downs_the_sunken_stair"
         ],
         "directions": {
-          "north": "greymoor_downs_broken_watchtower"
+          "north": "greymoor_downs_broken_watchtower",
+          "down": "greymoor_downs_the_sunken_stair"
         },
         "monsters": [
           "wolf_pup"
@@ -1317,6 +1321,338 @@
         "grid_position": {
           "x": -1,
           "y": -4
+        }
+      },
+      "greymoor_downs_the_vantage_reach": {
+        "name": "The Vantage Reach",
+        "layer": "surface",
+        "description": "The ridge keeps going east past the vantage point, further than the watchtower's own real sightline should carry.",
+        "connections": [
+          "greymoor_downs_tower_vantage_below",
+          "greymoor_downs_the_windswept_hollow",
+          "greymoor_downs_the_reachs_overlook"
+        ],
+        "directions": {
+          "west": "greymoor_downs_tower_vantage_below",
+          "east": "greymoor_downs_the_windswept_hollow",
+          "north": "greymoor_downs_the_reachs_overlook"
+        },
+        "monsters": [
+          "vantage_reach_wolf"
+        ],
+        "grid_position": {
+          "x": 3,
+          "y": 0
+        }
+      },
+      "greymoor_downs_the_windswept_hollow": {
+        "name": "The Windswept Hollow",
+        "layer": "surface",
+        "description": "A real hollow in the ridge, wind loud enough here to cover most other sound.",
+        "connections": [
+          "greymoor_downs_the_vantage_reach",
+          "greymoor_downs_the_sheltered_camp",
+          "greymoor_downs_the_far_marker",
+          "greymoor_downs_the_hollows_lee"
+        ],
+        "directions": {
+          "west": "greymoor_downs_the_vantage_reach",
+          "north": "greymoor_downs_the_sheltered_camp",
+          "east": "greymoor_downs_the_far_marker",
+          "south": "greymoor_downs_the_hollows_lee"
+        },
+        "monsters": [
+          "vantage_reach_alpha"
+        ],
+        "grid_position": {
+          "x": 4,
+          "y": 0
+        }
+      },
+      "greymoor_downs_the_sheltered_camp": {
+        "name": "The Sheltered Camp",
+        "layer": "surface",
+        "description": "A real camp, sheltered from the wind by a fold in the ridge -- the one genuinely calm spot on this whole reach.",
+        "connections": [
+          "greymoor_downs_the_windswept_hollow",
+          "greymoor_downs_the_ridge_cache"
+        ],
+        "directions": {
+          "south": "greymoor_downs_the_windswept_hollow",
+          "north": "greymoor_downs_the_ridge_cache"
+        },
+        "resource_nodes": [
+          {
+            "id": "sheltered_camp_herb_bed",
+            "name": "a bed of wind-hardy herbs",
+            "material": "silverleaf_herb",
+            "ability": "wisdom",
+            "skill": "herbalism"
+          }
+        ],
+        "grid_position": {
+          "x": 4,
+          "y": 1
+        }
+      },
+      "greymoor_downs_the_ridge_cache": {
+        "name": "The Ridge Cache",
+        "layer": "surface",
+        "description": "A real cache, tucked into the ridge's own fold, well out of the wind and well out of sight.",
+        "connections": [
+          "greymoor_downs_the_sheltered_camp"
+        ],
+        "directions": {
+          "south": "greymoor_downs_the_sheltered_camp"
+        },
+        "lockables": [
+          {
+            "id": "ridge_cache_chest",
+            "kind": "chest",
+            "name": "a real cache set into the ridge",
+            "loot": {
+              "greater_healing_potion": 1
+            },
+            "gold": 220
+          }
+        ],
+        "grid_position": {
+          "x": 4,
+          "y": 2
+        }
+      },
+      "greymoor_downs_the_far_marker": {
+        "name": "The Far Marker",
+        "layer": "surface",
+        "description": "A real boundary marker, older than the watchtower, worn nearly smooth by wind and years.",
+        "connections": [
+          "greymoor_downs_the_windswept_hollow",
+          "greymoor_downs_the_markers_riddle",
+          "greymoor_downs_the_markers_shadow"
+        ],
+        "directions": {
+          "west": "greymoor_downs_the_windswept_hollow",
+          "east": "greymoor_downs_the_markers_riddle",
+          "south": "greymoor_downs_the_markers_shadow"
+        },
+        "grid_position": {
+          "x": 5,
+          "y": 0
+        }
+      },
+      "greymoor_downs_the_markers_riddle": {
+        "name": "The Marker's Riddle",
+        "layer": "surface",
+        "description": "The far marker's own real inscription, worn but legible if you actually stop to read it.",
+        "connections": [
+          "greymoor_downs_the_far_marker",
+          "greymoor_downs_the_deep_reach"
+        ],
+        "directions": {
+          "west": "greymoor_downs_the_far_marker",
+          "east": "greymoor_downs_the_deep_reach"
+        },
+        "npcs": [
+          "the_downs_own_marker"
+        ],
+        "grid_position": {
+          "x": 6,
+          "y": 0
+        }
+      },
+      "greymoor_downs_the_deep_reach": {
+        "name": "The Deep Reach",
+        "layer": "surface",
+        "description": "The ridge finally starts to fall away here, real and steep, toward something the wind carries no sound of at all.",
+        "connections": [
+          "greymoor_downs_the_markers_riddle",
+          "greymoor_downs_the_reachs_hollow",
+          "greymoor_downs_the_reachs_ledge"
+        ],
+        "directions": {
+          "west": "greymoor_downs_the_markers_riddle",
+          "east": "greymoor_downs_the_reachs_hollow",
+          "south": "greymoor_downs_the_reachs_ledge"
+        },
+        "monsters": [
+          "vantage_reach_wolf"
+        ],
+        "grid_position": {
+          "x": 7,
+          "y": 0
+        }
+      },
+      "greymoor_downs_the_reachs_hollow": {
+        "name": "The Reach's Hollow",
+        "layer": "surface",
+        "description": "A real hollow at the edge of the reach, sheltered enough that something's clearly been using it.",
+        "connections": [
+          "greymoor_downs_the_deep_reach",
+          "greymoor_downs_the_ridges_end",
+          "greymoor_downs_the_hollows_record"
+        ],
+        "directions": {
+          "west": "greymoor_downs_the_deep_reach",
+          "east": "greymoor_downs_the_ridges_end",
+          "south": "greymoor_downs_the_hollows_record"
+        },
+        "monsters": [
+          "vantage_reach_alpha"
+        ],
+        "interactables": {
+          "reachs_hollow_record": {
+            "name": "a real, worn marker left in the hollow",
+            "description": "The same tally style found scratched into a certain dwarf's old gear -- whoever's route this was, it crossed the Downs too."
+          }
+        },
+        "grid_position": {
+          "x": 8,
+          "y": 0
+        }
+      },
+      "greymoor_downs_the_ridges_end": {
+        "name": "The Ridge's End",
+        "layer": "surface",
+        "description": "The real end of the ridge, level ground finally opening up -- and something old has clearly claimed it.",
+        "connections": [
+          "greymoor_downs_the_reachs_hollow",
+          "greymoor_downs_the_final_watch",
+          "greymoor_downs_the_ends_own_marker"
+        ],
+        "directions": {
+          "west": "greymoor_downs_the_reachs_hollow",
+          "east": "greymoor_downs_the_final_watch",
+          "south": "greymoor_downs_the_ends_own_marker"
+        },
+        "story_gates": {
+          "greymoor_downs_the_final_watch": {
+            "requires_companion_trust": {
+              "min_affinity": 40
+            }
+          }
+        },
+        "grid_position": {
+          "x": 9,
+          "y": 0
+        }
+      },
+      "greymoor_downs_the_final_watch": {
+        "name": "The Final Watch",
+        "layer": "surface",
+        "description": "The real last watch on this whole ridge -- and whatever's kept it has been alone up here for a very long time.",
+        "connections": [
+          "greymoor_downs_the_ridges_end"
+        ],
+        "directions": {
+          "west": "greymoor_downs_the_ridges_end"
+        },
+        "monsters": [
+          "the_ridges_last_alpha"
+        ],
+        "grid_position": {
+          "x": 10,
+          "y": 0
+        }
+      },
+      "greymoor_downs_the_reachs_overlook": {
+        "name": "The Reach's Overlook",
+        "layer": "surface",
+        "description": "A small rise off the vantage reach, real and deliberate, high enough to see most of the ridge at once.",
+        "connections": [
+          "greymoor_downs_the_vantage_reach"
+        ],
+        "directions": {
+          "south": "greymoor_downs_the_vantage_reach"
+        },
+        "grid_position": {
+          "x": 3,
+          "y": 1
+        }
+      },
+      "greymoor_downs_the_hollows_lee": {
+        "name": "The Hollow's Lee",
+        "layer": "surface",
+        "description": "A real lee off the windswept hollow, sheltered enough that something small has been left here.",
+        "connections": [
+          "greymoor_downs_the_windswept_hollow"
+        ],
+        "directions": {
+          "north": "greymoor_downs_the_windswept_hollow"
+        },
+        "lockables": [
+          {
+            "id": "hollows_lee_cache",
+            "kind": "chest",
+            "name": "a real cache tucked into the lee",
+            "loot": {
+              "scroll_invisibility": 1
+            },
+            "gold": 235
+          }
+        ],
+        "grid_position": {
+          "x": 4,
+          "y": -1
+        }
+      },
+      "greymoor_downs_the_markers_shadow": {
+        "name": "The Marker's Shadow",
+        "layer": "surface",
+        "description": "A small patch of real, permanent shade behind the far marker, out of place on an otherwise open ridge.",
+        "connections": [
+          "greymoor_downs_the_far_marker"
+        ],
+        "directions": {
+          "north": "greymoor_downs_the_far_marker"
+        },
+        "grid_position": {
+          "x": 5,
+          "y": -1
+        }
+      },
+      "greymoor_downs_the_reachs_ledge": {
+        "name": "The Reach's Ledge",
+        "layer": "surface",
+        "description": "A real ledge off the deep reach, narrow enough to be genuinely dangerous in a real hurry.",
+        "connections": [
+          "greymoor_downs_the_deep_reach"
+        ],
+        "directions": {
+          "north": "greymoor_downs_the_deep_reach"
+        },
+        "grid_position": {
+          "x": 7,
+          "y": -1
+        }
+      },
+      "greymoor_downs_the_hollows_record": {
+        "name": "The Hollow's Record",
+        "layer": "surface",
+        "description": "A small side pocket off the reach's hollow, real records left behind by whoever used it as a real waypoint.",
+        "connections": [
+          "greymoor_downs_the_reachs_hollow"
+        ],
+        "directions": {
+          "north": "greymoor_downs_the_reachs_hollow"
+        },
+        "grid_position": {
+          "x": 8,
+          "y": -1
+        }
+      },
+      "greymoor_downs_the_ends_own_marker": {
+        "name": "The End's Own Marker",
+        "layer": "surface",
+        "description": "A final real marker, the last one on the whole reach -- someone made sure this line was kept all the way out here too.",
+        "connections": [
+          "greymoor_downs_the_ridges_end"
+        ],
+        "directions": {
+          "north": "greymoor_downs_the_ridges_end"
+        },
+        "grid_position": {
+          "x": 9,
+          "y": -1
         }
       }
     },
@@ -5077,6 +5413,361 @@
           "x": 16,
           "y": -7
         }
+      },
+      "greymoor_downs_the_sunken_stair": {
+        "name": "The Sunken Stair",
+        "layer": "underground",
+        "description": "Real steps below the tower cellar, sinking further than the tower's own foundation should reach.",
+        "connections": [
+          "greymoor_downs_tower_cellar",
+          "greymoor_downs_the_cellar_hollow",
+          "greymoor_downs_the_stairs_landing"
+        ],
+        "directions": {
+          "up": "greymoor_downs_tower_cellar",
+          "down": "greymoor_downs_the_cellar_hollow",
+          "east": "greymoor_downs_the_stairs_landing"
+        },
+        "monsters": [
+          "sunken_cellar_wolf"
+        ],
+        "grid_position": {
+          "x": 4,
+          "y": -8
+        }
+      },
+      "greymoor_downs_the_cellar_hollow": {
+        "name": "The Cellar Hollow",
+        "layer": "underground",
+        "description": "A real hollow beneath the cellar, cold enough that the wolves above never bother coming down.",
+        "connections": [
+          "greymoor_downs_the_sunken_stair",
+          "greymoor_downs_the_sealed_larder",
+          "greymoor_downs_the_deeper_dark",
+          "greymoor_downs_the_hollows_edge"
+        ],
+        "directions": {
+          "up": "greymoor_downs_the_sunken_stair",
+          "east": "greymoor_downs_the_sealed_larder",
+          "down": "greymoor_downs_the_deeper_dark",
+          "west": "greymoor_downs_the_hollows_edge"
+        },
+        "monsters": [
+          "sunken_cellar_stalker"
+        ],
+        "grid_position": {
+          "x": 4,
+          "y": -9
+        }
+      },
+      "greymoor_downs_the_sealed_larder": {
+        "name": "The Sealed Larder",
+        "layer": "underground",
+        "description": "A real larder, sealed shut, stocked for a garrison that never came back to eat any of it.",
+        "connections": [
+          "greymoor_downs_the_cellar_hollow"
+        ],
+        "directions": {
+          "west": "greymoor_downs_the_cellar_hollow"
+        },
+        "lockables": [
+          {
+            "id": "sealed_larder_cache",
+            "kind": "chest",
+            "name": "the sealed larder's own real stock",
+            "loot": {
+              "greater_healing_potion": 1
+            },
+            "gold": 210
+          }
+        ],
+        "grid_position": {
+          "x": 5,
+          "y": -9
+        }
+      },
+      "greymoor_downs_the_deeper_dark": {
+        "name": "The Deeper Dark",
+        "layer": "underground",
+        "description": "Real dark, past anything the tower above was ever meant to reach -- the one genuinely still room this deep down.",
+        "connections": [
+          "greymoor_downs_the_cellar_hollow",
+          "greymoor_downs_the_bone_stair"
+        ],
+        "directions": {
+          "up": "greymoor_downs_the_cellar_hollow",
+          "down": "greymoor_downs_the_bone_stair"
+        },
+        "grid_position": {
+          "x": 4,
+          "y": -10
+        }
+      },
+      "greymoor_downs_the_bone_stair": {
+        "name": "The Bone Stair",
+        "layer": "underground",
+        "description": "Real bone, worked into the walls as reinforcement -- whoever built this had more bodies than stone to spare.",
+        "connections": [
+          "greymoor_downs_the_deeper_dark",
+          "greymoor_downs_the_watchers_grave",
+          "greymoor_downs_the_bone_niche"
+        ],
+        "directions": {
+          "up": "greymoor_downs_the_deeper_dark",
+          "down": "greymoor_downs_the_watchers_grave",
+          "east": "greymoor_downs_the_bone_niche"
+        },
+        "monsters": [
+          "sunken_cellar_husk"
+        ],
+        "resource_nodes": [
+          {
+            "id": "bone_stair_ore_vein",
+            "name": "a real ore vein exposed in the bone-reinforced wall",
+            "material": "iron_ore",
+            "ability": "strength",
+            "skill": "mining"
+          }
+        ],
+        "grid_position": {
+          "x": 4,
+          "y": -11
+        }
+      },
+      "greymoor_downs_the_watchers_grave": {
+        "name": "The Watcher's Grave",
+        "layer": "underground",
+        "description": "A real grave, marked, deliberate -- whoever's buried here was meant to keep watching even after they stopped being able to.",
+        "connections": [
+          "greymoor_downs_the_bone_stair",
+          "greymoor_downs_the_marker_hall"
+        ],
+        "directions": {
+          "up": "greymoor_downs_the_bone_stair",
+          "down": "greymoor_downs_the_marker_hall"
+        },
+        "interactables": {
+          "watchers_grave_marker": {
+            "name": "a real, deliberate grave marker",
+            "description": "Whoever's buried here was placed facing the way out, on purpose -- still watching, even now."
+          }
+        },
+        "grid_position": {
+          "x": 4,
+          "y": -12
+        }
+      },
+      "greymoor_downs_the_marker_hall": {
+        "name": "The Marker Hall",
+        "layer": "underground",
+        "description": "A real hall, lined with the same worn boundary markers found up on the Downs -- someone's been keeping this exact line for a very long time.",
+        "connections": [
+          "greymoor_downs_the_watchers_grave",
+          "greymoor_downs_the_cellar_warden",
+          "greymoor_downs_the_markers_answer"
+        ],
+        "directions": {
+          "up": "greymoor_downs_the_watchers_grave",
+          "down": "greymoor_downs_the_cellar_warden",
+          "east": "greymoor_downs_the_markers_answer"
+        },
+        "npcs": [
+          "the_downs_own_marker"
+        ],
+        "grid_position": {
+          "x": 4,
+          "y": -13
+        }
+      },
+      "greymoor_downs_the_cellar_warden": {
+        "name": "The Cellar Warden's Hall",
+        "layer": "underground",
+        "description": "A real hall, kept exactly as it was left -- and something's still keeping it that way.",
+        "connections": [
+          "greymoor_downs_the_marker_hall",
+          "greymoor_downs_the_last_cellar"
+        ],
+        "directions": {
+          "up": "greymoor_downs_the_marker_hall",
+          "down": "greymoor_downs_the_last_cellar"
+        },
+        "monsters": [
+          "the_cellar_warden"
+        ],
+        "grid_position": {
+          "x": 4,
+          "y": -14
+        }
+      },
+      "greymoor_downs_the_last_cellar": {
+        "name": "The Last Cellar",
+        "layer": "underground",
+        "description": "The real bottom of the tower's foundation -- older than the tower itself, and clearly still occupied.",
+        "connections": [
+          "greymoor_downs_the_cellar_warden",
+          "greymoor_downs_the_final_approach",
+          "greymoor_downs_the_cellars_own_ledger"
+        ],
+        "directions": {
+          "up": "greymoor_downs_the_cellar_warden",
+          "down": "greymoor_downs_the_final_approach",
+          "east": "greymoor_downs_the_cellars_own_ledger"
+        },
+        "interactables": {
+          "last_cellar_record": {
+            "name": "a real, worn record left in the last cellar",
+            "description": "Whoever kept this watch left one final note, unsigned: \"the downs remember longer than anyone standing on them does.\""
+          }
+        },
+        "grid_position": {
+          "x": 4,
+          "y": -15
+        }
+      },
+      "greymoor_downs_the_final_approach": {
+        "name": "The Final Approach",
+        "layer": "underground",
+        "description": "The last real stretch before whatever's actually still keeping this whole watch -- quiet, cold, and clearly not alone.",
+        "connections": [
+          "greymoor_downs_the_last_cellar",
+          "greymoor_downs_the_downs_last_watch"
+        ],
+        "directions": {
+          "up": "greymoor_downs_the_last_cellar",
+          "down": "greymoor_downs_the_downs_last_watch"
+        },
+        "story_gates": {
+          "greymoor_downs_the_downs_last_watch": {
+            "requires_companion_trust": {
+              "min_affinity": 40
+            }
+          }
+        },
+        "grid_position": {
+          "x": 4,
+          "y": -16
+        }
+      },
+      "greymoor_downs_the_downs_last_watch": {
+        "name": "The Downs' Last Watch",
+        "layer": "underground",
+        "description": "The real, final watch beneath the Downs -- and whatever's kept it this whole time has been waiting a very long time to be relieved.",
+        "connections": [
+          "greymoor_downs_the_final_approach"
+        ],
+        "directions": {
+          "up": "greymoor_downs_the_final_approach"
+        },
+        "monsters": [
+          "the_downs_last_watch"
+        ],
+        "combat_environment": {
+          "name": "the last watch's own real, settling foundation stones",
+          "description": "Real stone, real age, real weight -- fighting hard enough down here risks bringing a genuine piece of the tower's own foundation down.",
+          "damage_dice": "4d6"
+        },
+        "grid_position": {
+          "x": 4,
+          "y": -17
+        }
+      },
+      "greymoor_downs_the_stairs_landing": {
+        "name": "The Stair's Landing",
+        "layer": "underground",
+        "description": "A small landing partway down the sunken stair, real and deliberate, clearly meant as a resting point.",
+        "connections": [
+          "greymoor_downs_the_sunken_stair"
+        ],
+        "directions": {
+          "west": "greymoor_downs_the_sunken_stair"
+        },
+        "grid_position": {
+          "x": 5,
+          "y": -8
+        }
+      },
+      "greymoor_downs_the_hollows_edge": {
+        "name": "The Hollow's Edge",
+        "layer": "underground",
+        "description": "The real edge of the cellar hollow, easy to overlook -- something small has been left here, on purpose.",
+        "connections": [
+          "greymoor_downs_the_cellar_hollow"
+        ],
+        "directions": {
+          "east": "greymoor_downs_the_cellar_hollow"
+        },
+        "interactables": {
+          "hollows_edge_marker": {
+            "name": "a small, real marker left at the edge",
+            "description": "Someone left this here deliberately, a real waypoint for whoever came looking after them."
+          }
+        },
+        "grid_position": {
+          "x": 3,
+          "y": -9
+        }
+      },
+      "greymoor_downs_the_bone_niche": {
+        "name": "The Bone Niche",
+        "layer": "underground",
+        "description": "A small niche off the bone stair, real and deliberate, sealed shut once and not since.",
+        "connections": [
+          "greymoor_downs_the_bone_stair"
+        ],
+        "directions": {
+          "west": "greymoor_downs_the_bone_stair"
+        },
+        "lockables": [
+          {
+            "id": "bone_niche_cache",
+            "kind": "chest",
+            "name": "a real cache sealed into the bone niche",
+            "loot": {
+              "scroll_invisibility": 1
+            },
+            "gold": 230
+          }
+        ],
+        "grid_position": {
+          "x": 5,
+          "y": -11
+        }
+      },
+      "greymoor_downs_the_markers_answer": {
+        "name": "The Marker's Answer",
+        "layer": "underground",
+        "description": "A small side chamber where the boundary markers finally explain themselves, to whoever actually asks.",
+        "connections": [
+          "greymoor_downs_the_marker_hall"
+        ],
+        "directions": {
+          "west": "greymoor_downs_the_marker_hall"
+        },
+        "grid_position": {
+          "x": 5,
+          "y": -13
+        }
+      },
+      "greymoor_downs_the_cellars_own_ledger": {
+        "name": "The Cellar's Own Ledger",
+        "layer": "underground",
+        "description": "A small side room, real ledgers stacked floor to ceiling -- whoever kept this watch was thorough about it.",
+        "connections": [
+          "greymoor_downs_the_last_cellar"
+        ],
+        "directions": {
+          "west": "greymoor_downs_the_last_cellar"
+        },
+        "interactables": {
+          "cellars_ledger": {
+            "name": "a real, thorough ledger",
+            "description": "Every shift, every watch, recorded for generations -- right up until the entries just stop, mid-page."
+          }
+        },
+        "grid_position": {
+          "x": 5,
+          "y": -15
+        }
       }
     },
     "sky": {
@@ -6206,6 +6897,15 @@
         "damage_dice": "1d8",
         "damage_bonus": 60
       }
+    },
+    "the_downs_own_marker": {
+      "name": "The Downs' Own Marker",
+      "role": "puzzle_guardian",
+      "personality": "worn nearly smooth by wind and years, and still, somehow, legible to whoever actually needs it to be",
+      "goals": "has been marking the same real boundary since long before the watchtower ever needed one",
+      "recruitable": false,
+      "alignment": "True Neutral",
+      "disposition": "neutral"
     }
   },
   "shops": {
@@ -7988,6 +8688,44 @@
       },
       "clue": "The tracks lead east from the Scout's Camp, onto open ground.",
       "weight": "climactic"
+    },
+    "the_sunken_cellars_warden": {
+      "title": "What the Cellar Kept",
+      "description": "A real hall below the tower cellar, kept exactly as it was left -- and something's still keeping it that way.",
+      "location": "greymoor_downs_the_cellar_warden",
+      "reward_xp": 2200,
+      "reward_gold": 750,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_cellar_warden"
+      },
+      "clue": "The Cellar Warden's Hall lies deep below the Tower Cellar, past the Watcher's Grave."
+    },
+    "the_downs_own_marker_riddle": {
+      "title": "The Line That Never Moves",
+      "description": "A real boundary marker, older than the watchtower, still keeping the same line it always has.",
+      "location": "greymoor_downs_the_markers_riddle",
+      "trigger": {
+        "type": "solve_puzzle",
+        "puzzle_id": "downs_own_marker_riddle"
+      },
+      "reward_xp": 2100,
+      "reward_gold": 700,
+      "clue": "The Downs' Own Marker poses a real question: \"I mark the same line every year, and I am never the one who moves. What am I?\""
+    },
+    "the_downs_last_watchs_reckoning": {
+      "title": "The Downs' Last Watch",
+      "description": "The real, final watch beneath the Downs -- and whatever's kept it this whole time has been waiting a very long time to be relieved.",
+      "location": "greymoor_downs_the_downs_last_watch",
+      "reward_xp": 3200,
+      "reward_gold": 1100,
+      "reward_item": "the_downs_last_watchs_seal",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_downs_last_watch"
+      },
+      "clue": "The Final Approach, past the Last Cellar, leads straight to whatever's actually still keeping this watch.",
+      "weight": "climactic"
     }
   },
   "story_arcs": {
@@ -8107,7 +8845,10 @@
         "the_vantage_belows_alpha",
         "the_barrow_depths_bound",
         "kess_first_reckoning",
-        "kess_the_unbound_reckoning"
+        "kess_the_unbound_reckoning",
+        "the_sunken_cellars_warden",
+        "the_downs_own_marker_riddle",
+        "the_downs_last_watchs_reckoning"
       ],
       "required_level": 75
     },
@@ -10935,6 +11676,143 @@
       "damage_dice": "1d8",
       "damage_bonus": 255,
       "damage_type": "poison"
+    },
+    "sunken_cellar_wolf": {
+      "name": "Sunken Cellar Wolf",
+      "level": 78,
+      "dexterity": 16,
+      "strength": 18,
+      "armor_class": 22,
+      "hp_max": 5300,
+      "proficiency_bonus": 16,
+      "xp_reward": 3400,
+      "damage_dice": "1d8",
+      "damage_bonus": 280,
+      "damage_type": "physical"
+    },
+    "sunken_cellar_stalker": {
+      "name": "Sunken Cellar Stalker",
+      "level": 82,
+      "dexterity": 17,
+      "strength": 18,
+      "armor_class": 22,
+      "hp_max": 5800,
+      "proficiency_bonus": 16,
+      "xp_reward": 3700,
+      "damage_dice": "1d8",
+      "damage_bonus": 295,
+      "damage_type": "necrotic"
+    },
+    "the_cellar_warden": {
+      "name": "The Cellar Warden",
+      "level": 87,
+      "dexterity": 15,
+      "strength": 21,
+      "armor_class": 24,
+      "hp_max": 8500,
+      "proficiency_bonus": 17,
+      "xp_reward": 4400,
+      "damage_dice": "1d8",
+      "damage_bonus": 330,
+      "damage_type": "necrotic",
+      "is_boss": false,
+      "stealable_items": [
+        {
+          "item_id": "greater_spell_tonic",
+          "weight": 90
+        }
+      ]
+    },
+    "sunken_cellar_husk": {
+      "name": "Sunken Cellar Husk",
+      "level": 90,
+      "dexterity": 15,
+      "strength": 20,
+      "armor_class": 23,
+      "hp_max": 9200,
+      "proficiency_bonus": 18,
+      "xp_reward": 4700,
+      "damage_dice": "1d8",
+      "damage_bonus": 345,
+      "damage_type": "necrotic"
+    },
+    "the_downs_last_watch": {
+      "name": "The Downs' Last Watch",
+      "level": 95,
+      "dexterity": 16,
+      "strength": 22,
+      "armor_class": 25,
+      "hp_max": 15000,
+      "proficiency_bonus": 19,
+      "xp_reward": 6000,
+      "damage_dice": "1d8",
+      "damage_bonus": 380,
+      "damage_type": "necrotic",
+      "is_boss": true,
+      "known_spells": [
+        "insect_plague"
+      ],
+      "counters_backstab": true,
+      "extra_attack_when_enraged": true,
+      "vulnerabilities": [
+        "radiant"
+      ],
+      "stealable_items": [
+        {
+          "item_id": "greater_spell_tonic",
+          "weight": 60
+        },
+        {
+          "item_id": "supreme_spell_tonic",
+          "weight": 25
+        }
+      ]
+    },
+    "vantage_reach_wolf": {
+      "name": "Vantage Reach Wolf",
+      "level": 80,
+      "dexterity": 17,
+      "strength": 18,
+      "armor_class": 22,
+      "hp_max": 5500,
+      "proficiency_bonus": 16,
+      "xp_reward": 3550,
+      "damage_dice": "1d8",
+      "damage_bonus": 288,
+      "damage_type": "physical"
+    },
+    "vantage_reach_alpha": {
+      "name": "Vantage Reach Alpha",
+      "level": 84,
+      "dexterity": 16,
+      "strength": 20,
+      "armor_class": 23,
+      "hp_max": 6100,
+      "proficiency_bonus": 17,
+      "xp_reward": 3900,
+      "damage_dice": "1d8",
+      "damage_bonus": 305,
+      "damage_type": "physical"
+    },
+    "the_ridges_last_alpha": {
+      "name": "The Ridge's Last Alpha",
+      "level": 93,
+      "dexterity": 17,
+      "strength": 21,
+      "armor_class": 24,
+      "hp_max": 9500,
+      "proficiency_bonus": 18,
+      "xp_reward": 4900,
+      "damage_dice": "1d8",
+      "damage_bonus": 360,
+      "damage_type": "physical",
+      "is_boss": false,
+      "stealable_items": [
+        {
+          "item_id": "greater_healing_potion",
+          "weight": 90
+        }
+      ]
     }
   },
   "factions": {
@@ -11115,6 +11993,14 @@
         "a shadow",
         "the gorge below",
         "the watcher"
+      ]
+    },
+    "downs_own_marker_riddle": {
+      "riddle": "I mark the same line every year, and I am never the one who moves. What am I?",
+      "accepted_answers": [
+        "a boundary stone",
+        "a marker",
+        "the horizon"
       ]
     }
   },

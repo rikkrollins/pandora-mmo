@@ -707,6 +707,15 @@ ITEMS = {
         "note": "Whoever it was warding this crossing for never actually arrived. It kept watch anyway.",
         "description": "Whoever it was warding this crossing for never actually arrived. It kept watch anyway.",
     },
+    # Chapter 8 expansion (2026-08-30): The Downs' Last Watch's real
+    # unique reward -- the final new item of the Chapter 3-8 expansion.
+    "the_downs_last_watchs_seal": {
+        "name": "The Downs' Last Watch's Seal", "type": "wondrous", "rarity": "very_rare",
+        "price": 0, "weight": 1,
+        "elemental_resistances": [{"damage_type": "necrotic", "value": 50}],
+        "note": "The watch is finally, genuinely over. Whatever it was waiting to be relieved by, it wasn't this -- and it doesn't seem to mind.",
+        "description": "The watch is finally, genuinely over. Whatever it was waiting to be relieved by, it wasn't this -- and it doesn't seem to mind.",
+    },
 
     # --- Recipe books (2026-08-11, per Coffee: real, buyable reference
     # items teaching a profession's real level-1 recipes -- "make basic,

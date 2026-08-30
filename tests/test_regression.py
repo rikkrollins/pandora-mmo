@@ -6145,6 +6145,104 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(npc.get("recruitable"))
             self.assertIn(npc_id, cl.get_location(bot.CAMPAIGN, loc_id)["npcs"])
 
+    # -- Chapter 8 expansion, Phase 6 (2026-08-30, FINAL phase): Greymoor
+    #    Downs grows from 8 real core rooms/7 quests to 40 rooms/10
+    #    quests -- light touch, the existing Kess climax and the
+    #    Cairnbound Remnant are both completely untouched -------------
+    def test_arc_8_now_has_ten_quests_original_seven_completely_undisturbed(self):
+        quests = bot.CAMPAIGN["story_arcs"]["arc_8_greymoor_downs"]["quests"]
+        self.assertEqual(len(quests), 10)
+        self.assertEqual(
+            quests[:7],
+            [
+                "borins_blackthorn_warning", "watchtowers_stalker", "the_tower_cellars_pup",
+                "the_vantage_belows_alpha", "the_barrow_depths_bound", "kess_first_reckoning",
+                "kess_the_unbound_reckoning",
+            ],
+        )
+
+    def test_greymoor_downs_grows_to_40_rooms_without_touching_the_endgame_chain(self):
+        locs = {}
+        for layer, d in bot.CAMPAIGN["locations"].items():
+            locs.update(d)
+        core_ids = {
+            "greymoor_downs", "greymoor_downs_barrow_depths", "greymoor_downs_broken_watchtower",
+            "greymoor_downs_lonely_cairn", "greymoor_downs_sunken_barrow", "greymoor_downs_tower_cellar",
+            "greymoor_downs_tower_vantage_below", "greymoor_downs_windswept_ridge",
+        }
+        endgame_chain = {"greymoor_downs_below_the_cairn", "greymoor_downs_the_unopened_seal", "greymoor_downs_the_last_question"}
+        for loc_id in endgame_chain:
+            self.assertIn(loc_id, locs, f"{loc_id} must still exist, untouched")
+        new_ids = {
+            k for k in locs
+            if k.startswith("greymoor_downs_") and k not in core_ids and k not in endgame_chain
+        }
+        self.assertEqual(len(core_ids) + len(new_ids), 40)
+
+    def test_greymoor_downs_new_rooms_are_fully_connected_and_reciprocated(self):
+        locs = {}
+        for layer, d in bot.CAMPAIGN["locations"].items():
+            locs.update(d)
+        core_ids = {
+            "greymoor_downs", "greymoor_downs_barrow_depths", "greymoor_downs_broken_watchtower",
+            "greymoor_downs_lonely_cairn", "greymoor_downs_sunken_barrow", "greymoor_downs_tower_cellar",
+            "greymoor_downs_tower_vantage_below", "greymoor_downs_windswept_ridge",
+        }
+        endgame_chain = {"greymoor_downs_below_the_cairn", "greymoor_downs_the_unopened_seal", "greymoor_downs_the_last_question"}
+        new_ids = [
+            k for k in locs
+            if k.startswith("greymoor_downs_") and k not in core_ids and k not in endgame_chain
+        ]
+        self.assertGreaterEqual(len(new_ids), 32)
+        for loc_id in new_ids:
+            loc = locs[loc_id]
+            for direction, dest_id in loc.get("directions", {}).items():
+                dest = cl.get_location(bot.CAMPAIGN, dest_id)
+                self.assertIsNotNone(dest, f"{loc_id} -> {dest_id} via {direction} is a dead end")
+                self.assertIn(loc_id, dest.get("connections", []), f"{dest_id} doesn't connect back to {loc_id}")
+
+    def test_kess_climax_and_cairnbound_completely_untouched(self):
+        """Light touch, per the approved plan -- the existing Kess climax rooms and the Cairnbound Remnant stay exactly as they were."""
+        hub = cl.get_location(bot.CAMPAIGN, "greymoor_downs")
+        self.assertEqual(set(hub["npcs"]), {"kess_the_bandit", "kess_the_unbound"})
+        cairn = cl.get_location(bot.CAMPAIGN, "greymoor_downs_lonely_cairn")
+        self.assertEqual(cairn["monsters"], ["the_cairnbound"])
+        self.assertEqual(bot.CAMPAIGN["monsters"]["the_cairnbound"]["hp_max"], 100000)
+
+    def test_the_downs_last_watch_uses_the_real_new_systems_not_a_generic_statstick(self):
+        boss = bot.CAMPAIGN["monsters"]["the_downs_last_watch"]
+        self.assertTrue(boss["is_boss"])
+        self.assertIn("insect_plague", boss["known_spells"])
+        self.assertTrue(boss.get("counters_backstab"))
+        self.assertTrue(boss.get("extra_attack_when_enraged"))
+        self.assertTrue(boss.get("stealable_items"))
+        self.assertIn("the_downs_last_watchs_reckoning", bot._QUEST_MONSTER_INDEX.get("the_downs_last_watch", []))
+        quest = bot.CAMPAIGN["quests"]["the_downs_last_watchs_reckoning"]
+        self.assertEqual(quest["reward_item"], "the_downs_last_watchs_seal")
+
+    def test_final_watch_and_downs_last_watch_are_gated_behind_companion_trust(self):
+        location_a = cl.get_location(bot.CAMPAIGN, "greymoor_downs_the_final_approach")
+        current_a = {"story_gates": location_a["story_gates"]}
+        character = {"party_id": None, "completed_quests": []}
+        self.assertIsNotNone(bot._check_story_gate(character, current_a, "greymoor_downs_the_downs_last_watch"))
+
+        location_b = cl.get_location(bot.CAMPAIGN, "greymoor_downs_the_ridges_end")
+        current_b = {"story_gates": location_b["story_gates"]}
+        self.assertIsNotNone(bot._check_story_gate(character, current_b, "greymoor_downs_the_final_watch"))
+
+    def test_greymoor_downs_lockable_chests_grant_real_loot(self):
+        for loc_id in ("greymoor_downs_the_sealed_larder", "greymoor_downs_the_bone_niche", "greymoor_downs_the_ridge_cache"):
+            loc = cl.get_location(bot.CAMPAIGN, loc_id)
+            chest = loc["lockables"][0]
+            self.assertEqual(chest["kind"], "chest")
+            self.assertTrue(chest["loot"])
+
+    def test_new_greymoor_downs_npc_is_real_and_non_recruitable(self):
+        npc = bot.CAMPAIGN["npcs"]["the_downs_own_marker"]
+        self.assertFalse(npc.get("recruitable"))
+        self.assertIn("the_downs_own_marker", cl.get_location(bot.CAMPAIGN, "greymoor_downs_the_marker_hall")["npcs"])
+        self.assertIn("the_downs_own_marker", cl.get_location(bot.CAMPAIGN, "greymoor_downs_the_markers_riddle")["npcs"])
+
     def test_companion_favor_pays_more_affinity_once_the_companion_already_trusts_you(self):
         """
         Real live request (2026-08-23, Coffee: "give the affinity real
@@ -18533,7 +18631,15 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("kess_first_reckoning", arc["quests"])
         self.assertIn("kess_the_unbound_reckoning", arc["quests"])
         self.assertFalse(set(arc["quests"]).issubset(known_quests), "arc 8 should NOT read complete without both Kess fights")
-        self.assertTrue(set(arc["quests"]).issubset(known_quests | {"kess_first_reckoning", "kess_the_unbound_reckoning"}))
+        # Chapter 8 expansion, Phase 6 (2026-08-30): 3 new light-touch
+        # quests appended AFTER both Kess quests (per the approved
+        # plan) -- arc_8 legitimately has more than the original 7 now,
+        # so the exclusivity check widens to include them by name
+        # instead of re-asserting the old, now-stale exact set.
+        expansion_quests = {"the_sunken_cellars_warden", "the_downs_own_marker_riddle", "the_downs_last_watchs_reckoning"}
+        self.assertTrue(
+            set(arc["quests"]).issubset(known_quests | {"kess_first_reckoning", "kess_the_unbound_reckoning"} | expansion_quests)
+        )
 
     # -- Stranded AI companion resync (2026-08-26, real live gap: Borin
     #    Ironjaw missed a real Wrathflame Unbound Remnant bind because
