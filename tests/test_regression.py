@@ -11764,6 +11764,58 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot._do_lockpick(FakeUpdate(960006, "pick the lock", []), member, dict(lockable), "pick the lock", forced_roll=9)
         self.assertIn(lockable["id"], bot._UNLOCKED.get(-999, set()))
 
+    # -- Dungeon redesign Phase 0 (2026-08-30, per Coffee's own reference
+    #    material: real locked doors, not a straight corridor). Two new
+    #    non-roll lockable variants reusing the exact same
+    #    locked_connections/lockables/_UNLOCKED plumbing above. -----------
+    async def test_key_item_lockable_refuses_without_the_item_and_needs_no_roll_with_it(self):
+        """
+        requires_key_item is a real gate, not a chance-based lock --
+        forced_roll=1 (would fail any real DEX check) still succeeds once
+        the item is held, proving the roll is bypassed entirely, not just
+        favorably modified.
+        """
+        location_id = "hollow_stump_shrine"
+        lockable = {"id": "test_key_gate", "kind": "door", "name": "a sealed iron gate", "requires_key_item": "healing_potion"}
+
+        no_key = make_basic_character(960100, "NoKeyTester", current_location=location_id)
+        sink = []
+        await bot._do_lockpick(FakeUpdate(960100, "open the gate", sink), no_key, dict(lockable), "open the gate", forced_roll=1)
+        self.assertNotIn("test_key_gate", bot._UNLOCKED.get(-999, set()))
+        self.assertTrue(any("won't budge" in s.lower() for s in sink), sink)
+
+        has_key = make_basic_character(960101, "HasKeyTester", current_location=location_id)
+        db.add_item(960101, -999, "healing_potion", 1)
+        has_key = db.get_character(960101, -999)
+        sink2 = []
+        await bot._do_lockpick(FakeUpdate(960101, "open the gate", sink2), has_key, dict(lockable), "open the gate", forced_roll=1)
+        self.assertIn("test_key_gate", bot._UNLOCKED.get(-999, set()))
+        self.assertTrue(any("opens" in s.lower() for s in sink2), sink2)
+
+    async def test_lever_lockable_always_succeeds_no_roll_needed(self):
+        """A shortcut lever (reachable only from the far end of a branch) always opens -- no DEX check, no key item, just being there."""
+        location_id = "hollow_stump_shrine"
+        lockable = {"id": "test_shortcut_lever", "kind": "lever", "name": "a rusted lever"}
+        character = make_basic_character(960102, "LeverTester", current_location=location_id)
+        sink = []
+        await bot._do_lockpick(FakeUpdate(960102, "pull the lever", sink), character, dict(lockable), "pull the lever", forced_roll=1)
+        self.assertIn("test_shortcut_lever", bot._UNLOCKED.get(-999, set()))
+        self.assertTrue(any("way back" in s.lower() for s in sink), sink)
+
+    def test_reveal_dungeon_teaser_writes_exactly_the_given_room_ids_once(self):
+        """The 'visual tease' beat: a hub-entry reveal targets specific real room ids, not a random layer-wide pick, and never re-adds an id already visited or already revealed."""
+        user_id = 960103
+        make_basic_character(user_id, "TeaserTester", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, visited_locations=["crossroads_tavern"], map_revealed_locations=[])
+        bot._reveal_dungeon_teaser(user_id, -999, ["market_row", "the_weeping_well"])
+        character = db.get_character(user_id, -999)
+        self.assertEqual(set(character["map_revealed_locations"]), {"market_row", "the_weeping_well"})
+
+        db.update_character(user_id, -999, visited_locations=["crossroads_tavern", "market_row"])
+        bot._reveal_dungeon_teaser(user_id, -999, ["market_row", "the_weeping_well", "the_colosseum"])
+        character = db.get_character(user_id, -999)
+        self.assertEqual(set(character["map_revealed_locations"]), {"market_row", "the_weeping_well", "the_colosseum"})
+
     async def test_bestiary_shows_real_stealable_items_for_a_known_monster(self):
         """Real feature (2026-08-11, per Coffee: "post what can be stolen from them in the bestiary")."""
         template = bot.cl.get_monster_template(bot.CAMPAIGN, "goblin")

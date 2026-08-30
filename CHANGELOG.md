@@ -2,6 +2,63 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.420] — Phase 0 of the dungeon redesign: real key-item/lever locks + targeted map teasers
+
+Real live complaint (2026-08-30, Coffee, dev-bridge, with the
+Wrathflame Vault minimap screenshot from the previous deploy): "This is
+the current map design that you gave dungeon one and it seems extremely
+simple... it's just a straight path to the boss. I want locked doors,
+map interconnectivity, and puzzles connecting rooms." Followed by real
+reference material (a "what makes Zelda dungeons fun" summary, real
+SNES dungeon-map screenshots, and a structured "lock and key" design
+formula) that Coffee sent to be studied before redesigning all 8
+dungeons this session built. Confirmed directly against the real room
+graphs that the complaint is right -- Wrathflame Vault is a 9-room
+single-file chain with zero puzzles or gates, and even the larger story
+dungeons are mostly corridor with only a handful of real branch points.
+
+This is Phase 0 of an 8-dungeon redesign plan (biggest-impact dungeons
+first, per Coffee) -- the shared mechanics every dungeon phase will
+reuse, shipped and tested on their own before any dungeon's room graph
+actually changes:
+
+- `_do_lockpick` (bot.py) now supports two new non-roll lockable
+  variants, both reusing the exact same `locked_connections`/
+  `lockables`/`_UNLOCKED` plumbing every existing chest/door lock
+  already uses -- zero new schema plumbing, just two new branches:
+  - `requires_key_item`: a real permanent gate, not a chance-based
+    lock -- opens instantly if the item is held (no DEX roll at all,
+    confirmed via a forced failing roll that still succeeds once the
+    item is in inventory), refuses outright otherwise.
+  - `kind: "lever"`: always succeeds with no roll -- a shortcut switch
+    meant to sit only in the far room of a dungeon branch, opening a
+    hub's own locked connection back to it. Chosen over a literal
+    one-way passage because the existing whole-campaign `connections`
+    reciprocity invariant (enforced by every dungeon's own regression
+    test and by map_render's edge model) assumes symmetric reachability
+    -- a lever keeps that invariant intact while still delivering a
+    real "loop back to the hub" Zelda beat.
+- New `_reveal_dungeon_teaser(telegram_user_id, chat_id,
+  teaser_location_ids)`: writes specific, dungeon-chosen room ids into
+  the real `map_revealed_locations` field the first time a character
+  reaches a dungeon's designated hub room (new `dungeon_hub`/
+  `dungeon_teaser_locations` location flags) -- the same field the
+  existing random layer-wide "map" item type already writes, just
+  targeted instead of random, delivering the "see a room exists before
+  you can reach it" visual-tease beat from Coffee's own reference
+  material with no new persistent field.
+
+No dungeon's actual room layout changed yet -- that starts with Phase 1
+(Wrathflame Vault, the exact dungeon from the complaint screenshot).
+
+Tested: the key-item lock refuses without the item and opens instantly
+with it even on a forced roll of 1 (proving the roll is bypassed, not
+just favorably modified); the lever always opens regardless of roll;
+the teaser reveal writes exactly the given room ids once and never
+re-adds an id already visited or already revealed. Full lockpick/
+lockable/story-gate/checkpoint regression slice re-run clean (22/22)
+alongside the 3 new tests.
+
 ## [1.27.419] — each of the 8 new dungeons gets its own real minimap
 
 Real live request (2026-08-30, Coffee, right after the fast-travel/

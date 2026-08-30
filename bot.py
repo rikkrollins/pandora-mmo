@@ -11267,10 +11267,44 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
     Physical-dice mode (manual_dice_enabled) is handled by the caller,
     _do_skill_check, before this is ever dispatched to -- forced_roll
     just threads that already-collected value through to the actual roll.
+
+    Dungeon-redesign key-item/lever gates (2026-08-30, per Coffee: real
+    locked doors and interconnectivity, not a straight corridor).
+    `requires_key_item`: a real gate, not a pickable lock -- no DEX roll
+    at all, opens instantly if held, otherwise refuses outright (a
+    Zelda-style permanent key, not a chance-based chest). `kind ==
+    "lever"`: always succeeds with no roll -- a shortcut switch reachable
+    only from the far side of a branch, opening the HUB's own
+    locked_connections entry back to it (see _do_move's reciprocal-
+    connections-with-a-lock pattern, chosen instead of a real one-way
+    edge so the existing whole-campaign reciprocity invariant/tests hold).
     """
     if lockable["id"] in _chat_scoped_set(_UNLOCKED, update.effective_chat.id):
         await update.effective_chat.send_message(
             f"{lockable['name'].capitalize()} is already unlocked.",
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        )
+        return
+
+    key_item = lockable.get("requires_key_item")
+    if key_item:
+        if key_item not in character.get("inventory", {}):
+            await update.effective_chat.send_message(
+                f"{lockable['name'].capitalize()} won't budge — it needs something specific, not brute force or a steady hand.",
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+            )
+            return
+        _chat_scoped_set(_UNLOCKED, update.effective_chat.id).add(lockable["id"])
+        await update.effective_chat.send_message(
+            f"🔑 **{character['name']}** uses the {items_module.get_item(key_item)['name']} — {lockable['name'].lower()} opens.",
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        )
+        return
+
+    if lockable.get("kind") == "lever":
+        _chat_scoped_set(_UNLOCKED, update.effective_chat.id).add(lockable["id"])
+        await update.effective_chat.send_message(
+            f"🔧 **{character['name']}** pulls {lockable['name'].lower()} — somewhere behind you, a way back just opened.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
@@ -24138,6 +24172,26 @@ def _find_location_by_name_fragment(fragment: str) -> str | None:
     return None
 
 
+def _reveal_dungeon_teaser(telegram_user_id: int, chat_id: int, teaser_location_ids: list[str]) -> None:
+    """
+    Writes a dungeon's own designated gated-room ids into the real
+    character-scoped map_revealed_locations field, the same field the
+    random layer-wide "map" item type already writes (_do_use_item) --
+    only targeted at exactly this dungeon's own teaser rooms instead of
+    a random pick across a whole layer. Idempotent: never re-adds ids
+    the character has already visited or already had revealed.
+    """
+    character = db.get_character(telegram_user_id, chat_id)
+    if character is None:
+        return
+    revealed = set(character.get("map_revealed_locations") or [])
+    visited = set(character.get("visited_locations") or [])
+    new_ids = [loc_id for loc_id in teaser_location_ids if loc_id not in revealed and loc_id not in visited]
+    if not new_ids:
+        return
+    db.update_character(telegram_user_id, chat_id, map_revealed_locations=sorted(revealed | set(new_ids)))
+
+
 async def _do_move(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -24299,6 +24353,16 @@ async def _do_move(update: Update, text: str) -> None:
     # so the just-arrived destination is actually reflected.
     if not destination_already_visited and destination.get("dungeon_checkpoint"):
         await _check_and_award_achievements(update, db.get_character(update.effective_user.id, update.effective_chat.id))
+
+    # Dungeon redesign, "visual tease" beat (2026-08-30, per Coffee's own
+    # reference material: "place rewards or major doors... in the hub
+    # room so players can see them long before they can reach them").
+    # Deterministic and dungeon-scoped -- unlike the random layer-wide
+    # map-item reveal (_do_use_item's "map" branch), this targets exactly
+    # the 1-2 room ids a dungeon's own hub wants shown, once, the first
+    # time a character actually stands in that hub.
+    if not destination_already_visited and destination.get("dungeon_hub") and destination.get("dungeon_teaser_locations"):
+        _reveal_dungeon_teaser(update.effective_user.id, update.effective_chat.id, destination["dungeon_teaser_locations"])
 
     # Real bug found live (2026-07-17, Coffee): recruited companions
     # (is_ai=1, is_autonomous=0) are supposed to be traveling WITH
