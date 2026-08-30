@@ -689,6 +689,15 @@ ITEMS = {
         "note": "The very last entry is finally crossed out. Whatever it was owed, it isn't anymore.",
         "description": "The very last entry is finally crossed out. Whatever it was owed, it isn't anymore.",
     },
+    # Chapter 6 expansion (2026-08-30): The Keeping Current's real
+    # unique reward.
+    "the_keeping_currents_seal": {
+        "name": "The Keeping Current's Seal", "type": "wondrous", "rarity": "very_rare",
+        "price": 0, "weight": 1,
+        "elemental_resistances": [{"damage_type": "poison", "value": 50}],
+        "note": "Whatever it was keeping finally stopped needing to be kept.",
+        "description": "Whatever it was keeping finally stopped needing to be kept.",
+    },
 
     # --- Recipe books (2026-08-11, per Coffee: real, buyable reference
     # items teaching a profession's real level-1 recipes -- "make basic,

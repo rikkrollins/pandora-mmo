@@ -73,6 +73,7 @@ from ai.dm_agent import (
     narrate_borin_dialogue, narrate_confrontation_choice_outcome,
     narrate_kess_transformation, narrate_chapter_8_epilogue,
     kess_first_confrontation_script, kess_unbound_confrontation_script, kess_flees_line,
+    kess_shrine_vigil_script,
     grask_supply_tunnels_reaction, grask_deep_larders_reaction,
     _fallback_hourly_update, _fallback_narration,
     is_narration_call_active,
@@ -14032,6 +14033,13 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         climax_narration = f"{transformation_text}\n\n"
     elif quest_id == "kess_the_unbound_reckoning":
         pass  # its own fully hand-written bespoke ending below needs no separate climax_narration prefix
+    elif quest_id == "the_kept_shrines_vigil":
+        # Chapter 6 expansion, Phase 4 (2026-08-30): Kess's first spoken
+        # beat, staged as a real narrative-only vigil scene -- hand-
+        # written in full, bypassing the generic AI reach_location
+        # arrival narration entirely (zero Ollama calls, matching every
+        # other Kess beat's own discipline).
+        climax_narration = f"{kess_shrine_vigil_script(character['name'])}\n\n"
     elif quest.get("weight") == "climactic":
         climax_text = await asyncio.to_thread(
             narrate_chapter_climax, quest["title"], quest["description"], reward_text,

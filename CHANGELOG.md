@@ -2,6 +2,43 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.413] — Chapter 6 expansion, Phase 4: Sunken Root Caverns grows to 32 rooms, Kess's first spoken beat
+
+Fourth installment of the approved Chapter 3-8 expansion plan, and the
+one carrying this arc's real emotional turn. Sunken Root Caverns had
+only 7 real rooms and 4 quests -- grown to 32 rooms and 10 quests
+across two new branches. The Buried Current Remnant was already here
+(no relocation needed this time).
+
+- **The Choked Route** (west of the Deep Tunnels, 12 new rooms): the
+  existing smuggling-route flavor (`tunnel_rubble_choke`,
+  `stashed_toll_crate`) finally leads somewhere real, ending at a real
+  mini-boss. Wren Hollowbrook's own personal beat lives here too (a
+  real, tended grove that shouldn't still be alive this deep down) --
+  delivered as pure environmental flavor, the same safe pattern
+  already proven for Borin and Grask.
+- **The Deepest Spring** (north of the Hollow Wellspring, 13 new
+  rooms): stages Kess's first real spoken beat as a genuine narrative
+  set-piece, not a fight -- the party finds her alone at a shrine like
+  their own, mid-vigil, and for a few real lines she's a person before
+  the moment closes over. Fully hand-written (zero Ollama calls, same
+  discipline as every other Kess beat), wired through a new fifth
+  `_complete_quest_and_announce` branch so it bypasses the generic AI
+  arrival narration entirely. Ends in a new level-62 boss, The Keeping
+  Current (real Insect Plague spellcasting, resists_dot_stacking, an
+  enrage shift, and a unique reward).
+- Two real, pre-existing structural bugs (not from this session) found
+  and fixed while working in this zone: `sunken_root_caverns_side_pool`
+  had zero real directions despite being connected, and
+  `forgotten_cistern`'s own declared direction back to the flooded
+  gallery was never reciprocated in its connections list.
+- Verified with real executed tests: all 32 rooms reciprocated, an
+  end-to-end test confirming the shrine-vigil quest genuinely fires the
+  hand-written Kess scene (not the generic AI path -- the test would
+  hang on a real network call if it ever did), plus a full re-run of
+  the Kess-sequencing/Borin/Blackthorn/Grask/Wren suites. Zero
+  regressions.
+
 ## [1.27.412] — Chapter 5 expansion, Phase 3: Goblin Warrens grows to 28 rooms, 10 quests, first Kess environmental thread
 
 Third installment of the approved Chapter 3-8 expansion plan. Goblin

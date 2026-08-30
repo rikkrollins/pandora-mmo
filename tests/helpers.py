@@ -287,6 +287,8 @@ ARCS_1_THROUGH_7_QUEST_IDS = (
     "the_paymasters_route", "the_ledger_vaults_answer", "the_toll_masters_den",
     "the_true_paymasters_reckoning",
     "flooded_gallerys_hold", "the_side_pools_straggler", "the_channels_keeper", "the_hollow_wellsprings_elder",
+    "the_cleared_chokes_stalker", "the_smugglers_cuts_lurker", "the_smugglers_ends_warden",
+    "the_deep_currents_shard", "the_kept_shrines_vigil", "the_sources_reckoning",
     "web_hollows_brood", "silked_nooks_hatchling", "deep_currents_keeper", "the_undertows_elder",
 )
 

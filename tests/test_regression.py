@@ -5844,6 +5844,111 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(npc.get("recruitable"))
         self.assertIn("the_silent_bookkeeper", cl.get_location(bot.CAMPAIGN, "goblin_warrens_the_buried_threshold")["npcs"])
 
+    # -- Chapter 6 expansion, Phase 4 (2026-08-30): Sunken Root Caverns
+    #    grows from 7 real rooms/4 quests to 32 rooms/10 quests, and
+    #    stages Kess's first spoken beat as a real shrine-vigil scene --
+    def test_arc_6_now_has_ten_quests_original_four_completely_undisturbed(self):
+        quests = bot.CAMPAIGN["story_arcs"]["arc_6_sunken_root_caverns"]["quests"]
+        self.assertEqual(len(quests), 10)
+        self.assertEqual(
+            quests[:4],
+            ["flooded_gallerys_hold", "the_side_pools_straggler", "the_channels_keeper", "the_hollow_wellsprings_elder"],
+        )
+
+    def test_sunken_root_caverns_grows_to_32_rooms(self):
+        locs = bot.CAMPAIGN["locations"]["underground"]
+        core_ids = {
+            "sunken_root_caverns", "sunken_root_caverns_deep_tunnels", "sunken_root_caverns_flooded_gallery",
+            "sunken_root_caverns_forgotten_cistern", "sunken_root_caverns_precise_channel",
+            "sunken_root_caverns_hollow_wellspring", "sunken_root_caverns_side_pool",
+        }
+        new_ids = {k for k in locs if k.startswith("sunken_root_caverns") and k not in core_ids}
+        self.assertEqual(len(core_ids) + len(new_ids), 32)
+
+    def test_sunken_root_caverns_new_rooms_are_fully_connected_and_reciprocated(self):
+        locs = bot.CAMPAIGN["locations"]["underground"]
+        core_ids = {
+            "sunken_root_caverns", "sunken_root_caverns_deep_tunnels", "sunken_root_caverns_flooded_gallery",
+            "sunken_root_caverns_forgotten_cistern", "sunken_root_caverns_precise_channel",
+            "sunken_root_caverns_hollow_wellspring", "sunken_root_caverns_side_pool",
+        }
+        new_ids = [k for k in locs if k.startswith("sunken_root_caverns") and k not in core_ids]
+        self.assertGreaterEqual(len(new_ids), 25)
+        for loc_id in new_ids:
+            loc = locs[loc_id]
+            for direction, dest_id in loc.get("directions", {}).items():
+                dest = cl.get_location(bot.CAMPAIGN, dest_id)
+                self.assertIsNotNone(dest, f"{loc_id} -> {dest_id} via {direction} is a dead end")
+                self.assertIn(loc_id, dest.get("connections", []), f"{dest_id} doesn't connect back to {loc_id}")
+
+    def test_preexisting_side_pool_and_cistern_connection_bugs_fixed(self):
+        """Two real, pre-existing (not mine) structural bugs found while working in this zone: side_pool had zero directions despite being connected, and forgotten_cistern's own declared direction back to flooded_gallery was never reciprocated in its connections list."""
+        locs = bot.CAMPAIGN["locations"]["underground"]
+        side_pool = locs["sunken_root_caverns_side_pool"]
+        self.assertIn("west", side_pool["directions"])
+        cistern = locs["sunken_root_caverns_forgotten_cistern"]
+        self.assertIn("sunken_root_caverns_flooded_gallery", cistern["connections"])
+
+    def test_the_keeping_current_uses_the_real_new_systems_not_a_generic_statstick(self):
+        boss = bot.CAMPAIGN["monsters"]["the_keeping_current"]
+        self.assertTrue(boss["is_boss"])
+        self.assertIn("insect_plague", boss["known_spells"])
+        self.assertTrue(boss.get("resists_dot_stacking"))
+        self.assertTrue(boss.get("extra_attack_when_enraged"))
+        self.assertTrue(boss.get("stealable_items"))
+        self.assertIn("the_sources_reckoning", bot._QUEST_MONSTER_INDEX.get("the_keeping_current", []))
+        quest = bot.CAMPAIGN["quests"]["the_sources_reckoning"]
+        self.assertEqual(quest["reward_item"], "the_keeping_currents_seal")
+
+    def test_smugglers_end_is_gated_behind_companion_trust(self):
+        location = cl.get_location(bot.CAMPAIGN, "sunken_root_caverns_the_last_crossing")
+        current_dict = {"story_gates": location["story_gates"]}
+        character = {"party_id": None, "completed_quests": []}
+        self.assertIsNotNone(bot._check_story_gate(character, current_dict, "sunken_root_caverns_the_smugglers_end"))
+
+    def test_wrens_old_grove_delivers_her_beat_as_pure_environmental_flavor(self):
+        """Same safe pattern as Borin/Grask -- no new giver_npc=wren_hollowbrook quest, just a real interactable at a dedicated room."""
+        loc = cl.get_location(bot.CAMPAIGN, "sunken_root_caverns_wrens_old_grove")
+        self.assertIn("wren", loc["interactables"]["old_grove_tending"]["description"].lower())
+
+    def test_kess_shrine_vigil_script_is_hand_written(self):
+        import ai.dm_agent as dm_agent_module
+        result = dm_agent_module.kess_shrine_vigil_script("Ravenloft")
+        self.assertIn("Kess:", result)
+        self.assertIn("Whispers", result)
+
+    async def test_completing_the_kept_shrines_vigil_fires_the_real_kess_scene(self):
+        """
+        End-to-end: completing the_kept_shrines_vigil must route through
+        the hand-written shrine-vigil script, not the generic AI
+        reach_location arrival narration -- confirmed by NOT patching
+        narrate_reach_location_quest_completion at all (if the code path
+        ever called it, this test would hang/fail on a real network call).
+        """
+        user_id = 900960
+        make_basic_character(user_id, "ShrineWitness", current_location="sunken_root_caverns_the_kept_shrine")
+        sink = []
+        await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "the_kept_shrines_vigil")
+        combined = "\n".join(sink)
+        self.assertIn("Kess:", combined)
+        self.assertIn("Whispers", combined)
+
+    def test_sunken_root_caverns_lockable_chests_grant_real_loot(self):
+        for loc_id in ("sunken_root_caverns_the_hidden_cache", "sunken_root_caverns_the_second_pool"):
+            loc = cl.get_location(bot.CAMPAIGN, loc_id)
+            chest = loc["lockables"][0]
+            self.assertEqual(chest["kind"], "chest")
+            self.assertTrue(chest["loot"])
+
+    def test_new_sunken_root_caverns_npcs_are_real_and_non_recruitable(self):
+        for npc_id, loc_id in (
+            ("the_tangled_warden", "sunken_root_caverns_the_tangled_hollow"),
+            ("the_wellsprings_keeper", "sunken_root_caverns_the_wellsprings_answer"),
+        ):
+            npc = bot.CAMPAIGN["npcs"][npc_id]
+            self.assertFalse(npc.get("recruitable"))
+            self.assertIn(npc_id, cl.get_location(bot.CAMPAIGN, loc_id)["npcs"])
+
     def test_companion_favor_pays_more_affinity_once_the_companion_already_trusts_you(self):
         """
         Real live request (2026-08-23, Coffee: "give the affinity real

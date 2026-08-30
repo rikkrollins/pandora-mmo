@@ -1186,11 +1186,13 @@
         "description": "Passages that keep going long after they should have ended. Somewhere ahead, rubble chokes one of them almost shut \u2014 almost.",
         "connections": [
           "sunken_root_caverns",
-          "sunken_root_caverns_flooded_gallery"
+          "sunken_root_caverns_flooded_gallery",
+          "sunken_root_caverns_the_cleared_choke"
         ],
         "directions": {
           "south": "sunken_root_caverns",
-          "north": "sunken_root_caverns_flooded_gallery"
+          "north": "sunken_root_caverns_flooded_gallery",
+          "west": "sunken_root_caverns_the_cleared_choke"
         },
         "lockables": [
           {
@@ -1227,6 +1229,7 @@
         "layer": "underground",
         "description": "A dry, ancient cistern, long since cut off from whatever it used to hold. Someone stashed something down here and never came back for it.",
         "connections": [
+          "sunken_root_caverns_flooded_gallery",
           "sunken_root_caverns_deep_tunnels",
           "sunken_root_caverns_precise_channel"
         ],
@@ -2177,7 +2180,8 @@
         ],
         "directions": {
           "south": "sunken_root_caverns_deep_tunnels",
-          "north": "sunken_root_caverns_forgotten_cistern"
+          "north": "sunken_root_caverns_forgotten_cistern",
+          "east": "sunken_root_caverns_side_pool"
         },
         "monsters": [
           "root_bound_goblin"
@@ -2203,10 +2207,12 @@
         "layer": "underground",
         "description": "Past the channel, the water finally pools somewhere real \u2014 a wellspring sunk so deep that whatever drinks from it hasn't seen the surface in longer than anyone's kept track.",
         "connections": [
-          "sunken_root_caverns_precise_channel"
+          "sunken_root_caverns_precise_channel",
+          "sunken_root_caverns_the_spring_stair"
         ],
         "directions": {
-          "south": "sunken_root_caverns_precise_channel"
+          "south": "sunken_root_caverns_precise_channel",
+          "north": "sunken_root_caverns_the_spring_stair"
         },
         "monsters": [
           "elder_root_shaman"
@@ -2229,7 +2235,9 @@
         "connections": [
           "sunken_root_caverns_flooded_gallery"
         ],
-        "directions": {},
+        "directions": {
+          "west": "sunken_root_caverns_flooded_gallery"
+        },
         "monsters": [
           "root_goblin_pup"
         ],
@@ -2240,8 +2248,8 @@
           }
         },
         "grid_position": {
-          "x": -2,
-          "y": -11
+          "x": 1,
+          "y": 2
         }
       },
       "stonearch_bridge_web_hollow": {
@@ -3898,6 +3906,552 @@
           "x": 1,
           "y": 5
         }
+      },
+      "sunken_root_caverns_the_cleared_choke": {
+        "name": "The Cleared Choke",
+        "layer": "underground",
+        "description": "The rubble that used to choke this passage almost shut has clearly been cleared, on purpose, more than once.",
+        "connections": [
+          "sunken_root_caverns_deep_tunnels",
+          "sunken_root_caverns_the_smugglers_cut"
+        ],
+        "directions": {
+          "east": "sunken_root_caverns_deep_tunnels",
+          "west": "sunken_root_caverns_the_smugglers_cut"
+        },
+        "monsters": [
+          "root_cavern_stalker"
+        ],
+        "grid_position": {
+          "x": -1,
+          "y": 1
+        }
+      },
+      "sunken_root_caverns_the_smugglers_cut": {
+        "name": "The Smuggler's Cut",
+        "layer": "underground",
+        "description": "A real, deliberate cut through the rock, wide enough for someone carrying real cargo -- not a goblin tunnel at all.",
+        "connections": [
+          "sunken_root_caverns_the_cleared_choke",
+          "sunken_root_caverns_the_hidden_cache",
+          "sunken_root_caverns_the_root_stair"
+        ],
+        "directions": {
+          "east": "sunken_root_caverns_the_cleared_choke",
+          "north": "sunken_root_caverns_the_hidden_cache",
+          "west": "sunken_root_caverns_the_root_stair"
+        },
+        "monsters": [
+          "root_cavern_lurker"
+        ],
+        "grid_position": {
+          "x": -2,
+          "y": 1
+        }
+      },
+      "sunken_root_caverns_the_hidden_cache": {
+        "name": "The Hidden Cache",
+        "layer": "underground",
+        "description": "A real cache, tucked well out of sight of the main cut -- exactly the kind of place a smuggler would actually use.",
+        "connections": [
+          "sunken_root_caverns_the_smugglers_cut"
+        ],
+        "directions": {
+          "south": "sunken_root_caverns_the_smugglers_cut"
+        },
+        "lockables": [
+          {
+            "id": "smugglers_cache",
+            "kind": "chest",
+            "name": "a real smuggler's cache",
+            "loot": {
+              "greater_healing_potion": 1
+            },
+            "gold": 150
+          }
+        ],
+        "grid_position": {
+          "x": -2,
+          "y": 2
+        }
+      },
+      "sunken_root_caverns_the_root_stair": {
+        "name": "The Root Stair",
+        "layer": "underground",
+        "description": "Roots have grown into real, deliberate steps here, thick enough to actually climb down.",
+        "connections": [
+          "sunken_root_caverns_the_smugglers_cut",
+          "sunken_root_caverns_the_quiet_pool"
+        ],
+        "directions": {
+          "east": "sunken_root_caverns_the_smugglers_cut",
+          "down": "sunken_root_caverns_the_quiet_pool"
+        },
+        "grid_position": {
+          "x": -3,
+          "y": 1
+        }
+      },
+      "sunken_root_caverns_the_quiet_pool": {
+        "name": "The Quiet Pool",
+        "layer": "underground",
+        "description": "Real, still water, untouched by the rot further back -- the one genuinely calm room on this whole side.",
+        "connections": [
+          "sunken_root_caverns_the_root_stair",
+          "sunken_root_caverns_the_marked_root",
+          "sunken_root_caverns_the_forgotten_bend"
+        ],
+        "directions": {
+          "up": "sunken_root_caverns_the_root_stair",
+          "down": "sunken_root_caverns_the_marked_root",
+          "east": "sunken_root_caverns_the_forgotten_bend"
+        },
+        "resource_nodes": [
+          {
+            "id": "quiet_pool_herb_bed",
+            "name": "a bed of real, unrotted herbs",
+            "material": "silverleaf_herb",
+            "ability": "wisdom",
+            "skill": "herbalism"
+          }
+        ],
+        "grid_position": {
+          "x": -3,
+          "y": 2
+        }
+      },
+      "sunken_root_caverns_the_marked_root": {
+        "name": "The Marked Root",
+        "layer": "underground",
+        "description": "A single massive root, marked with the same toll-tokens found strung on the goblin warrens' own totem.",
+        "connections": [
+          "sunken_root_caverns_the_quiet_pool",
+          "sunken_root_caverns_wrens_old_grove"
+        ],
+        "directions": {
+          "up": "sunken_root_caverns_the_quiet_pool",
+          "down": "sunken_root_caverns_wrens_old_grove"
+        },
+        "interactables": {
+          "marked_root_tokens": {
+            "name": "toll-tokens strung along the root",
+            "description": "The same cheap tokens the Blackthorn Raiders hand travelers at Greymoor Downs, this far from any road -- whoever's running this route reports somewhere real."
+          }
+        },
+        "grid_position": {
+          "x": -3,
+          "y": 3
+        }
+      },
+      "sunken_root_caverns_wrens_old_grove": {
+        "name": "The Old Grove",
+        "layer": "underground",
+        "description": "Real, growing things down here too, further from any real light than the isle's own floating garden -- something has clearly been tending this.",
+        "connections": [
+          "sunken_root_caverns_the_marked_root",
+          "sunken_root_caverns_the_tangled_hollow"
+        ],
+        "directions": {
+          "up": "sunken_root_caverns_the_marked_root",
+          "down": "sunken_root_caverns_the_tangled_hollow"
+        },
+        "interactables": {
+          "old_grove_tending": {
+            "name": "a grove someone's clearly still tending",
+            "description": "Wren stops here longer than anywhere else in the caverns. \"This shouldn't still be alive,\" she says, quiet, kneeling by a root that's threaded itself into a shape too deliberate to be an accident. \"Someone's been keeping it this way. Recently.\" She doesn't say who she thinks did."
+          }
+        },
+        "grid_position": {
+          "x": -3,
+          "y": 4
+        }
+      },
+      "sunken_root_caverns_the_tangled_hollow": {
+        "name": "The Tangled Hollow",
+        "layer": "underground",
+        "description": "Roots knot so tightly here they form real walls -- something grown, not built, and clearly still growing.",
+        "connections": [
+          "sunken_root_caverns_wrens_old_grove",
+          "sunken_root_caverns_the_deeper_current"
+        ],
+        "directions": {
+          "up": "sunken_root_caverns_wrens_old_grove",
+          "down": "sunken_root_caverns_the_deeper_current"
+        },
+        "npcs": [
+          "the_tangled_warden"
+        ],
+        "grid_position": {
+          "x": -3,
+          "y": 5
+        }
+      },
+      "sunken_root_caverns_the_deeper_current": {
+        "name": "The Deeper Current",
+        "layer": "underground",
+        "description": "The water here moves with real purpose, faster than anything upstream should allow.",
+        "connections": [
+          "sunken_root_caverns_the_tangled_hollow",
+          "sunken_root_caverns_the_last_crossing"
+        ],
+        "directions": {
+          "up": "sunken_root_caverns_the_tangled_hollow",
+          "down": "sunken_root_caverns_the_last_crossing"
+        },
+        "monsters": [
+          "root_cavern_shard"
+        ],
+        "grid_position": {
+          "x": -3,
+          "y": 6
+        }
+      },
+      "sunken_root_caverns_the_last_crossing": {
+        "name": "The Last Crossing",
+        "layer": "underground",
+        "description": "The last real crossing before whatever's actually running this smuggling route in person.",
+        "connections": [
+          "sunken_root_caverns_the_deeper_current",
+          "sunken_root_caverns_the_smugglers_end"
+        ],
+        "directions": {
+          "up": "sunken_root_caverns_the_deeper_current",
+          "down": "sunken_root_caverns_the_smugglers_end"
+        },
+        "story_gates": {
+          "sunken_root_caverns_the_smugglers_end": {
+            "requires_companion_trust": {
+              "min_affinity": 40
+            }
+          }
+        },
+        "grid_position": {
+          "x": -3,
+          "y": 7
+        }
+      },
+      "sunken_root_caverns_the_smugglers_end": {
+        "name": "The Smuggler's End",
+        "layer": "underground",
+        "description": "The route finally ends here, well guarded, well away from anything a goblin would ever think to defend.",
+        "connections": [
+          "sunken_root_caverns_the_last_crossing"
+        ],
+        "directions": {
+          "up": "sunken_root_caverns_the_last_crossing"
+        },
+        "monsters": [
+          "the_smugglers_warden"
+        ],
+        "grid_position": {
+          "x": -3,
+          "y": 8
+        }
+      },
+      "sunken_root_caverns_the_spring_stair": {
+        "name": "The Spring Stair",
+        "layer": "underground",
+        "description": "Water runs down these steps in a real, steady sheet, colder the further down it goes.",
+        "connections": [
+          "sunken_root_caverns_hollow_wellspring",
+          "sunken_root_caverns_the_second_pool"
+        ],
+        "directions": {
+          "south": "sunken_root_caverns_hollow_wellspring",
+          "north": "sunken_root_caverns_the_second_pool"
+        },
+        "monsters": [
+          "root_cavern_shard"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": 6
+        }
+      },
+      "sunken_root_caverns_the_second_pool": {
+        "name": "The Second Pool",
+        "layer": "underground",
+        "description": "A second real pool, fed by the same spring, hidden well enough that most people never find it.",
+        "connections": [
+          "sunken_root_caverns_the_spring_stair",
+          "sunken_root_caverns_the_deep_current"
+        ],
+        "directions": {
+          "south": "sunken_root_caverns_the_spring_stair",
+          "north": "sunken_root_caverns_the_deep_current"
+        },
+        "lockables": [
+          {
+            "id": "second_pool_cache",
+            "kind": "chest",
+            "name": "a cache sunk into the second pool",
+            "loot": {
+              "scroll_invisibility": 1
+            },
+            "gold": 160
+          }
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": 7
+        }
+      },
+      "sunken_root_caverns_the_deep_current": {
+        "name": "The Deep Current",
+        "layer": "underground",
+        "description": "The water moves with real force here, deep enough that the bottom's never actually been seen.",
+        "connections": [
+          "sunken_root_caverns_the_second_pool",
+          "sunken_root_caverns_the_kept_shrine"
+        ],
+        "directions": {
+          "south": "sunken_root_caverns_the_second_pool",
+          "north": "sunken_root_caverns_the_kept_shrine"
+        },
+        "monsters": [
+          "root_cavern_current"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": 8
+        }
+      },
+      "sunken_root_caverns_the_kept_shrine": {
+        "name": "The Kept Shrine",
+        "layer": "underground",
+        "description": "A real shrine, kept clean and lit by something that isn't a torch -- the one genuinely still room this deep in the caverns.",
+        "connections": [
+          "sunken_root_caverns_the_deep_current",
+          "sunken_root_caverns_the_shrines_after"
+        ],
+        "directions": {
+          "south": "sunken_root_caverns_the_deep_current",
+          "north": "sunken_root_caverns_the_shrines_after"
+        },
+        "interactables": {
+          "kept_shrine_spring": {
+            "name": "a real, clear spring set into the shrine floor",
+            "description": "Colder than anything else this deep down, and somehow completely still."
+          },
+          "kept_shrine_stone": {
+            "name": "a worn shrine stone",
+            "description": "Kept clean by hands that clearly come back to it, again and again."
+          }
+        },
+        "grid_position": {
+          "x": 0,
+          "y": 9
+        }
+      },
+      "sunken_root_caverns_the_shrines_after": {
+        "name": "Past the Kept Shrine",
+        "layer": "underground",
+        "description": "Whatever just happened at the shrine behind you, the caverns ahead don't care -- they keep going, the same as always.",
+        "connections": [
+          "sunken_root_caverns_the_kept_shrine",
+          "sunken_root_caverns_the_flooded_stair"
+        ],
+        "directions": {
+          "south": "sunken_root_caverns_the_kept_shrine",
+          "north": "sunken_root_caverns_the_flooded_stair"
+        },
+        "interactables": {
+          "shrines_after_warmth": {
+            "name": "a spot on the stone still faintly warm",
+            "description": "Whoever was kneeling here left in a hurry. Nothing else down here explains a warm patch of stone."
+          }
+        },
+        "grid_position": {
+          "x": 0,
+          "y": 10
+        }
+      },
+      "sunken_root_caverns_the_flooded_stair": {
+        "name": "The Flooded Stair",
+        "layer": "underground",
+        "description": "Real steps, real flooding, deep enough now to be a genuine hazard for anyone who isn't careful.",
+        "connections": [
+          "sunken_root_caverns_the_shrines_after",
+          "sunken_root_caverns_the_drowned_hall"
+        ],
+        "directions": {
+          "south": "sunken_root_caverns_the_shrines_after",
+          "down": "sunken_root_caverns_the_drowned_hall"
+        },
+        "monsters": [
+          "root_cavern_lurker"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": 11
+        }
+      },
+      "sunken_root_caverns_the_drowned_hall": {
+        "name": "The Drowned Hall",
+        "layer": "underground",
+        "description": "A real hall, fully flooded, the water somehow clear enough to see the whole shape of it from the entrance.",
+        "connections": [
+          "sunken_root_caverns_the_flooded_stair",
+          "sunken_root_caverns_the_hollow_beneath",
+          "sunken_root_caverns_the_wellsprings_answer"
+        ],
+        "directions": {
+          "up": "sunken_root_caverns_the_flooded_stair",
+          "east": "sunken_root_caverns_the_hollow_beneath",
+          "down": "sunken_root_caverns_the_wellsprings_answer"
+        },
+        "resource_nodes": [
+          {
+            "id": "drowned_hall_ore_vein",
+            "name": "a vein of ore, fully submerged",
+            "material": "iron_ore",
+            "ability": "strength",
+            "skill": "mining"
+          }
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": 12
+        }
+      },
+      "sunken_root_caverns_the_hollow_beneath": {
+        "name": "The Hollow Beneath",
+        "layer": "underground",
+        "description": "A small hollow beneath the drowned hall's own floor, dry against every odd.",
+        "connections": [
+          "sunken_root_caverns_the_drowned_hall"
+        ],
+        "directions": {
+          "west": "sunken_root_caverns_the_drowned_hall"
+        },
+        "interactables": {
+          "hollow_beneath_note": {
+            "name": "a real, dry record left in the one dry spot for miles",
+            "description": "Someone found this hollow and used it exactly once, for exactly this -- a single note, unsigned: \"the roots keep better secrets than people do.\""
+          }
+        },
+        "grid_position": {
+          "x": 1,
+          "y": 12
+        }
+      },
+      "sunken_root_caverns_the_wellsprings_answer": {
+        "name": "The Wellspring's Answer",
+        "layer": "underground",
+        "description": "The drowned hall's water finally answers back here, in a rhythm too deliberate to be natural.",
+        "connections": [
+          "sunken_root_caverns_the_drowned_hall",
+          "sunken_root_caverns_the_final_current"
+        ],
+        "directions": {
+          "up": "sunken_root_caverns_the_drowned_hall",
+          "down": "sunken_root_caverns_the_final_current"
+        },
+        "npcs": [
+          "the_wellsprings_keeper"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": 13
+        }
+      },
+      "sunken_root_caverns_the_final_current": {
+        "name": "The Final Current",
+        "layer": "underground",
+        "description": "The last real current before whatever's actually keeping all of this -- fast, cold, and clearly guarding something.",
+        "connections": [
+          "sunken_root_caverns_the_wellsprings_answer",
+          "sunken_root_caverns_the_last_root"
+        ],
+        "directions": {
+          "up": "sunken_root_caverns_the_wellsprings_answer",
+          "down": "sunken_root_caverns_the_last_root"
+        },
+        "monsters": [
+          "the_final_current"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": 14
+        }
+      },
+      "sunken_root_caverns_the_last_root": {
+        "name": "The Last Root",
+        "layer": "underground",
+        "description": "The very last real root in the whole system ends here, thick as a wall, older than everything around it.",
+        "connections": [
+          "sunken_root_caverns_the_final_current",
+          "sunken_root_caverns_the_deepest_approach"
+        ],
+        "directions": {
+          "up": "sunken_root_caverns_the_final_current",
+          "down": "sunken_root_caverns_the_deepest_approach"
+        },
+        "grid_position": {
+          "x": 0,
+          "y": 15
+        }
+      },
+      "sunken_root_caverns_the_deepest_approach": {
+        "name": "The Deepest Approach",
+        "layer": "underground",
+        "description": "The last real stretch before whatever's actually kept down here this whole time -- quiet, cold, and clearly not empty.",
+        "connections": [
+          "sunken_root_caverns_the_last_root",
+          "sunken_root_caverns_the_source"
+        ],
+        "directions": {
+          "up": "sunken_root_caverns_the_last_root",
+          "down": "sunken_root_caverns_the_source"
+        },
+        "grid_position": {
+          "x": 0,
+          "y": 16
+        }
+      },
+      "sunken_root_caverns_the_source": {
+        "name": "The Source",
+        "layer": "underground",
+        "description": "Every current in these caverns starts here -- and whatever's actually keeping it moving has been waiting a very long time to be found.",
+        "connections": [
+          "sunken_root_caverns_the_deepest_approach"
+        ],
+        "directions": {
+          "up": "sunken_root_caverns_the_deepest_approach"
+        },
+        "monsters": [
+          "the_keeping_current"
+        ],
+        "combat_environment": {
+          "name": "the source's own rising water",
+          "description": "The water in the chamber climbs steadily higher as the fight goes on, until standing still anywhere near the center stops being an option.",
+          "damage_dice": "4d6"
+        },
+        "grid_position": {
+          "x": 0,
+          "y": 17
+        }
+      },
+      "sunken_root_caverns_the_forgotten_bend": {
+        "name": "The Forgotten Bend",
+        "layer": "underground",
+        "description": "A small bend off the quiet pool, easy to walk past without noticing -- someone clearly did notice, once.",
+        "connections": [
+          "sunken_root_caverns_the_quiet_pool"
+        ],
+        "directions": {
+          "west": "sunken_root_caverns_the_quiet_pool"
+        },
+        "interactables": {
+          "forgotten_bend_marks": {
+            "name": "a small, worn resting spot",
+            "description": "Whoever cut the smuggling route further in rested here first, before it was ever a route at all."
+          }
+        },
+        "grid_position": {
+          "x": -2,
+          "y": 3
+        }
       }
     },
     "sky": {
@@ -4967,6 +5521,24 @@
       "role": "puzzle_guardian",
       "personality": "keeps a perfect, obsessive count of everything that passes, and refuses to let anyone by until their own count is settled",
       "goals": "has been balancing the same ledger for longer than the warren has existed",
+      "recruitable": false,
+      "alignment": "True Neutral",
+      "disposition": "neutral"
+    },
+    "the_tangled_warden": {
+      "name": "The Tangled Warden",
+      "role": "puzzle_guardian",
+      "personality": "grown from root instead of born, speaks slowly, and has never once been in a hurry to let anyone through",
+      "goals": "has been asking the same thing of the caverns for longer than they've had a name",
+      "recruitable": false,
+      "alignment": "True Neutral",
+      "disposition": "neutral"
+    },
+    "the_wellsprings_keeper": {
+      "name": "The Wellspring's Keeper",
+      "role": "puzzle_guardian",
+      "personality": "speaks in the rhythm of dripping water, never in a hurry, never repeating itself the same way twice",
+      "goals": "has been testing everyone who reaches the deepest pool with the same real question",
       "recruitable": false,
       "alignment": "True Neutral",
       "disposition": "neutral"
@@ -6603,6 +7175,80 @@
       },
       "clue": "Past the Final Ledger, the Paymaster's Approach leads straight to whoever's really been in charge.",
       "weight": "climactic"
+    },
+    "the_cleared_chokes_stalker": {
+      "title": "What Kept Clearing the Choke",
+      "description": "The rubble that used to choke the deep tunnels almost shut has clearly been cleared, on purpose, more than once.",
+      "location": "sunken_root_caverns_the_cleared_choke",
+      "reward_xp": 700,
+      "reward_gold": 220,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "root_cavern_stalker"
+      },
+      "clue": "West of the Deep Tunnels, the old rubble choke has clearly been cleared on purpose."
+    },
+    "the_smugglers_cuts_lurker": {
+      "title": "Not a Goblin Tunnel",
+      "description": "A real, deliberate cut through the rock, wide enough for real cargo -- nothing a goblin ever dug.",
+      "location": "sunken_root_caverns_the_smugglers_cut",
+      "reward_xp": 760,
+      "reward_gold": 240,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "root_cavern_lurker"
+      },
+      "clue": "Past the cleared choke, a real cut through the rock leads further west."
+    },
+    "the_smugglers_ends_warden": {
+      "title": "Where the Route Ends",
+      "description": "The smuggling route through the caverns finally ends here, well guarded, well away from anything a goblin would defend.",
+      "location": "sunken_root_caverns_the_smugglers_end",
+      "reward_xp": 1050,
+      "reward_gold": 350,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_smugglers_warden"
+      },
+      "clue": "The Smuggler's Warden guards the true end of the route, past the Last Crossing."
+    },
+    "the_deep_currents_shard": {
+      "title": "The Water Runs Colder",
+      "description": "North past the Hollow Wellspring, the water runs colder and faster than anything upstream should allow.",
+      "location": "sunken_root_caverns_the_deep_current",
+      "reward_xp": 780,
+      "reward_gold": 250,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "root_cavern_current"
+      },
+      "clue": "North of the Hollow Wellspring, a real spring stair leads deeper still."
+    },
+    "the_kept_shrines_vigil": {
+      "title": "The Kept Shrine",
+      "description": "A real shrine, kept clean and lit by something that isn't a torch -- and someone's clearly still using it.",
+      "location": "sunken_root_caverns_the_kept_shrine",
+      "trigger": {
+        "type": "reach_location",
+        "location": "sunken_root_caverns_the_kept_shrine"
+      },
+      "reward_xp": 500,
+      "reward_gold": 150,
+      "clue": "Deep past the Deep Current, a shrine has been kept far too clean to be abandoned."
+    },
+    "the_sources_reckoning": {
+      "title": "The Source",
+      "description": "Every current in these caverns starts here -- and whatever's actually keeping it moving has been waiting a very long time to be found.",
+      "location": "sunken_root_caverns_the_source",
+      "reward_xp": 1600,
+      "reward_gold": 550,
+      "reward_item": "the_keeping_currents_seal",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_keeping_current"
+      },
+      "clue": "The Deepest Approach, past the Last Root, leads straight to the true source of every current in these caverns.",
+      "weight": "climactic"
     }
   },
   "story_arcs": {
@@ -6685,7 +7331,13 @@
         "flooded_gallerys_hold",
         "the_side_pools_straggler",
         "the_channels_keeper",
-        "the_hollow_wellsprings_elder"
+        "the_hollow_wellsprings_elder",
+        "the_cleared_chokes_stalker",
+        "the_smugglers_cuts_lurker",
+        "the_smugglers_ends_warden",
+        "the_deep_currents_shard",
+        "the_kept_shrines_vigil",
+        "the_sources_reckoning"
       ],
       "required_level": 50
     },
@@ -9264,6 +9916,130 @@
           "weight": 20
         }
       ]
+    },
+    "root_cavern_stalker": {
+      "name": "Root Cavern Stalker",
+      "level": 50,
+      "dexterity": 15,
+      "strength": 17,
+      "armor_class": 19,
+      "hp_max": 2800,
+      "proficiency_bonus": 11,
+      "xp_reward": 2000,
+      "damage_dice": "1d8",
+      "damage_bonus": 155,
+      "damage_type": "poison"
+    },
+    "root_cavern_lurker": {
+      "name": "Root Cavern Lurker",
+      "level": 53,
+      "dexterity": 14,
+      "strength": 18,
+      "armor_class": 19,
+      "hp_max": 3100,
+      "proficiency_bonus": 11,
+      "xp_reward": 2200,
+      "damage_dice": "1d8",
+      "damage_bonus": 165,
+      "damage_type": "poison"
+    },
+    "the_smugglers_warden": {
+      "name": "The Smuggler's Warden",
+      "level": 57,
+      "dexterity": 13,
+      "strength": 20,
+      "armor_class": 21,
+      "hp_max": 4000,
+      "proficiency_bonus": 12,
+      "xp_reward": 2600,
+      "damage_dice": "1d8",
+      "damage_bonus": 185,
+      "damage_type": "physical",
+      "is_boss": false,
+      "stealable_items": [
+        {
+          "item_id": "greater_spell_tonic",
+          "weight": 90
+        }
+      ]
+    },
+    "root_cavern_shard": {
+      "name": "Root Cavern Shard",
+      "level": 52,
+      "dexterity": 15,
+      "strength": 16,
+      "armor_class": 19,
+      "hp_max": 3000,
+      "proficiency_bonus": 11,
+      "xp_reward": 2150,
+      "damage_dice": "1d8",
+      "damage_bonus": 162,
+      "damage_type": "cold"
+    },
+    "root_cavern_current": {
+      "name": "Root Cavern Current",
+      "level": 55,
+      "dexterity": 14,
+      "strength": 18,
+      "armor_class": 20,
+      "hp_max": 3500,
+      "proficiency_bonus": 12,
+      "xp_reward": 2400,
+      "damage_dice": "1d8",
+      "damage_bonus": 178,
+      "damage_type": "cold"
+    },
+    "the_final_current": {
+      "name": "The Final Current",
+      "level": 59,
+      "dexterity": 14,
+      "strength": 20,
+      "armor_class": 21,
+      "hp_max": 4600,
+      "proficiency_bonus": 13,
+      "xp_reward": 2900,
+      "damage_dice": "1d8",
+      "damage_bonus": 200,
+      "damage_type": "cold",
+      "is_boss": false,
+      "stealable_items": [
+        {
+          "item_id": "greater_healing_potion",
+          "weight": 90
+        }
+      ]
+    },
+    "the_keeping_current": {
+      "name": "The Keeping Current",
+      "level": 62,
+      "dexterity": 15,
+      "strength": 20,
+      "armor_class": 22,
+      "hp_max": 9000,
+      "proficiency_bonus": 13,
+      "xp_reward": 3400,
+      "damage_dice": "1d8",
+      "damage_bonus": 220,
+      "damage_type": "poison",
+      "is_boss": true,
+      "known_spells": [
+        "insect_plague"
+      ],
+      "resists_dot_stacking": true,
+      "extra_attack_when_enraged": true,
+      "vulnerabilities": [
+        "fire"
+      ],
+      "stealable_items": [
+        {
+          "item_id": "greater_spell_tonic",
+          "weight": 60
+        },
+        {
+          "item_id": "supreme_spell_tonic",
+          "weight": 20
+        }
+      ]
     }
   },
   "factions": {
@@ -9412,6 +10188,22 @@
         "a toll",
         "a ledger",
         "a debt"
+      ]
+    },
+    "tangled_hollow_riddle": {
+      "riddle": "I hold everything together and let nothing through. What am I?",
+      "accepted_answers": [
+        "a root",
+        "roots",
+        "a net"
+      ]
+    },
+    "wellsprings_answer_riddle": {
+      "riddle": "I am never the same twice, yet I always find the lowest point. What am I?",
+      "accepted_answers": [
+        "water",
+        "a river",
+        "a current"
       ]
     }
   },

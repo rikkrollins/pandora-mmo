@@ -1715,6 +1715,41 @@ def narrate_confrontation_choice_outcome(
     return script.format(name=character_name, mechanical_outcome=mechanical_outcome)
 
 
+def kess_shrine_vigil_script(character_name: str) -> str:
+    """
+    Chapter 6 expansion, Phase 4 (2026-08-30, per the approved plan's
+    "Story & character craft" section) -- the single clearest "why is
+    Kess evil" beat in the whole Chapter 3-8 arc, delivered by staging
+    rather than exposition: the party finds her already at the same
+    kind of shrine they themselves use, alone, unguarded, mid-vigil --
+    not fighting, not taunting, genuinely at rest for the length of a
+    few real lines. This is a pure narrative beat, not a fight (no
+    combat triggers here); she notices the party and the moment breaks
+    on its own, same real "flees rather than dies" discipline her
+    actual boss fights already use, just without a fight ever starting
+    at all. Hand-written, zero Ollama calls, same voice established by
+    kess_first_confrontation_script -- calm, controlled, a script she's
+    following that isn't her own, "Whispers of the Universe" the same
+    in-fiction Remnant term her later scenes already use.
+    """
+    return (
+        "*The shrine ahead is lit, faintly, by something that isn't a torch. A woman kneels at it, "
+        "alone, head bowed -- not praying, exactly. Listening.*\n\n"
+        f"*{character_name} recognizes her before she ever looks up. Kess.*\n\n"
+        "**Kess:** \"...They're louder down here. The Whispers. I didn't think that was possible "
+        "this far from the surface.\"\n\n"
+        "*She doesn't reach for a weapon. For a moment she just sounds tired, the calculation gone "
+        "out of her voice entirely.*\n\n"
+        "**Kess:** \"I used to think I was the one asking them for something. Lately I can't tell "
+        "anymore which direction that actually runs.\"\n\n"
+        "*She hears them move, and the moment closes over as fast as it opened -- the tiredness gone, "
+        "replaced by the same unhurried calm as always.*\n\n"
+        "**Kess:** \"You shouldn't have seen that. Pretend you didn't, and I'll pretend the same about "
+        "you being here at all.\"\n\n"
+        "*She's already gone before anyone can answer -- not fled, exactly. Excused herself.*"
+    )
+
+
 def kess_flees_line() -> str:
     """
     Hand-written (Kess Arc Phase 2, per Coffee: "if KESS is not
