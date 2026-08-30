@@ -5679,6 +5679,96 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(chest["kind"], "chest")
             self.assertTrue(chest["loot"])
 
+    # -- Chapter 4 expansion, Phase 2 (2026-08-30): The Unmoored Isle
+    #    grows from 1 real arc_4 room to 24 rooms/10 quests. The existing
+    #    hollow->afterimage->...->first_wait chain is arc_13's own
+    #    deferred endgame content and must stay completely untouched. --
+    def test_arc_4_now_has_ten_quests_original_two_completely_undisturbed(self):
+        quests = bot.CAMPAIGN["story_arcs"]["arc_4_ascension"]["quests"]
+        self.assertEqual(len(quests), 10)
+        self.assertEqual(quests[:2], ["unmoored_isle_arrival", "the_unmoored_isle_quest"])
+
+    def test_unmoored_isle_grows_to_24_rooms_without_touching_arc_13s_chain(self):
+        locs = bot.CAMPAIGN["locations"]["sky"]
+        arc_13_chain = {
+            "unmoored_isle_hollow", "unmoored_isle_afterimage", "unmoored_isle_turning_stair",
+            "unmoored_isle_missed_step", "unmoored_isle_loom", "unmoored_isle_last_measure",
+            "unmoored_isle_first_wait",
+        }
+        for loc_id in arc_13_chain:
+            self.assertIn(loc_id, locs, f"{loc_id} must still exist, untouched")
+        new_ids = {k for k in locs if k.startswith("unmoored_isle_") and k not in arc_13_chain}
+        self.assertEqual(len(new_ids) + 1, 24)  # +1 for the_unmoored_isle hub itself
+
+    def test_unmoored_isle_new_rooms_are_fully_connected_and_reciprocated(self):
+        locs = bot.CAMPAIGN["locations"]["sky"]
+        arc_13_chain = {
+            "unmoored_isle_hollow", "unmoored_isle_afterimage", "unmoored_isle_turning_stair",
+            "unmoored_isle_missed_step", "unmoored_isle_loom", "unmoored_isle_last_measure",
+            "unmoored_isle_first_wait",
+        }
+        new_ids = [k for k in locs if k.startswith("unmoored_isle_") and k not in arc_13_chain]
+        self.assertGreaterEqual(len(new_ids), 23)
+        for loc_id in new_ids:
+            loc = locs[loc_id]
+            for direction, dest_id in loc.get("directions", {}).items():
+                dest = cl.get_location(bot.CAMPAIGN, dest_id)
+                self.assertIsNotNone(dest, f"{loc_id} -> {dest_id} via {direction} is a dead end")
+                self.assertIn(loc_id, dest.get("connections", []), f"{dest_id} doesn't connect back to {loc_id}")
+
+    def test_the_waiting_shape_untouched_by_the_expansion(self):
+        """The flagged level mismatch is resolved via a real, escalating path leading UP to it, not by re-leveling the existing boss real players may have already fought."""
+        boss = bot.CAMPAIGN["monsters"]["the_waiting_shape"]
+        self.assertEqual(boss["level"], 45)
+        self.assertEqual(boss["hp_max"], 9500)
+        isle = cl.get_location(bot.CAMPAIGN, "the_unmoored_isle")
+        self.assertEqual(isle["monsters"], ["the_waiting_shape"])
+        self.assertEqual(isle["requires_item"], "shard_of_dim_light")
+
+    def test_the_drowned_reflection_uses_the_real_new_systems_not_a_generic_statstick(self):
+        boss = bot.CAMPAIGN["monsters"]["the_drowned_reflection"]
+        self.assertTrue(boss["is_boss"])
+        self.assertIn("cone_of_cold", boss["known_spells"])
+        self.assertTrue(boss.get("adapts_to_damage"))
+        self.assertTrue(boss.get("extra_attack_when_enraged"))
+        self.assertTrue(boss.get("stealable_items"))
+        self.assertIn("the_sunken_reflections_end", bot._QUEST_MONSTER_INDEX.get("the_drowned_reflection", []))
+        quest = bot.CAMPAIGN["quests"]["the_sunken_reflections_end"]
+        self.assertEqual(quest["reward_item"], "the_drowned_reflections_lens")
+
+    def test_the_spires_grace_relocated_to_the_isle_stats_unchanged(self):
+        spire_reaches = cl.get_location(bot.CAMPAIGN, "the_first_city_spire_reaches")
+        self.assertNotIn("the_spires_grace", spire_reaches.get("monsters", []))
+        sanctum = cl.get_location(bot.CAMPAIGN, "unmoored_isle_the_spires_grace_sanctum")
+        self.assertIn("the_spires_grace", sanctum["monsters"])
+        remnant = remnants_module.get_remnant("the_spires_grace")
+        self.assertEqual(remnant["location_id"], "unmoored_isle_the_spires_grace_sanctum")
+        self.assertEqual(remnant["element"], "radiant")
+        # Stats (not lore/location) must be completely unchanged.
+        boss = bot.CAMPAIGN["monsters"]["the_spires_grace"]
+        self.assertEqual(boss["level"], bot.CAMPAIGN["monsters"]["the_spires_grace"]["level"])
+        quest = bot.CAMPAIGN["quests"]["remnant_the_spires_grace"]
+        self.assertEqual(quest["location"], "unmoored_isle_the_spires_grace_sanctum")
+
+    def test_spires_grace_sanctum_is_gated_behind_companion_trust(self):
+        location = cl.get_location(bot.CAMPAIGN, "unmoored_isle_the_suns_threshold")
+        current_dict = {"story_gates": location["story_gates"]}
+        character = {"party_id": None, "completed_quests": []}
+        self.assertIsNotNone(bot._check_story_gate(character, current_dict, "unmoored_isle_the_spires_grace_sanctum"))
+
+    def test_unmoored_isle_lockable_chests_grant_real_loot(self):
+        for loc_id in ("unmoored_isle_the_repeating_door", "unmoored_isle_the_second_shadow", "unmoored_isle_the_suns_threshold"):
+            loc = cl.get_location(bot.CAMPAIGN, loc_id)
+            chest = loc["lockables"][0]
+            self.assertEqual(chest["kind"], "chest")
+            self.assertTrue(chest["loot"])
+
+    def test_new_unmoored_isle_npcs_are_real_and_non_recruitable(self):
+        for npc_id, loc_id in (("the_folded_voice", "unmoored_isle_the_folded_atrium"), ("the_argument", "unmoored_isle_the_argument_of_echoes")):
+            npc = bot.CAMPAIGN["npcs"][npc_id]
+            self.assertFalse(npc.get("recruitable"))
+            self.assertIn(npc_id, cl.get_location(bot.CAMPAIGN, loc_id)["npcs"])
+
     def test_companion_favor_pays_more_affinity_once_the_companion_already_trusts_you(self):
         """
         Real live request (2026-08-23, Coffee: "give the affinity real

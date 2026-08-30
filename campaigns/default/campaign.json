@@ -1545,9 +1545,7 @@
             "description": "Watched directly, they hold perfectly still. Watched from the corner of your eye, more than one of them is moving."
           }
         },
-        "monsters": [
-          "the_spires_grace"
-        ],
+        "monsters": [],
         "grid_position": {
           "x": 3,
           "y": -1
@@ -3401,7 +3399,10 @@
         "layer": "sky",
         "description": "An island of grey stone drifting slowly above the clouds, tethered to nothing anyone can see. Something on it has been waiting a very long time.",
         "connections": [
-          "unmoored_isle_hollow"
+          "unmoored_isle_hollow",
+          "unmoored_isle_drifting_threshold",
+          "unmoored_isle_the_mirrored_threshold",
+          "unmoored_isle_the_radiant_stair"
         ],
         "hidden": true,
         "requires_item": "shard_of_dim_light",
@@ -3424,7 +3425,10 @@
           }
         },
         "directions": {
-          "down": "unmoored_isle_hollow"
+          "down": "unmoored_isle_hollow",
+          "north": "unmoored_isle_drifting_threshold",
+          "south": "unmoored_isle_the_mirrored_threshold",
+          "east": "unmoored_isle_the_radiant_stair"
         },
         "combat_environment": {
           "name": "the crumbling edge of the isle itself",
@@ -3649,6 +3653,514 @@
         "grid_position": {
           "x": 1,
           "y": -3
+        }
+      },
+      "unmoored_isle_drifting_threshold": {
+        "name": "The Drifting Threshold",
+        "layer": "sky",
+        "description": "The isle's stone keeps going here, well past where it should have run out into open air.",
+        "connections": [
+          "the_unmoored_isle",
+          "unmoored_isle_the_backward_hall"
+        ],
+        "directions": {
+          "south": "the_unmoored_isle",
+          "north": "unmoored_isle_the_backward_hall"
+        },
+        "monsters": [
+          "unmoored_drift_wisp"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": 1
+        }
+      },
+      "unmoored_isle_the_backward_hall": {
+        "name": "The Backward Hall",
+        "layer": "sky",
+        "description": "Every real sound in this hall arrives before whatever made it actually happens.",
+        "connections": [
+          "unmoored_isle_drifting_threshold",
+          "unmoored_isle_the_repeating_door",
+          "unmoored_isle_the_upside_stair"
+        ],
+        "directions": {
+          "south": "unmoored_isle_drifting_threshold",
+          "east": "unmoored_isle_the_repeating_door",
+          "north": "unmoored_isle_the_upside_stair"
+        },
+        "monsters": [
+          "unmoored_backward_echo"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": 2
+        }
+      },
+      "unmoored_isle_the_repeating_door": {
+        "name": "The Repeating Door",
+        "layer": "sky",
+        "description": "A single door, opened and closed the same number of times by everyone who's ever reached it.",
+        "connections": [
+          "unmoored_isle_the_backward_hall"
+        ],
+        "directions": {
+          "west": "unmoored_isle_the_backward_hall"
+        },
+        "lockables": [
+          {
+            "id": "repeating_door_cache",
+            "kind": "chest",
+            "name": "a cache behind the repeating door",
+            "loot": {
+              "greater_healing_potion": 1
+            },
+            "gold": 90
+          }
+        ],
+        "grid_position": {
+          "x": 1,
+          "y": 2
+        }
+      },
+      "unmoored_isle_the_upside_stair": {
+        "name": "The Upside Stair",
+        "layer": "sky",
+        "description": "A stair that climbs in a direction that only makes sense if you don't look directly at your own feet.",
+        "connections": [
+          "unmoored_isle_the_backward_hall",
+          "unmoored_isle_the_floating_garden"
+        ],
+        "directions": {
+          "south": "unmoored_isle_the_backward_hall",
+          "up": "unmoored_isle_the_floating_garden"
+        },
+        "grid_position": {
+          "x": 0,
+          "y": 3
+        }
+      },
+      "unmoored_isle_the_floating_garden": {
+        "name": "The Floating Garden",
+        "layer": "sky",
+        "description": "Real, growing things, somehow, this high up -- the one genuinely calm room on the whole isle.",
+        "connections": [
+          "unmoored_isle_the_upside_stair",
+          "unmoored_isle_the_untethered_bridge"
+        ],
+        "directions": {
+          "down": "unmoored_isle_the_upside_stair",
+          "up": "unmoored_isle_the_untethered_bridge"
+        },
+        "interactables": {
+          "floating_garden_bloom": {
+            "name": "a real, blooming garden",
+            "description": "Nothing about this should still be alive up here. It clearly doesn't care."
+          }
+        },
+        "grid_position": {
+          "x": 0,
+          "y": 4
+        }
+      },
+      "unmoored_isle_the_untethered_bridge": {
+        "name": "The Untethered Bridge",
+        "layer": "sky",
+        "description": "A bridge with nothing holding either end down, somehow perfectly still.",
+        "connections": [
+          "unmoored_isle_the_floating_garden",
+          "unmoored_isle_the_folded_atrium"
+        ],
+        "directions": {
+          "down": "unmoored_isle_the_floating_garden",
+          "up": "unmoored_isle_the_folded_atrium"
+        },
+        "resource_nodes": [
+          {
+            "id": "untethered_bridge_light_ore",
+            "name": "a vein of oddly weightless ore",
+            "material": "iron_ore",
+            "ability": "strength",
+            "skill": "mining"
+          }
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": 5
+        }
+      },
+      "unmoored_isle_the_folded_atrium": {
+        "name": "The Folded Atrium",
+        "layer": "sky",
+        "description": "A room that is somehow also, at the same time, the hallway leading into it.",
+        "connections": [
+          "unmoored_isle_the_untethered_bridge",
+          "unmoored_isle_the_drifting_halls_end"
+        ],
+        "directions": {
+          "down": "unmoored_isle_the_untethered_bridge",
+          "up": "unmoored_isle_the_drifting_halls_end"
+        },
+        "npcs": [
+          "the_folded_voice"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": 6
+        }
+      },
+      "unmoored_isle_the_drifting_halls_end": {
+        "name": "Where the Drifting Halls End",
+        "layer": "sky",
+        "description": "The halls simply stop here, all at once, like whoever built them ran out of reason to keep going.",
+        "connections": [
+          "unmoored_isle_the_folded_atrium"
+        ],
+        "directions": {
+          "down": "unmoored_isle_the_folded_atrium"
+        },
+        "monsters": [
+          "the_folded_warden"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": 7
+        }
+      },
+      "unmoored_isle_the_mirrored_threshold": {
+        "name": "The Mirrored Threshold",
+        "layer": "sky",
+        "description": "The stone underfoot reflects the sky above it so cleanly it's genuinely hard to tell which way is down.",
+        "connections": [
+          "the_unmoored_isle",
+          "unmoored_isle_the_upside_down_lake"
+        ],
+        "directions": {
+          "north": "the_unmoored_isle",
+          "south": "unmoored_isle_the_upside_down_lake"
+        },
+        "monsters": [
+          "unmoored_mirror_wisp"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": -1
+        }
+      },
+      "unmoored_isle_the_upside_down_lake": {
+        "name": "The Upside-Down Lake",
+        "layer": "sky",
+        "description": "A real lake, held in place above the isle rather than on it, water pooling toward the sky instead of away from it.",
+        "connections": [
+          "unmoored_isle_the_mirrored_threshold",
+          "unmoored_isle_the_second_shadow",
+          "unmoored_isle_the_reflected_stair"
+        ],
+        "directions": {
+          "north": "unmoored_isle_the_mirrored_threshold",
+          "east": "unmoored_isle_the_second_shadow",
+          "south": "unmoored_isle_the_reflected_stair"
+        },
+        "interactables": {
+          "lake_wrong_reflection": {
+            "name": "the lake's own reflection",
+            "description": "It shows the isle as it must have looked before it was ever an island -- whole, and attached to something much larger."
+          }
+        },
+        "grid_position": {
+          "x": 0,
+          "y": -2
+        }
+      },
+      "unmoored_isle_the_second_shadow": {
+        "name": "The Second Shadow",
+        "layer": "sky",
+        "description": "A shadow here that doesn't belong to anything currently standing in the room.",
+        "connections": [
+          "unmoored_isle_the_upside_down_lake"
+        ],
+        "directions": {
+          "west": "unmoored_isle_the_upside_down_lake"
+        },
+        "lockables": [
+          {
+            "id": "second_shadow_cache",
+            "kind": "chest",
+            "name": "a cache tucked into the shadow itself",
+            "loot": {
+              "scroll_invisibility": 1
+            },
+            "gold": 110
+          }
+        ],
+        "grid_position": {
+          "x": 1,
+          "y": -2
+        }
+      },
+      "unmoored_isle_the_reflected_stair": {
+        "name": "The Reflected Stair",
+        "layer": "sky",
+        "description": "A stair down that is, impossibly, also a stair up, depending entirely on which direction you started from.",
+        "connections": [
+          "unmoored_isle_the_upside_down_lake",
+          "unmoored_isle_the_glass_garden"
+        ],
+        "directions": {
+          "north": "unmoored_isle_the_upside_down_lake",
+          "south": "unmoored_isle_the_glass_garden"
+        },
+        "monsters": [
+          "unmoored_reflection_shard"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": -3
+        }
+      },
+      "unmoored_isle_the_glass_garden": {
+        "name": "The Glass Garden",
+        "layer": "sky",
+        "description": "Every real plant here has been replaced, leaf for leaf, by something that only looks like glass until you touch it.",
+        "connections": [
+          "unmoored_isle_the_reflected_stair",
+          "unmoored_isle_the_argument_of_echoes"
+        ],
+        "directions": {
+          "north": "unmoored_isle_the_reflected_stair",
+          "south": "unmoored_isle_the_argument_of_echoes"
+        },
+        "grid_position": {
+          "x": 0,
+          "y": -4
+        }
+      },
+      "unmoored_isle_the_argument_of_echoes": {
+        "name": "The Argument of Echoes",
+        "layer": "sky",
+        "description": "Two voices, arguing, neither of them willing to admit which one is the real one.",
+        "connections": [
+          "unmoored_isle_the_glass_garden",
+          "unmoored_isle_the_reflection_deepens"
+        ],
+        "directions": {
+          "north": "unmoored_isle_the_glass_garden",
+          "south": "unmoored_isle_the_reflection_deepens"
+        },
+        "npcs": [
+          "the_argument"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": -5
+        }
+      },
+      "unmoored_isle_the_reflection_deepens": {
+        "name": "Where the Reflection Deepens",
+        "layer": "sky",
+        "description": "The one genuinely still room on this whole side of the isle -- everything here is calm, deliberately.",
+        "connections": [
+          "unmoored_isle_the_argument_of_echoes",
+          "unmoored_isle_the_sunken_reflections_end"
+        ],
+        "directions": {
+          "north": "unmoored_isle_the_argument_of_echoes",
+          "south": "unmoored_isle_the_sunken_reflections_end"
+        },
+        "interactables": {
+          "deepening_reflection_note": {
+            "name": "a record scratched into the stillest water",
+            "description": "Whatever's down at the true bottom of this reflection has been waiting for someone to actually look."
+          }
+        },
+        "grid_position": {
+          "x": 0,
+          "y": -6
+        }
+      },
+      "unmoored_isle_the_sunken_reflections_end": {
+        "name": "The Sunken Reflection's End",
+        "layer": "sky",
+        "description": "The reflection finally shows something real -- and it's already looking back.",
+        "connections": [
+          "unmoored_isle_the_reflection_deepens"
+        ],
+        "directions": {
+          "north": "unmoored_isle_the_reflection_deepens"
+        },
+        "monsters": [
+          "the_drowned_reflection"
+        ],
+        "combat_environment": {
+          "name": "the reflection's own bottomless water",
+          "description": "The deeper this fight goes, the less the water here looks like it's reflecting the room at all.",
+          "damage_dice": "4d6"
+        },
+        "grid_position": {
+          "x": 0,
+          "y": -7
+        }
+      },
+      "unmoored_isle_the_radiant_stair": {
+        "name": "The Radiant Stair",
+        "layer": "sky",
+        "description": "A stair climbing toward real, warm light -- the first genuinely warm thing anyone's found on this whole cold island.",
+        "connections": [
+          "the_unmoored_isle",
+          "unmoored_isle_the_sunward_ledge"
+        ],
+        "directions": {
+          "west": "the_unmoored_isle",
+          "east": "unmoored_isle_the_sunward_ledge"
+        },
+        "monsters": [
+          "unmoored_radiant_mote"
+        ],
+        "grid_position": {
+          "x": 1,
+          "y": 0
+        }
+      },
+      "unmoored_isle_the_sunward_ledge": {
+        "name": "The Sunward Ledge",
+        "layer": "sky",
+        "description": "A ledge facing a sunrise that never actually arrives, though the light keeps promising it will.",
+        "connections": [
+          "unmoored_isle_the_radiant_stair",
+          "unmoored_isle_the_warming_hollow"
+        ],
+        "directions": {
+          "west": "unmoored_isle_the_radiant_stair",
+          "east": "unmoored_isle_the_warming_hollow"
+        },
+        "monsters": [
+          "unmoored_sunward_watcher"
+        ],
+        "grid_position": {
+          "x": 2,
+          "y": 0
+        }
+      },
+      "unmoored_isle_the_warming_hollow": {
+        "name": "The Warming Hollow",
+        "layer": "sky",
+        "description": "Real warmth pools here, safe and steady -- the calmest spot on the whole radiant side of the isle.",
+        "connections": [
+          "unmoored_isle_the_sunward_ledge",
+          "unmoored_isle_the_climbing_light"
+        ],
+        "directions": {
+          "west": "unmoored_isle_the_sunward_ledge",
+          "east": "unmoored_isle_the_climbing_light"
+        },
+        "resource_nodes": [
+          {
+            "id": "warming_hollow_herb_bed",
+            "name": "a bed of sun-warmed herbs",
+            "material": "silverleaf_herb",
+            "ability": "wisdom",
+            "skill": "herbalism"
+          }
+        ],
+        "grid_position": {
+          "x": 3,
+          "y": 0
+        }
+      },
+      "unmoored_isle_the_climbing_light": {
+        "name": "The Climbing Light",
+        "layer": "sky",
+        "description": "The light here climbs the walls instead of falling from above, always reaching a little higher than it did a moment ago.",
+        "connections": [
+          "unmoored_isle_the_warming_hollow",
+          "unmoored_isle_the_high_approach"
+        ],
+        "directions": {
+          "west": "unmoored_isle_the_warming_hollow",
+          "east": "unmoored_isle_the_high_approach"
+        },
+        "interactables": {
+          "climbing_light_record": {
+            "name": "a record etched into the climbing light's own path",
+            "description": "Whatever this light has been reaching toward for so long is close now -- close enough that the reaching itself has started to feel deliberate."
+          }
+        },
+        "grid_position": {
+          "x": 4,
+          "y": 0
+        }
+      },
+      "unmoored_isle_the_high_approach": {
+        "name": "The High Approach",
+        "layer": "sky",
+        "description": "The path narrows here, deliberately, like whatever's ahead wants to see exactly who's still coming.",
+        "connections": [
+          "unmoored_isle_the_climbing_light",
+          "unmoored_isle_the_suns_threshold"
+        ],
+        "directions": {
+          "west": "unmoored_isle_the_climbing_light",
+          "east": "unmoored_isle_the_suns_threshold"
+        },
+        "monsters": [
+          "the_high_approach_sentinel"
+        ],
+        "grid_position": {
+          "x": 5,
+          "y": 0
+        }
+      },
+      "unmoored_isle_the_suns_threshold": {
+        "name": "The Sun's Threshold",
+        "layer": "sky",
+        "description": "The very edge of the radiant approach, warm enough now to be uncomfortable -- whatever's past here is the real source of it.",
+        "connections": [
+          "unmoored_isle_the_high_approach",
+          "unmoored_isle_the_spires_grace_sanctum"
+        ],
+        "directions": {
+          "west": "unmoored_isle_the_high_approach",
+          "east": "unmoored_isle_the_spires_grace_sanctum"
+        },
+        "lockables": [
+          {
+            "id": "suns_threshold_cache",
+            "kind": "chest",
+            "name": "a sun-warmed cache set into the threshold",
+            "loot": {
+              "supreme_spell_tonic": 1
+            },
+            "gold": 130
+          }
+        ],
+        "story_gates": {
+          "unmoored_isle_the_spires_grace_sanctum": {
+            "requires_companion_trust": {
+              "min_affinity": 40
+            }
+          }
+        },
+        "grid_position": {
+          "x": 6,
+          "y": 0
+        }
+      },
+      "unmoored_isle_the_spires_grace_sanctum": {
+        "name": "The Spire's Grace Sanctum",
+        "layer": "sky",
+        "description": "The First City's tallest spire was built facing the sunrise -- and somehow, impossibly, the real thing it was always reaching for turned out to be up here.",
+        "connections": [
+          "unmoored_isle_the_suns_threshold"
+        ],
+        "directions": {
+          "west": "unmoored_isle_the_suns_threshold"
+        },
+        "monsters": [
+          "the_spires_grace"
+        ],
+        "grid_position": {
+          "x": 7,
+          "y": 0
         }
       }
     }
@@ -3921,6 +4433,24 @@
       "role": "puzzle_guardian",
       "personality": "ancient, patient, and utterly indifferent to whether anyone ever answers it correctly",
       "goals": "has been asking the same question of everyone who reaches it, for longer than anyone alive",
+      "recruitable": false,
+      "alignment": "True Neutral",
+      "disposition": "neutral"
+    },
+    "the_folded_voice": {
+      "name": "The Folded Voice",
+      "role": "puzzle_guardian",
+      "personality": "speaks every sentence as though it's already been said before, and will be again",
+      "goals": "has been asking the same thing of everyone who reaches the atrium, in every direction at once",
+      "recruitable": false,
+      "alignment": "True Neutral",
+      "disposition": "neutral"
+    },
+    "the_argument": {
+      "name": "The Argument",
+      "role": "puzzle_guardian",
+      "personality": "speaks only in disagreement with itself, each half finishing the other's sentence differently",
+      "goals": "has never once agreed with its own echo, and won't let anyone past until they do",
       "recruitable": false,
       "alignment": "True Neutral",
       "disposition": "neutral"
@@ -5117,8 +5647,8 @@
     },
     "remnant_the_spires_grace": {
       "title": "The Spire That Still Faces Sunrise",
-      "description": "Something real is still down here -- The Spire's Grace never fully faded like the rest did.",
-      "location": "the_first_city_spire_reaches",
+      "description": "Something real is still up here, above the clouds -- The Spire's Grace never fully faded like the rest did.",
+      "location": "unmoored_isle_the_spires_grace_sanctum",
       "reward_xp": 1650,
       "reward_gold": 200,
       "trigger": {
@@ -5373,6 +5903,104 @@
       },
       "clue": "The Final Count, deep past the Last Archive, is the last real guardian standing between the party and the Original Spire itself.",
       "weight": "climactic"
+    },
+    "the_drifting_halls_threshold": {
+      "title": "What Drifts North",
+      "description": "The isle's stone keeps going north, well past where it should end into open sky.",
+      "location": "unmoored_isle_drifting_threshold",
+      "reward_xp": 260,
+      "reward_gold": 80,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "unmoored_drift_wisp"
+      },
+      "clue": "North of the isle's center, the ground doesn't stop where it should."
+    },
+    "the_folded_atriums_riddle": {
+      "title": "What the Folded Voice Asks",
+      "description": "Something in the Folded Atrium has been asking the same thing of everyone who reaches it, from every direction at once.",
+      "location": "unmoored_isle_the_folded_atrium",
+      "trigger": {
+        "type": "solve_puzzle",
+        "puzzle_id": "folded_atrium_riddle"
+      },
+      "reward_xp": 320,
+      "reward_gold": 100,
+      "clue": "The Folded Voice poses a real question: \"I finish before I start, and start again right where I finished. What am I?\""
+    },
+    "the_drifting_halls_warden": {
+      "title": "Where the Drifting Halls End",
+      "description": "The halls to the north simply stop, all at once -- and something real is still standing guard where they do.",
+      "location": "unmoored_isle_the_drifting_halls_end",
+      "reward_xp": 480,
+      "reward_gold": 160,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_folded_warden"
+      },
+      "clue": "The Folded Warden waits at the true end of the Drifting Halls, past the Folded Atrium."
+    },
+    "the_mirrored_thresholds_echo": {
+      "title": "Which Way Is Down",
+      "description": "South of the isle's center, the stone reflects the sky so cleanly that up and down stop meaning much.",
+      "location": "unmoored_isle_the_mirrored_threshold",
+      "reward_xp": 270,
+      "reward_gold": 80,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "unmoored_mirror_wisp"
+      },
+      "clue": "South of the isle's center, the ground itself starts acting like a mirror."
+    },
+    "the_arguments_answer": {
+      "title": "Which One Spoke First",
+      "description": "Two voices argue endlessly in the Glass Garden's own reflection -- and neither will let the party pass until the argument's actually settled.",
+      "location": "unmoored_isle_the_argument_of_echoes",
+      "trigger": {
+        "type": "solve_puzzle",
+        "puzzle_id": "argument_of_echoes_riddle"
+      },
+      "reward_xp": 340,
+      "reward_gold": 110,
+      "clue": "The Argument poses a real question: \"Two voices agree on everything except which one of them spoke first. What are they?\""
+    },
+    "the_sunken_reflections_end": {
+      "title": "The Sunken Reflection",
+      "description": "The reflection at the deepest, calmest point south of the isle finally shows something real -- and it's already looking back.",
+      "location": "unmoored_isle_the_sunken_reflections_end",
+      "reward_xp": 950,
+      "reward_gold": 320,
+      "reward_item": "the_drowned_reflections_lens",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_drowned_reflection"
+      },
+      "clue": "Past the Argument of Echoes, where the reflection finally deepens, something real is waiting at the bottom of it.",
+      "weight": "climactic"
+    },
+    "the_radiant_stairs_climb": {
+      "title": "The First Real Warmth",
+      "description": "East of the isle's center, real warmth finally breaks through the cold -- the first sign that not everything up here is waiting to be fought.",
+      "location": "unmoored_isle_the_radiant_stair",
+      "reward_xp": 280,
+      "reward_gold": 90,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "unmoored_radiant_mote"
+      },
+      "clue": "East of the isle's center, a stair climbs toward real, warm light."
+    },
+    "the_suns_thresholds_secret": {
+      "title": "What the Light Was Reaching For",
+      "description": "The radiant approach ends at a real threshold, warm enough now to be uncomfortable -- whatever's past it is the true source.",
+      "location": "unmoored_isle_the_high_approach",
+      "reward_xp": 520,
+      "reward_gold": 170,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_high_approach_sentinel"
+      },
+      "clue": "The High Approach Sentinel guards the last real stretch before the sun's own threshold."
     }
   },
   "story_arcs": {
@@ -5419,7 +6047,15 @@
       "description": "The final confrontation, far from where anyone thought to look.",
       "quests": [
         "unmoored_isle_arrival",
-        "the_unmoored_isle_quest"
+        "the_unmoored_isle_quest",
+        "the_drifting_halls_threshold",
+        "the_folded_atriums_riddle",
+        "the_drifting_halls_warden",
+        "the_mirrored_thresholds_echo",
+        "the_arguments_answer",
+        "the_sunken_reflections_end",
+        "the_radiant_stairs_climb",
+        "the_suns_thresholds_secret"
       ],
       "required_level": 15
     },
@@ -7732,6 +8368,156 @@
           "weight": 20
         }
       ]
+    },
+    "unmoored_drift_wisp": {
+      "name": "Drift Wisp",
+      "level": 15,
+      "dexterity": 15,
+      "strength": 8,
+      "armor_class": 15,
+      "hp_max": 300,
+      "proficiency_bonus": 5,
+      "xp_reward": 240,
+      "damage_dice": "1d8",
+      "damage_bonus": 26,
+      "damage_type": "force"
+    },
+    "unmoored_backward_echo": {
+      "name": "Backward Echo",
+      "level": 18,
+      "dexterity": 14,
+      "strength": 12,
+      "armor_class": 16,
+      "hp_max": 420,
+      "proficiency_bonus": 5,
+      "xp_reward": 300,
+      "damage_dice": "1d8",
+      "damage_bonus": 32,
+      "damage_type": "force"
+    },
+    "the_folded_warden": {
+      "name": "The Folded Warden",
+      "level": 27,
+      "dexterity": 13,
+      "strength": 19,
+      "armor_class": 19,
+      "hp_max": 2200,
+      "proficiency_bonus": 7,
+      "xp_reward": 520,
+      "damage_dice": "1d8",
+      "damage_bonus": 54,
+      "damage_type": "force",
+      "is_boss": false,
+      "stealable_items": [
+        {
+          "item_id": "greater_healing_potion",
+          "weight": 90
+        }
+      ]
+    },
+    "unmoored_mirror_wisp": {
+      "name": "Mirror Wisp",
+      "level": 16,
+      "dexterity": 15,
+      "strength": 9,
+      "armor_class": 15,
+      "hp_max": 320,
+      "proficiency_bonus": 5,
+      "xp_reward": 250,
+      "damage_dice": "1d8",
+      "damage_bonus": 27,
+      "damage_type": "cold"
+    },
+    "unmoored_reflection_shard": {
+      "name": "Reflection Shard",
+      "level": 19,
+      "dexterity": 14,
+      "strength": 12,
+      "armor_class": 16,
+      "hp_max": 450,
+      "proficiency_bonus": 6,
+      "xp_reward": 320,
+      "damage_dice": "1d8",
+      "damage_bonus": 34,
+      "damage_type": "cold"
+    },
+    "the_drowned_reflection": {
+      "name": "The Drowned Reflection",
+      "level": 32,
+      "dexterity": 13,
+      "strength": 20,
+      "armor_class": 21,
+      "hp_max": 4500,
+      "proficiency_bonus": 8,
+      "xp_reward": 800,
+      "damage_dice": "1d8",
+      "damage_bonus": 70,
+      "damage_type": "cold",
+      "is_boss": true,
+      "known_spells": [
+        "cone_of_cold"
+      ],
+      "adapts_to_damage": true,
+      "extra_attack_when_enraged": true,
+      "vulnerabilities": [
+        "fire"
+      ],
+      "stealable_items": [
+        {
+          "item_id": "greater_spell_tonic",
+          "weight": 70
+        },
+        {
+          "item_id": "supreme_spell_tonic",
+          "weight": 15
+        }
+      ]
+    },
+    "unmoored_radiant_mote": {
+      "name": "Radiant Mote",
+      "level": 17,
+      "dexterity": 15,
+      "strength": 9,
+      "armor_class": 16,
+      "hp_max": 360,
+      "proficiency_bonus": 5,
+      "xp_reward": 270,
+      "damage_dice": "1d8",
+      "damage_bonus": 30,
+      "damage_type": "radiant"
+    },
+    "unmoored_sunward_watcher": {
+      "name": "Sunward Watcher",
+      "level": 21,
+      "dexterity": 13,
+      "strength": 15,
+      "armor_class": 18,
+      "hp_max": 560,
+      "proficiency_bonus": 6,
+      "xp_reward": 380,
+      "damage_dice": "1d8",
+      "damage_bonus": 40,
+      "damage_type": "radiant"
+    },
+    "the_high_approach_sentinel": {
+      "name": "The High Approach Sentinel",
+      "level": 30,
+      "dexterity": 13,
+      "strength": 19,
+      "armor_class": 20,
+      "hp_max": 2800,
+      "proficiency_bonus": 8,
+      "xp_reward": 620,
+      "damage_dice": "1d8",
+      "damage_bonus": 62,
+      "damage_type": "radiant",
+      "is_boss": false,
+      "stealable_items": [
+        {
+          "item_id": "greater_spell_tonic",
+          "weight": 80
+        }
+      ]
     }
   },
   "factions": {
@@ -7856,6 +8642,22 @@
         "silence",
         "the space between the words",
         "what's unsaid"
+      ]
+    },
+    "folded_atrium_riddle": {
+      "riddle": "I finish before I start, and start again right where I finished. What am I?",
+      "accepted_answers": [
+        "a circle",
+        "a loop",
+        "a cycle"
+      ]
+    },
+    "argument_of_echoes_riddle": {
+      "riddle": "Two voices agree on everything except which one of them spoke first. What are they?",
+      "accepted_answers": [
+        "an echo and its source",
+        "an echo",
+        "a reflection and what it reflects"
       ]
     }
   },

@@ -2,6 +2,57 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.411] — Chapter 4 expansion, Phase 2: The Unmoored Isle grows to 24 rooms, 10 quests, and fixes the flagged level gap
+
+Second installment of the approved Chapter 3-8 expansion plan. Arc_4
+had only 1 real room and 2 quests, jumping straight from "reach the
+isle" to a level-45/9500HP boss (The Waiting Shape) with zero
+progression in between -- a real, previously-flagged mismatch against
+arc_4's own required_level 15. The existing hollow->afterimage->...->
+first_wait chain beyond the isle is arc_13's own deferred endgame
+content and was left completely untouched (confirmed nobody's
+defeated its own gate yet either).
+
+- 23 new rooms across three branches, all new directions off the
+  isle's hub (its only prior connection, "down" to the arc_13 chain,
+  is unchanged): the Drifting Halls (north, ends in a real mini-boss),
+  the Sunken Reflection (south, ends in a new level-32 boss), and the
+  Radiant Approach (east, ends at the relocated Spire's Grace Remnant).
+- The level gap is fixed by giving the isle a real, escalating path
+  (level 15 -> 32) instead of re-leveling The Waiting Shape itself --
+  it stays exactly as it was, since real characters may already have
+  fought it; the new content gives a party something to actually do at
+  their own level before choosing to take on the isle's true, much
+  harder guardian.
+- A new climactic boss, The Drowned Reflection (level 32): real
+  known_spells (Cone of Cold), adapts_to_damage, a mid-fight enrage
+  shift, and a unique reward (The Drowned Reflection's Lens). Its
+  approach room and the Spire's Grace sanctum are each gated behind
+  companion trust.
+- The Spire's Grace Remnant relocated from The First City to a new
+  sanctum here -- a genuinely better elemental fit (radiant, "facing
+  the sunrise," on a floating isle instead of underground). Stats
+  completely unchanged; its own defeat-quest updated to the new
+  location.
+- **Live bug found and fixed mid-phase**: a real player report ("I
+  accepted the quest... it says I have not completed the quest...
+  Lorianna has completed the quest") traced to the SAME transitional
+  issue the previous version's Remnant-vault relocation created --
+  13 characters (both real players' alternate characters and AI
+  companions) had already defeated the Wrathflame Unbound/Root That
+  Remembers Remnants BEFORE their vaults existed, but lacked the new
+  entry-quest credit now gating them. Retroactively granted via a
+  careful character_id-scoped live-data fix (never telegram_user_id,
+  per this project's standing rule) to everyone already holding the
+  matching Remnant-defeat quest. Confirmed nobody's in the same
+  position for this version's own relocation (Spire's Grace) before
+  deploying it.
+- Verified with real executed tests: all 24 rooms reciprocated, the
+  new boss's mechanics real, both new gates genuinely block, chests
+  grant real loot -- plus a full re-run of the Kess-sequencing/Borin/
+  Blackthorn suites (arc_4 growing to 10 quests changes what "arcs 1-7
+  complete" requires) confirming zero regressions.
+
 ## [1.27.410] — Chapter 3 expansion, Phase 1: The First City grows to a real 20-room dungeon, 10 quests
 
 First real installment of the approved Chapter 3-8 expansion plan. The

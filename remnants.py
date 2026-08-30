@@ -196,10 +196,16 @@ REMNANTS = {
         "name": "The Spire's Grace",
         "monster_key": "the_spires_grace",
         "story_tied": True,
-        "location_id": "the_first_city_spire_reaches",
+        "location_id": "unmoored_isle_the_spires_grace_sanctum",
         "element": "radiant",
         "summon_secondary": "party_heal",
-        "lore": "The First City's tallest spire was built facing the sunrise. Something up there still believes that's what it's for.",
+        # Relocated 2026-08-30 (Chapter 4 expansion, Phase 2, per the
+        # approved plan): a radiant presence "facing the sunrise"
+        # belongs naturally on a floating isle in the sky rather than
+        # underground -- a better elemental fit than its old home, not
+        # just a reshuffle. Stats completely unchanged; only the real
+        # location and these two location-specific lines moved.
+        "lore": "The First City's tallest spire was built facing the sunrise, reaching for something it could never actually touch from underground. Up here, above the clouds, it finally has.",
     },
     "the_archives_keeper": {
         "summon_damage_dice": "2d10", "summon_damage_bonus": 13,
