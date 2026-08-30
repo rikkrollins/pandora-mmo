@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.412] — Chapter 5 expansion, Phase 3: Goblin Warrens grows to 28 rooms, 10 quests, first Kess environmental thread
+
+Third installment of the approved Chapter 3-8 expansion plan. Goblin
+Warrens had only 5 real rooms and 3 quests -- grown to 28 rooms and 10
+quests across two new branches off the existing dead ends.
+
+- **The Buried Archive** (west of the Collapsed Tunnel, 11 new rooms):
+  an archive predating the warren entirely, which the goblins tunneled
+  into without understanding and now half-worship as an idol. Ends at
+  the relocated Archive's Keeper Remnant, gated behind companion trust.
+- **The Ledger's Trail** (north of the Deep Larder, 12 new rooms): the
+  chapter's real financial thread -- deep_larders_elder's own existing
+  clue ("whoever's really paying for all this clearly isn't the
+  goblins") now leads somewhere real. Ends in a new level-48 boss, The
+  Paymaster's Shadow (real Eldritch Blast spellcasting, counters_rage --
+  a deliberate callback to the Barbarian companion fighting alongside
+  the party here -- a mid-fight enrage shift, and a unique reward).
+- Grask Emberscale's own old cage is a real, findable room along this
+  branch (his own established "captive who was never quite broken"
+  backstory, iron bars bent outward from the inside) -- delivered as
+  pure environmental flavor, not a new companion quest: a 3rd
+  giver_npc=grask_emberscale quest was considered but skipped after
+  Phase 1 already proved this exact pattern breaks an existing test
+  guarding a companion's arc as a fixed, closed chain.
+- The Archive's Keeper's own defeat quest updated to its new location.
+- Verified with real executed tests: all 28 rooms reciprocated (plus
+  one real non-reciprocated connection bug caught and fixed during
+  verification, and one extra room added to hit the real 28 target
+  after an 11+11 miscount), the new boss's mechanics real, both gates
+  genuinely block -- plus a full re-run of the Kess-sequencing/Borin/
+  Blackthorn/Grask suites confirming zero regressions. Confirmed no
+  live character has defeated the Archive's Keeper yet, so no
+  grandfather live-data fix was needed this time (unlike last version).
+
 ## [1.27.411] — Chapter 4 expansion, Phase 2: The Unmoored Isle grows to 24 rooms, 10 quests, and fixes the flagged level gap
 
 Second installment of the approved Chapter 3-8 expansion plan. Arc_4

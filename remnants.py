@@ -212,10 +212,15 @@ REMNANTS = {
         "name": "The Archive's Keeper",
         "monster_key": "the_archives_keeper",
         "story_tied": True,
-        "location_id": "the_first_city_sunken_archive",
+        "location_id": "goblin_warrens_the_buried_archive",
         "element": "psychic",
         "summon_secondary": "self_heal",
-        "lore": "It has read everything ever written down here, in the correct order, and it still hasn't found the part that explains itself.",
+        # Relocated 2026-08-30 (Chapter 5 expansion, Phase 3, per the
+        # approved plan): reframed as an archive predating the warren
+        # entirely, which the goblins tunneled into without ever
+        # understanding it, now half-worshipped as an idol. Stats
+        # completely unchanged; only the real location and lore moved.
+        "lore": "It has read everything ever written down here, in the correct order, and it still hasn't found the part that explains itself -- long before the goblins arrived, and long after they started praying to it without asking why.",
     },
     "the_deepest_record": {
         "summon_damage_dice": "2d10", "summon_damage_bonus": 14,

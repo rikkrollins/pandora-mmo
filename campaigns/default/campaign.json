@@ -1584,9 +1584,7 @@
             "description": "Words carved at its edge, worn but legible: \"I speak without a mouth and hear without ears. I have no body, but I come alive with wind. What am I?\""
           }
         },
-        "monsters": [
-          "the_archives_keeper"
-        ],
+        "monsters": [],
         "grid_position": {
           "x": 1,
           "y": -11
@@ -2121,10 +2119,12 @@
         "layer": "underground",
         "description": "Past the inner den, a low chamber packed floor to ceiling with hoarded supplies \u2014 enough to keep a much bigger warren fed than the one anyone's actually seen so far.",
         "connections": [
-          "goblin_warrens_inner_den"
+          "goblin_warrens_inner_den",
+          "goblin_warrens_the_counting_hall"
         ],
         "directions": {
-          "south": "goblin_warrens_inner_den"
+          "south": "goblin_warrens_inner_den",
+          "north": "goblin_warrens_the_counting_hall"
         },
         "monsters": [
           "goblin_shaman_elder"
@@ -2145,10 +2145,12 @@
         "layer": "underground",
         "description": "A side passage caved in long before the goblins ever moved in \u2014 most of it's rubble now, but something's clearly still squatting in what's left of it.",
         "connections": [
-          "goblin_warrens"
+          "goblin_warrens",
+          "goblin_warrens_deeper_rubble"
         ],
         "directions": {
-          "east": "goblin_warrens"
+          "east": "goblin_warrens",
+          "west": "goblin_warrens_deeper_rubble"
         },
         "monsters": [
           "young_goblin"
@@ -3391,6 +3393,511 @@
           "x": 1,
           "y": -18
         }
+      },
+      "goblin_warrens_deeper_rubble": {
+        "name": "The Deeper Rubble",
+        "layer": "underground",
+        "description": "The cave-in goes back much further than anyone squatting near the entrance ever bothered to dig.",
+        "connections": [
+          "goblin_warrens_collapsed_tunnel",
+          "goblin_warrens_the_old_seam"
+        ],
+        "directions": {
+          "east": "goblin_warrens_collapsed_tunnel",
+          "west": "goblin_warrens_the_old_seam"
+        },
+        "monsters": [
+          "warren_deep_lurker"
+        ],
+        "grid_position": {
+          "x": -3,
+          "y": 0
+        }
+      },
+      "goblin_warrens_the_old_seam": {
+        "name": "The Old Seam",
+        "layer": "underground",
+        "description": "A real, deliberate seam in the rock, cut by tools no goblin in this warren has ever owned.",
+        "connections": [
+          "goblin_warrens_deeper_rubble",
+          "goblin_warrens_the_sealed_cache",
+          "goblin_warrens_the_forgotten_bore"
+        ],
+        "directions": {
+          "east": "goblin_warrens_deeper_rubble",
+          "north": "goblin_warrens_the_sealed_cache",
+          "west": "goblin_warrens_the_forgotten_bore"
+        },
+        "monsters": [
+          "warren_bone_picker"
+        ],
+        "grid_position": {
+          "x": -4,
+          "y": 0
+        }
+      },
+      "goblin_warrens_the_sealed_cache": {
+        "name": "The Sealed Cache",
+        "layer": "underground",
+        "description": "A cache sealed shut long before goblins ever knew this tunnel existed.",
+        "connections": [
+          "goblin_warrens_the_old_seam"
+        ],
+        "directions": {
+          "south": "goblin_warrens_the_old_seam"
+        },
+        "lockables": [
+          {
+            "id": "old_seam_cache",
+            "kind": "chest",
+            "name": "the sealed cache set into the old seam",
+            "loot": {
+              "greater_healing_potion": 1
+            },
+            "gold": 120
+          }
+        ],
+        "grid_position": {
+          "x": -4,
+          "y": 1
+        }
+      },
+      "goblin_warrens_the_forgotten_bore": {
+        "name": "The Forgotten Bore",
+        "layer": "underground",
+        "description": "A wide, quiet bore-hole, untouched by the chaos further back -- the one genuinely calm room on this whole side.",
+        "connections": [
+          "goblin_warrens_the_old_seam",
+          "goblin_warrens_the_ancient_shaft"
+        ],
+        "directions": {
+          "east": "goblin_warrens_the_old_seam",
+          "west": "goblin_warrens_the_ancient_shaft"
+        },
+        "grid_position": {
+          "x": -5,
+          "y": 0
+        }
+      },
+      "goblin_warrens_the_ancient_shaft": {
+        "name": "The Ancient Shaft",
+        "layer": "underground",
+        "description": "A shaft sunk straight down, real and deliberate, long before this warren had a name.",
+        "connections": [
+          "goblin_warrens_the_forgotten_bore",
+          "goblin_warrens_the_buried_threshold"
+        ],
+        "directions": {
+          "east": "goblin_warrens_the_forgotten_bore",
+          "down": "goblin_warrens_the_buried_threshold"
+        },
+        "resource_nodes": [
+          {
+            "id": "ancient_shaft_ore_vein",
+            "name": "a real, untouched ore vein",
+            "material": "iron_ore",
+            "ability": "strength",
+            "skill": "mining"
+          }
+        ],
+        "grid_position": {
+          "x": -5,
+          "y": -1
+        }
+      },
+      "goblin_warrens_the_buried_threshold": {
+        "name": "The Buried Threshold",
+        "layer": "underground",
+        "description": "A real threshold, carved, standing at the bottom of the shaft -- whatever's past it was built to be found, eventually, by someone.",
+        "connections": [
+          "goblin_warrens_the_ancient_shaft",
+          "goblin_warrens_the_reverent_hollow"
+        ],
+        "directions": {
+          "up": "goblin_warrens_the_ancient_shaft",
+          "down": "goblin_warrens_the_reverent_hollow"
+        },
+        "npcs": [
+          "the_silent_bookkeeper"
+        ],
+        "grid_position": {
+          "x": -5,
+          "y": -2
+        }
+      },
+      "goblin_warrens_the_reverent_hollow": {
+        "name": "The Reverent Hollow",
+        "layer": "underground",
+        "description": "Goblin markings cover the walls here, arranged with real, uncharacteristic care -- something down here gets treated like it matters.",
+        "connections": [
+          "goblin_warrens_the_buried_threshold",
+          "goblin_warrens_the_idol_chamber"
+        ],
+        "directions": {
+          "up": "goblin_warrens_the_buried_threshold",
+          "down": "goblin_warrens_the_idol_chamber"
+        },
+        "interactables": {
+          "reverent_hollow_markings": {
+            "name": "careful markings covering every wall",
+            "description": "Goblins drew these, but not like goblins usually draw anything -- slow, repeated, deliberate, like a ritual instead of graffiti."
+          }
+        },
+        "grid_position": {
+          "x": -5,
+          "y": -3
+        }
+      },
+      "goblin_warrens_the_idol_chamber": {
+        "name": "The Idol Chamber",
+        "layer": "underground",
+        "description": "Goblins have propped something up here and started worshipping it without any real idea what it actually is.",
+        "connections": [
+          "goblin_warrens_the_reverent_hollow",
+          "goblin_warrens_the_unread_stack"
+        ],
+        "directions": {
+          "up": "goblin_warrens_the_reverent_hollow",
+          "down": "goblin_warrens_the_unread_stack"
+        },
+        "monsters": [
+          "the_idol_warden"
+        ],
+        "grid_position": {
+          "x": -5,
+          "y": -4
+        }
+      },
+      "goblin_warrens_the_unread_stack": {
+        "name": "The Unread Stack",
+        "layer": "underground",
+        "description": "Shelves, real ones, holding something that isn't quite paper and isn't quite stone -- exactly like the First City's own archive, and just as undisturbed.",
+        "connections": [
+          "goblin_warrens_the_idol_chamber",
+          "goblin_warrens_the_archive_threshold"
+        ],
+        "directions": {
+          "up": "goblin_warrens_the_idol_chamber",
+          "down": "goblin_warrens_the_archive_threshold"
+        },
+        "interactables": {
+          "unread_stack_shelves": {
+            "name": "shelves of the same unreadable script",
+            "description": "The goblins never learned to read it. Neither, most likely, did whoever built the warren over top of it, generations later."
+          }
+        },
+        "grid_position": {
+          "x": -5,
+          "y": -5
+        }
+      },
+      "goblin_warrens_the_archive_threshold": {
+        "name": "The Archive Threshold",
+        "layer": "underground",
+        "description": "The real entrance to whatever this place actually was, before it was ever a warren.",
+        "connections": [
+          "goblin_warrens_the_unread_stack",
+          "goblin_warrens_the_buried_archive"
+        ],
+        "directions": {
+          "up": "goblin_warrens_the_unread_stack",
+          "down": "goblin_warrens_the_buried_archive"
+        },
+        "story_gates": {
+          "goblin_warrens_the_buried_archive": {
+            "requires_companion_trust": {
+              "min_affinity": 40
+            }
+          }
+        },
+        "grid_position": {
+          "x": -5,
+          "y": -6
+        }
+      },
+      "goblin_warrens_the_buried_archive": {
+        "name": "The Buried Archive",
+        "layer": "underground",
+        "description": "Older than the First City's own archive, and every bit as real -- whatever's still whole down here has been waiting a very long time to be found again.",
+        "connections": [
+          "goblin_warrens_the_archive_threshold"
+        ],
+        "directions": {
+          "up": "goblin_warrens_the_archive_threshold"
+        },
+        "monsters": [
+          "the_archives_keeper"
+        ],
+        "grid_position": {
+          "x": -5,
+          "y": -7
+        }
+      },
+      "goblin_warrens_the_counting_hall": {
+        "name": "The Counting Hall",
+        "layer": "underground",
+        "description": "More of the same careful chalk tallies from the entrance, thicker here, covering every wall floor to ceiling.",
+        "connections": [
+          "goblin_warrens_deep_larder",
+          "goblin_warrens_the_second_stash",
+          "goblin_warrens_the_paymasters_route"
+        ],
+        "directions": {
+          "south": "goblin_warrens_deep_larder",
+          "north": "goblin_warrens_the_second_stash",
+          "west": "goblin_warrens_the_paymasters_route"
+        },
+        "monsters": [
+          "warren_ledger_keeper"
+        ],
+        "interactables": {
+          "counting_hall_tallies": {
+            "name": "chalk tallies covering every wall",
+            "description": "The same running coin-count from the entrance, kept going for a much longer stretch than anyone casually passing through would ever need to."
+          }
+        },
+        "grid_position": {
+          "x": -1,
+          "y": 4
+        }
+      },
+      "goblin_warrens_the_second_stash": {
+        "name": "The Second Stash",
+        "layer": "underground",
+        "description": "A stash better hidden than the one in the Deep Larder, meant for someone who was never going to be a goblin.",
+        "connections": [
+          "goblin_warrens_the_counting_hall"
+        ],
+        "directions": {
+          "south": "goblin_warrens_the_counting_hall"
+        },
+        "lockables": [
+          {
+            "id": "second_stash_cache",
+            "kind": "chest",
+            "name": "a stash better hidden than the rest",
+            "loot": {
+              "scroll_invisibility": 1
+            },
+            "gold": 140
+          }
+        ],
+        "grid_position": {
+          "x": -1,
+          "y": 5
+        }
+      },
+      "goblin_warrens_the_paymasters_route": {
+        "name": "The Paymaster's Route",
+        "layer": "underground",
+        "description": "A route worn smooth by real, regular foot traffic -- someone's been walking this exact path for a long time, on a real schedule.",
+        "connections": [
+          "goblin_warrens_the_counting_hall",
+          "goblin_warrens_the_quiet_crossing"
+        ],
+        "directions": {
+          "east": "goblin_warrens_the_counting_hall",
+          "north": "goblin_warrens_the_quiet_crossing"
+        },
+        "monsters": [
+          "warren_toll_collector"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": 4
+        }
+      },
+      "goblin_warrens_the_quiet_crossing": {
+        "name": "The Quiet Crossing",
+        "layer": "underground",
+        "description": "A wide, still crossing, deliberately kept clear -- the one genuinely calm room this deep into the ledger's trail.",
+        "connections": [
+          "goblin_warrens_the_paymasters_route",
+          "goblin_warrens_the_grasping_hollow",
+          "goblin_warrens_the_forgotten_landing"
+        ],
+        "directions": {
+          "south": "goblin_warrens_the_paymasters_route",
+          "north": "goblin_warrens_the_grasping_hollow",
+          "east": "goblin_warrens_the_forgotten_landing"
+        },
+        "grid_position": {
+          "x": 0,
+          "y": 5
+        }
+      },
+      "goblin_warrens_the_grasping_hollow": {
+        "name": "The Grasping Hollow",
+        "layer": "underground",
+        "description": "A wide hollow, iron rings still bolted into the rock -- built to hold something a lot bigger than a goblin.",
+        "connections": [
+          "goblin_warrens_the_quiet_crossing",
+          "goblin_warrens_grasks_old_cage",
+          "goblin_warrens_the_ledger_vault"
+        ],
+        "directions": {
+          "south": "goblin_warrens_the_quiet_crossing",
+          "east": "goblin_warrens_grasks_old_cage",
+          "north": "goblin_warrens_the_ledger_vault"
+        },
+        "resource_nodes": [
+          {
+            "id": "grasping_hollow_ore_vein",
+            "name": "a vein of iron, half-mined already",
+            "material": "iron_ore",
+            "ability": "strength",
+            "skill": "mining"
+          }
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": 6
+        }
+      },
+      "goblin_warrens_grasks_old_cage": {
+        "name": "The Old Cage",
+        "layer": "underground",
+        "description": "A cage, real iron, still standing -- the bars bent outward at the bottom, not cut, like something simply forced its own way through.",
+        "connections": [
+          "goblin_warrens_the_grasping_hollow"
+        ],
+        "directions": {
+          "west": "goblin_warrens_the_grasping_hollow"
+        },
+        "interactables": {
+          "grasks_bent_bars": {
+            "name": "iron bars, bent outward from the inside",
+            "description": "This is where they kept him. The bend in the bars isn't a break -- it's a real dragonborn's own strength, applied slowly, for as long as it took. Grask goes quiet looking at it, then says, flatly, that he's not going back in. Nobody asks him to."
+          }
+        },
+        "grid_position": {
+          "x": 1,
+          "y": 6
+        }
+      },
+      "goblin_warrens_the_ledger_vault": {
+        "name": "The Ledger Vault",
+        "layer": "underground",
+        "description": "A real vault, kept for records instead of gold -- every debt this warren's real paymaster is owed, written down somewhere in here.",
+        "connections": [
+          "goblin_warrens_the_grasping_hollow",
+          "goblin_warrens_the_toll_masters_den"
+        ],
+        "directions": {
+          "south": "goblin_warrens_the_grasping_hollow",
+          "north": "goblin_warrens_the_toll_masters_den"
+        },
+        "grid_position": {
+          "x": 0,
+          "y": 7
+        }
+      },
+      "goblin_warrens_the_toll_masters_den": {
+        "name": "The Toll Master's Den",
+        "layer": "underground",
+        "description": "Whoever actually runs this warren's finances keeps their own den here, well guarded, well away from the goblins they're using.",
+        "connections": [
+          "goblin_warrens_the_ledger_vault",
+          "goblin_warrens_the_final_ledger"
+        ],
+        "directions": {
+          "south": "goblin_warrens_the_ledger_vault",
+          "north": "goblin_warrens_the_final_ledger"
+        },
+        "monsters": [
+          "the_toll_master"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": 8
+        }
+      },
+      "goblin_warrens_the_final_ledger": {
+        "name": "The Final Ledger",
+        "layer": "underground",
+        "description": "One last real ledger, more detailed than all the others -- and the very last entry in it is dated after today.",
+        "connections": [
+          "goblin_warrens_the_toll_masters_den",
+          "goblin_warrens_the_paymasters_approach"
+        ],
+        "directions": {
+          "south": "goblin_warrens_the_toll_masters_den",
+          "north": "goblin_warrens_the_paymasters_approach"
+        },
+        "interactables": {
+          "final_ledger_last_entry": {
+            "name": "the ledger's very last entry",
+            "description": "Every other entry lists coin, dates, names of dead goblins. The last one is different -- just a single line, in the same steady hand as everything else: \"paid in full, whether they know it or not.\" Whoever's really been funding this warren clearly isn't worried about being found. They're just not here."
+          }
+        },
+        "grid_position": {
+          "x": 0,
+          "y": 9
+        }
+      },
+      "goblin_warrens_the_paymasters_approach": {
+        "name": "The Paymaster's Approach",
+        "layer": "underground",
+        "description": "The last real stretch before whoever's actually in charge down here -- quiet, deliberate, and clearly meant to be crossed alone.",
+        "connections": [
+          "goblin_warrens_the_final_ledger",
+          "goblin_warrens_the_true_paymaster"
+        ],
+        "directions": {
+          "south": "goblin_warrens_the_final_ledger",
+          "north": "goblin_warrens_the_true_paymaster"
+        },
+        "monsters": [
+          "warren_paymasters_scout"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": 10
+        }
+      },
+      "goblin_warrens_the_true_paymaster": {
+        "name": "The True Paymaster's Den",
+        "layer": "underground",
+        "description": "The real seat of whatever's been running this warren all along -- and it's been expecting company for a while now.",
+        "connections": [
+          "goblin_warrens_the_paymasters_approach"
+        ],
+        "directions": {
+          "south": "goblin_warrens_the_paymasters_approach"
+        },
+        "monsters": [
+          "the_paymasters_shadow"
+        ],
+        "combat_environment": {
+          "name": "the den's own scattered ledgers and coin",
+          "description": "Every real page and coin in the room gets kicked up into the fight sooner or later -- none of it enough to slow anything down, all of it enough to be a real hazard underfoot.",
+          "damage_dice": "4d6"
+        },
+        "grid_position": {
+          "x": 0,
+          "y": 11
+        }
+      },
+      "goblin_warrens_the_forgotten_landing": {
+        "name": "The Forgotten Landing",
+        "layer": "underground",
+        "description": "A small landing off the main crossing, clearly used once as a real waypoint and then abandoned once the route further in was finished.",
+        "connections": [
+          "goblin_warrens_the_quiet_crossing"
+        ],
+        "directions": {
+          "west": "goblin_warrens_the_quiet_crossing"
+        },
+        "interactables": {
+          "forgotten_landing_marks": {
+            "name": "old waypoint marks scratched into the stone",
+            "description": "Whoever cut this route first rested here, before the deeper tunnels past the crossing were ever finished."
+          }
+        },
+        "grid_position": {
+          "x": 1,
+          "y": 5
+        }
       }
     },
     "sky": {
@@ -4451,6 +4958,15 @@
       "role": "puzzle_guardian",
       "personality": "speaks only in disagreement with itself, each half finishing the other's sentence differently",
       "goals": "has never once agreed with its own echo, and won't let anyone past until they do",
+      "recruitable": false,
+      "alignment": "True Neutral",
+      "disposition": "neutral"
+    },
+    "the_silent_bookkeeper": {
+      "name": "The Silent Bookkeeper",
+      "role": "puzzle_guardian",
+      "personality": "keeps a perfect, obsessive count of everything that passes, and refuses to let anyone by until their own count is settled",
+      "goals": "has been balancing the same ledger for longer than the warren has existed",
       "recruitable": false,
       "alignment": "True Neutral",
       "disposition": "neutral"
@@ -5659,8 +6175,8 @@
     },
     "remnant_the_archives_keeper": {
       "title": "The Book With No Explaining Page",
-      "description": "Something real is still down here -- The Archive's Keeper never fully faded like the rest did.",
-      "location": "the_first_city_sunken_archive",
+      "description": "Something real is still down here, older than the warren itself -- The Archive's Keeper never fully faded like the rest did.",
+      "location": "goblin_warrens_the_buried_archive",
       "reward_xp": 1700,
       "reward_gold": 200,
       "trigger": {
@@ -6001,6 +6517,92 @@
         "monster": "the_high_approach_sentinel"
       },
       "clue": "The High Approach Sentinel guards the last real stretch before the sun's own threshold."
+    },
+    "deeper_rubbles_lurker": {
+      "title": "What the Rubble Was Hiding",
+      "description": "The cave-in west of the Collapsed Tunnel goes back much further than anyone squatting near the entrance ever bothered to dig.",
+      "location": "goblin_warrens_deeper_rubble",
+      "reward_xp": 420,
+      "reward_gold": 140,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "warren_deep_lurker"
+      },
+      "clue": "West of the Collapsed Tunnel, the rubble keeps going long after it should have stopped."
+    },
+    "the_old_seams_secret": {
+      "title": "A Seam No Goblin Cut",
+      "description": "A real, deliberate seam in the rock -- cut by tools no goblin in this warren has ever owned.",
+      "location": "goblin_warrens_the_old_seam",
+      "reward_xp": 460,
+      "reward_gold": 150,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "warren_bone_picker"
+      },
+      "clue": "Past the deeper rubble, a seam in the rock was cut by something that wasn't a goblin."
+    },
+    "the_idol_chambers_warden": {
+      "title": "What the Goblins Started Worshipping",
+      "description": "The goblins have propped something up in a hollow deep past the old seam and started worshipping it, with no real idea what it actually is.",
+      "location": "goblin_warrens_the_idol_chamber",
+      "reward_xp": 600,
+      "reward_gold": 200,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_idol_warden"
+      },
+      "clue": "The Idol Warden guards whatever the goblins have started treating like it matters, deep past the reverent hollow."
+    },
+    "the_paymasters_route": {
+      "title": "A Route Worn Smooth",
+      "description": "North of the Deep Larder, a route worn smooth by real, regular foot traffic -- someone's been walking it on a real schedule.",
+      "location": "goblin_warrens_the_paymasters_route",
+      "reward_xp": 440,
+      "reward_gold": 145,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "warren_toll_collector"
+      },
+      "clue": "North past the Counting Hall, a route worn smooth by traffic no goblin walks that regularly."
+    },
+    "the_ledger_vaults_answer": {
+      "title": "What the Bookkeeper Is Owed",
+      "description": "Something in the Ledger Vault has been keeping a perfect, obsessive count of everyone who passes -- and won't let anyone by until their own count is settled.",
+      "location": "goblin_warrens_the_ledger_vault",
+      "trigger": {
+        "type": "solve_puzzle",
+        "puzzle_id": "ledger_vaults_riddle"
+      },
+      "reward_xp": 520,
+      "reward_gold": 170,
+      "clue": "The Silent Bookkeeper poses a real question: \"I never spend anything, yet everyone who passes through here owes me something. What am I?\""
+    },
+    "the_toll_masters_den": {
+      "title": "Whoever Runs the Finances",
+      "description": "Whoever actually runs this warren's finances keeps their own den well guarded, well away from the goblins they're using.",
+      "location": "goblin_warrens_the_toll_masters_den",
+      "reward_xp": 680,
+      "reward_gold": 230,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_toll_master"
+      },
+      "clue": "The Toll Master's Den lies north past the Ledger Vault."
+    },
+    "the_true_paymasters_reckoning": {
+      "title": "The True Paymaster",
+      "description": "The real seat of whatever's been running this warren all along -- and it's been expecting company for a while now.",
+      "location": "goblin_warrens_the_true_paymaster",
+      "reward_xp": 1400,
+      "reward_gold": 500,
+      "reward_item": "the_paymasters_shadows_ledger",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_paymasters_shadow"
+      },
+      "clue": "Past the Final Ledger, the Paymaster's Approach leads straight to whoever's really been in charge.",
+      "weight": "climactic"
     }
   },
   "story_arcs": {
@@ -6065,7 +6667,14 @@
       "quests": [
         "supply_tunnels_veteran",
         "the_collapsed_tunnels_survivor",
-        "deep_larders_elder"
+        "deep_larders_elder",
+        "deeper_rubbles_lurker",
+        "the_old_seams_secret",
+        "the_idol_chambers_warden",
+        "the_paymasters_route",
+        "the_ledger_vaults_answer",
+        "the_toll_masters_den",
+        "the_true_paymasters_reckoning"
       ],
       "required_level": 40
     },
@@ -8518,6 +9127,143 @@
           "weight": 80
         }
       ]
+    },
+    "warren_deep_lurker": {
+      "name": "Deep Lurker",
+      "level": 40,
+      "dexterity": 13,
+      "strength": 17,
+      "armor_class": 17,
+      "hp_max": 1900,
+      "proficiency_bonus": 9,
+      "xp_reward": 1400,
+      "damage_dice": "1d8",
+      "damage_bonus": 100,
+      "damage_type": "physical"
+    },
+    "warren_bone_picker": {
+      "name": "Bone Picker",
+      "level": 42,
+      "dexterity": 14,
+      "strength": 15,
+      "armor_class": 17,
+      "hp_max": 2100,
+      "proficiency_bonus": 9,
+      "xp_reward": 1550,
+      "damage_dice": "1d8",
+      "damage_bonus": 108,
+      "damage_type": "poison"
+    },
+    "the_idol_warden": {
+      "name": "The Idol Warden",
+      "level": 45,
+      "dexterity": 12,
+      "strength": 19,
+      "armor_class": 19,
+      "hp_max": 3200,
+      "proficiency_bonus": 10,
+      "xp_reward": 2000,
+      "damage_dice": "1d8",
+      "damage_bonus": 130,
+      "damage_type": "psychic",
+      "is_boss": false,
+      "stealable_items": [
+        {
+          "item_id": "greater_spell_tonic",
+          "weight": 90
+        }
+      ]
+    },
+    "warren_ledger_keeper": {
+      "name": "Ledger Keeper",
+      "level": 41,
+      "dexterity": 14,
+      "strength": 14,
+      "armor_class": 17,
+      "hp_max": 2000,
+      "proficiency_bonus": 9,
+      "xp_reward": 1480,
+      "damage_dice": "1d8",
+      "damage_bonus": 104,
+      "damage_type": "psychic"
+    },
+    "warren_toll_collector": {
+      "name": "Toll Collector",
+      "level": 43,
+      "dexterity": 13,
+      "strength": 17,
+      "armor_class": 18,
+      "hp_max": 2200,
+      "proficiency_bonus": 10,
+      "xp_reward": 1620,
+      "damage_dice": "1d8",
+      "damage_bonus": 114,
+      "damage_type": "physical"
+    },
+    "warren_paymasters_scout": {
+      "name": "Paymaster's Scout",
+      "level": 44,
+      "dexterity": 15,
+      "strength": 16,
+      "armor_class": 18,
+      "hp_max": 2300,
+      "proficiency_bonus": 10,
+      "xp_reward": 1700,
+      "damage_dice": "1d8",
+      "damage_bonus": 120,
+      "damage_type": "physical"
+    },
+    "the_toll_master": {
+      "name": "The Toll Master",
+      "level": 46,
+      "dexterity": 13,
+      "strength": 19,
+      "armor_class": 19,
+      "hp_max": 3400,
+      "proficiency_bonus": 10,
+      "xp_reward": 2150,
+      "damage_dice": "1d8",
+      "damage_bonus": 136,
+      "damage_type": "physical",
+      "is_boss": false,
+      "stealable_items": [
+        {
+          "item_id": "greater_healing_potion",
+          "weight": 90
+        }
+      ]
+    },
+    "the_paymasters_shadow": {
+      "name": "The Paymaster's Shadow",
+      "level": 48,
+      "dexterity": 16,
+      "strength": 18,
+      "armor_class": 21,
+      "hp_max": 6500,
+      "proficiency_bonus": 11,
+      "xp_reward": 2600,
+      "damage_dice": "1d8",
+      "damage_bonus": 150,
+      "damage_type": "force",
+      "is_boss": true,
+      "known_spells": [
+        "eldritch_blast"
+      ],
+      "counters_rage": true,
+      "extra_attack_when_enraged": true,
+      "vulnerabilities": [
+        "radiant"
+      ],
+      "stealable_items": [
+        {
+          "item_id": "greater_spell_tonic",
+          "weight": 60
+        },
+        {
+          "item_id": "supreme_spell_tonic",
+          "weight": 20
+        }
+      ]
     }
   },
   "factions": {
@@ -8658,6 +9404,14 @@
         "an echo and its source",
         "an echo",
         "a reflection and what it reflects"
+      ]
+    },
+    "ledger_vaults_riddle": {
+      "riddle": "I never spend anything, yet everyone who passes through here owes me something. What am I?",
+      "accepted_answers": [
+        "a toll",
+        "a ledger",
+        "a debt"
       ]
     }
   },

@@ -283,6 +283,9 @@ ARCS_1_THROUGH_7_QUEST_IDS = (
     "the_mirrored_thresholds_echo", "the_arguments_answer", "the_sunken_reflections_end",
     "the_radiant_stairs_climb", "the_suns_thresholds_secret",
     "supply_tunnels_veteran", "the_collapsed_tunnels_survivor", "deep_larders_elder",
+    "deeper_rubbles_lurker", "the_old_seams_secret", "the_idol_chambers_warden",
+    "the_paymasters_route", "the_ledger_vaults_answer", "the_toll_masters_den",
+    "the_true_paymasters_reckoning",
     "flooded_gallerys_hold", "the_side_pools_straggler", "the_channels_keeper", "the_hollow_wellsprings_elder",
     "web_hollows_brood", "silked_nooks_hatchling", "deep_currents_keeper", "the_undertows_elder",
 )

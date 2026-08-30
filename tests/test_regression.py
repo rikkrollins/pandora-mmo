@@ -5769,6 +5769,81 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(npc.get("recruitable"))
             self.assertIn(npc_id, cl.get_location(bot.CAMPAIGN, loc_id)["npcs"])
 
+    # -- Chapter 5 expansion, Phase 3 (2026-08-30): Goblin Warrens grows
+    #    from 5 real rooms/3 quests to 28 rooms/10 quests -------------
+    def test_arc_5_now_has_ten_quests_original_three_completely_undisturbed(self):
+        quests = bot.CAMPAIGN["story_arcs"]["arc_5_goblin_warrens"]["quests"]
+        self.assertEqual(len(quests), 10)
+        self.assertEqual(quests[:3], ["supply_tunnels_veteran", "the_collapsed_tunnels_survivor", "deep_larders_elder"])
+
+    def test_goblin_warrens_grows_to_28_rooms(self):
+        locs = bot.CAMPAIGN["locations"]["underground"]
+        core_ids = {"goblin_warrens", "goblin_warrens_collapsed_tunnel", "goblin_warrens_supply_tunnel",
+                    "goblin_warrens_inner_den", "goblin_warrens_deep_larder"}
+        new_ids = {k for k in locs if k.startswith("goblin_warrens_") and k not in core_ids}
+        self.assertEqual(len(core_ids) + len(new_ids), 28)
+
+    def test_goblin_warrens_new_rooms_are_fully_connected_and_reciprocated(self):
+        locs = bot.CAMPAIGN["locations"]["underground"]
+        core_ids = {"goblin_warrens", "goblin_warrens_collapsed_tunnel", "goblin_warrens_supply_tunnel",
+                    "goblin_warrens_inner_den", "goblin_warrens_deep_larder"}
+        new_ids = [k for k in locs if k.startswith("goblin_warrens_") and k not in core_ids]
+        self.assertGreaterEqual(len(new_ids), 23)
+        for loc_id in new_ids:
+            loc = locs[loc_id]
+            for direction, dest_id in loc.get("directions", {}).items():
+                dest = cl.get_location(bot.CAMPAIGN, dest_id)
+                self.assertIsNotNone(dest, f"{loc_id} -> {dest_id} via {direction} is a dead end")
+                self.assertIn(loc_id, dest.get("connections", []), f"{dest_id} doesn't connect back to {loc_id}")
+
+    def test_the_paymasters_shadow_uses_the_real_new_systems_not_a_generic_statstick(self):
+        boss = bot.CAMPAIGN["monsters"]["the_paymasters_shadow"]
+        self.assertTrue(boss["is_boss"])
+        self.assertIn("eldritch_blast", boss["known_spells"])
+        self.assertTrue(boss.get("counters_rage"))
+        self.assertTrue(boss.get("extra_attack_when_enraged"))
+        self.assertTrue(boss.get("stealable_items"))
+        self.assertIn("the_true_paymasters_reckoning", bot._QUEST_MONSTER_INDEX.get("the_paymasters_shadow", []))
+        quest = bot.CAMPAIGN["quests"]["the_true_paymasters_reckoning"]
+        self.assertEqual(quest["reward_item"], "the_paymasters_shadows_ledger")
+
+    def test_the_archives_keeper_relocated_to_goblin_warrens_stats_unchanged(self):
+        sunken_archive = cl.get_location(bot.CAMPAIGN, "the_first_city_sunken_archive")
+        self.assertNotIn("the_archives_keeper", sunken_archive.get("monsters", []))
+        buried_archive = cl.get_location(bot.CAMPAIGN, "goblin_warrens_the_buried_archive")
+        self.assertIn("the_archives_keeper", buried_archive["monsters"])
+        remnant = remnants_module.get_remnant("the_archives_keeper")
+        self.assertEqual(remnant["location_id"], "goblin_warrens_the_buried_archive")
+        self.assertEqual(remnant["element"], "psychic")
+        quest = bot.CAMPAIGN["quests"]["remnant_the_archives_keeper"]
+        self.assertEqual(quest["location"], "goblin_warrens_the_buried_archive")
+
+    def test_buried_archive_is_gated_behind_companion_trust(self):
+        location = cl.get_location(bot.CAMPAIGN, "goblin_warrens_the_archive_threshold")
+        current_dict = {"story_gates": location["story_gates"]}
+        character = {"party_id": None, "completed_quests": []}
+        self.assertIsNotNone(bot._check_story_gate(character, current_dict, "goblin_warrens_the_buried_archive"))
+
+    def test_grasks_old_cage_delivers_his_beat_as_pure_environmental_flavor(self):
+        """Same safe pattern Phase 1 proved out for Borin -- no new giver_npc=grask_emberscale quest (his existing 2-quest arc is a tested, fixed chain), just a real interactable at a dedicated room."""
+        loc = cl.get_location(bot.CAMPAIGN, "goblin_warrens_grasks_old_cage")
+        self.assertIn("dragonborn", loc["interactables"]["grasks_bent_bars"]["description"].lower())
+        for qid, quest in bot.CAMPAIGN["quests"].items():
+            if quest.get("giver_npc") == "grask_emberscale":
+                self.assertIn(qid, ("grasks_freedom", "grasks_resolution"))
+
+    def test_goblin_warrens_lockable_chests_grant_real_loot(self):
+        for loc_id in ("goblin_warrens_the_sealed_cache", "goblin_warrens_the_second_stash"):
+            loc = cl.get_location(bot.CAMPAIGN, loc_id)
+            chest = loc["lockables"][0]
+            self.assertEqual(chest["kind"], "chest")
+            self.assertTrue(chest["loot"])
+
+    def test_new_goblin_warrens_npc_is_real_and_non_recruitable(self):
+        npc = bot.CAMPAIGN["npcs"]["the_silent_bookkeeper"]
+        self.assertFalse(npc.get("recruitable"))
+        self.assertIn("the_silent_bookkeeper", cl.get_location(bot.CAMPAIGN, "goblin_warrens_the_buried_threshold")["npcs"])
+
     def test_companion_favor_pays_more_affinity_once_the_companion_already_trusts_you(self):
         """
         Real live request (2026-08-23, Coffee: "give the affinity real

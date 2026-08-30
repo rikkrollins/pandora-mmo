@@ -680,6 +680,15 @@ ITEMS = {
         "note": "Looking through it shows things exactly as they are, which turns out to be the rarer trick.",
         "description": "Looking through it shows things exactly as they are, which turns out to be the rarer trick.",
     },
+    # Chapter 5 expansion (2026-08-30): The Paymaster's Shadow's real
+    # unique reward.
+    "the_paymasters_shadows_ledger": {
+        "name": "The Paymaster's Shadow's Ledger", "type": "wondrous", "rarity": "very_rare",
+        "price": 0, "weight": 1,
+        "elemental_resistances": [{"damage_type": "force", "value": 50}],
+        "note": "The very last entry is finally crossed out. Whatever it was owed, it isn't anymore.",
+        "description": "The very last entry is finally crossed out. Whatever it was owed, it isn't anymore.",
+    },
 
     # --- Recipe books (2026-08-11, per Coffee: real, buyable reference
     # items teaching a profession's real level-1 recipes -- "make basic,
