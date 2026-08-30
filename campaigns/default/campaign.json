@@ -1043,7 +1043,8 @@
         "grid_position": {
           "x": 0,
           "y": -3
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_watch_stair": {
         "name": "The Watch Stair",
@@ -1064,7 +1065,8 @@
         "grid_position": {
           "x": 0,
           "y": -4
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_sealed_armory": {
         "name": "The Sealed Armory",
@@ -1092,7 +1094,8 @@
         "grid_position": {
           "x": 1,
           "y": -4
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_upper_battlement": {
         "name": "The Upper Battlement",
@@ -1112,7 +1115,8 @@
         "grid_position": {
           "x": 0,
           "y": -5
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_quiet_rampart": {
         "name": "The Quiet Rampart",
@@ -1129,7 +1133,8 @@
         "grid_position": {
           "x": 0,
           "y": -6
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_signal_tower": {
         "name": "The Signal Tower",
@@ -1155,7 +1160,8 @@
         "grid_position": {
           "x": 0,
           "y": -7
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_carved_gate": {
         "name": "The Carved Gate",
@@ -1175,7 +1181,8 @@
         "grid_position": {
           "x": 0,
           "y": -8
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_gatehouse": {
         "name": "The Gatehouse",
@@ -1198,7 +1205,8 @@
         "grid_position": {
           "x": 0,
           "y": -9
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_high_guard": {
         "name": "The High Guard",
@@ -1218,7 +1226,8 @@
         "grid_position": {
           "x": 0,
           "y": -10
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_towers_crown": {
         "name": "The Tower's Crown",
@@ -1238,7 +1247,8 @@
         "grid_position": {
           "x": 0,
           "y": -11
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_keepers_hall": {
         "name": "The Keeper's Hall",
@@ -1262,7 +1272,8 @@
         "grid_position": {
           "x": 0,
           "y": -12
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_old_keep": {
         "name": "The Old Keep",
@@ -1285,7 +1296,8 @@
         "grid_position": {
           "x": 0,
           "y": -13
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_armory_annex": {
         "name": "The Armory Annex",
@@ -1306,7 +1318,8 @@
         "grid_position": {
           "x": 2,
           "y": -4
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_watch_stairs_landing": {
         "name": "The Watch Stair's Landing",
@@ -1321,7 +1334,8 @@
         "grid_position": {
           "x": -1,
           "y": -4
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_vantage_reach": {
         "name": "The Vantage Reach",
@@ -1343,7 +1357,8 @@
         "grid_position": {
           "x": 3,
           "y": 0
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_windswept_hollow": {
         "name": "The Windswept Hollow",
@@ -1367,7 +1382,8 @@
         "grid_position": {
           "x": 4,
           "y": 0
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_sheltered_camp": {
         "name": "The Sheltered Camp",
@@ -1393,7 +1409,9 @@
         "grid_position": {
           "x": 4,
           "y": 1
-        }
+        },
+        "dungeon_interior": true,
+        "dungeon_checkpoint": true
       },
       "greymoor_downs_the_ridge_cache": {
         "name": "The Ridge Cache",
@@ -1419,7 +1437,8 @@
         "grid_position": {
           "x": 4,
           "y": 2
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_far_marker": {
         "name": "The Far Marker",
@@ -1438,7 +1457,8 @@
         "grid_position": {
           "x": 5,
           "y": 0
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_markers_riddle": {
         "name": "The Marker's Riddle",
@@ -1458,7 +1478,8 @@
         "grid_position": {
           "x": 6,
           "y": 0
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_deep_reach": {
         "name": "The Deep Reach",
@@ -1480,7 +1501,8 @@
         "grid_position": {
           "x": 7,
           "y": 0
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_reachs_hollow": {
         "name": "The Reach's Hollow",
@@ -1508,7 +1530,8 @@
         "grid_position": {
           "x": 8,
           "y": 0
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_ridges_end": {
         "name": "The Ridge's End",
@@ -1534,7 +1557,8 @@
         "grid_position": {
           "x": 9,
           "y": 0
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_final_watch": {
         "name": "The Final Watch",
@@ -1552,7 +1576,8 @@
         "grid_position": {
           "x": 10,
           "y": 0
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_reachs_overlook": {
         "name": "The Reach's Overlook",
@@ -1567,7 +1592,8 @@
         "grid_position": {
           "x": 3,
           "y": 1
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_hollows_lee": {
         "name": "The Hollow's Lee",
@@ -1593,7 +1619,8 @@
         "grid_position": {
           "x": 4,
           "y": -1
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_markers_shadow": {
         "name": "The Marker's Shadow",
@@ -1608,7 +1635,8 @@
         "grid_position": {
           "x": 5,
           "y": -1
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_reachs_ledge": {
         "name": "The Reach's Ledge",
@@ -1623,7 +1651,8 @@
         "grid_position": {
           "x": 7,
           "y": -1
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_hollows_record": {
         "name": "The Hollow's Record",
@@ -1638,7 +1667,8 @@
         "grid_position": {
           "x": 8,
           "y": -1
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_ends_own_marker": {
         "name": "The End's Own Marker",
@@ -1653,7 +1683,8 @@
         "grid_position": {
           "x": 9,
           "y": -1
-        }
+        },
+        "dungeon_interior": true
       }
     },
     "underground": {
@@ -3243,7 +3274,8 @@
         "grid_position": {
           "x": 2,
           "y": 2
-        }
+        },
+        "dungeon_interior": true
       },
       "wrathflame_vault_ember_hall": {
         "name": "The Ember Hall",
@@ -3265,7 +3297,8 @@
         "grid_position": {
           "x": 2,
           "y": 3
-        }
+        },
+        "dungeon_interior": true
       },
       "wrathflame_vault_bellows_chamber": {
         "name": "The Bellows Chamber",
@@ -3297,7 +3330,8 @@
         "grid_position": {
           "x": 3,
           "y": 3
-        }
+        },
+        "dungeon_interior": true
       },
       "wrathflame_vault_ash_gallery": {
         "name": "The Ash Gallery",
@@ -3317,7 +3351,8 @@
         "grid_position": {
           "x": 2,
           "y": 4
-        }
+        },
+        "dungeon_interior": true
       },
       "wrathflame_vault_ember_font": {
         "name": "The Ember Font",
@@ -3346,7 +3381,9 @@
           "y": 5
         },
         "healing_water": true,
-        "real_shrine": true
+        "real_shrine": true,
+        "dungeon_interior": true,
+        "dungeon_checkpoint": true
       },
       "wrathflame_vault_smoldering_stair": {
         "name": "The Smoldering Stair",
@@ -3366,7 +3403,8 @@
         "grid_position": {
           "x": 2,
           "y": 6
-        }
+        },
+        "dungeon_interior": true
       },
       "wrathflame_vault_deep_forge": {
         "name": "The Deep Forge",
@@ -3392,7 +3430,8 @@
         "grid_position": {
           "x": 2,
           "y": 7
-        }
+        },
+        "dungeon_interior": true
       },
       "wrathflame_vault_cinder_archive": {
         "name": "The Cinder Archive",
@@ -3415,7 +3454,8 @@
         "grid_position": {
           "x": 2,
           "y": 8
-        }
+        },
+        "dungeon_interior": true
       },
       "wrathflame_vault_inner_seal": {
         "name": "The Inner Seal",
@@ -3432,7 +3472,8 @@
         "grid_position": {
           "x": 2,
           "y": 9
-        }
+        },
+        "dungeon_interior": true
       },
       "wrathflame_vault_sanctum": {
         "name": "The Wrathflame Sanctum",
@@ -3450,7 +3491,8 @@
         "grid_position": {
           "x": 2,
           "y": 10
-        }
+        },
+        "dungeon_interior": true
       },
       "deep_root_vault_threshold": {
         "name": "The Ringed Threshold",
@@ -3470,7 +3512,8 @@
         "grid_position": {
           "x": 0,
           "y": -3
-        }
+        },
+        "dungeon_interior": true
       },
       "deep_root_vault_spore_hollow": {
         "name": "The Spore Hollow",
@@ -3492,7 +3535,8 @@
         "grid_position": {
           "x": 0,
           "y": -4
-        }
+        },
+        "dungeon_interior": true
       },
       "deep_root_vault_choking_hollow": {
         "name": "The Choking Hollow",
@@ -3518,7 +3562,8 @@
         "grid_position": {
           "x": 1,
           "y": -4
-        }
+        },
+        "dungeon_interior": true
       },
       "deep_root_vault_bramble_maze": {
         "name": "The Bramble Maze",
@@ -3538,7 +3583,8 @@
         "grid_position": {
           "x": 0,
           "y": -5
-        }
+        },
+        "dungeon_interior": true
       },
       "deep_root_vault_weeping_spring": {
         "name": "The Weeping Spring",
@@ -3567,7 +3613,9 @@
           "y": -6
         },
         "healing_water": true,
-        "real_shrine": true
+        "real_shrine": true,
+        "dungeon_interior": true,
+        "dungeon_checkpoint": true
       },
       "deep_root_vault_sentinel_hollow": {
         "name": "The Sentinel Hollow",
@@ -3587,7 +3635,8 @@
         "grid_position": {
           "x": 0,
           "y": -7
-        }
+        },
+        "dungeon_interior": true
       },
       "deep_root_vault_husk_gallery": {
         "name": "The Husk Gallery",
@@ -3619,7 +3668,8 @@
         "grid_position": {
           "x": 0,
           "y": -8
-        }
+        },
+        "dungeon_interior": true
       },
       "deep_root_vault_elder_root_chamber": {
         "name": "The Elder Root Chamber",
@@ -3639,7 +3689,8 @@
         "grid_position": {
           "x": 0,
           "y": -9
-        }
+        },
+        "dungeon_interior": true
       },
       "deep_root_vault_last_root": {
         "name": "The Last Root",
@@ -3656,7 +3707,8 @@
         "grid_position": {
           "x": 0,
           "y": -10
-        }
+        },
+        "dungeon_interior": true
       },
       "deep_root_vault_deepest_memory": {
         "name": "The Deepest Memory",
@@ -3679,7 +3731,8 @@
         "grid_position": {
           "x": 0,
           "y": -11
-        }
+        },
+        "dungeon_interior": true
       },
       "deep_root_vault_sanctum": {
         "name": "The Root Sanctum",
@@ -3697,7 +3750,8 @@
         "grid_position": {
           "x": 0,
           "y": -12
-        }
+        },
+        "dungeon_interior": true
       },
       "the_first_city_forgotten_ward": {
         "name": "The Forgotten Ward",
@@ -3717,7 +3771,8 @@
         "grid_position": {
           "x": 2,
           "y": 1
-        }
+        },
+        "dungeon_interior": true
       },
       "the_first_city_collapsed_row": {
         "name": "The Collapsed Row",
@@ -3736,7 +3791,8 @@
         "grid_position": {
           "x": 2,
           "y": 2
-        }
+        },
+        "dungeon_interior": true
       },
       "the_first_city_sealed_vault_row": {
         "name": "The Sealed Vault Row",
@@ -3762,7 +3818,8 @@
         "grid_position": {
           "x": 3,
           "y": 2
-        }
+        },
+        "dungeon_interior": true
       },
       "the_first_city_silent_market": {
         "name": "The Silent Market",
@@ -3788,7 +3845,8 @@
         "grid_position": {
           "x": 2,
           "y": 3
-        }
+        },
+        "dungeon_interior": true
       },
       "the_first_city_watchers_walk": {
         "name": "Watcher's Walk",
@@ -3806,7 +3864,8 @@
         "grid_position": {
           "x": 2,
           "y": 4
-        }
+        },
+        "dungeon_interior": true
       },
       "the_first_city_spire_stair": {
         "name": "The Spire Stair",
@@ -3832,7 +3891,8 @@
         "grid_position": {
           "x": 4,
           "y": -1
-        }
+        },
+        "dungeon_interior": true
       },
       "the_first_city_spire_overlook": {
         "name": "The Spire Overlook",
@@ -3855,7 +3915,8 @@
         "grid_position": {
           "x": 4,
           "y": -2
-        }
+        },
+        "dungeon_interior": true
       },
       "the_first_city_spire_crown": {
         "name": "The Spire Crown",
@@ -3873,7 +3934,8 @@
         "grid_position": {
           "x": 4,
           "y": -3
-        }
+        },
+        "dungeon_interior": true
       },
       "the_first_city_forgotten_vault": {
         "name": "The Forgotten Vault",
@@ -3902,7 +3964,8 @@
         "grid_position": {
           "x": 1,
           "y": -13
-        }
+        },
+        "dungeon_interior": true
       },
       "the_first_city_the_unwritten_hall": {
         "name": "The Unwritten Hall",
@@ -3919,7 +3982,8 @@
         "grid_position": {
           "x": 1,
           "y": -14
-        }
+        },
+        "dungeon_interior": true
       },
       "the_first_city_the_counted_door": {
         "name": "The Counted Door",
@@ -3949,7 +4013,8 @@
         "grid_position": {
           "x": 1,
           "y": -15
-        }
+        },
+        "dungeon_interior": true
       },
       "the_first_city_borins_old_ward": {
         "name": "The Old Watch Post",
@@ -3970,7 +4035,8 @@
         "grid_position": {
           "x": 2,
           "y": -15
-        }
+        },
+        "dungeon_interior": true
       },
       "the_first_city_last_archive": {
         "name": "The Last Archive",
@@ -3993,7 +4059,9 @@
         "grid_position": {
           "x": 1,
           "y": -16
-        }
+        },
+        "dungeon_interior": true,
+        "dungeon_checkpoint": true
       },
       "the_first_city_the_final_count": {
         "name": "The Final Count",
@@ -4020,7 +4088,8 @@
         "grid_position": {
           "x": 1,
           "y": -17
-        }
+        },
+        "dungeon_interior": true
       },
       "the_first_city_the_original_spire": {
         "name": "The Original Spire",
@@ -4043,7 +4112,8 @@
         "grid_position": {
           "x": 1,
           "y": -18
-        }
+        },
+        "dungeon_interior": true
       },
       "goblin_warrens_deeper_rubble": {
         "name": "The Deeper Rubble",
@@ -4063,7 +4133,8 @@
         "grid_position": {
           "x": -3,
           "y": 0
-        }
+        },
+        "dungeon_interior": true
       },
       "goblin_warrens_the_old_seam": {
         "name": "The Old Seam",
@@ -4085,7 +4156,8 @@
         "grid_position": {
           "x": -4,
           "y": 0
-        }
+        },
+        "dungeon_interior": true
       },
       "goblin_warrens_the_sealed_cache": {
         "name": "The Sealed Cache",
@@ -4111,7 +4183,8 @@
         "grid_position": {
           "x": -4,
           "y": 1
-        }
+        },
+        "dungeon_interior": true
       },
       "goblin_warrens_the_forgotten_bore": {
         "name": "The Forgotten Bore",
@@ -4128,7 +4201,8 @@
         "grid_position": {
           "x": -5,
           "y": 0
-        }
+        },
+        "dungeon_interior": true
       },
       "goblin_warrens_the_ancient_shaft": {
         "name": "The Ancient Shaft",
@@ -4154,7 +4228,8 @@
         "grid_position": {
           "x": -5,
           "y": -1
-        }
+        },
+        "dungeon_interior": true
       },
       "goblin_warrens_the_buried_threshold": {
         "name": "The Buried Threshold",
@@ -4174,7 +4249,8 @@
         "grid_position": {
           "x": -5,
           "y": -2
-        }
+        },
+        "dungeon_interior": true
       },
       "goblin_warrens_the_reverent_hollow": {
         "name": "The Reverent Hollow",
@@ -4197,7 +4273,8 @@
         "grid_position": {
           "x": -5,
           "y": -3
-        }
+        },
+        "dungeon_interior": true
       },
       "goblin_warrens_the_idol_chamber": {
         "name": "The Idol Chamber",
@@ -4217,7 +4294,8 @@
         "grid_position": {
           "x": -5,
           "y": -4
-        }
+        },
+        "dungeon_interior": true
       },
       "goblin_warrens_the_unread_stack": {
         "name": "The Unread Stack",
@@ -4240,7 +4318,8 @@
         "grid_position": {
           "x": -5,
           "y": -5
-        }
+        },
+        "dungeon_interior": true
       },
       "goblin_warrens_the_archive_threshold": {
         "name": "The Archive Threshold",
@@ -4264,7 +4343,8 @@
         "grid_position": {
           "x": -5,
           "y": -6
-        }
+        },
+        "dungeon_interior": true
       },
       "goblin_warrens_the_buried_archive": {
         "name": "The Buried Archive",
@@ -4282,7 +4362,8 @@
         "grid_position": {
           "x": -5,
           "y": -7
-        }
+        },
+        "dungeon_interior": true
       },
       "goblin_warrens_the_counting_hall": {
         "name": "The Counting Hall",
@@ -4310,7 +4391,8 @@
         "grid_position": {
           "x": -1,
           "y": 4
-        }
+        },
+        "dungeon_interior": true
       },
       "goblin_warrens_the_second_stash": {
         "name": "The Second Stash",
@@ -4336,7 +4418,8 @@
         "grid_position": {
           "x": -1,
           "y": 5
-        }
+        },
+        "dungeon_interior": true
       },
       "goblin_warrens_the_paymasters_route": {
         "name": "The Paymaster's Route",
@@ -4356,7 +4439,8 @@
         "grid_position": {
           "x": 0,
           "y": 4
-        }
+        },
+        "dungeon_interior": true
       },
       "goblin_warrens_the_quiet_crossing": {
         "name": "The Quiet Crossing",
@@ -4375,7 +4459,9 @@
         "grid_position": {
           "x": 0,
           "y": 5
-        }
+        },
+        "dungeon_interior": true,
+        "dungeon_checkpoint": true
       },
       "goblin_warrens_the_grasping_hollow": {
         "name": "The Grasping Hollow",
@@ -4403,7 +4489,8 @@
         "grid_position": {
           "x": 0,
           "y": 6
-        }
+        },
+        "dungeon_interior": true
       },
       "goblin_warrens_grasks_old_cage": {
         "name": "The Old Cage",
@@ -4424,7 +4511,8 @@
         "grid_position": {
           "x": 1,
           "y": 6
-        }
+        },
+        "dungeon_interior": true
       },
       "goblin_warrens_the_ledger_vault": {
         "name": "The Ledger Vault",
@@ -4441,7 +4529,8 @@
         "grid_position": {
           "x": 0,
           "y": 7
-        }
+        },
+        "dungeon_interior": true
       },
       "goblin_warrens_the_toll_masters_den": {
         "name": "The Toll Master's Den",
@@ -4461,7 +4550,8 @@
         "grid_position": {
           "x": 0,
           "y": 8
-        }
+        },
+        "dungeon_interior": true
       },
       "goblin_warrens_the_final_ledger": {
         "name": "The Final Ledger",
@@ -4484,7 +4574,8 @@
         "grid_position": {
           "x": 0,
           "y": 9
-        }
+        },
+        "dungeon_interior": true
       },
       "goblin_warrens_the_paymasters_approach": {
         "name": "The Paymaster's Approach",
@@ -4504,7 +4595,8 @@
         "grid_position": {
           "x": 0,
           "y": 10
-        }
+        },
+        "dungeon_interior": true
       },
       "goblin_warrens_the_true_paymaster": {
         "name": "The True Paymaster's Den",
@@ -4527,7 +4619,8 @@
         "grid_position": {
           "x": 0,
           "y": 11
-        }
+        },
+        "dungeon_interior": true
       },
       "goblin_warrens_the_forgotten_landing": {
         "name": "The Forgotten Landing",
@@ -4548,7 +4641,8 @@
         "grid_position": {
           "x": 1,
           "y": 5
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_cleared_choke": {
         "name": "The Cleared Choke",
@@ -4568,7 +4662,8 @@
         "grid_position": {
           "x": -1,
           "y": 1
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_smugglers_cut": {
         "name": "The Smuggler's Cut",
@@ -4590,7 +4685,8 @@
         "grid_position": {
           "x": -2,
           "y": 1
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_hidden_cache": {
         "name": "The Hidden Cache",
@@ -4616,7 +4712,8 @@
         "grid_position": {
           "x": -2,
           "y": 2
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_root_stair": {
         "name": "The Root Stair",
@@ -4633,7 +4730,8 @@
         "grid_position": {
           "x": -3,
           "y": 1
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_quiet_pool": {
         "name": "The Quiet Pool",
@@ -4661,7 +4759,8 @@
         "grid_position": {
           "x": -3,
           "y": 2
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_marked_root": {
         "name": "The Marked Root",
@@ -4684,7 +4783,8 @@
         "grid_position": {
           "x": -3,
           "y": 3
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_wrens_old_grove": {
         "name": "The Old Grove",
@@ -4707,7 +4807,8 @@
         "grid_position": {
           "x": -3,
           "y": 4
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_tangled_hollow": {
         "name": "The Tangled Hollow",
@@ -4727,7 +4828,8 @@
         "grid_position": {
           "x": -3,
           "y": 5
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_deeper_current": {
         "name": "The Deeper Current",
@@ -4747,7 +4849,8 @@
         "grid_position": {
           "x": -3,
           "y": 6
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_last_crossing": {
         "name": "The Last Crossing",
@@ -4771,7 +4874,8 @@
         "grid_position": {
           "x": -3,
           "y": 7
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_smugglers_end": {
         "name": "The Smuggler's End",
@@ -4789,7 +4893,8 @@
         "grid_position": {
           "x": -3,
           "y": 8
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_spring_stair": {
         "name": "The Spring Stair",
@@ -4809,7 +4914,8 @@
         "grid_position": {
           "x": 0,
           "y": 6
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_second_pool": {
         "name": "The Second Pool",
@@ -4837,7 +4943,8 @@
         "grid_position": {
           "x": 0,
           "y": 7
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_deep_current": {
         "name": "The Deep Current",
@@ -4857,7 +4964,8 @@
         "grid_position": {
           "x": 0,
           "y": 8
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_kept_shrine": {
         "name": "The Kept Shrine",
@@ -4886,7 +4994,9 @@
           "y": 9
         },
         "healing_water": true,
-        "real_shrine": true
+        "real_shrine": true,
+        "dungeon_interior": true,
+        "dungeon_checkpoint": true
       },
       "sunken_root_caverns_the_shrines_after": {
         "name": "Past the Kept Shrine",
@@ -4909,7 +5019,8 @@
         "grid_position": {
           "x": 0,
           "y": 10
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_flooded_stair": {
         "name": "The Flooded Stair",
@@ -4929,7 +5040,8 @@
         "grid_position": {
           "x": 0,
           "y": 11
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_drowned_hall": {
         "name": "The Drowned Hall",
@@ -4957,7 +5069,8 @@
         "grid_position": {
           "x": 0,
           "y": 12
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_hollow_beneath": {
         "name": "The Hollow Beneath",
@@ -4978,7 +5091,8 @@
         "grid_position": {
           "x": 1,
           "y": 12
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_wellsprings_answer": {
         "name": "The Wellspring's Answer",
@@ -4998,7 +5112,8 @@
         "grid_position": {
           "x": 0,
           "y": 13
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_final_current": {
         "name": "The Final Current",
@@ -5018,7 +5133,8 @@
         "grid_position": {
           "x": 0,
           "y": 14
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_last_root": {
         "name": "The Last Root",
@@ -5035,7 +5151,8 @@
         "grid_position": {
           "x": 0,
           "y": 15
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_deepest_approach": {
         "name": "The Deepest Approach",
@@ -5052,7 +5169,8 @@
         "grid_position": {
           "x": 0,
           "y": 16
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_source": {
         "name": "The Source",
@@ -5075,7 +5193,8 @@
         "grid_position": {
           "x": 0,
           "y": 17
-        }
+        },
+        "dungeon_interior": true
       },
       "sunken_root_caverns_the_forgotten_bend": {
         "name": "The Forgotten Bend",
@@ -5096,7 +5215,8 @@
         "grid_position": {
           "x": -2,
           "y": 3
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_undertows_reach": {
         "name": "The Undertow's Reach",
@@ -5116,7 +5236,8 @@
         "grid_position": {
           "x": 8,
           "y": -6
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_silent_current": {
         "name": "The Silent Current",
@@ -5144,7 +5265,8 @@
         "grid_position": {
           "x": 9,
           "y": -6
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_gorge_throat": {
         "name": "The Gorge Throat",
@@ -5166,7 +5288,8 @@
         "grid_position": {
           "x": 10,
           "y": -6
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_hanging_web": {
         "name": "The Hanging Web",
@@ -5185,7 +5308,8 @@
         "grid_position": {
           "x": 11,
           "y": -6
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_deep_nest": {
         "name": "The Deep Nest",
@@ -5220,7 +5344,8 @@
         "grid_position": {
           "x": 12,
           "y": -6
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_watchers_perch": {
         "name": "The Watcher's Perch",
@@ -5240,7 +5365,8 @@
         "grid_position": {
           "x": 13,
           "y": -6
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_lower_span": {
         "name": "The Lower Span",
@@ -5260,7 +5386,8 @@
         "grid_position": {
           "x": 14,
           "y": -6
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_far_approach": {
         "name": "The Far Approach",
@@ -5285,7 +5412,8 @@
         "grid_position": {
           "x": 15,
           "y": -6
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_scouts_ledge": {
         "name": "The Scout's Ledge",
@@ -5304,7 +5432,8 @@
         "grid_position": {
           "x": 16,
           "y": -6
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_scouting_ground": {
         "name": "The Scouting Ground",
@@ -5322,7 +5451,8 @@
         },
         "npcs": [
           "kess_scouting"
-        ]
+        ],
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_broken_watch": {
         "name": "The Broken Watch",
@@ -5348,7 +5478,8 @@
         "grid_position": {
           "x": 10,
           "y": -7
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_silent_shrine": {
         "name": "The Silent Shrine",
@@ -5370,7 +5501,9 @@
           "x": 11,
           "y": -7
         },
-        "real_shrine": true
+        "real_shrine": true,
+        "dungeon_interior": true,
+        "dungeon_checkpoint": true
       },
       "stonearch_bridge_the_far_markers": {
         "name": "The Far Markers",
@@ -5391,7 +5524,8 @@
         "grid_position": {
           "x": 15,
           "y": -7
-        }
+        },
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_scouts_camp": {
         "name": "The Scout's Camp",
@@ -5412,7 +5546,8 @@
         "grid_position": {
           "x": 16,
           "y": -7
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_sunken_stair": {
         "name": "The Sunken Stair",
@@ -5434,7 +5569,8 @@
         "grid_position": {
           "x": 4,
           "y": -8
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_cellar_hollow": {
         "name": "The Cellar Hollow",
@@ -5458,7 +5594,8 @@
         "grid_position": {
           "x": 4,
           "y": -9
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_sealed_larder": {
         "name": "The Sealed Larder",
@@ -5484,7 +5621,8 @@
         "grid_position": {
           "x": 5,
           "y": -9
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_deeper_dark": {
         "name": "The Deeper Dark",
@@ -5501,7 +5639,8 @@
         "grid_position": {
           "x": 4,
           "y": -10
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_bone_stair": {
         "name": "The Bone Stair",
@@ -5532,7 +5671,8 @@
         "grid_position": {
           "x": 4,
           "y": -11
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_watchers_grave": {
         "name": "The Watcher's Grave",
@@ -5555,7 +5695,8 @@
         "grid_position": {
           "x": 4,
           "y": -12
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_marker_hall": {
         "name": "The Marker Hall",
@@ -5577,7 +5718,8 @@
         "grid_position": {
           "x": 4,
           "y": -13
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_cellar_warden": {
         "name": "The Cellar Warden's Hall",
@@ -5597,7 +5739,8 @@
         "grid_position": {
           "x": 4,
           "y": -14
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_last_cellar": {
         "name": "The Last Cellar",
@@ -5622,7 +5765,8 @@
         "grid_position": {
           "x": 4,
           "y": -15
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_final_approach": {
         "name": "The Final Approach",
@@ -5646,7 +5790,8 @@
         "grid_position": {
           "x": 4,
           "y": -16
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_downs_last_watch": {
         "name": "The Downs' Last Watch",
@@ -5669,7 +5814,8 @@
         "grid_position": {
           "x": 4,
           "y": -17
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_stairs_landing": {
         "name": "The Stair's Landing",
@@ -5684,7 +5830,8 @@
         "grid_position": {
           "x": 5,
           "y": -8
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_hollows_edge": {
         "name": "The Hollow's Edge",
@@ -5705,7 +5852,8 @@
         "grid_position": {
           "x": 3,
           "y": -9
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_bone_niche": {
         "name": "The Bone Niche",
@@ -5731,7 +5879,8 @@
         "grid_position": {
           "x": 5,
           "y": -11
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_markers_answer": {
         "name": "The Marker's Answer",
@@ -5746,7 +5895,8 @@
         "grid_position": {
           "x": 5,
           "y": -13
-        }
+        },
+        "dungeon_interior": true
       },
       "greymoor_downs_the_cellars_own_ledger": {
         "name": "The Cellar's Own Ledger",
@@ -5767,7 +5917,8 @@
         "grid_position": {
           "x": 5,
           "y": -15
-        }
+        },
+        "dungeon_interior": true
       }
     },
     "sky": {
@@ -6050,7 +6201,8 @@
         "grid_position": {
           "x": 0,
           "y": 1
-        }
+        },
+        "dungeon_interior": true
       },
       "unmoored_isle_the_backward_hall": {
         "name": "The Backward Hall",
@@ -6072,7 +6224,8 @@
         "grid_position": {
           "x": 0,
           "y": 2
-        }
+        },
+        "dungeon_interior": true
       },
       "unmoored_isle_the_repeating_door": {
         "name": "The Repeating Door",
@@ -6098,7 +6251,8 @@
         "grid_position": {
           "x": 1,
           "y": 2
-        }
+        },
+        "dungeon_interior": true
       },
       "unmoored_isle_the_upside_stair": {
         "name": "The Upside Stair",
@@ -6115,7 +6269,8 @@
         "grid_position": {
           "x": 0,
           "y": 3
-        }
+        },
+        "dungeon_interior": true
       },
       "unmoored_isle_the_floating_garden": {
         "name": "The Floating Garden",
@@ -6138,7 +6293,9 @@
         "grid_position": {
           "x": 0,
           "y": 4
-        }
+        },
+        "dungeon_interior": true,
+        "dungeon_checkpoint": true
       },
       "unmoored_isle_the_untethered_bridge": {
         "name": "The Untethered Bridge",
@@ -6164,7 +6321,8 @@
         "grid_position": {
           "x": 0,
           "y": 5
-        }
+        },
+        "dungeon_interior": true
       },
       "unmoored_isle_the_folded_atrium": {
         "name": "The Folded Atrium",
@@ -6184,7 +6342,8 @@
         "grid_position": {
           "x": 0,
           "y": 6
-        }
+        },
+        "dungeon_interior": true
       },
       "unmoored_isle_the_drifting_halls_end": {
         "name": "Where the Drifting Halls End",
@@ -6202,7 +6361,8 @@
         "grid_position": {
           "x": 0,
           "y": 7
-        }
+        },
+        "dungeon_interior": true
       },
       "unmoored_isle_the_mirrored_threshold": {
         "name": "The Mirrored Threshold",
@@ -6222,7 +6382,8 @@
         "grid_position": {
           "x": 0,
           "y": -1
-        }
+        },
+        "dungeon_interior": true
       },
       "unmoored_isle_the_upside_down_lake": {
         "name": "The Upside-Down Lake",
@@ -6247,7 +6408,8 @@
         "grid_position": {
           "x": 0,
           "y": -2
-        }
+        },
+        "dungeon_interior": true
       },
       "unmoored_isle_the_second_shadow": {
         "name": "The Second Shadow",
@@ -6273,7 +6435,8 @@
         "grid_position": {
           "x": 1,
           "y": -2
-        }
+        },
+        "dungeon_interior": true
       },
       "unmoored_isle_the_reflected_stair": {
         "name": "The Reflected Stair",
@@ -6293,7 +6456,8 @@
         "grid_position": {
           "x": 0,
           "y": -3
-        }
+        },
+        "dungeon_interior": true
       },
       "unmoored_isle_the_glass_garden": {
         "name": "The Glass Garden",
@@ -6310,7 +6474,8 @@
         "grid_position": {
           "x": 0,
           "y": -4
-        }
+        },
+        "dungeon_interior": true
       },
       "unmoored_isle_the_argument_of_echoes": {
         "name": "The Argument of Echoes",
@@ -6330,7 +6495,8 @@
         "grid_position": {
           "x": 0,
           "y": -5
-        }
+        },
+        "dungeon_interior": true
       },
       "unmoored_isle_the_reflection_deepens": {
         "name": "Where the Reflection Deepens",
@@ -6353,7 +6519,8 @@
         "grid_position": {
           "x": 0,
           "y": -6
-        }
+        },
+        "dungeon_interior": true
       },
       "unmoored_isle_the_sunken_reflections_end": {
         "name": "The Sunken Reflection's End",
@@ -6376,7 +6543,8 @@
         "grid_position": {
           "x": 0,
           "y": -7
-        }
+        },
+        "dungeon_interior": true
       },
       "unmoored_isle_the_radiant_stair": {
         "name": "The Radiant Stair",
@@ -6396,7 +6564,8 @@
         "grid_position": {
           "x": 1,
           "y": 0
-        }
+        },
+        "dungeon_interior": true
       },
       "unmoored_isle_the_sunward_ledge": {
         "name": "The Sunward Ledge",
@@ -6416,7 +6585,8 @@
         "grid_position": {
           "x": 2,
           "y": 0
-        }
+        },
+        "dungeon_interior": true
       },
       "unmoored_isle_the_warming_hollow": {
         "name": "The Warming Hollow",
@@ -6442,7 +6612,8 @@
         "grid_position": {
           "x": 3,
           "y": 0
-        }
+        },
+        "dungeon_interior": true
       },
       "unmoored_isle_the_climbing_light": {
         "name": "The Climbing Light",
@@ -6465,7 +6636,8 @@
         "grid_position": {
           "x": 4,
           "y": 0
-        }
+        },
+        "dungeon_interior": true
       },
       "unmoored_isle_the_high_approach": {
         "name": "The High Approach",
@@ -6485,7 +6657,8 @@
         "grid_position": {
           "x": 5,
           "y": 0
-        }
+        },
+        "dungeon_interior": true
       },
       "unmoored_isle_the_suns_threshold": {
         "name": "The Sun's Threshold",
@@ -6520,7 +6693,8 @@
         "grid_position": {
           "x": 6,
           "y": 0
-        }
+        },
+        "dungeon_interior": true
       },
       "unmoored_isle_the_spires_grace_sanctum": {
         "name": "The Spire's Grace Sanctum",
@@ -6538,7 +6712,8 @@
         "grid_position": {
           "x": 7,
           "y": 0
-        }
+        },
+        "dungeon_interior": true
       }
     }
   },

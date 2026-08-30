@@ -2,6 +2,42 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.418] — dungeon fast-travel restricted to real safe waypoints, plus a real achievement for reaching one
+
+Real live request (2026-08-30, dev-bridge, Coffee: "make sure players
+cannot fast travel in the dungeons or to the dungeons. They must use
+the safe way points... I want this area to be the waypoint for dungeon
+one... make sure the other locations are removed" -- followed by "when
+they reach those 'safe place' type locations can u give them an
+achievement... use this only in dungeons"). Two related, real
+features, both scoped to the 8 dungeons this session's Chapter 3-8
+expansion built:
+
+- New `dungeon_interior`/`dungeon_checkpoint` location flags. Every
+  interior room across all 8 dungeons (167 rooms total) is flagged
+  `dungeon_interior` and excluded from ordinary fast-travel; each
+  dungeon's own real, already-authored safe room (the Ember Font, the
+  Weeping Spring, the Kept Shrine, the Silent Shrine, and four
+  newly-designated equivalents for the chapters that didn't already
+  have one) is the sole `dungeon_checkpoint` exception. The rest of
+  the entire existing game is completely unaffected -- no flag means
+  "fast-travel eligible," exactly as it's always behaved. Trying to
+  warp directly to a named deep room now gets a precise rejection
+  instead of the generic "you haven't been there" message (which
+  would have been actively wrong, since the player HAD been there).
+- A new `reached_location` achievement check type (reusing the real,
+  already-existing `visited_locations` field, no new counter) and 8
+  new achievements, one per dungeon's own checkpoint, awarded
+  automatically the first time a character walks there on foot.
+
+Verified with real executed tests: a genuine fail-then-pass confirming
+the old code really did let a player warp straight to a boss room, the
+waypoint menu/list both correctly filtered, all 8 checkpoints
+confirmed real and correctly flagged, an achievement firing end-to-end
+on real arrival -- plus a full re-run of the existing fast-travel/
+waypoint/movement test suite (including the AI-companion-follow and
+downed-party-member-carried-along tests). Zero regressions.
+
 ## [1.27.417] — Chapter 8 expansion, Phase 6 (FINAL): Greymoor Downs grows to 40 rooms, closing the Chapter 3-8 expansion
 
 Sixth and final installment of the approved Chapter 3-8 dungeon

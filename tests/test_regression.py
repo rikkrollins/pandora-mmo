@@ -21,6 +21,7 @@ from types import SimpleNamespace
 
 import requests
 
+import achievements
 import bot
 import campaign_loader as cl
 import config
@@ -6242,6 +6243,89 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(npc.get("recruitable"))
         self.assertIn("the_downs_own_marker", cl.get_location(bot.CAMPAIGN, "greymoor_downs_the_marker_hall")["npcs"])
         self.assertIn("the_downs_own_marker", cl.get_location(bot.CAMPAIGN, "greymoor_downs_the_markers_riddle")["npcs"])
+
+    # -- Real live request (2026-08-30, dev-bridge, Coffee: "make sure
+    #    players cannot fast travel in the dungeons or to the
+    #    dungeons... They must use the safe way points") -----------
+    def test_every_dungeon_has_exactly_one_real_checkpoint(self):
+        locs = {}
+        for layer, d in bot.CAMPAIGN["locations"].items():
+            locs.update(d)
+        checkpoints = [loc_id for loc_id, loc in locs.items() if loc.get("dungeon_checkpoint")]
+        self.assertEqual(len(checkpoints), 8, checkpoints)
+        for loc_id in checkpoints:
+            self.assertTrue(locs[loc_id].get("dungeon_interior"), f"{loc_id} must also be a real dungeon_interior room")
+
+    def test_dungeon_interior_rooms_are_ineligible_except_their_own_checkpoint(self):
+        sanctum = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_sanctum")
+        checkpoint = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_ember_font")
+        overworld = cl.get_location(bot.CAMPAIGN, "crossroads_tavern")
+        self.assertFalse(bot._is_fast_travel_eligible(sanctum))
+        self.assertTrue(bot._is_fast_travel_eligible(checkpoint))
+        self.assertTrue(bot._is_fast_travel_eligible(overworld))
+
+    def test_waypoint_keyboard_excludes_dungeon_interiors_but_keeps_the_checkpoint(self):
+        visited = ["wrathflame_vault_sanctum", "wrathflame_vault_ember_font", "crossroads_tavern"]
+        keyboard = bot._waypoint_keyboard(visited, "market_row")
+        labels = [btn.text for row in keyboard.inline_keyboard for btn in row]
+        self.assertFalse(any("Wrathflame Sanctum" in label for label in labels))
+        self.assertTrue(any("Ember Font" in label for label in labels))
+        self.assertTrue(any("Crossroads" in label for label in labels))
+
+    async def test_fast_travel_rejects_a_deep_dungeon_room_with_a_precise_message(self):
+        user_id = 900980
+        make_basic_character(user_id, "NoSkippingAhead", current_location="wrathflame_vault_ember_font")
+        db.mark_visited(user_id, -999, "wrathflame_vault_sanctum")
+        sink = []
+        await bot._do_fast_travel(FakeUpdate(user_id, "warp to the wrathflame sanctum", sink), "warp to the wrathflame sanctum")
+        combined = " ".join(sink)
+        self.assertIn("can't fast-travel directly", combined)
+        self.assertIn("safe waypoint", combined)
+
+    async def test_fast_travel_to_a_dungeon_checkpoint_still_works(self):
+        user_id = 900981
+        make_basic_character(user_id, "CheckpointWarper", current_location="crossroads_tavern")
+        db.mark_visited(user_id, -999, "wrathflame_vault_ember_font")
+        sink = []
+        await bot._do_fast_travel(FakeUpdate(user_id, "warp to the ember font", sink), "warp to the ember font")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "wrathflame_vault_ember_font")
+
+    # -- Real live request (2026-08-30, dev-bridge, Coffee: "when they
+    #    reach those 'safe place' type locations can u give them an
+    #    achievement... use this only in dungeons") ------------------
+    def test_all_eight_checkpoint_achievements_are_real_and_valid(self):
+        checkpoint_achievement_ids = [
+            "wrathflame_vault_waypoint", "deep_root_vault_waypoint", "first_city_waypoint",
+            "unmoored_isle_waypoint", "goblin_warrens_waypoint", "sunken_root_caverns_waypoint",
+            "stonearch_gorge_waypoint", "greymoor_downs_waypoint",
+        ]
+        for aid in checkpoint_achievement_ids:
+            data = achievements.get_achievement(aid)
+            self.assertIsNotNone(data, aid)
+            self.assertEqual(data["check"]["type"], "reached_location")
+            loc = cl.get_location(bot.CAMPAIGN, data["check"]["location_id"])
+            self.assertIsNotNone(loc, aid)
+            self.assertTrue(loc.get("dungeon_checkpoint"), f"{aid}'s own location_id must be a real checkpoint")
+
+    def test_reached_location_condition_reads_the_real_visited_locations_field(self):
+        met = {"visited_locations": ["wrathflame_vault_ember_font"]}
+        not_met = {"visited_locations": []}
+        check = {"type": "reached_location", "location_id": "wrathflame_vault_ember_font"}
+        self.assertTrue(bot._achievement_condition_met(met, check))
+        self.assertFalse(bot._achievement_condition_met(not_met, check))
+
+    async def test_reaching_a_checkpoint_on_foot_actually_unlocks_the_achievement(self):
+        """End-to-end: walking (not warping) into a real dungeon checkpoint for the first time fires the real achievement."""
+        user_id = 900982
+        make_basic_character(user_id, "AchievementWalker", current_location="wrathflame_vault_ash_gallery")
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "go down", sink), "go down")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "wrathflame_vault_ember_font")
+        self.assertIn("wrathflame_vault_waypoint", character["achievements"])
+        combined = " ".join(sink)
+        self.assertIn("The Ember Font", combined)
 
     def test_companion_favor_pays_more_affinity_once_the_companion_already_trusts_you(self):
         """

@@ -22903,6 +22903,13 @@ def _achievement_condition_met(character: dict, check: dict) -> bool:
         return len(character.get("bound_remnants") or []) >= check["value"]
     if check_type == "has_secondary_guild":
         return bool(character.get("secondary_guilds"))
+    if check_type == "reached_location":
+        # Chapter 3-8 expansion follow-up (2026-08-30, per Coffee: an
+        # achievement for reaching a dungeon's own real safe waypoint).
+        # Reuses the same real, already-existing visited_locations
+        # field every other fog-of-war/map feature already relies on --
+        # no new counter invented.
+        return check["location_id"] in (character.get("visited_locations") or [])
     return False
 
 
@@ -24219,6 +24226,16 @@ async def _do_move(update: Update, text: str) -> None:
     db.move_character(update.effective_user.id, update.effective_chat.id, destination_id)
     db.mark_visited(update.effective_user.id, update.effective_chat.id, destination_id)
 
+    # Real live request (2026-08-30, dev-bridge, Coffee: "when they
+    # reach those 'safe place' type locations can u give them an
+    # achievement... use this only in dungeons"). Checked here, right
+    # after the real visited_locations write, using the same generic
+    # "reached_location" check type / _check_and_award_achievements
+    # every other achievement already goes through -- re-fetches fresh
+    # so the just-arrived destination is actually reflected.
+    if not destination_already_visited and destination.get("dungeon_checkpoint"):
+        await _check_and_award_achievements(update, db.get_character(update.effective_user.id, update.effective_chat.id))
+
     # Real bug found live (2026-07-17, Coffee): recruited companions
     # (is_ai=1, is_autonomous=0) are supposed to be traveling WITH
     # whoever recruited them, but this only ever moved the acting
@@ -24628,6 +24645,26 @@ async def _send_rebirth_gate_message(update: Update, destination: dict) -> None:
     )
 
 
+def _is_fast_travel_eligible(location: dict) -> bool:
+    """
+    Real live request (2026-08-30, dev-bridge, Coffee: "make sure
+    players cannot fast travel in the dungeons or to the dungeons.
+    They must use the safe way points... I want this area to be the
+    waypoint for dungeon one... make sure the other locations are
+    removed"). A location opts OUT of ordinary fast-travel eligibility
+    via "dungeon_interior": true -- the whole rest of the game (every
+    location without that flag) is completely unaffected, exactly as
+    fast-travel has always behaved. The one real exception per dungeon
+    is its own designated "dungeon_checkpoint": true room (an already-
+    real, hand-authored safe room -- the Ember Font, the Weeping
+    Spring, etc.), which stays reachable so a party can warp back to
+    where they left off without re-clearing the whole crawl.
+    """
+    if not location.get("dungeon_interior"):
+        return True
+    return bool(location.get("dungeon_checkpoint"))
+
+
 async def _do_fast_travel(update: Update, text: str) -> None:
     """
     Warp directly to any location this character has already visited
@@ -24636,6 +24673,10 @@ async def _do_fast_travel(update: Update, text: str) -> None:
     constraints entirely. Ordinary _do_move (on-foot, connection-by-
     connection, fully narrated) is untouched; this is purely a
     convenience for places already discovered the hard way.
+
+    Real live request (2026-08-30): dungeon interior rooms are excluded
+    from this convenience entirely except each dungeon's own real
+    checkpoint room -- see _is_fast_travel_eligible.
     """
     telegram_user_id = update.effective_user.id
     character = db.get_character(telegram_user_id, update.effective_chat.id)
@@ -24663,7 +24704,10 @@ async def _do_fast_travel(update: Update, text: str) -> None:
         )
         return
 
-    visited = character["visited_locations"]
+    visited = [
+        loc_id for loc_id in character["visited_locations"]
+        if (loc := cl.get_location(CAMPAIGN, loc_id)) and _is_fast_travel_eligible(loc)
+    ]
     lowered = text.lower()
     destination_id = None
     for loc_id in visited:
@@ -24673,6 +24717,18 @@ async def _do_fast_travel(update: Update, text: str) -> None:
             break
 
     if destination_id is None:
+        # A more precise rejection when the text actually names a real,
+        # already-visited dungeon room that's just not fast-travel
+        # eligible -- "you haven't been there" would be actively wrong.
+        for loc_id in character["visited_locations"]:
+            loc = cl.get_location(CAMPAIGN, loc_id)
+            if loc and not _is_fast_travel_eligible(loc) and (loc_id.replace("_", " ") in lowered or loc["name"].lower() in lowered):
+                await update.effective_chat.send_message(
+                    f"You can't fast-travel directly to {loc['name']} — it's deep inside a real dungeon. "
+                    f"Travel there on foot, or warp to that dungeon's own safe waypoint if you've found it.",
+                    message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+                )
+                return
         known_names = ", ".join(cl.get_location(CAMPAIGN, loc_id)["name"] for loc_id in visited)
         await update.effective_chat.send_message(
             f"You can only fast-travel somewhere you've actually been. Waypoints you've discovered: {known_names}",
@@ -29039,7 +29095,10 @@ def _waypoint_keyboard(visited_locations: list[str], current_location_id: str) -
         if loc_id == current_location_id:
             continue
         loc = cl.get_location(CAMPAIGN, loc_id)
-        if loc:
+        # Real live request (2026-08-30): dungeon interior rooms are
+        # excluded from this list entirely except each dungeon's own
+        # real checkpoint room -- see _is_fast_travel_eligible.
+        if loc and _is_fast_travel_eligible(loc):
             rows.append([InlineKeyboardButton(f"📍 {loc['name']}", callback_data=f"waypoint|go|{loc_id}")])
     return InlineKeyboardMarkup(rows)
 
@@ -29052,7 +29111,11 @@ async def _do_show_waypoints(update: Update) -> None:
         )
         return
     visited = character["visited_locations"]
-    others = [loc_id for loc_id in visited if loc_id != character["current_location"]]
+    others = [
+        loc_id for loc_id in visited
+        if loc_id != character["current_location"]
+        and (loc := cl.get_location(CAMPAIGN, loc_id)) and _is_fast_travel_eligible(loc)
+    ]
     if not others:
         await update.effective_chat.send_message(
             "You haven't discovered anywhere else to fast-travel to yet.",

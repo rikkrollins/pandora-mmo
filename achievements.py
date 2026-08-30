@@ -15,7 +15,9 @@ completed_specific_quest (a single named quest_id, for one-off finale
 achievements rather than a reusable threshold), min_bound_remnants (real
 count of character["bound_remnants"]), has_secondary_guild (a real
 "doubled up" Promotion guild beyond the primary -- character["secondary_
-guilds"] non-empty).
+guilds"] non-empty), reached_location (a single named location_id in
+character["visited_locations"] -- used for the Chapter 3-8 expansion's
+per-dungeon safe-waypoint achievements).
 See bot.py's _achievement_condition_met for how each is evaluated.
 """
 
@@ -176,6 +178,43 @@ ACHIEVEMENTS = {
         "description": "Hold a second, \"doubled up\" guild alongside your primary one.",
         "title": "the Promoted",
         "check": {"type": "has_secondary_guild"},
+    },
+    # Chapter 3-8 expansion follow-up (2026-08-30, per Coffee: an
+    # achievement for reaching a dungeon's own real safe waypoint --
+    # "use this only in dungeons"). One per dungeon's designated
+    # dungeon_checkpoint room, reusing the real visited_locations field
+    # every other fog-of-war feature already relies on.
+    "wrathflame_vault_waypoint": {
+        "name": "The Ember Font", "description": "Reach the Wrathflame Vault's own safe waypoint.",
+        "title": "the Ember-Warded", "check": {"type": "reached_location", "location_id": "wrathflame_vault_ember_font"},
+    },
+    "deep_root_vault_waypoint": {
+        "name": "The Weeping Spring", "description": "Reach the Deep Root Vault's own safe waypoint.",
+        "title": "the Root-Warded", "check": {"type": "reached_location", "location_id": "deep_root_vault_weeping_spring"},
+    },
+    "first_city_waypoint": {
+        "name": "The Last Archive", "description": "Reach The First City's own safe waypoint.",
+        "title": "the Archive-Warded", "check": {"type": "reached_location", "location_id": "the_first_city_last_archive"},
+    },
+    "unmoored_isle_waypoint": {
+        "name": "The Floating Garden", "description": "Reach the Unmoored Isle's own safe waypoint.",
+        "title": "the Garden-Warded", "check": {"type": "reached_location", "location_id": "unmoored_isle_the_floating_garden"},
+    },
+    "goblin_warrens_waypoint": {
+        "name": "The Quiet Crossing", "description": "Reach the Goblin Warrens' own safe waypoint.",
+        "title": "the Warren-Warded", "check": {"type": "reached_location", "location_id": "goblin_warrens_the_quiet_crossing"},
+    },
+    "sunken_root_caverns_waypoint": {
+        "name": "The Kept Shrine", "description": "Reach the Sunken Root Caverns' own safe waypoint.",
+        "title": "the Shrine-Warded", "check": {"type": "reached_location", "location_id": "sunken_root_caverns_the_kept_shrine"},
+    },
+    "stonearch_gorge_waypoint": {
+        "name": "The Silent Shrine", "description": "Reach Stonearch Gorge's own safe waypoint.",
+        "title": "the Gorge-Warded", "check": {"type": "reached_location", "location_id": "stonearch_bridge_the_silent_shrine"},
+    },
+    "greymoor_downs_waypoint": {
+        "name": "The Sheltered Camp", "description": "Reach Greymoor Downs' own safe waypoint.",
+        "title": "the Downs-Warded", "check": {"type": "reached_location", "location_id": "greymoor_downs_the_sheltered_camp"},
     },
 }
 
