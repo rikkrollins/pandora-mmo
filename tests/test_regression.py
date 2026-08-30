@@ -887,6 +887,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         result = _keyword_fallback("I choose to spare the bandit", [])
         self.assertEqual(result["action"], "resolve_choice")
 
+    def test_question_phrased_puzzle_guess_now_classifies_as_answer_puzzle(self):
+        """
+        Real live report (2026-08-30, dev-bridge): "Is the answer an
+        echo?" fell through to silent 'chat' -- none of the existing
+        phrasings require "is" right after "answer" the way a question
+        inverts it ("the answer is X" -> "is the answer X"). The player
+        had to fall back to a bare one-word guess before it worked.
+        """
+        result = _keyword_fallback("Is the answer an echo?", [])
+        self.assertEqual(result["action"], "answer_puzzle")
+
     # -- 7 previously-orphaned magic items now have a real acquisition
     #    path (shops or quest rewards) (v1.9.2) ------------------------
     def test_no_orphaned_items_remain_in_shops_or_quest_rewards(self):

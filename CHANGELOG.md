@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.405] — Question-phrased riddle answers ("Is the answer X?") now recognized
+
+Real live report: solving the Sunken Archive riddle, "Is the answer an
+echo?" fell through to silent `chat` -- a genuine natural-language
+answer attempt, just phrased as a question rather than a statement.
+None of `_keyword_fallback`'s existing answer_puzzle phrasings require
+the word "is" to land right after "answer" the way a question inverts
+that order ("the answer is X" -> "is the answer X"). The player had to
+fall back to a bare one-word guess to get it recognized. Added "is the
+answer" to the recognized phrasings, confirmed with a real fail-then-
+pass test plus a full re-run of the surrounding puzzle/riddle test
+group.
+
 ## [1.27.404] — The real story quest now looks different from a random bounty
 
 Last item from the new-player onboarding audit: the "Quest board"

@@ -1588,8 +1588,15 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
                                     "ill help", "i'll take the job", "i'll take it on"]):
         return {**base, "action": "accept_quest"}
 
+    # Real live report (2026-08-30, dev-bridge): "Is the answer an
+    # echo?" fell through to silent 'chat' -- a genuine natural-language
+    # answer attempt, just phrased as a question rather than a
+    # statement ("the answer is X" inverted to "is the answer X"). The
+    # player got no response at all and had to fall back to a bare
+    # one-word guess to get it recognized -- "is the answer" closes
+    # that specific reported gap.
     if any(w in lowered for w in ["the answer is", "my answer is", "i think it's", "i think the answer is",
-                                    "could it be"]):
+                                    "could it be", "is the answer"]):
         return {**base, "action": "answer_puzzle"}
 
     if any(w in lowered for w in ["gamble", "wager", "place a bet", "i bet", "let's bet", "lets bet",
