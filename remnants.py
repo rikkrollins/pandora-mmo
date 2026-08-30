@@ -50,7 +50,15 @@ never hinted at, found only by genuine off-the-beaten-path exploration.
 # Every element used below is one of this game's own real, already-
 # implemented damage types (rules/combat.py's apply_damage_type_
 # modifier) -- never an invented one.
-REAL_DAMAGE_TYPES = ("cold", "fire", "force", "lightning", "necrotic", "physical", "poison", "psychic", "radiant")
+#
+# "earth" added 2026-08-30 (Elemental Foundations, per Coffee: "im not
+# sure what u have planned but i want all types of elementals included"
+# -- classical Earth/Air/Fire/Water coverage). Air deliberately reuses
+# the existing "lightning" type rather than adding a redundant one
+# (Coffee's own catch: "what elemental type is lightnening considered
+# ??? cant that be air type ?") -- Fire and Water already mapped onto
+# "fire"/"cold" beforehand, so Earth is the only genuinely new type.
+REAL_DAMAGE_TYPES = ("cold", "earth", "fire", "force", "lightning", "necrotic", "physical", "poison", "psychic", "radiant")
 
 # Real secondary summon effects (2026-08-13) -- deliberately a small,
 # fully-implemented set (see bot._do_summon_remnant) rather than one

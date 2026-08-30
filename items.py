@@ -75,6 +75,25 @@ ITEMS = {
         "description": "Deals 2d8+3 physical damage. The carving stops repeating itself the instant your hand closes around the hilt.",
         "weapon_category": "martial", "damage_type": "physical",
     },
+    # Elemental Foundations (2026-08-30): before this, flametongue_
+    # shortsword (fire) was the ONLY elemental weapon in the entire
+    # catalog. These expand real elemental gear across Earth (new) and
+    # Air/lightning (existing type, previously no dedicated weapon at
+    # all), same rare-tier drop-only shape as flametongue.
+    "stoneheart_warhammer": {
+        "name": "Stoneheart Warhammer", "type": "weapon", "rarity": "rare",
+        "price": 0, "weight": 5, "damage_dice": "1d8+2", "ability": "strength",
+        "note": "Heavier than its size should allow. The head never chips, no matter what it strikes.",
+        "description": "Deals 1d8+2 earth damage. Heavier than its size should allow. The head never chips, no matter what it strikes.",
+        "weapon_category": "martial", "damage_type": "earth",
+    },
+    "stormcaller_rapier": {
+        "name": "Stormcaller Rapier", "type": "weapon", "rarity": "rare",
+        "price": 0, "weight": 2, "damage_dice": "1d6+2", "ability": "dexterity",
+        "note": "A faint crackle follows every thrust, half a second behind the blade.",
+        "description": "Deals 1d6+2 lightning damage. A faint crackle follows every thrust, half a second behind the blade.",
+        "weapon_category": "martial", "damage_type": "lightning",
+    },
 
     # --- Armor & Shields ---
     # armor_category (task #223): "light"/"medium"/"heavy", or "shield"
@@ -84,6 +103,28 @@ ITEMS = {
     "chain_shirt": {"name": "Chain Shirt", "type": "armor", "rarity": "common", "price": 50, "weight": 20, "ac_base": 13, "armor_category": "medium", "description": "Rings of iron, close-linked and heavier than they look at a glance."},
     "chain_mail": {"name": "Chain Mail", "type": "armor", "rarity": "uncommon", "price": 75, "weight": 55, "ac_base": 16, "armor_category": "heavy", "description": "A real suit of it, head to knee — the kind of weight you stop noticing after the first hour."},
     "wooden_shield": {"name": "Wooden Shield", "type": "shield", "rarity": "common", "price": 10, "weight": 6, "ac_bonus": 2, "armor_category": "shield", "description": "Banded oak, scarred along the rim from blows that never got any further."},
+
+    # Elemental Foundations (2026-08-30): static armor with a real,
+    # authored elemental_resistances affix -- same field shape
+    # db._apply_affix's "elemental_resistance" kind writes onto generated
+    # gear (bot._compute_equipped_resist_profile reads "elemental_
+    # resistances": [{"damage_type", "value"}] off ANY item, generated or
+    # static, identically). This is the literal mechanism behind Coffee's
+    # own example ("if u have an ice armour and u get hit with ice it
+    # shud heal the player") -- stack two of these (or an enchant_stone_
+    # ward on top) past 100% earth resistance and rules.combat.elemental_
+    # overflow_heal converts the overflow into real healing.
+    "stoneward_plate": {
+        "name": "Stoneward Plate", "type": "armor", "rarity": "rare", "price": 0, "weight": 60,
+        "ac_base": 16, "armor_category": "heavy",
+        "elemental_resistances": [{"damage_type": "earth", "value": 50}],
+        "description": "Plate forged from stone that never fully stopped being stone. Cracks under an earth-shaking blow instead of denting.",
+    },
+    "stormguard_cloak": {
+        "name": "Stormguard Cloak", "type": "wondrous", "rarity": "rare", "price": 0, "weight": 2,
+        "elemental_resistances": [{"damage_type": "lightning", "value": 50}],
+        "description": "Fabric that stands on end a half-second before a real strike lands, like it already knows.",
+    },
 
     # --- Consumables ---
     # Potion healing (2026-07-25, per Coffee's evolution/HP-scaling pass):

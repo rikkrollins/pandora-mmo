@@ -398,6 +398,47 @@ def _grind_heal_mastery(character: dict) -> float:
     )
 
 
+def _maybe_apply_weapon_element_mastery(attacker: dict, target: dict, weapon: dict, result: dict) -> None:
+    """
+    Elemental Weapon Mastery (2026-08-30, Elemental Foundations, per
+    Coffee: "make sure the weapons and armour elemental stats actually
+    work against the enemies... make sure players can level them up").
+    element_mastery_pct previously grew ONLY from spell/heal casts
+    (_grind_spell_mastery/_grind_heal_mastery) -- a real elemental
+    weapon hit (flametongue_shortsword, stoneheart_warhammer, an
+    enchant_flame'd blade, etc.) never grew it and never benefited from
+    it, even though it's the exact same shared per-element bucket.
+    This closes that gap: any landed hit with a non-physical weapon
+    damage_type grinds the same element_mastery_pct dict a matching
+    spell would, and grants the same HALF-weight-only bonus
+    _spell_mastery_power_multiplier already gives the element half of a
+    spell's own bonus (full personal mastery is a spell-only concept --
+    there's no per-weapon mastery tier to mirror here). A no-op below
+    100% element_pct (fresh characters), same "a bonus, never a
+    penalty, worth the grind at scale" shape every mastery system in
+    this game already follows. Real players only -- monsters/AI never
+    grind proficiency (see _roll_weapon_proficiency's own rule).
+    """
+    damage_type = weapon.get("damage_type", "physical")
+    if damage_type == "physical" or not result.get("hit"):
+        return
+    if attacker.get("is_ai") or not attacker.get("char_class"):
+        return
+    element_dict = attacker.get("element_mastery_pct", {})
+    element_pct = _grind_dict_proficiency(
+        attacker["telegram_user_id"], attacker["chat_id"], "element_mastery_pct", element_dict, damage_type,
+    )
+    bonus_multiplier = 1.0 + (_mastery_overflow_multiplier(element_pct) - 1.0) / 2.0
+    if bonus_multiplier <= 1.0 or result["damage_dealt"] <= 0:
+        return
+    extra_damage = int(round(result["damage_dealt"] * (bonus_multiplier - 1.0)))
+    if extra_damage <= 0:
+        return
+    result["damage_dealt"] += extra_damage
+    target["hp_current"], _warded = _apply_damage_with_death_ward(target, extra_damage)
+    result["defender_hp_remaining"] = target["hp_current"]
+
+
 def _spell_mastery_power_multiplier(spell_pct: float, element_pct: float) -> float:
     """
     Real damage/healing bonus from Spell Mastery -- full weight for
@@ -10630,6 +10671,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                 result["damage_dealt"] += mastery_strike_dmg
                 target["hp_current"], _warded = _apply_damage_with_death_ward(target, mastery_strike_dmg)
                 result["defender_hp_remaining"] = target["hp_current"]
+            _maybe_apply_weapon_element_mastery(attacker, target, weapon_used, result)
 
             # General armor mastery -- same shape, defender's side: a
             # real player wearing real armor gets a chance to soften a
@@ -10857,6 +10899,7 @@ async def _do_throw_weapon(update: Update, action_text: str) -> None:
             result["damage_dealt"] += mastery_throw_dmg
             target["hp_current"], _warded = _apply_damage_with_death_ward(target, mastery_throw_dmg)
             result["defender_hp_remaining"] = target["hp_current"]
+        _maybe_apply_weapon_element_mastery(attacker, target, weapon_item, result)
 
         _sync_player_to_db(target)
         db.remove_item(user_id, chat_id, weapon_id, 1)

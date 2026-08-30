@@ -371,6 +371,40 @@ SPELLS = {
         "name": "Hold Monster", "level": 5, "school": "enchantment",
         "effect": "buff", "duration_rounds": 10,
     },
+    # Elemental Foundations (2026-08-30, per Coffee: "Charvenna wondered
+    # if we had earth type spells? Earthquake? Mudslide? Meteor?" -- real
+    # gap, confirmed via grep: no earth-typed spell existed anywhere.
+    # Same shape as every other damage spell above (fireball/lightning_
+    # bolt/ice_storm/cone_of_cold) -- damage_type "earth" is now real
+    # (see remnants.REAL_DAMAGE_TYPES), so these just use it like any
+    # other type; nothing new for spells.resolve_damage_spell to learn.
+    "mudslide": {
+        "name": "Mudslide", "level": 3, "school": "evocation",
+        "effect": "damage", "damage_dice": "5d8", "save_ability": "strength", "damage_type": "earth",
+        "aoe": True,
+    },
+    "earthquake": {
+        "name": "Earthquake", "level": 5, "school": "evocation",
+        "effect": "damage", "damage_dice": "8d8", "save_ability": "dexterity", "damage_type": "earth",
+        "aoe": True,
+    },
+    "meteor": {
+        "name": "Meteor", "level": 5, "school": "evocation",
+        "effect": "damage", "damage_dice": "9d8", "save_ability": "dexterity", "damage_type": "earth",
+        "aoe": True,
+    },
+    # Air deliberately reuses the existing "lightning" damage_type
+    # (Coffee: "cant that be air type?") rather than inventing a 6th/
+    # separate one that would just duplicate it.
+    "gale_force": {
+        "name": "Gale Force", "level": 2, "school": "evocation",
+        "effect": "damage", "damage_dice": "3d8", "save_ability": "strength", "damage_type": "lightning",
+    },
+    "cyclone": {
+        "name": "Cyclone", "level": 4, "school": "evocation",
+        "effect": "damage", "damage_dice": "6d8", "save_ability": "dexterity", "damage_type": "lightning",
+        "aoe": True,
+    },
     # Arcane Circle exclusive spells (2026-07-25, per Coffee: "let them
     # learn new spells not otherwise available unless in the guilds").
     # Deliberately NOT in any CLASS_SPELL_LISTS entry below, so they
@@ -425,18 +459,18 @@ CLASS_CANTRIPS = {
 CLASS_SPELL_LISTS = {
     "wizard": ["magic_missile", "shield", "burning_hands", "charm_person",
                "detect_magic", "scorching_ray", "misty_step", "hold_person",
-               "fireball", "lightning_bolt", "counterspell", "dispel_magic",
-               "ice_storm", "polymorph", "cone_of_cold", "hold_monster"],
+               "gale_force", "fireball", "lightning_bolt", "mudslide", "counterspell", "dispel_magic",
+               "ice_storm", "polymorph", "cone_of_cold", "hold_monster", "cyclone", "earthquake", "meteor"],
     "sorcerer": ["magic_missile", "shield", "burning_hands", "charm_person",
-                 "scorching_ray", "misty_step", "hold_person",
-                 "fireball", "lightning_bolt", "counterspell",
-                 "ice_storm", "polymorph", "cone_of_cold", "hold_monster"],
+                 "scorching_ray", "misty_step", "hold_person", "gale_force",
+                 "fireball", "lightning_bolt", "mudslide", "counterspell",
+                 "ice_storm", "polymorph", "cone_of_cold", "hold_monster", "cyclone", "earthquake", "meteor"],
     "cleric": ["cure_wounds", "healing_word", "guiding_bolt", "command", "bless",
                "spiritual_weapon", "hold_person", "lesser_restoration", "dispel_magic", "revivify",
                "death_ward", "guardian_of_faith", "flame_strike", "mass_cure_wounds"],
     "druid": ["cure_wounds", "animal_friendship", "faerie_fire",
-              "moonbeam", "hold_person", "lesser_restoration", "call_lightning",
-              "ice_storm", "polymorph", "insect_plague", "mass_cure_wounds"],
+              "moonbeam", "hold_person", "lesser_restoration", "call_lightning", "mudslide",
+              "ice_storm", "polymorph", "insect_plague", "mass_cure_wounds", "earthquake"],
     "bard": ["healing_word", "charm_person", "faerie_fire",
              "invisibility", "hold_person", "dispel_magic",
              "polymorph", "dimension_door", "mass_cure_wounds", "hold_monster"],

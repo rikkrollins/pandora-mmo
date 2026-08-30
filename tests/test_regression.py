@@ -9183,6 +9183,160 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         db._apply_affix(item, {"kind": "elemental_resistance", "damage_type": "lightning", "value": 50})
         self.assertEqual(item["elemental_resistances"], [{"damage_type": "lightning", "value": 50}])
 
+    # -- Elemental Foundations (2026-08-30): earth added as a real damage
+    #    type, air deliberately reusing "lightning" ------------------------
+    def test_earth_is_a_real_damage_type_in_the_canonical_list(self):
+        self.assertIn("earth", remnants_module.REAL_DAMAGE_TYPES)
+
+    def test_earth_damage_type_gets_full_resistance_vulnerability_math(self):
+        """Earth must behave exactly like every other real damage type -- resistance halves, vulnerability doubles, boolean stacking cancels."""
+        combatant = {"resistances": ["earth"]}
+        self.assertEqual(resolve_attack.__globals__["apply_damage_type_modifier"](20, "earth", combatant), 10)
+        combatant2 = {"vulnerabilities": ["earth"]}
+        self.assertEqual(resolve_attack.__globals__["apply_damage_type_modifier"](20, "earth", combatant2), 40)
+        combatant3 = {"resistances": ["earth"], "vulnerabilities": ["earth"]}
+        self.assertEqual(resolve_attack.__globals__["apply_damage_type_modifier"](20, "earth", combatant3), 20)
+
+    def test_earth_elemental_resistance_pct_stacking_nullifies_then_heals(self):
+        from rules.combat import apply_damage_type_modifier, elemental_overflow_heal
+        half = {"elemental_resistance_pct": {"earth": 50}}
+        self.assertEqual(apply_damage_type_modifier(40, "earth", half), 20)
+        nullified = {"elemental_resistance_pct": {"earth": 100}}
+        self.assertEqual(apply_damage_type_modifier(40, "earth", nullified), 0)
+        heals = {"elemental_resistance_pct": {"earth": 150}}
+        self.assertEqual(apply_damage_type_modifier(40, "earth", heals), 0)
+        self.assertEqual(elemental_overflow_heal(40, "earth", heals), 20)
+
+    def test_a_real_vulnerability_to_a_damage_type_deals_genuine_bonus_damage(self):
+        """Coffee's own example: 'if the player is weak against air, and we hit it with lightning it shud do critical damage.' Vulnerability doubles -- confirmed on a player-shaped defender dict, not just a monster."""
+        from rules.combat import apply_damage_type_modifier
+        weak_player = {"telegram_user_id": 1, "name": "WeakToAir", "vulnerabilities": ["lightning"]}
+        self.assertEqual(apply_damage_type_modifier(30, "lightning", weak_player), 60)
+        self.assertEqual(apply_damage_type_modifier(30, "earth", weak_player), 30)
+
+    def test_new_earth_and_air_spells_are_real_and_correctly_typed(self):
+        for spell_id, dtype in (
+            ("mudslide", "earth"), ("earthquake", "earth"), ("meteor", "earth"),
+            ("gale_force", "lightning"), ("cyclone", "lightning"),
+        ):
+            spell = spells.SPELLS[spell_id]
+            self.assertEqual(spell["effect"], "damage")
+            self.assertEqual(spell["damage_type"], dtype)
+        # Answers Charvenna's real question directly.
+        for cls in ("wizard", "sorcerer"):
+            self.assertIn("earthquake", spells.CLASS_SPELL_LISTS[cls])
+        self.assertIn("earthquake", spells.CLASS_SPELL_LISTS["druid"])
+
+    def test_new_offensive_and_defensive_enchant_recipes_cover_earth_and_lightning(self):
+        from rules.crafting import ENCHANT_RECIPES
+        self.assertEqual(
+            ENCHANT_RECIPES["enchant_earth"]["affix"], {"kind": "elemental_damage", "damage_type": "earth"},
+        )
+        self.assertEqual(
+            ENCHANT_RECIPES["enchant_lightning"]["affix"], {"kind": "elemental_damage", "damage_type": "lightning"},
+        )
+        self.assertEqual(
+            ENCHANT_RECIPES["enchant_stone_ward"]["affix"],
+            {"kind": "elemental_resistance", "damage_type": "earth", "value": 50},
+        )
+        self.assertIn("weapon", ENCHANT_RECIPES["enchant_earth"]["applies_to"])
+        self.assertNotIn("weapon", ENCHANT_RECIPES["enchant_stone_ward"]["applies_to"])
+
+    def test_new_elemental_weapons_and_armor_are_real_catalog_items(self):
+        warhammer = items_module.ITEMS["stoneheart_warhammer"]
+        self.assertEqual(warhammer["damage_type"], "earth")
+        rapier = items_module.ITEMS["stormcaller_rapier"]
+        self.assertEqual(rapier["damage_type"], "lightning")
+        plate = items_module.ITEMS["stoneward_plate"]
+        self.assertEqual(plate["elemental_resistances"], [{"damage_type": "earth", "value": 50}])
+        cloak = items_module.ITEMS["stormguard_cloak"]
+        self.assertEqual(cloak["elemental_resistances"], [{"damage_type": "lightning", "value": 50}])
+
+    async def test_ice_armour_equivalent_actually_heals_a_real_equipped_player_on_overflow(self):
+        """
+        End-to-end version of Coffee's own example ('if u have an ice
+        armour and u get hit with ice it shud heal the player'), done
+        here with earth instead of ice since stoneward_plate + enchant_
+        stone_ward together are the real gear that crosses 100%. Uses
+        the exact real equip/combat pipeline, not a synthetic dict.
+        """
+        from rules.combat import resolve_attack
+        user_id = 950930
+        make_basic_character(user_id, "StoneArmoured", current_location="crossroads_tavern")
+        armor_id = "stoneward_plate"
+        db.add_item(user_id, -999, armor_id, 1)
+        self.assertTrue(db.equip_item(user_id, -999, armor_id)[0])
+        # A second, independently-enchanted source of the SAME earth
+        # resistance so the total genuinely crosses 100% (two sources of
+        # 50 alone only reach exactly 100%, a full nullify, not overflow
+        # -- elemental_overflow_heal only triggers ABOVE 100%).
+        shield = {"name": "Stone Ward Shield", "type": "shield", "rarity": "rare", "price": 0, "weight": 6, "ac_bonus": 1, "armor_category": "shield"}
+        shield["affixes"] = [{"kind": "elemental_resistance", "damage_type": "earth", "value": 100}]
+        shield_id = db.create_item_instance(
+            item_type=shield["type"], name=shield["name"], rarity=shield["rarity"],
+            price=shield["price"], base_stats=shield, affixes=shield["affixes"],
+        )
+        db.add_item(user_id, -999, shield_id, 1)
+        self.assertTrue(db.equip_item(user_id, -999, shield_id)[0])
+
+        party = bot._get_real_party_combatants(db.get_character(user_id, -999))
+        defender = next(p for p in party if p["telegram_user_id"] == user_id)
+        self.assertEqual(defender.get("elemental_resistance_pct", {}).get("earth"), 150)
+        attacker = {"name": "Earth Attacker", "telegram_user_id": -777002, "strength": 10, "dexterity": 10, "armor_class": 1}
+        weapon = {"name": "Earth Dagger", "damage_dice": "1d1", "damage_bonus": 20, "ability": "strength", "damage_type": "earth"}
+        defender["hp_current"] = 1  # already damaged, so real healing has somewhere to go
+        starting_hp = defender["hp_current"]
+        result = resolve_attack(attacker, defender, weapon, forced_roll=20, forced_damage_roll=1)
+        self.assertTrue(result["hit"])
+        self.assertEqual(result["damage_dealt"], 0)
+        self.assertGreater(result["elemental_heal_gained"], 0)
+        self.assertGreater(defender["hp_current"], starting_hp)
+
+    def test_weapon_element_mastery_grinds_on_a_real_elemental_hit(self):
+        """
+        element_mastery_pct previously grew ONLY from spell/heal casts.
+        A landed elemental weapon hit must now grind the same shared
+        bucket -- confirmed against the real DB-backed character.
+        """
+        user_id = 950931
+        character = make_basic_character(user_id, "ElementalStriker", current_location="crossroads_tavern", char_class="Fighter")
+        target = {"name": "Dummy", "telegram_user_id": -777003, "hp_current": 999, "hp_max": 999, "armor_class": 1}
+        weapon = items_module.get_item("stoneheart_warhammer")
+        result = {"hit": True, "damage_dealt": 10}
+        self.assertNotIn("earth", character.get("element_mastery_pct", {}))
+        bot._maybe_apply_weapon_element_mastery(character, target, weapon, result)
+        updated = db.get_character(user_id, -999)
+        self.assertIn("earth", updated["element_mastery_pct"])
+        self.assertGreater(updated["element_mastery_pct"]["earth"], 0)
+
+    def test_weapon_element_mastery_grants_bonus_damage_once_mastery_is_high(self):
+        """Forces element_mastery_pct past the real overflow threshold (mirrors this session's existing 'force the RNG/mastery value' test pattern) and confirms a real bonus is added, not just grinding."""
+        user_id = 950932
+        character = make_basic_character(user_id, "MasterOfEarth", current_location="crossroads_tavern", char_class="Fighter")
+        db.update_character(user_id, -999, element_mastery_pct={"earth": 300.0})
+        character = db.get_character(user_id, -999)
+        target = {"name": "Dummy", "telegram_user_id": -777004, "hp_current": 999, "hp_max": 999, "armor_class": 1}
+        weapon = items_module.get_item("stoneheart_warhammer")
+        result = {"hit": True, "damage_dealt": 100}
+        bot._maybe_apply_weapon_element_mastery(character, target, weapon, result)
+        self.assertGreater(result["damage_dealt"], 100)
+        self.assertEqual(target["hp_current"], 999 - (result["damage_dealt"] - 100))
+
+    def test_weapon_element_mastery_is_a_noop_for_physical_weapons_and_misses(self):
+        user_id = 950933
+        character = make_basic_character(user_id, "PlainFighter", current_location="crossroads_tavern", char_class="Fighter")
+        db.update_character(user_id, -999, element_mastery_pct={"earth": 300.0})
+        character = db.get_character(user_id, -999)
+        target = {"name": "Dummy", "telegram_user_id": -777005, "hp_current": 999, "hp_max": 999, "armor_class": 1}
+        physical_weapon = items_module.get_item("longsword")
+        result = {"hit": True, "damage_dealt": 100}
+        bot._maybe_apply_weapon_element_mastery(character, target, physical_weapon, result)
+        self.assertEqual(result["damage_dealt"], 100)
+        elemental_weapon = items_module.get_item("stoneheart_warhammer")
+        missed_result = {"hit": False, "damage_dealt": 0}
+        bot._maybe_apply_weapon_element_mastery(character, target, elemental_weapon, missed_result)
+        self.assertEqual(missed_result["damage_dealt"], 0)
+
     def test_bestiary_shows_the_waking_embers_real_elemental_strength(self):
         """
         Real feature (2026-08-10, per Coffee: "note them on the

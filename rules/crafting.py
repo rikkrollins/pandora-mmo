@@ -559,6 +559,24 @@ ENCHANT_RECIPES = {
         "applies_to": ("weapon",),
         "ability": "intelligence", "dc": 15, "profession": "alchemy",
     },
+    # Elemental Foundations (2026-08-30): the note above enchant_force
+    # already said the goal was "covering every real damage type this
+    # game actually has" -- lightning was a real, live gap even before
+    # earth existed at all (8 of 9 real types had an offensive enchant,
+    # lightning didn't). Same base tier as every other elemental retype
+    # above; both are now covered.
+    "enchant_lightning": {
+        "materials": {"sulfur_dust": 1, "iron_ore": 2},
+        "affix": {"kind": "elemental_damage", "damage_type": "lightning"},
+        "applies_to": ("weapon",),
+        "ability": "intelligence", "dc": 15, "profession": "alchemy",
+    },
+    "enchant_earth": {
+        "materials": {"iron_ore": 2, "glimmerdeep_moss": 1},
+        "affix": {"kind": "elemental_damage", "damage_type": "earth"},
+        "applies_to": ("weapon",),
+        "ability": "intelligence", "dc": 15, "profession": "alchemy",
+    },
     "enchant_warding": {
         "materials": {"iron_ore": 2, "silverleaf_herb": 2},
         "affix": {"kind": "resistance", "damage_type": "cold"},
@@ -603,6 +621,19 @@ ENCHANT_RECIPES = {
     "enchant_spark_ward": {
         "materials": {"iron_ore": 2, "moonpetal": 1},
         "affix": {"kind": "elemental_resistance", "damage_type": "lightning", "value": 50},
+        "applies_to": ("armor", "shield", "ring", "amulet", "wondrous"),
+        "ability": "intelligence", "dc": 16, "profession": "alchemy",
+    },
+    # Elemental Foundations (2026-08-30): earth's own base-tier ward,
+    # same shape/tier as flame_ward/frost_ward/spark_ward above -- this
+    # is the real mechanism behind Coffee's own example ("if u have an
+    # ice armour and u get hit with ice it shud heal the player"), just
+    # for earth instead of cold; stacking two of these on the same
+    # damage type already crosses 100% via rules.combat.elemental_
+    # overflow_heal with no extra work here.
+    "enchant_stone_ward": {
+        "materials": {"iron_ore": 2, "glimmerdeep_moss": 1},
+        "affix": {"kind": "elemental_resistance", "damage_type": "earth", "value": 50},
         "applies_to": ("armor", "shield", "ring", "amulet", "wondrous"),
         "ability": "intelligence", "dc": 16, "profession": "alchemy",
     },

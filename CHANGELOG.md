@@ -2,6 +2,50 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.408] — Elemental Foundations: Earth added, Air/Fire/Water expanded, weapons now level up their own element
+
+Per Coffee: "i want all types of elementals included" (Earth/Air/Fire/
+Water, Avatar-style) across spells/weapons/armor/enchants/proficiency,
+with real leveling and real combat interaction -- "if u have an ice
+armour and u get hit with ice it shud heal the player, if the player
+is weak against air... it shud do critical damage."
+
+Confirmed by reading the real code first: the hard part (resistance/
+vulnerability/immunity math, and the overflow-into-healing mechanic)
+already worked correctly for players, not just monsters, via already-
+equipped gear. The real gaps were narrower:
+
+- **Earth is now a real damage type.** Air deliberately reuses the
+  existing `lightning` type instead of adding a redundant one (Coffee's
+  own catch: "what elemental type is lightnening considered? cant that
+  be air type?") -- so Earth is the only genuinely new type.
+- New Earth spells (Mudslide, Earthquake, Meteor) and new Air-flavored
+  spells on the existing lightning type (Gale Force, Cyclone), added to
+  Wizard/Sorcerer/Druid spell lists -- directly answers a real player
+  question (Charvenna: "do we have earth type spells? Earthquake?
+  Mudslide? Meteor?").
+- New offensive enchants `enchant_earth`/`enchant_lightning` (lightning
+  was a real pre-existing gap even before earth existed -- 8 of 9 real
+  damage types had one, lightning didn't) and a new defensive
+  `enchant_stone_ward`, on the already-real Enchanters' Guild ladder.
+- New elemental weapons (Stoneheart Warhammer, Stormcaller Rapier) and
+  armor (Stoneward Plate, Stormguard Cloak) -- previously only ONE
+  weapon in the entire catalog had any elemental damage_type at all.
+- **Elemental Weapon Mastery**: `element_mastery_pct` previously grew
+  only from spell/heal casts. A landed hit with any non-physical
+  weapon now grinds the same shared per-element bucket and gets the
+  same half-weight bonus a spell's own element track already grants --
+  weapons now genuinely level up their element, not just spells.
+- Confirmed end-to-end with real executed tests: earth resistance/
+  vulnerability math, overflow-into-healing on a real equipped
+  character (not just a synthetic dict), a real vulnerability dealing
+  genuine bonus damage, and weapon-element-mastery actually grinding
+  and paying off at high mastery -- plus no regressions in the
+  existing weapon/throw mastery and elemental-resistance test suites.
+- First step of a larger Chapter 3-8 dungeon expansion + two gated
+  bonus dungeons around the Wrathflame Unbound and Root That Remembers
+  Remnants, still in progress.
+
 ## [1.27.407] — Summoned spirits mirror the caster's own stats and spells, not fixed flavor numbers
 
 Per Coffee: "use the players stats for the damage and magic and other
