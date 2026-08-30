@@ -647,6 +647,20 @@ ITEMS = {
         "price": 60, "weight": 0.2, "reveals_layer": "underground", "reveals_count": 3,
         "description": "Torn along one edge, the surviving ink tracing passages that never see daylight.",
     },
+    # Bonus vault dungeons (2026-08-30): each vault's own findable map,
+    # same real reveals_layer/reveals_count mechanic as the two above --
+    # never sold, found only via the Molten Sentinel/Elder Bramble Husk
+    # defeat-quest reward inside each vault.
+    "cinder_marked_chart": {
+        "name": "Cinder-Marked Chart", "type": "map", "rarity": "rare",
+        "price": 0, "weight": 0.2, "reveals_layer": "underground", "reveals_count": 3,
+        "description": "Scorched at the edges but still legible -- whoever drew this knew the Wrathflame Vault well enough to map it and get out again.",
+    },
+    "root_bound_survey": {
+        "name": "Root-Bound Survey", "type": "map", "rarity": "rare",
+        "price": 0, "weight": 0.2, "reveals_layer": "underground", "reveals_count": 3,
+        "description": "Drawn on bark instead of parchment, the ink following the grain like it grew there.",
+    },
 
     # --- Recipe books (2026-08-11, per Coffee: real, buyable reference
     # items teaching a profession's real level-1 recipes -- "make basic,

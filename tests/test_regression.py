@@ -5495,6 +5495,101 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id, chat_id)
         self.assertIsNone(bot._check_story_gate(character, current, "the_deep_beyond"))
 
+    # -- Bonus vault dungeons (2026-08-30): requires_completed_quest, the
+    #    new 5th story_gate condition ----------------------------------
+    def test_requires_completed_quest_gate_blocks_then_passes(self):
+        chat_id = -999052
+        user_id = 900995
+        make_basic_character(user_id, "QuestGateWalker", chat_id=chat_id, current_location="hollow_stump_shrine")
+        current = {"story_gates": {"wrathflame_vault_threshold": {"requires_completed_quest": "wrens_trial_by_fire"}}}
+        character = db.get_character(user_id, chat_id)
+        rejection = bot._check_story_gate(character, current, "wrathflame_vault_threshold")
+        self.assertIsNotNone(rejection)
+        db.complete_quest(user_id, chat_id, "wrens_trial_by_fire")
+        character = db.get_character(user_id, chat_id)
+        self.assertIsNone(bot._check_story_gate(character, current, "wrathflame_vault_threshold"))
+
+    def test_requires_completed_quest_is_a_noop_when_absent(self):
+        character = {"completed_quests": []}
+        self.assertIsNone(bot._check_story_gate(character, {"story_gates": {}}, "anywhere"))
+
+    def test_wrathflame_vault_is_real_and_gated_behind_wrens_trial(self):
+        """
+        End-to-end: a fresh character cannot move from the shrine into
+        the vault before completing wrens_trial_by_fire, and can once
+        they have -- the exact real player-facing flow, not just the
+        pure _check_story_gate unit above.
+        """
+        chat_id = -999053
+        user_id = 900996
+        make_basic_character(user_id, "VaultSeeker", chat_id=chat_id, current_location="hollow_stump_shrine")
+        location = cl.get_location(bot.CAMPAIGN, "hollow_stump_shrine")
+        self.assertEqual(location["story_gates"]["wrathflame_vault_threshold"], {"requires_defeated_monster": "wolf"})
+        character = db.get_character(user_id, chat_id)
+        self.assertIsNotNone(bot._check_story_gate(character, location, "wrathflame_vault_threshold"))
+        db.complete_quest(user_id, chat_id, "wrens_trial_by_fire")
+        character = db.get_character(user_id, chat_id)
+        self.assertIsNone(bot._check_story_gate(character, location, "wrathflame_vault_threshold"))
+
+    def test_deep_root_vault_is_real_and_gated_behind_the_glades_answer(self):
+        chat_id = -999054
+        user_id = 900997
+        make_basic_character(user_id, "RootSeeker", chat_id=chat_id, current_location="whispering_wood_deep_glade")
+        location = cl.get_location(bot.CAMPAIGN, "whispering_wood_deep_glade")
+        character = db.get_character(user_id, chat_id)
+        self.assertIsNotNone(bot._check_story_gate(character, location, "deep_root_vault_threshold"))
+        db.complete_quest(user_id, chat_id, "the_glades_answer")
+        character = db.get_character(user_id, chat_id)
+        self.assertIsNone(bot._check_story_gate(character, location, "deep_root_vault_threshold"))
+
+    def test_wrathflame_unbound_and_root_that_remembers_moved_to_their_real_sanctums(self):
+        """Both Remnants must be OUT of their old shared/open rooms now that a real gated vault leads to them -- stats completely untouched."""
+        shrine = cl.get_location(bot.CAMPAIGN, "hollow_stump_shrine")
+        glade = cl.get_location(bot.CAMPAIGN, "whispering_wood_deep_glade")
+        self.assertNotIn("the_wrathflame_unbound", shrine.get("monsters", []))
+        self.assertNotIn("the_root_that_remembers", glade.get("monsters", []))
+        sanctum = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_sanctum")
+        root_sanctum = cl.get_location(bot.CAMPAIGN, "deep_root_vault_sanctum")
+        self.assertIn("the_wrathflame_unbound", sanctum["monsters"])
+        self.assertIn("the_root_that_remembers", root_sanctum["monsters"])
+        self.assertEqual(bot.CAMPAIGN["monsters"]["the_wrathflame_unbound"]["level"], 20)
+        self.assertEqual(bot.CAMPAIGN["monsters"]["the_wrathflame_unbound"]["hp_max"], 7000)
+        self.assertEqual(bot.CAMPAIGN["monsters"]["the_root_that_remembers"]["level"], 30)
+        self.assertEqual(bot.CAMPAIGN["monsters"]["the_root_that_remembers"]["hp_max"], 18000)
+
+    def test_bonus_vault_room_graphs_are_fully_connected_and_reciprocated(self):
+        """Every direction out of a bonus-vault room must point to a real location, and that location must list the reverse connection back -- no dead-end typos."""
+        for prefix in ("wrathflame_vault_", "deep_root_vault_"):
+            vault_locations = {
+                k: v for k, v in bot.CAMPAIGN["locations"]["underground"].items() if k.startswith(prefix)
+            }
+            self.assertGreaterEqual(len(vault_locations), 9)
+            for loc_id, loc in vault_locations.items():
+                for direction, dest_id in loc.get("directions", {}).items():
+                    dest = cl.get_location(bot.CAMPAIGN, dest_id)
+                    self.assertIsNotNone(dest, f"{loc_id} -> {dest_id} via {direction} is a dead end")
+                    self.assertIn(loc_id, dest.get("connections", []), f"{dest_id} doesn't connect back to {loc_id}")
+
+    def test_bonus_vault_lockable_chests_grant_real_loot(self):
+        bellows = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_bellows_chamber")
+        chest = bellows["lockables"][0]
+        self.assertEqual(chest["kind"], "chest")
+        self.assertIn("healing_potion", chest["loot"])
+        cache = cl.get_location(bot.CAMPAIGN, "deep_root_vault_choking_hollow")
+        chest2 = cache["lockables"][0]
+        self.assertEqual(chest2["kind"], "chest")
+        self.assertIn("greater_healing_potion", chest2["loot"])
+
+    def test_bonus_vault_map_item_quests_are_real_and_grant_the_right_map(self):
+        forge_quest = bot.CAMPAIGN["quests"]["the_deep_forges_cinder_map"]
+        self.assertEqual(forge_quest["trigger"], {"type": "defeat_monster", "monster": "molten_sentinel"})
+        self.assertEqual(forge_quest["reward_item"], "cinder_marked_chart")
+        root_quest = bot.CAMPAIGN["quests"]["the_elder_roots_survey"]
+        self.assertEqual(root_quest["trigger"], {"type": "defeat_monster", "monster": "elder_bramble_husk"})
+        self.assertEqual(root_quest["reward_item"], "root_bound_survey")
+        self.assertEqual(items_module.get_item("cinder_marked_chart")["reveals_layer"], "underground")
+        self.assertEqual(items_module.get_item("root_bound_survey")["reveals_layer"], "underground")
+
     def test_companion_favor_pays_more_affinity_once_the_companion_already_trusts_you(self):
         """
         Real live request (2026-08-23, Coffee: "give the affinity real

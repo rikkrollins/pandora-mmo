@@ -18,8 +18,8 @@
           "the_colosseum"
         ],
         "sensory_connections": {
-          "whispering_wood": "A rutted dirt road runs west out of the yard, straight for a stretch before curving out of sight toward a dark, unbroken tree line — the Whispering Wood, farther off than it looks from the tavern steps.",
-          "stonearch_bridge": "East, past the last few rooftops, the road narrows and climbs toward a low stone rise — Stonearch Bridge is up and over that rise, out of sight until you're most of the way there."
+          "whispering_wood": "A rutted dirt road runs west out of the yard, straight for a stretch before curving out of sight toward a dark, unbroken tree line \u2014 the Whispering Wood, farther off than it looks from the tavern steps.",
+          "stonearch_bridge": "East, past the last few rooftops, the road narrows and climbs toward a low stone rise \u2014 Stonearch Bridge is up and over that rise, out of sight until you're most of the way there."
         },
         "npcs": [
           "grimsby",
@@ -74,7 +74,7 @@
           },
           "shuttered_stall": {
             "name": "a boarded-up stall",
-            "description": "Nailed shut from the outside, which is the strange part — nobody in Market Row admits to knowing who used to run it."
+            "description": "Nailed shut from the outside, which is the strange part \u2014 nobody in Market Row admits to knowing who used to run it."
           },
           "locksmiths_keys": {
             "name": "rows of hanging keys in the locksmith's window",
@@ -165,7 +165,7 @@
         "interactables": {
           "listening_tree": {
             "name": "an ancient, wide-boled tree",
-            "description": "Its bark seems to almost resolve into faces at the edge of your vision — never quite there when you look straight at it."
+            "description": "Its bark seems to almost resolve into faces at the edge of your vision \u2014 never quite there when you look straight at it."
           },
           "carved_waystone": {
             "name": "a weathered waystone",
@@ -189,12 +189,14 @@
         "connections": [
           "whispering_wood",
           "whispering_wood_mossy_creek",
-          "whispering_wood_bramble_thicket"
+          "whispering_wood_bramble_thicket",
+          "deep_root_vault_threshold"
         ],
         "directions": {
           "north": "whispering_wood",
           "east": "whispering_wood_mossy_creek",
-          "south": "whispering_wood_bramble_thicket"
+          "south": "whispering_wood_bramble_thicket",
+          "down": "deep_root_vault_threshold"
         },
         "resource_nodes": [
           {
@@ -211,12 +213,15 @@
             "description": "Too even to be natural, too old to be anyone's doing. Nothing else grows inside it."
           }
         },
-        "monsters": [
-          "the_root_that_remembers"
-        ],
+        "monsters": [],
         "grid_position": {
           "x": 1,
           "y": -1
+        },
+        "story_gates": {
+          "deep_root_vault_threshold": {
+            "requires_completed_quest": "the_glades_answer"
+          }
         }
       },
       "whispering_wood_mossy_creek": {
@@ -248,7 +253,7 @@
         "interactables": {
           "creek_stones": {
             "name": "a line of flat stepping stones",
-            "description": "Worn smooth and evenly spaced, as if placed rather than found — though no one living remembers placing them."
+            "description": "Worn smooth and evenly spaced, as if placed rather than found \u2014 though no one living remembers placing them."
           }
         },
         "grid_position": {
@@ -291,7 +296,7 @@
       "whispering_wood_elder_glen": {
         "name": "The Elder Glen",
         "layer": "surface",
-        "description": "The oldest trees in the Wood stand here in a loose, deliberate circle, bark carved smooth by centuries of wind. Locals say the trees remember things — here, it feels like they're the ones doing the watching.",
+        "description": "The oldest trees in the Wood stand here in a loose, deliberate circle, bark carved smooth by centuries of wind. Locals say the trees remember things \u2014 here, it feels like they're the ones doing the watching.",
         "connections": [
           "whispering_wood_bramble_thicket"
         ],
@@ -310,7 +315,7 @@
         "interactables": {
           "the_watching_circle": {
             "name": "the ring of ancient, wind-smoothed trees",
-            "description": "Stand in the center and the leaves go still, all at once, all around you — the only place in the whole Wood where they ever stop moving."
+            "description": "Stand in the center and the leaves go still, all at once, all around you \u2014 the only place in the whole Wood where they ever stop moving."
           },
           "elder_carved_riddle": {
             "name": "words worn into the widest tree's bark",
@@ -327,7 +332,8 @@
         "layer": "surface",
         "description": "A shrine built into the base of a tree wider than a house, long since dead. Offerings left here are never touched by animals.",
         "connections": [
-          "whispering_wood"
+          "whispering_wood",
+          "wrathflame_vault_threshold"
         ],
         "npcs": [
           "wren_hollowbrook"
@@ -362,18 +368,22 @@
           },
           "stumps_rings": {
             "name": "the stump's growth rings",
-            "description": "Visible where the outer bark has fallen away. One ring, deep in, is far darker than all the others — as if that entire year burned instead of grew."
+            "description": "Visible where the outer bark has fallen away. One ring, deep in, is far darker than all the others \u2014 as if that entire year burned instead of grew."
           }
         },
-        "monsters": [
-          "the_wrathflame_unbound"
-        ],
+        "monsters": [],
         "directions": {
-          "south": "whispering_wood"
+          "south": "whispering_wood",
+          "down": "wrathflame_vault_threshold"
         },
         "grid_position": {
           "x": 1,
           "y": 1
+        },
+        "story_gates": {
+          "wrathflame_vault_threshold": {
+            "requires_defeated_monster": "wolf"
+          }
         }
       },
       "greymoor_downs": {
@@ -449,7 +459,7 @@
         "interactables": {
           "ridge_cairn_markers": {
             "name": "a line of small stacked-stone markers",
-            "description": "Spaced too evenly to be idle piling, all pointing the same direction along the ridge — toward the cairn further north."
+            "description": "Spaced too evenly to be idle piling, all pointing the same direction along the ridge \u2014 toward the cairn further north."
           }
         },
         "story_gates": {
@@ -479,7 +489,7 @@
         "interactables": {
           "the_cairn_itself": {
             "name": "the cairn's carefully fitted stones",
-            "description": "No name carved anywhere on it, but the topmost stone is always clean — swept clear, again and again, of whatever the wind piles onto it."
+            "description": "No name carved anywhere on it, but the topmost stone is always clean \u2014 swept clear, again and again, of whatever the wind piles onto it."
           }
         },
         "monsters": [
@@ -493,7 +503,7 @@
       "greymoor_downs_broken_watchtower": {
         "name": "The Broken Watchtower",
         "layer": "surface",
-        "description": "A collapsed watchtower, half its height still standing. From the top of what's left, the bridge crossing is fully visible — every safe way across, and every way that isn't.",
+        "description": "A collapsed watchtower, half its height still standing. From the top of what's left, the bridge crossing is fully visible \u2014 every safe way across, and every way that isn't.",
         "connections": [
           "greymoor_downs_windswept_ridge",
           "greymoor_downs_tower_vantage_below",
@@ -516,7 +526,7 @@
         "interactables": {
           "watchtower_vantage": {
             "name": "the tower's remaining upper landing",
-            "description": "Rotted through in two places, but still holds — and still gives the clearest view of the bridge crossing for miles."
+            "description": "Rotted through in two places, but still holds \u2014 and still gives the clearest view of the bridge crossing for miles."
           }
         },
         "monsters": [
@@ -577,7 +587,7 @@
           },
           "gorge_below": {
             "name": "the gorge beneath the bridge",
-            "description": "Looking down, the sound that rises up doesn't quite match falling water — closer to something breathing, slow and even."
+            "description": "Looking down, the sound that rises up doesn't quite match falling water \u2014 closer to something breathing, slow and even."
           }
         },
         "grid_position": {
@@ -588,7 +598,7 @@
       "stonearch_bridge_far_end": {
         "name": "The Far End of the Span",
         "layer": "surface",
-        "description": "Where the bridge finally lets out past the gorge, onto a narrow shelf of rock before the land opens up again. Quieter here — the gorge's sound doesn't carry this far.",
+        "description": "Where the bridge finally lets out past the gorge, onto a narrow shelf of rock before the land opens up again. Quieter here \u2014 the gorge's sound doesn't carry this far.",
         "connections": [
           "stonearch_bridge",
           "hollow_verge_threshold"
@@ -600,7 +610,7 @@
         "interactables": {
           "far_end_marker": {
             "name": "a single carved marker stone",
-            "description": "Newer than the bridge itself by centuries, but already weathering to match — someone wanted it to look like it had always been here. A small toll-mark is scratched into its base, low enough to miss unless you're looking."
+            "description": "Newer than the bridge itself by centuries, but already weathering to match \u2014 someone wanted it to look like it had always been here. A small toll-mark is scratched into its base, low enough to miss unless you're looking."
           }
         },
         "monsters": [
@@ -734,7 +744,7 @@
         "interactables": {
           "vanes_shelves": {
             "name": "shelves of curiosities behind the counter",
-            "description": "Nothing on them is labeled, and no two items seem to be from the same era, region, or maker — yet somehow none of it looks out of place next to the rest."
+            "description": "Nothing on them is labeled, and no two items seem to be from the same era, region, or maker \u2014 yet somehow none of it looks out of place next to the rest."
           },
           "the_uneven_floor": {
             "name": "the shop's oddly uneven floor",
@@ -939,7 +949,7 @@
       "hollow_verge_forgotten_nook": {
         "name": "The Forgotten Nook",
         "layer": "surface",
-        "description": "A side hollow off the bonefield, easy to miss and clearly not meant to be found — nothing here was ever part of the main procession the rest of the Verge seems built around.",
+        "description": "A side hollow off the bonefield, easy to miss and clearly not meant to be found \u2014 nothing here was ever part of the main procession the rest of the Verge seems built around.",
         "connections": [
           "hollow_verge_bonefield"
         ],
@@ -963,7 +973,7 @@
       "greymoor_downs_tower_vantage_below": {
         "name": "Beneath the Vantage",
         "layer": "surface",
-        "description": "The watchtower's collapsed base opens further down than it looks from the ridge — whatever's been using the ruin as a perch clearly isn't alone up there.",
+        "description": "The watchtower's collapsed base opens further down than it looks from the ridge \u2014 whatever's been using the ruin as a perch clearly isn't alone up there.",
         "connections": [
           "greymoor_downs_broken_watchtower"
         ],
@@ -987,7 +997,7 @@
       "greymoor_downs_tower_cellar": {
         "name": "The Tower Cellar",
         "layer": "surface",
-        "description": "A half-buried storeroom under the watchtower's foundation, easy to miss beneath the rubble — something small has been using it to stay out of the wind.",
+        "description": "A half-buried storeroom under the watchtower's foundation, easy to miss beneath the rubble \u2014 something small has been using it to stay out of the wind.",
         "connections": [
           "greymoor_downs_broken_watchtower"
         ],
@@ -1052,7 +1062,7 @@
           },
           "damp_alcove": {
             "name": "a damp stone alcove",
-            "description": "Old claw marks score the walls here, layered over each other by what must have been years of the same animal returning to the same spot — or several animals never learning better."
+            "description": "Old claw marks score the walls here, layered over each other by what must have been years of the same animal returning to the same spot \u2014 or several animals never learning better."
           }
         },
         "story_gates": {
@@ -1105,7 +1115,7 @@
         "interactables": {
           "chalk_markings": {
             "name": "chalk markings on the tunnel walls",
-            "description": "Goblin scrawl, but organized — arrows, tallies, what might be a crude map — in a hand far steadier than goblins are known for. One tally column keeps a running count in coin, not kills."
+            "description": "Goblin scrawl, but organized \u2014 arrows, tallies, what might be a crude map \u2014 in a hand far steadier than goblins are known for. One tally column keeps a running count in coin, not kills."
           },
           "makeshift_totem": {
             "name": "a crude bone totem",
@@ -1157,7 +1167,7 @@
           },
           "grotto_pool": {
             "name": "a still, black pool",
-            "description": "The water is perfectly still, and reflects the ceiling above — except for one patch, near the center, that seems to reflect something else entirely."
+            "description": "The water is perfectly still, and reflects the ceiling above \u2014 except for one patch, near the center, that seems to reflect something else entirely."
           }
         },
         "story_gates": {
@@ -1173,7 +1183,7 @@
       "sunken_root_caverns_deep_tunnels": {
         "name": "The Deep Tunnels",
         "layer": "underground",
-        "description": "Passages that keep going long after they should have ended. Somewhere ahead, rubble chokes one of them almost shut — almost.",
+        "description": "Passages that keep going long after they should have ended. Somewhere ahead, rubble chokes one of them almost shut \u2014 almost.",
         "connections": [
           "sunken_root_caverns",
           "sunken_root_caverns_flooded_gallery"
@@ -1199,7 +1209,7 @@
         "interactables": {
           "tunnel_rubble_choke": {
             "name": "a passage nearly sealed by old rubble",
-            "description": "Almost fully collapsed, but not quite — cleared enough times, by something or someone, to still be worth clearing again. Air moves through it from somewhere else entirely. A scrap of oiled cloth, the kind used to keep coin dry underground, is snagged on the rubble's edge."
+            "description": "Almost fully collapsed, but not quite \u2014 cleared enough times, by something or someone, to still be worth clearing again. Air moves through it from somewhere else entirely. A scrap of oiled cloth, the kind used to keep coin dry underground, is snagged on the rubble's edge."
           }
         },
         "story_gates": {
@@ -1244,7 +1254,7 @@
           },
           "stashed_toll_crate": {
             "name": "a crate wedged into a dry alcove",
-            "description": "Empty now, but the inside still smells faintly of coin — the same close, metal smell as a toll booth's strongbox, kept somewhere no one would ever think to look for one."
+            "description": "Empty now, but the inside still smells faintly of coin \u2014 the same close, metal smell as a toll booth's strongbox, kept somewhere no one would ever think to look for one."
           }
         },
         "monsters": [
@@ -1314,7 +1324,7 @@
         "interactables": {
           "den_bone_pile": {
             "name": "a disorganized pile of gnawed bones",
-            "description": "The one thing back here that ISN'T organized — everything else in these warrens is unnervingly tidy by comparison."
+            "description": "The one thing back here that ISN'T organized \u2014 everything else in these warrens is unnervingly tidy by comparison."
           }
         },
         "story_gates": {
@@ -1498,7 +1508,7 @@
         "interactables": {
           "ward_angled_walls": {
             "name": "walls set at impossible, deliberate angles",
-            "description": "Every angle is different, and every angle is exact — nothing here is broken or worn, only built strangely on purpose."
+            "description": "Every angle is different, and every angle is exact \u2014 nothing here is broken or worn, only built strangely on purpose."
           }
         },
         "grid_position": {
@@ -1565,7 +1575,7 @@
         "interactables": {
           "archive_endless_shelves": {
             "name": "shelves stretching further back than the light reaches",
-            "description": "Every shelf holds the same repeated shape, over and over, for as far as you can see — counting something, still, long after anyone stopped needing the count."
+            "description": "Every shelf holds the same repeated shape, over and over, for as far as you can see \u2014 counting something, still, long after anyone stopped needing the count."
           },
           "archive_echoing_recess": {
             "name": "a recess carved deep into the archive's rear wall",
@@ -1583,7 +1593,7 @@
       "the_first_city_deepest_record": {
         "name": "The Deepest Record",
         "layer": "underground",
-        "description": "The lowest chamber anyone's found beneath the spire, walls carved floor to ceiling in the same script found everywhere above — except here, for the first time, it isn't repeating. It's telling something.",
+        "description": "The lowest chamber anyone's found beneath the spire, walls carved floor to ceiling in the same script found everywhere above \u2014 except here, for the first time, it isn't repeating. It's telling something.",
         "connections": [
           "the_first_city_sunken_archive"
         ],
@@ -1593,7 +1603,7 @@
         "interactables": {
           "the_unrepeating_wall": {
             "name": "the one wall in the whole buried city that doesn't repeat itself",
-            "description": "Every other surface up above counts the same shape over and over. This one, finally, says something different — though no one still living can read it."
+            "description": "Every other surface up above counts the same shape over and over. This one, finally, says something different \u2014 though no one still living can read it."
           }
         },
         "lockables": [
@@ -1618,7 +1628,7 @@
       "the_first_city_forgotten_depth": {
         "name": "The Forgotten Depth",
         "layer": "underground",
-        "description": "Past the seam in the floor, the carved script gives up its shape completely — the walls here are smooth, black, and warm, like something that stopped bothering to explain itself a long time ago.",
+        "description": "Past the seam in the floor, the carved script gives up its shape completely \u2014 the walls here are smooth, black, and warm, like something that stopped bothering to explain itself a long time ago.",
         "connections": [
           "wordless_choir_gate"
         ],
@@ -1690,7 +1700,7 @@
         "interactables": {
           "den_claw_marks": {
             "name": "deep claw marks scored into the packed earth",
-            "description": "Layered thick, over and over, always at the same height — whatever left them never grew any smaller."
+            "description": "Layered thick, over and over, always at the same height \u2014 whatever left them never grew any smaller."
           }
         },
         "story_gates": {
@@ -1706,7 +1716,7 @@
       "whispering_wood_deeper_roots": {
         "name": "The Deeper Roots",
         "layer": "underground",
-        "description": "Past the den, the roots stop looking like roots. They're too regular, too deliberate — less like something that grew here and more like something that was built to look grown.",
+        "description": "Past the den, the roots stop looking like roots. They're too regular, too deliberate \u2014 less like something that grew here and more like something that was built to look grown.",
         "connections": [
           "whispering_wood_hollow_threshold",
           "whispering_wood_deep_root_chamber"
@@ -1737,7 +1747,7 @@
       "greymoor_downs_sunken_barrow": {
         "name": "The Sunken Barrow",
         "layer": "underground",
-        "description": "A real camp, still warm in places, dug into the hillside below the Downs — the cold campsite up top was never anything but bait for anyone who stopped looking too soon.",
+        "description": "A real camp, still warm in places, dug into the hillside below the Downs \u2014 the cold campsite up top was never anything but bait for anyone who stopped looking too soon.",
         "connections": [
           "greymoor_downs_barrow_depths"
         ],
@@ -1805,11 +1815,11 @@
         "interactables": {
           "depths_breathing_wall": {
             "name": "a wide stretch of rock wall, faintly warm",
-            "description": "It rises and falls under your palm, slow and even — the same rhythm audible from the bridge far above, only close enough now to feel."
+            "description": "It rises and falls under your palm, slow and even \u2014 the same rhythm audible from the bridge far above, only close enough now to feel."
           },
           "worn_footpath": {
             "name": "a worn footpath near the rubble-choked passage",
-            "description": "Boot prints, pressed into the dust again and again by the same few feet, all leading the same direction — toward the Downs, not away from them."
+            "description": "Boot prints, pressed into the dust again and again by the same few feet, all leading the same direction \u2014 toward the Downs, not away from them."
           }
         },
         "story_gates": {
@@ -1888,7 +1898,7 @@
       "wordless_choir_machinery": {
         "name": "The Still Machinery",
         "layer": "underground",
-        "description": "Vast shapes stand silent in ranks, built for a purpose no one living was ever told. Whatever they once made — sound, meaning, both — they stopped making it so long ago that stillness is the only thing they do well anymore.",
+        "description": "Vast shapes stand silent in ranks, built for a purpose no one living was ever told. Whatever they once made \u2014 sound, meaning, both \u2014 they stopped making it so long ago that stillness is the only thing they do well anymore.",
         "connections": [
           "wordless_choir_antechamber",
           "wordless_choir_hall",
@@ -1952,7 +1962,7 @@
       "wordless_choir_source": {
         "name": "The Source",
         "layer": "underground",
-        "description": "Where the hall's shape finally resolves into a single point, something is still, impossibly, humming — a note too low to hear and too old to have ever had a name.",
+        "description": "Where the hall's shape finally resolves into a single point, something is still, impossibly, humming \u2014 a note too low to hear and too old to have ever had a name.",
         "connections": [
           "wordless_choir_resonance_well"
         ],
@@ -1981,7 +1991,7 @@
       "wordless_choir_antechamber": {
         "name": "The Antechamber",
         "layer": "underground",
-        "description": "A narrow space between the gate and whatever lies beyond it, built the way a held breath is built — meant to be passed through, never meant to be stayed in.",
+        "description": "A narrow space between the gate and whatever lies beyond it, built the way a held breath is built \u2014 meant to be passed through, never meant to be stayed in.",
         "connections": [
           "wordless_choir_gate",
           "wordless_choir_machinery"
@@ -2012,7 +2022,7 @@
       "wordless_choir_resonance_well": {
         "name": "The Resonance Well",
         "layer": "underground",
-        "description": "A shaft that seems to answer back, faintly, if you're quiet long enough to notice — the same note, over and over, from somewhere too far down to actually be there.",
+        "description": "A shaft that seems to answer back, faintly, if you're quiet long enough to notice \u2014 the same note, over and over, from somewhere too far down to actually be there.",
         "connections": [
           "wordless_choir_hall",
           "wordless_choir_source"
@@ -2050,7 +2060,7 @@
       "wordless_choir_forgotten_chord": {
         "name": "The Forgotten Chord",
         "layer": "underground",
-        "description": "A side hollow off the still machinery, easy to miss between two of the silent ranks — whatever used to happen here was never part of the main performance.",
+        "description": "A side hollow off the still machinery, easy to miss between two of the silent ranks \u2014 whatever used to happen here was never part of the main performance.",
         "connections": [
           "wordless_choir_machinery"
         ],
@@ -2074,7 +2084,7 @@
       "goblin_warrens_supply_tunnel": {
         "name": "The Supply Tunnel",
         "layer": "underground",
-        "description": "A narrow tunnel stacked with crates and stolen sacks, guarded better than the entrance ever was — whoever's really running this warren clearly cares more about what's down here.",
+        "description": "A narrow tunnel stacked with crates and stolen sacks, guarded better than the entrance ever was \u2014 whoever's really running this warren clearly cares more about what's down here.",
         "connections": [
           "goblin_warrens",
           "goblin_warrens_inner_den"
@@ -2105,7 +2115,7 @@
       "goblin_warrens_deep_larder": {
         "name": "The Deep Larder",
         "layer": "underground",
-        "description": "Past the inner den, a low chamber packed floor to ceiling with hoarded supplies — enough to keep a much bigger warren fed than the one anyone's actually seen so far.",
+        "description": "Past the inner den, a low chamber packed floor to ceiling with hoarded supplies \u2014 enough to keep a much bigger warren fed than the one anyone's actually seen so far.",
         "connections": [
           "goblin_warrens_inner_den"
         ],
@@ -2129,7 +2139,7 @@
       "goblin_warrens_collapsed_tunnel": {
         "name": "The Collapsed Tunnel",
         "layer": "underground",
-        "description": "A side passage caved in long before the goblins ever moved in — most of it's rubble now, but something's clearly still squatting in what's left of it.",
+        "description": "A side passage caved in long before the goblins ever moved in \u2014 most of it's rubble now, but something's clearly still squatting in what's left of it.",
         "connections": [
           "goblin_warrens"
         ],
@@ -2185,7 +2195,7 @@
       "sunken_root_caverns_hollow_wellspring": {
         "name": "The Hollow Wellspring",
         "layer": "underground",
-        "description": "Past the channel, the water finally pools somewhere real — a wellspring sunk so deep that whatever drinks from it hasn't seen the surface in longer than anyone's kept track.",
+        "description": "Past the channel, the water finally pools somewhere real \u2014 a wellspring sunk so deep that whatever drinks from it hasn't seen the surface in longer than anyone's kept track.",
         "connections": [
           "sunken_root_caverns_precise_channel"
         ],
@@ -2209,7 +2219,7 @@
       "sunken_root_caverns_side_pool": {
         "name": "The Side Pool",
         "layer": "underground",
-        "description": "A smaller offshoot of the flooded gallery, easy to wade past without noticing — something small has been squatting here, well out of the way of the main tunnels.",
+        "description": "A smaller offshoot of the flooded gallery, easy to wade past without noticing \u2014 something small has been squatting here, well out of the way of the main tunnels.",
         "connections": [
           "sunken_root_caverns_flooded_gallery"
         ],
@@ -2231,7 +2241,7 @@
       "stonearch_bridge_web_hollow": {
         "name": "The Web Hollow",
         "layer": "underground",
-        "description": "A hollow in the gorge wall gone almost entirely to silk — layer over layer of it, thick enough that whatever's still spinning down here has clearly had a long time to work.",
+        "description": "A hollow in the gorge wall gone almost entirely to silk \u2014 layer over layer of it, thick enough that whatever's still spinning down here has clearly had a long time to work.",
         "connections": [
           "stonearch_bridge_gorge_depths",
           "stonearch_bridge_deep_current",
@@ -2264,7 +2274,7 @@
       "stonearch_bridge_undertow": {
         "name": "The Undertow",
         "layer": "underground",
-        "description": "Past the deep current, the water finally drags at something solid — a den built low against the pull, exactly where nothing swept downstream would ever be able to climb back out.",
+        "description": "Past the deep current, the water finally drags at something solid \u2014 a den built low against the pull, exactly where nothing swept downstream would ever be able to climb back out.",
         "connections": [
           "stonearch_bridge_deep_current"
         ],
@@ -2288,7 +2298,7 @@
       "stonearch_bridge_silked_nook": {
         "name": "The Silked Nook",
         "layer": "underground",
-        "description": "A narrow gap in the web hollow's silk, easy to miss — something small has been left here to grow, well away from the rest of the brood.",
+        "description": "A narrow gap in the web hollow's silk, easy to miss \u2014 something small has been left here to grow, well away from the rest of the brood.",
         "connections": [
           "stonearch_bridge_web_hollow"
         ],
@@ -2312,7 +2322,7 @@
       "greymoor_downs_barrow_depths": {
         "name": "The Barrow Depths",
         "layer": "underground",
-        "description": "Past the sunken barrow's supply cache, the hillside opens into a real den — deeper, older, and considerably less willing to share its territory.",
+        "description": "Past the sunken barrow's supply cache, the hillside opens into a real den \u2014 deeper, older, and considerably less willing to share its territory.",
         "connections": [
           "greymoor_downs_sunken_barrow"
         ],
@@ -2348,7 +2358,7 @@
           },
           "the_wedged_marker": {
             "name": "a weather-stained marker, wedged sideways into the shaft wall",
-            "description": "Not local stone — carried here, then left. Scratched into its face, in a hand that matches nothing else down here, is a story about someone called Pandora, who was given a box she never asked for and told only that she must never open it — and who spent the rest of her life proving that being told 'never' isn't the same as being told 'why.' The marker doesn't say what was inside. It doesn't say she opened it, either. It just says she kept the box, and kept asking, until the day she didn't need an answer anymore. Nothing else here explains why it's buried under a cairn on the far side of a world it clearly wasn't carved in."
+            "description": "Not local stone \u2014 carried here, then left. Scratched into its face, in a hand that matches nothing else down here, is a story about someone called Pandora, who was given a box she never asked for and told only that she must never open it \u2014 and who spent the rest of her life proving that being told 'never' isn't the same as being told 'why.' The marker doesn't say what was inside. It doesn't say she opened it, either. It just says she kept the box, and kept asking, until the day she didn't need an answer anymore. Nothing else here explains why it's buried under a cairn on the far side of a world it clearly wasn't carved in."
           }
         },
         "directions": {
@@ -2374,7 +2384,7 @@
       "greymoor_downs_the_unopened_seal": {
         "name": "The Unopened Seal",
         "layer": "surface",
-        "description": "Past the shaft's carefully refilled walls, past the marker no one still living can properly read, the digging finally reaches something that was never dirt to begin with — a seal, still closed, exactly the way it was left. Whoever kept coming back down here never actually opened it. They just kept checking that it hadn't opened itself.",
+        "description": "Past the shaft's carefully refilled walls, past the marker no one still living can properly read, the digging finally reaches something that was never dirt to begin with \u2014 a seal, still closed, exactly the way it was left. Whoever kept coming back down here never actually opened it. They just kept checking that it hadn't opened itself.",
         "connections": [
           "greymoor_downs_below_the_cairn",
           "greymoor_downs_the_last_question"
@@ -2412,7 +2422,7 @@
       "greymoor_downs_the_last_question": {
         "name": "The Last Question",
         "layer": "surface",
-        "description": "Whatever the seal was built to keep in is, impossibly, still exactly what was sealed in the first place — old beyond the world it's buried under, patient beyond every name anyone's ever given the things that came after it, and, for the first time in longer than waiting has meant anything, finally about to be asked something back.",
+        "description": "Whatever the seal was built to keep in is, impossibly, still exactly what was sealed in the first place \u2014 old beyond the world it's buried under, patient beyond every name anyone's ever given the things that came after it, and, for the first time in longer than waiting has meant anything, finally about to be asked something back.",
         "connections": [
           "greymoor_downs_the_unopened_seal"
         ],
@@ -2436,7 +2446,7 @@
       "whispering_wood_hollow_threshold": {
         "name": "The Hollow Threshold",
         "layer": "underground",
-        "description": "The passage between the den and whatever's past the deeper roots narrows here to almost nothing — easy to defend, and clearly being defended.",
+        "description": "The passage between the den and whatever's past the deeper roots narrows here to almost nothing \u2014 easy to defend, and clearly being defended.",
         "connections": [
           "whispering_wood_sunken_den",
           "whispering_wood_deeper_roots",
@@ -2469,7 +2479,7 @@
       "whispering_wood_stray_den": {
         "name": "The Stray Den",
         "layer": "underground",
-        "description": "A smaller den branching off the threshold, half-collapsed and clearly not the pack's main territory — something's still using it anyway.",
+        "description": "A smaller den branching off the threshold, half-collapsed and clearly not the pack's main territory \u2014 something's still using it anyway.",
         "connections": [
           "whispering_wood_hollow_threshold"
         ],
@@ -2493,7 +2503,7 @@
       "whispering_wood_deep_root_chamber": {
         "name": "The Deep Root Chamber",
         "layer": "underground",
-        "description": "Past the deeper roots, the regular, deliberate root-work finally resolves into an actual chamber — built, not grown, by something that clearly wanted this exact shape.",
+        "description": "Past the deeper roots, the regular, deliberate root-work finally resolves into an actual chamber \u2014 built, not grown, by something that clearly wanted this exact shape.",
         "connections": [
           "whispering_wood_deeper_roots"
         ],
@@ -2517,7 +2527,7 @@
       "glimmerdeep_grotto_buried_glow": {
         "name": "The Buried Glow",
         "layer": "underground",
-        "description": "Past the glimmering pool, whatever's buried in the silt finally surfaces enough to see — barely — and it's not alone down here anymore.",
+        "description": "Past the glimmering pool, whatever's buried in the silt finally surfaces enough to see \u2014 barely \u2014 and it's not alone down here anymore.",
         "connections": [
           "glimmerdeep_grotto_glimmering_pool"
         ],
@@ -2541,7 +2551,7 @@
       "glimmerdeep_grotto_dim_hollow": {
         "name": "The Dim Hollow",
         "layer": "underground",
-        "description": "A narrow side-hollow off the glimmering pool, lit only by whatever light bleeds through from the crystals nearby — dim enough that something small has made a home of it.",
+        "description": "A narrow side-hollow off the glimmering pool, lit only by whatever light bleeds through from the crystals nearby \u2014 dim enough that something small has made a home of it.",
         "connections": [
           "glimmerdeep_grotto_glimmering_pool"
         ],
@@ -2561,6 +2571,476 @@
           "x": 2,
           "y": 1
         }
+      },
+      "wrathflame_vault_threshold": {
+        "name": "The Sealed Threshold",
+        "layer": "underground",
+        "description": "The stone beneath the shrine gives way to a passage that's clearly been sealed on purpose, not collapsed by accident. The air here is already warmer than it has any right to be.",
+        "connections": [
+          "hollow_stump_shrine",
+          "wrathflame_vault_ember_hall"
+        ],
+        "directions": {
+          "up": "hollow_stump_shrine",
+          "down": "wrathflame_vault_ember_hall"
+        },
+        "monsters": [
+          "ember_wisp"
+        ],
+        "grid_position": {
+          "x": 2,
+          "y": 2
+        }
+      },
+      "wrathflame_vault_ember_hall": {
+        "name": "The Ember Hall",
+        "layer": "underground",
+        "description": "A long hall lit only by embers set into the walls, none of them burning anything that still exists.",
+        "connections": [
+          "wrathflame_vault_threshold",
+          "wrathflame_vault_ash_gallery",
+          "wrathflame_vault_bellows_chamber"
+        ],
+        "directions": {
+          "up": "wrathflame_vault_threshold",
+          "down": "wrathflame_vault_ash_gallery",
+          "east": "wrathflame_vault_bellows_chamber"
+        },
+        "monsters": [
+          "cinder_hound"
+        ],
+        "grid_position": {
+          "x": 2,
+          "y": 3
+        }
+      },
+      "wrathflame_vault_bellows_chamber": {
+        "name": "The Bellows Chamber",
+        "layer": "underground",
+        "description": "A side chamber built around a huge, ancient bellows that hasn't drawn breath in a very long time. Something was left here in a hurry.",
+        "connections": [
+          "wrathflame_vault_ember_hall"
+        ],
+        "directions": {
+          "west": "wrathflame_vault_ember_hall"
+        },
+        "interactables": {
+          "the_old_bellows": {
+            "name": "the ancient bellows",
+            "description": "Cold, but the leather hasn't rotted the way it should have by now."
+          }
+        },
+        "lockables": [
+          {
+            "id": "bellows_strongbox",
+            "kind": "chest",
+            "name": "a warded iron strongbox",
+            "loot": {
+              "healing_potion": 2
+            },
+            "gold": 45
+          }
+        ],
+        "grid_position": {
+          "x": 3,
+          "y": 3
+        }
+      },
+      "wrathflame_vault_ash_gallery": {
+        "name": "The Ash Gallery",
+        "layer": "underground",
+        "description": "Ash drifts here that never seems to settle, stirred by heat with no visible source.",
+        "connections": [
+          "wrathflame_vault_ember_hall",
+          "wrathflame_vault_ember_font"
+        ],
+        "directions": {
+          "up": "wrathflame_vault_ember_hall",
+          "down": "wrathflame_vault_ember_font"
+        },
+        "monsters": [
+          "ash_wraith"
+        ],
+        "grid_position": {
+          "x": 2,
+          "y": 4
+        }
+      },
+      "wrathflame_vault_ember_font": {
+        "name": "The Ember Font",
+        "layer": "underground",
+        "description": "A single, small spring bubbles here, warm rather than scalding -- the one genuinely safe room this deep in.",
+        "connections": [
+          "wrathflame_vault_ash_gallery",
+          "wrathflame_vault_smoldering_stair"
+        ],
+        "directions": {
+          "up": "wrathflame_vault_ash_gallery",
+          "down": "wrathflame_vault_smoldering_stair"
+        },
+        "interactables": {
+          "ember_font_spring": {
+            "name": "a warm, clear spring",
+            "description": "Drinking from it settles something in your chest you didn't know was unsettled. The one genuinely calm spot this deep in the vault."
+          },
+          "ember_font_shrine": {
+            "name": "a small worn shrine",
+            "description": "Old enough that no one remembers who it was built for. It still feels like it's listening."
+          }
+        },
+        "grid_position": {
+          "x": 2,
+          "y": 5
+        }
+      },
+      "wrathflame_vault_smoldering_stair": {
+        "name": "The Smoldering Stair",
+        "layer": "underground",
+        "description": "Steps that radiate heat upward with every one you descend, like the vault itself is breathing.",
+        "connections": [
+          "wrathflame_vault_ember_font",
+          "wrathflame_vault_deep_forge"
+        ],
+        "directions": {
+          "up": "wrathflame_vault_ember_font",
+          "down": "wrathflame_vault_deep_forge"
+        },
+        "monsters": [
+          "molten_sentinel"
+        ],
+        "grid_position": {
+          "x": 2,
+          "y": 6
+        }
+      },
+      "wrathflame_vault_deep_forge": {
+        "name": "The Deep Forge",
+        "layer": "underground",
+        "description": "A real forge, still intact, still faintly warm at the coals -- whoever worked here left mid-task and never came back.",
+        "connections": [
+          "wrathflame_vault_smoldering_stair",
+          "wrathflame_vault_cinder_archive"
+        ],
+        "directions": {
+          "up": "wrathflame_vault_smoldering_stair",
+          "down": "wrathflame_vault_cinder_archive"
+        },
+        "resource_nodes": [
+          {
+            "id": "deep_forge_ore_vein",
+            "name": "a rich, heat-blackened ore vein",
+            "material": "iron_ore",
+            "ability": "strength",
+            "skill": "mining"
+          }
+        ],
+        "grid_position": {
+          "x": 2,
+          "y": 7
+        }
+      },
+      "wrathflame_vault_cinder_archive": {
+        "name": "The Cinder Archive",
+        "layer": "underground",
+        "description": "Shelves of scorched, half-legible records -- someone was keeping track of this place, once, and stopped without warning.",
+        "connections": [
+          "wrathflame_vault_deep_forge",
+          "wrathflame_vault_inner_seal"
+        ],
+        "directions": {
+          "up": "wrathflame_vault_deep_forge",
+          "down": "wrathflame_vault_inner_seal"
+        },
+        "interactables": {
+          "scorched_record": {
+            "name": "a scorched record shelf",
+            "description": "The legible fragments all say the same thing in different words: whatever's sealed below was never meant to wake on its own."
+          }
+        },
+        "grid_position": {
+          "x": 2,
+          "y": 8
+        }
+      },
+      "wrathflame_vault_inner_seal": {
+        "name": "The Inner Seal",
+        "layer": "underground",
+        "description": "The last real door in the vault, standing open -- whatever used to hold it shut gave way a long time before anyone arrived.",
+        "connections": [
+          "wrathflame_vault_cinder_archive",
+          "wrathflame_vault_sanctum"
+        ],
+        "directions": {
+          "up": "wrathflame_vault_cinder_archive",
+          "down": "wrathflame_vault_sanctum"
+        },
+        "grid_position": {
+          "x": 2,
+          "y": 9
+        }
+      },
+      "wrathflame_vault_sanctum": {
+        "name": "The Wrathflame Sanctum",
+        "layer": "underground",
+        "description": "The heat here isn't ambient anymore -- it's coming from something that's very much still awake, and has been for a long time.",
+        "connections": [
+          "wrathflame_vault_inner_seal"
+        ],
+        "directions": {
+          "up": "wrathflame_vault_inner_seal"
+        },
+        "monsters": [
+          "the_wrathflame_unbound"
+        ],
+        "grid_position": {
+          "x": 2,
+          "y": 10
+        }
+      },
+      "deep_root_vault_threshold": {
+        "name": "The Ringed Threshold",
+        "layer": "underground",
+        "description": "The ground beneath the mushroom ring opens onto a passage that clearly wasn't dug by anything with hands.",
+        "connections": [
+          "whispering_wood_deep_glade",
+          "deep_root_vault_spore_hollow"
+        ],
+        "directions": {
+          "up": "whispering_wood_deep_glade",
+          "down": "deep_root_vault_spore_hollow"
+        },
+        "monsters": [
+          "root_touched_stalker"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": -3
+        }
+      },
+      "deep_root_vault_spore_hollow": {
+        "name": "The Spore Hollow",
+        "layer": "underground",
+        "description": "The air here hangs thick and faintly sweet -- not rot, exactly, something closer to patience.",
+        "connections": [
+          "deep_root_vault_threshold",
+          "deep_root_vault_bramble_maze",
+          "deep_root_vault_choking_hollow"
+        ],
+        "directions": {
+          "up": "deep_root_vault_threshold",
+          "down": "deep_root_vault_bramble_maze",
+          "east": "deep_root_vault_choking_hollow"
+        },
+        "monsters": [
+          "bloated_spore_lurker"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": -4
+        }
+      },
+      "deep_root_vault_choking_hollow": {
+        "name": "The Choking Hollow",
+        "layer": "underground",
+        "description": "A tight side pocket, thick with spores -- something was dragged in here and never dragged back out.",
+        "connections": [
+          "deep_root_vault_spore_hollow"
+        ],
+        "directions": {
+          "west": "deep_root_vault_spore_hollow"
+        },
+        "lockables": [
+          {
+            "id": "choking_hollow_cache",
+            "kind": "chest",
+            "name": "a resin-sealed cache",
+            "loot": {
+              "greater_healing_potion": 1
+            },
+            "gold": 60
+          }
+        ],
+        "grid_position": {
+          "x": 1,
+          "y": -4
+        }
+      },
+      "deep_root_vault_bramble_maze": {
+        "name": "The Bramble Maze",
+        "layer": "underground",
+        "description": "Roots knot into walls here, thick enough to be architecture rather than plant growth.",
+        "connections": [
+          "deep_root_vault_spore_hollow",
+          "deep_root_vault_weeping_spring"
+        ],
+        "directions": {
+          "up": "deep_root_vault_spore_hollow",
+          "down": "deep_root_vault_weeping_spring"
+        },
+        "monsters": [
+          "withering_bramble"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": -5
+        }
+      },
+      "deep_root_vault_weeping_spring": {
+        "name": "The Weeping Spring",
+        "layer": "underground",
+        "description": "Clean water somehow finds its way down here, untouched by anything growing around it -- the one real safe room in the vault.",
+        "connections": [
+          "deep_root_vault_bramble_maze",
+          "deep_root_vault_sentinel_hollow"
+        ],
+        "directions": {
+          "up": "deep_root_vault_bramble_maze",
+          "down": "deep_root_vault_sentinel_hollow"
+        },
+        "interactables": {
+          "weeping_spring_water": {
+            "name": "a clean, cold spring",
+            "description": "Untouched by anything else growing down here. Drinking it clears your head."
+          },
+          "weeping_spring_shrine": {
+            "name": "a moss-covered shrine stone",
+            "description": "Someone kept this clear of the bramble for a very long time, on purpose."
+          }
+        },
+        "grid_position": {
+          "x": 0,
+          "y": -6
+        }
+      },
+      "deep_root_vault_sentinel_hollow": {
+        "name": "The Sentinel Hollow",
+        "layer": "underground",
+        "description": "Something has clearly been standing watch here, and has been for longer than anything should be able to stand still.",
+        "connections": [
+          "deep_root_vault_weeping_spring",
+          "deep_root_vault_husk_gallery"
+        ],
+        "directions": {
+          "up": "deep_root_vault_weeping_spring",
+          "down": "deep_root_vault_husk_gallery"
+        },
+        "monsters": [
+          "hollow_root_sentinel"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": -7
+        }
+      },
+      "deep_root_vault_husk_gallery": {
+        "name": "The Husk Gallery",
+        "layer": "underground",
+        "description": "Rows of hollowed-out husks line the walls, each one shaped like it used to be something else.",
+        "connections": [
+          "deep_root_vault_sentinel_hollow",
+          "deep_root_vault_elder_root_chamber"
+        ],
+        "directions": {
+          "up": "deep_root_vault_sentinel_hollow",
+          "down": "deep_root_vault_elder_root_chamber"
+        },
+        "resource_nodes": [
+          {
+            "id": "husk_gallery_growth",
+            "name": "a cluster of rare bitter-root herbs",
+            "material": "silverleaf_herb",
+            "ability": "wisdom",
+            "skill": "herbalism"
+          }
+        ],
+        "interactables": {
+          "hollowed_husk_row": {
+            "name": "a row of hollowed husks",
+            "description": "Whatever these used to be, the shape is closer to person than plant."
+          }
+        },
+        "grid_position": {
+          "x": 0,
+          "y": -8
+        }
+      },
+      "deep_root_vault_elder_root_chamber": {
+        "name": "The Elder Root Chamber",
+        "layer": "underground",
+        "description": "One single root, older and thicker than every other one in this vault combined, runs wall to wall through here.",
+        "connections": [
+          "deep_root_vault_husk_gallery",
+          "deep_root_vault_last_root"
+        ],
+        "directions": {
+          "up": "deep_root_vault_husk_gallery",
+          "down": "deep_root_vault_last_root"
+        },
+        "monsters": [
+          "elder_bramble_husk"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": -9
+        }
+      },
+      "deep_root_vault_last_root": {
+        "name": "The Last Root",
+        "layer": "underground",
+        "description": "The elder root finally ends here, or starts here -- it's genuinely unclear which direction it was ever growing.",
+        "connections": [
+          "deep_root_vault_elder_root_chamber",
+          "deep_root_vault_deepest_memory"
+        ],
+        "directions": {
+          "up": "deep_root_vault_elder_root_chamber",
+          "down": "deep_root_vault_deepest_memory"
+        },
+        "grid_position": {
+          "x": 0,
+          "y": -10
+        }
+      },
+      "deep_root_vault_deepest_memory": {
+        "name": "The Deepest Memory",
+        "layer": "underground",
+        "description": "Everything down here feels remembered rather than real -- like the vault itself is playing something back.",
+        "connections": [
+          "deep_root_vault_last_root",
+          "deep_root_vault_sanctum"
+        ],
+        "directions": {
+          "up": "deep_root_vault_last_root",
+          "down": "deep_root_vault_sanctum"
+        },
+        "interactables": {
+          "playback_root": {
+            "name": "a root pulsing faintly, in a rhythm",
+            "description": "It isn't growing. It's remembering something on a loop, and hasn't reached the end of it yet."
+          }
+        },
+        "grid_position": {
+          "x": 0,
+          "y": -11
+        }
+      },
+      "deep_root_vault_sanctum": {
+        "name": "The Root Sanctum",
+        "layer": "underground",
+        "description": "The oldest root in the Whispering Wood ends here, or begins here -- and it has clearly been waiting.",
+        "connections": [
+          "deep_root_vault_deepest_memory"
+        ],
+        "directions": {
+          "up": "deep_root_vault_deepest_memory"
+        },
+        "monsters": [
+          "the_root_that_remembers"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": -12
+        }
       }
     },
     "sky": {
@@ -2579,7 +3059,7 @@
         "interactables": {
           "waiting_shape": {
             "name": "a still shape at the island's center",
-            "description": "Motionless, silhouetted, and unmistakably waiting — for how long, and for what, you can't yet say."
+            "description": "Motionless, silhouetted, and unmistakably waiting \u2014 for how long, and for what, you can't yet say."
           },
           "isles_edge": {
             "name": "the island's crumbling edge",
@@ -2607,7 +3087,7 @@
       "unmoored_isle_hollow": {
         "name": "The Hollow Beneath the Wait",
         "layer": "sky",
-        "description": "Where the waiting shape stood is now just a hollow in the stone — and the hollow, it turns out, goes down, not into the isle's rock but into something the isle was only ever resting on top of.",
+        "description": "Where the waiting shape stood is now just a hollow in the stone \u2014 and the hollow, it turns out, goes down, not into the isle's rock but into something the isle was only ever resting on top of.",
         "connections": [
           "the_unmoored_isle",
           "unmoored_isle_afterimage"
@@ -2623,7 +3103,7 @@
         "interactables": {
           "the_hollow_itself": {
             "name": "the hollow left behind",
-            "description": "Not empty so much as finally uncovered — whatever the waiting shape spent all that time standing on top of."
+            "description": "Not empty so much as finally uncovered \u2014 whatever the waiting shape spent all that time standing on top of."
           }
         },
         "story_gates": {
@@ -2639,7 +3119,7 @@
       "unmoored_isle_turning_stair": {
         "name": "The Turning Stair",
         "layer": "sky",
-        "description": "A stair that turns back on itself in ways the eye refuses to follow — climbing it and descending it are, as far as anyone can tell, the exact same motion.",
+        "description": "A stair that turns back on itself in ways the eye refuses to follow \u2014 climbing it and descending it are, as far as anyone can tell, the exact same motion.",
         "connections": [
           "unmoored_isle_afterimage",
           "unmoored_isle_loom",
@@ -2672,7 +3152,7 @@
       "unmoored_isle_loom": {
         "name": "The Loom",
         "layer": "sky",
-        "description": "Threads run wall to wall in patterns too vast to see whole from any one place in the room — and every pattern, followed far enough, leads back to where it started.",
+        "description": "Threads run wall to wall in patterns too vast to see whole from any one place in the room \u2014 and every pattern, followed far enough, leads back to where it started.",
         "connections": [
           "unmoored_isle_turning_stair",
           "unmoored_isle_last_measure"
@@ -2707,7 +3187,7 @@
       "unmoored_isle_first_wait": {
         "name": "The First Wait",
         "layer": "sky",
-        "description": "Before there was a shape to wait, something was already waiting here — and it has been patient for far longer than the story anyone's been told about this place.",
+        "description": "Before there was a shape to wait, something was already waiting here \u2014 and it has been patient for far longer than the story anyone's been told about this place.",
         "connections": [
           "unmoored_isle_last_measure"
         ],
@@ -2736,7 +3216,7 @@
       "unmoored_isle_afterimage": {
         "name": "The Afterimage",
         "layer": "sky",
-        "description": "A space that only exists because something else already passed through it — an impression left in the air itself, still holding the shape of whatever cast it.",
+        "description": "A space that only exists because something else already passed through it \u2014 an impression left in the air itself, still holding the shape of whatever cast it.",
         "connections": [
           "unmoored_isle_hollow",
           "unmoored_isle_turning_stair"
@@ -2767,7 +3247,7 @@
       "unmoored_isle_last_measure": {
         "name": "The Last Measure",
         "layer": "sky",
-        "description": "The Loom's pattern finally runs out here, frayed at the edge into threads that don't lead anywhere else — the very last measure of something that was never going to resolve cleanly.",
+        "description": "The Loom's pattern finally runs out here, frayed at the edge into threads that don't lead anywhere else \u2014 the very last measure of something that was never going to resolve cleanly.",
         "connections": [
           "unmoored_isle_loom",
           "unmoored_isle_first_wait"
@@ -2798,7 +3278,7 @@
       "unmoored_isle_missed_step": {
         "name": "The Missed Step",
         "layer": "sky",
-        "description": "A step on the turning stair that doesn't quite connect to any of the others — easy to fall into by accident, and just as easy to never notice was ever there at all.",
+        "description": "A step on the turning stair that doesn't quite connect to any of the others \u2014 easy to fall into by accident, and just as easy to never notice was ever there at all.",
         "connections": [
           "unmoored_isle_turning_stair"
         ],
@@ -2879,7 +3359,7 @@
     "theron_the_wanderer": {
       "name": "Theron",
       "role": "wandering_monk",
-      "personality": "a quiet, unaligned drifter who speaks in riddles and owes loyalty to no one — not unfriendly, but never quite trustworthy either",
+      "personality": "a quiet, unaligned drifter who speaks in riddles and owes loyalty to no one \u2014 not unfriendly, but never quite trustworthy either",
       "alignment": "True Neutral",
       "disposition": "neutral",
       "can_wander": true,
@@ -2893,8 +3373,8 @@
     "kess_the_bandit": {
       "name": "Kess",
       "role": "bandit_captain",
-      "personality": "a cold, calculating highwaywoman who sizes up travelers as marks before they've even noticed her — cruel by choice, not desperation",
-      "goals": "collecting tolls to fund something far bigger than banditry — she'd never say what, and the coin never stays with her crew",
+      "personality": "a cold, calculating highwaywoman who sizes up travelers as marks before they've even noticed her \u2014 cruel by choice, not desperation",
+      "goals": "collecting tolls to fund something far bigger than banditry \u2014 she'd never say what, and the coin never stays with her crew",
       "alignment": "Chaotic Evil",
       "disposition": "hostile",
       "is_boss": true,
@@ -3079,7 +3559,7 @@
   "shops": {
     "marens_wares": {
       "owner_npc": "old_maren",
-      "description": "Old Maren's stall sprawls across three tables — a weapon rack, a rack of hung armor, and shelves of tools and provisions, every price scratched straight into the wood in her own tally-marks.",
+      "description": "Old Maren's stall sprawls across three tables \u2014 a weapon rack, a rack of hung armor, and shelves of tools and provisions, every price scratched straight into the wood in her own tally-marks.",
       "inventory": [
         "rusty_dagger",
         "shortsword",
@@ -3114,7 +3594,7 @@
     },
     "vanes_curiosities": {
       "owner_npc": "ossian_vane",
-      "description": "Ossian Vane's corner of the Arcane Nook — scrolls pinned in neat rows, a locked case of stranger things, and a ledger he never quite lets anyone read.",
+      "description": "Ossian Vane's corner of the Arcane Nook \u2014 scrolls pinned in neat rows, a locked case of stranger things, and a ledger he never quite lets anyone read.",
       "inventory": [
         "scroll_cure_wounds",
         "scroll_shield",
@@ -3138,7 +3618,7 @@
     },
     "grimsbys_tavern": {
       "owner_npc": "grimsby",
-      "description": "Grimsby keeps a short shelf behind the bar — ale, rations, and just enough healing to get a rough night behind you.",
+      "description": "Grimsby keeps a short shelf behind the bar \u2014 ale, rations, and just enough healing to get a rough night behind you.",
       "inventory": [
         "ale",
         "rations",
@@ -3385,7 +3865,7 @@
         "type": "reach_location",
         "location": "hollow_stump_shrine"
       },
-      "clue": "Old offerings at the shrine are undisturbed by animals — worth seeing with your own eyes."
+      "clue": "Old offerings at the shrine are undisturbed by animals \u2014 worth seeing with your own eyes."
     },
     "clear_the_warrens": {
       "title": "Clear the Goblin Warrens",
@@ -3416,7 +3896,7 @@
     },
     "the_hush_stage1_signs": {
       "title": "Into the Hush",
-      "description": "No two accounts of what's past Glimmerdeep Grotto agree — that alone is worth noting. The only way to know for certain is to go down and see it yourself.",
+      "description": "No two accounts of what's past Glimmerdeep Grotto agree \u2014 that alone is worth noting. The only way to know for certain is to go down and see it yourself.",
       "location": "the_hush_below",
       "reward_xp": 100,
       "reward_gold": 50,
@@ -3424,11 +3904,11 @@
         "type": "reach_location",
         "location": "the_hush_below"
       },
-      "clue": "No two accounts of what's past Glimmerdeep Grotto agree — that alone is worth noting."
+      "clue": "No two accounts of what's past Glimmerdeep Grotto agree \u2014 that alone is worth noting."
     },
     "the_hush_stage2_the_wisp": {
       "title": "What Watches in the Dark",
-      "description": "Something pale and quick moves at the edge of every torch's reach down here, blinding anyone who gets too close a good look at it — it has to be dealt with before whatever's deeper even notices you've arrived.",
+      "description": "Something pale and quick moves at the edge of every torch's reach down here, blinding anyone who gets too close a good look at it \u2014 it has to be dealt with before whatever's deeper even notices you've arrived.",
       "location": "the_hush_below",
       "reward_xp": 200,
       "reward_gold": 100,
@@ -3436,11 +3916,11 @@
         "type": "defeat_monster",
         "monster": "shadow_wisp"
       },
-      "clue": "Footprints in old dust, fresh enough that the dust hasn't resettled — something else is already down here."
+      "clue": "Footprints in old dust, fresh enough that the dust hasn't resettled \u2014 something else is already down here."
     },
     "the_hush_stage3_the_unspoken": {
       "title": "What Answers Back",
-      "description": "Few who go into the Hush Below come back describing the same thing twice — and something down there has started describing YOU back, in a voice that isn't quite a voice.",
+      "description": "Few who go into the Hush Below come back describing the same thing twice \u2014 and something down there has started describing YOU back, in a voice that isn't quite a voice.",
       "location": "the_hush_below",
       "reward_xp": 450,
       "reward_gold": 250,
@@ -3449,12 +3929,12 @@
         "type": "defeat_monster",
         "monster": "the_unspoken"
       },
-      "clue": "An old iron door, ajar, wasn't open a moment ago — whatever moved it wants to be found now. Whatever's past that door, you won't want to face it with anyone you don't genuinely trust at your back.",
+      "clue": "An old iron door, ajar, wasn't open a moment ago \u2014 whatever moved it wants to be found now. Whatever's past that door, you won't want to face it with anyone you don't genuinely trust at your back.",
       "weight": "climactic"
     },
     "first_city_arrival": {
       "title": "Beneath Everything",
-      "description": "The tunnels give way all at once — not to more tunnel, but to towers and streets, a whole skyline swallowed and kept in the dark, far older than anything else you've found down here.",
+      "description": "The tunnels give way all at once \u2014 not to more tunnel, but to towers and streets, a whole skyline swallowed and kept in the dark, far older than anything else you've found down here.",
       "location": "the_hush_below",
       "reward_xp": 200,
       "reward_gold": 50,
@@ -3462,11 +3942,11 @@
         "type": "reach_location",
         "location": "the_first_city"
       },
-      "clue": "Whatever's down here was never meant to be found — but you've already seen it now."
+      "clue": "Whatever's down here was never meant to be found \u2014 but you've already seen it now."
     },
     "the_first_city_quest": {
       "title": "The First City",
-      "description": "Beneath everything, something predates the goblins, the roots, and the crystals — and the spire's slow, warm breathing has just changed rhythm.",
+      "description": "Beneath everything, something predates the goblins, the roots, and the crystals \u2014 and the spire's slow, warm breathing has just changed rhythm.",
       "location": "the_first_city",
       "reward_xp": 1500,
       "reward_gold": 1000,
@@ -3480,7 +3960,7 @@
     },
     "conflict_at_crossroads_tavern": {
       "title": "Conflict at Crossroads Tavern",
-      "description": "Word of what you found beneath the First City won't stay buried for long, and it isn't the only thing stirring. Rising concerns are already being talked about back on the surface — the Crossroads Tavern is where the roads still meet, and the paladin stationed there has never let real trouble past unremarked.",
+      "description": "Word of what you found beneath the First City won't stay buried for long, and it isn't the only thing stirring. Rising concerns are already being talked about back on the surface \u2014 the Crossroads Tavern is where the roads still meet, and the paladin stationed there has never let real trouble past unremarked.",
       "location": "the_first_city",
       "requires_completed_quest": "the_first_city_quest",
       "reward_xp": 100,
@@ -3501,11 +3981,11 @@
         "type": "reach_location",
         "location": "the_unmoored_isle"
       },
-      "clue": "Follow where the shard wants to go — up, past the spire, into open sky."
+      "clue": "Follow where the shard wants to go \u2014 up, past the spire, into open sky."
     },
     "the_unmoored_isle_quest": {
       "title": "What Waits Above",
-      "description": "The sky itself is not as empty as it looks — something has been waiting at the island's center for a very long time, and it's noticed you.",
+      "description": "The sky itself is not as empty as it looks \u2014 something has been waiting at the island's center for a very long time, and it's noticed you.",
       "location": "the_unmoored_isle",
       "reward_xp": 3000,
       "reward_gold": 2500,
@@ -3532,7 +4012,7 @@
     },
     "the_elder_glens_riddle": {
       "title": "The Elder Glen's Riddle",
-      "description": "Words carved into the widest tree in the Elder Glen — old enough that whoever carved them is long gone, but the question still stands.",
+      "description": "Words carved into the widest tree in the Elder Glen \u2014 old enough that whoever carved them is long gone, but the question still stands.",
       "location": "whispering_wood_elder_glen",
       "trigger": {
         "type": "solve_puzzle",
@@ -3545,7 +4025,7 @@
     },
     "the_archives_recess": {
       "title": "The Archive's Recess",
-      "description": "A recess carved into the rear wall of the Sunken Archive, words worn into its edge — whoever carved them wanted this one specifically remembered.",
+      "description": "A recess carved into the rear wall of the Sunken Archive, words worn into its edge \u2014 whoever carved them wanted this one specifically remembered.",
       "location": "the_first_city_sunken_archive",
       "trigger": {
         "type": "solve_puzzle",
@@ -3571,7 +4051,7 @@
     },
     "the_unrepeating_depth": {
       "title": "What Finally Speaks",
-      "description": "Past the seam in the Deepest Record's floor, the walls stop repeating themselves entirely — and whatever kept them company down here is done waiting to be read.",
+      "description": "Past the seam in the Deepest Record's floor, the walls stop repeating themselves entirely \u2014 and whatever kept them company down here is done waiting to be read.",
       "location": "the_first_city_forgotten_depth",
       "trigger": {
         "type": "defeat_monster",
@@ -4397,6 +4877,58 @@
       },
       "clue": "Whatever was enchanted into the gorge's depths is still working, generations later -- the Guild wants to know by whose hand, and how.",
       "requires_guild": "enchanters_guild"
+    },
+    "wrens_trial_by_fire": {
+      "title": "What Wren Won't Say",
+      "description": "Wren keeps glancing toward the shrine's deeper stones every time a wolf howls too close -- she won't explain why until she's sure the wood's own threats are actually handled, not just quiet for the moment.",
+      "location": "hollow_stump_shrine",
+      "giver_npc": "wren_hollowbrook",
+      "objective_location": "whispering_wood",
+      "reward_xp": 200,
+      "reward_gold": 60,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "wolf"
+      },
+      "clue": "Wren says she can't in good conscience show anyone what the shrine is really built over while something's still circling it."
+    },
+    "the_glades_answer": {
+      "title": "The Glade's Answer",
+      "description": "The ring of mushrooms in the Deep Glade is too even, too old, and too deliberate to be ignored any longer -- whatever it's asking, it wants a real answer before it lets anyone past.",
+      "location": "whispering_wood_deep_glade",
+      "trigger": {
+        "type": "solve_puzzle",
+        "puzzle_id": "deep_glade_ring_riddle"
+      },
+      "reward_xp": 250,
+      "reward_gold": 70,
+      "clue": "The ring of mushrooms in the glade doesn't look natural, and it doesn't look finished either -- like it's still waiting on something."
+    },
+    "the_deep_forges_cinder_map": {
+      "title": "What the Forge Left Behind",
+      "description": "The Deep Forge's last worker never came back for their things -- among them, a real chart of the vault below.",
+      "location": "wrathflame_vault_smoldering_stair",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "molten_sentinel"
+      },
+      "reward_xp": 180,
+      "reward_gold": 0,
+      "reward_item": "cinder_marked_chart",
+      "clue": "The Molten Sentinel guards the way down to the old forge -- whatever it was protecting is worth a look once it's dealt with."
+    },
+    "the_elder_roots_survey": {
+      "title": "What Grew Around It",
+      "description": "Something has been charting this vault for a very long time, root by root -- the elder root chamber is where that record is finally kept.",
+      "location": "deep_root_vault_elder_root_chamber",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "elder_bramble_husk"
+      },
+      "reward_xp": 260,
+      "reward_gold": 0,
+      "reward_item": "root_bound_survey",
+      "clue": "The Elder Bramble Husk has coiled itself around something for longer than it's been alive to notice."
     }
   },
   "story_arcs": {
@@ -6531,12 +7063,129 @@
           "weight": 5
         }
       ]
+    },
+    "ember_wisp": {
+      "name": "Ember Wisp",
+      "level": 5,
+      "dexterity": 14,
+      "strength": 8,
+      "armor_class": 14,
+      "hp_max": 110,
+      "proficiency_bonus": 2,
+      "xp_reward": 120,
+      "damage_dice": "1d8",
+      "damage_bonus": 14,
+      "damage_type": "fire"
+    },
+    "cinder_hound": {
+      "name": "Cinder Hound",
+      "level": 8,
+      "dexterity": 15,
+      "strength": 12,
+      "armor_class": 15,
+      "hp_max": 160,
+      "proficiency_bonus": 3,
+      "xp_reward": 160,
+      "damage_dice": "1d8",
+      "damage_bonus": 18,
+      "damage_type": "fire"
+    },
+    "ash_wraith": {
+      "name": "Ash Wraith",
+      "level": 12,
+      "dexterity": 16,
+      "strength": 13,
+      "armor_class": 16,
+      "hp_max": 260,
+      "proficiency_bonus": 4,
+      "xp_reward": 220,
+      "damage_dice": "1d8",
+      "damage_bonus": 24,
+      "damage_type": "fire"
+    },
+    "molten_sentinel": {
+      "name": "Molten Sentinel",
+      "level": 16,
+      "dexterity": 12,
+      "strength": 18,
+      "armor_class": 18,
+      "hp_max": 420,
+      "proficiency_bonus": 5,
+      "xp_reward": 320,
+      "damage_dice": "1d8",
+      "damage_bonus": 32,
+      "damage_type": "fire"
+    },
+    "root_touched_stalker": {
+      "name": "Root-Touched Stalker",
+      "level": 8,
+      "dexterity": 15,
+      "strength": 12,
+      "armor_class": 15,
+      "hp_max": 160,
+      "proficiency_bonus": 3,
+      "xp_reward": 170,
+      "damage_dice": "1d8",
+      "damage_bonus": 18,
+      "damage_type": "poison"
+    },
+    "bloated_spore_lurker": {
+      "name": "Bloated Spore Lurker",
+      "level": 12,
+      "dexterity": 11,
+      "strength": 15,
+      "armor_class": 16,
+      "hp_max": 260,
+      "proficiency_bonus": 4,
+      "xp_reward": 230,
+      "damage_dice": "1d8",
+      "damage_bonus": 24,
+      "damage_type": "poison"
+    },
+    "withering_bramble": {
+      "name": "Withering Bramble",
+      "level": 16,
+      "dexterity": 13,
+      "strength": 17,
+      "armor_class": 17,
+      "hp_max": 420,
+      "proficiency_bonus": 5,
+      "xp_reward": 330,
+      "damage_dice": "1d8",
+      "damage_bonus": 32,
+      "damage_type": "poison"
+    },
+    "hollow_root_sentinel": {
+      "name": "Hollow Root Sentinel",
+      "level": 20,
+      "dexterity": 12,
+      "strength": 19,
+      "armor_class": 18,
+      "hp_max": 600,
+      "proficiency_bonus": 6,
+      "xp_reward": 450,
+      "damage_dice": "1d8",
+      "damage_bonus": 40,
+      "damage_type": "poison"
+    },
+    "elder_bramble_husk": {
+      "name": "Elder Bramble Husk",
+      "level": 25,
+      "dexterity": 12,
+      "strength": 20,
+      "armor_class": 19,
+      "hp_max": 900,
+      "proficiency_bonus": 7,
+      "xp_reward": 600,
+      "damage_dice": "1d8",
+      "damage_bonus": 50,
+      "damage_type": "poison"
     }
   },
   "factions": {
     "crossroads_folk": {
       "name": "The Crossroads Folk",
-      "description": "The ordinary people who keep the Crossroads running — innkeepers, traders, and the wanderers who pass through and stay a while. No oaths, no hierarchy, just people who look out for each other.",
+      "description": "The ordinary people who keep the Crossroads running \u2014 innkeepers, traders, and the wanderers who pass through and stay a while. No oaths, no hierarchy, just people who look out for each other.",
       "alignment_lean": "good",
       "member_npcs": [
         "grimsby",
@@ -6547,7 +7196,7 @@
     },
     "blackthorn_raiders": {
       "name": "The Blackthorn Raiders",
-      "description": "A loose band of highwaymen and opportunists preying on the roads between settlements. Small, cruel, and — some in the Crossroads whisper — funded by something bigger than banditry.",
+      "description": "A loose band of highwaymen and opportunists preying on the roads between settlements. Small, cruel, and \u2014 some in the Crossroads whisper \u2014 funded by something bigger than banditry.",
       "alignment_lean": "evil",
       "member_npcs": [
         "kess_the_bandit"
@@ -6557,7 +7206,7 @@
     },
     "the_wanderers_road": {
       "name": "The Wanderers' Road",
-      "description": "An informal fellowship of drifters, hermits, and those who owe allegiance to no settlement or crown. Neither friend nor enemy by default — standing with them is earned entirely by what you actually do.",
+      "description": "An informal fellowship of drifters, hermits, and those who owe allegiance to no settlement or crown. Neither friend nor enemy by default \u2014 standing with them is earned entirely by what you actually do.",
       "alignment_lean": "neutral",
       "member_npcs": [
         "theron_the_wanderer"
@@ -6629,6 +7278,16 @@
         "pandora's box",
         "the truth",
         "the answer"
+      ]
+    },
+    "deep_glade_ring_riddle": {
+      "riddle": "I grow in a circle and never step outside it. Everything that has ever touched me, I still carry. What am I?",
+      "accepted_answers": [
+        "a ring of memory",
+        "memory",
+        "a tree ring",
+        "tree rings",
+        "a ring"
       ]
     }
   }

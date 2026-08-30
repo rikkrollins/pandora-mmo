@@ -2,6 +2,46 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.409] — Two gated bonus dungeons: the Wrathflame Vault and the Deep Root Vault
+
+Per Coffee: "i feel there shud be a dungeon for both the root that
+remembers remnant and the [Wrathflame Unbound]... make them optional,
+players can goto it at anytime" -- followed by "make sure we cannot
+enter these dungeons early, we must do a quest (be creative on how we
+have to get in)."
+
+Both Remnants were already real, already placed at their own real
+level (`the_wrathflame_unbound`, level 20, at Hollow Stump Shrine;
+`the_root_that_remembers`, level 30, at the Deep Glade), sharing a room
+with either Wren Hollowbrook or nothing at all -- neither has been
+re-leveled or relocated in spirit, they've each been given a real
+dungeon leading up to their own already-existing room.
+
+- **The Wrathflame Vault** (10 rooms, fire, escalating level 5-20):
+  gated behind a new quest, `wrens_trial_by_fire` -- Wren won't unseal
+  the passage beneath her own shrine until a real Chapter 1 threat
+  (the wolves she's been watching for) is actually dealt with.
+- **The Deep Root Vault** (12 rooms, poison, escalating level 8-30):
+  gated behind a new quest, `the_glades_answer` -- the Deep Glade's
+  own long-unexplained ring of mushrooms is now a real riddle gate,
+  themed directly around memory (tying into what The Root That
+  Remembers actually is).
+- New 5th `story_gates` condition, `requires_completed_quest` -- the
+  existing 3 gate types (defeated monster / cleared location /
+  companion trust) had no generic "completed this specific quest"
+  shape, needed for a puzzle-solve gate.
+- Both vaults include a real lockable chest, a resource node, a lore-
+  note trail, and their own findable map item (reusing the existing
+  map-item mechanic exactly, granted via a real defeat-quest reward on
+  each vault's escalation mini-boss) -- same design template the
+  larger upcoming Chapter 3-8 dungeon expansion will reuse.
+- Verified with real executed tests: the gate genuinely blocks entry
+  before the quest, opens after; both Remnants confirmed relocated
+  with stats completely unchanged; every room-to-room connection in
+  both vaults confirmed reciprocated (no dead-end typos); chests and
+  map-item quests confirmed real. No regressions in the existing
+  story-gate/trust-gate/Kess-sequencing test suites.
+
 ## [1.27.408] — Elemental Foundations: Earth added, Air/Fire/Water expanded, weapons now level up their own element
 
 Per Coffee: "i want all types of elementals included" (Earth/Air/Fire/

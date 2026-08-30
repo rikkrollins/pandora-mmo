@@ -24452,6 +24452,21 @@ def _check_story_gate(character: dict, current: dict, destination_id: str) -> st
             "while it's still at your back doesn't feel like it'll end well."
         )
 
+    # A fifth condition (2026-08-30, bonus vault dungeons, per Coffee:
+    # "make sure we cannot enter these dungeons early, we must do a
+    # quest -- be creative on how we have to get in"). The existing 3
+    # gate types (requires_defeated_monster/requires_cleared_location/
+    # requires_companion_trust) cover a lot, but none of them fit
+    # "solved a specific puzzle" or any other quest whose trigger isn't
+    # a defeat_monster -- this is the plain, generic form: any real
+    # completed quest id, by name, no trigger-shape assumption at all.
+    required_quest_id = gate.get("requires_completed_quest")
+    if required_quest_id and required_quest_id not in character.get("completed_quests", []):
+        return (
+            "Something here isn't ready to let you through yet — there's clearly "
+            "unfinished business standing between you and whatever's deeper in."
+        )
+
     trust_gate = gate.get("requires_companion_trust")
     if trust_gate:
         # Real live request (2026-08-23, Coffee, after v1.27.340 fixed
