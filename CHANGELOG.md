@@ -2,6 +2,43 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.423] — fix: dungeon key-guardian quests were free, zero-fight completions
+
+Real live bug (2026-08-30, dev-bridge, Coffee, right after v1.27.422:
+"How did I complete the quest I didn't do anything yet and I only just
+got here?!"). Root cause: both new Phase 1/2 key-guardian quests
+(`the_cinder_keys_reckoning` in the Wrathflame Vault,
+`the_last_seeds_reckoning` in the Deep Root Vault) targeted
+`cinder_hound`/`withering_bramble` -- the SAME monster_key as that
+dungeon's own ordinary wandering encounter (Ember Hall / Bramble Maze).
+Any character who'd ever fought one of those common monsters ANYWHERE
+already had it in their real `defeated_monsters`, and this game's own
+real "a defeat_monster quest auto-completes instantly if its target is
+already dead" safety net -- built 2026-08-29 specifically so a genuinely
+unique, unrepeatable boss fight can never permanently soft-lock a
+quest -- fired the moment the quest became offerable, with zero real
+fight. Correct behavior for a unique boss, wrong behavior for a shared
+trash-mob key.
+
+Fixed by giving each guardian its own real, never-shared monster_key
+(`the_bound_cinder_hound`, `the_root_bound_husk` -- copied stats from
+the originals, slightly tuned up as a real guardian moment) so the
+safety net only ever fires for an actual prior kill of THIS specific
+guardian, never a coincidence of having fought the same monster TYPE
+somewhere unrelated. Also reverted the one live character (Elduinn)
+who'd already hit this -- the_cinder_keys_reckoning completion and The
+Cinder Key removed so he gets the real fight; the trivial 350 XP/80
+gold was left alone (negligible at his scale).
+
+Tested: both guardians confirmed as real, exclusively-used monster_keys
+(present nowhere else in the campaign); a real regression reproducing
+the exact live bug (a character with the common monster already in
+`defeated_monsters`, offered the quest via the real
+`_maybe_push_quest_offer` path) confirms it no longer auto-completes;
+the pre-existing 2026-08-29 auto-complete safety net itself re-verified
+still working correctly for its real, intended unique-boss case. Full
+Wrathflame/Deep Root/bonus-vault slice re-run clean (24/24).
+
 ## [1.27.422] — dungeon redesign Phase 2: the Deep Root Vault is a real hub-and-spoke now
 
 Phase 2 of the 8-dungeon redesign (see v1.27.420/421), same template as

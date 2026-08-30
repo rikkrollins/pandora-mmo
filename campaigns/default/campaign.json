@@ -6225,7 +6225,7 @@
           "up": "wrathflame_vault_ember_font"
         },
         "monsters": [
-          "cinder_hound"
+          "the_bound_cinder_hound"
         ],
         "lockables": [
           {
@@ -6306,7 +6306,7 @@
           "up": "deep_root_vault_weeping_spring"
         },
         "monsters": [
-          "withering_bramble"
+          "the_root_bound_husk"
         ],
         "lockables": [
           {
@@ -9395,12 +9395,12 @@
       "location": "wrathflame_vault_cinder_key_alcove",
       "trigger": {
         "type": "defeat_monster",
-        "monster": "cinder_hound"
+        "monster": "the_bound_cinder_hound"
       },
       "reward_xp": 350,
       "reward_gold": 80,
       "reward_item": "the_cinder_key",
-      "clue": "The alcove's guardian won't move until it's put down for good."
+      "clue": "The alcove's own bound guardian won't move until it's put down for good."
     },
     "the_root_bound_alcoves_secret": {
       "title": "What the Voice Protects",
@@ -9420,12 +9420,12 @@
       "location": "deep_root_vault_last_seed",
       "trigger": {
         "type": "defeat_monster",
-        "monster": "withering_bramble"
+        "monster": "the_root_bound_husk"
       },
       "reward_xp": 360,
       "reward_gold": 90,
       "reward_item": "the_last_seed",
-      "clue": "Whatever's curled around the seed won't move until it's put down for good."
+      "clue": "Whatever's curled around the seed won't move until it's put down for good, and it isn't the same thing you've fought anywhere else."
     }
   },
   "story_arcs": {
@@ -12513,6 +12513,32 @@
           "weight": 90
         }
       ]
+    },
+    "the_bound_cinder_hound": {
+      "name": "The Bound Cinder Hound",
+      "level": 10,
+      "dexterity": 15,
+      "strength": 12,
+      "armor_class": 15,
+      "hp_max": 220,
+      "proficiency_bonus": 3,
+      "xp_reward": 220,
+      "damage_dice": "1d8",
+      "damage_bonus": 22,
+      "damage_type": "fire"
+    },
+    "the_root_bound_husk": {
+      "name": "The Root-Bound Husk",
+      "level": 18,
+      "dexterity": 13,
+      "strength": 17,
+      "armor_class": 17,
+      "hp_max": 520,
+      "proficiency_bonus": 5,
+      "xp_reward": 400,
+      "damage_dice": "1d8",
+      "damage_bonus": 38,
+      "damage_type": "poison"
     }
   },
   "factions": {

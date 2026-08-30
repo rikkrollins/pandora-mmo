@@ -5605,10 +5605,54 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
     def test_wrathflame_vault_cinder_key_quest_registered_against_its_real_guardian(self):
         """The key is a real defeat_monster reward, not a free pickup -- registered in the same _QUEST_MONSTER_INDEX every other quest-tied monster uses."""
-        self.assertIn("the_cinder_keys_reckoning", bot._QUEST_MONSTER_INDEX.get("cinder_hound", []))
+        self.assertIn("the_cinder_keys_reckoning", bot._QUEST_MONSTER_INDEX.get("the_bound_cinder_hound", []))
         quest = bot.CAMPAIGN["quests"]["the_cinder_keys_reckoning"]
         self.assertEqual(quest["reward_item"], "the_cinder_key")
         self.assertEqual(quest["location"], "wrathflame_vault_cinder_key_alcove")
+
+    def test_wrathflame_vault_key_guardian_is_a_real_unique_monster_not_the_common_hound(self):
+        """
+        Real live bug (2026-08-30, dev-bridge, Coffee: "How did I complete
+        the quest I didn't do anything yet?!"). Root cause: the guardian
+        was plain "cinder_hound" -- the SAME monster_key as Ember Hall's
+        ordinary wandering encounter in this same dungeon, so any
+        character who'd ever fought one anywhere already had it in their
+        real defeated_monsters, and the game's own real "defeat_monster
+        quest auto-completes on offer if the target's already dead"
+        safety net (built for genuinely unique bosses) fired instantly
+        with zero real fight. The guardian must be its own real,
+        never-shared monster_key.
+        """
+        self.assertEqual(cl.get_location(bot.CAMPAIGN, "wrathflame_vault_cinder_key_alcove")["monsters"], ["the_bound_cinder_hound"])
+        for layer, locs in bot.CAMPAIGN["locations"].items():
+            for loc_id, loc in locs.items():
+                if loc_id == "wrathflame_vault_cinder_key_alcove":
+                    continue
+                self.assertNotIn("the_bound_cinder_hound", loc.get("monsters") or [], f"{loc_id} also uses the guardian's unique monster_key")
+
+    async def test_a_prior_unrelated_cinder_hound_kill_never_auto_completes_the_key_quest(self):
+        """
+        The exact live repro (2026-08-30): a character who fought the
+        ordinary Ember Hall hound (or any other cinder_hound, anywhere)
+        long before ever seeing this dungeon must NOT have
+        _maybe_push_quest_offer's real "already-defeated" auto-complete
+        safety net fire for the key quest -- that net is real and
+        correct for genuinely unique targets, which is exactly why the
+        guardian now has its own real monster_key the common hound
+        never shares.
+        """
+        from unittest.mock import patch, AsyncMock
+        user_id = 960220
+        character = make_basic_character(user_id, "PriorHoundKillTester", current_location="wrathflame_vault_cinder_key_alcove")
+        db.update_character(user_id, -999, defeated_monsters=["cinder_hound"])
+        character = db.get_character(user_id, -999)
+        quest_id, quest = "the_cinder_keys_reckoning", bot.CAMPAIGN["quests"]["the_cinder_keys_reckoning"]
+        sink = []
+        update = FakeUpdate(user_id, "", sink, chat_id=-999)
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._maybe_push_quest_offer(update, character, quest_id, quest)
+        char = db.get_character(user_id, -999)
+        self.assertNotIn("the_cinder_keys_reckoning", char.get("completed_quests") or [], "a prior kill of the COMMON hound must never silently grant the key")
 
     async def test_wrathflame_vault_key_gate_blocks_branch_b_without_the_key_and_opens_with_it(self):
         location = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_ember_hall")
@@ -5723,10 +5767,33 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("the_root_bound_alcoves_secret", character.get("completed_quests") or [])
 
     def test_deep_root_vault_seed_quest_registered_against_its_real_guardian(self):
-        self.assertIn("the_last_seeds_reckoning", bot._QUEST_MONSTER_INDEX.get("withering_bramble", []))
+        self.assertIn("the_last_seeds_reckoning", bot._QUEST_MONSTER_INDEX.get("the_root_bound_husk", []))
         quest = bot.CAMPAIGN["quests"]["the_last_seeds_reckoning"]
         self.assertEqual(quest["reward_item"], "the_last_seed")
         self.assertEqual(quest["location"], "deep_root_vault_last_seed")
+
+    def test_deep_root_vault_key_guardian_is_a_real_unique_monster_not_the_common_bramble(self):
+        """Same real bug/fix as the Wrathflame Vault guardian -- withering_bramble is ALSO the ordinary Bramble Maze encounter in this same dungeon, so the key guardian needs its own real, never-shared monster_key."""
+        self.assertEqual(cl.get_location(bot.CAMPAIGN, "deep_root_vault_last_seed")["monsters"], ["the_root_bound_husk"])
+        for layer, locs in bot.CAMPAIGN["locations"].items():
+            for loc_id, loc in locs.items():
+                if loc_id == "deep_root_vault_last_seed":
+                    continue
+                self.assertNotIn("the_root_bound_husk", loc.get("monsters") or [], f"{loc_id} also uses the guardian's unique monster_key")
+
+    async def test_a_prior_unrelated_withering_bramble_kill_never_auto_completes_the_seed_quest(self):
+        from unittest.mock import patch, AsyncMock
+        user_id = 960221
+        character = make_basic_character(user_id, "PriorBrambleKillTester", current_location="deep_root_vault_last_seed")
+        db.update_character(user_id, -999, defeated_monsters=["withering_bramble"])
+        character = db.get_character(user_id, -999)
+        quest_id, quest = "the_last_seeds_reckoning", bot.CAMPAIGN["quests"]["the_last_seeds_reckoning"]
+        sink = []
+        update = FakeUpdate(user_id, "", sink, chat_id=-999)
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._maybe_push_quest_offer(update, character, quest_id, quest)
+        char = db.get_character(user_id, -999)
+        self.assertNotIn("the_last_seeds_reckoning", char.get("completed_quests") or [], "a prior kill of the COMMON bramble must never silently grant the seed")
 
     async def test_deep_root_vault_key_gate_blocks_branch_b_without_the_seed_and_opens_with_it(self):
         location = cl.get_location(bot.CAMPAIGN, "deep_root_vault_spore_hollow")
