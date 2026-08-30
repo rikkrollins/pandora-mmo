@@ -5580,6 +5580,34 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chest2["kind"], "chest")
         self.assertIn("greater_healing_potion", chest2["loot"])
 
+    # -- Real live bug (2026-08-30, dev-bridge, Coffee/Elduinn: "Drink
+    #    from the warm clear spring" got "Use what, exactly? Name a
+    #    consumable you're actually carrying.") -- the expansion's own
+    #    checkpoint rooms describe their water as a spring/pool, never
+    #    the bare word "water", so the existing drink_water fast-path
+    #    never matched real player phrasing at all. ------------------
+    def test_drink_spring_or_pool_classifies_as_drink_water_not_use_item(self):
+        for phrase in ("Drink from the warm clear spring", "drink from the pool", "I drink the water"):
+            result = _keyword_fallback(phrase, [], None)
+            self.assertEqual(result["action"], "drink_water", f"{phrase!r} misclassified as {result['action']!r}")
+
+    def test_checkpoint_rooms_are_real_healing_water_locations(self):
+        for loc_id in (
+            "wrathflame_vault_ember_font", "deep_root_vault_weeping_spring", "sunken_root_caverns_the_kept_shrine",
+        ):
+            loc = cl.get_location(bot.CAMPAIGN, loc_id)
+            self.assertTrue(loc.get("healing_water"), f"{loc_id} should be a real healing_water location")
+
+    async def test_drinking_at_a_new_checkpoint_room_actually_heals(self):
+        """End-to-end: the real _do_drink_water handler, not just the flag/classification in isolation."""
+        user_id = 900970
+        make_basic_character(user_id, "SpringDrinker", current_location="wrathflame_vault_ember_font")
+        db.update_character(user_id, -999, hp_current=1)
+        sink = []
+        await bot._do_drink_water(FakeUpdate(user_id, "drink from the spring", sink))
+        character = db.get_character(user_id, -999)
+        self.assertGreater(character["hp_current"], 1)
+
     def test_bonus_vault_map_item_quests_are_real_and_grant_the_right_map(self):
         forge_quest = bot.CAMPAIGN["quests"]["the_deep_forges_cinder_map"]
         self.assertEqual(forge_quest["trigger"], {"type": "defeat_monster", "monster": "molten_sentinel"})

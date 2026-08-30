@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.415] — fix "drink from the spring" misrouting to the item-use error
+
+Real live bug (2026-08-30, dev-bridge, Coffee/Elduinn: "Drink from the
+warm clear spring" got "Use what, exactly? Name a consumable you're
+actually carrying." at the Wrathflame Vault's Ember Font). Two real,
+stacked causes, both fixed:
+
+- The Chapter 3-8 expansion's own new checkpoint rooms (the Wrathflame
+  Vault's Ember Font, the Deep Root Vault's Weeping Spring, Chapter 6's
+  Kept Shrine) describe their water as a "spring"/"pool" in their own
+  flavor text, but were never actually flagged with the real, existing
+  `healing_water` location flag `_do_drink_water` already checks --
+  drinking there would have done nothing even if classified correctly.
+- Separately, and more directly causing the observed error: an earlier,
+  more generic `"drink "` catch-all in the intent parser's keyword
+  fallback matched before the real `drink_water` fast-path ever got a
+  chance, unconditionally routing to `use_item` instead. Fixed by
+  deferring to `drink_water` whenever the text also mentions water/a
+  spring/a pool -- "drink the healing potion"/"drink my potion" still
+  correctly land on `use_item` exactly as before, confirmed by test.
+
+Verified with real executed tests: fast-path classification, the
+`healing_water` flag now present on all three checkpoint rooms, and an
+end-to-end test of the real `_do_drink_water` handler actually healing
+at one of them. No regressions in the existing use_item/quaff test
+suite.
+
 ## [1.27.414] — Chapter 7 expansion, Phase 5: Stonearch Gorge grows to 36 rooms, Kess's first real fight
 
 Fifth installment of the approved Chapter 3-8 expansion plan, and the

@@ -3007,7 +3007,8 @@
         "grid_position": {
           "x": 2,
           "y": 5
-        }
+        },
+        "healing_water": true
       },
       "wrathflame_vault_smoldering_stair": {
         "name": "The Smoldering Stair",
@@ -3226,7 +3227,8 @@
         "grid_position": {
           "x": 0,
           "y": -6
-        }
+        },
+        "healing_water": true
       },
       "deep_root_vault_sentinel_hollow": {
         "name": "The Sentinel Hollow",
@@ -4543,7 +4545,8 @@
         "grid_position": {
           "x": 0,
           "y": 9
-        }
+        },
+        "healing_water": true
       },
       "sunken_root_caverns_the_shrines_after": {
         "name": "Past the Kept Shrine",

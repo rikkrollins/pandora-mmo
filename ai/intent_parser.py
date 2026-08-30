@@ -2106,7 +2106,17 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # that ISN'T a registered NPC/companion name (a fellow real
     # player's own character, for instance) still needs this bare
     # fallback copy to ever match at all.
-    if any(w in lowered for w in ["drink ", "quaff"]) \
+    # Real live bug (2026-08-30, dev-bridge, Coffee/Elduinn: "Drink from
+    # the warm clear spring" got "Use what, exactly? Name a consumable
+    # you're actually carrying."): this "drink " catch-all fires before
+    # the real drink_water fast-path further below ever gets a chance,
+    # since a location's own water/spring/pool is never a carried item.
+    # Deferring to drink_water here (instead of duplicating its own
+    # water/spring/pool wording check) keeps exactly one place deciding
+    # what counts as "drinkable location water" -- "drink my potion"/
+    # "drink the vial" etc. still lands on use_item exactly as before,
+    # since none of those mention water/spring/pool.
+    if (any(w in lowered for w in ["drink ", "quaff"]) and not any(w in lowered for w in ("water", "spring", "pool"))) \
             or re.search(r"\buse (the|my|a|an)\b", lowered) \
             or re.search(r"\buse\s+\S.*\bon\b", lowered) \
             or re.search(r"\beats?\b", lowered):
@@ -2244,7 +2254,17 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # _do_drink_water is the one place that decides whether THIS
     # location's water does anything, so this fast-path only ever needs
     # to recognize the plain verb, never which location is special.
-    if re.search(r"\bdrink(?:s|ing)?\b", lowered) and "water" in lowered:
+    # Real live bug (2026-08-30, dev-bridge, Coffee/Elduinn: "Drink from
+    # the warm clear spring" got "Use what, exactly? Name a consumable
+    # you're actually carrying." -- the Chapter 3-8 expansion's own new
+    # checkpoint rooms describe their water as a "spring"/"pool" in
+    # their own flavor text, matching real player phrasing that never
+    # says the bare word "water" at all. Widened to the same real
+    # synonyms _do_drink_water's own docstring already treats as
+    # interchangeable ("holy water", a spring, a pool) -- still gated
+    # on the drink verb itself, so this never fires on an unrelated
+    # sentence that merely mentions a spring/pool in passing.
+    if re.search(r"\bdrink(?:s|ing)?\b", lowered) and any(w in lowered for w in ("water", "spring", "pool")):
         return {**base, "action": "drink_water"}
 
     # choose_subclass (2026-07-24 pilot: Wizard's Arcane Tradition;
