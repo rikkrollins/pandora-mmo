@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.407] — Summoned spirits mirror the caster's own stats and spells, not fixed flavor numbers
+
+Per Coffee: "use the players stats for the damage and magic and other
+stats also but also use the RNG we spoke about before so there is some
+variance... they shud have their abilities too - maybe like a copycat
+or mimic of the player? make sure the spirits can use them all."
+
+Summoned spirits (Summon Lesser/Greater/Elder Spirit) already scaled
+HP/damage off the caster's own level and weapon, with a real 0.85x-
+1.15x RNG roll on top (biased better by the caster's own Summoning
+proficiency) -- but dexterity, strength, and armor_class were still
+each tier's own fixed authored numbers (identical for every caster),
+and known_spells was a fixed 2-spell list per tier, not the caster's
+own real spells.
+
+- Dexterity/strength/armor_class now mirror the caster's own real
+  stats, scaled by the same level-cap ratio and RNG roll already
+  applied to HP/damage -- a low-tier scroll still produces a real but
+  weaker echo of the caster, not a full-power clone.
+- `known_spells` is now a genuine, complete copy of the caster's own
+  real known_spells -- every spell they know, not an approximation.
+  Spell damage itself already scales correctly off the summon's real
+  "level" field via the existing rules pipeline, so this needed no new
+  plumbing.
+- Removed the now-unused `SPIRIT_TIER_KNOWN_SPELLS` fixed-ability list.
+- Confirmed with a real fail-then-pass test proving RNG variance
+  genuinely lands on the newly-mirrored stats, plus a full re-run of
+  the summon test suite.
+
 ## [1.27.406] — Kess's story now requires actually reaching Chapter 8
 
 Real, direct player feedback: "your telling us to do chapter 8 content

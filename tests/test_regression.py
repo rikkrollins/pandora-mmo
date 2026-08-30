@@ -6581,8 +6581,53 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(spirit["proficiency_bonus"], bot.proficiency_bonus_for_level(8))
         self.assertEqual(spirit["damage_dice"], caster_weapon["damage_dice"])
         self.assertEqual(spirit["damage_bonus"], caster_weapon.get("damage_bonus", 0))
-        # Real spell-authored flavor stats stay untouched -- only HP/level/damage scale.
-        self.assertEqual(spirit["armor_class"], spells.SPELLS["summon_lesser_spirit"]["summon_stats"]["armor_class"])
+        # Real live request (2026-08-30, Coffee: "use the players stats
+        # for the damage and magic and other stats also") -- dexterity/
+        # strength/armor_class now mirror the CASTER's own real stats
+        # (with RNG mocked to a no-op here, and cap_factor == 1.0 since
+        # real_level == the scroll's own cap), not the spell's old
+        # fixed flavor numbers.
+        self.assertEqual(spirit["armor_class"], caster["armor_class"])
+        self.assertEqual(spirit["dexterity"], caster["dexterity"])
+        self.assertEqual(spirit["strength"], caster["strength"])
+        sessions.end_session(-999)
+
+    async def test_summon_mirrored_ability_scores_actually_get_the_real_rng_variance(self):
+        """
+        Real live request (2026-08-30, Coffee: "use the players stats
+        for the damage and magic and other stats also but also use the
+        RNG we spoke about before so there is some variance"). Forces
+        a real, non-1.0 variance roll and confirms it actually lands on
+        the mirrored dexterity/strength/armor_class, not just HP/damage
+        as before -- proves the RNG is genuinely applied to the new
+        stats, not silently skipped.
+        """
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        caster_id = 900483
+        make_basic_character(
+            caster_id, "VarianceSummoner", char_class="Wizard",
+            known_spells=["summon_lesser_spirit"], spell_slots_max=3, current_location="crossroads_tavern",
+        )
+        db.update_character(caster_id, -999, level=8, spell_slots_current=3, strength=16, dexterity=14, armor_class=18)
+        enemy = {"telegram_user_id": -5200915, "name": "VarianceDummy", "dexterity": 10, "strength": 10,
+                 "armor_class": 5, "hp_current": 200, "hp_max": 200, "conditions": [],
+                 "is_ai": 1, "monster_key": "goblin"}
+        caster = db.get_character(caster_id, -999)
+        caster["telegram_user_id"] = caster_id
+        session = sessions.start_session(-999, [caster, enemy], {caster_id: "party", -5200915: "enemy"})
+        session.turn_order = [caster_id, -5200915]
+
+        sink = []
+        with patch("bot.narrate_action", return_value="The blow lands."), \
+                patch("bot._get_combat_throttle_seconds", return_value=0.0), \
+                patch("bot._summon_rng_variance", return_value=1.15):
+            await bot._do_cast_spell(FakeUpdate(caster_id, "cast summon lesser spirit", sink), "cast summon lesser spirit")
+        spirit = next(p for p in session.participants if p.get("name") == "A Lesser Spirit")
+        self.assertEqual(spirit["strength"], round(16 * 1.15))
+        self.assertEqual(spirit["dexterity"], round(14 * 1.15))
+        self.assertEqual(spirit["armor_class"], round(18 * 1.15))
         sessions.end_session(-999)
 
     async def test_summon_scroll_soft_caps_the_spirit_below_a_much_higher_caster(self):
@@ -6673,26 +6718,24 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(bot.SUMMON_RNG_MIN_VARIANCE <= r <= bot.SUMMON_RNG_MAX_VARIANCE for r in low_rolls + high_rolls))
         self.assertGreater(sum(high_rolls) / len(high_rolls), sum(low_rolls) / len(low_rolls))
 
-    async def test_each_spirit_tier_has_2_real_abilities_with_a_magic_and_damage_type(self):
-        """Real live request (2026-08-21, Coffee: "2 for each tier, a magic type, and a damage type") -- each tier's own known_spells resolve to 2 real, distinct damage spells."""
-        for spell_id, ability_ids in bot.SPIRIT_TIER_KNOWN_SPELLS.items():
-            self.assertEqual(len(ability_ids), 2, spell_id)
-            for aid in ability_ids:
-                ability = spells.get_spell(aid)
-                self.assertIsNotNone(ability, aid)
-                self.assertEqual(ability["effect"], "damage")
-                self.assertTrue(ability["school"])
-                self.assertTrue(ability["damage_type"])
-
-    async def test_summoned_spirit_gets_its_tiers_real_known_spells(self):
-        """A real cast actually sets known_spells on the live summon dict, not just the spells.py catalog."""
+    async def test_summoned_spirit_mimics_the_casters_own_full_known_spells(self):
+        """
+        Real live request (2026-08-30, Coffee: "they shud have their
+        abilities too - maybe like a copycat or mimic of the player?
+        make sure the spirits can use them all"). Superseded the old
+        fixed 2-spell-per-tier list (SPIRIT_TIER_KNOWN_SPELLS, removed)
+        -- a summoned spirit now gets a genuine, exact copy of the
+        CASTER's own real known_spells, every one of them, not an
+        approximation or a subset.
+        """
         import sessions
         from unittest.mock import patch
         sessions.end_session(-999)
         caster_id = 900488
+        caster_spells = ["summon_greater_spirit", "fireball", "magic_missile", "shield"]
         make_basic_character(
             caster_id, "AbilitySummoner", char_class="Wizard",
-            known_spells=["summon_greater_spirit"], spell_slots_max=3, current_location="crossroads_tavern",
+            known_spells=caster_spells, spell_slots_max=3, current_location="crossroads_tavern",
         )
         db.update_character(caster_id, -999, level=60, spell_slots_current=3)
         enemy = {"telegram_user_id": -5200913, "name": "AbilityDummy2", "dexterity": 10, "strength": 10,
@@ -6706,7 +6749,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 patch("bot._get_combat_throttle_seconds", return_value=0.0):
             await bot._do_cast_spell(FakeUpdate(caster_id, "cast summon greater spirit", sink), "cast summon greater spirit")
         spirit = next(p for p in session.participants if p.get("name") == "A Greater Spirit")
-        self.assertEqual(spirit["known_spells"], ["spirit_rend", "spirit_wail"])
+        self.assertEqual(spirit["known_spells"], caster_spells)
         sessions.end_session(-999)
 
     def test_summon_removed_from_battle_outright_on_death_no_death_save(self):

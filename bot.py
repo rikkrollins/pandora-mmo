@@ -27331,26 +27331,14 @@ def _text_mentions_spell(spell_id: str, spell_name: str, lowered_text: str) -> b
     return difflib.SequenceMatcher(None, squashed_text, squashed_name).ratio() >= 0.82
 
 
-# Real spirit-summon abilities (2026-08-21, per Coffee: "2 for each
-# tier, a magic type, and a damage type") -- each tier's own known_
-# spells (spells.py), picked up automatically by the existing side-
-# agnostic monster-spellcasting mechanic (_decide_monster_spell/
-# _maybe_monster_cast_spell) the moment they're set on the summon dict.
-SPIRIT_TIER_KNOWN_SPELLS = {
-    "summon_lesser_spirit": ["spirit_lash", "spirit_bolt"],
-    "summon_spirit": ["spirit_flare", "spirit_ray"],
-    "summon_greater_spirit": ["spirit_rend", "spirit_wail"],
-    "summon_elder_spirit": ["spirit_dread", "spirit_collapse"],
-}
-
-# Real RNG variance on a summon's HP/damage (2026-08-21, per Coffee:
-# "use RNG so they dont always have the same stats... higher the
-# proficience the higher the odds of RNG"). Scoped to hp_max/damage_
-# bonus only -- armor_class/dexterity/strength stay each tier's fixed
-# authored baseline (spells.py's summon_stats), so this never also
-# swings to-hit odds (this session's separate natural-attack
-# proficiency fix) or lets a low tier's roll cross into a higher tier's
-# territory.
+# Real RNG variance on a summon's HP/damage/mirrored ability scores
+# (2026-08-21, per Coffee: "use RNG so they dont always have the same
+# stats... higher the proficience the higher the odds of RNG").
+# Originally scoped to hp_max/damage_bonus only; extended 2026-08-30 to
+# also cover the caster-mirrored dexterity/strength/armor_class (see
+# the "summon" effect handler in _do_cast_spell) once those stopped
+# being each tier's fixed authored baseline and started mirroring the
+# real caster instead.
 SUMMON_RNG_MIN_VARIANCE = 0.85
 SUMMON_RNG_MAX_VARIANCE = 1.15
 
@@ -27947,18 +27935,42 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
             variance = _summon_rng_variance(character.get("summoning_mastery_pct", PROFICIENCY_STARTING_PCT))
             hp_max = round(hp_max * variance)
             damage_bonus = round(damage_bonus * variance)
+            # Real live request (2026-08-30, per Coffee: "use the
+            # players stats for the damage and magic and other stats
+            # also but also use the RNG we spoke about before so there
+            # is some variance" -- "and they shud have their abilities
+            # too - maybe like a copycat or mimic of the player? make
+            # sure the spirits can use them all"). Dexterity/strength/
+            # armor_class used to be the spell's own fixed flavor
+            # numbers (10-16 range, identical for every caster) --
+            # mirrored from the caster's own real stats now, same
+            # cap_factor/variance treatment already given to HP and
+            # damage_bonus just above, so a low-tier scroll still
+            # produces a real but weaker echo of the caster rather than
+            # a full-power clone. known_spells is now a genuine copy of
+            # the caster's own real known_spells (every spell they
+            # know, not the old fixed 2-spell-per-tier list) -- a real
+            # mimic, not an approximation. _decide_monster_spell already
+            # filters to real damage spells and rolls a real per-turn
+            # chance to cast one, so this needs no new plumbing;
+            # spell damage itself already scales off the "level" field
+            # set below via power_scale_ratio (spells.py's resolve_
+            # damage_spell), exactly like every other real caster.
+            dexterity = max(1, round(character.get("dexterity", 10) * cap_factor * variance))
+            strength = max(1, round(character.get("strength", 10) * cap_factor * variance))
+            armor_class = max(1, round(character.get("armor_class", 10) * cap_factor * variance))
             summon = {
                 "telegram_user_id": synthetic_id, "name": stats["name"].title(),
-                "dexterity": stats["dexterity"], "strength": stats["strength"],
-                "armor_class": stats["armor_class"], "hp_current": hp_max,
+                "dexterity": dexterity, "strength": strength,
+                "armor_class": armor_class, "hp_current": hp_max,
                 "hp_max": hp_max, "proficiency_bonus": proficiency_bonus_for_level(effective_level),
                 "level": effective_level,
                 "damage_dice": caster_weapon["damage_dice"], "damage_bonus": damage_bonus,
                 "damage_type": caster_weapon.get("damage_type", "physical"),
-                "known_spells": SPIRIT_TIER_KNOWN_SPELLS.get(spell_id, []),
+                "known_spells": list(character.get("known_spells") or []),
                 "is_ai": 1, "xp_reward": 0,
             }
-            summon["initiative"] = roll_d20() + ability_modifier(stats["dexterity"])
+            summon["initiative"] = roll_d20() + ability_modifier(dexterity)
             session.participants.append(summon)
             session.turn_order.append(synthetic_id)
             session.sides[synthetic_id] = "party"
