@@ -264,3 +264,26 @@ def make_basic_character(user_id: int, name: str = "Elduinn", **overrides) -> di
     )
     fields.update(overrides)
     return db.create_character(**fields)
+
+
+# Every real quest in story arcs 1-7, in campaign.json's own arc order
+# -- completing all of these makes arc_8 the character's real current
+# arc (_current_story_arc), needed by any test exercising a quest with
+# a real "requires_current_arc" field (2026-08-30, the Kess-sequencing
+# fix). Kept as one shared list here rather than repeated inline in
+# every test that needs it.
+ARCS_1_THROUGH_7_QUEST_IDS = (
+    "welcome_to_the_crossroads", "the_hollow_stump", "clear_the_warrens",
+    "the_wrong_color", "the_hush_stage1_signs", "the_hush_stage2_the_wisp", "the_hush_stage3_the_unspoken",
+    "first_city_arrival", "the_first_city_quest", "the_archives_recess", "conflict_at_crossroads_tavern",
+    "unmoored_isle_arrival", "the_unmoored_isle_quest",
+    "supply_tunnels_veteran", "the_collapsed_tunnels_survivor", "deep_larders_elder",
+    "flooded_gallerys_hold", "the_side_pools_straggler", "the_channels_keeper", "the_hollow_wellsprings_elder",
+    "web_hollows_brood", "silked_nooks_hatchling", "deep_currents_keeper", "the_undertows_elder",
+)
+
+
+def complete_arcs_1_through_7(user_id: int, chat_id: int = -999) -> None:
+    """Marks every real quest in story arcs 1-7 complete, so arc_8 becomes the character's real current arc."""
+    for quest_id in ARCS_1_THROUGH_7_QUEST_IDS:
+        db.complete_quest(user_id, chat_id, quest_id)

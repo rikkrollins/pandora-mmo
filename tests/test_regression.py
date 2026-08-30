@@ -40,7 +40,7 @@ from rules.combat import resolve_attack, reaction_precheck
 from rules.crafting import RECIPES
 from tests.helpers import (
     DummyContext, DummyMessage, FakeBot, FakeCallbackUpdate, FakeChat, FakeUpdate, FakeUser,
-    make_basic_character, use_test_db,
+    make_basic_character, use_test_db, complete_arcs_1_through_7,
 )
 
 
@@ -16641,7 +16641,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         Completing first_city_arrival alone (the OLD prerequisite,
         before the 2026-08-28 bridge-quest request) must no longer be
         enough on its own -- borins_blackthorn_warning now requires
-        the real conflict_at_crossroads_tavern quest specifically.
+        the real conflict_at_crossroads_tavern quest specifically, AND
+        (2026-08-30, real live feedback -- see _meets_quest_current_
+        arc_requirement's own docstring) arc_8 must be genuinely
+        current, not just conflict_at_crossroads_tavern completed in
+        isolation.
         """
         user_id = 999933
         make_basic_character(user_id, "OldPrereqSeeker", current_location="crossroads_tavern")
@@ -16655,7 +16659,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "first_city_arrival alone should no longer satisfy Borin's real prerequisite",
         )
 
-        db.complete_quest(user_id, -999, "conflict_at_crossroads_tavern")
+        complete_arcs_1_through_7(user_id)
         character = db.get_character(user_id, -999)
         offer = bot._offerable_companion_quest(character)
         self.assertEqual(offer[0], "borins_blackthorn_warning")
@@ -16699,6 +16703,81 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("kess_first_reckoning", character["active_quests"])
         sessions.end_session(-999)
 
+    # -- Kess sequencing fix (2026-08-30, real live player feedback:
+    #    "we want to follow the story path in order and we still have
+    #    no idea who kess is and there has been NO story development of
+    #    that character"). borins_blackthorn_warning (Kess's real entry
+    #    point) previously bypassed the "must be the character's
+    #    globally current arc" restriction entirely (both via its own
+    #    requires_completed_quest exemption in _offerable_quest_at_
+    #    location, and via _offerable_companion_quest never checking
+    #    arc-current for ANY companion quest) -- a party could recruit
+    #    Borin and walk his whole personal quest line, including all of
+    #    Kess's escalating chapters, having skipped 100% of the real
+    #    Chapters 4-7 foreshadowing built specifically so she doesn't
+    #    come out of nowhere. See _meets_quest_current_arc_requirement's
+    #    own docstring. --------------------------------------------
+    async def test_borins_blackthorn_warning_not_offerable_via_companion_before_arc_8_is_current(self):
+        user_id = 999947
+        make_basic_character(user_id, "TooEarlyCompanionSeeker", current_location="crossroads_tavern")
+        await bot._do_recruit_npc(FakeUpdate(user_id, "recruit Borin Ironjaw", []), "Borin Ironjaw")
+        db.complete_quest(user_id, -999, "borins_vouching_task")
+        db.complete_quest(user_id, -999, "borins_resolution")
+        db.complete_quest(user_id, -999, "conflict_at_crossroads_tavern")
+        character = db.get_character(user_id, -999)
+        self.assertNotEqual(
+            bot._current_story_arc(character)[0], "arc_8_greymoor_downs",
+            "sanity check -- this character genuinely hasn't reached arc_8 yet",
+        )
+        self.assertIsNone(
+            bot._offerable_companion_quest(character),
+            "borins_blackthorn_warning must not be offered before arc_8 is genuinely current, even with its real prerequisite done",
+        )
+
+    def test_borins_blackthorn_warning_not_offerable_at_location_before_arc_8_is_current(self):
+        """Same real gap, the OTHER path in -- the tavern's own location-based offer must respect it too, not just the companion path."""
+        user_id = 999948
+        make_basic_character(user_id, "TooEarlyLocationSeeker", current_location="crossroads_tavern")
+        # welcome_to_the_crossroads (Grimsby's own, ungated) is also a
+        # real quest at this same location and comes first in dict
+        # order -- clear it out of the way, same as the sibling test.
+        db.complete_quest(user_id, -999, "welcome_to_the_crossroads")
+        db.complete_quest(user_id, -999, "conflict_at_crossroads_tavern")
+        character = db.get_character(user_id, -999)
+        self.assertIsNone(bot._offerable_quest_at_location(character, "crossroads_tavern"))
+
+    async def test_borins_blackthorn_warning_becomes_offerable_once_arc_8_is_genuinely_current(self):
+        """No-regression companion to the two tests above -- it DOES become offerable, via either path, once arcs 1-7 are genuinely done."""
+        user_id = 999949
+        make_basic_character(user_id, "ReadyForArc8Seeker", current_location="crossroads_tavern")
+        await bot._do_recruit_npc(FakeUpdate(user_id, "recruit Borin Ironjaw", []), "Borin Ironjaw")
+        db.complete_quest(user_id, -999, "borins_vouching_task")
+        db.complete_quest(user_id, -999, "borins_resolution")
+        complete_arcs_1_through_7(user_id)
+        character = db.get_character(user_id, -999)
+        self.assertEqual(bot._current_story_arc(character)[0], "arc_8_greymoor_downs")
+
+        companion_offer = bot._offerable_companion_quest(character)
+        self.assertEqual(companion_offer[0], "borins_blackthorn_warning")
+        location_offer = bot._offerable_quest_at_location(character, "crossroads_tavern")
+        self.assertEqual(location_offer[0], "borins_blackthorn_warning")
+
+    async def test_other_companion_quests_are_unaffected_by_the_current_arc_requirement(self):
+        """
+        No-regression: this is a per-quest opt-in, not a blanket
+        policy change -- Borin's OWN earlier personal quests (which
+        have no requires_current_arc field) must stay exactly as
+        reachable as they always were, regardless of the character's
+        current arc.
+        """
+        user_id = 999950
+        make_basic_character(user_id, "OtherCompanionSeeker", current_location="crossroads_tavern")
+        await bot._do_recruit_npc(FakeUpdate(user_id, "recruit Borin Ironjaw", []), "Borin Ironjaw")
+        character = db.get_character(user_id, -999)
+        self.assertNotEqual(bot._current_story_arc(character)[0], "arc_8_greymoor_downs")
+        offer = bot._offerable_companion_quest(character)
+        self.assertEqual(offer[0], "borins_vouching_task")
+
     async def test_borin_offers_the_blackthorn_warning_only_after_his_own_arc_resolves(self):
         """
         _offerable_companion_quest matches the first not-yet-completed/
@@ -16740,8 +16819,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "shouldn't offer the Blackthorn reveal before reaching the first city",
         )
 
-        db.complete_quest(user_id, -999, "first_city_arrival")
-        db.complete_quest(user_id, -999, "conflict_at_crossroads_tavern")
+        complete_arcs_1_through_7(user_id)
         character = db.get_character(user_id, -999)
         third = bot._offerable_companion_quest(character)
         self.assertEqual(third[0], "borins_blackthorn_warning")
@@ -16782,10 +16860,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # welcome_to_the_crossroads (Grimsby's own, ungated) is also a
         # real quest at this same location and comes first in dict
         # order -- clear it out of the way so the check below isolates
-        # borins_blackthorn_warning specifically.
-        db.complete_quest(user_id, -999, "welcome_to_the_crossroads")
-        db.complete_quest(user_id, -999, "first_city_arrival")
-        db.complete_quest(user_id, -999, "conflict_at_crossroads_tavern")
+        # borins_blackthorn_warning specifically. complete_arcs_1_
+        # through_7 (2026-08-30, real live feedback -- see _meets_
+        # quest_current_arc_requirement's own docstring) makes arc_8
+        # genuinely current, now required on top of the real prereq.
+        complete_arcs_1_through_7(user_id)
         character = db.get_character(user_id, -999)
 
         offer = bot._offerable_quest_at_location(character, "crossroads_tavern")

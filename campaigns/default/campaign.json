@@ -3225,6 +3225,7 @@
       "location": "crossroads_tavern",
       "giver_npc": "borin_ironjaw",
       "requires_completed_quest": "conflict_at_crossroads_tavern",
+      "requires_current_arc": true,
       "reward_xp": 200,
       "reward_gold": 0,
       "reward_item": "torn_ledger_page",

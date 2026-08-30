@@ -12856,14 +12856,21 @@ def _meets_quest_arc_order_requirement(character: dict, quest_id: str) -> bool:
     enforcement whatsoever, dict order alone decided what showed up.
 
     Deliberately does NOT also require the quest's own arc to be the
-    character's globally CURRENT arc (_current_story_arc) -- that's
-    _offerable_quest_at_location's own separate, stricter check, kept
-    there unchanged. A companion-offered quest stays reachable "out of
-    sequence" relative to the full 14-arc ladder on purpose: confirmed
-    via real live data that Kess's own arc_8 content was reached while
-    arc_3 through arc_7 were still incomplete, which is how this game
-    has actually been played -- this fix only stops a quest from
-    skipping ahead of its OWN arc-mates, not the whole story.
+    character's globally CURRENT arc (_current_story_arc) by default --
+    that's _offerable_quest_at_location's own separate, stricter check.
+    A companion-offered quest stays reachable "out of sequence"
+    relative to the full 14-arc ladder by default, which is how this
+    game was actually played for a while.
+
+    REVERSED for Kess specifically (2026-08-30, real live player
+    feedback: "we want to follow the story path in order and we still
+    have no idea who kess is and there has been NO story development
+    of that character"): reaching her out of sequence this way skips
+    100% of the real Chapters 4-7 foreshadowing built specifically so
+    she doesn't come out of nowhere. See _meets_quest_current_arc_
+    requirement below, now checked alongside this function wherever a
+    quest opts into it via a real "requires_current_arc" field --
+    every other companion's own personal quest line is untouched.
     """
     arc_info = _story_arc_for_quest(quest_id)
     if arc_info is None:
@@ -12872,6 +12879,27 @@ def _meets_quest_arc_order_requirement(character: dict, quest_id: str) -> bool:
     completed = set(character["completed_quests"])
     prior_quests = arc["quests"][:arc["quests"].index(quest_id)]
     return completed.issuperset(prior_quests)
+
+
+def _meets_quest_current_arc_requirement(character: dict, quest_id: str) -> bool:
+    """
+    True unless this quest has a real "requires_current_arc" field set
+    -- an explicit, per-quest opt-in (not a blanket policy) forcing its
+    own story arc to be the character's globally CURRENT arc, added
+    2026-08-30 specifically for borins_blackthorn_warning (Kess's real
+    entry point) after real live feedback that reaching her out of
+    sequence skips the Chapters 4-7 foreshadowing built for her. Every
+    other companion quest has no such field and is unaffected.
+    """
+    quest = CAMPAIGN["quests"].get(quest_id, {})
+    if not quest.get("requires_current_arc"):
+        return True
+    arc_info = _story_arc_for_quest(quest_id)
+    if arc_info is None:
+        return True
+    arc_id, _arc = arc_info
+    current = _current_story_arc(character)
+    return current is not None and current[0] == arc_id
 
 
 def _build_quest_monster_index() -> dict[str, list[str]]:
@@ -12985,21 +13013,28 @@ def _offerable_quest_at_location(character: dict, location_id: str) -> tuple[str
             continue
         arc_info = _story_arc_for_quest(quest_id)
         # A quest with its own explicit requires_completed_quest (e.g.
-        # borins_blackthorn_warning, a deliberate early on-ramp into
-        # arc_8) is exempt from the "must be the globally CURRENT arc"
-        # restriction below -- real live regression (2026-08-28): once
-        # it became a real arc_8 member (to fix its arc-opening
+        # a real early on-ramp into a later arc) is normally exempt
+        # from the "must be the globally CURRENT arc" restriction below
+        # -- real live regression (2026-08-28): once borins_blackthorn_
+        # warning became a real arc_8 member (to fix its arc-opening
         # cutscene/order gating), this check wrongly started blocking
         # it at the tavern for any party that hadn't finished arcs 3-7
         # yet, even though its own real, explicit gate (first_city_
         # arrival) was already satisfied. Same "an explicit prerequisite
         # is a stronger, more precise signal than blanket arc-current-
         # ness" reasoning _quest_suggested_level already applies.
-        if arc_info and not quest.get("requires_completed_quest"):
+        #
+        # REVERSED for a quest with its own real "requires_current_arc"
+        # flag (2026-08-30, real live feedback -- see _meets_quest_
+        # current_arc_requirement's own docstring): that explicit flag
+        # always wins over the on-ramp exemption, for that quest only.
+        if arc_info and (quest.get("requires_current_arc") or not quest.get("requires_completed_quest")):
             arc_id, _arc = arc_info
             if arc_id != current_arc_id:
                 continue
         if not _meets_quest_arc_order_requirement(character, quest_id):
+            continue
+        if not _meets_quest_current_arc_requirement(character, quest_id):
             continue
         return quest_id, quest
     return None
@@ -13047,6 +13082,8 @@ def _offerable_companion_quest(character: dict) -> tuple[str, dict] | None:
             continue
         if not _meets_quest_arc_order_requirement(character, quest_id):
             continue
+        if not _meets_quest_current_arc_requirement(character, quest_id):
+            continue
         return quest_id, quest
     return None
 
@@ -13071,6 +13108,8 @@ def _offerable_quest_for_specific_companion(character: dict, npc_id: str) -> tup
         if not _meets_quest_prerequisite_requirement(character, quest):
             continue
         if not _meets_quest_arc_order_requirement(character, quest_id):
+            continue
+        if not _meets_quest_current_arc_requirement(character, quest_id):
             continue
         return quest_id, quest
     return None

@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.406] — Kess's story now requires actually reaching Chapter 8
+
+Real, direct player feedback: "your telling us to do chapter 8 content
+when we are in chapter 3/4?? shudnt there be character build up of
+kess from where we are to chapter 8?? ... we want to follow the story
+path in order and we still have no idea who kess is and there has been
+NO story development of that character."
+
+Root cause: two decisions made at different points never got
+reconciled. The Kess Arc rebuild (v1.27.393-401) wove real
+foreshadowing into Chapters 4-7 specifically so she doesn't come out
+of nowhere by Chapter 8 -- but Borin's own personal quest line (which
+leads straight into her) was left reachable "out of sequence," a
+deliberate design decision reinforced in the very same session that
+built the foreshadowing. A party could recruit Borin and walk his
+entire questline, including Kess's full arc, having skipped 100% of
+that build-up.
+
+- New per-quest opt-in field, `requires_current_arc`, added ONLY to
+  `borins_blackthorn_warning` (Kess's real entry point) -- forces its
+  own story arc (arc_8) to be the character's genuinely CURRENT arc
+  (arcs 1-7 actually complete) before it can be offered, via either
+  real path in (Borin himself, or the Crossroads Tavern location
+  offer). Every other companion's own personal quest line is
+  completely untouched -- this is a scoped reversal for Kess
+  specifically, not a blanket policy change.
+- Confirmed with real fail-then-pass tests (both offer paths), a
+  no-regression test for other companions' quests, and a full re-run
+  of the existing 31-test Kess/Borin suite.
+- Live data: reset Ravenloft, Charvenna, and Elduinn's Kess-line
+  progress (accumulated out of sequence earlier this session) back to
+  untouched, so they experience the real, built-up version once they
+  actually reach Chapter 8.
+
 ## [1.27.405] — Question-phrased riddle answers ("Is the answer X?") now recognized
 
 Real live report: solving the Sunken Archive riddle, "Is the answer an
