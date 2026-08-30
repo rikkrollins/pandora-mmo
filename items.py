@@ -763,6 +763,14 @@ ITEMS = {
         "price": 0, "weight": 0.1,
         "description": "Still faintly warm no matter how long it's carried, as if something in the vault remembers exactly where it belongs.",
     },
+    # Dungeon redesign Phase 2 (2026-08-30) -- Deep Root Vault's own key
+    # item, opening the resin-sealed root door from Spore Hollow into
+    # the Sentinel Hollow branch.
+    "the_last_seed": {
+        "name": "The Last Seed", "type": "quest_item", "rarity": "unique",
+        "price": 0, "weight": 0.1,
+        "description": "Never sprouted, never rotted either -- it's been waiting for something for a very long time.",
+    },
     "brass_key_no_lock": {
         "name": "Brass Key That Fits No Lock", "type": "quest_item", "rarity": "unique",
         "price": 0, "weight": 0.1,

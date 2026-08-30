@@ -5681,6 +5681,115 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         hub = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_ember_hall")
         self.assertIsNotNone(bot._find_lockable(hub, "open the gate"))
 
+    # -- Dungeon redesign Phase 2 (2026-08-30, same template as Phase 1):
+    #    Deep Root Vault is now a real hub-and-spoke too, not an 11-room
+    #    corridor with one dead-end chest. -----------------------------
+    def test_deep_root_vault_now_has_14_real_rooms_with_a_real_hub(self):
+        locs = bot.CAMPAIGN["locations"]["underground"]
+        drv = {k: v for k, v in locs.items() if v.get("dungeon_id") == "deep_root_vault"}
+        self.assertEqual(len(drv), 14)
+        hub = locs["deep_root_vault_spore_hollow"]
+        self.assertTrue(hub.get("dungeon_hub"))
+        self.assertEqual(set(hub["dungeon_teaser_locations"]), {"deep_root_vault_sanctum", "deep_root_vault_root_bound_alcove"})
+        self.assertGreaterEqual(len(hub["connections"]), 3)
+        self.assertEqual(set(hub["locked_connections"]), {"deep_root_vault_sentinel_hollow"})
+
+    async def test_deep_root_vault_branch_a_is_reachable_with_no_gate_at_all(self):
+        user_id = 960210
+        make_basic_character(user_id, "DRVBranchATester", current_location="deep_root_vault_spore_hollow")
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "", sink), "go to the bramble maze")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "deep_root_vault_bramble_maze")
+
+    def test_deep_root_vault_alcove_gated_behind_the_bramble_bound_voices_riddle(self):
+        location = cl.get_location(bot.CAMPAIGN, "deep_root_vault_bramble_maze")
+        self.assertEqual(location["story_gates"]["deep_root_vault_root_bound_alcove"], {"requires_completed_quest": "the_root_bound_alcoves_secret"})
+        user_id = 960211
+        make_basic_character(user_id, "DRVRiddleGateTester", current_location="deep_root_vault_bramble_maze")
+        character = db.get_character(user_id, -999)
+        self.assertIsNotNone(bot._check_story_gate(character, location, "deep_root_vault_root_bound_alcove"))
+        db.complete_quest(user_id, -999, "the_root_bound_alcoves_secret")
+        character = db.get_character(user_id, -999)
+        self.assertIsNone(bot._check_story_gate(character, location, "deep_root_vault_root_bound_alcove"))
+
+    async def test_answering_the_root_bound_alcoves_riddle_completes_it_end_to_end(self):
+        user_id = 960212
+        make_basic_character(user_id, "DRVRiddleAnswerTester", current_location="deep_root_vault_bramble_maze")
+        db.accept_quest(user_id, -999, "the_root_bound_alcoves_secret")
+        sink = []
+        await bot._do_answer_puzzle(FakeUpdate(user_id, "", sink), "a seed")
+        character = db.get_character(user_id, -999)
+        self.assertIn("the_root_bound_alcoves_secret", character.get("completed_quests") or [])
+
+    def test_deep_root_vault_seed_quest_registered_against_its_real_guardian(self):
+        self.assertIn("the_last_seeds_reckoning", bot._QUEST_MONSTER_INDEX.get("withering_bramble", []))
+        quest = bot.CAMPAIGN["quests"]["the_last_seeds_reckoning"]
+        self.assertEqual(quest["reward_item"], "the_last_seed")
+        self.assertEqual(quest["location"], "deep_root_vault_last_seed")
+
+    async def test_deep_root_vault_key_gate_blocks_branch_b_without_the_seed_and_opens_with_it(self):
+        location = cl.get_location(bot.CAMPAIGN, "deep_root_vault_spore_hollow")
+        lockable = next(lk for lk in location["lockables"] if lk["id"] == "deep_root_vault_root_gate")
+        self.assertEqual(lockable["requires_key_item"], "the_last_seed")
+
+        no_key = make_basic_character(960213, "NoSeedTester", current_location="deep_root_vault_spore_hollow")
+        sink = []
+        await bot._do_lockpick(FakeUpdate(960213, "open the root door", sink), no_key, dict(lockable), "open the root door", forced_roll=1)
+        self.assertNotIn("deep_root_vault_root_gate", bot._UNLOCKED.get(-999, set()))
+
+        has_key = make_basic_character(960214, "HasSeedTester", current_location="deep_root_vault_spore_hollow")
+        db.add_item(960214, -999, "the_last_seed", 1)
+        has_key = db.get_character(960214, -999)
+        sink2 = []
+        await bot._do_lockpick(FakeUpdate(960214, "open the root door", sink2), has_key, dict(lockable), "open the root door", forced_roll=1)
+        self.assertIn("deep_root_vault_root_gate", bot._UNLOCKED.get(-999, set()))
+
+        sink3 = []
+        await bot._do_move(FakeUpdate(960214, "", sink3), "go to the sentinel hollow")
+        character = db.get_character(960214, -999)
+        self.assertEqual(character["current_location"], "deep_root_vault_sentinel_hollow")
+
+    async def test_deep_root_vault_shortcut_lever_only_works_from_the_far_room_and_opens_a_quick_way_back(self):
+        alcove = cl.get_location(bot.CAMPAIGN, "deep_root_vault_last_seed")
+        lever = alcove["lockables"][0]
+        self.assertEqual(lever["kind"], "lever")
+        self.assertEqual(alcove["locked_connections"]["deep_root_vault_spore_hollow"], lever["id"])
+        hub = cl.get_location(bot.CAMPAIGN, "deep_root_vault_spore_hollow")
+        self.assertNotIn("deep_root_vault_last_seed", hub.get("locked_connections", {}))
+
+        user_id = 960215
+        character = make_basic_character(user_id, "DRVLeverPullTester", current_location="deep_root_vault_last_seed")
+        sink = []
+        await bot._do_lockpick(FakeUpdate(user_id, "pull the lever", sink), character, dict(lever), "pull the lever")
+        self.assertIn(lever["id"], bot._UNLOCKED.get(-999, set()))
+
+        sink2 = []
+        await bot._do_move(FakeUpdate(user_id, "", sink2), "go to the spore hollow")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "deep_root_vault_spore_hollow")
+
+    def test_deep_root_vault_husk_cache_door_is_a_plain_dc13_lockpick_no_key_needed(self):
+        elder = cl.get_location(bot.CAMPAIGN, "deep_root_vault_elder_root_chamber")
+        door_id = elder["locked_connections"]["deep_root_vault_husks_last_cache"]
+        door = next(lk for lk in elder["lockables"] if lk["id"] == door_id)
+        self.assertEqual(door["kind"], "door")
+        self.assertNotIn("requires_key_item", door)
+        cache = cl.get_location(bot.CAMPAIGN, "deep_root_vault_husks_last_cache")
+        chest = cache["lockables"][0]
+        self.assertEqual(chest["kind"], "chest")
+        self.assertIn("greater_healing_potion", chest["loot"])
+
+    async def test_deep_root_vault_hub_entry_fires_the_teaser_reveal(self):
+        user_id = 960216
+        make_basic_character(user_id, "DRVTeaserHubTester", current_location="deep_root_vault_threshold")
+        db.update_character(user_id, -999, visited_locations=["deep_root_vault_threshold"], map_revealed_locations=[])
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "", sink), "go to the spore hollow")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "deep_root_vault_spore_hollow")
+        self.assertEqual(set(character["map_revealed_locations"]), {"deep_root_vault_sanctum", "deep_root_vault_root_bound_alcove"})
+
     def test_bonus_vault_room_graphs_are_fully_connected_and_reciprocated(self):
         """
         Every direction out of a bonus-vault room must point to a real

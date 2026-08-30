@@ -3639,7 +3639,7 @@
       "deep_root_vault_spore_hollow": {
         "name": "The Spore Hollow",
         "layer": "underground",
-        "description": "The air here hangs thick and faintly sweet -- not rot, exactly, something closer to patience.",
+        "description": "A wide pocket thick with drifting spores, branching off in three real directions -- and something has sealed a fourth passage shut with hardened root-resin.",
         "connections": [
           "deep_root_vault_threshold",
           "deep_root_vault_bramble_maze",
@@ -3658,7 +3658,23 @@
           "y": -4
         },
         "dungeon_interior": true,
-        "dungeon_id": "deep_root_vault"
+        "dungeon_id": "deep_root_vault",
+        "dungeon_hub": true,
+        "dungeon_teaser_locations": [
+          "deep_root_vault_sanctum",
+          "deep_root_vault_root_bound_alcove"
+        ],
+        "locked_connections": {
+          "deep_root_vault_sentinel_hollow": "deep_root_vault_root_gate"
+        },
+        "lockables": [
+          {
+            "id": "deep_root_vault_root_gate",
+            "kind": "door",
+            "name": "a resin-sealed root door",
+            "requires_key_item": "the_last_seed"
+          }
+        ]
       },
       "deep_root_vault_choking_hollow": {
         "name": "The Choking Hollow",
@@ -3694,11 +3710,13 @@
         "description": "Roots knot into walls here, thick enough to be architecture rather than plant growth.",
         "connections": [
           "deep_root_vault_spore_hollow",
-          "deep_root_vault_weeping_spring"
+          "deep_root_vault_weeping_spring",
+          "deep_root_vault_root_bound_alcove"
         ],
         "directions": {
           "up": "deep_root_vault_spore_hollow",
-          "down": "deep_root_vault_weeping_spring"
+          "down": "deep_root_vault_weeping_spring",
+          "east": "deep_root_vault_root_bound_alcove"
         },
         "monsters": [
           "withering_bramble"
@@ -3708,7 +3726,15 @@
           "y": -5
         },
         "dungeon_interior": true,
-        "dungeon_id": "deep_root_vault"
+        "dungeon_id": "deep_root_vault",
+        "npcs": [
+          "the_bramble_bound_voice"
+        ],
+        "story_gates": {
+          "deep_root_vault_root_bound_alcove": {
+            "requires_completed_quest": "the_root_bound_alcoves_secret"
+          }
+        }
       },
       "deep_root_vault_weeping_spring": {
         "name": "The Weeping Spring",
@@ -3716,11 +3742,11 @@
         "description": "Clean water somehow finds its way down here, untouched by anything growing around it -- the one real safe room in the vault.",
         "connections": [
           "deep_root_vault_bramble_maze",
-          "deep_root_vault_sentinel_hollow"
+          "deep_root_vault_last_seed"
         ],
         "directions": {
           "up": "deep_root_vault_bramble_maze",
-          "down": "deep_root_vault_sentinel_hollow"
+          "down": "deep_root_vault_last_seed"
         },
         "interactables": {
           "weeping_spring_water": {
@@ -3745,24 +3771,35 @@
       "deep_root_vault_sentinel_hollow": {
         "name": "The Sentinel Hollow",
         "layer": "underground",
-        "description": "Something has clearly been standing watch here, and has been for longer than anything should be able to stand still.",
+        "description": "Something stands here that used to be alive, root-fused into the wall, still facing the way in. The root door back to the hollow stands closed behind you until you open it again.",
         "connections": [
-          "deep_root_vault_weeping_spring",
+          "deep_root_vault_spore_hollow",
           "deep_root_vault_husk_gallery"
         ],
         "directions": {
-          "up": "deep_root_vault_weeping_spring",
+          "up": "deep_root_vault_spore_hollow",
           "down": "deep_root_vault_husk_gallery"
         },
         "monsters": [
           "hollow_root_sentinel"
         ],
         "grid_position": {
-          "x": 0,
+          "x": -1,
           "y": -7
         },
         "dungeon_interior": true,
-        "dungeon_id": "deep_root_vault"
+        "dungeon_id": "deep_root_vault",
+        "locked_connections": {
+          "deep_root_vault_spore_hollow": "deep_root_vault_root_gate"
+        },
+        "lockables": [
+          {
+            "id": "deep_root_vault_root_gate",
+            "kind": "door",
+            "name": "a resin-sealed root door",
+            "requires_key_item": "the_last_seed"
+          }
+        ]
       },
       "deep_root_vault_husk_gallery": {
         "name": "The Husk Gallery",
@@ -3792,7 +3829,7 @@
           }
         },
         "grid_position": {
-          "x": 0,
+          "x": -1,
           "y": -8
         },
         "dungeon_interior": true,
@@ -3814,11 +3851,21 @@
           "elder_bramble_husk"
         ],
         "grid_position": {
-          "x": 0,
+          "x": -1,
           "y": -9
         },
         "dungeon_interior": true,
-        "dungeon_id": "deep_root_vault"
+        "dungeon_id": "deep_root_vault",
+        "locked_connections": {
+          "deep_root_vault_husks_last_cache": "deep_root_vault_husk_cache_door"
+        },
+        "lockables": [
+          {
+            "id": "deep_root_vault_husk_cache_door",
+            "kind": "door",
+            "name": "a root-choked door"
+          }
+        ]
       },
       "deep_root_vault_last_root": {
         "name": "The Last Root",
@@ -3833,7 +3880,7 @@
           "down": "deep_root_vault_deepest_memory"
         },
         "grid_position": {
-          "x": 0,
+          "x": -1,
           "y": -10
         },
         "dungeon_interior": true,
@@ -3858,7 +3905,7 @@
           }
         },
         "grid_position": {
-          "x": 0,
+          "x": -1,
           "y": -11
         },
         "dungeon_interior": true,
@@ -3878,7 +3925,7 @@
           "the_root_that_remembers"
         ],
         "grid_position": {
-          "x": 0,
+          "x": -1,
           "y": -12
         },
         "dungeon_interior": true,
@@ -6224,6 +6271,87 @@
         },
         "dungeon_interior": true,
         "dungeon_id": "wrathflame_vault"
+      },
+      "deep_root_vault_root_bound_alcove": {
+        "name": "The Root-Bound Alcove",
+        "layer": "underground",
+        "description": "A hollow behind the bramble wall, root-tangled floor to ceiling, that something has clearly been keeping deliberately closed off.",
+        "connections": [
+          "deep_root_vault_bramble_maze"
+        ],
+        "directions": {
+          "west": "deep_root_vault_bramble_maze"
+        },
+        "interactables": {
+          "alcove_root_carving": {
+            "name": "a carving worked into living root",
+            "description": "Whoever made this fed it into the root itself, growing the message rather than cutting it: 'It sleeps. It always wakes. Don't wake it twice.'"
+          }
+        },
+        "grid_position": {
+          "x": 1,
+          "y": -5
+        },
+        "dungeon_interior": true,
+        "dungeon_id": "deep_root_vault"
+      },
+      "deep_root_vault_last_seed": {
+        "name": "The Last Seed",
+        "layer": "underground",
+        "description": "A dead-end root chamber, curled protectively around a single seed that's never actually sprouted -- and something withered still won't let it go.",
+        "connections": [
+          "deep_root_vault_weeping_spring"
+        ],
+        "directions": {
+          "up": "deep_root_vault_weeping_spring"
+        },
+        "monsters": [
+          "withering_bramble"
+        ],
+        "lockables": [
+          {
+            "id": "deep_root_vault_hub_shortcut",
+            "kind": "lever",
+            "name": "a thick root lever"
+          }
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": -7
+        },
+        "dungeon_interior": true,
+        "dungeon_id": "deep_root_vault",
+        "locked_connections": {
+          "deep_root_vault_spore_hollow": "deep_root_vault_hub_shortcut"
+        }
+      },
+      "deep_root_vault_husks_last_cache": {
+        "name": "The Husk's Last Cache",
+        "layer": "underground",
+        "description": "Whatever the elder husk was guarding this chamber for, it stashed its own supplies here first.",
+        "connections": [
+          "deep_root_vault_elder_root_chamber"
+        ],
+        "directions": {
+          "east": "deep_root_vault_elder_root_chamber"
+        },
+        "lockables": [
+          {
+            "id": "deep_root_vault_husk_cache_chest",
+            "kind": "chest",
+            "name": "a husk-wrapped cache",
+            "loot": {
+              "greater_healing_potion": 1
+            },
+            "gold": 45
+          }
+        ],
+        "grid_position": {
+          "x": -2,
+          "y": -9
+        },
+        "dungeon_interior": true,
+        "dungeon_id": "deep_root_vault"
       }
     },
     "sky": {
@@ -7416,6 +7544,15 @@
       "role": "puzzle_guardian",
       "personality": "speaks only in riddles, and has clearly been doing so for far longer than is healthy",
       "goals": "won't let anyone near the reliquary until they've proven they understand what the vault actually is",
+      "recruitable": false,
+      "alignment": "True Neutral",
+      "disposition": "neutral"
+    },
+    "the_bramble_bound_voice": {
+      "name": "The Bramble-Bound Voice",
+      "role": "puzzle_guardian",
+      "personality": "speaks slowly, like every word costs it something, and won't be rushed into repeating itself",
+      "goals": "guards the alcove the way it's always guarded it -- by making sure whoever enters actually understands what they're walking past",
       "recruitable": false,
       "alignment": "True Neutral",
       "disposition": "neutral"
@@ -9264,6 +9401,31 @@
       "reward_gold": 80,
       "reward_item": "the_cinder_key",
       "clue": "The alcove's guardian won't move until it's put down for good."
+    },
+    "the_root_bound_alcoves_secret": {
+      "title": "What the Voice Protects",
+      "description": "The Bramble-Bound Voice won't let anyone past the wall until its own question is actually answered.",
+      "location": "deep_root_vault_bramble_maze",
+      "trigger": {
+        "type": "solve_puzzle",
+        "puzzle_id": "root_bound_alcoves_riddle"
+      },
+      "reward_xp": 320,
+      "reward_gold": 110,
+      "clue": "The Bramble-Bound Voice poses a real question: \"I fall so I can rise again. I sleep for years, then wake in a single day. What am I?\""
+    },
+    "the_last_seeds_reckoning": {
+      "title": "The Last Seed",
+      "description": "Something withered has been curled around this seed for longer than anything down here should still be moving -- and it isn't letting go without a fight.",
+      "location": "deep_root_vault_last_seed",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "withering_bramble"
+      },
+      "reward_xp": 360,
+      "reward_gold": 90,
+      "reward_item": "the_last_seed",
+      "clue": "Whatever's curled around the seed won't move until it's put down for good."
     }
   },
   "story_arcs": {
@@ -12548,6 +12710,14 @@
         "a fire",
         "flame",
         "a flame"
+      ]
+    },
+    "root_bound_alcoves_riddle": {
+      "riddle": "I fall so I can rise again. I sleep for years, then wake in a single day. What am I?",
+      "accepted_answers": [
+        "a seed",
+        "seed",
+        "seeds"
       ]
     }
   },

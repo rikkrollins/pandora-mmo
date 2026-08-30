@@ -2,6 +2,46 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.422] — dungeon redesign Phase 2: the Deep Root Vault is a real hub-and-spoke now
+
+Phase 2 of the 8-dungeon redesign (see v1.27.420/421), same template as
+the Wrathflame Vault. Deep Root Vault grows from 11 rooms (one dead-end
+chest, otherwise a pure corridor) to 14, with a real fork at its own
+natural 3-way junction:
+
+- **Spore Hollow is now the real hub** (`dungeon_hub`): its existing 3
+  connections (entrance, Bramble Maze, the Choking Hollow chest) plus a
+  new resin-sealed root door into Branch B.
+- **Branch A (open)**: Bramble Maze -> a new puzzle NPC (The
+  Bramble-Bound Voice) gating a secret Root-Bound Alcove behind a real
+  riddle -> the Weeping Spring checkpoint -> a new Last Seed chamber,
+  where defeating a real guardian grants a real key item, The Last
+  Seed. Never requires the key itself to reach it.
+- **Branch B (locked)**: the root door only opens with The Last Seed in
+  hand. Leads through the existing Sentinel Hollow/Husk Gallery chain to
+  a new DEX-lockpick door (Elder Root Chamber -> The Husk's Last Cache)
+  and on to the existing sanctum boss fight, untouched.
+- **A real shortcut lever** in the Last Seed chamber (unreachable from
+  the hub side) opens a direct path straight back to Spore Hollow.
+- **Visual tease**: reaching Spore Hollow for the first time reveals the
+  sanctum and the Root-Bound Alcove on the map before either is
+  reachable.
+
+No other dungeon's layout has changed -- Sunken Root Caverns (Phase 3,
+the first MAIN story dungeon in this redesign) is next.
+
+Tested: same full coverage shape as Phase 1 -- hub fields and 3+
+connections, Branch A open with no gate, the alcove blocked before the
+riddle and open after (both the story-gate check and a real end-to-end
+riddle answer), the key quest registered against its real guardian, the
+root door refusing without the key and opening instantly with it even
+on a forced failing roll, the shortcut lever only existing on the far
+side and opening a real path back once pulled, the new lockpick door
+being a plain DC-13 check with no key, and the hub-entry teaser
+revealing exactly the right two rooms. Full related regression slice
+re-run clean (33/33 map/dungeon/checkpoint/fast-travel, plus the bonus
+vault slice) alongside the 9 new Deep Root Vault tests.
+
 ## [1.27.421] — dungeon redesign Phase 1: the Wrathflame Vault is a real hub-and-spoke now
 
 Phase 1 of the 8-dungeon redesign (see v1.27.420) -- the exact dungeon
