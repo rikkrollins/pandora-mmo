@@ -276,6 +276,8 @@ ARCS_1_THROUGH_7_QUEST_IDS = (
     "welcome_to_the_crossroads", "the_hollow_stump", "clear_the_warrens",
     "the_wrong_color", "the_hush_stage1_signs", "the_hush_stage2_the_wisp", "the_hush_stage3_the_unspoken",
     "first_city_arrival", "the_first_city_quest", "the_archives_recess", "conflict_at_crossroads_tavern",
+    "the_wards_collapse", "the_watchers_riddle", "the_spire_crowns_sentinel",
+    "the_forgotten_vaults_secret", "the_unwritten_halls_answer", "the_original_spires_reckoning",
     "unmoored_isle_arrival", "the_unmoored_isle_quest",
     "supply_tunnels_veteran", "the_collapsed_tunnels_survivor", "deep_larders_elder",
     "flooded_gallerys_hold", "the_side_pools_straggler", "the_channels_keeper", "the_hollow_wellsprings_elder",

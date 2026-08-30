@@ -662,6 +662,16 @@ ITEMS = {
         "description": "Drawn on bark instead of parchment, the ink following the grain like it grew there.",
     },
 
+    # Chapter 3 expansion (2026-08-30): The Last Glyph's real unique
+    # reward, ties directly into Phase 0's new Earth element.
+    "the_last_glyphs_seal": {
+        "name": "The Last Glyph's Seal", "type": "wondrous", "rarity": "very_rare",
+        "price": 0, "weight": 1,
+        "elemental_resistances": [{"damage_type": "earth", "value": 50}],
+        "note": "Whatever kept repeating itself through that whole buried city finally stopped, and left this behind instead.",
+        "description": "Whatever kept repeating itself through that whole buried city finally stopped, and left this behind instead.",
+    },
+
     # --- Recipe books (2026-08-11, per Coffee: real, buyable reference
     # items teaching a profession's real level-1 recipes -- "make basic,
     # make tiered books that will be available in the game as the

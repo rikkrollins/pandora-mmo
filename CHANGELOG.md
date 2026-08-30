@@ -2,6 +2,44 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.410] — Chapter 3 expansion, Phase 1: The First City grows to a real 20-room dungeon, 10 quests
+
+First real installment of the approved Chapter 3-8 expansion plan. The
+First City (Chapter 3's zone) had only 5 real rooms and 4 quests --
+grown to 20 rooms and 10 quests, all new content branching off the
+existing hub, nothing existing touched or renamed.
+
+- 15 new rooms across three branches: the Ward (Forgotten Ward,
+  Collapsed Row, a secret Sealed Vault Row, the Silent Market with a
+  new NPC, Watcher's Walk with a puzzle guardian), the Spire (Spire
+  Stair, Spire Overlook, Spire Crown mini-boss), and a real climactic
+  descent past the Deepest Record (Forgotten Vault, Unwritten Hall
+  puzzle, Counted Door with a secret cache, Borin's Old Watch Post,
+  Last Archive, a second mini-boss, and the true final boss room).
+- 6 new arc_3 quests, strictly appended after the original 4 (which
+  stay in their exact fixed order -- v1.27.402 already taught this
+  project the hard way that reordering this specific list can
+  reintroduce a real soft-lock).
+- A new climactic boss, The Last Glyph (level 38): real known_spells
+  (Earthquake, tying into Elemental Foundations), echoes_damage_type,
+  a real mid-fight enrage tactic shift, earth resistance, pickpocket-
+  eligible, and a real unique reward item, The Last Glyph's Seal.
+  Its approach room is gated behind a real companion-trust check.
+- Two new lockable chests, two resource nodes, a lore-note trail, and
+  two new ambient NPCs (Mira the rival cartographer, The Watching
+  Glyph). Borin's own early "penance" hint is delivered as pure
+  environmental flavor text at his old watch post, not a new
+  companion quest -- a new giver_npc=borin_ironjaw quest was tried
+  first and genuinely broke an existing test guarding his companion
+  arc as a fixed, closed 3-quest chain; removed in favor of the
+  interactable, which needed no new mechanism at all.
+- Verified with real executed tests: all 20 rooms reciprocated with no
+  dead ends, the new boss's mechanics all real (not a stat-stick), the
+  companion-trust gate genuinely blocks, both chests grant real loot --
+  plus a full re-run of the Kess-sequencing/Borin/Blackthorn test
+  suites (critical, since arc_3 growing from 4 to 10 quests changes
+  what "arcs 1-7 complete" now requires) confirming zero regressions.
+
 ## [1.27.409] — Two gated bonus dungeons: the Wrathflame Vault and the Deep Root Vault
 
 Per Coffee: "i feel there shud be a dungeon for both the root that

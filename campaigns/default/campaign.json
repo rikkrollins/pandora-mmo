@@ -1497,10 +1497,12 @@
         "layer": "underground",
         "description": "A ring of buried structures further out from the spire, walls still standing at odd, deliberate angles no living architect would choose. Whatever lived here built for reasons, not just shelter.",
         "connections": [
-          "the_first_city"
+          "the_first_city",
+          "the_first_city_forgotten_ward"
         ],
         "directions": {
-          "south": "the_first_city"
+          "south": "the_first_city",
+          "north": "the_first_city_forgotten_ward"
         },
         "monsters": [
           "the_waking_ember"
@@ -1521,10 +1523,12 @@
         "layer": "underground",
         "description": "The upper reaches of the buried city, close enough to the central spire to feel its warmth without touching it. The glyphs here are denser, and some of them move, slightly, when you're not looking directly at them.",
         "connections": [
-          "the_first_city"
+          "the_first_city",
+          "the_first_city_spire_stair"
         ],
         "directions": {
-          "west": "the_first_city"
+          "west": "the_first_city",
+          "up": "the_first_city_spire_stair"
         },
         "resource_nodes": [
           {
@@ -1595,10 +1599,12 @@
         "layer": "underground",
         "description": "The lowest chamber anyone's found beneath the spire, walls carved floor to ceiling in the same script found everywhere above \u2014 except here, for the first time, it isn't repeating. It's telling something.",
         "connections": [
-          "the_first_city_sunken_archive"
+          "the_first_city_sunken_archive",
+          "the_first_city_forgotten_vault"
         ],
         "directions": {
-          "up": "the_first_city_sunken_archive"
+          "up": "the_first_city_sunken_archive",
+          "down": "the_first_city_forgotten_vault"
         },
         "interactables": {
           "the_unrepeating_wall": {
@@ -3041,6 +3047,352 @@
           "x": 0,
           "y": -12
         }
+      },
+      "the_first_city_forgotten_ward": {
+        "name": "The Forgotten Ward",
+        "layer": "underground",
+        "description": "Buildings here have fully lost whatever shape they were built in -- just angles now, repeated without any obvious plan.",
+        "connections": [
+          "the_first_city_outer_ward",
+          "the_first_city_collapsed_row"
+        ],
+        "directions": {
+          "south": "the_first_city_outer_ward",
+          "north": "the_first_city_collapsed_row"
+        },
+        "monsters": [
+          "ward_wanderer"
+        ],
+        "grid_position": {
+          "x": 2,
+          "y": 1
+        }
+      },
+      "the_first_city_collapsed_row": {
+        "name": "The Collapsed Row",
+        "layer": "underground",
+        "description": "An entire street's worth of structures folded in on themselves at once, all in the same direction.",
+        "connections": [
+          "the_first_city_forgotten_ward",
+          "the_first_city_silent_market",
+          "the_first_city_sealed_vault_row"
+        ],
+        "directions": {
+          "south": "the_first_city_forgotten_ward",
+          "north": "the_first_city_silent_market",
+          "east": "the_first_city_sealed_vault_row"
+        },
+        "grid_position": {
+          "x": 2,
+          "y": 2
+        }
+      },
+      "the_first_city_sealed_vault_row": {
+        "name": "The Sealed Vault Row",
+        "layer": "underground",
+        "description": "A short row of what used to be storerooms, one of them still sealed shut against everything that's happened since.",
+        "connections": [
+          "the_first_city_collapsed_row"
+        ],
+        "directions": {
+          "west": "the_first_city_collapsed_row"
+        },
+        "lockables": [
+          {
+            "id": "vault_row_strongbox",
+            "kind": "chest",
+            "name": "the one storeroom still sealed",
+            "loot": {
+              "greater_healing_potion": 1
+            },
+            "gold": 80
+          }
+        ],
+        "grid_position": {
+          "x": 3,
+          "y": 2
+        }
+      },
+      "the_first_city_silent_market": {
+        "name": "The Silent Market",
+        "layer": "underground",
+        "description": "Stalls still stand in careful rows, every single one of them empty. Someone else has clearly been through here recently, on purpose.",
+        "connections": [
+          "the_first_city_collapsed_row",
+          "the_first_city_watchers_walk"
+        ],
+        "directions": {
+          "south": "the_first_city_collapsed_row",
+          "north": "the_first_city_watchers_walk"
+        },
+        "npcs": [
+          "mira_the_cartographer"
+        ],
+        "interactables": {
+          "empty_market_stalls": {
+            "name": "rows of empty market stalls",
+            "description": "Whoever cleared these out did it carefully, not in a panic."
+          }
+        },
+        "grid_position": {
+          "x": 2,
+          "y": 3
+        }
+      },
+      "the_first_city_watchers_walk": {
+        "name": "Watcher's Walk",
+        "layer": "underground",
+        "description": "A single carved figure lines this whole passage, repeated exactly, watching every direction at once.",
+        "connections": [
+          "the_first_city_silent_market"
+        ],
+        "directions": {
+          "south": "the_first_city_silent_market"
+        },
+        "npcs": [
+          "the_watching_glyph"
+        ],
+        "grid_position": {
+          "x": 2,
+          "y": 4
+        }
+      },
+      "the_first_city_spire_stair": {
+        "name": "The Spire Stair",
+        "layer": "underground",
+        "description": "Steps spiral up around the spire's own core, closer to whatever keeps it faintly warm with every turn.",
+        "connections": [
+          "the_first_city_spire_reaches",
+          "the_first_city_spire_overlook"
+        ],
+        "directions": {
+          "down": "the_first_city_spire_reaches",
+          "up": "the_first_city_spire_overlook"
+        },
+        "resource_nodes": [
+          {
+            "id": "spire_stair_ore_seam",
+            "name": "a warm, glyph-etched ore seam",
+            "material": "iron_ore",
+            "ability": "strength",
+            "skill": "mining"
+          }
+        ],
+        "grid_position": {
+          "x": 4,
+          "y": -1
+        }
+      },
+      "the_first_city_spire_overlook": {
+        "name": "The Spire Overlook",
+        "layer": "underground",
+        "description": "High enough to see the shape of the whole buried city at once -- it was clearly a real city, once, laid out with real intent.",
+        "connections": [
+          "the_first_city_spire_stair",
+          "the_first_city_spire_crown"
+        ],
+        "directions": {
+          "down": "the_first_city_spire_stair",
+          "up": "the_first_city_spire_crown"
+        },
+        "interactables": {
+          "overlook_true_shape": {
+            "name": "the true shape of the city, seen from here",
+            "description": "From up here it's obvious this was never a ruin by accident -- something made a very deliberate choice to bury it."
+          }
+        },
+        "grid_position": {
+          "x": 4,
+          "y": -2
+        }
+      },
+      "the_first_city_spire_crown": {
+        "name": "The Spire Crown",
+        "layer": "underground",
+        "description": "The very top of the spire, sealed off from the sky above by more stone than should be structurally possible.",
+        "connections": [
+          "the_first_city_spire_overlook"
+        ],
+        "directions": {
+          "down": "the_first_city_spire_overlook"
+        },
+        "monsters": [
+          "buried_sentinel"
+        ],
+        "grid_position": {
+          "x": 4,
+          "y": -3
+        }
+      },
+      "the_first_city_forgotten_vault": {
+        "name": "The Forgotten Vault",
+        "layer": "underground",
+        "description": "A storage chamber below even the Deepest Record -- whatever was kept here was worth burying twice.",
+        "connections": [
+          "the_first_city_deepest_record",
+          "the_first_city_the_unwritten_hall"
+        ],
+        "directions": {
+          "up": "the_first_city_deepest_record",
+          "down": "the_first_city_the_unwritten_hall"
+        },
+        "monsters": [
+          "record_kept_husk"
+        ],
+        "resource_nodes": [
+          {
+            "id": "forgotten_vault_ore_seam",
+            "name": "a rich, undisturbed ore seam",
+            "material": "iron_ore",
+            "ability": "strength",
+            "skill": "mining"
+          }
+        ],
+        "grid_position": {
+          "x": 1,
+          "y": -13
+        }
+      },
+      "the_first_city_the_unwritten_hall": {
+        "name": "The Unwritten Hall",
+        "layer": "underground",
+        "description": "Every other wall in this city is covered edge to edge in script. This one, alone, is completely bare.",
+        "connections": [
+          "the_first_city_forgotten_vault",
+          "the_first_city_the_counted_door"
+        ],
+        "directions": {
+          "up": "the_first_city_forgotten_vault",
+          "down": "the_first_city_the_counted_door"
+        },
+        "grid_position": {
+          "x": 1,
+          "y": -14
+        }
+      },
+      "the_first_city_the_counted_door": {
+        "name": "The Counted Door",
+        "layer": "underground",
+        "description": "A door with real, deliberate tally marks carved beside it -- someone was counting something every time they passed through.",
+        "connections": [
+          "the_first_city_the_unwritten_hall",
+          "the_first_city_last_archive",
+          "the_first_city_borins_old_ward"
+        ],
+        "directions": {
+          "up": "the_first_city_the_unwritten_hall",
+          "down": "the_first_city_last_archive",
+          "east": "the_first_city_borins_old_ward"
+        },
+        "lockables": [
+          {
+            "id": "counted_door_cache",
+            "kind": "chest",
+            "name": "a small cache tucked beside the tally marks",
+            "loot": {
+              "scroll_invisibility": 1
+            },
+            "gold": 100
+          }
+        ],
+        "grid_position": {
+          "x": 1,
+          "y": -15
+        }
+      },
+      "the_first_city_borins_old_ward": {
+        "name": "The Old Watch Post",
+        "layer": "underground",
+        "description": "A guard post, real and deliberately built, standing at odds with everything else down here -- someone from the surface world stood watch here once.",
+        "connections": [
+          "the_first_city_the_counted_door"
+        ],
+        "directions": {
+          "west": "the_first_city_the_counted_door"
+        },
+        "interactables": {
+          "old_watch_post_marks": {
+            "name": "worn marks on the old post's stone sill",
+            "description": "Whoever stood watch here counted the days a very specific way -- the same tally style you've seen scratched into a certain dwarf's old gear."
+          }
+        },
+        "grid_position": {
+          "x": 2,
+          "y": -15
+        }
+      },
+      "the_first_city_last_archive": {
+        "name": "The Last Archive",
+        "layer": "underground",
+        "description": "A final, small room of records, quieter than the Sunken Archive above -- the one genuinely calm room this deep in.",
+        "connections": [
+          "the_first_city_the_counted_door",
+          "the_first_city_the_final_count"
+        ],
+        "directions": {
+          "up": "the_first_city_the_counted_door",
+          "down": "the_first_city_the_final_count"
+        },
+        "interactables": {
+          "last_archive_final_shelf": {
+            "name": "the one shelf that isn't repeating itself",
+            "description": "Every other shelf in this city counts the same thing over and over. This one is the only place that seems to be building toward something instead."
+          }
+        },
+        "grid_position": {
+          "x": 1,
+          "y": -16
+        }
+      },
+      "the_first_city_the_final_count": {
+        "name": "The Final Count",
+        "layer": "underground",
+        "description": "The counting stops here -- whatever kept tally this whole way down has clearly finished.",
+        "connections": [
+          "the_first_city_last_archive",
+          "the_first_city_the_original_spire"
+        ],
+        "directions": {
+          "up": "the_first_city_last_archive",
+          "down": "the_first_city_the_original_spire"
+        },
+        "monsters": [
+          "the_final_count"
+        ],
+        "story_gates": {
+          "the_first_city_the_original_spire": {
+            "requires_companion_trust": {
+              "min_affinity": 40
+            }
+          }
+        },
+        "grid_position": {
+          "x": 1,
+          "y": -17
+        }
+      },
+      "the_first_city_the_original_spire": {
+        "name": "The Original Spire",
+        "layer": "underground",
+        "description": "The real spire, the one every buried copy above was built to imitate -- and the thing that's been repeating itself through this whole city is finally, completely awake.",
+        "connections": [
+          "the_first_city_the_final_count"
+        ],
+        "directions": {
+          "up": "the_first_city_the_final_count"
+        },
+        "monsters": [
+          "the_last_glyph"
+        ],
+        "combat_environment": {
+          "name": "the original spire's own unraveling glyphwork",
+          "description": "The carved script covering every surface here starts repeating itself faster and faster the longer the fight goes on, until the stone itself can't hold the shape anymore.",
+          "damage_dice": "4d6"
+        },
+        "grid_position": {
+          "x": 1,
+          "y": -18
+        }
       }
     },
     "sky": {
@@ -3554,6 +3906,24 @@
       },
       "alignment": "Chaotic Neutral",
       "disposition": "friendly"
+    },
+    "mira_the_cartographer": {
+      "name": "Mira",
+      "role": "rival_treasure_hunter",
+      "personality": "sharp, competitive, and openly annoyed that someone else found their way down here first",
+      "goals": "mapping the First City before anyone else can claim to have done it properly",
+      "recruitable": false,
+      "alignment": "Chaotic Neutral",
+      "disposition": "wary"
+    },
+    "the_watching_glyph": {
+      "name": "The Watching Glyph",
+      "role": "puzzle_guardian",
+      "personality": "ancient, patient, and utterly indifferent to whether anyone ever answers it correctly",
+      "goals": "has been asking the same question of everyone who reaches it, for longer than anyone alive",
+      "recruitable": false,
+      "alignment": "True Neutral",
+      "disposition": "neutral"
     }
   },
   "shops": {
@@ -4929,6 +5299,80 @@
       "reward_gold": 0,
       "reward_item": "root_bound_survey",
       "clue": "The Elder Bramble Husk has coiled itself around something for longer than it's been alive to notice."
+    },
+    "the_wards_collapse": {
+      "title": "What the Ward Forgot",
+      "description": "The Outer Ward gives way to something even less finished further in -- whatever collapsed it did so all at once, on purpose.",
+      "location": "the_first_city_forgotten_ward",
+      "reward_xp": 220,
+      "reward_gold": 60,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "ward_wanderer"
+      },
+      "clue": "The Forgotten Ward lies deeper north past the Outer Ward -- whatever's still wandering there hasn't noticed the city's already dead."
+    },
+    "the_watchers_riddle": {
+      "title": "What the Glyph Is Asking",
+      "description": "Something carved into Watcher's Walk has been asking the same question of everyone who passes, for longer than anyone's been alive to answer it.",
+      "location": "the_first_city_watchers_walk",
+      "trigger": {
+        "type": "solve_puzzle",
+        "puzzle_id": "watchers_walk_riddle"
+      },
+      "reward_xp": 280,
+      "reward_gold": 90,
+      "clue": "The Watching Glyph at the end of Watcher's Walk, past the Silent Market, poses a real riddle: \"The more you take, the more you leave behind. What am I?\""
+    },
+    "the_spire_crowns_sentinel": {
+      "title": "What Still Guards the Crown",
+      "description": "The Spire Crown, sealed off from the sky by more stone than should be possible, still has something standing watch inside it.",
+      "location": "the_first_city_spire_crown",
+      "reward_xp": 380,
+      "reward_gold": 130,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "buried_sentinel"
+      },
+      "clue": "The Spire Crown sits at the very top of the stair climbing up past the Spire Reaches."
+    },
+    "the_forgotten_vaults_secret": {
+      "title": "Buried Twice",
+      "description": "Something below even the Deepest Record was worth burying a second time -- worth finding out what, and why.",
+      "location": "the_first_city_forgotten_vault",
+      "reward_xp": 320,
+      "reward_gold": 100,
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "record_kept_husk"
+      },
+      "clue": "Past the Deepest Record, the floor gives way to a real vault, deeper still."
+    },
+    "the_unwritten_halls_answer": {
+      "title": "The One Bare Wall",
+      "description": "Every wall in this whole buried city is covered edge to edge in script -- except one, and that alone makes it worth real attention.",
+      "location": "the_first_city_the_unwritten_hall",
+      "trigger": {
+        "type": "solve_puzzle",
+        "puzzle_id": "unwritten_hall_riddle"
+      },
+      "reward_xp": 340,
+      "reward_gold": 110,
+      "clue": "The Unwritten Hall's own silence carries a real question, if you know to ask it: \"I am not written, yet every wall down here is covered in me. What am I?\""
+    },
+    "the_original_spires_reckoning": {
+      "title": "The Original Spire",
+      "description": "Every glyph in this whole buried city has been leading down to the same place -- and the thing that's been repeating itself through all of it is finally, completely awake.",
+      "location": "the_first_city_the_original_spire",
+      "reward_xp": 900,
+      "reward_gold": 300,
+      "reward_item": "the_last_glyphs_seal",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_last_glyph"
+      },
+      "clue": "The Final Count, deep past the Last Archive, is the last real guardian standing between the party and the Original Spire itself.",
+      "weight": "climactic"
     }
   },
   "story_arcs": {
@@ -4960,7 +5404,13 @@
         "first_city_arrival",
         "the_first_city_quest",
         "the_archives_recess",
-        "conflict_at_crossroads_tavern"
+        "conflict_at_crossroads_tavern",
+        "the_wards_collapse",
+        "the_watchers_riddle",
+        "the_spire_crowns_sentinel",
+        "the_forgotten_vaults_secret",
+        "the_unwritten_halls_answer",
+        "the_original_spires_reckoning"
       ],
       "required_level": 10
     },
@@ -7180,6 +7630,108 @@
       "damage_dice": "1d8",
       "damage_bonus": 50,
       "damage_type": "poison"
+    },
+    "ward_wanderer": {
+      "name": "Ward Wanderer",
+      "level": 10,
+      "dexterity": 13,
+      "strength": 14,
+      "armor_class": 15,
+      "hp_max": 180,
+      "proficiency_bonus": 3,
+      "xp_reward": 180,
+      "damage_dice": "1d8",
+      "damage_bonus": 20,
+      "damage_type": "physical"
+    },
+    "buried_sentinel": {
+      "name": "Buried Sentinel",
+      "level": 22,
+      "dexterity": 10,
+      "strength": 18,
+      "armor_class": 18,
+      "hp_max": 1500,
+      "proficiency_bonus": 6,
+      "xp_reward": 420,
+      "damage_dice": "1d8",
+      "damage_bonus": 44,
+      "damage_type": "earth",
+      "is_boss": false,
+      "stealable_items": [
+        {
+          "item_id": "iron_ore",
+          "weight": 100
+        }
+      ]
+    },
+    "record_kept_husk": {
+      "name": "Record-Kept Husk",
+      "level": 15,
+      "dexterity": 12,
+      "strength": 15,
+      "armor_class": 16,
+      "hp_max": 400,
+      "proficiency_bonus": 5,
+      "xp_reward": 260,
+      "damage_dice": "1d8",
+      "damage_bonus": 28,
+      "damage_type": "psychic"
+    },
+    "the_final_count": {
+      "name": "The Final Count",
+      "level": 28,
+      "dexterity": 12,
+      "strength": 20,
+      "armor_class": 19,
+      "hp_max": 2400,
+      "proficiency_bonus": 7,
+      "xp_reward": 650,
+      "damage_dice": "1d8",
+      "damage_bonus": 56,
+      "damage_type": "force",
+      "is_boss": false,
+      "stealable_items": [
+        {
+          "item_id": "greater_spell_tonic",
+          "weight": 80
+        }
+      ]
+    },
+    "the_last_glyph": {
+      "name": "The Last Glyph",
+      "level": 38,
+      "dexterity": 12,
+      "strength": 20,
+      "armor_class": 21,
+      "hp_max": 8500,
+      "proficiency_bonus": 8,
+      "xp_reward": 900,
+      "damage_dice": "1d8",
+      "damage_bonus": 90,
+      "damage_type": "earth",
+      "is_boss": true,
+      "known_spells": [
+        "earthquake"
+      ],
+      "echoes_damage_type": true,
+      "extra_attack_when_enraged": true,
+      "on_hit_condition": "prone",
+      "vulnerabilities": [
+        "radiant"
+      ],
+      "elemental_resistance_pct": {
+        "earth": 150
+      },
+      "stealable_items": [
+        {
+          "item_id": "greater_spell_tonic",
+          "weight": 60
+        },
+        {
+          "item_id": "supreme_spell_tonic",
+          "weight": 20
+        }
+      ]
     }
   },
   "factions": {
@@ -7289,6 +7841,23 @@
         "tree rings",
         "a ring"
       ]
+    },
+    "watchers_walk_riddle": {
+      "riddle": "The more you take, the more you leave behind. What am I?",
+      "accepted_answers": [
+        "footsteps",
+        "steps",
+        "footprints"
+      ]
+    },
+    "unwritten_hall_riddle": {
+      "riddle": "I am not written, yet every wall down here is covered in me. What am I?",
+      "accepted_answers": [
+        "silence",
+        "the space between the words",
+        "what's unsaid"
+      ]
     }
-  }
+  },
+  "_pending_items_note": null
 }

@@ -5590,6 +5590,95 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(items_module.get_item("cinder_marked_chart")["reveals_layer"], "underground")
         self.assertEqual(items_module.get_item("root_bound_survey")["reveals_layer"], "underground")
 
+    # -- Chapter 3 expansion, Phase 1 (2026-08-30): The First City grows
+    #    from 5 real rooms/4 quests to 20 rooms/10 quests -------------
+    def test_arc_3_now_has_ten_quests_original_four_completely_undisturbed(self):
+        """
+        Real lesson from v1.27.402 (a genuine soft-lock from reordering
+        this exact list carelessly): the original 4, in their fixed
+        order, must stay first and untouched -- new content is
+        strictly appended, never interleaved.
+        """
+        quests = bot.CAMPAIGN["story_arcs"]["arc_3_revelation"]["quests"]
+        self.assertEqual(len(quests), 10)
+        self.assertEqual(
+            quests[:4],
+            ["first_city_arrival", "the_first_city_quest", "the_archives_recess", "conflict_at_crossroads_tavern"],
+        )
+
+    def test_chapter_3_dungeon_has_twenty_real_rooms(self):
+        locs = bot.CAMPAIGN["locations"]["underground"]
+        core_ids = {"the_first_city", "the_first_city_outer_ward", "the_first_city_spire_reaches",
+                    "the_first_city_sunken_archive", "the_first_city_deepest_record"}
+        new_ids = {k for k in locs if k.startswith("the_first_city_") and k != "the_first_city_forgotten_depth" and k not in core_ids}
+        self.assertEqual(len(core_ids) + len(new_ids), 20)
+
+    def test_chapter_3_new_rooms_are_fully_connected_and_reciprocated(self):
+        locs = bot.CAMPAIGN["locations"]["underground"]
+        new_ids = [k for k in locs if k.startswith("the_first_city_") and k not in (
+            "the_first_city_outer_ward", "the_first_city_spire_reaches",
+            "the_first_city_sunken_archive", "the_first_city_deepest_record", "the_first_city_forgotten_depth",
+        )]
+        self.assertGreaterEqual(len(new_ids), 15)
+        for loc_id in new_ids:
+            loc = locs[loc_id]
+            for direction, dest_id in loc.get("directions", {}).items():
+                dest = cl.get_location(bot.CAMPAIGN, dest_id)
+                self.assertIsNotNone(dest, f"{loc_id} -> {dest_id} via {direction} is a dead end")
+                self.assertIn(loc_id, dest.get("connections", []), f"{dest_id} doesn't connect back to {loc_id}")
+
+    def test_the_last_glyph_uses_the_real_new_systems_not_a_generic_statstick(self):
+        boss = bot.CAMPAIGN["monsters"]["the_last_glyph"]
+        self.assertTrue(boss["is_boss"])
+        self.assertIn("earthquake", boss["known_spells"])
+        self.assertTrue(boss.get("echoes_damage_type"))
+        self.assertTrue(boss.get("extra_attack_when_enraged"))
+        self.assertEqual(boss["elemental_resistance_pct"]["earth"], 150)
+        self.assertTrue(boss.get("stealable_items"))
+        self.assertIn("the_original_spires_reckoning", bot._QUEST_MONSTER_INDEX.get("the_last_glyph", []))
+
+    def test_the_original_spire_is_gated_behind_companion_trust(self):
+        location = cl.get_location(bot.CAMPAIGN, "the_first_city_the_final_count")
+        current_dict = {"story_gates": location["story_gates"]}
+        character = {"party_id": None, "completed_quests": []}
+        self.assertIsNotNone(bot._check_story_gate(character, current_dict, "the_first_city_the_original_spire"))
+
+    def test_borins_old_watch_post_delivers_the_hint_as_pure_environmental_flavor(self):
+        """
+        Borin's own companion-quest chain (vouching_task -> resolution ->
+        blackthorn_warning) is a closed, fixed sequence real tests already
+        guard end-to-end (test_borin_offers_the_blackthorn_warning_only_
+        after_his_own_arc_resolves asserts nothing more is ever offered
+        after it). Adding a 4th giver_npc=borin_ironjaw quest broke that
+        real invariant -- the early Chapter 3 hint about his past is
+        delivered as a pure interactable/lore-note instead, no new quest
+        needed at all.
+        """
+        loc = cl.get_location(bot.CAMPAIGN, "the_first_city_borins_old_ward")
+        self.assertIn("dwarf", loc["interactables"]["old_watch_post_marks"]["description"].lower())
+        self.assertNotIn("borins_old_ward", bot.CAMPAIGN["quests"])
+
+    def test_the_last_glyphs_seal_is_a_real_reward_item_tied_to_earth(self):
+        forge_quest = bot.CAMPAIGN["quests"]["the_original_spires_reckoning"]
+        self.assertEqual(forge_quest["reward_item"], "the_last_glyphs_seal")
+        item = items_module.get_item("the_last_glyphs_seal")
+        self.assertEqual(item["elemental_resistances"], [{"damage_type": "earth", "value": 50}])
+
+    def test_new_first_city_npcs_are_real_and_non_recruitable(self):
+        mira = bot.CAMPAIGN["npcs"]["mira_the_cartographer"]
+        self.assertFalse(mira.get("recruitable"))
+        glyph = bot.CAMPAIGN["npcs"]["the_watching_glyph"]
+        self.assertFalse(glyph.get("recruitable"))
+        self.assertIn("mira_the_cartographer", cl.get_location(bot.CAMPAIGN, "the_first_city_silent_market")["npcs"])
+        self.assertIn("the_watching_glyph", cl.get_location(bot.CAMPAIGN, "the_first_city_watchers_walk")["npcs"])
+
+    def test_chapter_3_lockable_chests_grant_real_loot(self):
+        for loc_id in ("the_first_city_sealed_vault_row", "the_first_city_the_counted_door"):
+            loc = cl.get_location(bot.CAMPAIGN, loc_id)
+            chest = loc["lockables"][0]
+            self.assertEqual(chest["kind"], "chest")
+            self.assertTrue(chest["loot"])
+
     def test_companion_favor_pays_more_affinity_once_the_companion_already_trusts_you(self):
         """
         Real live request (2026-08-23, Coffee: "give the affinity real
