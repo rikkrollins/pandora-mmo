@@ -5558,8 +5558,142 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bot.CAMPAIGN["monsters"]["the_root_that_remembers"]["level"], 30)
         self.assertEqual(bot.CAMPAIGN["monsters"]["the_root_that_remembers"]["hp_max"], 18000)
 
+    # -- Dungeon redesign Phase 1 (2026-08-30, per Coffee's own Zelda
+    #    reference material + the Wrathflame Vault complaint screenshot):
+    #    the vault is now a real hub-and-spoke with a key-item gate, a
+    #    puzzle-gated secret room, a shortcut lever, and a DEX-lockpick
+    #    door -- not a straight 9-room corridor anymore. ------------------
+    def test_wrathflame_vault_now_has_13_real_rooms_with_a_real_hub(self):
+        locs = bot.CAMPAIGN["locations"]["underground"]
+        wv = {k: v for k, v in locs.items() if v.get("dungeon_id") == "wrathflame_vault"}
+        self.assertEqual(len(wv), 13)
+        hub = locs["wrathflame_vault_ember_hall"]
+        self.assertTrue(hub.get("dungeon_hub"))
+        self.assertEqual(set(hub["dungeon_teaser_locations"]), {"wrathflame_vault_sanctum", "wrathflame_vault_sealed_reliquary"})
+        # A real fork, not a corridor: 3 open connections plus a key-gated one off the same room.
+        self.assertGreaterEqual(len(hub["connections"]), 3)
+        self.assertEqual(set(hub["locked_connections"]), {"wrathflame_vault_smoldering_stair"})
+
+    async def test_wrathflame_vault_branch_a_is_reachable_with_no_gate_at_all(self):
+        """The path to the dungeon's own key item must never itself require the key -- Coffee's reference material's own progression-graph rule."""
+        user_id = 960200
+        make_basic_character(user_id, "BranchATester", current_location="wrathflame_vault_ember_hall")
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "", sink), "go to the ash gallery")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "wrathflame_vault_ash_gallery")
+
+    def test_wrathflame_vault_sealed_reliquary_gated_behind_the_ash_wardens_riddle(self):
+        location = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_ash_gallery")
+        self.assertEqual(location["story_gates"]["wrathflame_vault_sealed_reliquary"], {"requires_completed_quest": "the_ash_wardens_riddle"})
+        user_id = 960201
+        make_basic_character(user_id, "ReliquaryTester", current_location="wrathflame_vault_ash_gallery")
+        character = db.get_character(user_id, -999)
+        self.assertIsNotNone(bot._check_story_gate(character, location, "wrathflame_vault_sealed_reliquary"))
+        db.complete_quest(user_id, -999, "the_ash_wardens_riddle")
+        character = db.get_character(user_id, -999)
+        self.assertIsNone(bot._check_story_gate(character, location, "wrathflame_vault_sealed_reliquary"))
+
+    async def test_answering_the_ash_wardens_riddle_completes_it_end_to_end(self):
+        user_id = 960202
+        make_basic_character(user_id, "RiddleAnswerTester", current_location="wrathflame_vault_ash_gallery")
+        db.accept_quest(user_id, -999, "the_ash_wardens_riddle")
+        sink = []
+        await bot._do_answer_puzzle(FakeUpdate(user_id, "", sink), "fire")
+        character = db.get_character(user_id, -999)
+        self.assertIn("the_ash_wardens_riddle", character.get("completed_quests") or [])
+
+    def test_wrathflame_vault_cinder_key_quest_registered_against_its_real_guardian(self):
+        """The key is a real defeat_monster reward, not a free pickup -- registered in the same _QUEST_MONSTER_INDEX every other quest-tied monster uses."""
+        self.assertIn("the_cinder_keys_reckoning", bot._QUEST_MONSTER_INDEX.get("cinder_hound", []))
+        quest = bot.CAMPAIGN["quests"]["the_cinder_keys_reckoning"]
+        self.assertEqual(quest["reward_item"], "the_cinder_key")
+        self.assertEqual(quest["location"], "wrathflame_vault_cinder_key_alcove")
+
+    async def test_wrathflame_vault_key_gate_blocks_branch_b_without_the_key_and_opens_with_it(self):
+        location = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_ember_hall")
+        lockable = next(lk for lk in location["lockables"] if lk["id"] == "wrathflame_vault_key_gate")
+        self.assertEqual(lockable["requires_key_item"], "the_cinder_key")
+
+        no_key = make_basic_character(960203, "NoCinderKeyTester", current_location="wrathflame_vault_ember_hall")
+        sink = []
+        await bot._do_lockpick(FakeUpdate(960203, "open the warded door", sink), no_key, dict(lockable), "open the warded door", forced_roll=1)
+        self.assertNotIn("wrathflame_vault_key_gate", bot._UNLOCKED.get(-999, set()))
+
+        has_key = make_basic_character(960204, "HasCinderKeyTester", current_location="wrathflame_vault_ember_hall")
+        db.add_item(960204, -999, "the_cinder_key", 1)
+        has_key = db.get_character(960204, -999)
+        sink2 = []
+        await bot._do_lockpick(FakeUpdate(960204, "open the warded door", sink2), has_key, dict(lockable), "open the warded door", forced_roll=1)
+        self.assertIn("wrathflame_vault_key_gate", bot._UNLOCKED.get(-999, set()))
+
+        sink3 = []
+        await bot._do_move(FakeUpdate(960204, "", sink3), "go to the smoldering stair")
+        character = db.get_character(960204, -999)
+        self.assertEqual(character["current_location"], "wrathflame_vault_smoldering_stair")
+
+    async def test_wrathflame_vault_shortcut_lever_only_works_from_the_far_room_and_opens_a_quick_way_back(self):
+        """The genuine Zelda beat: pull the lever at the FAR end of the branch and gain a quick way straight back to the hub -- not the hub reaching into the branch."""
+        alcove = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_cinder_key_alcove")
+        lever = alcove["lockables"][0]
+        self.assertEqual(lever["kind"], "lever")
+        self.assertEqual(alcove["locked_connections"]["wrathflame_vault_ember_hall"], lever["id"])
+        hub = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_ember_hall")
+        # Not reachable from the hub's own side at all -- must be found and pulled from the alcove itself.
+        self.assertNotIn("wrathflame_vault_cinder_key_alcove", hub.get("locked_connections", {}))
+
+        user_id = 960205
+        character = make_basic_character(user_id, "LeverPullTester", current_location="wrathflame_vault_cinder_key_alcove")
+        sink = []
+        await bot._do_lockpick(FakeUpdate(user_id, "pull the lever", sink), character, dict(lever), "pull the lever")
+        self.assertIn(lever["id"], bot._UNLOCKED.get(-999, set()))
+
+        sink2 = []
+        await bot._do_move(FakeUpdate(user_id, "", sink2), "go to the ember hall")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "wrathflame_vault_ember_hall")
+
+    def test_wrathflame_vault_forgeholds_door_is_a_plain_dc13_lockpick_no_key_needed(self):
+        """The 'classic' DEX-lockpick door this vault didn't have before -- distinct from the existing Bellows Chamber chest."""
+        archive = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_cinder_archive")
+        door_id = archive["locked_connections"]["wrathflame_vault_forgeholds_cache"]
+        door = next(lk for lk in archive["lockables"] if lk["id"] == door_id)
+        self.assertEqual(door["kind"], "door")
+        self.assertNotIn("requires_key_item", door)
+        cache = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_forgeholds_cache")
+        chest = cache["lockables"][0]
+        self.assertEqual(chest["kind"], "chest")
+        self.assertIn("greater_healing_potion", chest["loot"])
+
+    async def test_wrathflame_vault_hub_entry_fires_the_teaser_reveal(self):
+        user_id = 960206
+        make_basic_character(user_id, "TeaserHubTester", current_location="wrathflame_vault_threshold")
+        db.update_character(user_id, -999, visited_locations=["wrathflame_vault_threshold"], map_revealed_locations=[])
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "", sink), "go to the ember hall")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "wrathflame_vault_ember_hall")
+        self.assertEqual(set(character["map_revealed_locations"]), {"wrathflame_vault_sanctum", "wrathflame_vault_sealed_reliquary"})
+
+    def test_find_lockable_resolves_natural_lever_and_gate_phrasing(self):
+        alcove = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_cinder_key_alcove")
+        self.assertIsNotNone(bot._find_lockable(alcove, "pull the lever"))
+        hub = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_ember_hall")
+        self.assertIsNotNone(bot._find_lockable(hub, "open the gate"))
+
     def test_bonus_vault_room_graphs_are_fully_connected_and_reciprocated(self):
-        """Every direction out of a bonus-vault room must point to a real location, and that location must list the reverse connection back -- no dead-end typos."""
+        """
+        Every direction out of a bonus-vault room must point to a real
+        location, and that location must list the reverse connection
+        back -- no dead-end typos. A real, INTENTIONAL exception (dungeon
+        redesign Phase 1, 2026-08-30): a `locked_connections` target is
+        deliberately excluded from the gating room's own `connections`
+        list, same established convention as this game's other real
+        locked doors (`the_weeping_well`/`glimmerdeep_grotto`,
+        `stonearch_bridge_gorge_depths`/`sunken_root_caverns_deep_tunnels`)
+        -- movement still works via _do_move's own separate
+        locked_connections extension, it's just not a plain graph edge.
+        """
         for prefix in ("wrathflame_vault_", "deep_root_vault_"):
             vault_locations = {
                 k: v for k, v in bot.CAMPAIGN["locations"]["underground"].items() if k.startswith(prefix)
@@ -5569,6 +5703,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 for direction, dest_id in loc.get("directions", {}).items():
                     dest = cl.get_location(bot.CAMPAIGN, dest_id)
                     self.assertIsNotNone(dest, f"{loc_id} -> {dest_id} via {direction} is a dead end")
+                    # Exempt on EITHER end if that side gates the connection
+                    # via locked_connections instead of a plain edge.
+                    if dest_id in loc.get("locked_connections", {}) or loc_id in dest.get("locked_connections", {}):
+                        continue
                     self.assertIn(loc_id, dest.get("connections", []), f"{dest_id} doesn't connect back to {loc_id}")
 
     def test_bonus_vault_lockable_chests_grant_real_loot(self):

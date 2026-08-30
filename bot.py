@@ -11250,8 +11250,11 @@ def _find_lockable(location: dict, action_text: str) -> dict | None:
         # Kind-specific fallback words only — a location whose only
         # lockable is a chest must not match generic "door" phrasing
         # (and vice versa), or a player mentioning the wrong kind of
-        # lockable gets silently routed to the wrong one.
-        kind_words = {"chest": ("chest", "lock"), "door": ("door", "lock")}
+        # lockable gets silently routed to the wrong one. "lever" added
+        # for the dungeon-redesign shortcut mechanic (2026-08-30) --
+        # deliberately excludes "lock"/"door" words so a player can't
+        # accidentally "pick" a lever that's meant to just be pulled.
+        kind_words = {"chest": ("chest", "lock"), "door": ("door", "lock", "gate"), "lever": ("lever", "switch", "wheel", "valve")}
         if any(w in lowered for w in kind_words.get(lockable["kind"], ("lock",))):
             return lockable
     return None

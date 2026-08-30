@@ -754,6 +754,15 @@ ITEMS = {
         "price": 0, "weight": 0.1,
         "description": "A sliver of something that glows just barely enough to notice, and no brighter no matter how you turn it.",
     },
+    # Dungeon redesign Phase 1 (2026-08-30, per Coffee: real locked
+    # doors and a lock-and-key formula, not a straight corridor) --
+    # Wrathflame Vault's first real key item, opening the warded door
+    # from the Ember Hall hub into the Smoldering Stair branch.
+    "the_cinder_key": {
+        "name": "The Cinder Key", "type": "quest_item", "rarity": "unique",
+        "price": 0, "weight": 0.1,
+        "description": "Still faintly warm no matter how long it's carried, as if something in the vault remembers exactly where it belongs.",
+    },
     "brass_key_no_lock": {
         "name": "Brass Key That Fits No Lock", "type": "quest_item", "rarity": "unique",
         "price": 0, "weight": 0.1,

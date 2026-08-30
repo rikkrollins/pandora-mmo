@@ -2,6 +2,61 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.421] — dungeon redesign Phase 1: the Wrathflame Vault is a real hub-and-spoke now
+
+Phase 1 of the 8-dungeon redesign (see v1.27.420) -- the exact dungeon
+from Coffee's own complaint screenshot ("it's just a straight path to
+the boss") is rebuilt end to end using Phase 0's new mechanics. Grows
+from 9 rooms to 13, and from a pure single-file chain to a real
+lock-and-key layout:
+
+- **The Ember Hall is now a real hub** (`dungeon_hub`): 3 open
+  connections (back to the entrance, a lockpick chest side-room, and
+  Branch A) plus a key-gated door into Branch B -- the smallest room in
+  the vault now has more real choices than the whole dungeon did before.
+- **Branch A (open from the start)**: Ash Gallery -> a new puzzle NPC
+  (The Ash-Bound Warden) gating a secret Sealed Reliquary room behind a
+  real riddle -> the Ember Font checkpoint -> a new Cinder Key Alcove,
+  where defeating a real guardian grants a real key item, The Cinder
+  Key. Never requires the key itself to reach it, per Coffee's own
+  reference material's progression-graph rule.
+- **Branch B (locked)**: the Ember Hall's warded iron door only opens
+  with The Cinder Key in hand -- a real gate, not a chance-based pick.
+  Leads down through the existing Smoldering Stair/Deep Forge chain to
+  a new DEX-lockpick door (Cinder Archive -> The Forgehold's Cache, a
+  side-loot room) and on to the existing sanctum boss fight, untouched.
+- **A real shortcut lever**: pulling it in the Cinder Key Alcove (it
+  can't be found or picked from the hub side at all) opens a direct
+  path straight back to the Ember Hall, skipping the long way through
+  the Font and Gallery -- the genuine "loop back to the hub" Zelda beat.
+- **Visual tease**: reaching the Ember Hall for the first time reveals
+  the sanctum and the sealed reliquary on the map before either is
+  reachable.
+- `_find_lockable` now recognizes "lever"/"switch"/"wheel"/"valve" and
+  "gate" phrasing, so natural text ("pull the lever", "open the gate")
+  actually resolves to the right lockable.
+
+No other dungeon's layout has changed -- Deep Root Vault (Phase 2) is
+next.
+
+Tested: the hub has 3+ real connections and the correct locked/teaser
+fields; Branch A is reachable with zero gates; the reliquary is blocked
+before the riddle and open after (both the story-gate check and a real
+end-to-end riddle answer); the key quest is registered against its real
+guardian monster; the warded door refuses without the key and opens
+instantly with it even on a forced failing roll; the shortcut lever
+only exists on the far side and, once pulled, opens a real direct path
+back to the hub; the new lockpick door is a plain DC-13 check with no
+key involved; the hub-entry teaser reveals exactly the right two rooms.
+The existing bonus-vault reciprocation test was updated to exempt
+locked-connection edges on either end (the same real asymmetric-lock
+shape this game's own `the_weeping_well`/`glimmerdeep_grotto` and
+`stonearch_bridge_gorge_depths`/`sunken_root_caverns_deep_tunnels`
+connections already use) -- not a weakened check, a corrected one.
+Full related regression slice re-run clean (33/33 map/dungeon/
+checkpoint/fast-travel tests, 6/6 bonus-vault tests) alongside the 10
+new Wrathflame Vault tests.
+
 ## [1.27.420] — Phase 0 of the dungeon redesign: real key-item/lever locks + targeted map teasers
 
 Real live complaint (2026-08-30, Coffee, dev-bridge, with the

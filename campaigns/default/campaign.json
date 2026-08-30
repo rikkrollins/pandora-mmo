@@ -3344,7 +3344,7 @@
       "wrathflame_vault_ember_hall": {
         "name": "The Ember Hall",
         "layer": "underground",
-        "description": "A long hall lit only by embers set into the walls, none of them burning anything that still exists.",
+        "description": "A long hall lit only by embers set into the walls, none of them burning anything that still exists. A warded iron door bars a passage to the west, and something below the floor here sounds hollow underfoot.",
         "connections": [
           "wrathflame_vault_threshold",
           "wrathflame_vault_ash_gallery",
@@ -3363,7 +3363,23 @@
           "y": 3
         },
         "dungeon_interior": true,
-        "dungeon_id": "wrathflame_vault"
+        "dungeon_id": "wrathflame_vault",
+        "dungeon_hub": true,
+        "dungeon_teaser_locations": [
+          "wrathflame_vault_sanctum",
+          "wrathflame_vault_sealed_reliquary"
+        ],
+        "locked_connections": {
+          "wrathflame_vault_smoldering_stair": "wrathflame_vault_key_gate"
+        },
+        "lockables": [
+          {
+            "id": "wrathflame_vault_key_gate",
+            "kind": "door",
+            "name": "a warded iron door",
+            "requires_key_item": "the_cinder_key"
+          }
+        ]
       },
       "wrathflame_vault_bellows_chamber": {
         "name": "The Bellows Chamber",
@@ -3405,11 +3421,13 @@
         "description": "Ash drifts here that never seems to settle, stirred by heat with no visible source.",
         "connections": [
           "wrathflame_vault_ember_hall",
-          "wrathflame_vault_ember_font"
+          "wrathflame_vault_ember_font",
+          "wrathflame_vault_sealed_reliquary"
         ],
         "directions": {
           "up": "wrathflame_vault_ember_hall",
-          "down": "wrathflame_vault_ember_font"
+          "down": "wrathflame_vault_ember_font",
+          "east": "wrathflame_vault_sealed_reliquary"
         },
         "monsters": [
           "ash_wraith"
@@ -3419,7 +3437,15 @@
           "y": 4
         },
         "dungeon_interior": true,
-        "dungeon_id": "wrathflame_vault"
+        "dungeon_id": "wrathflame_vault",
+        "npcs": [
+          "the_ash_bound_warden"
+        ],
+        "story_gates": {
+          "wrathflame_vault_sealed_reliquary": {
+            "requires_completed_quest": "the_ash_wardens_riddle"
+          }
+        }
       },
       "wrathflame_vault_ember_font": {
         "name": "The Ember Font",
@@ -3427,11 +3453,11 @@
         "description": "A single, small spring bubbles here, warm rather than scalding -- the one genuinely safe room this deep in.",
         "connections": [
           "wrathflame_vault_ash_gallery",
-          "wrathflame_vault_smoldering_stair"
+          "wrathflame_vault_cinder_key_alcove"
         ],
         "directions": {
           "up": "wrathflame_vault_ash_gallery",
-          "down": "wrathflame_vault_smoldering_stair"
+          "down": "wrathflame_vault_cinder_key_alcove"
         },
         "interactables": {
           "ember_font_spring": {
@@ -3456,24 +3482,35 @@
       "wrathflame_vault_smoldering_stair": {
         "name": "The Smoldering Stair",
         "layer": "underground",
-        "description": "Steps that radiate heat upward with every one you descend, like the vault itself is breathing.",
+        "description": "Steps that radiate heat upward with every one you descend, like the vault itself is breathing. The warded door back to the hall stands closed behind you until you open it again.",
         "connections": [
-          "wrathflame_vault_ember_font",
+          "wrathflame_vault_ember_hall",
           "wrathflame_vault_deep_forge"
         ],
         "directions": {
-          "up": "wrathflame_vault_ember_font",
+          "up": "wrathflame_vault_ember_hall",
           "down": "wrathflame_vault_deep_forge"
         },
         "monsters": [
           "molten_sentinel"
         ],
         "grid_position": {
-          "x": 2,
+          "x": 1,
           "y": 6
         },
         "dungeon_interior": true,
-        "dungeon_id": "wrathflame_vault"
+        "dungeon_id": "wrathflame_vault",
+        "locked_connections": {
+          "wrathflame_vault_ember_hall": "wrathflame_vault_key_gate"
+        },
+        "lockables": [
+          {
+            "id": "wrathflame_vault_key_gate",
+            "kind": "door",
+            "name": "a warded iron door",
+            "requires_key_item": "the_cinder_key"
+          }
+        ]
       },
       "wrathflame_vault_deep_forge": {
         "name": "The Deep Forge",
@@ -3497,7 +3534,7 @@
           }
         ],
         "grid_position": {
-          "x": 2,
+          "x": 1,
           "y": 7
         },
         "dungeon_interior": true,
@@ -3522,11 +3559,21 @@
           }
         },
         "grid_position": {
-          "x": 2,
+          "x": 1,
           "y": 8
         },
         "dungeon_interior": true,
-        "dungeon_id": "wrathflame_vault"
+        "dungeon_id": "wrathflame_vault",
+        "locked_connections": {
+          "wrathflame_vault_forgeholds_cache": "wrathflame_vault_forge_cache_door"
+        },
+        "lockables": [
+          {
+            "id": "wrathflame_vault_forge_cache_door",
+            "kind": "door",
+            "name": "a rusted iron door"
+          }
+        ]
       },
       "wrathflame_vault_inner_seal": {
         "name": "The Inner Seal",
@@ -3541,7 +3588,7 @@
           "down": "wrathflame_vault_sanctum"
         },
         "grid_position": {
-          "x": 2,
+          "x": 1,
           "y": 9
         },
         "dungeon_interior": true,
@@ -3561,7 +3608,7 @@
           "the_wrathflame_unbound"
         ],
         "grid_position": {
-          "x": 2,
+          "x": 1,
           "y": 10
         },
         "dungeon_interior": true,
@@ -6096,6 +6143,87 @@
         },
         "dungeon_interior": true,
         "dungeon_id": "greymoor_downs"
+      },
+      "wrathflame_vault_sealed_reliquary": {
+        "name": "The Sealed Reliquary",
+        "layer": "underground",
+        "description": "A small stone alcove behind the gallery wall, untouched since whatever sealed it shut. The air here is still, unlike everywhere else in the vault.",
+        "connections": [
+          "wrathflame_vault_ash_gallery"
+        ],
+        "directions": {
+          "west": "wrathflame_vault_ash_gallery"
+        },
+        "interactables": {
+          "reliquary_ledger": {
+            "name": "a fire-warped ledger",
+            "description": "Names, dates, and a final entry that just reads: 'It listens now. It didn't used to.' Whoever wrote it never came back to finish the page."
+          }
+        },
+        "grid_position": {
+          "x": 3,
+          "y": 4
+        },
+        "dungeon_interior": true,
+        "dungeon_id": "wrathflame_vault"
+      },
+      "wrathflame_vault_cinder_key_alcove": {
+        "name": "The Cinder Key Alcove",
+        "layer": "underground",
+        "description": "A dead-end chamber past the font, where something molten still stands guard over a single small object set into the far wall.",
+        "connections": [
+          "wrathflame_vault_ember_font"
+        ],
+        "directions": {
+          "up": "wrathflame_vault_ember_font"
+        },
+        "monsters": [
+          "cinder_hound"
+        ],
+        "lockables": [
+          {
+            "id": "wrathflame_vault_hub_shortcut",
+            "kind": "lever",
+            "name": "a rusted lever"
+          }
+        ],
+        "grid_position": {
+          "x": 2,
+          "y": 6
+        },
+        "dungeon_interior": true,
+        "dungeon_id": "wrathflame_vault",
+        "locked_connections": {
+          "wrathflame_vault_ember_hall": "wrathflame_vault_hub_shortcut"
+        }
+      },
+      "wrathflame_vault_forgeholds_cache": {
+        "name": "The Forgehold's Cache",
+        "layer": "underground",
+        "description": "A cramped storeroom the old forge-wardens kept locked, apparently out of habit more than need.",
+        "connections": [
+          "wrathflame_vault_cinder_archive"
+        ],
+        "directions": {
+          "east": "wrathflame_vault_cinder_archive"
+        },
+        "lockables": [
+          {
+            "id": "wrathflame_vault_forge_cache_chest",
+            "kind": "chest",
+            "name": "an old forge-warden's chest",
+            "loot": {
+              "greater_healing_potion": 1
+            },
+            "gold": 40
+          }
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": 8
+        },
+        "dungeon_interior": true,
+        "dungeon_id": "wrathflame_vault"
       }
     },
     "sky": {
@@ -7279,6 +7407,15 @@
       "role": "puzzle_guardian",
       "personality": "worn nearly smooth by wind and years, and still, somehow, legible to whoever actually needs it to be",
       "goals": "has been marking the same real boundary since long before the watchtower ever needed one",
+      "recruitable": false,
+      "alignment": "True Neutral",
+      "disposition": "neutral"
+    },
+    "the_ash_bound_warden": {
+      "name": "The Ash-Bound Warden",
+      "role": "puzzle_guardian",
+      "personality": "speaks only in riddles, and has clearly been doing so for far longer than is healthy",
+      "goals": "won't let anyone near the reliquary until they've proven they understand what the vault actually is",
       "recruitable": false,
       "alignment": "True Neutral",
       "disposition": "neutral"
@@ -9102,6 +9239,31 @@
       },
       "clue": "The Final Approach, past the Last Cellar, leads straight to whatever's actually still keeping this watch.",
       "weight": "climactic"
+    },
+    "the_ash_wardens_riddle": {
+      "title": "What the Warden Guards",
+      "description": "The Ash-Bound Warden won't move from the gallery wall until its question is actually answered -- not guessed at, answered.",
+      "location": "wrathflame_vault_ash_gallery",
+      "trigger": {
+        "type": "solve_puzzle",
+        "puzzle_id": "ash_wardens_riddle"
+      },
+      "reward_xp": 300,
+      "reward_gold": 100,
+      "clue": "The Ash-Bound Warden poses a real question: \"I am not alive, yet I grow. I have no lungs, yet I need air. I have no mouth, yet water kills me. What am I?\""
+    },
+    "the_cinder_keys_reckoning": {
+      "title": "The Cinder Key",
+      "description": "Something molten still guards whatever the vault's old wardens locked away -- and it isn't going to just hand it over.",
+      "location": "wrathflame_vault_cinder_key_alcove",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "cinder_hound"
+      },
+      "reward_xp": 350,
+      "reward_gold": 80,
+      "reward_item": "the_cinder_key",
+      "clue": "The alcove's guardian won't move until it's put down for good."
     }
   },
   "story_arcs": {
@@ -12377,6 +12539,15 @@
         "a boundary stone",
         "a marker",
         "the horizon"
+      ]
+    },
+    "ash_wardens_riddle": {
+      "riddle": "I am not alive, yet I grow. I have no lungs, yet I need air. I have no mouth, yet water kills me. What am I?",
+      "accepted_answers": [
+        "fire",
+        "a fire",
+        "flame",
+        "a flame"
       ]
     }
   },
