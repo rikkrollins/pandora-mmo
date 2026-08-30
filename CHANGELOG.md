@@ -2,6 +2,47 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.424] — dungeon redesign Phase 3: Sunken Root Caverns gets real interconnectivity
+
+Phase 3 of the 8-dungeon redesign (see v1.27.420-423) — the first MAIN
+story dungeon, not a bonus vault. Unlike Wrathflame Vault/Deep Root
+Vault, this one already had real branching (a genuine 3-way fork at
+Deep Tunnels, a companion-trust-gated side path, several lockpick
+chests) and real live characters had already started exploring it (1-4
+rooms each, none past Deep Tunnels) — so this pass is purely additive,
+never touching either existing open branch:
+
+- **Deep Tunnels is now the real, designated hub** (`dungeon_hub`) —
+  its existing 3-way fork stays exactly as-is; a 4th, key-gated branch
+  is added alongside it.
+- **A new optional key-and-vault side branch**: The Silt Hollow (open,
+  a real unique guardian drops The Silt Key) unlocks a silt-sealed door
+  into The Silt Vault (a genuine bonus treasure room) — entirely
+  additive bonus content, not a gate on the main story path, since real
+  players had already begun that path before today.
+- **A new puzzle-gated secret room**: a new NPC (The Choked Reliquary's
+  Voice) at the existing Cleared Choke poses a real riddle gating a new
+  secret Choked Reliquary room.
+- **A new shortcut lever** at the existing companion-trust branch's
+  dead end (The Smuggler's End) opens a direct path straight back to
+  the hub, skipping that long corridor on return trips.
+- **Incidental fix**: 6 rooms (Deep Tunnels, Forgotten Cistern, Precise
+  Channel, Flooded Gallery, Hollow Wellspring, Side Pool) never got the
+  `dungeon_interior` flag in the original v1.27.418 fast-travel pass —
+  found while working on this phase, now fixed. The dungeon's own
+  multi-zone entrance crossroads (shared with Goblin Warrens/Glimmerdeep
+  Grotto/Stonearch Gorge) is deliberately left alone, not exclusively
+  this dungeon's own interior.
+
+Goblin Warrens (Phase 4) is next.
+
+Tested: same coverage shape as Phases 1-2, plus two new guards specific
+to this phase — a regression confirming both pre-existing branches stay
+completely open and ungated, and confirming all 6 previously-unflagged
+rooms are now correctly fast-travel-ineligible. Full related regression
+slice re-run clean (56/56) alongside the 12 new Sunken Root Caverns
+tests.
+
 ## [1.27.423] — fix: dungeon key-guardian quests were free, zero-fight completions
 
 Real live bug (2026-08-30, dev-bridge, Coffee, right after v1.27.422:

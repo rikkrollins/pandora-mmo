@@ -5857,6 +5857,132 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(character["current_location"], "deep_root_vault_spore_hollow")
         self.assertEqual(set(character["map_revealed_locations"]), {"deep_root_vault_sanctum", "deep_root_vault_root_bound_alcove"})
 
+    # -- Dungeon redesign Phase 3 (2026-08-30): Sunken Root Caverns, the
+    #    first MAIN story dungeon in this pass. Unlike the two bonus
+    #    vaults, this one already had real branching and real players
+    #    who'd started exploring it -- additive only, the two existing
+    #    open branches are untouched. -------------------------------
+    def test_sunken_root_caverns_deep_tunnels_is_the_real_hub(self):
+        hub = cl.get_location(bot.CAMPAIGN, "sunken_root_caverns_deep_tunnels")
+        self.assertTrue(hub.get("dungeon_hub"))
+        self.assertEqual(set(hub["dungeon_teaser_locations"]), {"sunken_root_caverns_the_source", "sunken_root_caverns_the_silt_vault"})
+        self.assertIn("sunken_root_caverns_the_silt_vault", hub["locked_connections"])
+
+    def test_sunken_root_caverns_existing_branches_remain_open_and_untouched(self):
+        """Real players had already started exploring both existing branches before this phase -- neither gets a new gate."""
+        hub = cl.get_location(bot.CAMPAIGN, "sunken_root_caverns_deep_tunnels")
+        self.assertIn("sunken_root_caverns_flooded_gallery", hub["connections"])
+        self.assertIn("sunken_root_caverns_the_cleared_choke", hub["connections"])
+        self.assertNotIn("sunken_root_caverns_flooded_gallery", hub.get("locked_connections", {}))
+        self.assertNotIn("sunken_root_caverns_the_cleared_choke", hub.get("locked_connections", {}))
+
+    def test_sunken_root_caverns_interior_flag_gap_is_fixed(self):
+        """Real incidental gap found while working on this phase: 6 rooms never got dungeon_interior in the original v1.27.418 fast-travel pass."""
+        for loc_id in (
+            "sunken_root_caverns_deep_tunnels", "sunken_root_caverns_forgotten_cistern",
+            "sunken_root_caverns_precise_channel", "sunken_root_caverns_flooded_gallery",
+            "sunken_root_caverns_hollow_wellspring", "sunken_root_caverns_side_pool",
+        ):
+            loc = cl.get_location(bot.CAMPAIGN, loc_id)
+            self.assertTrue(loc.get("dungeon_interior"), f"{loc_id} still missing dungeon_interior")
+            self.assertFalse(bot._is_fast_travel_eligible(loc), f"{loc_id} still fast-travel eligible")
+
+    def test_sunken_root_caverns_silt_key_quest_registered_against_a_real_unique_guardian(self):
+        self.assertIn("the_silt_hollows_reckoning", bot._QUEST_MONSTER_INDEX.get("the_silt_bound_current", []))
+        quest = bot.CAMPAIGN["quests"]["the_silt_hollows_reckoning"]
+        self.assertEqual(quest["reward_item"], "the_silt_key")
+        self.assertEqual(quest["location"], "sunken_root_caverns_the_silt_hollow")
+        for layer, locs in bot.CAMPAIGN["locations"].items():
+            for loc_id, loc in locs.items():
+                if loc_id == "sunken_root_caverns_the_silt_hollow":
+                    continue
+                self.assertNotIn("the_silt_bound_current", loc.get("monsters") or [], f"{loc_id} also uses the guardian's unique monster_key")
+
+    async def test_a_prior_unrelated_root_cavern_current_kill_never_auto_completes_the_silt_quest(self):
+        """Same real bug class as the Phase 1/2 fix -- the guardian's stats were copied from root_cavern_current, but the monster_key itself must be exclusively its own."""
+        from unittest.mock import patch, AsyncMock
+        user_id = 960230
+        character = make_basic_character(user_id, "PriorCurrentKillTester", current_location="sunken_root_caverns_the_silt_hollow")
+        db.update_character(user_id, -999, defeated_monsters=["root_cavern_current"])
+        character = db.get_character(user_id, -999)
+        quest_id, quest = "the_silt_hollows_reckoning", bot.CAMPAIGN["quests"]["the_silt_hollows_reckoning"]
+        sink = []
+        update = FakeUpdate(user_id, "", sink, chat_id=-999)
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._maybe_push_quest_offer(update, character, quest_id, quest)
+        char = db.get_character(user_id, -999)
+        self.assertNotIn("the_silt_hollows_reckoning", char.get("completed_quests") or [])
+
+    async def test_sunken_root_caverns_silt_vault_door_blocks_without_key_and_opens_with_it(self):
+        location = cl.get_location(bot.CAMPAIGN, "sunken_root_caverns_deep_tunnels")
+        lockable = next(lk for lk in location["lockables"] if lk["id"] == "sunken_root_caverns_silt_vault_door")
+        self.assertEqual(lockable["requires_key_item"], "the_silt_key")
+
+        no_key = make_basic_character(960231, "NoSiltKeyTester", current_location="sunken_root_caverns_deep_tunnels")
+        sink = []
+        await bot._do_lockpick(FakeUpdate(960231, "open the door", sink), no_key, dict(lockable), "open the door", forced_roll=1)
+        self.assertNotIn("sunken_root_caverns_silt_vault_door", bot._UNLOCKED.get(-999, set()))
+
+        has_key = make_basic_character(960232, "HasSiltKeyTester", current_location="sunken_root_caverns_deep_tunnels")
+        db.add_item(960232, -999, "the_silt_key", 1)
+        has_key = db.get_character(960232, -999)
+        sink2 = []
+        await bot._do_lockpick(FakeUpdate(960232, "open the door", sink2), has_key, dict(lockable), "open the door", forced_roll=1)
+        self.assertIn("sunken_root_caverns_silt_vault_door", bot._UNLOCKED.get(-999, set()))
+
+        sink3 = []
+        await bot._do_move(FakeUpdate(960232, "", sink3), "go to the silt vault")
+        character = db.get_character(960232, -999)
+        self.assertEqual(character["current_location"], "sunken_root_caverns_the_silt_vault")
+
+    async def test_sunken_root_caverns_smugglers_end_lever_opens_a_shortcut_to_the_hub(self):
+        far_room = cl.get_location(bot.CAMPAIGN, "sunken_root_caverns_the_smugglers_end")
+        lever = far_room["lockables"][0]
+        self.assertEqual(lever["kind"], "lever")
+        self.assertEqual(far_room["locked_connections"]["sunken_root_caverns_deep_tunnels"], lever["id"])
+        hub = cl.get_location(bot.CAMPAIGN, "sunken_root_caverns_deep_tunnels")
+        self.assertNotIn("sunken_root_caverns_the_smugglers_end", hub.get("locked_connections", {}))
+
+        user_id = 960233
+        character = make_basic_character(user_id, "SmugglersLeverTester", current_location="sunken_root_caverns_the_smugglers_end")
+        sink = []
+        await bot._do_lockpick(FakeUpdate(user_id, "pull the lever", sink), character, dict(lever), "pull the lever")
+        self.assertIn(lever["id"], bot._UNLOCKED.get(-999, set()))
+        sink2 = []
+        await bot._do_move(FakeUpdate(user_id, "", sink2), "go to the deep tunnels")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "sunken_root_caverns_deep_tunnels")
+
+    def test_sunken_root_caverns_choked_reliquary_gated_behind_the_riddle(self):
+        location = cl.get_location(bot.CAMPAIGN, "sunken_root_caverns_the_cleared_choke")
+        self.assertEqual(location["story_gates"]["sunken_root_caverns_the_choked_reliquary"], {"requires_completed_quest": "the_choked_reliquarys_answer"})
+        user_id = 960234
+        make_basic_character(user_id, "ChokeGateTester", current_location="sunken_root_caverns_the_cleared_choke")
+        character = db.get_character(user_id, -999)
+        self.assertIsNotNone(bot._check_story_gate(character, location, "sunken_root_caverns_the_choked_reliquary"))
+        db.complete_quest(user_id, -999, "the_choked_reliquarys_answer")
+        character = db.get_character(user_id, -999)
+        self.assertIsNone(bot._check_story_gate(character, location, "sunken_root_caverns_the_choked_reliquary"))
+
+    async def test_answering_the_choked_reliquarys_riddle_completes_it_end_to_end(self):
+        user_id = 960235
+        make_basic_character(user_id, "ChokeRiddleAnswerTester", current_location="sunken_root_caverns_the_cleared_choke")
+        db.accept_quest(user_id, -999, "the_choked_reliquarys_answer")
+        sink = []
+        await bot._do_answer_puzzle(FakeUpdate(user_id, "", sink), "the water")
+        character = db.get_character(user_id, -999)
+        self.assertIn("the_choked_reliquarys_answer", character.get("completed_quests") or [])
+
+    async def test_sunken_root_caverns_hub_entry_fires_the_teaser_reveal(self):
+        user_id = 960236
+        make_basic_character(user_id, "SRCTeaserHubTester", current_location="sunken_root_caverns")
+        db.update_character(user_id, -999, visited_locations=["sunken_root_caverns"], map_revealed_locations=[], cleared_locations=["sunken_root_caverns"])
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "", sink), "go to the deep tunnels")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "sunken_root_caverns_deep_tunnels")
+        self.assertEqual(set(character["map_revealed_locations"]), {"sunken_root_caverns_the_source", "sunken_root_caverns_the_silt_vault"})
+
     def test_bonus_vault_room_graphs_are_fully_connected_and_reciprocated(self):
         """
         Every direction out of a bonus-vault room must point to a real
@@ -6243,9 +6369,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "sunken_root_caverns_hollow_wellspring", "sunken_root_caverns_side_pool",
         }
         new_ids = {k for k in locs if k.startswith("sunken_root_caverns") and k not in core_ids}
-        self.assertEqual(len(core_ids) + len(new_ids), 32)
+        # 32 from the original Chapter 6 expansion + 3 real new rooms from
+        # the dungeon-redesign Phase 3 pass (2026-08-30): the Silt Hollow,
+        # the Silt Vault, and the Choked Reliquary.
+        self.assertEqual(len(core_ids) + len(new_ids), 35)
 
     def test_sunken_root_caverns_new_rooms_are_fully_connected_and_reciprocated(self):
+        """
+        A real, INTENTIONAL exception (dungeon redesign Phase 3,
+        2026-08-30): a `locked_connections` target is deliberately
+        excluded from the gating room's own `connections` list, same
+        convention as this game's other real locked doors -- see the
+        bonus-vault version of this same test.
+        """
         locs = bot.CAMPAIGN["locations"]["underground"]
         core_ids = {
             "sunken_root_caverns", "sunken_root_caverns_deep_tunnels", "sunken_root_caverns_flooded_gallery",
@@ -6259,6 +6395,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             for direction, dest_id in loc.get("directions", {}).items():
                 dest = cl.get_location(bot.CAMPAIGN, dest_id)
                 self.assertIsNotNone(dest, f"{loc_id} -> {dest_id} via {direction} is a dead end")
+                if dest_id in loc.get("locked_connections", {}) or loc_id in dest.get("locked_connections", {}):
+                    continue
                 self.assertIn(loc_id, dest.get("connections", []), f"{dest_id} doesn't connect back to {loc_id}")
 
     def test_preexisting_side_pool_and_cistern_connection_bugs_fixed(self):

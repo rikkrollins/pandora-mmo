@@ -771,6 +771,16 @@ ITEMS = {
         "price": 0, "weight": 0.1,
         "description": "Never sprouted, never rotted either -- it's been waiting for something for a very long time.",
     },
+    # Dungeon redesign Phase 3 (2026-08-30) -- Sunken Root Caverns' own
+    # key item, opening the silt-sealed door from Deep Tunnels into the
+    # Silt Vault (a genuinely optional bonus side-branch, since the
+    # dungeon's two existing main branches were already open before
+    # this pass and real players had already started exploring them).
+    "the_silt_key": {
+        "name": "The Silt Key", "type": "quest_item", "rarity": "unique",
+        "price": 0, "weight": 0.1,
+        "description": "Caked in fine grey silt no amount of handling seems to wear off.",
+    },
     "brass_key_no_lock": {
         "name": "Brass Key That Fits No Lock", "type": "quest_item", "rarity": "unique",
         "price": 0, "weight": 0.1,

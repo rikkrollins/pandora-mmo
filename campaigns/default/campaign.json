@@ -1892,16 +1892,18 @@
       "sunken_root_caverns_deep_tunnels": {
         "name": "The Deep Tunnels",
         "layer": "underground",
-        "description": "Passages that keep going long after they should have ended. Somewhere ahead, rubble chokes one of them almost shut \u2014 almost.",
+        "description": "Passages that keep going long after they should have ended. Somewhere ahead, rubble chokes one of them almost shut -- almost. A second, narrower gap nearby has been sealed with something far more deliberate than rubble.",
         "connections": [
           "sunken_root_caverns",
           "sunken_root_caverns_flooded_gallery",
-          "sunken_root_caverns_the_cleared_choke"
+          "sunken_root_caverns_the_cleared_choke",
+          "sunken_root_caverns_the_silt_hollow"
         ],
         "directions": {
           "south": "sunken_root_caverns",
           "north": "sunken_root_caverns_flooded_gallery",
-          "west": "sunken_root_caverns_the_cleared_choke"
+          "west": "sunken_root_caverns_the_cleared_choke",
+          "up": "sunken_root_caverns_the_silt_hollow"
         },
         "lockables": [
           {
@@ -1909,10 +1911,17 @@
             "kind": "door",
             "name": "a rubble-choked passage",
             "leads_to": "stonearch_bridge_gorge_depths"
+          },
+          {
+            "id": "sunken_root_caverns_silt_vault_door",
+            "kind": "door",
+            "name": "a silt-sealed door",
+            "requires_key_item": "the_silt_key"
           }
         ],
         "locked_connections": {
-          "stonearch_bridge_gorge_depths": "rubble_choked_passage"
+          "stonearch_bridge_gorge_depths": "rubble_choked_passage",
+          "sunken_root_caverns_the_silt_vault": "sunken_root_caverns_silt_vault_door"
         },
         "monsters": [
           "tunnel_goblin"
@@ -1932,7 +1941,13 @@
           "x": 0,
           "y": 1
         },
-        "dungeon_id": "sunken_root_caverns"
+        "dungeon_id": "sunken_root_caverns",
+        "dungeon_interior": true,
+        "dungeon_hub": true,
+        "dungeon_teaser_locations": [
+          "sunken_root_caverns_the_source",
+          "sunken_root_caverns_the_silt_vault"
+        ]
       },
       "sunken_root_caverns_forgotten_cistern": {
         "name": "The Forgotten Cistern",
@@ -1977,7 +1992,8 @@
           "x": 0,
           "y": 3
         },
-        "dungeon_id": "sunken_root_caverns"
+        "dungeon_id": "sunken_root_caverns",
+        "dungeon_interior": true
       },
       "sunken_root_caverns_precise_channel": {
         "name": "The Precise Channel",
@@ -2009,7 +2025,8 @@
           "x": 0,
           "y": 4
         },
-        "dungeon_id": "sunken_root_caverns"
+        "dungeon_id": "sunken_root_caverns",
+        "dungeon_interior": true
       },
       "goblin_warrens_inner_den": {
         "name": "The Inner Den",
@@ -2925,7 +2942,8 @@
           "x": 0,
           "y": 2
         },
-        "dungeon_id": "sunken_root_caverns"
+        "dungeon_id": "sunken_root_caverns",
+        "dungeon_interior": true
       },
       "sunken_root_caverns_hollow_wellspring": {
         "name": "The Hollow Wellspring",
@@ -2952,7 +2970,8 @@
           "x": 0,
           "y": 5
         },
-        "dungeon_id": "sunken_root_caverns"
+        "dungeon_id": "sunken_root_caverns",
+        "dungeon_interior": true
       },
       "sunken_root_caverns_side_pool": {
         "name": "The Side Pool",
@@ -2977,7 +2996,8 @@
           "x": 1,
           "y": 2
         },
-        "dungeon_id": "sunken_root_caverns"
+        "dungeon_id": "sunken_root_caverns",
+        "dungeon_interior": true
       },
       "stonearch_bridge_web_hollow": {
         "name": "The Web Hollow",
@@ -4866,11 +4886,13 @@
         "description": "The rubble that used to choke this passage almost shut has clearly been cleared, on purpose, more than once.",
         "connections": [
           "sunken_root_caverns_deep_tunnels",
-          "sunken_root_caverns_the_smugglers_cut"
+          "sunken_root_caverns_the_smugglers_cut",
+          "sunken_root_caverns_the_choked_reliquary"
         ],
         "directions": {
           "east": "sunken_root_caverns_deep_tunnels",
-          "west": "sunken_root_caverns_the_smugglers_cut"
+          "west": "sunken_root_caverns_the_smugglers_cut",
+          "south": "sunken_root_caverns_the_choked_reliquary"
         },
         "monsters": [
           "root_cavern_stalker"
@@ -4880,7 +4902,15 @@
           "y": 1
         },
         "dungeon_interior": true,
-        "dungeon_id": "sunken_root_caverns"
+        "dungeon_id": "sunken_root_caverns",
+        "npcs": [
+          "the_choked_reliquarys_voice"
+        ],
+        "story_gates": {
+          "sunken_root_caverns_the_choked_reliquary": {
+            "requires_completed_quest": "the_choked_reliquarys_answer"
+          }
+        }
       },
       "sunken_root_caverns_the_smugglers_cut": {
         "name": "The Smuggler's Cut",
@@ -5121,7 +5151,17 @@
           "y": 8
         },
         "dungeon_interior": true,
-        "dungeon_id": "sunken_root_caverns"
+        "dungeon_id": "sunken_root_caverns",
+        "lockables": [
+          {
+            "id": "sunken_root_caverns_smugglers_shortcut",
+            "kind": "lever",
+            "name": "an old smuggler's counterweight lever"
+          }
+        ],
+        "locked_connections": {
+          "sunken_root_caverns_deep_tunnels": "sunken_root_caverns_smugglers_shortcut"
+        }
       },
       "sunken_root_caverns_the_spring_stair": {
         "name": "The Spring Stair",
@@ -6217,7 +6257,7 @@
       "wrathflame_vault_cinder_key_alcove": {
         "name": "The Cinder Key Alcove",
         "layer": "underground",
-        "description": "A dead-end chamber past the font, where something molten still stands guard over a single small object set into the far wall.",
+        "description": "A dead-end chamber past the font, where something molten stands guard -- whatever it is guarding will only ever be yours once it is finally put down.",
         "connections": [
           "wrathflame_vault_ember_font"
         ],
@@ -6298,7 +6338,7 @@
       "deep_root_vault_last_seed": {
         "name": "The Last Seed",
         "layer": "underground",
-        "description": "A dead-end root chamber, curled protectively around a single seed that's never actually sprouted -- and something withered still won't let it go.",
+        "description": "A dead-end root chamber, curled protectively around a single seed that's never actually sprouted -- it will only let go once whatever is guarding it is finally put down.",
         "connections": [
           "deep_root_vault_weeping_spring"
         ],
@@ -6352,6 +6392,83 @@
         },
         "dungeon_interior": true,
         "dungeon_id": "deep_root_vault"
+      },
+      "sunken_root_caverns_the_silt_hollow": {
+        "name": "The Silt Hollow",
+        "layer": "underground",
+        "description": "A shallow pocket half-filled with fine grey silt, something real and deliberately shaped buried in it -- it will only ever be yours once whatever is guarding it is finally put down.",
+        "connections": [
+          "sunken_root_caverns_deep_tunnels"
+        ],
+        "directions": {
+          "down": "sunken_root_caverns_deep_tunnels"
+        },
+        "monsters": [
+          "the_silt_bound_current"
+        ],
+        "grid_position": {
+          "x": 0,
+          "y": -1
+        },
+        "dungeon_interior": true,
+        "dungeon_id": "sunken_root_caverns"
+      },
+      "sunken_root_caverns_the_silt_vault": {
+        "name": "The Silt Vault",
+        "layer": "underground",
+        "description": "Whatever the old warren-runners were hiding from each other, they hid it here -- dry, undisturbed, and very deliberately sealed.",
+        "connections": [
+          "sunken_root_caverns_deep_tunnels"
+        ],
+        "directions": {
+          "down": "sunken_root_caverns_deep_tunnels"
+        },
+        "lockables": [
+          {
+            "id": "sunken_root_caverns_silt_vault_chest",
+            "kind": "chest",
+            "name": "a silt-packed strongbox",
+            "loot": {
+              "greater_healing_potion": 2
+            },
+            "gold": 150
+          }
+        ],
+        "interactables": {
+          "silt_vault_marker": {
+            "name": "a marker scratched into the vault wall",
+            "description": "Whoever sealed this counted on nobody else ever having the key -- the scratch marks trail off mid-sentence, like they never finished the thought before something changed their mind."
+          }
+        },
+        "grid_position": {
+          "x": 1,
+          "y": 0
+        },
+        "dungeon_interior": true,
+        "dungeon_id": "sunken_root_caverns"
+      },
+      "sunken_root_caverns_the_choked_reliquary": {
+        "name": "The Choked Reliquary",
+        "layer": "underground",
+        "description": "A small side-chamber behind the rubble, kept just clear enough by someone -- or something -- that clearly still cares what's in here.",
+        "connections": [
+          "sunken_root_caverns_the_cleared_choke"
+        ],
+        "directions": {
+          "north": "sunken_root_caverns_the_cleared_choke"
+        },
+        "interactables": {
+          "reliquary_root_tablet": {
+            "name": "a tablet grown out of living root",
+            "description": "Fed into the root the same way the deep vaults do it, letter by letter: 'The water remembers everyone who ever tried to leave it dry.'"
+          }
+        },
+        "grid_position": {
+          "x": -1,
+          "y": 0
+        },
+        "dungeon_interior": true,
+        "dungeon_id": "sunken_root_caverns"
       }
     },
     "sky": {
@@ -7553,6 +7670,15 @@
       "role": "puzzle_guardian",
       "personality": "speaks slowly, like every word costs it something, and won't be rushed into repeating itself",
       "goals": "guards the alcove the way it's always guarded it -- by making sure whoever enters actually understands what they're walking past",
+      "recruitable": false,
+      "alignment": "True Neutral",
+      "disposition": "neutral"
+    },
+    "the_choked_reliquarys_voice": {
+      "name": "The Choked Reliquary's Voice",
+      "role": "puzzle_guardian",
+      "personality": "dry, patient, and entirely uninterested in repeating itself for anyone who wasn't listening the first time",
+      "goals": "keeps the reliquary closed to anyone who hasn't proven they understand what the caverns actually are",
       "recruitable": false,
       "alignment": "True Neutral",
       "disposition": "neutral"
@@ -9426,6 +9552,31 @@
       "reward_gold": 90,
       "reward_item": "the_last_seed",
       "clue": "Whatever's curled around the seed won't move until it's put down for good, and it isn't the same thing you've fought anywhere else."
+    },
+    "the_silt_hollows_reckoning": {
+      "title": "The Silt-Sealed Key",
+      "description": "Something's been curled around a real, deliberately shaped key for longer than anything down here should still be moving.",
+      "location": "sunken_root_caverns_the_silt_hollow",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_silt_bound_current"
+      },
+      "reward_xp": 950,
+      "reward_gold": 220,
+      "reward_item": "the_silt_key",
+      "clue": "Whatever's curled around the key in the Silt Hollow won't move until it's put down for good."
+    },
+    "the_choked_reliquarys_answer": {
+      "title": "What the Water Remembers",
+      "description": "The voice behind the reliquary wall won't move until its own real question is actually answered.",
+      "location": "sunken_root_caverns_the_cleared_choke",
+      "trigger": {
+        "type": "solve_puzzle",
+        "puzzle_id": "choked_reliquarys_riddle"
+      },
+      "reward_xp": 700,
+      "reward_gold": 200,
+      "clue": "The Choked Reliquary's Voice poses a real question: \"I have no mouth, yet I remember every name spoken near me. I have no hands, yet I never let go. What am I?\""
     }
   },
   "story_arcs": {
@@ -12539,6 +12690,19 @@
       "damage_dice": "1d8",
       "damage_bonus": 38,
       "damage_type": "poison"
+    },
+    "the_silt_bound_current": {
+      "name": "The Silt-Bound Current",
+      "level": 52,
+      "dexterity": 14,
+      "strength": 18,
+      "armor_class": 20,
+      "hp_max": 1600,
+      "proficiency_bonus": 12,
+      "xp_reward": 900,
+      "damage_dice": "1d8",
+      "damage_bonus": 140,
+      "damage_type": "cold"
     }
   },
   "factions": {
@@ -12744,6 +12908,15 @@
         "a seed",
         "seed",
         "seeds"
+      ]
+    },
+    "choked_reliquarys_riddle": {
+      "riddle": "I have no mouth, yet I remember every name spoken near me. I have no hands, yet I never let go. What am I?",
+      "accepted_answers": [
+        "water",
+        "the water",
+        "root water",
+        "the root water"
       ]
     }
   },
