@@ -8407,13 +8407,22 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         all_targets = bot._resolve_spell_target_list(spell, 300.0, candidates, primary)
         self.assertEqual(len(all_targets), len(candidates))
 
-    def test_spell_mastery_power_multiplier_stacks_full_spell_plus_half_element(self):
-        """Confirmed dual-tier stacking: full weight for the spell's own mastery, HALF weight for the shared elemental bonus. spell=150% (+50%), element=140% (+40%) -> +50% + 20% = +70% total, i.e. a 1.70x multiplier."""
-        self.assertAlmostEqual(bot._spell_mastery_power_multiplier(150.0, 140.0), 1.70, places=6)
-        self.assertEqual(bot._spell_mastery_power_multiplier(100.0, 100.0), 1.0)
-        self.assertEqual(bot._spell_mastery_power_multiplier(50.0, 50.0), 1.0)
+    def test_element_mastery_drives_spell_power_at_full_weight_not_half(self):
+        """
+        Consolidated 2026-08-31 (per Coffee: "I don't want the
+        individual spells to level up, but I want the spell types to
+        level up"). The old dual-tier system gave full weight to a
+        spell's own personal mastery and only HALF weight to the
+        shared element bonus; now that element_mastery_pct is the
+        sole axis for spells, it must grant the FULL bonus
+        _mastery_overflow_multiplier itself defines -- 140% -> +40%,
+        a 1.40x multiplier, not the old half-weighted 1.20x.
+        """
+        self.assertAlmostEqual(bot._mastery_overflow_multiplier(140.0), 1.40, places=6)
+        self.assertEqual(bot._mastery_overflow_multiplier(100.0), 1.0)
+        self.assertEqual(bot._mastery_overflow_multiplier(50.0), 1.0)
 
-    async def test_casting_an_aoe_spell_grows_both_its_own_and_its_elements_mastery(self):
+    async def test_casting_a_spell_grows_only_the_shared_element_mastery_not_a_per_spell_one(self):
         import sessions
         from unittest.mock import patch, AsyncMock
         sessions.end_session(-999)
@@ -8432,15 +8441,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [caster_id, -5200960]
 
         before = db.get_character(caster_id, -999)
-        self.assertEqual(before["spell_mastery_pct"], {})
         self.assertEqual(before["element_mastery_pct"], {})
         with patch("bot.narrate_action", return_value="Flames erupt."), \
              patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
             await bot._do_cast_spell(FakeUpdate(caster_id, "cast fireball", []), "cast fireball")
             await _drain_narration_queue()
         after = db.get_character(caster_id, -999)
-        self.assertIn("fireball", after["spell_mastery_pct"])
-        self.assertGreater(after["spell_mastery_pct"]["fireball"], before["spell_mastery_pct"].get("fireball", 1.0))
+        self.assertNotIn("fireball", after.get("spell_mastery_pct", {}), "the old per-spell tier must no longer grow")
         self.assertIn("fire", after["element_mastery_pct"])
         self.assertGreater(after["element_mastery_pct"]["fire"], before["element_mastery_pct"].get("fire", 1.0))
         sessions.end_session(-999)
@@ -8454,10 +8461,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             caster_id, "AOECaster", char_class="Wizard", current_location="crossroads_tavern",
             known_spells=["fireball"], spell_slots_max=5,
         )
-        # 300%+ mastery -- confirmed top tier, hits every living enemy.
+        # 300%+ Fire Magic (the element mastery, sole axis since
+        # 2026-08-31's consolidation) -- confirmed top tier, hits every living enemy.
         db.update_character(
             caster_id, -999, spell_slots_current=5,
-            spell_mastery_pct={"fireball": 300.0}, element_mastery_pct={"fire": 1.0},
+            element_mastery_pct={"fire": 300.0},
         )
         goblins = [
             {"telegram_user_id": -5200961 - i, "name": f"AOEGoblin{i}", "dexterity": 10, "strength": 10,
@@ -8507,9 +8515,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             caster_id, "MassHealer", char_class="Cleric", current_location="crossroads_tavern",
             known_spells=["mass_cure_wounds"], spell_slots_max=5,
         )
+        # 300%+ Heal Magic (the element mastery, sole axis since 2026-08-31's consolidation) -- confirmed top tier.
         db.update_character(
             caster_id, -999, spell_slots_current=5,
-            spell_mastery_pct={"mass_cure_wounds": 300.0}, element_mastery_pct={"heal": 1.0},
+            element_mastery_pct={"heal": 300.0},
         )
         make_basic_character(ally1_id, "WoundedAlly1", chat_id=-999, hp_max=100)
         db.update_character(ally1_id, -999, hp_current=20)
@@ -17166,23 +17175,27 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("8d6 fire damage", reply)
         self.assertIn("reaction", reply.lower())
 
-    async def test_magic_menu_shows_real_mastery_and_target_reach(self):
+    async def test_magic_menu_shows_real_element_mastery_and_target_reach(self):
+        """
+        Consolidated 2026-08-31 (per Coffee: "I don't want the
+        individual spells to level up, but I want the spell types to
+        level up"). No more separate per-spell "X% mastery" figure --
+        Element Mastery alone drives both the displayed % and the
+        target-reach tier now.
+        """
         use_test_db("tests/tmp/magic_menu_mastery_test.db")
         user_id = 950701
         character = make_basic_character(
             user_id, "MasteryDisplayTester", current_location="crossroads_tavern",
             char_class="Sorcerer", known_spells=["fireball"],
         )
-        db.update_character(
-            user_id, -999,
-            spell_mastery_pct={"fireball": 150.0}, element_mastery_pct={"fire": 40.0},
-        )
+        db.update_character(user_id, -999, element_mastery_pct={"fire": 150.0})
         sink = []
         await bot._do_show_magic_menu(FakeUpdate(user_id, "", sink))
         reply = sink[0]
-        self.assertIn("150% mastery", reply)
+        self.assertNotIn("% mastery", reply)
         self.assertIn("targets: 2", reply)
-        self.assertIn("fire magic 40%", reply)
+        self.assertIn("fire magic 150%", reply)
 
     async def test_magic_menu_cast_button_reaches_real_heal_target_picker(self):
         """
@@ -22585,8 +22598,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         Real request (2026-08-22, Coffee): "under our character sheets
         can u show our % to mastery or next lvl on proficiencies?"
         Covers both a dict-keyed mastery (weapon) and a scalar one
-        (backstab), and confirms the label reads the real spell name
-        for spell_mastery_pct, not the bare spell_id.
+        (backstab). Consolidated 2026-08-31 (per Coffee: "I don't want
+        the individual spells to level up, but I want the spell types
+        to level up... it cleans up the proficiency list") -- an
+        individual spell's own name (e.g. "Fireball") no longer
+        appears here at all, only its element ("Fire Magic").
         """
         user_id = 900513
         character = make_basic_character(user_id, "Proficient", char_class="Sorcerer", known_spells=["fireball"])
@@ -22599,7 +22615,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sheet = bot._format_character_sheet(character)
         self.assertIn("Martial Weapon 62%", sheet)
         self.assertIn("Backstab 140%", sheet)
-        self.assertIn("Fireball 155%", sheet)
+        self.assertNotIn("Fireball 155%", sheet, "the old per-spell proficiency entry must be gone from this line (Fireball itself still legitimately appears elsewhere, under Spells known)")
         self.assertIn("Fire Magic 30%", sheet)
         self.assertIn("100% = Mastery", sheet)
 

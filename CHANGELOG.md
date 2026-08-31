@@ -2,6 +2,45 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.441] — consolidate Spell Mastery onto Element Mastery alone
+
+Real request (2026-08-31, Coffee, dev-bridge screenshot): "When
+levelling up proficiencies I don't want the individual spells to level
+up, but I want the spell types to level up. For example infectious
+plague is a poison magic spell so instead of having infectious plague,
+we just level up poison magic... it cleans up the proficiency list and
+only focusses on the types." The Proficiencies line was showing a real
+spell's own mastery right next to its element's mastery ("Fireball 2%,
+Fire Magic 2%") — the exact redundant clutter this was pointing at.
+
+Removed the per-spell tier (spell_mastery_pct) entirely from every
+real path that used to grow or read it: casting a damage or heal spell
+now grinds ONLY the shared element_mastery_pct bucket, at FULL weight
+(it's the sole axis now, not a secondary bonus riding alongside a
+personal one). The multi-target unlock tiers (100%/200%/300% → 2/3/All
+targets) — previously driven by the per-spell tier specifically — now
+read from the same element mastery: master Fire Magic and every fire
+spell you know benefits, not just whichever one you personally
+practiced most. The Character Sheet's Proficiencies line and the
+Magic menu both drop the old per-spell "X% mastery" figure, keeping
+only the type-level one. Weapon Elemental Mastery (a separate, already
+half-weight bonus with no personal-spell tier of its own) is
+unchanged. Old spell_mastery_pct values already on live characters are
+simply no longer read (all trivially small — 1-2% — not worth a
+migration).
+
+Also fixed a small pre-existing gap found while touching this: the
+Magic menu's per-spell display never showed a HEAL spell's own Heal
+Magic % at all (its damage_type is None, so the old `if damage_type:`
+guard silently skipped it) — now resolved the same way the real mana
+grind itself already resolves a heal spell's element key.
+
+Tested: real fail-then-pass repros confirming casting a spell grows
+only element_mastery_pct (never spell_mastery_pct), the Character
+Sheet and Magic menu both drop the per-spell figure, and the 300%
+multi-target tier now reads from Element Mastery. Every directly
+affected and adjacent mastery-system test (20+) re-run clean.
+
 ## [1.27.440] — tool: dungeon quality checker + authoring toolkit, plus a real reciprocity fix it found
 
 Real request (2026-08-31, Coffee): "the purpose of this is so as i

@@ -338,19 +338,27 @@ def _grind_dict_proficiency(telegram_user_id: int, chat_id: int, field_name: str
     return current_value
 
 
-def _grind_spell_mastery(character: dict, spell_id: str, damage_type: str) -> tuple[float, float]:
+def _grind_element_mastery(character: dict, damage_type: str) -> float:
     """
     Spell Mastery (2026-08-22, per Coffee: "let the players level up
     thier magic... tiers of magic that can get stronger and target
-    multiple enemies"). Grinds BOTH tiers on a real cast -- this
+    multiple enemies"; consolidated 2026-08-31, per Coffee, dev-bridge
+    screenshot: "I don't want the individual spells to level up, but I
+    want the spell types to level up... instead of having infectious
+    plague, we just level up poison magic... it cleans up the
+    proficiency list"). Used to grind TWO separate tiers -- this
     spell's own mastery (spell_mastery_pct, keyed by spell_id) AND a
     smaller, shared per-element mastery (element_mastery_pct, keyed by
-    the spell's own damage_type) that helps every spell of that
-    element, even ones not personally practiced -- and returns the
-    PRE-grind (spell_pct, element_pct) pair THIS cast's own damage/
-    healing/targeting should be computed from, same "returns the value
-    as it stood before this use" contract _grind_flat_proficiency/
-    _grind_dict_proficiency already follow.
+    damage_type) -- which put both an individual spell AND its own
+    element on the character sheet's Proficiencies line side by side
+    (e.g. "Fireball 2%, Fire Magic 2%"), exactly the redundant clutter
+    Coffee's report was pointing at. Now grinds ONLY the shared
+    per-element tier, at full weight (see _mastery_overflow_multiplier's
+    own call site below, no more half-weight split) -- it's the sole
+    axis now, not a secondary bonus on top of a personal one.
+    spell_mastery_pct itself is left alone in the DB (existing values
+    are tiny -- 1-2% on live characters -- and simply go unread from
+    here on, not worth a migration).
 
     Real players only -- monsters/AI never grind proficiency, same
     rule every other mastery type in this game already follows (see
@@ -359,20 +367,12 @@ def _grind_spell_mastery(character: dict, spell_id: str, damage_type: str) -> tu
     spell at all (see _maybe_monster_cast_spell), not something it
     grinds toward.
     """
-    spell_dict = character.get("spell_mastery_pct", {})
     element_dict = character.get("element_mastery_pct", {})
     if character.get("is_ai") or not character.get("char_class"):
-        return (
-            spell_dict.get(spell_id, PROFICIENCY_STARTING_PCT),
-            element_dict.get(damage_type, PROFICIENCY_STARTING_PCT),
-        )
-    spell_pct = _grind_dict_proficiency(
-        character["telegram_user_id"], character["chat_id"], "spell_mastery_pct", spell_dict, spell_id,
-    )
-    element_pct = _grind_dict_proficiency(
+        return element_dict.get(damage_type, PROFICIENCY_STARTING_PCT)
+    return _grind_dict_proficiency(
         character["telegram_user_id"], character["chat_id"], "element_mastery_pct", element_dict, damage_type,
     )
-    return spell_pct, element_pct
 
 
 def _grind_heal_mastery(character: dict) -> float:
@@ -381,7 +381,7 @@ def _grind_heal_mastery(character: dict) -> float:
     for healing type scrolls, magic, and abilities that heal
     characters... make healing proficiency like an element"). Cure
     Wounds/Healing Word/Mass Cure Wounds already grind element_mastery_
-    pct["heal"] via _grind_spell_mastery (damage_type defaults to
+    pct["heal"] via _grind_element_mastery (damage_type defaults to
     "heal" for heal-effect spells) -- this is the exact same shared
     bucket, reused here so Second Wind, Lay on Hands, and healing
     items/potions grind and benefit from IT TOO, instead of each
@@ -405,16 +405,18 @@ def _maybe_apply_weapon_element_mastery(attacker: dict, target: dict, weapon: di
     Coffee: "make sure the weapons and armour elemental stats actually
     work against the enemies... make sure players can level them up").
     element_mastery_pct previously grew ONLY from spell/heal casts
-    (_grind_spell_mastery/_grind_heal_mastery) -- a real elemental
+    (_grind_element_mastery/_grind_heal_mastery) -- a real elemental
     weapon hit (flametongue_shortsword, stoneheart_warhammer, an
     enchant_flame'd blade, etc.) never grew it and never benefited from
     it, even though it's the exact same shared per-element bucket.
     This closes that gap: any landed hit with a non-physical weapon
     damage_type grinds the same element_mastery_pct dict a matching
-    spell would, and grants the same HALF-weight-only bonus
-    _spell_mastery_power_multiplier already gives the element half of a
-    spell's own bonus (full personal mastery is a spell-only concept --
-    there's no per-weapon mastery tier to mirror here). A no-op below
+    spell would, at HALF the weight a real spell cast of that element
+    gets (2026-08-31: spells now take element_mastery_pct at full
+    weight, since it's their only mastery axis -- weapons deliberately
+    keep the original half-weight bonus unchanged; a weapon was never
+    meant to hit as hard from the same grind as actually casting the
+    spell). A no-op below
     100% element_pct (fresh characters), same "a bonus, never a
     penalty, worth the grind at scale" shape every mastery system in
     this game already follows. Real players only -- monsters/AI never
@@ -440,38 +442,30 @@ def _maybe_apply_weapon_element_mastery(attacker: dict, target: dict, weapon: di
     result["defender_hp_remaining"] = target["hp_current"]
 
 
-def _spell_mastery_power_multiplier(spell_pct: float, element_pct: float) -> float:
-    """
-    Real damage/healing bonus from Spell Mastery -- full weight for
-    this spell's own practice, HALF weight for the shared elemental
-    bonus (per the confirmed dual-tier design: the element track is a
-    smaller, universal bonus, not equal to personally mastering a
-    spell). 1.0 (no-op) when both are at or under 100%, same "a bonus,
-    never a penalty" rule _mastery_overflow_multiplier itself follows.
-    """
-    spell_bonus = _mastery_overflow_multiplier(spell_pct) - 1.0
-    element_bonus = (_mastery_overflow_multiplier(element_pct) - 1.0) / 2.0
-    return 1.0 + spell_bonus + element_bonus
-
-
 SPELL_MASTERY_TARGET_TIERS = ((300.0, None), (200.0, 3), (100.0, 2))
 
 
-def _spell_target_count(spell_pct: float) -> int | None:
+def _spell_target_count(element_pct: float) -> int | None:
     """
-    How many targets this spell's own mastery has unlocked -- None
-    means every living target on the relevant side ("All", the
-    confirmed top tier, no fixed numeric cap). Driven by the PER-SPELL
-    mastery only; element_mastery_pct affects damage/healing power,
-    never target count.
+    How many targets this spell's own damage type's Element Mastery
+    has unlocked -- None means every living target on the relevant
+    side ("All", the confirmed top tier, no fixed numeric cap).
+
+    Consolidated 2026-08-31 (per Coffee: "I don't want the individual
+    spells to level up, but I want the spell types to level up"): used
+    to be driven by a separate per-spell mastery tier (spell_mastery_
+    pct), with element_mastery_pct only ever affecting damage/healing
+    power. Now the sole mastery axis for spells -- mastering Fire
+    Magic to 300% unlocks "All" targets for every fire spell you know,
+    not just whichever single spell you'd personally ground the most.
     """
     for threshold, count in SPELL_MASTERY_TARGET_TIERS:
-        if spell_pct >= threshold:
+        if element_pct >= threshold:
             return count
     return 1
 
 
-def _resolve_spell_target_list(spell: dict, spell_pct: float, candidates: list[dict], primary_target: dict) -> list[dict]:
+def _resolve_spell_target_list(spell: dict, element_pct: float, candidates: list[dict], primary_target: dict) -> list[dict]:
     """
     Real multi-target Spell Mastery reach. Only spells flagged
     spell["aoe"] can ever expand past the one hand-picked target --
@@ -484,7 +478,7 @@ def _resolve_spell_target_list(spell: dict, spell_pct: float, candidates: list[d
     """
     if not spell.get("aoe"):
         return [primary_target]
-    count = _spell_target_count(spell_pct)
+    count = _spell_target_count(element_pct)
     others = [c for c in candidates if c is not primary_target]
     if count is None:
         return [primary_target, *others]
@@ -17890,13 +17884,21 @@ def _format_proficiency_line(character: dict) -> str:
     still shows the real number rather than clamping it, matching how
     every other mastery display in this game (the Magic menu, battle
     narration) already reads.
+
+    spell_mastery_pct (one entry per individual spell) deliberately
+    dropped from this list (2026-08-31, per Coffee, dev-bridge
+    screenshot: "I don't want the individual spells to level up, but I
+    want the spell types to level up... it cleans up the proficiency
+    list and only focusses on the types") -- element_mastery_pct below
+    already shows the same information at the type level (e.g. "Fire
+    Magic 2%"), which used to sit right next to its own redundant
+    per-spell twin ("Fireball 2%, Fire Magic 2%") on this exact line.
     """
     entries = []
     dict_fields = (
         ("weapon_proficiency_pct", lambda k: f"{k.replace('_', ' ').capitalize()} Weapon"),
         ("armor_proficiency_pct", lambda k: f"{k.replace('_', ' ').capitalize()} Armor"),
         ("profession_mastery_pct", lambda k: k.replace("_", " ").capitalize()),
-        ("spell_mastery_pct", lambda k: (spells_module.get_spell(k) or {}).get("name", k)),
         ("element_mastery_pct", lambda k: f"{k.capitalize()} Magic"),
     )
     for field, label_fn in dict_fields:
@@ -18343,10 +18345,21 @@ async def _do_show_magic_menu(update: Update) -> None:
     logic was needed here), but a freshly Remnant-taught or newly
     learned spell was easy to miss there. Shows each spell's real
     level, a grounded one-line description (_spell_menu_description),
-    and its real Spell Mastery %/Element Mastery % and current AOE
-    target reach (_spell_target_count) -- read-only display, never
-    grinds mastery itself (grinding only ever happens on a real cast,
-    via _grind_spell_mastery).
+    and its real Element Mastery % and current AOE target reach
+    (_spell_target_count) -- read-only display, never grinds mastery
+    itself (grinding only ever happens on a real cast, via
+    _grind_element_mastery).
+
+    Consolidated 2026-08-31 (per Coffee: "I don't want the individual
+    spells to level up, but I want the spell types to level up") --
+    used to show a separate per-spell "X% mastery" figure alongside
+    the element's own %; that per-spell tier no longer exists, so only
+    the element figure remains. Also fixes a small pre-existing gap
+    found while touching this: a heal spell's own damage_type is None
+    (it grinds element_mastery_pct["heal"] instead, same convention
+    _grind_heal_mastery uses), so the old `if damage_type:` guard
+    silently never showed a heal spell's own Heal Magic % here at all
+    -- now resolved the same way the real grind itself resolves it.
     """
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -18363,22 +18376,18 @@ async def _do_show_magic_menu(update: Update) -> None:
             reply_markup=_with_menu_button(None), speak=False,
         )
         return
-    spell_mastery = character.get("spell_mastery_pct", {})
     element_mastery = character.get("element_mastery_pct", {})
     lines = []
     for spell_id in known:
         spell = spells_module.get_spell(spell_id)
         if not spell:
             continue
-        spell_pct = spell_mastery.get(spell_id, PROFICIENCY_STARTING_PCT)
-        damage_type = spell.get("damage_type")
-        mastery_bits = [f"{spell_pct:.0f}% mastery"]
+        element_key = spell.get("damage_type") or "heal"
+        element_pct = element_mastery.get(element_key, PROFICIENCY_STARTING_PCT)
+        mastery_bits = [f"{element_key} magic {element_pct:.0f}%"]
         if spell.get("aoe"):
-            count = _spell_target_count(spell_pct)
+            count = _spell_target_count(element_pct)
             mastery_bits.append(f"targets: {'All' if count is None else count}")
-        if damage_type:
-            element_pct = element_mastery.get(damage_type, PROFICIENCY_STARTING_PCT)
-            mastery_bits.append(f"{damage_type} magic {element_pct:.0f}%")
         lines.append(
             f"**{spell['name']}** (Lv{spell['level']}) — {', '.join(mastery_bits)}\n"
             f"  _{_spell_menu_description(spell_id, spell)}_"
@@ -28041,15 +28050,15 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
             _consume_scroll_if_any()
 
             primary_target = _pick_target(text, opposing)
-            spell_pct, element_pct = _grind_spell_mastery(character, spell_id, spell.get("damage_type", "physical"))
-            mastery_multiplier = _spell_mastery_power_multiplier(spell_pct, element_pct)
+            element_pct = _grind_element_mastery(character, spell.get("damage_type", "physical"))
+            mastery_multiplier = _mastery_overflow_multiplier(element_pct)
             # Spell Mastery multi-target reach (2026-08-22) -- every
             # spell not flagged spell["aoe"] (the overwhelming majority)
             # gets exactly [primary_target] back here, so this loop runs
             # exactly once with exactly today's target for every cast
             # that isn't one of the handful of AOE-flagged spells at
             # 100%+ mastery -- zero behavior change otherwise.
-            for target in _resolve_spell_target_list(spell, spell_pct, opposing, primary_target):
+            for target in _resolve_spell_target_list(spell, element_pct, opposing, primary_target):
                 result = spells_module.resolve_damage_spell(spell_id, character, target)
                 result["damage_dealt"] = int(result["damage_dealt"] * mastery_multiplier)
                 result = _apply_empowered_spell(update.effective_user.id, character, spell, result, target=target)
@@ -28230,8 +28239,8 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
         if not await _spend_cast_resource(update, character, spell, via_scroll, via_gear, gear_instance_id, gear_spell_uses):
             return
         _consume_scroll_if_any()
-        spell_pct, element_pct = _grind_spell_mastery(character, spell_id, spell.get("damage_type") or "heal")
-        mastery_multiplier = _spell_mastery_power_multiplier(spell_pct, element_pct)
+        element_pct = _grind_element_mastery(character, spell.get("damage_type") or "heal")
+        mastery_multiplier = _mastery_overflow_multiplier(element_pct)
         # Spell Mastery multi-target heal reach (2026-08-22) -- mass_cure_
         # wounds is the one flagged spell["aoe"] heal; every other heal
         # spell (the overwhelming majority) always resolves against just
@@ -28248,7 +28257,7 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
                 if p["telegram_user_id"] != target_character["telegram_user_id"]
                 and p["telegram_user_id"] > -1_000_000
             ]
-        for i, h_target in enumerate(_resolve_spell_target_list(spell, spell_pct, heal_candidates, target_character)):
+        for i, h_target in enumerate(_resolve_spell_target_list(spell, element_pct, heal_candidates, target_character)):
             h_is_summon = is_summon_target if i == 0 else False
             result = spells_module.resolve_heal_spell(spell_id, character, h_target)
             # Mastery bonus applied as extra healing on top of the base
