@@ -6685,9 +6685,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "stonearch_bridge_web_hollow", "the_weeping_well",
         }
         new_ids = {k for k in locs if (k.startswith("stonearch_bridge_") or k == "the_weeping_well") and k not in core_ids}
-        self.assertEqual(len(core_ids) + len(new_ids), 36)
+        # 36 from the original Chapter 7 expansion + 2 real new rooms from
+        # the dungeon-redesign Phase 7 pass (2026-08-30): The Old Watch
+        # and The Old Vault.
+        self.assertEqual(len(core_ids) + len(new_ids), 38)
 
     def test_stonearch_gorge_new_rooms_are_fully_connected_and_reciprocated(self):
+        """A real, INTENTIONAL exception (dungeon redesign Phase 7, 2026-08-30): see the bonus-vault/Sunken Root Caverns versions of this same test for why a locked_connections target is exempt."""
         locs = {}
         for layer, d in bot.CAMPAIGN["locations"].items():
             locs.update(d)
@@ -6703,7 +6707,124 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             for direction, dest_id in loc.get("directions", {}).items():
                 dest = cl.get_location(bot.CAMPAIGN, dest_id)
                 self.assertIsNotNone(dest, f"{loc_id} -> {dest_id} via {direction} is a dead end")
+                if dest_id in loc.get("locked_connections", {}) or loc_id in dest.get("locked_connections", {}):
+                    continue
                 self.assertIn(loc_id, dest.get("connections", []), f"{dest_id} doesn't connect back to {loc_id}")
+
+    # -- Dungeon redesign Phase 7 (2026-08-30): Stonearch Bridge/Gorge.
+    #    The entrance was ALREADY a real 5-way hub -- real characters
+    #    had only ever reached 1-4 rooms, so everything past The Watch
+    #    Stair/Web Hollow was free to work with. kess_scouting is NEVER
+    #    touched, same care as Greymoor Downs' entrance. -----------------
+    def test_stonearch_bridge_hub_is_designated_with_a_new_key_branch(self):
+        hub = cl.get_location(bot.CAMPAIGN, "stonearch_bridge")
+        self.assertTrue(hub.get("dungeon_hub"))
+        self.assertEqual(set(hub["dungeon_teaser_locations"]), {"stonearch_bridge_the_old_keep", "stonearch_bridge_the_old_vault"})
+        self.assertIn("stonearch_bridge_the_old_vault", hub["locked_connections"])
+
+    def test_kess_scouting_room_completely_untouched_by_phase_7(self):
+        """Light-touch guard around Kess's scripted short fight, same care as Greymoor Downs' entrance."""
+        scouting = cl.get_location(bot.CAMPAIGN, "stonearch_bridge_the_scouting_ground")
+        self.assertEqual(scouting["npcs"], ["kess_scouting"])
+        self.assertEqual(scouting["connections"], ["stonearch_bridge_the_scouts_ledge"])
+
+    def test_stonearch_bridge_interior_flag_gap_is_fixed(self):
+        for loc_id in (
+            "stonearch_bridge_far_end", "the_weeping_well", "stonearch_bridge_gorge_depths",
+            "stonearch_bridge_deep_current", "stonearch_bridge_undertow",
+            "stonearch_bridge_web_hollow", "stonearch_bridge_silked_nook",
+        ):
+            loc = cl.get_location(bot.CAMPAIGN, loc_id)
+            self.assertTrue(loc.get("dungeon_interior"), f"{loc_id} still missing dungeon_interior")
+            self.assertFalse(bot._is_fast_travel_eligible(loc), f"{loc_id} still fast-travel eligible")
+
+    def test_stonearch_bridge_existing_riddles_now_actually_gate_their_own_corridors(self):
+        """Both riddles have existed as side quests since the original Chapter 7 expansion, but never blocked movement."""
+        carved = cl.get_location(bot.CAMPAIGN, "stonearch_bridge_the_carved_gate")
+        self.assertEqual(carved["story_gates"]["stonearch_bridge_the_gatehouse"], {"requires_completed_quest": "the_carved_gates_riddle"})
+        perch = cl.get_location(bot.CAMPAIGN, "stonearch_bridge_the_watchers_perch")
+        self.assertEqual(perch["story_gates"]["stonearch_bridge_the_lower_span"], {"requires_completed_quest": "the_watchers_perchs_answer"})
+
+        user_id = 960280
+        make_basic_character(user_id, "CarvedGateTester", current_location="stonearch_bridge_the_carved_gate")
+        character = db.get_character(user_id, -999)
+        self.assertIsNotNone(bot._check_story_gate(character, carved, "stonearch_bridge_the_gatehouse"))
+        db.complete_quest(user_id, -999, "the_carved_gates_riddle")
+        character = db.get_character(user_id, -999)
+        self.assertIsNone(bot._check_story_gate(character, carved, "stonearch_bridge_the_gatehouse"))
+
+    def test_stonearch_bridge_old_watch_key_quest_registered_against_a_real_unique_guardian(self):
+        self.assertIn("the_old_watchs_reckoning", bot._QUEST_MONSTER_INDEX.get("the_watch_bound_sentry", []))
+        quest = bot.CAMPAIGN["quests"]["the_old_watchs_reckoning"]
+        self.assertEqual(quest["reward_item"], "the_old_watch_key")
+        self.assertEqual(quest["location"], "stonearch_bridge_the_old_watch")
+        for layer, locs in bot.CAMPAIGN["locations"].items():
+            for loc_id, loc in locs.items():
+                if loc_id == "stonearch_bridge_the_old_watch":
+                    continue
+                self.assertNotIn("the_watch_bound_sentry", loc.get("monsters") or [], f"{loc_id} also uses the guardian's unique monster_key")
+
+    async def test_a_prior_unrelated_battlement_watchman_kill_never_auto_completes_the_watch_quest(self):
+        from unittest.mock import patch, AsyncMock
+        user_id = 960281
+        character = make_basic_character(user_id, "PriorWatchmanKillTester", current_location="stonearch_bridge_the_old_watch")
+        db.update_character(user_id, -999, defeated_monsters=["battlement_watchman"])
+        character = db.get_character(user_id, -999)
+        quest_id, quest = "the_old_watchs_reckoning", bot.CAMPAIGN["quests"]["the_old_watchs_reckoning"]
+        sink = []
+        update = FakeUpdate(user_id, "", sink, chat_id=-999)
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._maybe_push_quest_offer(update, character, quest_id, quest)
+        char = db.get_character(user_id, -999)
+        self.assertNotIn("the_old_watchs_reckoning", char.get("completed_quests") or [])
+
+    async def test_stonearch_bridge_old_vault_door_blocks_without_key_and_opens_with_it(self):
+        location = cl.get_location(bot.CAMPAIGN, "stonearch_bridge")
+        lockable = next(lk for lk in location["lockables"] if lk["id"] == "stonearch_bridge_old_vault_door")
+        self.assertEqual(lockable["requires_key_item"], "the_old_watch_key")
+
+        no_key = make_basic_character(960282, "NoOldWatchKeyTester", current_location="stonearch_bridge")
+        sink = []
+        await bot._do_lockpick(FakeUpdate(960282, "pick the lock", sink), no_key, dict(lockable), "pick the lock", forced_roll=1)
+        self.assertNotIn("stonearch_bridge_old_vault_door", bot._UNLOCKED.get(-999, set()))
+
+        has_key = make_basic_character(960283, "HasOldWatchKeyTester", current_location="stonearch_bridge")
+        db.add_item(960283, -999, "the_old_watch_key", 1)
+        has_key = db.get_character(960283, -999)
+        sink2 = []
+        await bot._do_lockpick(FakeUpdate(960283, "pick the lock", sink2), has_key, dict(lockable), "pick the lock", forced_roll=1)
+        self.assertIn("stonearch_bridge_old_vault_door", bot._UNLOCKED.get(-999, set()))
+        sink3 = []
+        await bot._do_move(FakeUpdate(960283, "", sink3), "go to the old vault")
+        character = db.get_character(960283, -999)
+        self.assertEqual(character["current_location"], "stonearch_bridge_the_old_vault")
+
+    async def test_stonearch_bridge_old_keep_lever_opens_a_shortcut_to_the_hub(self):
+        far_room = cl.get_location(bot.CAMPAIGN, "stonearch_bridge_the_old_keep")
+        lever = next(lk for lk in far_room["lockables"] if lk["kind"] == "lever")
+        self.assertEqual(far_room["locked_connections"]["stonearch_bridge"], lever["id"])
+        hub = cl.get_location(bot.CAMPAIGN, "stonearch_bridge")
+        self.assertNotIn("stonearch_bridge_the_old_keep", hub.get("locked_connections", {}))
+
+        user_id = 960284
+        character = make_basic_character(user_id, "OldKeepLeverTester", current_location="stonearch_bridge_the_old_keep")
+        sink = []
+        await bot._do_lockpick(FakeUpdate(user_id, "pull the lever", sink), character, dict(lever), "pull the lever")
+        self.assertIn(lever["id"], bot._UNLOCKED.get(-999, set()))
+        sink2 = []
+        await bot._do_move(FakeUpdate(user_id, "", sink2), "go to the stonearch bridge")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "stonearch_bridge")
+
+    async def test_stonearch_bridge_hub_entry_fires_the_teaser_reveal(self):
+        user_id = 960285
+        make_basic_character(user_id, "SBTeaserHubTester", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, visited_locations=["crossroads_tavern"], map_revealed_locations=[])
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "", sink), "go to stonearch bridge")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "stonearch_bridge")
+        self.assertEqual(set(character["map_revealed_locations"]), {"stonearch_bridge_the_old_keep", "stonearch_bridge_the_old_vault"})
 
     def test_the_keeps_warden_uses_the_real_new_systems_not_a_generic_statstick(self):
         boss = bot.CAMPAIGN["monsters"]["the_keeps_warden"]

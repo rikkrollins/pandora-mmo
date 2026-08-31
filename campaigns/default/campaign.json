@@ -559,14 +559,16 @@
           "greymoor_downs",
           "the_weeping_well",
           "stonearch_bridge_far_end",
-          "stonearch_bridge_the_lower_battlement"
+          "stonearch_bridge_the_lower_battlement",
+          "stonearch_bridge_the_old_watch"
         ],
         "descends_to": "stonearch_bridge_gorge_depths",
         "directions": {
           "north": "crossroads_tavern",
           "south": "the_weeping_well",
           "west": "stonearch_bridge_far_end",
-          "up": "stonearch_bridge_the_lower_battlement"
+          "up": "stonearch_bridge_the_lower_battlement",
+          "east": "stonearch_bridge_the_old_watch"
         },
         "npcs": [
           "pip_thistledown"
@@ -604,7 +606,23 @@
           "x": 0,
           "y": -1
         },
-        "dungeon_id": "stonearch_bridge"
+        "dungeon_id": "stonearch_bridge",
+        "dungeon_hub": true,
+        "dungeon_teaser_locations": [
+          "stonearch_bridge_the_old_keep",
+          "stonearch_bridge_the_old_vault"
+        ],
+        "locked_connections": {
+          "stonearch_bridge_the_old_vault": "stonearch_bridge_old_vault_door"
+        },
+        "lockables": [
+          {
+            "id": "stonearch_bridge_old_vault_door",
+            "kind": "door",
+            "name": "a rusted old gate",
+            "requires_key_item": "the_old_watch_key"
+          }
+        ]
       },
       "stonearch_bridge_far_end": {
         "name": "The Far End of the Span",
@@ -631,7 +649,8 @@
           "x": -1,
           "y": -1
         },
-        "dungeon_id": "stonearch_bridge"
+        "dungeon_id": "stonearch_bridge",
+        "dungeon_interior": true
       },
       "the_weeping_well": {
         "name": "The Weeping Well",
@@ -680,7 +699,8 @@
           "x": 0,
           "y": -2
         },
-        "dungeon_id": "stonearch_bridge"
+        "dungeon_id": "stonearch_bridge",
+        "dungeon_interior": true
       },
       "tavern_cellar": {
         "name": "The Tavern Cellar",
@@ -1203,7 +1223,12 @@
           "y": -8
         },
         "dungeon_interior": true,
-        "dungeon_id": "stonearch_bridge"
+        "dungeon_id": "stonearch_bridge",
+        "story_gates": {
+          "stonearch_bridge_the_gatehouse": {
+            "requires_completed_quest": "the_carved_gates_riddle"
+          }
+        }
       },
       "stonearch_bridge_the_gatehouse": {
         "name": "The Gatehouse",
@@ -1323,7 +1348,17 @@
           "y": -13
         },
         "dungeon_interior": true,
-        "dungeon_id": "stonearch_bridge"
+        "dungeon_id": "stonearch_bridge",
+        "lockables": [
+          {
+            "id": "stonearch_bridge_old_keep_shortcut",
+            "kind": "lever",
+            "name": "a rusted keep-bell lever"
+          }
+        ],
+        "locked_connections": {
+          "stonearch_bridge": "stonearch_bridge_old_keep_shortcut"
+        }
       },
       "stonearch_bridge_the_armory_annex": {
         "name": "The Armory Annex",
@@ -1738,6 +1773,60 @@
         },
         "dungeon_interior": true,
         "dungeon_id": "greymoor_downs"
+      },
+      "stonearch_bridge_the_old_watch": {
+        "name": "The Old Watch",
+        "layer": "surface",
+        "description": "A real, half-collapsed watch post off the bridge's own eastern rail, holding a single deliberately-kept key -- and something has made a den of guarding it.",
+        "connections": [
+          "stonearch_bridge"
+        ],
+        "directions": {
+          "west": "stonearch_bridge"
+        },
+        "monsters": [
+          "the_watch_bound_sentry"
+        ],
+        "grid_position": {
+          "x": 1,
+          "y": -1
+        },
+        "dungeon_interior": true,
+        "dungeon_id": "stonearch_bridge"
+      },
+      "stonearch_bridge_the_old_vault": {
+        "name": "The Old Vault",
+        "layer": "surface",
+        "description": "Real, deliberate storage built into the bridge's own stonework -- whoever sealed it meant for it to stay that way.",
+        "connections": [
+          "stonearch_bridge"
+        ],
+        "directions": {
+          "east": "stonearch_bridge"
+        },
+        "lockables": [
+          {
+            "id": "stonearch_bridge_old_vault_chest",
+            "kind": "chest",
+            "name": "a real, stone-set strongbox",
+            "loot": {
+              "greater_healing_potion": 2
+            },
+            "gold": 420
+          }
+        ],
+        "interactables": {
+          "old_vault_marker": {
+            "name": "a marker carved into the vault's own stone",
+            "description": "Whoever sealed this counted on nobody else ever having the key -- and, judging by the dust, nobody ever did until now."
+          }
+        },
+        "grid_position": {
+          "x": 2,
+          "y": -1
+        },
+        "dungeon_interior": true,
+        "dungeon_id": "stonearch_bridge"
       }
     },
     "underground": {
@@ -2588,7 +2677,8 @@
           "x": 4,
           "y": -6
         },
-        "dungeon_id": "stonearch_bridge"
+        "dungeon_id": "stonearch_bridge",
+        "dungeon_interior": true
       },
       "stonearch_bridge_deep_current": {
         "name": "The Deep Current",
@@ -2620,7 +2710,8 @@
           "x": 6,
           "y": -6
         },
-        "dungeon_id": "stonearch_bridge"
+        "dungeon_id": "stonearch_bridge",
+        "dungeon_interior": true
       },
       "wordless_choir_gate": {
         "name": "The Wordless Gate",
@@ -3050,7 +3141,8 @@
           "x": 5,
           "y": -6
         },
-        "dungeon_id": "stonearch_bridge"
+        "dungeon_id": "stonearch_bridge",
+        "dungeon_interior": true
       },
       "stonearch_bridge_undertow": {
         "name": "The Undertow",
@@ -3077,7 +3169,8 @@
           "x": 7,
           "y": -6
         },
-        "dungeon_id": "stonearch_bridge"
+        "dungeon_id": "stonearch_bridge",
+        "dungeon_interior": true
       },
       "stonearch_bridge_silked_nook": {
         "name": "The Silked Nook",
@@ -3102,7 +3195,8 @@
           "x": 5,
           "y": -5
         },
-        "dungeon_id": "stonearch_bridge"
+        "dungeon_id": "stonearch_bridge",
+        "dungeon_interior": true
       },
       "greymoor_downs_barrow_depths": {
         "name": "The Barrow Depths",
@@ -5710,7 +5804,12 @@
           "y": -6
         },
         "dungeon_interior": true,
-        "dungeon_id": "stonearch_bridge"
+        "dungeon_id": "stonearch_bridge",
+        "story_gates": {
+          "stonearch_bridge_the_lower_span": {
+            "requires_completed_quest": "the_watchers_perchs_answer"
+          }
+        }
       },
       "stonearch_bridge_the_lower_span": {
         "name": "The Lower Span",
@@ -9902,6 +10001,19 @@
       "reward_gold": 130,
       "reward_item": "the_drifting_key",
       "clue": "Whatever's circling the hollow won't move until it's put down for good."
+    },
+    "the_old_watchs_reckoning": {
+      "title": "The Old Watch Key",
+      "description": "Whatever's been keeping this post has a real, deliberately cut key among what it's hoarded -- and it isn't giving it up quietly.",
+      "location": "stonearch_bridge_the_old_watch",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_watch_bound_sentry"
+      },
+      "reward_xp": 1400,
+      "reward_gold": 380,
+      "reward_item": "the_old_watch_key",
+      "clue": "Whatever's guarding the old watch post won't move until it's put down for good."
     }
   },
   "story_arcs": {
@@ -13067,6 +13179,19 @@
       "damage_dice": "1d8",
       "damage_bonus": 45,
       "damage_type": "force"
+    },
+    "the_watch_bound_sentry": {
+      "name": "The Watch-Bound Sentry",
+      "level": 64,
+      "dexterity": 15,
+      "strength": 17,
+      "armor_class": 20,
+      "hp_max": 4600,
+      "proficiency_bonus": 13,
+      "xp_reward": 3000,
+      "damage_dice": "1d8",
+      "damage_bonus": 250,
+      "damage_type": "physical"
     }
   },
   "factions": {

@@ -806,6 +806,14 @@ ITEMS = {
         "price": 0, "weight": 0.1,
         "description": "Never quite settles in your hand, like it's still deciding whether it wants to be held.",
     },
+    # Dungeon redesign Phase 7 (2026-08-30) -- Stonearch Bridge's own
+    # key item, opening the rusted old gate from the bridge's own
+    # entrance into The Old Vault.
+    "the_old_watch_key": {
+        "name": "The Old Watch Key", "type": "quest_item", "rarity": "unique",
+        "price": 0, "weight": 0.1,
+        "description": "Cold to the touch no matter the weather, like it's still standing its own watch.",
+    },
     "brass_key_no_lock": {
         "name": "Brass Key That Fits No Lock", "type": "quest_item", "rarity": "unique",
         "price": 0, "weight": 0.1,

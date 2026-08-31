@@ -2,6 +2,39 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.429] — dungeon redesign Phase 7: Stonearch Bridge/Gorge gets real interconnectivity
+
+Phase 7 of the 8-dungeon redesign (see v1.27.420-428). The entrance was
+ALREADY a real 5-way hub (2 branches lead straight to real Remnant
+dead-ends, The Farthest Span and The Drowned Choir) with 2 long,
+distinct branches — a tower climb ending at a real boss (The Keep's
+Warden), and a spider-gorge descent ending near Kess's own scripted
+short fight. Real characters have only ever reached 1-4 rooms, all
+right at the entrance, so everything past The Watch Stair/Web Hollow
+was free to work with. `kess_scouting` (The Scouting Ground) and its
+own connection are never touched, same care as Greymoor Downs':
+
+- **The entrance is now the designated hub**, with a new 6th branch.
+- **Both existing riddles finally gate something**: The Gate Carving's
+  and The Watcher's Perch's riddles have sat unused as side quests
+  since the original Chapter 7 expansion — now real `story_gates`
+  blocking each branch's own corridor until solved.
+- **A new key-and-vault side branch** off the hub: The Old Watch (open,
+  a real unique guardian drops The Old Watch Key) unlocks a rusted old
+  gate into The Old Vault (bonus treasure).
+- **A new shortcut lever** at the tower boss's dead end (The Old Keep)
+  opens a direct path back to the hub.
+- **Incidental fix**: 7 rooms right around the entrance never got the
+  `dungeon_interior` flag in the original fast-travel pass, matching
+  the same gap class fixed in every phase so far.
+
+The First City (Phase 8, the last dungeon in this pass) is next.
+
+Tested: same coverage shape as Phases 1-6, plus a dedicated guard
+confirming the Kess-scouting room and its connection are byte-for-byte
+untouched. Full related regression slice re-run clean (109/109)
+alongside the 12 new Stonearch Bridge tests.
+
 ## [1.27.428] — dungeon redesign Phase 6: Unmoored Isle gets real interconnectivity
 
 Phase 6 of the 8-dungeon redesign (see v1.27.420-427). The entrance was
