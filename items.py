@@ -781,6 +781,14 @@ ITEMS = {
         "price": 0, "weight": 0.1,
         "description": "Caked in fine grey silt no amount of handling seems to wear off.",
     },
+    # Dungeon redesign Phase 4 (2026-08-30) -- Goblin Warrens' own key
+    # item, opening the scavenged iron grate from The Old Seam into The
+    # Deep Stash.
+    "the_vein_key": {
+        "name": "The Vein Key", "type": "quest_item", "rarity": "unique",
+        "price": 0, "weight": 0.1,
+        "description": "Cut cleaner than anything else pulled out of this vein -- whoever made it wasn't a goblin.",
+    },
     "brass_key_no_lock": {
         "name": "Brass Key That Fits No Lock", "type": "quest_item", "rarity": "unique",
         "price": 0, "weight": 0.1,

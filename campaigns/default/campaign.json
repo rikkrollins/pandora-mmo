@@ -2068,7 +2068,8 @@
           "x": -1,
           "y": 2
         },
-        "dungeon_id": "goblin_warrens"
+        "dungeon_id": "goblin_warrens",
+        "dungeon_interior": true
       },
       "glimmerdeep_grotto_glimmering_pool": {
         "name": "The Glimmering Pool",
@@ -2854,7 +2855,8 @@
           "x": -1,
           "y": 1
         },
-        "dungeon_id": "goblin_warrens"
+        "dungeon_id": "goblin_warrens",
+        "dungeon_interior": true
       },
       "goblin_warrens_deep_larder": {
         "name": "The Deep Larder",
@@ -2881,7 +2883,8 @@
           "x": -1,
           "y": 3
         },
-        "dungeon_id": "goblin_warrens"
+        "dungeon_id": "goblin_warrens",
+        "dungeon_interior": true
       },
       "goblin_warrens_collapsed_tunnel": {
         "name": "The Collapsed Tunnel",
@@ -2908,7 +2911,8 @@
           "x": -2,
           "y": 0
         },
-        "dungeon_id": "goblin_warrens"
+        "dungeon_id": "goblin_warrens",
+        "dungeon_interior": true
       },
       "sunken_root_caverns_flooded_gallery": {
         "name": "The Flooded Gallery",
@@ -4357,12 +4361,14 @@
         "connections": [
           "goblin_warrens_deeper_rubble",
           "goblin_warrens_the_sealed_cache",
-          "goblin_warrens_the_forgotten_bore"
+          "goblin_warrens_the_forgotten_bore",
+          "goblin_warrens_the_deep_vein"
         ],
         "directions": {
           "east": "goblin_warrens_deeper_rubble",
           "north": "goblin_warrens_the_sealed_cache",
-          "west": "goblin_warrens_the_forgotten_bore"
+          "west": "goblin_warrens_the_forgotten_bore",
+          "south": "goblin_warrens_the_deep_vein"
         },
         "monsters": [
           "warren_bone_picker"
@@ -4372,7 +4378,23 @@
           "y": 0
         },
         "dungeon_interior": true,
-        "dungeon_id": "goblin_warrens"
+        "dungeon_id": "goblin_warrens",
+        "dungeon_hub": true,
+        "dungeon_teaser_locations": [
+          "goblin_warrens_the_buried_archive",
+          "goblin_warrens_the_deep_stash"
+        ],
+        "locked_connections": {
+          "goblin_warrens_the_deep_stash": "goblin_warrens_deep_stash_door"
+        },
+        "lockables": [
+          {
+            "id": "goblin_warrens_deep_stash_door",
+            "kind": "door",
+            "name": "a scavenged iron grate",
+            "requires_key_item": "the_vein_key"
+          }
+        ]
       },
       "goblin_warrens_the_sealed_cache": {
         "name": "The Sealed Cache",
@@ -4617,7 +4639,11 @@
           "y": 4
         },
         "dungeon_interior": true,
-        "dungeon_id": "goblin_warrens"
+        "dungeon_id": "goblin_warrens",
+        "dungeon_hub": true,
+        "dungeon_teaser_locations": [
+          "goblin_warrens_the_true_paymaster"
+        ]
       },
       "goblin_warrens_the_second_stash": {
         "name": "The Second Stash",
@@ -4719,7 +4745,12 @@
           "y": 6
         },
         "dungeon_interior": true,
-        "dungeon_id": "goblin_warrens"
+        "dungeon_id": "goblin_warrens",
+        "story_gates": {
+          "goblin_warrens_the_ledger_vault": {
+            "requires_completed_quest": "the_ledger_vaults_answer"
+          }
+        }
       },
       "goblin_warrens_grasks_old_cage": {
         "name": "The Old Cage",
@@ -4855,7 +4886,17 @@
           "y": 11
         },
         "dungeon_interior": true,
-        "dungeon_id": "goblin_warrens"
+        "dungeon_id": "goblin_warrens",
+        "lockables": [
+          {
+            "id": "goblin_warrens_paymaster_shortcut",
+            "kind": "lever",
+            "name": "a counting-house pulley lever"
+          }
+        ],
+        "locked_connections": {
+          "goblin_warrens_the_counting_hall": "goblin_warrens_paymaster_shortcut"
+        }
       },
       "goblin_warrens_the_forgotten_landing": {
         "name": "The Forgotten Landing",
@@ -6469,6 +6510,60 @@
         },
         "dungeon_interior": true,
         "dungeon_id": "sunken_root_caverns"
+      },
+      "goblin_warrens_the_deep_vein": {
+        "name": "The Deep Vein",
+        "layer": "underground",
+        "description": "A real, worked vein cutting through the rock, far too clean to be goblin work -- and something has made a den of guarding whatever's left of it.",
+        "connections": [
+          "goblin_warrens_the_old_seam"
+        ],
+        "directions": {
+          "north": "goblin_warrens_the_old_seam"
+        },
+        "monsters": [
+          "the_vein_bound_picker"
+        ],
+        "grid_position": {
+          "x": -3,
+          "y": -1
+        },
+        "dungeon_interior": true,
+        "dungeon_id": "goblin_warrens"
+      },
+      "goblin_warrens_the_deep_stash": {
+        "name": "The Deep Stash",
+        "layer": "underground",
+        "description": "Whatever the warren's own diggers found down here, they kept it behind real iron, not just rubble.",
+        "connections": [
+          "goblin_warrens_the_old_seam"
+        ],
+        "directions": {
+          "north": "goblin_warrens_the_old_seam"
+        },
+        "lockables": [
+          {
+            "id": "goblin_warrens_deep_stash_chest",
+            "kind": "chest",
+            "name": "a real iron-banded strongbox",
+            "loot": {
+              "greater_healing_potion": 2
+            },
+            "gold": 220
+          }
+        ],
+        "interactables": {
+          "deep_stash_marker": {
+            "name": "a marker scratched into the stash wall",
+            "description": "Whoever sealed this counted on nobody else ever having the key -- and, judging by the dust, nobody ever did until now."
+          }
+        },
+        "grid_position": {
+          "x": -4,
+          "y": -1
+        },
+        "dungeon_interior": true,
+        "dungeon_id": "goblin_warrens"
       }
     },
     "sky": {
@@ -9577,6 +9672,19 @@
       "reward_xp": 700,
       "reward_gold": 200,
       "clue": "The Choked Reliquary's Voice poses a real question: \"I have no mouth, yet I remember every name spoken near me. I have no hands, yet I never let go. What am I?\""
+    },
+    "the_deep_veins_reckoning": {
+      "title": "The Vein Key",
+      "description": "Whatever's been picking through this vein for scraps has a real, deliberately cut key among its hoard -- and it isn't giving it up quietly.",
+      "location": "goblin_warrens_the_deep_vein",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_vein_bound_picker"
+      },
+      "reward_xp": 1100,
+      "reward_gold": 260,
+      "reward_item": "the_vein_key",
+      "clue": "Whatever's guarding the vein won't move until it's put down for good."
     }
   },
   "story_arcs": {
@@ -12703,6 +12811,19 @@
       "damage_dice": "1d8",
       "damage_bonus": 140,
       "damage_type": "cold"
+    },
+    "the_vein_bound_picker": {
+      "name": "The Vein-Bound Picker",
+      "level": 44,
+      "dexterity": 14,
+      "strength": 15,
+      "armor_class": 17,
+      "hp_max": 2600,
+      "proficiency_bonus": 9,
+      "xp_reward": 1800,
+      "damage_dice": "1d8",
+      "damage_bonus": 120,
+      "damage_type": "poison"
     }
   },
   "factions": {

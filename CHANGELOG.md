@@ -2,6 +2,45 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.426] — dungeon redesign Phase 4: Goblin Warrens gets real interconnectivity
+
+Phase 4 of the 8-dungeon redesign (see v1.27.420-424). Real characters
+had only ever reached the first 1-3 rooms right at the entrance
+(Collapsed Tunnel/Supply Tunnel) — everything past The Old Seam/Inner
+Den was completely unexplored live, giving this phase far more freedom
+than Phase 3's did:
+
+- **Both of the dungeon's existing natural forks are now real hubs**:
+  The Old Seam (west branch) and The Counting Hall (north branch), each
+  with their own teaser reveal.
+- **The existing riddle finally gates something**: The Silent
+  Bookkeeper's `the_ledger_vaults_answer` riddle has existed as a side
+  quest since the original Chapter 5 expansion, but nothing ever
+  blocked movement into the Ledger Vault before it was solved —
+  exactly the "puzzles never actually gate anything" pattern this whole
+  redesign exists to fix. It's now a real `story_gates` block.
+- **A new key-and-vault side branch** off The Old Seam: The Deep Vein
+  (open, a real unique guardian drops The Vein Key) unlocks a scavenged
+  iron grate into The Deep Stash (bonus treasure).
+- **A new shortcut lever** at the dungeon's own boss dead end (The True
+  Paymaster) opens a direct path straight back to The Counting Hall,
+  skipping the whole long Paymaster corridor on the return trip.
+- **Incidental fix**: 4 rooms (Inner Den, Supply Tunnel, Deep Larder,
+  Collapsed Tunnel) never got the `dungeon_interior` flag in the
+  original fast-travel pass — same gap class as Phase 3's, now fixed
+  here too. The dungeon's own entrance (shared with Sunken Root
+  Caverns) is deliberately left alone.
+
+Sunken Root Caverns and Goblin Warrens (Phases 3-4) close out this
+pass's work on dungeons real players had already started exploring.
+Greymoor Downs (Phase 5) is next — light touch only, since its Kess
+climax chain must stay completely untouched.
+
+Tested: same coverage shape as Phases 1-3, plus a dedicated test
+confirming the existing riddle now genuinely blocks movement before
+it's solved and allows it after. Full related regression slice re-run
+clean (68/68) alongside the 13 new Goblin Warrens tests.
+
 ## [1.27.425] — fix: "pick the lock" silently failed to pull a shortcut lever
 
 Real live bug (2026-08-31, dev-bridge, Charvenna: "I picked the lock

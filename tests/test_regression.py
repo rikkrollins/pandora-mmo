@@ -6009,6 +6009,119 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(character["current_location"], "sunken_root_caverns_deep_tunnels")
         self.assertEqual(set(character["map_revealed_locations"]), {"sunken_root_caverns_the_source", "sunken_root_caverns_the_silt_vault"})
 
+    # -- Dungeon redesign Phase 4 (2026-08-30): Goblin Warrens. Real
+    #    characters had only ever reached the first 1-3 rooms right at
+    #    the entrance, so this phase had far more freedom than Phase 3 --
+    #    both of the dungeon's existing natural forks become real hubs,
+    #    the EXISTING unused riddle finally becomes a real gate, and a
+    #    new key-and-vault branch plus a shortcut lever are added. -----
+    def test_goblin_warrens_both_existing_forks_are_now_real_hubs(self):
+        old_seam = cl.get_location(bot.CAMPAIGN, "goblin_warrens_the_old_seam")
+        self.assertTrue(old_seam.get("dungeon_hub"))
+        self.assertEqual(set(old_seam["dungeon_teaser_locations"]), {"goblin_warrens_the_buried_archive", "goblin_warrens_the_deep_stash"})
+        self.assertIn("goblin_warrens_the_deep_stash", old_seam["locked_connections"])
+        counting_hall = cl.get_location(bot.CAMPAIGN, "goblin_warrens_the_counting_hall")
+        self.assertTrue(counting_hall.get("dungeon_hub"))
+        self.assertEqual(set(counting_hall["dungeon_teaser_locations"]), {"goblin_warrens_the_true_paymaster"})
+
+    def test_goblin_warrens_interior_flag_gap_is_fixed(self):
+        for loc_id in ("goblin_warrens_inner_den", "goblin_warrens_supply_tunnel",
+                       "goblin_warrens_deep_larder", "goblin_warrens_collapsed_tunnel"):
+            loc = cl.get_location(bot.CAMPAIGN, loc_id)
+            self.assertTrue(loc.get("dungeon_interior"), f"{loc_id} still missing dungeon_interior")
+            self.assertFalse(bot._is_fast_travel_eligible(loc), f"{loc_id} still fast-travel eligible")
+
+    def test_goblin_warrens_existing_riddle_now_actually_gates_the_ledger_vault(self):
+        """
+        Real gap found while working on this phase: the_ledger_vaults_answer
+        (posed by The Silent Bookkeeper) already existed as a side quest,
+        but nothing ever blocked movement into the ledger vault before it
+        was solved -- exactly the pre-existing-puzzles-never-gate-anything
+        pattern this whole redesign is meant to fix.
+        """
+        location = cl.get_location(bot.CAMPAIGN, "goblin_warrens_the_grasping_hollow")
+        self.assertEqual(location["story_gates"]["goblin_warrens_the_ledger_vault"], {"requires_completed_quest": "the_ledger_vaults_answer"})
+        user_id = 960250
+        make_basic_character(user_id, "LedgerGateTester", current_location="goblin_warrens_the_grasping_hollow")
+        character = db.get_character(user_id, -999)
+        self.assertIsNotNone(bot._check_story_gate(character, location, "goblin_warrens_the_ledger_vault"))
+        db.complete_quest(user_id, -999, "the_ledger_vaults_answer")
+        character = db.get_character(user_id, -999)
+        self.assertIsNone(bot._check_story_gate(character, location, "goblin_warrens_the_ledger_vault"))
+
+    def test_goblin_warrens_vein_key_quest_registered_against_a_real_unique_guardian(self):
+        self.assertIn("the_deep_veins_reckoning", bot._QUEST_MONSTER_INDEX.get("the_vein_bound_picker", []))
+        quest = bot.CAMPAIGN["quests"]["the_deep_veins_reckoning"]
+        self.assertEqual(quest["reward_item"], "the_vein_key")
+        self.assertEqual(quest["location"], "goblin_warrens_the_deep_vein")
+        for layer, locs in bot.CAMPAIGN["locations"].items():
+            for loc_id, loc in locs.items():
+                if loc_id == "goblin_warrens_the_deep_vein":
+                    continue
+                self.assertNotIn("the_vein_bound_picker", loc.get("monsters") or [], f"{loc_id} also uses the guardian's unique monster_key")
+
+    async def test_a_prior_unrelated_bone_picker_kill_never_auto_completes_the_vein_quest(self):
+        from unittest.mock import patch, AsyncMock
+        user_id = 960251
+        character = make_basic_character(user_id, "PriorPickerKillTester", current_location="goblin_warrens_the_deep_vein")
+        db.update_character(user_id, -999, defeated_monsters=["warren_bone_picker"])
+        character = db.get_character(user_id, -999)
+        quest_id, quest = "the_deep_veins_reckoning", bot.CAMPAIGN["quests"]["the_deep_veins_reckoning"]
+        sink = []
+        update = FakeUpdate(user_id, "", sink, chat_id=-999)
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._maybe_push_quest_offer(update, character, quest_id, quest)
+        char = db.get_character(user_id, -999)
+        self.assertNotIn("the_deep_veins_reckoning", char.get("completed_quests") or [])
+
+    async def test_goblin_warrens_deep_stash_door_blocks_without_key_and_opens_with_it(self):
+        location = cl.get_location(bot.CAMPAIGN, "goblin_warrens_the_old_seam")
+        lockable = next(lk for lk in location["lockables"] if lk["id"] == "goblin_warrens_deep_stash_door")
+        self.assertEqual(lockable["requires_key_item"], "the_vein_key")
+
+        no_key = make_basic_character(960252, "NoVeinKeyTester", current_location="goblin_warrens_the_old_seam")
+        sink = []
+        await bot._do_lockpick(FakeUpdate(960252, "pick the lock", sink), no_key, dict(lockable), "pick the lock", forced_roll=1)
+        self.assertNotIn("goblin_warrens_deep_stash_door", bot._UNLOCKED.get(-999, set()))
+
+        has_key = make_basic_character(960253, "HasVeinKeyTester", current_location="goblin_warrens_the_old_seam")
+        db.add_item(960253, -999, "the_vein_key", 1)
+        has_key = db.get_character(960253, -999)
+        sink2 = []
+        await bot._do_lockpick(FakeUpdate(960253, "pick the lock", sink2), has_key, dict(lockable), "pick the lock", forced_roll=1)
+        self.assertIn("goblin_warrens_deep_stash_door", bot._UNLOCKED.get(-999, set()))
+        sink3 = []
+        await bot._do_move(FakeUpdate(960253, "", sink3), "go to the deep stash")
+        character = db.get_character(960253, -999)
+        self.assertEqual(character["current_location"], "goblin_warrens_the_deep_stash")
+
+    async def test_goblin_warrens_paymaster_lever_opens_a_shortcut_to_the_counting_hall(self):
+        boss_room = cl.get_location(bot.CAMPAIGN, "goblin_warrens_the_true_paymaster")
+        lever = next(lk for lk in boss_room["lockables"] if lk["kind"] == "lever")
+        self.assertEqual(boss_room["locked_connections"]["goblin_warrens_the_counting_hall"], lever["id"])
+        hub = cl.get_location(bot.CAMPAIGN, "goblin_warrens_the_counting_hall")
+        self.assertNotIn("goblin_warrens_the_true_paymaster", hub.get("locked_connections", {}))
+
+        user_id = 960254
+        character = make_basic_character(user_id, "PaymasterLeverTester", current_location="goblin_warrens_the_true_paymaster")
+        sink = []
+        await bot._do_lockpick(FakeUpdate(user_id, "pull the lever", sink), character, dict(lever), "pull the lever")
+        self.assertIn(lever["id"], bot._UNLOCKED.get(-999, set()))
+        sink2 = []
+        await bot._do_move(FakeUpdate(user_id, "", sink2), "go to the counting hall")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "goblin_warrens_the_counting_hall")
+
+    async def test_goblin_warrens_old_seam_hub_entry_fires_the_teaser_reveal(self):
+        user_id = 960255
+        make_basic_character(user_id, "GWOldSeamTeaserTester", current_location="goblin_warrens_deeper_rubble")
+        db.update_character(user_id, -999, visited_locations=["goblin_warrens_deeper_rubble"], map_revealed_locations=[])
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "", sink), "go to the old seam")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "goblin_warrens_the_old_seam")
+        self.assertEqual(set(character["map_revealed_locations"]), {"goblin_warrens_the_buried_archive", "goblin_warrens_the_deep_stash"})
+
     def test_bonus_vault_room_graphs_are_fully_connected_and_reciprocated(self):
         """
         Every direction out of a bonus-vault room must point to a real
@@ -6313,9 +6426,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         core_ids = {"goblin_warrens", "goblin_warrens_collapsed_tunnel", "goblin_warrens_supply_tunnel",
                     "goblin_warrens_inner_den", "goblin_warrens_deep_larder"}
         new_ids = {k for k in locs if k.startswith("goblin_warrens_") and k not in core_ids}
-        self.assertEqual(len(core_ids) + len(new_ids), 28)
+        # 28 from the original Chapter 5 expansion + 2 real new rooms from
+        # the dungeon-redesign Phase 4 pass (2026-08-30): The Deep Vein
+        # and The Deep Stash.
+        self.assertEqual(len(core_ids) + len(new_ids), 30)
 
     def test_goblin_warrens_new_rooms_are_fully_connected_and_reciprocated(self):
+        """A real, INTENTIONAL exception (dungeon redesign Phase 4, 2026-08-30): see the bonus-vault/Sunken Root Caverns versions of this same test for why a locked_connections target is exempt."""
         locs = bot.CAMPAIGN["locations"]["underground"]
         core_ids = {"goblin_warrens", "goblin_warrens_collapsed_tunnel", "goblin_warrens_supply_tunnel",
                     "goblin_warrens_inner_den", "goblin_warrens_deep_larder"}
@@ -6326,6 +6443,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             for direction, dest_id in loc.get("directions", {}).items():
                 dest = cl.get_location(bot.CAMPAIGN, dest_id)
                 self.assertIsNotNone(dest, f"{loc_id} -> {dest_id} via {direction} is a dead end")
+                if dest_id in loc.get("locked_connections", {}) or loc_id in dest.get("locked_connections", {}):
+                    continue
                 self.assertIn(loc_id, dest.get("connections", []), f"{dest_id} doesn't connect back to {loc_id}")
 
     def test_the_paymasters_shadow_uses_the_real_new_systems_not_a_generic_statstick(self):
