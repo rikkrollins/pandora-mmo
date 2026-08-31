@@ -22558,6 +22558,29 @@ async def _do_examine(update: Update, target_text: str) -> None:
         if await _do_examine_owned_item(update, character, location, item_match):
             return
 
+        # Real live feature request (2026-08-31, dev-bridge, Elduinn: "I
+        # don't know if this area has a lever but if it doesn't, you
+        # should tell us"). Reuses _find_lockable's own real resolution
+        # (id/name match, or its kind-word fallback when exactly one
+        # lockable is here) -- purely informative, never rolls or
+        # triggers anything, so asking "is there a lever here?" can
+        # never accidentally pull one or spend a turn. Real, honest
+        # state too: already-open, key-only, or a plain pickable lock
+        # each get their own real line, not a generic "there's a thing".
+        lockable_match = _find_lockable(location, target_text)
+        if lockable_match:
+            already_open = lockable_match["id"] in _chat_scoped_set(_UNLOCKED, update.effective_chat.id)
+            if already_open:
+                state = "already open"
+            elif lockable_match.get("kind") == "lever":
+                state = "waiting to be pulled"
+            elif lockable_match.get("requires_key_item"):
+                state = "sealed shut — it won't budge without something specific, not brute force or a steady hand"
+            else:
+                state = "locked, but it looks pickable"
+            await _safe_send(update, f"🔍 **{character['name']}** spots {lockable_match['name']} here — {state}.")
+            return
+
         names = [i["name"] for i in interactables.values()]
         hint = f" Things worth a closer look here: {', '.join(names)}" if names else ""
         await update.effective_chat.send_message(

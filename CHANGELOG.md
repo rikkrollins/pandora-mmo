@@ -2,6 +2,54 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.433] — feature: honest lockable examine, plus a real narrative-spoiler fix
+
+**Feature** (per Coffee, "yes do that next"): asking a genuine question
+about a lockable — "look for a lever", "is there a lever here", "do you
+see a lock", "any switch around" — now routes to a real, honest
+`examine` answer instead of falling through to the AI model (which
+could misclassify it, as v1.27.432 found). `_do_examine` gets a new
+fallback that reuses the existing `_find_lockable` resolution and
+describes the real state without ever rolling or unlocking anything:
+"already open", "waiting to be pulled" (levers), "sealed shut... it
+needs something specific" (key-item gates), or "locked, but it looks
+pickable" (plain DC13 doors/chests). The existing hidden-passage
+Perception-check phrasing ("look for a hidden door") is left alone —
+excluded via a "hidden"/"secret" check so it isn't shadowed.
+
+**Fix — real narrative spoiler** (2026-08-31, dev-bridge, Elduinn:
+"Summon the wrathflame unbound" mid-combat got "Kess, the Unbound isn't
+interested in talking — this ends in a fight, not a conversation").
+Root cause: the intent parser's NPC-name-matching loop ran BEFORE the
+remnant-summon check, and "Unbound" is a word shared between the real
+Remnant "The Wrathflame Unbound" and the real NPC "Kess, the Unbound" —
+so a completely unrelated combat command incorrectly resolved to
+talking to Kess, and in doing so leaked her own future transformed
+identity to a player nowhere near that content. Fixed by moving the
+entire remnant-summon/check-remnants block ahead of the NPC-name loop,
+same "checked before the npc_name loop" pattern already used for
+`throw_weapon`/`auto_equip`.
+
+While building the regression test for that fix, found and fixed a
+second, separate, pre-existing bug in the same NPC-name loop: it split
+each known NPC name on whitespace without stripping punctuation, so
+"Kess, the Unbound".split() kept a literal trailing comma on "kess,",
+and the whole-word match regex for "kess," never matched bare "kess" in
+a player's own message. Any epithet-style NPC name ("Name, the X")
+was silently unaddressable by first name alone. Fixed by extracting
+word characters only instead of splitting on whitespace.
+
+Tested: real fail-then-pass repros for both the lockable-examine
+feature and the summon/Kess collision; the punctuation fix confirmed
+via the same "Talk to Kess" repro that surfaced it. Full related
+regression slices re-run clean: 31/31 Kess tests, 7/7 remnant/npc_name-
+collision tests, 6/6 remnant catalog/menu tests (one unrelated
+pre-existing failure — `the_wrathflame_unbound`'s monster_key missing
+from its own room's monster list post-dungeon-redesign — confirmed via
+git-stash to predate this change, left out of scope), 27/27 examine
+tests (one unrelated pre-existing failure, `test_view_classified_as_
+examine`, also confirmed pre-existing via git-stash).
+
 ## [1.27.432] — fix: an ordinary question got hallucinated into leaving a party
 
 Real live incident (2026-08-31, dev-bridge): "Look for a lever" — a

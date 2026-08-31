@@ -1131,6 +1131,42 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
                                     "put on my gear automatically", "equip my gear automatically"]):
         return {**base, "action": "auto_equip"}
 
+    # The Remnants (2026-08-13, per Coffee -- see remnants.py's own
+    # module docstring). "summon"/"call forth" naming a real bound
+    # Remnant by name is checked BEFORE the generic "summon"/cast_spell
+    # collision further down (this game's real "Summon Lesser Spirit"
+    # spell also uses the word "summon") -- grounded in a real
+    # Remnant's own name/id being present, the same "never fire on an
+    # unrelated word alone" shape join_guild/leave_guild already use.
+    #
+    # Real live bug + real spoiler (2026-08-31, dev-bridge, Elduinn:
+    # "Summon the wrathflame unbound" mid-combat got "Kess, the Unbound
+    # isn't interested in talking" -- revealing Kess's own future
+    # transformed name/identity to a player nowhere near that content).
+    # Root cause: this whole block used to live AFTER the npc_name loop
+    # below, so the single shared word "Unbound" (present in BOTH "The
+    # Wrathflame Unbound", a real Remnant, and "Kess, the Unbound", a
+    # real NPC) let that loop's own whole-word name matching win first,
+    # misrouting a real, unambiguous "summon [Remnant]" command into
+    # talk_npc against a completely unrelated, spoiler-heavy NPC. Same
+    # "checked before the npc_name loop" fix shape as throw_weapon/
+    # auto_equip immediately above -- an explicit "summon"/"call forth"
+    # naming a real Remnant now always wins before any NPC name, shared
+    # words or not, ever gets a chance to compete for it.
+    mentions_a_real_remnant = any(
+        r["name"].lower() in lowered or rid.replace("_", " ") in lowered for rid, r in REMNANTS.items()
+    )
+    if mentions_a_real_remnant and re.search(r"\b(?:summon|call forth|invoke)\b", lowered):
+        return {**base, "action": "summon_remnant"}
+    # Real feature request (2026-08-18, per Coffee: "make a menu for
+    # 'Remnants' so players can see what the summons do... and their
+    # attack or ability"). Checked AFTER summon_remnant above so an
+    # actual "summon [name]" command is never swallowed by this
+    # broader bare-word catch -- same ordering convention as the
+    # menu/formation/waypoints block above.
+    if re.search(r"\bremnants?\b", lowered):
+        return {**base, "action": "check_remnants"}
+
     for npc_name in known_npc_names:
         # Matches the NPC's full registered name as a substring ("old
         # maren" in "go talk to old maren") OR any single word of it, at
@@ -1143,8 +1179,15 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
         # introduced. Whole-word (not substring-within-a-word) matching
         # on individual name words avoids a short/common fragment
         # accidentally firing on unrelated text.
+        # Real live bug (2026-08-31, found while testing the Kess-spoiler
+        # fix above): plain .split() keeps trailing punctuation attached
+        # ("Kess, the Unbound".split() -> ["kess,", "the", "unbound"]),
+        # so the whole-word regex for "kess," (with a literal comma) never
+        # matches bare "kess" in a player's message. Any epithet-style
+        # name ("Name, the X") silently couldn't be addressed by first
+        # name alone. Fixed by extracting word characters only.
         name_words = [
-            w for w in npc_name.lower().split()
+            w for w in re.findall(r"[a-z0-9']+", npc_name.lower())
             if len(w) >= 3 and w not in _NPC_NAME_FILLER_WORDS
         ]
         if (npc_name.lower() in lowered or any(
@@ -1209,27 +1252,6 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
         "guild" in lowered or any(gid.replace("_", " ") in lowered or g["name"].lower() in lowered for gid, g in GUILDS.items())
     ):
         return {**base, "action": "leave_guild"}
-
-    # The Remnants (2026-08-13, per Coffee -- see remnants.py's own
-    # module docstring). "summon"/"call forth" naming a real bound
-    # Remnant by name is checked BEFORE the generic "summon"/cast_spell
-    # collision further down (this game's real "Summon Lesser Spirit"
-    # spell also uses the word "summon") -- grounded in a real
-    # Remnant's own name/id being present, the same "never fire on an
-    # unrelated word alone" shape join_guild/leave_guild already use.
-    mentions_a_real_remnant = any(
-        r["name"].lower() in lowered or rid.replace("_", " ") in lowered for rid, r in REMNANTS.items()
-    )
-    if mentions_a_real_remnant and re.search(r"\b(?:summon|call forth|invoke)\b", lowered):
-        return {**base, "action": "summon_remnant"}
-    # Real feature request (2026-08-18, per Coffee: "make a menu for
-    # 'Remnants' so players can see what the summons do... and their
-    # attack or ability"). Checked AFTER summon_remnant above so an
-    # actual "summon [name]" command is never swallowed by this
-    # broader bare-word catch -- same ordering convention as the
-    # menu/formation/waypoints block above.
-    if re.search(r"\bremnants?\b", lowered):
-        return {**base, "action": "check_remnants"}
 
     # Bench/un-bench (2026-07-31, per Coffee: battle-planning roster
     # picker) -- checked before "unbench" would ever risk matching a
@@ -2028,6 +2050,29 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # ability check otherwise, never a false "nothing here" examine.
     if re.search(r"\bopen(?:ing|ed)?\b.*\b(?:door|gate|lock)\b", lowered):
         return {**base, "action": "skill_check", "ability": "dexterity"}
+
+    # Real live feature request (2026-08-31, dev-bridge, Elduinn: "I
+    # don't know if this area has a lever but if it doesn't, you should
+    # tell us"). A genuine QUESTION about whether a lockable exists here
+    # ("look for a lever", "is there a lever", "do you see a lock") is
+    # different from an ATTEMPT to open one (handled above) -- this
+    # routes to a real, honest examine instead, which bot.py's
+    # _do_examine now checks against the location's real lockables
+    # (falling back to _find_lockable) before giving up, so the player
+    # gets a real "yes, there's a rusted lever here" or a real "no,
+    # nothing like that here", never silence or a misfire into an
+    # unrelated action. Excludes "hidden"/"secret" so the existing
+    # "look for hidden door" -> Perception-check phrasing (a real,
+    # different mechanic, handled by skill_check_verb_abilities/
+    # _mentions_hidden_passage further below) is never shadowed.
+    if "hidden" not in lowered and "secret" not in lowered:
+        lockable_query_match = re.search(
+            r"\b(?:look for|search for|is there|are there|do you see|any|see a|see an)\b.*?"
+            r"\b(lever|switch|lock|door|gate|chest|wheel|valve)\b",
+            lowered,
+        )
+        if lockable_query_match:
+            return {**base, "action": "examine", "target": lockable_query_match.group(1)}
 
     if not any(w in lowered for w in ["force open", "break down", "break open", "smash"]):
         open_match = re.search(r"\bopen(?:ing|ed)?\b\s+(?:the |a |an )?(.+)", lowered)

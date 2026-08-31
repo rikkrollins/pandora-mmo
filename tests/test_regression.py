@@ -4339,6 +4339,46 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         result = _keyword_fallback("open the chest", [])
         self.assertEqual(result["action"], "examine")
 
+    def test_asking_about_a_lockable_routes_to_examine_not_the_model(self):
+        """
+        Real live feature request (2026-08-31, dev-bridge, Elduinn: "I
+        don't know if this area has a lever but if it doesn't, you
+        should tell us"). A genuine QUESTION about a lockable is
+        different from trying to open one -- routed to a real, honest
+        examine (see _do_examine's own new lockable-aware fallback)
+        instead of ever reaching the model at all.
+        """
+        for phrase in ("Look for a lever", "is there a lever here", "Do you see a lock", "any switch around"):
+            result = _keyword_fallback(phrase, [])
+            self.assertEqual(result["action"], "examine", f"{phrase!r} misclassified as {result['action']!r}")
+
+        # No regression: the existing "look for hidden door" -> Perception-check phrasing is never shadowed.
+        result = _keyword_fallback("look for hidden door", [])
+        self.assertEqual(result["action"], "skill_check")
+        self.assertEqual(result["ability"], "wisdom")
+
+    async def test_examine_honestly_answers_whether_a_lockable_is_really_here(self):
+        """The new lockable-aware examine fallback: real, distinct answers for a lever, a key-only gate, and no lockable at all -- never a roll, never an unlock, purely informative."""
+        lever_loc = "wrathflame_vault_cinder_key_alcove"
+        character = make_basic_character(960301, "LeverAskTester", current_location=lever_loc)
+        sink = []
+        await bot._do_examine(FakeUpdate(960301, "look for a lever", sink), "look for a lever")
+        self.assertTrue(any("lever" in s.lower() and "waiting to be pulled" in s.lower() for s in sink), sink)
+        lever = cl.get_location(bot.CAMPAIGN, lever_loc)["lockables"][0]
+        self.assertNotIn(lever["id"], bot._UNLOCKED.get(-999, set()), "asking about a lever must never pull it")
+
+        key_gate_loc = "wrathflame_vault_ember_hall"
+        character2 = make_basic_character(960302, "GateAskTester", current_location=key_gate_loc)
+        sink2 = []
+        await bot._do_examine(FakeUpdate(960302, "is there a door here", sink2), "is there a door here")
+        self.assertTrue(any("sealed shut" in s.lower() for s in sink2), sink2)
+
+        no_lockable_loc = "crossroads_tavern"
+        character3 = make_basic_character(960303, "NoLockAskTester", current_location=no_lockable_loc)
+        sink3 = []
+        await bot._do_examine(FakeUpdate(960303, "is there a lever here", sink3), "is there a lever here")
+        self.assertTrue(any("doesn't spot anything" in s.lower() for s in sink3), sink3)
+
     async def test_key_item_lockable_success_message_has_no_doubled_article(self):
         """Real live grammar bug (2026-08-31, dev-bridge screenshot): every key item this redesign added is named "The X Key", so "uses the {name}" doubled into "uses the The Cinder Key"."""
         location_id = "wrathflame_vault_ember_hall"
@@ -4426,6 +4466,31 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         with patch("ai.intent_parser.requests.post", return_value=FakeResponse()):
             result = intent_parser_module.parse_intent("I want to leave my party", [])
         self.assertEqual(result["action"], "leave_party")
+
+    def test_summon_remnant_never_loses_to_a_shared_word_npc_name_collision(self):
+        """
+        Real live bug + real spoiler (2026-08-31, dev-bridge, Elduinn:
+        "Summon the wrathflame unbound" mid-combat got "Kess, the
+        Unbound isn't interested in talking" -- revealing Kess's own
+        future transformed identity to a player nowhere near that
+        content). Root cause: "Unbound" is shared between a real
+        Remnant ("The Wrathflame Unbound") and a real, unrelated,
+        spoiler-heavy NPC ("Kess, the Unbound") -- the npc_name loop's
+        own whole-word matching won before the summon_remnant check ever
+        got a chance to fire, since it used to live after that loop.
+        known_npc_names is always the FULL global NPC roster (bot.py's
+        known_npcs = every CAMPAIGN["npcs"] name, not location-scoped),
+        so this collision is real and live regardless of where the
+        player actually is.
+        """
+        result = _keyword_fallback("Summon the wrathflame unbound", ["Kess, the Unbound", "Wren Hollowbrook"])
+        self.assertEqual(result["action"], "summon_remnant")
+        self.assertIsNone(result.get("npc_name"))
+
+        # No regression: an actual request to talk to Kess still works.
+        result = _keyword_fallback("Talk to Kess", ["Kess, the Unbound", "Wren Hollowbrook"])
+        self.assertEqual(result["action"], "talk_npc")
+        self.assertEqual(result["npc_name"], "Kess, the Unbound")
 
     def test_bare_take_reclassified_to_examine_when_model_also_says_chat(self):
         """
