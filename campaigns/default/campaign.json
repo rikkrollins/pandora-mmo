@@ -3505,7 +3505,7 @@
       "wrathflame_vault_ember_hall": {
         "name": "The Ember Hall",
         "layer": "underground",
-        "description": "A long hall lit only by embers set into the walls, none of them burning anything that still exists. A warded iron door bars a passage to the west, and something below the floor here sounds hollow underfoot.",
+        "description": "A long hall lit only by embers set into the walls, none of them burning anything that still exists. A warded iron door bars a passage to the west.",
         "connections": [
           "wrathflame_vault_threshold",
           "wrathflame_vault_ash_gallery",

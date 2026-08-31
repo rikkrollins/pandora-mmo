@@ -24372,8 +24372,16 @@ async def _do_move(update: Update, text: str) -> None:
             (lk for lk in current.get("lockables", []) if lk["id"] == lockable_id), None
         )
         name = lockable["name"] if lockable else "something locked"
+        # Real live bug (2026-08-31, dev-bridge: "I picked the lock
+        # successfully, why is it telling me to pick it again?"). This
+        # message hardcoded "picking the lock" even when the actual
+        # lockable is a lever -- which never involves a pick or a roll,
+        # only a pull, and only from the far room. Telling a player to
+        # "pick" a lever they can't even reach yet was the real source
+        # of the confusion, not a repeat-lock bug.
+        verb_hint = "pulling the lever" if lockable and lockable.get("kind") == "lever" else "picking the lock"
         await update.effective_chat.send_message(
-            f"The way to {destination['name']} is blocked by {name}. Try picking the lock first.",
+            f"The way to {destination['name']} is blocked by {name}. Try {verb_hint} first.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
@@ -24938,8 +24946,16 @@ async def _do_fast_travel(update: Update, text: str) -> None:
             (lk for lk in current.get("lockables", []) if lk["id"] == lockable_id), None
         )
         name = lockable["name"] if lockable else "something locked"
+        # Real live bug (2026-08-31, dev-bridge: "I picked the lock
+        # successfully, why is it telling me to pick it again?"). This
+        # message hardcoded "picking the lock" even when the actual
+        # lockable is a lever -- which never involves a pick or a roll,
+        # only a pull, and only from the far room. Telling a player to
+        # "pick" a lever they can't even reach yet was the real source
+        # of the confusion, not a repeat-lock bug.
+        verb_hint = "pulling the lever" if lockable and lockable.get("kind") == "lever" else "picking the lock"
         await update.effective_chat.send_message(
-            f"The way to {destination['name']} is blocked by {name}. Try picking the lock first.",
+            f"The way to {destination['name']} is blocked by {name}. Try {verb_hint} first.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return

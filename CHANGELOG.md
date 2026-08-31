@@ -2,6 +2,46 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.434] — fix: wrong-verb lever message + a room describing a mechanic that didn't exist
+
+Found via a routine dev-bridge sweep, not a new report: two more real
+bugs behind confusion in the Wrathflame Vault (the pilot dungeon for
+the Zelda-style redesign).
+
+**Fix**: the generic "way is blocked" message always said "Try picking
+the lock first" — even for a lever, which never involves a pick or a
+roll at all, only a pull, and only from the far room. A player who'd
+just genuinely succeeded a real lockpick roll elsewhere ("I picked the
+lock successfully, why is it telling me to pick it again?") was being
+told the wrong verb for a mechanism they hadn't even reached yet. Now
+says "Try pulling the lever first" when the lockable's kind is a lever;
+unchanged for real doors/chests.
+
+**Fix**: The Ember Hall's room description said "something below the
+floor here sounds hollow underfoot" — flavor text implying a hidden
+floor mechanism that was never actually wired up anywhere (the room's
+only real interactable is its warded iron door). Two players separately
+tried "look at the floor" / "look for a switch or a lever" here and got
+an honest "doesn't spot anything", chasing content that didn't exist.
+Removed the false promise from the description.
+
+Also confirmed, while auditing the rest of the backlog, that three
+older-looking reports were already resolved by earlier work this
+session and needed no further action: the "quest completed without
+fighting" confusion (the unique-guardian-monster fix already covers
+it), a "drink from the spring" misclassification (the deterministic
+keyword fallback for `drink_water` already short-circuits before the
+model ever gets a chance to guess), and the Cinder Key Alcove's own
+"object set into the far wall" wording (already rewritten in an earlier
+phase of this session).
+
+Tested: real fail-then-pass repro for the lever-wording fix (chat-
+scoped, isolated from every other lockable test's shared `_UNLOCKED`
+state); a real assertion the door/key-gate wording is unchanged; a
+direct content check that the misleading floor line is gone. Full
+lockpick/lockable/find_lockable/blocked slice re-run clean (24/24) and
+the whole Wrathflame Vault slice re-run clean (11/11).
+
 ## [1.27.433] — feature: honest lockable examine, plus a real narrative-spoiler fix
 
 **Feature** (per Coffee, "yes do that next"): asking a genuine question

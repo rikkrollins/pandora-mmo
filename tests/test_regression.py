@@ -5869,6 +5869,34 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id, -999)
         self.assertEqual(character["current_location"], "wrathflame_vault_ember_hall")
 
+    async def test_blocked_lever_connection_tells_the_player_to_pull_not_pick(self):
+        """
+        Real live bug (2026-08-31, dev-bridge: "I picked the lock
+        successfully, why is it telling me to pick it again?"). The
+        block message hardcoded "picking the lock" even for a lever,
+        which never involves a pick or roll at all -- only a pull, and
+        only from the far room. Approaching from the hub side (where
+        the lever can never actually be found/picked) must now say
+        "pulling the lever", not "picking the lock".
+        """
+        user_id = 960299
+        make_basic_character(user_id, "LeverBlockTester", chat_id=-960299, current_location="wrathflame_vault_cinder_key_alcove")
+        db.update_character(user_id, -960299, visited_locations=["wrathflame_vault_cinder_key_alcove", "wrathflame_vault_ember_hall"])
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "", sink, chat_id=-960299), "go to the ember hall")
+        self.assertIn("blocked by a rusted lever", sink[-1])
+        self.assertIn("pulling the lever", sink[-1])
+        self.assertNotIn("picking the lock", sink[-1])
+
+        # No-regression check: a real door/key gate still says "picking
+        # the lock" -- only the lever wording changed.
+        user_id2 = 960298
+        make_basic_character(user_id2, "DoorBlockTester", chat_id=-960298, current_location="wrathflame_vault_ember_hall")
+        db.update_character(user_id2, -960298, visited_locations=["wrathflame_vault_ember_hall", "wrathflame_vault_smoldering_stair"])
+        sink2 = []
+        await bot._do_move(FakeUpdate(user_id2, "", sink2, chat_id=-960298), "go to the smoldering stair")
+        self.assertIn("picking the lock", sink2[-1])
+
     def test_wrathflame_vault_forgeholds_door_is_a_plain_dc13_lockpick_no_key_needed(self):
         """The 'classic' DEX-lockpick door this vault didn't have before -- distinct from the existing Bellows Chamber chest."""
         archive = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_cinder_archive")
@@ -5890,6 +5918,22 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id, -999)
         self.assertEqual(character["current_location"], "wrathflame_vault_ember_hall")
         self.assertEqual(set(character["map_revealed_locations"]), {"wrathflame_vault_sanctum", "wrathflame_vault_sealed_reliquary"})
+
+    def test_ember_hall_description_no_longer_promises_a_floor_mechanic_that_doesnt_exist(self):
+        """
+        Real live confusion (2026-08-31, dev-bridge, two separate
+        reports): the room's own description said "something below the
+        floor here sounds hollow underfoot", but the room's only real
+        lockable is the warded iron door -- no lever, switch, or hidden
+        passage was ever wired up for the floor. Players who reasonably
+        tried "look at the floor" / "look for a switch or a lever" got
+        an honest but confusing "doesn't spot anything", chasing a
+        mechanic that was pure unwired flavor text. Fixed by removing
+        the false promise from the description itself.
+        """
+        hub = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_ember_hall")
+        self.assertNotIn("hollow underfoot", hub["description"])
+        self.assertNotIn("floor", hub["description"])
 
     def test_find_lockable_resolves_natural_lever_and_gate_phrasing(self):
         alcove = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_cinder_key_alcove")
