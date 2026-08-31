@@ -798,6 +798,14 @@ ITEMS = {
         "price": 0, "weight": 0.1,
         "description": "Heavier than it looks, like it was made to be noticed by whoever finally found it.",
     },
+    # Dungeon redesign Phase 6 (2026-08-30) -- Unmoored Isle's own key
+    # item, opening the drifting door from the hub into The Drifting
+    # Vault.
+    "the_drifting_key": {
+        "name": "The Drifting Key", "type": "quest_item", "rarity": "unique",
+        "price": 0, "weight": 0.1,
+        "description": "Never quite settles in your hand, like it's still deciding whether it wants to be held.",
+    },
     "brass_key_no_lock": {
         "name": "Brass Key That Fits No Lock", "type": "quest_item", "rarity": "unique",
         "price": 0, "weight": 0.1,

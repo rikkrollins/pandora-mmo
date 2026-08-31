@@ -2,6 +2,64 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.428] — dungeon redesign Phase 6: Unmoored Isle gets real interconnectivity
+
+Phase 6 of the 8-dungeon redesign (see v1.27.420-427). The entrance was
+ALREADY a real 4-way hub with 3 distinct branches, each ending in its
+own boss or Remnant (The Folded Warden, The Drowned Reflection, The
+Spire's Grace) plus the isle's own unfleeable main boss (The Waiting
+Shape) behind a 4th gate — real characters have only ever reached the
+entrance itself, so everything past it was free to work with:
+
+- **The entrance is now the designated hub**, with a new 5th branch.
+- **Both existing riddles finally gate something**: The Folded Voice's
+  and The Argument's riddles have sat unused as side quests since the
+  original Chapter 4 expansion — now real `story_gates` blocking each
+  branch's own boss corridor until solved.
+- **A new key-and-vault side branch** off the hub: The Drifting Hollow
+  (open, a real unique guardian drops The Drifting Key) unlocks a
+  drifting door into The Drifting Vault (bonus treasure).
+- **A new shortcut lever** at Branch A's dead end (The Drifting Hall's
+  End, past The Folded Warden) opens a direct path back to the hub.
+- Correctly extended the fast-travel restriction to the entrance room
+  itself (it was missed in the original v1.27.418 pass) — it's not a
+  checkpoint (The Floating Garden is), so warping to it now correctly
+  requires reaching that real waypoint on foot, the same as every
+  other room in this dungeon, regardless of whether the shard is held.
+
+Stonearch Bridge (Phase 7) is next.
+
+Tested: same coverage shape as Phases 1-5. One existing fast-travel
+test needed updating (not weakening) to reflect the entrance's own
+newly-correct dungeon-interior status. Full related regression slice
+re-run clean (105/105) alongside the 12 new Unmoored Isle tests.
+
+**Also in this deploy — fix: a bare "look" got hallucinated into leaving a guild.**
+Real live incident (2026-08-31, dev-bridge): Elduinn typed a bare
+"look" and Charvenna typed "Surface map" — neither message has
+anything to do with guilds — and both got classified as `leave_guild`
+by the AI model, actually firing for Elduinn and silently dropping him
+from the Forge Guild. Root cause: the keyword fallback only matches
+multi-word "look around"-style phrases, so a bare "look" fell through
+to the model, which hallucinated an unrelated but real, valid action
+(same failure shape as this file's other documented misclassifications
+— "my characters" → start_combat, "I try to pick the lock" → pass_turn
+— just never previously guarded for `leave_guild`/`join_guild`
+specifically). Fixed two ways: a bare "look" now gets its own
+deterministic match so it never reaches the model at all, and
+`leave_guild`/`join_guild` are now only ever trusted from the model
+when the raw text actually contains "guild" or a real guild's name —
+same grounding the deterministic fallback already required of itself.
+Elduinn's Forge Guild membership was restored (character_id-scoped,
+matching the guild's own real `join_guild` field set) — his exact
+curriculum step specifically couldn't be recovered (no snapshot/backup
+exists in this WAL-mode database), so he restarts that guild's
+training from its first step; nothing else, including any already-
+permanent stat bonus his prior membership had granted, was ever
+touched by leaving in the first place. Tested: a real fail-then-pass
+repro confirms both the bare-"look" fix and the model-trust guard;
+full related intent-parser regression slice re-run clean (6/6).
+
 ## [1.27.427] — dungeon redesign Phase 5: Greymoor Downs, light touch
 
 Phase 5 of the 8-dungeon redesign (see v1.27.420-426) — LIGHT TOUCH

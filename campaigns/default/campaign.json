@@ -6673,7 +6673,8 @@
           "unmoored_isle_hollow",
           "unmoored_isle_drifting_threshold",
           "unmoored_isle_the_mirrored_threshold",
-          "unmoored_isle_the_radiant_stair"
+          "unmoored_isle_the_radiant_stair",
+          "unmoored_isle_the_drifting_hollow"
         ],
         "hidden": true,
         "requires_item": "shard_of_dim_light",
@@ -6699,7 +6700,8 @@
           "down": "unmoored_isle_hollow",
           "north": "unmoored_isle_drifting_threshold",
           "south": "unmoored_isle_the_mirrored_threshold",
-          "east": "unmoored_isle_the_radiant_stair"
+          "east": "unmoored_isle_the_radiant_stair",
+          "west": "unmoored_isle_the_drifting_hollow"
         },
         "combat_environment": {
           "name": "the crumbling edge of the isle itself",
@@ -6710,7 +6712,24 @@
           "x": 0,
           "y": 0
         },
-        "dungeon_id": "unmoored_isle"
+        "dungeon_id": "unmoored_isle",
+        "dungeon_interior": true,
+        "dungeon_hub": true,
+        "dungeon_teaser_locations": [
+          "unmoored_isle_the_spires_grace_sanctum",
+          "unmoored_isle_the_drifting_vault"
+        ],
+        "locked_connections": {
+          "unmoored_isle_the_drifting_vault": "unmoored_isle_drifting_vault_door"
+        },
+        "lockables": [
+          {
+            "id": "unmoored_isle_drifting_vault_door",
+            "kind": "door",
+            "name": "a drifting, half-real door",
+            "requires_key_item": "the_drifting_key"
+          }
+        ]
       },
       "unmoored_isle_hollow": {
         "name": "The Hollow Beneath the Wait",
@@ -7094,7 +7113,12 @@
           "y": 6
         },
         "dungeon_interior": true,
-        "dungeon_id": "unmoored_isle"
+        "dungeon_id": "unmoored_isle",
+        "story_gates": {
+          "unmoored_isle_the_drifting_halls_end": {
+            "requires_completed_quest": "the_folded_atriums_riddle"
+          }
+        }
       },
       "unmoored_isle_the_drifting_halls_end": {
         "name": "Where the Drifting Halls End",
@@ -7114,7 +7138,17 @@
           "y": 7
         },
         "dungeon_interior": true,
-        "dungeon_id": "unmoored_isle"
+        "dungeon_id": "unmoored_isle",
+        "lockables": [
+          {
+            "id": "unmoored_isle_halls_end_shortcut",
+            "kind": "lever",
+            "name": "a suspended chime lever"
+          }
+        ],
+        "locked_connections": {
+          "the_unmoored_isle": "unmoored_isle_halls_end_shortcut"
+        }
       },
       "unmoored_isle_the_mirrored_threshold": {
         "name": "The Mirrored Threshold",
@@ -7254,7 +7288,12 @@
           "y": -5
         },
         "dungeon_interior": true,
-        "dungeon_id": "unmoored_isle"
+        "dungeon_id": "unmoored_isle",
+        "story_gates": {
+          "unmoored_isle_the_reflection_deepens": {
+            "requires_completed_quest": "the_arguments_answer"
+          }
+        }
       },
       "unmoored_isle_the_reflection_deepens": {
         "name": "Where the Reflection Deepens",
@@ -7477,6 +7516,60 @@
         ],
         "grid_position": {
           "x": 7,
+          "y": 0
+        },
+        "dungeon_interior": true,
+        "dungeon_id": "unmoored_isle"
+      },
+      "unmoored_isle_the_drifting_hollow": {
+        "name": "The Drifting Hollow",
+        "layer": "sky",
+        "description": "A real, motionless pocket of air just off the isle's own edge, holding still against every current -- and something has made a den of guarding whatever's caught in it.",
+        "connections": [
+          "the_unmoored_isle"
+        ],
+        "directions": {
+          "east": "the_unmoored_isle"
+        },
+        "monsters": [
+          "the_drift_bound_wisp"
+        ],
+        "grid_position": {
+          "x": -1,
+          "y": 0
+        },
+        "dungeon_interior": true,
+        "dungeon_id": "unmoored_isle"
+      },
+      "unmoored_isle_the_drifting_vault": {
+        "name": "The Drifting Vault",
+        "layer": "sky",
+        "description": "A real, sealed pocket of the isle's own substance, holding together out here through nothing anyone can explain.",
+        "connections": [
+          "the_unmoored_isle"
+        ],
+        "directions": {
+          "east": "the_unmoored_isle"
+        },
+        "lockables": [
+          {
+            "id": "unmoored_isle_drifting_vault_chest",
+            "kind": "chest",
+            "name": "a real, drifting strongbox",
+            "loot": {
+              "greater_healing_potion": 1
+            },
+            "gold": 160
+          }
+        ],
+        "interactables": {
+          "drifting_vault_marker": {
+            "name": "a marker scratched into the vault's own substance",
+            "description": "Whoever sealed this counted on nobody else ever having the key -- and, judging by how untouched it is, nobody ever did until now."
+          }
+        },
+        "grid_position": {
+          "x": -2,
           "y": 0
         },
         "dungeon_interior": true,
@@ -9796,6 +9889,19 @@
       "reward_gold": 400,
       "reward_item": "the_warden_key",
       "clue": "Whatever's guarding the hollow won't move until it's put down for good."
+    },
+    "the_drifting_hollows_reckoning": {
+      "title": "The Drifting Key",
+      "description": "Something's been circling a real, deliberately shaped key for longer than anything this far from solid ground should still be moving.",
+      "location": "unmoored_isle_the_drifting_hollow",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_drift_bound_wisp"
+      },
+      "reward_xp": 480,
+      "reward_gold": 130,
+      "reward_item": "the_drifting_key",
+      "clue": "Whatever's circling the hollow won't move until it's put down for good."
     }
   },
   "story_arcs": {
@@ -12948,6 +13054,19 @@
       "damage_dice": "1d8",
       "damage_bonus": 330,
       "damage_type": "necrotic"
+    },
+    "the_drift_bound_wisp": {
+      "name": "The Drift-Bound Wisp",
+      "level": 20,
+      "dexterity": 15,
+      "strength": 8,
+      "armor_class": 15,
+      "hp_max": 700,
+      "proficiency_bonus": 5,
+      "xp_reward": 500,
+      "damage_dice": "1d8",
+      "damage_bonus": 45,
+      "damage_type": "force"
     }
   },
   "factions": {

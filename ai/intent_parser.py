@@ -1888,6 +1888,17 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
                  r"(?:north|south|east|west|northeast|northwest|southeast|southwest)\b", lowered):
         return {**base, "action": "move"}
 
+    # Real live bug (2026-08-31, dev-bridge: a bare "look" from Elduinn
+    # got sent to the model -- since no multi-word phrase below matched
+    # it -- and the model hallucinated action="leave_guild", silently
+    # removing him from the Forge Guild. Same failure shape as this
+    # file's other documented misclassifications on this small model
+    # ("my characters" -> start_combat, "show me the map" -> move) --
+    # fixed the same way: a bare, otherwise-ambiguous single word gets
+    # its own deterministic match instead of ever reaching the model.
+    if re.fullmatch(r"look[.!]?", lowered.strip()):
+        return {**base, "action": "look"}
+
     if any(w in lowered for w in ["look around", "where am i", "look at my surroundings", "examine the area",
                                     "describe this place", "what's around me", "whats around me",
                                     "survey the area", "look like", "what is this place", "observe the"]):
@@ -2661,6 +2672,22 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
             # contains one of its own real trigger words, same reasoning
             # as start_combat/pass_turn/flee/attack above.
             if parsed["action"] == "dismantle_item" and not any(w in text.lower() for w in ["dismantle", "salvage"]):
+                return fallback
+            # Same defensive pattern again (2026-08-31, dev-bridge, real
+            # live incident): a bare "look" from Elduinn and "Surface
+            # map" from Charvenna were both classified as "leave_guild"
+            # by the model -- neither message has anything to do with
+            # guilds at all, and this actually fired, silently removing
+            # Elduinn from the Forge Guild. leave_guild/join_guild are
+            # real, consequential, hard-to-notice-gone-wrong actions
+            # (nothing about losing your guild is loud), so -- same
+            # grounding the deterministic fallback already requires of
+            # itself for these two actions -- never trusted from the
+            # model alone unless the raw text actually contains "guild"
+            # or a real guild's own name/id.
+            if parsed["action"] in ("leave_guild", "join_guild") and not (
+                "guild" in text.lower() or any(gid.replace("_", " ") in text.lower() or g["name"].lower() in text.lower() for gid, g in GUILDS.items())
+            ):
                 return fallback
             # Real live bug (2026-08-15, dev-bridge screenshot): "Take
             # the band" -- a ring the player had just been shown in a

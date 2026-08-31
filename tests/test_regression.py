@@ -4320,6 +4320,52 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             result = intent_parser_module.parse_intent("Please dismantle my old sword", [])
         self.assertEqual(result["action"], "dismantle_item")
 
+    def test_bare_look_classifies_deterministically_without_reaching_the_model(self):
+        """
+        Real live bug (2026-08-31, dev-bridge): a bare "look" from
+        Elduinn had no multi-word phrase to match in the keyword
+        fallback, fell through to the model, and the model hallucinated
+        action="leave_guild" -- silently removing him from the Forge
+        Guild. A bare "look" (optionally with trailing punctuation) now
+        gets its own deterministic match, same fix shape as every other
+        single-word/short-phrase misclassification already documented
+        in this file.
+        """
+        for phrase in ("look", "Look", "look.", "look!"):
+            result = _keyword_fallback(phrase, [])
+            self.assertEqual(result["action"], "look", f"{phrase!r} misclassified as {result['action']!r}")
+
+    def test_model_guessing_leave_guild_for_unrelated_text_is_never_trusted(self):
+        """
+        Real live incident (2026-08-31, dev-bridge): "look" (Elduinn) and
+        "Surface map" (Charvenna) were both classified as leave_guild by
+        the model -- neither message mentions a guild at all, and the
+        first one actually fired, silently removing Elduinn from the
+        Forge Guild. leave_guild/join_guild are real, consequential,
+        easy-to-miss-gone-wrong actions, so -- same grounding the
+        deterministic fallback already requires of itself -- never
+        trusted from the model alone unless the raw text actually
+        contains "guild" or a real guild's own name.
+        """
+        from unittest.mock import patch
+        import ai.intent_parser as intent_parser_module
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": '{"action": "leave_guild"}'}
+
+        with patch("ai.intent_parser.requests.post", return_value=FakeResponse()):
+            result = intent_parser_module.parse_intent("Surface map", [])
+        self.assertNotEqual(result["action"], "leave_guild")
+
+        # No regression: a real leave-guild phrase the model happens to agree with still works.
+        with patch("ai.intent_parser.requests.post", return_value=FakeResponse()):
+            result = intent_parser_module.parse_intent("I want to leave the Forge Guild", [])
+        self.assertEqual(result["action"], "leave_guild")
+
     def test_bare_take_reclassified_to_examine_when_model_also_says_chat(self):
         """
         Real live bug (2026-08-15, dev-bridge screenshot): "Take the
@@ -6343,9 +6389,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         for loc_id in arc_13_chain:
             self.assertIn(loc_id, locs, f"{loc_id} must still exist, untouched")
         new_ids = {k for k in locs if k.startswith("unmoored_isle_") and k not in arc_13_chain}
-        self.assertEqual(len(new_ids) + 1, 24)  # +1 for the_unmoored_isle hub itself
+        # 24 from the original Chapter 4 expansion + 2 real new rooms from
+        # the dungeon-redesign Phase 6 pass (2026-08-30): The Drifting
+        # Hollow and The Drifting Vault.
+        self.assertEqual(len(new_ids) + 1, 26)  # +1 for the_unmoored_isle hub itself
 
     def test_unmoored_isle_new_rooms_are_fully_connected_and_reciprocated(self):
+        """A real, INTENTIONAL exception (dungeon redesign Phase 6, 2026-08-30): see the bonus-vault/Sunken Root Caverns versions of this same test for why a locked_connections target is exempt."""
         locs = bot.CAMPAIGN["locations"]["sky"]
         arc_13_chain = {
             "unmoored_isle_hollow", "unmoored_isle_afterimage", "unmoored_isle_turning_stair",
@@ -6359,6 +6409,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             for direction, dest_id in loc.get("directions", {}).items():
                 dest = cl.get_location(bot.CAMPAIGN, dest_id)
                 self.assertIsNotNone(dest, f"{loc_id} -> {dest_id} via {direction} is a dead end")
+                if dest_id in loc.get("locked_connections", {}) or loc_id in dest.get("locked_connections", {}):
+                    continue
                 self.assertIn(loc_id, dest.get("connections", []), f"{dest_id} doesn't connect back to {loc_id}")
 
     def test_the_waiting_shape_untouched_by_the_expansion(self):
@@ -6921,6 +6973,107 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id, -999)
         self.assertEqual(character["current_location"], "greymoor_downs_the_cellar_hollow")
         self.assertEqual(set(character["map_revealed_locations"]), {"greymoor_downs_the_wardens_vault", "greymoor_downs_the_downs_last_watch"})
+
+    # -- Dungeon redesign Phase 6 (2026-08-30): Unmoored Isle. The
+    #    entrance was ALREADY a real 4-way hub with 3 distinct branches
+    #    -- real players had only ever reached the entrance itself, so
+    #    this phase wires the two existing unused riddles into real
+    #    gates and adds one new key-and-vault branch plus one lever. --
+    def test_unmoored_isle_hub_is_designated_with_a_new_key_branch(self):
+        hub = cl.get_location(bot.CAMPAIGN, "the_unmoored_isle")
+        self.assertTrue(hub.get("dungeon_hub"))
+        self.assertEqual(set(hub["dungeon_teaser_locations"]), {"unmoored_isle_the_spires_grace_sanctum", "unmoored_isle_the_drifting_vault"})
+        self.assertIn("unmoored_isle_the_drifting_vault", hub["locked_connections"])
+
+    def test_unmoored_isle_existing_riddles_now_actually_gate_their_own_corridors(self):
+        """Both riddles have existed as side quests since the original Chapter 4 expansion, but never blocked movement -- same pattern already fixed in Goblin Warrens/Greymoor Downs."""
+        folded = cl.get_location(bot.CAMPAIGN, "unmoored_isle_the_folded_atrium")
+        self.assertEqual(folded["story_gates"]["unmoored_isle_the_drifting_halls_end"], {"requires_completed_quest": "the_folded_atriums_riddle"})
+        argument = cl.get_location(bot.CAMPAIGN, "unmoored_isle_the_argument_of_echoes")
+        self.assertEqual(argument["story_gates"]["unmoored_isle_the_reflection_deepens"], {"requires_completed_quest": "the_arguments_answer"})
+
+        user_id = 960270
+        make_basic_character(user_id, "FoldedGateTester", current_location="unmoored_isle_the_folded_atrium")
+        character = db.get_character(user_id, -999)
+        self.assertIsNotNone(bot._check_story_gate(character, folded, "unmoored_isle_the_drifting_halls_end"))
+        db.complete_quest(user_id, -999, "the_folded_atriums_riddle")
+        character = db.get_character(user_id, -999)
+        self.assertIsNone(bot._check_story_gate(character, folded, "unmoored_isle_the_drifting_halls_end"))
+
+    def test_unmoored_isle_drifting_key_quest_registered_against_a_real_unique_guardian(self):
+        self.assertIn("the_drifting_hollows_reckoning", bot._QUEST_MONSTER_INDEX.get("the_drift_bound_wisp", []))
+        quest = bot.CAMPAIGN["quests"]["the_drifting_hollows_reckoning"]
+        self.assertEqual(quest["reward_item"], "the_drifting_key")
+        self.assertEqual(quest["location"], "unmoored_isle_the_drifting_hollow")
+        for layer, locs in bot.CAMPAIGN["locations"].items():
+            for loc_id, loc in locs.items():
+                if loc_id == "unmoored_isle_the_drifting_hollow":
+                    continue
+                self.assertNotIn("the_drift_bound_wisp", loc.get("monsters") or [], f"{loc_id} also uses the guardian's unique monster_key")
+
+    async def test_a_prior_unrelated_drift_wisp_kill_never_auto_completes_the_drifting_quest(self):
+        from unittest.mock import patch, AsyncMock
+        user_id = 960271
+        character = make_basic_character(user_id, "PriorWispKillTester", current_location="unmoored_isle_the_drifting_hollow")
+        db.update_character(user_id, -999, defeated_monsters=["unmoored_drift_wisp"])
+        character = db.get_character(user_id, -999)
+        quest_id, quest = "the_drifting_hollows_reckoning", bot.CAMPAIGN["quests"]["the_drifting_hollows_reckoning"]
+        sink = []
+        update = FakeUpdate(user_id, "", sink, chat_id=-999)
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._maybe_push_quest_offer(update, character, quest_id, quest)
+        char = db.get_character(user_id, -999)
+        self.assertNotIn("the_drifting_hollows_reckoning", char.get("completed_quests") or [])
+
+    async def test_unmoored_isle_drifting_vault_door_blocks_without_key_and_opens_with_it(self):
+        location = cl.get_location(bot.CAMPAIGN, "the_unmoored_isle")
+        lockable = next(lk for lk in location["lockables"] if lk["id"] == "unmoored_isle_drifting_vault_door")
+        self.assertEqual(lockable["requires_key_item"], "the_drifting_key")
+
+        no_key = make_basic_character(960272, "NoDriftKeyTester", current_location="the_unmoored_isle")
+        sink = []
+        await bot._do_lockpick(FakeUpdate(960272, "pick the lock", sink), no_key, dict(lockable), "pick the lock", forced_roll=1)
+        self.assertNotIn("unmoored_isle_drifting_vault_door", bot._UNLOCKED.get(-999, set()))
+
+        has_key = make_basic_character(960273, "HasDriftKeyTester", current_location="the_unmoored_isle")
+        db.add_item(960273, -999, "the_drifting_key", 1)
+        has_key = db.get_character(960273, -999)
+        sink2 = []
+        await bot._do_lockpick(FakeUpdate(960273, "pick the lock", sink2), has_key, dict(lockable), "pick the lock", forced_roll=1)
+        self.assertIn("unmoored_isle_drifting_vault_door", bot._UNLOCKED.get(-999, set()))
+        sink3 = []
+        await bot._do_move(FakeUpdate(960273, "", sink3), "go to the drifting vault")
+        character = db.get_character(960273, -999)
+        self.assertEqual(character["current_location"], "unmoored_isle_the_drifting_vault")
+
+    async def test_unmoored_isle_halls_end_lever_opens_a_shortcut_to_the_hub(self):
+        far_room = cl.get_location(bot.CAMPAIGN, "unmoored_isle_the_drifting_halls_end")
+        lever = next(lk for lk in far_room["lockables"] if lk["kind"] == "lever")
+        self.assertEqual(far_room["locked_connections"]["the_unmoored_isle"], lever["id"])
+        hub = cl.get_location(bot.CAMPAIGN, "the_unmoored_isle")
+        self.assertNotIn("unmoored_isle_the_drifting_halls_end", hub.get("locked_connections", {}))
+
+        user_id = 960274
+        character = make_basic_character(user_id, "HallsEndLeverTester", current_location="unmoored_isle_the_drifting_halls_end")
+        db.add_item(user_id, -999, "shard_of_dim_light", 1)  # the pre-existing entry-gate item -- also checked on the way BACK into the_unmoored_isle
+        sink = []
+        await bot._do_lockpick(FakeUpdate(user_id, "pull the lever", sink), character, dict(lever), "pull the lever")
+        self.assertIn(lever["id"], bot._UNLOCKED.get(-999, set()))
+        sink2 = []
+        await bot._do_move(FakeUpdate(user_id, "", sink2), "go to the unmoored isle")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "the_unmoored_isle")
+
+    async def test_unmoored_isle_hub_entry_fires_the_teaser_reveal(self):
+        user_id = 960275
+        make_basic_character(user_id, "UITeaserHubTester", current_location="unmoored_isle_drifting_threshold")
+        db.update_character(user_id, -999, visited_locations=["unmoored_isle_drifting_threshold"], map_revealed_locations=[])
+        db.add_item(user_id, -999, "shard_of_dim_light", 1)  # the pre-existing entry-gate item, needed for requires_item on the_unmoored_isle itself
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "", sink), "go to the unmoored isle")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "the_unmoored_isle")
+        self.assertEqual(set(character["map_revealed_locations"]), {"unmoored_isle_the_spires_grace_sanctum", "unmoored_isle_the_drifting_vault"})
 
     def test_the_downs_last_watch_uses_the_real_new_systems_not_a_generic_statstick(self):
         boss = bot.CAMPAIGN["monsters"]["the_downs_last_watch"]
@@ -23314,19 +23467,33 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     #    ever checked), so both were trivially bypassable by fast-
     #    traveling instead of walking. Mirrors _do_move's own checks.
     async def test_fast_travel_blocks_on_missing_requires_item(self):
+        """
+        the_unmoored_isle is the only real requires_item usage in the
+        whole game -- the requires_item mechanism itself is still fully
+        covered via real _do_move tests (see
+        test_unmoored_isle_reachable_with_shard_blocked_without).
+        Since the dungeon redesign (Phase 6, 2026-08-30) correctly
+        marked the_unmoored_isle itself dungeon_interior (it's not a
+        checkpoint -- unmoored_isle_the_floating_garden is), fast-travel
+        to it is now blocked by that check first, REGARDLESS of holding
+        the shard -- exactly the "only the dungeon's own safe waypoint
+        gets you back in" behavior the fast-travel restriction was
+        always meant to guarantee, now correctly extended to this
+        dungeon's own entrance too.
+        """
         user_id = 900530
         make_basic_character(user_id, "Gatetest", current_location="the_first_city")
         db.mark_visited(user_id, -999, "the_unmoored_isle")
         db.mark_visited(user_id, -999, "the_first_city")
         sink = []
         await bot._do_fast_travel(FakeUpdate(user_id, "", sink), "fast travel to the unmoored isle")
-        self.assertIn("missing something needed", sink[-1])
+        self.assertIn("waypoint", sink[-1].lower())
         self.assertEqual(db.get_character(user_id, -999)["current_location"], "the_first_city")
 
         db.add_item(user_id, -999, "shard_of_dim_light", 1)
         sink.clear()
         await bot._do_fast_travel(FakeUpdate(user_id, "", sink), "fast travel to the unmoored isle")
-        self.assertEqual(db.get_character(user_id, -999)["current_location"], "the_unmoored_isle")
+        self.assertEqual(db.get_character(user_id, -999)["current_location"], "the_first_city", "holding the shard doesn't bypass the dungeon-interior fast-travel restriction")
 
     async def test_fast_travel_blocks_on_locked_connection(self):
         user_id = 900531
