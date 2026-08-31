@@ -6302,9 +6302,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         core_ids = {"the_first_city", "the_first_city_outer_ward", "the_first_city_spire_reaches",
                     "the_first_city_sunken_archive", "the_first_city_deepest_record"}
         new_ids = {k for k in locs if k.startswith("the_first_city_") and k != "the_first_city_forgotten_depth" and k not in core_ids}
-        self.assertEqual(len(core_ids) + len(new_ids), 20)
+        # 20 from the original Chapter 3 expansion + 3 real new rooms from
+        # the dungeon-redesign Phase 8 pass (2026-08-30): The Old Archive,
+        # The Old Vault, and The Watcher's Secret.
+        self.assertEqual(len(core_ids) + len(new_ids), 23)
 
     def test_chapter_3_new_rooms_are_fully_connected_and_reciprocated(self):
+        """A real, INTENTIONAL exception (dungeon redesign Phase 8, 2026-08-30): see the bonus-vault/Sunken Root Caverns versions of this same test for why a locked_connections target is exempt."""
         locs = bot.CAMPAIGN["locations"]["underground"]
         new_ids = [k for k in locs if k.startswith("the_first_city_") and k not in (
             "the_first_city_outer_ward", "the_first_city_spire_reaches",
@@ -6316,6 +6320,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             for direction, dest_id in loc.get("directions", {}).items():
                 dest = cl.get_location(bot.CAMPAIGN, dest_id)
                 self.assertIsNotNone(dest, f"{loc_id} -> {dest_id} via {direction} is a dead end")
+                if dest_id in loc.get("locked_connections", {}) or loc_id in dest.get("locked_connections", {}):
+                    continue
                 self.assertIn(loc_id, dest.get("connections", []), f"{dest_id} doesn't connect back to {loc_id}")
 
     def test_the_last_glyph_uses_the_real_new_systems_not_a_generic_statstick(self):
@@ -6369,6 +6375,135 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             chest = loc["lockables"][0]
             self.assertEqual(chest["kind"], "chest")
             self.assertTrue(chest["loot"])
+
+    # -- Dungeon redesign Phase 8, FINAL (2026-08-30): The First City.
+    #    Smallest of the 6 main story dungeons, already the most
+    #    puzzle-rich (3 existing riddles) -- real characters had only
+    #    reached 1-4 rooms (Spire Overlook/Sunken Archive at the
+    #    deepest), so the lower two-thirds (including the real
+    #    checkpoint and boss) was completely unexplored live. -----------
+    def test_the_first_city_hub_is_designated_with_a_new_key_branch(self):
+        hub = cl.get_location(bot.CAMPAIGN, "the_first_city")
+        self.assertTrue(hub.get("dungeon_hub"))
+        self.assertEqual(set(hub["dungeon_teaser_locations"]), {"the_first_city_the_original_spire", "the_first_city_the_old_vault"})
+        self.assertIn("the_first_city_the_old_vault", hub["locked_connections"])
+
+    def test_the_first_city_interior_flag_gap_is_fixed(self):
+        for loc_id in (
+            "the_first_city_outer_ward", "the_first_city_spire_reaches",
+            "the_first_city_deepest_record", "the_first_city_sunken_archive",
+        ):
+            loc = cl.get_location(bot.CAMPAIGN, loc_id)
+            self.assertTrue(loc.get("dungeon_interior"), f"{loc_id} still missing dungeon_interior")
+            self.assertFalse(bot._is_fast_travel_eligible(loc), f"{loc_id} still fast-travel eligible")
+
+    def test_the_first_city_all_three_existing_riddles_now_actually_gate_something(self):
+        """All 3 riddles have existed as side quests since the original Chapter 3 expansion, but never blocked movement -- same pattern fixed in every dungeon this pass."""
+        archive = cl.get_location(bot.CAMPAIGN, "the_first_city_sunken_archive")
+        self.assertEqual(archive["story_gates"]["the_first_city_deepest_record"], {"requires_completed_quest": "the_archives_recess"})
+        unwritten = cl.get_location(bot.CAMPAIGN, "the_first_city_the_unwritten_hall")
+        self.assertEqual(unwritten["story_gates"]["the_first_city_the_counted_door"], {"requires_completed_quest": "the_unwritten_halls_answer"})
+        watchers = cl.get_location(bot.CAMPAIGN, "the_first_city_watchers_walk")
+        self.assertEqual(watchers["story_gates"]["the_first_city_the_watchers_secret"], {"requires_completed_quest": "the_watchers_riddle"})
+
+        user_id = 960290
+        make_basic_character(user_id, "ArchiveGateTester", current_location="the_first_city_sunken_archive")
+        character = db.get_character(user_id, -999)
+        self.assertIsNotNone(bot._check_story_gate(character, archive, "the_first_city_deepest_record"))
+        db.complete_quest(user_id, -999, "the_archives_recess")
+        character = db.get_character(user_id, -999)
+        self.assertIsNone(bot._check_story_gate(character, archive, "the_first_city_deepest_record"))
+
+    def test_the_first_city_old_archive_key_quest_registered_against_a_real_unique_guardian(self):
+        self.assertIn("the_old_archives_reckoning", bot._QUEST_MONSTER_INDEX.get("the_archive_bound_husk", []))
+        quest = bot.CAMPAIGN["quests"]["the_old_archives_reckoning"]
+        self.assertEqual(quest["reward_item"], "the_old_archive_key")
+        self.assertEqual(quest["location"], "the_first_city_the_old_archive")
+        for layer, locs in bot.CAMPAIGN["locations"].items():
+            for loc_id, loc in locs.items():
+                if loc_id == "the_first_city_the_old_archive":
+                    continue
+                self.assertNotIn("the_archive_bound_husk", loc.get("monsters") or [], f"{loc_id} also uses the guardian's unique monster_key")
+
+    async def test_a_prior_unrelated_ward_wanderer_kill_never_auto_completes_the_old_archive_quest(self):
+        from unittest.mock import patch, AsyncMock
+        user_id = 960291
+        character = make_basic_character(user_id, "PriorWandererKillTester", current_location="the_first_city_the_old_archive")
+        db.update_character(user_id, -999, defeated_monsters=["ward_wanderer"])
+        character = db.get_character(user_id, -999)
+        quest_id, quest = "the_old_archives_reckoning", bot.CAMPAIGN["quests"]["the_old_archives_reckoning"]
+        sink = []
+        update = FakeUpdate(user_id, "", sink, chat_id=-999)
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._maybe_push_quest_offer(update, character, quest_id, quest)
+        char = db.get_character(user_id, -999)
+        self.assertNotIn("the_old_archives_reckoning", char.get("completed_quests") or [])
+
+    async def test_the_first_city_old_vault_door_blocks_without_key_and_opens_with_it(self):
+        location = cl.get_location(bot.CAMPAIGN, "the_first_city")
+        lockable = next(lk for lk in location["lockables"] if lk["id"] == "the_first_city_old_vault_door")
+        self.assertEqual(lockable["requires_key_item"], "the_old_archive_key")
+
+        no_key = make_basic_character(960292, "NoOldArchiveKeyTester", current_location="the_first_city")
+        sink = []
+        await bot._do_lockpick(FakeUpdate(960292, "pick the lock", sink), no_key, dict(lockable), "pick the lock", forced_roll=1)
+        self.assertNotIn("the_first_city_old_vault_door", bot._UNLOCKED.get(-999, set()))
+
+        has_key = make_basic_character(960293, "HasOldArchiveKeyTester", current_location="the_first_city")
+        db.add_item(960293, -999, "the_old_archive_key", 1)
+        has_key = db.get_character(960293, -999)
+        sink2 = []
+        await bot._do_lockpick(FakeUpdate(960293, "pick the lock", sink2), has_key, dict(lockable), "pick the lock", forced_roll=1)
+        self.assertIn("the_first_city_old_vault_door", bot._UNLOCKED.get(-999, set()))
+        sink3 = []
+        await bot._do_move(FakeUpdate(960293, "", sink3), "go to the old vault")
+        character = db.get_character(960293, -999)
+        self.assertEqual(character["current_location"], "the_first_city_the_old_vault")
+
+    async def test_the_first_city_original_spire_lever_opens_a_shortcut_to_the_hub(self):
+        far_room = cl.get_location(bot.CAMPAIGN, "the_first_city_the_original_spire")
+        lever = next(lk for lk in far_room["lockables"] if lk["kind"] == "lever")
+        self.assertEqual(far_room["locked_connections"]["the_first_city"], lever["id"])
+        hub = cl.get_location(bot.CAMPAIGN, "the_first_city")
+        self.assertNotIn("the_first_city_the_original_spire", hub.get("locked_connections", {}))
+
+        user_id = 960294
+        character = make_basic_character(user_id, "OriginalSpireLeverTester", current_location="the_first_city_the_original_spire")
+        db.update_character(user_id, -999, level=10)  # the_first_city itself carries a real min_level: 7 gate
+        sink = []
+        await bot._do_lockpick(FakeUpdate(user_id, "pull the lever", sink), character, dict(lever), "pull the lever")
+        self.assertIn(lever["id"], bot._UNLOCKED.get(-999, set()))
+        sink2 = []
+        await bot._do_move(FakeUpdate(user_id, "", sink2), "go to the first city")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "the_first_city")
+
+    async def test_the_first_city_hub_entry_fires_the_teaser_reveal(self):
+        """
+        the_hush_below -> the_first_city carries a real, pre-existing
+        double gate (requires_defeated_monster: the_unspoken AND
+        requires_companion_trust: min_affinity 40) unrelated to this
+        redesign -- satisfied here the same way
+        test_requires_companion_trust_gate_blocks_and_unblocks does, so
+        this test exercises the real _do_move arrival path rather than
+        placing the character directly.
+        """
+        chat_id = -999090
+        user_id = 960295
+        make_basic_character(user_id, "TFCTeaserHubTester", chat_id=chat_id, current_location="the_hush_below")
+        db.update_character(user_id, chat_id, level=10, visited_locations=["the_hush_below"], map_revealed_locations=[],
+                             completed_quests=["the_hush_stage3_the_unspoken"])
+        party_id = db.create_party(user_id, chat_id)
+        companion_id = -960295
+        make_basic_character(companion_id, "Wren Hollowbrook", chat_id=chat_id, current_location="the_hush_below", is_ai=True)
+        db.update_character(companion_id, chat_id, party_id=party_id)
+        db.adjust_affinity(user_id, chat_id, "wren_hollowbrook", 40, event="test")
+
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), "go to the first city")
+        character = db.get_character(user_id, chat_id)
+        self.assertEqual(character["current_location"], "the_first_city")
+        self.assertEqual(set(character["map_revealed_locations"]), {"the_first_city_the_original_spire", "the_first_city_the_old_vault"})
 
     # -- Chapter 4 expansion, Phase 2 (2026-08-30): The Unmoored Isle
     #    grows from 1 real arc_4 room to 24 rooms/10 quests. The existing

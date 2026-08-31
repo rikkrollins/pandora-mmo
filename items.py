@@ -814,6 +814,14 @@ ITEMS = {
         "price": 0, "weight": 0.1,
         "description": "Cold to the touch no matter the weather, like it's still standing its own watch.",
     },
+    # Dungeon redesign Phase 8, FINAL (2026-08-30) -- The First City's
+    # own key item, opening the sealed old archway from the city's
+    # entrance into The Old Vault.
+    "the_old_archive_key": {
+        "name": "The Old Archive Key", "type": "quest_item", "rarity": "unique",
+        "price": 0, "weight": 0.1,
+        "description": "Etched with the same unfamiliar glyphs as the city's own entrance -- whoever cut it wasn't working from any script anyone above ground has ever read.",
+    },
     "brass_key_no_lock": {
         "name": "Brass Key That Fits No Lock", "type": "quest_item", "rarity": "unique",
         "price": 0, "weight": 0.1,

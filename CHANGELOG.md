@@ -2,6 +2,44 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.430] — dungeon redesign Phase 8 (FINAL): The First City gets real interconnectivity
+
+Phase 8 closes out the 8-dungeon redesign pass (see v1.27.420-429).
+Smallest of the 6 main story dungeons (20 rooms) and already the most
+puzzle-rich (3 existing riddle quests) — real characters had only ever
+reached 1-4 rooms (Spire Overlook/Sunken Archive at the deepest), so
+the lower two-thirds of the dungeon — including the real checkpoint
+and the real boss — was completely unexplored live:
+
+- **The entrance becomes the designated hub**, with a new 4th branch
+  (alongside its existing cross-zone connection and its own real
+  `descends_to` path into the Sunken Archive chain).
+- **All 3 existing riddles finally gate something**: the Archive
+  Recess's, the Watching Glyph's, and the Unwritten Hall's riddles have
+  sat unused as side quests since the original Chapter 3 expansion —
+  now real `story_gates` blocking their own corridors (one of them,
+  The Watcher's Secret, is a genuinely new small room added specifically
+  as a payoff for a riddle that previously guarded a dead end).
+- **A new key-and-vault side branch** off the hub: The Old Archive
+  (open, a real unique guardian drops The Old Archive Key) unlocks a
+  sealed old archway into The Old Vault (bonus treasure).
+- **A new shortcut lever** at the true final room (The Original Spire)
+  opens a direct path back to the hub.
+- **Incidental fix**: 4 rooms right around the entrance never got the
+  `dungeon_interior` flag in the original fast-travel pass, matching
+  the same gap class fixed in every phase of this pass.
+
+This closes the 8-dungeon lock-and-key redesign Coffee asked for after
+seeing the Wrathflame Vault's original straight-corridor layout. Every
+dungeon now has a real hub, at least one genuine key-item gate or
+newly-wired puzzle gate, and a shortcut lever — the exact "locked
+doors, map interconnectivity, and puzzles connecting rooms" ask from
+the original complaint.
+
+Tested: same coverage shape as every prior phase. Full related
+regression slice re-run clean (117/117) alongside the 9 new First City
+tests.
+
 ## [1.27.429] — dungeon redesign Phase 7: Stonearch Bridge/Gorge gets real interconnectivity
 
 Phase 7 of the 8-dungeon redesign (see v1.27.420-428). The entrance was

@@ -2281,7 +2281,8 @@
         "connections": [
           "the_hush_below",
           "the_first_city_outer_ward",
-          "the_first_city_spire_reaches"
+          "the_first_city_spire_reaches",
+          "the_first_city_the_old_archive"
         ],
         "ascends_to": "the_unmoored_isle",
         "descends_to": "the_first_city_sunken_archive",
@@ -2290,7 +2291,8 @@
         "directions": {
           "west": "the_hush_below",
           "north": "the_first_city_outer_ward",
-          "east": "the_first_city_spire_reaches"
+          "east": "the_first_city_spire_reaches",
+          "south": "the_first_city_the_old_archive"
         },
         "monsters": [
           "the_waking_ember"
@@ -2328,7 +2330,23 @@
           "x": 2,
           "y": -1
         },
-        "dungeon_id": "the_first_city"
+        "dungeon_id": "the_first_city",
+        "dungeon_hub": true,
+        "dungeon_teaser_locations": [
+          "the_first_city_the_original_spire",
+          "the_first_city_the_old_vault"
+        ],
+        "locked_connections": {
+          "the_first_city_the_old_vault": "the_first_city_old_vault_door"
+        },
+        "lockables": [
+          {
+            "id": "the_first_city_old_vault_door",
+            "kind": "door",
+            "name": "a sealed old archway",
+            "requires_key_item": "the_old_archive_key"
+          }
+        ]
       },
       "the_first_city_outer_ward": {
         "name": "The Outer Ward",
@@ -2355,7 +2373,8 @@
           "x": 2,
           "y": 0
         },
-        "dungeon_id": "the_first_city"
+        "dungeon_id": "the_first_city",
+        "dungeon_interior": true
       },
       "the_first_city_spire_reaches": {
         "name": "The Spire Reaches",
@@ -2389,7 +2408,8 @@
           "x": 3,
           "y": -1
         },
-        "dungeon_id": "the_first_city"
+        "dungeon_id": "the_first_city",
+        "dungeon_interior": true
       },
       "the_first_city_sunken_archive": {
         "name": "The Sunken Archive",
@@ -2429,7 +2449,13 @@
           "x": 1,
           "y": -11
         },
-        "dungeon_id": "the_first_city"
+        "dungeon_id": "the_first_city",
+        "dungeon_interior": true,
+        "story_gates": {
+          "the_first_city_deepest_record": {
+            "requires_completed_quest": "the_archives_recess"
+          }
+        }
       },
       "the_first_city_deepest_record": {
         "name": "The Deepest Record",
@@ -2467,7 +2493,8 @@
           "x": 1,
           "y": -12
         },
-        "dungeon_id": "the_first_city"
+        "dungeon_id": "the_first_city",
+        "dungeon_interior": true
       },
       "the_first_city_forgotten_depth": {
         "name": "The Forgotten Depth",
@@ -4169,10 +4196,12 @@
         "layer": "underground",
         "description": "A single carved figure lines this whole passage, repeated exactly, watching every direction at once.",
         "connections": [
-          "the_first_city_silent_market"
+          "the_first_city_silent_market",
+          "the_first_city_the_watchers_secret"
         ],
         "directions": {
-          "south": "the_first_city_silent_market"
+          "south": "the_first_city_silent_market",
+          "north": "the_first_city_the_watchers_secret"
         },
         "npcs": [
           "the_watching_glyph"
@@ -4182,7 +4211,12 @@
           "y": 4
         },
         "dungeon_interior": true,
-        "dungeon_id": "the_first_city"
+        "dungeon_id": "the_first_city",
+        "story_gates": {
+          "the_first_city_the_watchers_secret": {
+            "requires_completed_quest": "the_watchers_riddle"
+          }
+        }
       },
       "the_first_city_spire_stair": {
         "name": "The Spire Stair",
@@ -4305,7 +4339,12 @@
           "y": -14
         },
         "dungeon_interior": true,
-        "dungeon_id": "the_first_city"
+        "dungeon_id": "the_first_city",
+        "story_gates": {
+          "the_first_city_the_counted_door": {
+            "requires_completed_quest": "the_unwritten_halls_answer"
+          }
+        }
       },
       "the_first_city_the_counted_door": {
         "name": "The Counted Door",
@@ -4440,7 +4479,17 @@
           "y": -18
         },
         "dungeon_interior": true,
-        "dungeon_id": "the_first_city"
+        "dungeon_id": "the_first_city",
+        "lockables": [
+          {
+            "id": "the_first_city_original_spire_shortcut",
+            "kind": "lever",
+            "name": "a glyph-marked pulley lever"
+          }
+        ],
+        "locked_connections": {
+          "the_first_city": "the_first_city_original_spire_shortcut"
+        }
       },
       "goblin_warrens_deeper_rubble": {
         "name": "The Deeper Rubble",
@@ -6761,6 +6810,83 @@
         },
         "dungeon_interior": true,
         "dungeon_id": "greymoor_downs"
+      },
+      "the_first_city_the_watchers_secret": {
+        "name": "The Watcher's Secret",
+        "layer": "underground",
+        "description": "A real hollow behind the glyph wall, kept just clear enough that whatever answered the Watching Glyph clearly still comes back to it.",
+        "connections": [
+          "the_first_city_watchers_walk"
+        ],
+        "directions": {
+          "south": "the_first_city_watchers_walk"
+        },
+        "interactables": {
+          "watchers_secret_tablet": {
+            "name": "a tablet carved with the same unfamiliar glyphs as the spire above",
+            "description": "The same counting-script from the city's own entrance, worn smooth here from something tracing it, over and over, for longer than anyone's been alive to see it."
+          }
+        },
+        "grid_position": {
+          "x": 2,
+          "y": 5
+        },
+        "dungeon_interior": true,
+        "dungeon_id": "the_first_city"
+      },
+      "the_first_city_the_old_archive": {
+        "name": "The Old Archive",
+        "layer": "underground",
+        "description": "A real, sealed record-room off the city's own entrance, holding a single deliberately-kept key -- and something has made a den of guarding it.",
+        "connections": [
+          "the_first_city"
+        ],
+        "directions": {
+          "north": "the_first_city"
+        },
+        "monsters": [
+          "the_archive_bound_husk"
+        ],
+        "grid_position": {
+          "x": 1,
+          "y": -1
+        },
+        "dungeon_interior": true,
+        "dungeon_id": "the_first_city"
+      },
+      "the_first_city_the_old_vault": {
+        "name": "The Old Vault",
+        "layer": "underground",
+        "description": "Real, deliberate storage built into the city's own foundations -- whoever sealed it meant for it to stay that way.",
+        "connections": [
+          "the_first_city"
+        ],
+        "directions": {
+          "south": "the_first_city"
+        },
+        "lockables": [
+          {
+            "id": "the_first_city_old_vault_chest",
+            "kind": "chest",
+            "name": "a real, glyph-marked strongbox",
+            "loot": {
+              "greater_healing_potion": 1
+            },
+            "gold": 130
+          }
+        ],
+        "interactables": {
+          "old_vault_marker": {
+            "name": "a marker carved into the vault's own stone",
+            "description": "Whoever sealed this counted on nobody else ever having the key -- and, judging by the dust, nobody ever did until now."
+          }
+        },
+        "grid_position": {
+          "x": 1,
+          "y": 0
+        },
+        "dungeon_interior": true,
+        "dungeon_id": "the_first_city"
       }
     },
     "sky": {
@@ -10014,6 +10140,19 @@
       "reward_gold": 380,
       "reward_item": "the_old_watch_key",
       "clue": "Whatever's guarding the old watch post won't move until it's put down for good."
+    },
+    "the_old_archives_reckoning": {
+      "title": "The Old Archive Key",
+      "description": "Whatever's been guarding this sealed record-room has a real, deliberately cut key among what it's hoarded -- and it isn't giving it up quietly.",
+      "location": "the_first_city_the_old_archive",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_archive_bound_husk"
+      },
+      "reward_xp": 300,
+      "reward_gold": 90,
+      "reward_item": "the_old_archive_key",
+      "clue": "Whatever's guarding the old archive won't move until it's put down for good."
     }
   },
   "story_arcs": {
@@ -13191,6 +13330,19 @@
       "xp_reward": 3000,
       "damage_dice": "1d8",
       "damage_bonus": 250,
+      "damage_type": "physical"
+    },
+    "the_archive_bound_husk": {
+      "name": "The Archive-Bound Husk",
+      "level": 12,
+      "dexterity": 13,
+      "strength": 14,
+      "armor_class": 15,
+      "hp_max": 260,
+      "proficiency_bonus": 3,
+      "xp_reward": 240,
+      "damage_dice": "1d8",
+      "damage_bonus": 26,
       "damage_type": "physical"
     }
   },
