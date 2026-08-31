@@ -789,6 +789,15 @@ ITEMS = {
         "price": 0, "weight": 0.1,
         "description": "Cut cleaner than anything else pulled out of this vein -- whoever made it wasn't a goblin.",
     },
+    # Dungeon redesign Phase 5 (2026-08-30) -- Greymoor Downs' own key
+    # item, opening the warded cellar door from The Cellar Hollow into
+    # The Warden's Vault. Light-touch phase -- the Kess climax at the
+    # dungeon's own entrance is completely untouched.
+    "the_warden_key": {
+        "name": "The Warden Key", "type": "quest_item", "rarity": "unique",
+        "price": 0, "weight": 0.1,
+        "description": "Heavier than it looks, like it was made to be noticed by whoever finally found it.",
+    },
     "brass_key_no_lock": {
         "name": "Brass Key That Fits No Lock", "type": "quest_item", "rarity": "unique",
         "price": 0, "weight": 0.1,

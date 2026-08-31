@@ -476,7 +476,8 @@
           "x": 2,
           "y": 1
         },
-        "dungeon_id": "greymoor_downs"
+        "dungeon_id": "greymoor_downs",
+        "dungeon_interior": true
       },
       "greymoor_downs_lonely_cairn": {
         "name": "The Lonely Cairn",
@@ -502,7 +503,8 @@
           "x": 2,
           "y": 2
         },
-        "dungeon_id": "greymoor_downs"
+        "dungeon_id": "greymoor_downs",
+        "dungeon_interior": true
       },
       "greymoor_downs_broken_watchtower": {
         "name": "The Broken Watchtower",
@@ -545,7 +547,8 @@
           "x": 3,
           "y": 1
         },
-        "dungeon_id": "greymoor_downs"
+        "dungeon_id": "greymoor_downs",
+        "dungeon_interior": true
       },
       "stonearch_bridge": {
         "name": "Stonearch Bridge",
@@ -1005,7 +1008,8 @@
           "x": 4,
           "y": 1
         },
-        "dungeon_id": "greymoor_downs"
+        "dungeon_id": "greymoor_downs",
+        "dungeon_interior": true
       },
       "greymoor_downs_tower_cellar": {
         "name": "The Tower Cellar",
@@ -1032,7 +1036,8 @@
           "x": 3,
           "y": 0
         },
-        "dungeon_id": "greymoor_downs"
+        "dungeon_id": "greymoor_downs",
+        "dungeon_interior": true
       },
       "stonearch_bridge_the_lower_battlement": {
         "name": "The Lower Battlement",
@@ -1408,7 +1413,11 @@
           "y": 0
         },
         "dungeon_interior": true,
-        "dungeon_id": "greymoor_downs"
+        "dungeon_id": "greymoor_downs",
+        "dungeon_hub": true,
+        "dungeon_teaser_locations": [
+          "greymoor_downs_the_final_watch"
+        ]
       },
       "greymoor_downs_the_sheltered_camp": {
         "name": "The Sheltered Camp",
@@ -1486,7 +1495,12 @@
           "y": 0
         },
         "dungeon_interior": true,
-        "dungeon_id": "greymoor_downs"
+        "dungeon_id": "greymoor_downs",
+        "story_gates": {
+          "greymoor_downs_the_markers_riddle": {
+            "requires_completed_quest": "the_downs_own_marker_riddle"
+          }
+        }
       },
       "greymoor_downs_the_markers_riddle": {
         "name": "The Marker's Riddle",
@@ -2527,7 +2541,8 @@
           "x": -2,
           "y": -6
         },
-        "dungeon_id": "greymoor_downs"
+        "dungeon_id": "greymoor_downs",
+        "dungeon_interior": true
       },
       "stonearch_bridge_gorge_depths": {
         "name": "The Gorge Depths",
@@ -3112,7 +3127,8 @@
           "x": -2,
           "y": -5
         },
-        "dungeon_id": "greymoor_downs"
+        "dungeon_id": "greymoor_downs",
+        "dungeon_interior": true
       },
       "greymoor_downs_below_the_cairn": {
         "name": "Below the Cairn",
@@ -5917,13 +5933,15 @@
           "greymoor_downs_the_sunken_stair",
           "greymoor_downs_the_sealed_larder",
           "greymoor_downs_the_deeper_dark",
-          "greymoor_downs_the_hollows_edge"
+          "greymoor_downs_the_hollows_edge",
+          "greymoor_downs_the_wardens_hollow"
         ],
         "directions": {
           "up": "greymoor_downs_the_sunken_stair",
           "east": "greymoor_downs_the_sealed_larder",
           "down": "greymoor_downs_the_deeper_dark",
-          "west": "greymoor_downs_the_hollows_edge"
+          "west": "greymoor_downs_the_hollows_edge",
+          "south": "greymoor_downs_the_wardens_hollow"
         },
         "monsters": [
           "sunken_cellar_stalker"
@@ -5933,7 +5951,23 @@
           "y": -9
         },
         "dungeon_interior": true,
-        "dungeon_id": "greymoor_downs"
+        "dungeon_id": "greymoor_downs",
+        "dungeon_hub": true,
+        "dungeon_teaser_locations": [
+          "greymoor_downs_the_wardens_vault",
+          "greymoor_downs_the_downs_last_watch"
+        ],
+        "locked_connections": {
+          "greymoor_downs_the_wardens_vault": "greymoor_downs_wardens_vault_door"
+        },
+        "lockables": [
+          {
+            "id": "greymoor_downs_wardens_vault_door",
+            "kind": "door",
+            "name": "a warded cellar door",
+            "requires_key_item": "the_warden_key"
+          }
+        ]
       },
       "greymoor_downs_the_sealed_larder": {
         "name": "The Sealed Larder",
@@ -6162,7 +6196,17 @@
           "y": -17
         },
         "dungeon_interior": true,
-        "dungeon_id": "greymoor_downs"
+        "dungeon_id": "greymoor_downs",
+        "lockables": [
+          {
+            "id": "greymoor_downs_last_watch_shortcut",
+            "kind": "lever",
+            "name": "a rusted watch-bell lever"
+          }
+        ],
+        "locked_connections": {
+          "greymoor_downs_the_cellar_hollow": "greymoor_downs_last_watch_shortcut"
+        }
       },
       "greymoor_downs_the_stairs_landing": {
         "name": "The Stair's Landing",
@@ -6564,6 +6608,60 @@
         },
         "dungeon_interior": true,
         "dungeon_id": "goblin_warrens"
+      },
+      "greymoor_downs_the_wardens_hollow": {
+        "name": "The Warden's Hollow",
+        "layer": "underground",
+        "description": "A real, deliberately dug side-chamber, kept just clear enough that something has clearly still been using it.",
+        "connections": [
+          "greymoor_downs_the_cellar_hollow"
+        ],
+        "directions": {
+          "north": "greymoor_downs_the_cellar_hollow"
+        },
+        "monsters": [
+          "the_warden_bound_stalker"
+        ],
+        "grid_position": {
+          "x": 3,
+          "y": -8
+        },
+        "dungeon_interior": true,
+        "dungeon_id": "greymoor_downs"
+      },
+      "greymoor_downs_the_wardens_vault": {
+        "name": "The Warden's Vault",
+        "layer": "underground",
+        "description": "Real, deliberate storage -- whatever the downs' own watch kept sealed away, they meant to keep it that way.",
+        "connections": [
+          "greymoor_downs_the_cellar_hollow"
+        ],
+        "directions": {
+          "north": "greymoor_downs_the_cellar_hollow"
+        },
+        "lockables": [
+          {
+            "id": "greymoor_downs_wardens_vault_chest",
+            "kind": "chest",
+            "name": "a real warded strongbox",
+            "loot": {
+              "greater_healing_potion": 2
+            },
+            "gold": 380
+          }
+        ],
+        "interactables": {
+          "wardens_vault_marker": {
+            "name": "a marker scratched into the vault wall",
+            "description": "Whoever sealed this counted on nobody else ever having the key -- and, judging by the dust, nobody ever did until now."
+          }
+        },
+        "grid_position": {
+          "x": 4,
+          "y": -7
+        },
+        "dungeon_interior": true,
+        "dungeon_id": "greymoor_downs"
       }
     },
     "sky": {
@@ -9685,6 +9783,19 @@
       "reward_gold": 260,
       "reward_item": "the_vein_key",
       "clue": "Whatever's guarding the vein won't move until it's put down for good."
+    },
+    "the_wardens_hollows_reckoning": {
+      "title": "The Warden's Key",
+      "description": "Whatever's been guarding this hollow has a real key among what it's hoarded -- and it isn't giving it up quietly.",
+      "location": "greymoor_downs_the_wardens_hollow",
+      "trigger": {
+        "type": "defeat_monster",
+        "monster": "the_warden_bound_stalker"
+      },
+      "reward_xp": 2600,
+      "reward_gold": 400,
+      "reward_item": "the_warden_key",
+      "clue": "Whatever's guarding the hollow won't move until it's put down for good."
     }
   },
   "story_arcs": {
@@ -12824,6 +12935,19 @@
       "damage_dice": "1d8",
       "damage_bonus": 120,
       "damage_type": "poison"
+    },
+    "the_warden_bound_stalker": {
+      "name": "The Warden-Bound Stalker",
+      "level": 86,
+      "dexterity": 17,
+      "strength": 18,
+      "armor_class": 22,
+      "hp_max": 6800,
+      "proficiency_bonus": 16,
+      "xp_reward": 4300,
+      "damage_dice": "1d8",
+      "damage_bonus": 330,
+      "damage_type": "necrotic"
     }
   },
   "factions": {

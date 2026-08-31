@@ -6775,9 +6775,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             k for k in locs
             if k.startswith("greymoor_downs_") and k not in core_ids and k not in endgame_chain
         }
-        self.assertEqual(len(core_ids) + len(new_ids), 40)
+        # 40 from the original Chapter 8 expansion + 2 real new rooms from
+        # the dungeon-redesign Phase 5 pass (2026-08-30, light touch): The
+        # Warden's Hollow and The Warden's Vault.
+        self.assertEqual(len(core_ids) + len(new_ids), 42)
 
     def test_greymoor_downs_new_rooms_are_fully_connected_and_reciprocated(self):
+        """A real, INTENTIONAL exception (dungeon redesign Phase 5, 2026-08-30): see the bonus-vault/Sunken Root Caverns versions of this same test for why a locked_connections target is exempt."""
         locs = {}
         for layer, d in bot.CAMPAIGN["locations"].items():
             locs.update(d)
@@ -6797,6 +6801,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             for direction, dest_id in loc.get("directions", {}).items():
                 dest = cl.get_location(bot.CAMPAIGN, dest_id)
                 self.assertIsNotNone(dest, f"{loc_id} -> {dest_id} via {direction} is a dead end")
+                if dest_id in loc.get("locked_connections", {}) or loc_id in dest.get("locked_connections", {}):
+                    continue
                 self.assertIn(loc_id, dest.get("connections", []), f"{dest_id} doesn't connect back to {loc_id}")
 
     def test_kess_climax_and_cairnbound_completely_untouched(self):
@@ -6806,6 +6812,115 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         cairn = cl.get_location(bot.CAMPAIGN, "greymoor_downs_lonely_cairn")
         self.assertEqual(cairn["monsters"], ["the_cairnbound"])
         self.assertEqual(bot.CAMPAIGN["monsters"]["the_cairnbound"]["hp_max"], 100000)
+
+    # -- Dungeon redesign Phase 5 (2026-08-30), LIGHT TOUCH: Greymoor
+    #    Downs already had real branching (two genuine 4-way forks, two
+    #    companion-trust gates, four lockpick chests) -- the Kess climax
+    #    at the bare entrance is completely untouched (see the test
+    #    above); this phase only designates the two existing forks as
+    #    real hubs, wires the existing unused riddle into a real gate,
+    #    and adds one small key-and-vault branch plus one lever. --------
+    def test_greymoor_downs_both_existing_forks_are_now_real_hubs(self):
+        windswept_hollow = cl.get_location(bot.CAMPAIGN, "greymoor_downs_the_windswept_hollow")
+        self.assertTrue(windswept_hollow.get("dungeon_hub"))
+        cellar_hollow = cl.get_location(bot.CAMPAIGN, "greymoor_downs_the_cellar_hollow")
+        self.assertTrue(cellar_hollow.get("dungeon_hub"))
+        self.assertEqual(set(cellar_hollow["dungeon_teaser_locations"]), {"greymoor_downs_the_wardens_vault", "greymoor_downs_the_downs_last_watch"})
+        self.assertIn("greymoor_downs_the_wardens_vault", cellar_hollow["locked_connections"])
+
+    def test_greymoor_downs_interior_flag_gap_is_fixed(self):
+        for loc_id in (
+            "greymoor_downs_windswept_ridge", "greymoor_downs_broken_watchtower",
+            "greymoor_downs_tower_vantage_below", "greymoor_downs_tower_cellar",
+            "greymoor_downs_lonely_cairn", "greymoor_downs_sunken_barrow", "greymoor_downs_barrow_depths",
+        ):
+            loc = cl.get_location(bot.CAMPAIGN, loc_id)
+            self.assertTrue(loc.get("dungeon_interior"), f"{loc_id} still missing dungeon_interior")
+            self.assertFalse(bot._is_fast_travel_eligible(loc), f"{loc_id} still fast-travel eligible")
+
+    def test_greymoor_downs_existing_riddle_now_actually_gates_the_markers_riddle_room(self):
+        location = cl.get_location(bot.CAMPAIGN, "greymoor_downs_the_far_marker")
+        self.assertEqual(location["story_gates"]["greymoor_downs_the_markers_riddle"], {"requires_completed_quest": "the_downs_own_marker_riddle"})
+        user_id = 960260
+        make_basic_character(user_id, "MarkerGateTester", current_location="greymoor_downs_the_far_marker")
+        character = db.get_character(user_id, -999)
+        self.assertIsNotNone(bot._check_story_gate(character, location, "greymoor_downs_the_markers_riddle"))
+        db.complete_quest(user_id, -999, "the_downs_own_marker_riddle")
+        character = db.get_character(user_id, -999)
+        self.assertIsNone(bot._check_story_gate(character, location, "greymoor_downs_the_markers_riddle"))
+
+    def test_greymoor_downs_warden_key_quest_registered_against_a_real_unique_guardian(self):
+        self.assertIn("the_wardens_hollows_reckoning", bot._QUEST_MONSTER_INDEX.get("the_warden_bound_stalker", []))
+        quest = bot.CAMPAIGN["quests"]["the_wardens_hollows_reckoning"]
+        self.assertEqual(quest["reward_item"], "the_warden_key")
+        self.assertEqual(quest["location"], "greymoor_downs_the_wardens_hollow")
+        for layer, locs in bot.CAMPAIGN["locations"].items():
+            for loc_id, loc in locs.items():
+                if loc_id == "greymoor_downs_the_wardens_hollow":
+                    continue
+                self.assertNotIn("the_warden_bound_stalker", loc.get("monsters") or [], f"{loc_id} also uses the guardian's unique monster_key")
+
+    async def test_a_prior_unrelated_sunken_cellar_stalker_kill_never_auto_completes_the_warden_quest(self):
+        from unittest.mock import patch, AsyncMock
+        user_id = 960261
+        character = make_basic_character(user_id, "PriorStalkerKillTester", current_location="greymoor_downs_the_wardens_hollow")
+        db.update_character(user_id, -999, defeated_monsters=["sunken_cellar_stalker"])
+        character = db.get_character(user_id, -999)
+        quest_id, quest = "the_wardens_hollows_reckoning", bot.CAMPAIGN["quests"]["the_wardens_hollows_reckoning"]
+        sink = []
+        update = FakeUpdate(user_id, "", sink, chat_id=-999)
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._maybe_push_quest_offer(update, character, quest_id, quest)
+        char = db.get_character(user_id, -999)
+        self.assertNotIn("the_wardens_hollows_reckoning", char.get("completed_quests") or [])
+
+    async def test_greymoor_downs_wardens_vault_door_blocks_without_key_and_opens_with_it(self):
+        location = cl.get_location(bot.CAMPAIGN, "greymoor_downs_the_cellar_hollow")
+        lockable = next(lk for lk in location["lockables"] if lk["id"] == "greymoor_downs_wardens_vault_door")
+        self.assertEqual(lockable["requires_key_item"], "the_warden_key")
+
+        no_key = make_basic_character(960262, "NoWardenKeyTester", current_location="greymoor_downs_the_cellar_hollow")
+        sink = []
+        await bot._do_lockpick(FakeUpdate(960262, "pick the lock", sink), no_key, dict(lockable), "pick the lock", forced_roll=1)
+        self.assertNotIn("greymoor_downs_wardens_vault_door", bot._UNLOCKED.get(-999, set()))
+
+        has_key = make_basic_character(960263, "HasWardenKeyTester", current_location="greymoor_downs_the_cellar_hollow")
+        db.add_item(960263, -999, "the_warden_key", 1)
+        has_key = db.get_character(960263, -999)
+        sink2 = []
+        await bot._do_lockpick(FakeUpdate(960263, "pick the lock", sink2), has_key, dict(lockable), "pick the lock", forced_roll=1)
+        self.assertIn("greymoor_downs_wardens_vault_door", bot._UNLOCKED.get(-999, set()))
+        sink3 = []
+        await bot._do_move(FakeUpdate(960263, "", sink3), "go to the wardens vault")
+        character = db.get_character(960263, -999)
+        self.assertEqual(character["current_location"], "greymoor_downs_the_wardens_vault")
+
+    async def test_greymoor_downs_last_watch_lever_opens_a_shortcut_to_the_cellar_hollow(self):
+        far_room = cl.get_location(bot.CAMPAIGN, "greymoor_downs_the_downs_last_watch")
+        lever = next(lk for lk in far_room["lockables"] if lk["kind"] == "lever")
+        self.assertEqual(far_room["locked_connections"]["greymoor_downs_the_cellar_hollow"], lever["id"])
+        hub = cl.get_location(bot.CAMPAIGN, "greymoor_downs_the_cellar_hollow")
+        self.assertNotIn("greymoor_downs_the_downs_last_watch", hub.get("locked_connections", {}))
+
+        user_id = 960264
+        character = make_basic_character(user_id, "LastWatchLeverTester", current_location="greymoor_downs_the_downs_last_watch")
+        sink = []
+        await bot._do_lockpick(FakeUpdate(user_id, "pull the lever", sink), character, dict(lever), "pull the lever")
+        self.assertIn(lever["id"], bot._UNLOCKED.get(-999, set()))
+        sink2 = []
+        await bot._do_move(FakeUpdate(user_id, "", sink2), "go to the cellar hollow")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "greymoor_downs_the_cellar_hollow")
+
+    async def test_greymoor_downs_cellar_hollow_hub_entry_fires_the_teaser_reveal(self):
+        user_id = 960265
+        make_basic_character(user_id, "GDCellarTeaserTester", current_location="greymoor_downs_the_sunken_stair")
+        db.update_character(user_id, -999, visited_locations=["greymoor_downs_the_sunken_stair"], map_revealed_locations=[])
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "", sink), "go to the cellar hollow")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "greymoor_downs_the_cellar_hollow")
+        self.assertEqual(set(character["map_revealed_locations"]), {"greymoor_downs_the_wardens_vault", "greymoor_downs_the_downs_last_watch"})
 
     def test_the_downs_last_watch_uses_the_real_new_systems_not_a_generic_statstick(self):
         boss = bot.CAMPAIGN["monsters"]["the_downs_last_watch"]

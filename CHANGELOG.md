@@ -2,6 +2,43 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.427] — dungeon redesign Phase 5: Greymoor Downs, light touch
+
+Phase 5 of the 8-dungeon redesign (see v1.27.420-426) — LIGHT TOUCH
+only, as the plan required: Kess's climax (`kess_the_bandit`/
+`kess_the_unbound`, both scripted entirely at the dungeon's own bare
+entrance room) is completely untouched, confirmed by a dedicated
+regression test. Greymoor Downs already had real branching (two
+genuine 4-way forks, two companion-trust gates, four existing lockpick
+chests) — real characters have only ever reached 1-5 rooms, all right
+at the entrance, so everything past Broken Watchtower was free to work
+with:
+
+- **Both of the dungeon's existing 4-way forks are now real hubs**: The
+  Windswept Hollow (surface branch) and The Cellar Hollow (underground
+  branch), each with their own teaser reveal.
+- **The existing riddle finally gates something**: The Downs' Own
+  Marker's riddle has existed as a side quest since the original
+  Chapter 8 expansion, but nothing ever blocked movement into its own
+  room before it was solved — now a real `story_gates` block.
+- **One new key-and-vault side branch** off The Cellar Hollow: The
+  Warden's Hollow (open, a real unique guardian drops The Warden Key)
+  unlocks a warded cellar door into The Warden's Vault (bonus
+  treasure).
+- **One new shortcut lever** at The Downs' Last Watch (a real,
+  ordinary arc_8 boss fight — nothing to do with Kess) opens a direct
+  path back to The Cellar Hollow.
+- **Incidental fix**: 7 rooms right around the entrance never got the
+  `dungeon_interior` flag in the original fast-travel pass, matching
+  the same gap class fixed in Phases 3-4.
+
+Unmoored Isle (Phase 6) is next.
+
+Tested: same coverage shape as Phases 1-4, plus the pre-existing
+Kess-climax/Cairnbound-Remnant guard re-verified untouched. Full
+related regression slice re-run clean (80/80) alongside the 14 new
+Greymoor Downs tests.
+
 ## [1.27.426] — dungeon redesign Phase 4: Goblin Warrens gets real interconnectivity
 
 Phase 4 of the 8-dungeon redesign (see v1.27.420-424). Real characters
