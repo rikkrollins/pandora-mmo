@@ -2706,6 +2706,17 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "guild" in text.lower() or any(gid.replace("_", " ") in text.lower() or g["name"].lower() in text.lower() for gid, g in GUILDS.items())
             ):
                 return fallback
+            # Same real bug class again (2026-08-31, dev-bridge, real live
+            # incident): "Look for a lever" -- a genuine, ordinary
+            # question about a room, nothing to do with anyone's party --
+            # got classified as leave_party by the model, and it actually
+            # fired, silently dropping the player from their real party
+            # mid-dungeon. leave_party is exactly as consequential and
+            # exactly as easy to miss as leave_guild -- same fix, same
+            # reasoning: never trusted from the model alone unless the
+            # raw text actually contains "party".
+            if parsed["action"] == "leave_party" and "party" not in text.lower():
+                return fallback
             # Real live bug (2026-08-15, dev-bridge screenshot): "Take
             # the band" -- a ring the player had just been shown in a
             # quest/reward preview but never actually earned yet -- came

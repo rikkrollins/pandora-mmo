@@ -4397,6 +4397,36 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             result = intent_parser_module.parse_intent("I want to leave the Forge Guild", [])
         self.assertEqual(result["action"], "leave_guild")
 
+    def test_model_guessing_leave_party_for_an_ordinary_question_is_never_trusted(self):
+        """
+        Real live incident (2026-08-31, dev-bridge): "Look for a lever"
+        -- a genuine, ordinary question about a room, nothing to do with
+        anyone's party -- got classified as leave_party by the model,
+        and it actually fired, silently dropping the player from their
+        real party mid-dungeon (Elduinn's 7-companion party, restored
+        live afterward). Same fix as leave_guild/join_guild: never
+        trusted from the model alone unless the raw text actually
+        contains "party".
+        """
+        from unittest.mock import patch
+        import ai.intent_parser as intent_parser_module
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": '{"action": "leave_party"}'}
+
+        with patch("ai.intent_parser.requests.post", return_value=FakeResponse()):
+            result = intent_parser_module.parse_intent("Look for a lever", [])
+        self.assertNotEqual(result["action"], "leave_party")
+
+        # No regression: a real leave-party phrase the model happens to agree with still works.
+        with patch("ai.intent_parser.requests.post", return_value=FakeResponse()):
+            result = intent_parser_module.parse_intent("I want to leave my party", [])
+        self.assertEqual(result["action"], "leave_party")
+
     def test_bare_take_reclassified_to_examine_when_model_also_says_chat(self):
         """
         Real live bug (2026-08-15, dev-bridge screenshot): "Take the

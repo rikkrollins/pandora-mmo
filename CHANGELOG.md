@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.432] — fix: an ordinary question got hallucinated into leaving a party
+
+Real live incident (2026-08-31, dev-bridge): "Look for a lever" — a
+genuine, ordinary question about a room, nothing to do with anyone's
+party — got classified as `leave_party` by the AI model, and it
+actually fired, silently dropping Elduinn from his real 7-companion
+party mid-dungeon. Exact same failure shape as v1.27.428's
+leave_guild/join_guild hallucination fix, just never extended to
+leave_party at the time. Fixed the same way: leave_party is now only
+ever trusted from the model when the raw text actually contains
+"party". Elduinn's party membership was restored live (character_id-
+scoped) — his party was still fully intact, so this was a clean
+re-add, no state was lost.
+
+Tested: a real fail-then-pass repro confirms "Look for a lever" no
+longer triggers leave_party, with a no-regression check that a real
+"I want to leave my party" phrase still works. Related model-guessing/
+leave_guild/leave_party regression slice re-run clean (8/8).
+
 ## [1.27.431] — fix: "open the door" got swallowed by examine, plus a grammar bug
 
 Real live incident (2026-08-31, dev-bridge, Elduinn: "The first one
