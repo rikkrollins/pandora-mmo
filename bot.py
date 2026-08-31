@@ -11293,6 +11293,8 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
     connections-with-a-lock pattern, chosen instead of a real one-way
     edge so the existing whole-campaign reciprocity invariant/tests hold).
     """
+    location = cl.get_location(CAMPAIGN, character["current_location"])
+
     if lockable["id"] in _chat_scoped_set(_UNLOCKED, update.effective_chat.id):
         await update.effective_chat.send_message(
             f"{lockable['name'].capitalize()} is already unlocked.",
@@ -11318,6 +11320,7 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
         await update.effective_chat.send_message(
             f"🔑 **{character['name']}** uses {items_module.get_item(key_item)['name']} — {lockable['name'].lower()} opens.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+            reply_markup=_travel_button_for_unlocked_destination(location, lockable["id"]),
         )
         return
 
@@ -11326,6 +11329,7 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
         await update.effective_chat.send_message(
             f"🔧 **{character['name']}** pulls {lockable['name'].lower()} — somewhere behind you, a way back just opened.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+            reply_markup=_travel_button_for_unlocked_destination(location, lockable["id"]),
         )
         return
 
@@ -11371,7 +11375,8 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
         {**result, "ability": "dexterity", "dc": SKILL_CHECK_DC, "success": success},
     )
     message = _format_skill_check_result(flavor, result, "dexterity", SKILL_CHECK_DC, success) + reward_line
-    await _safe_send(update, message)
+    travel_button = _travel_button_for_unlocked_destination(location, lockable["id"]) if success else None
+    await _safe_send(update, message, reply_markup=travel_button)
 
 
 def _racially_immune_to_condition(character: dict, condition: str) -> bool:
@@ -20858,6 +20863,42 @@ def _look_action_keyboard(location: dict, unclaimed_board_quests: list) -> Inlin
         # complete real set via every location's own "directions"
         # dict) get a real compass/floor arrow; a connection with no
         # named direction keeps the old generic 🚶, never guessed.
+        direction_word = direction_for_dest.get(dest_id)
+        if direction_word:
+            emoji = _DIRECTION_EMOJI.get(direction_word.lower(), "🚶")
+            label = f"{direction_word.capitalize()}: {dest['name']}"
+        else:
+            emoji = "🚶"
+            label = dest["name"]
+        rows.append([InlineKeyboardButton(f"{emoji} {label}", callback_data=f"travel|go|{dest_id}")])
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
+def _travel_button_for_unlocked_destination(location: dict, lockable_id: str) -> InlineKeyboardMarkup | None:
+    """
+    Real live feature request (2026-08-31, dev-bridge, Coffee: "when we
+    successfully pick a lock ... please show that location as a push
+    button ... it should allow a travelable/viewable path"). A door/
+    lever's own `locked_connections` entry on the CURRENT location
+    already names exactly which destination this lockable_id guards
+    (the same dict _do_move reads to decide whether to block travel) --
+    reused here, right after a real unlock, so the newly-open path
+    shows up as an immediate tappable button instead of requiring a
+    separate "look around" to refresh the travel menu. Same button
+    shape as _look_action_keyboard's own travel rows, dispatched through
+    the same travel|go| callback. Naturally returns None for a chest
+    (chests are never a locked_connections target, only doors/levers
+    guarding an actual destination), so loot-only unlocks stay unchanged.
+    """
+    dest_ids = [d for d, lid in location.get("locked_connections", {}).items() if lid == lockable_id]
+    if not dest_ids:
+        return None
+    direction_for_dest = {dest: word for word, dest in location.get("directions", {}).items()}
+    rows = []
+    for dest_id in dest_ids:
+        dest = cl.get_location(CAMPAIGN, dest_id)
+        if dest is None:
+            continue
         direction_word = direction_for_dest.get(dest_id)
         if direction_word:
             emoji = _DIRECTION_EMOJI.get(direction_word.lower(), "🚶")

@@ -5869,6 +5869,68 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id, -999)
         self.assertEqual(character["current_location"], "wrathflame_vault_ember_hall")
 
+    async def test_successful_unlock_shows_an_immediate_travel_button_to_the_newly_open_path(self):
+        """
+        Real live feature request (2026-08-31, dev-bridge, Coffee: "when
+        we successfully pick a lock ... please show that location as a
+        push button ... it should allow a travelable/viewable path").
+        Previously a successful key-item/lever/DEX-roll unlock only ever
+        sent a plain text message -- the newly-open destination didn't
+        get a tappable button until the player separately said "look
+        around" again. Now every real unlock path attaches one
+        immediately, reusing the same travel|go| callback the ordinary
+        look-around menu already uses.
+        """
+        # Key-item gate (The Cinder Key -> the warded iron door).
+        location = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_ember_hall")
+        key_lockable = next(lk for lk in location["lockables"] if lk["id"] == "wrathflame_vault_key_gate")
+        chat_id = -960210
+        character = make_basic_character(960210, "KeyButtonTester", chat_id=chat_id, current_location="wrathflame_vault_ember_hall")
+        db.add_item(960210, chat_id, "the_cinder_key", 1)
+        character = db.get_character(960210, chat_id)
+        sink = []
+        update = FakeUpdate(960210, "open the warded door", sink, chat_id=chat_id)
+        captured = []
+        real_send = update.effective_chat.send_message
+        async def spy_send(text, **kwargs):
+            captured.append(kwargs.get("reply_markup"))
+            return await real_send(text, **kwargs)
+        update.effective_chat.send_message = spy_send
+        await bot._do_lockpick(update, character, dict(key_lockable), "open the warded door")
+        self.assertTrue(any(m is not None for m in captured), "key-item unlock should attach a travel button")
+        markup = next(m for m in captured if m is not None)
+        callback_datas = [btn.callback_data for row in markup.inline_keyboard for btn in row]
+        self.assertEqual(callback_datas, ["travel|go|wrathflame_vault_smoldering_stair"])
+
+        # Lever (the alcove's own shortcut back to the hub).
+        alcove = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_cinder_key_alcove")
+        lever = alcove["lockables"][0]
+        chat_id2 = -960211
+        character2 = make_basic_character(960211, "LeverButtonTester", chat_id=chat_id2, current_location="wrathflame_vault_cinder_key_alcove")
+        sink2 = []
+        update2 = FakeUpdate(960211, "pull the lever", sink2, chat_id=chat_id2)
+        captured2 = []
+        real_send2 = update2.effective_chat.send_message
+        async def spy_send2(text, **kwargs):
+            captured2.append(kwargs.get("reply_markup"))
+            return await real_send2(text, **kwargs)
+        update2.effective_chat.send_message = spy_send2
+        await bot._do_lockpick(update2, character2, dict(lever), "pull the lever")
+        markup2 = next(m for m in captured2 if m is not None)
+        callback_datas2 = [btn.callback_data for row in markup2.inline_keyboard for btn in row]
+        self.assertEqual(callback_datas2, ["travel|go|wrathflame_vault_ember_hall"])
+
+        # A plain DC13 door (no destination guard on a chest -- no button expected there).
+        cache = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_forgeholds_cache")
+        chest = cache["lockables"][0]
+        chat_id3 = -960212
+        character3 = make_basic_character(960212, "ChestButtonTester", chat_id=chat_id3, current_location="wrathflame_vault_forgeholds_cache")
+        sink3 = []
+        from unittest.mock import patch
+        with patch("bot.narrate_skill_check", return_value="A quick, practiced twist of the pick."):
+            await bot._do_lockpick(FakeUpdate(960212, "pick the lock", sink3, chat_id=chat_id3), character3, dict(chest), "pick the lock", forced_roll=20)
+        self.assertIn(chest["id"], bot._UNLOCKED.get(chat_id3, set()))
+
     async def test_blocked_lever_connection_tells_the_player_to_pull_not_pick(self):
         """
         Real live bug (2026-08-31, dev-bridge: "I picked the lock

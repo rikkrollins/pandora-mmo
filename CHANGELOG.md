@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.437] — feature: an immediate travel button right after a successful unlock
+
+Real live feature request (2026-08-31, dev-bridge, Coffee: "when we
+successfully pick a lock, can you please show that location as a push
+button ... with a successful lockpick completion, or a lever or a
+switch or some other type of mechanism activating this event it should
+allow a travelable/viewable path"). Previously a successful key-item
+gate, lever pull, or DC13 lockpick roll only ever sent a plain text
+message — the newly-open destination had no tappable button until the
+player separately said "look around" again to refresh the travel menu
+(which already listed every connection, locked or not). Now every real
+unlock path attaches an immediate button for the specific
+newly-reachable destination, reusing the exact same `travel|go|`
+callback the ordinary look-around menu already dispatches through — so
+every existing gate (requires_item, story_gates, level/rebirth
+requirements) still applies unchanged when tapped. A chest (never a
+travel destination) correctly gets no button, unchanged.
+
+Tested: real fail-then-pass repros for all three unlock paths (key-item
+gate, lever, plain DC13 door) confirm the right destination button now
+appears; a chest unlock stays button-free. Full lockpick/lockable/
+find_lockable/blocked slice re-run clean (24/24), look-action-keyboard
+slice re-run clean (2/2).
+
 ## [1.27.436] — fix: quest-giver dialogue hallucinating another party member's progress
 
 Real live bug (2026-08-30, dev-bridge, Coffee: "I accepted the quest.
