@@ -29602,6 +29602,65 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(508 <= actual_damage <= 522, f"damage {actual_damage} outside expected 508-522 overflow-scaled range")
         sessions.end_session(-983)
 
+    async def test_summoning_the_root_that_remembers_sends_the_real_uploaded_animation(self):
+        """
+        Real, uploaded animation override (2026-08-31, Coffee, dev-
+        bridge: sent a real GIF -- "Can you use this GIF when we summon
+        the root that remembers instead of the image that you provided
+        ... are you able to use it?"). assets/remnant_summons/the_root_
+        that_remembers.mp4 is a real, checked-in file -- summoning this
+        specific Remnant must send IT via send_animation, never fall
+        through to the generated-image path.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-982)
+        user_id = 800218
+        make_basic_character(user_id, "AnimationSummoner", current_location="crossroads_tavern", chat_id=-982)
+        db.update_character(user_id, -982, bound_remnants=["the_root_that_remembers"])
+        enemy_id = -11
+        player = db.get_character(user_id, -982)
+        player["telegram_user_id"] = user_id
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "hp_current": 100000, "hp_max": 100000,
+                 "armor_class": 10, "dexterity": 10, "resistances": [], "vulnerabilities": []}
+        session = sessions.start_session(-982, [player, enemy], {user_id: "party", enemy_id: "enemy"})
+        session.turn_order = [user_id, enemy_id]
+        session.current_turn_index = 0
+        sink = []
+        update = FakeUpdate(user_id, "summon the root that remembers on the goblin", sink, chat_id=-982)
+        with patch("bot.narrate_remnant_summon", return_value="Something ancient stirs."), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)) as mock_generated:
+            await bot._do_summon_remnant(update, "summon the root that remembers on the goblin", forced_roll=10)
+        self.assertEqual(len(update.effective_chat.sent_animations), 1)
+        self.assertIn("The Root That Remembers", update.effective_chat.sent_animations[0]["caption"])
+        mock_generated.assert_not_called()
+        sessions.end_session(-982)
+
+    async def test_summoning_a_different_remnant_still_uses_the_generated_image_unchanged(self):
+        """No real asset exists for The Cairnbound -- must fall through to the ordinary generated-image path exactly as before this override existed."""
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-982)
+        user_id = 800219
+        make_basic_character(user_id, "NoAnimationSummoner", current_location="crossroads_tavern", chat_id=-982)
+        db.update_character(user_id, -982, bound_remnants=["the_cairnbound"])
+        enemy_id = -12
+        player = db.get_character(user_id, -982)
+        player["telegram_user_id"] = user_id
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "hp_current": 100000, "hp_max": 100000,
+                 "armor_class": 10, "dexterity": 10, "resistances": [], "vulnerabilities": []}
+        session = sessions.start_session(-982, [player, enemy], {user_id: "party", enemy_id: "enemy"})
+        session.turn_order = [user_id, enemy_id]
+        session.current_turn_index = 0
+        sink = []
+        update = FakeUpdate(user_id, "summon the cairnbound on the goblin", sink, chat_id=-982)
+        with patch("bot.narrate_remnant_summon", return_value="Something ancient stirs."), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)) as mock_generated:
+            await bot._do_summon_remnant(update, "summon the cairnbound on the goblin", forced_roll=10)
+        self.assertEqual(update.effective_chat.sent_animations, [])
+        mock_generated.assert_called_once()
+        sessions.end_session(-982)
+
     async def test_check_remnants_preview_reflects_the_viewers_own_charisma_bonus(self):
         """
         The Remnants menu preview must quote the SAME total a real

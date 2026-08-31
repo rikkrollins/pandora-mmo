@@ -2,6 +2,38 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.442] — feature: a real uploaded animation for The Root That Remembers' summon
+
+Real request (2026-08-31, Coffee, dev-bridge): sent a real GIF and
+asked "Can you use this GIF when we summon the root that remembers
+instead of the image that you provided... are you able to use it?"
+Every other ability/Remnant visual in this game is Pollinations-
+generated on the fly — this is the first real, hand-picked static
+asset. Found via a related fix: the GIF was delivered by Telegram as a
+generic document (not a photo/video), landing in bot_live_tmp.log as
+`[dev_topic_document]` — a tag `scripts/check_dev_bridge.py` never
+watched for at all, the same blind-spot class already fixed for images
+and videos. Added `DOCUMENT_LINE_RE`, wired in the same way (skip if
+no caption); documents are a permanent `campaign_sources/` reference
+per that handler's own docstring, so deliberately left out of the
+screenshot/video purge step.
+
+The real asset now lives at `assets/remnant_summons/the_root_that_
+remembers.mp4` (Telegram's own GIF handling is a silent, looping MP4
+under the hood, so the uploaded file renders identically to a real
+GIF). New `_maybe_send_remnant_summon_animation` checks for a file at
+`assets/remnant_summons/{remnant_id}.mp4` before every summon and
+sends it via `send_animation` if present, falling back to the existing
+AI-generated ability image otherwise — convention-based, not
+hardcoded to just this one Remnant, so a future custom animation for a
+different Remnant needs no code change, just the file.
+
+Tested: real fail-then-pass repro confirms summoning The Root That
+Remembers sends the real uploaded animation (never the generated
+image), and summoning any other Remnant (no asset on disk) still uses
+the generated-image path completely unchanged. Related summon
+regression slice re-run clean.
+
 ## [1.27.441] — consolidate Spell Mastery onto Element Mastery alone
 
 Real request (2026-08-31, Coffee, dev-bridge screenshot): "When

@@ -138,6 +138,7 @@ class FakeChat:
         self._sink = sink
         self.last_sent_message = None
         self.sent_photos = []
+        self.sent_animations = []
         self.sent_thread_ids = []
         self._next_message_id = 1
 
@@ -151,6 +152,14 @@ class FakeChat:
     async def send_photo(self, photo, caption=None, **kwargs):
         self.sent_photos.append({"photo": photo, "caption": caption, "reply_markup": kwargs.get("reply_markup")})
         self._sink.append(f"<photo:{caption}>")
+        sent = FakeSentMessage(self._sink, message_id=self._next_message_id)
+        self._next_message_id += 1
+        self.last_sent_message = sent
+        return sent
+
+    async def send_animation(self, animation, caption=None, **kwargs):
+        self.sent_animations.append({"animation": animation, "caption": caption})
+        self._sink.append(f"<animation:{caption}>")
         sent = FakeSentMessage(self._sink, message_id=self._next_message_id)
         self._next_message_id += 1
         self.last_sent_message = sent

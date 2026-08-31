@@ -21573,6 +21573,44 @@ async def _maybe_send_ability_image(update: Update, ability_name: str, flavor: s
     )
 
 
+REMNANT_SUMMON_ANIMATIONS_DIR = "assets/remnant_summons"
+
+
+async def _maybe_send_remnant_summon_animation(update: Update, remnant_id: str) -> bool:
+    """
+    Real, uploaded animation override for a specific Remnant's summon
+    attack (2026-08-31, Coffee, dev-bridge: sent a real GIF -- "Can you
+    use this GIF when we summon the root that remembers instead of the
+    image that you provided, we used that image and we generated an
+    animation are you able to use it?"). Every other ability/Remnant
+    visual in this game is Pollinations-generated on the fly
+    (_maybe_send_ability_image); this is the first real, hand-picked
+    static/animated asset. Convention-based, not hardcoded to just this
+    one Remnant: any file dropped at
+    `assets/remnant_summons/{remnant_id}.mp4` is used automatically the
+    next time that Remnant is summoned, so a future custom animation for
+    a different Remnant needs no code change, just the file. Telegram's
+    own GIF handling is a silent, looping MP4 under the hood, so a real
+    MP4 sent via send_animation renders exactly like an uploaded GIF
+    would. Returns whether it actually sent, so the caller knows whether
+    to fall back to the generated-image path.
+    """
+    path = os.path.join(REMNANT_SUMMON_ANIMATIONS_DIR, f"{remnant_id}.mp4")
+    if not os.path.isfile(path):
+        return False
+    try:
+        with open(path, "rb") as f:
+            await update.effective_chat.send_animation(
+                animation=f,
+                caption=f"🔮 {remnants_module.get_remnant(remnant_id)['name']}",
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+            )
+        return True
+    except Exception as e:
+        logger.warning(f"[images] remnant summon animation send failed for {remnant_id!r}: {e!r}")
+        return False
+
+
 def _interactable_image_prompt(obj_data: dict) -> str:
     """
     Grounded only in the interactable's own real name/description --
@@ -29316,10 +29354,17 @@ async def _do_summon_remnant(update: Update, text: str, forced_roll: int | None 
         # the generated image (see _ability_image_prompt's own real
         # fix, 2026-08-10), grounded only in the Remnant's own real
         # element -- never an invented visual detail.
-        await _maybe_send_ability_image(
-            update, remnant["name"], f"{remnant['element']} energy, ancient otherworldly power surging outward",
-            emoji="🔮",
-        )
+        #
+        # Real, uploaded animation override (2026-08-31, Coffee, dev-
+        # bridge: sent a real GIF for The Root That Remembers' own
+        # summon specifically) -- checked FIRST; only falls through to
+        # the generated-image path for a Remnant with no real asset on
+        # disk (every other Remnant today).
+        if not await _maybe_send_remnant_summon_animation(update, remnant_id):
+            await _maybe_send_ability_image(
+                update, remnant["name"], f"{remnant['element']} energy, ancient otherworldly power surging outward",
+                emoji="🔮",
+            )
 
         # Real request (2026-08-20, per Coffee: "Use the remnants Bonus
         # Damage as part of thier attack to make then much stronger
