@@ -2,6 +2,32 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.431] — fix: "open the door" got swallowed by examine, plus a grammar bug
+
+Real live incident (2026-08-31, dev-bridge, Elduinn: "The first one
+didn't work" after "Open the door" got "doesn't spot anything like
+that here" at the Wrathflame Vault's own warded iron gate — "Pick the
+lock" then worked correctly). Root cause: the generic "open X" ->
+examine catch-all in the intent parser has no awareness of lockables
+at all, so the single most natural phrase for a real locked door/gate
+was swallowed as a failed examine before ever reaching the real "pick
+the lock" dexterity check further down. Fixed by routing any "open ...
+door/gate/lock" phrasing to a real dexterity skill check first — the
+existing `_find_lockable` resolution (already covers "door"/"gate"/
+"lock" wording) correctly attempts the real lock if one exists, and
+falls through to an honest ability check otherwise, never a false
+"nothing here."
+
+Also fixed a small grammar bug spotted in the same screenshot: every
+key item this redesign added is named "The X Key", so the success
+message's "uses the {name}" doubled into "uses the The Cinder Key."
+
+Tested: a real fail-then-pass repro confirms "open the door"/"open the
+gate" (and variants) now route to a real lockpick attempt instead of
+examine, with a no-regression check that plain "open the chest" still
+examines normally; the grammar fix confirmed directly. Related lever/
+lockpick/key-gate regression slice re-run clean (5/5).
+
 ## [1.27.430] — dungeon redesign Phase 8 (FINAL): The First City gets real interconnectivity
 
 Phase 8 closes out the 8-dungeon redesign pass (see v1.27.420-429).

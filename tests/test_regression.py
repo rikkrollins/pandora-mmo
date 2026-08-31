@@ -4320,6 +4320,37 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             result = intent_parser_module.parse_intent("Please dismantle my old sword", [])
         self.assertEqual(result["action"], "dismantle_item")
 
+    def test_open_the_door_or_gate_routes_to_a_real_lockpick_attempt_not_examine(self):
+        """
+        Real live bug (2026-08-31, dev-bridge, Elduinn: "Open the door"
+        at the Wrathflame Vault's own warded iron gate got "doesn't spot
+        anything like that here" instead of actually attempting the
+        lock). The generic "open X" -> examine catch-all had no
+        awareness of lockables, so the single most natural phrase for a
+        real locked door/gate never reached the real "pick the lock"
+        dexterity check at all.
+        """
+        for phrase in ("Open the door", "open the gate", "try to open this door", "opening the warded gate"):
+            result = _keyword_fallback(phrase, [])
+            self.assertEqual(result["action"], "skill_check", f"{phrase!r} misclassified as {result['action']!r}")
+            self.assertEqual(result["ability"], "dexterity")
+
+        # No regression: an ordinary "open X" with no door/gate/lock word still examines.
+        result = _keyword_fallback("open the chest", [])
+        self.assertEqual(result["action"], "examine")
+
+    async def test_key_item_lockable_success_message_has_no_doubled_article(self):
+        """Real live grammar bug (2026-08-31, dev-bridge screenshot): every key item this redesign added is named "The X Key", so "uses the {name}" doubled into "uses the The Cinder Key"."""
+        location_id = "wrathflame_vault_ember_hall"
+        lockable = {"id": "test_key_gate_grammar", "kind": "door", "name": "a warded iron door", "requires_key_item": "the_cinder_key"}
+        character = make_basic_character(960300, "KeyGrammarTester", current_location=location_id)
+        db.add_item(960300, -999, "the_cinder_key", 1)
+        character = db.get_character(960300, -999)
+        sink = []
+        await bot._do_lockpick(FakeUpdate(960300, "pick the lock", sink), character, dict(lockable), "pick the lock", forced_roll=1)
+        self.assertTrue(any("uses The Cinder Key" in s for s in sink), sink)
+        self.assertFalse(any("the The" in s for s in sink), sink)
+
     def test_bare_look_classifies_deterministically_without_reaching_the_model(self):
         """
         Real live bug (2026-08-31, dev-bridge): a bare "look" from

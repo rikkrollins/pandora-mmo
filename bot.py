@@ -11309,8 +11309,14 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
             )
             return
         _chat_scoped_set(_UNLOCKED, update.effective_chat.id).add(lockable["id"])
+        # Real live grammar bug (2026-08-31, dev-bridge screenshot):
+        # every dungeon key item this redesign added is already named
+        # "The X Key", so prepending "uses the" doubled up into "uses
+        # the The Cinder Key". Every real key item name already starts
+        # with "The", so dropping the extra article reads correctly for
+        # all of them without needing a name-by-name special case.
         await update.effective_chat.send_message(
-            f"🔑 **{character['name']}** uses the {items_module.get_item(key_item)['name']} — {lockable['name'].lower()} opens.",
+            f"🔑 **{character['name']}** uses {items_module.get_item(key_item)['name']} — {lockable['name'].lower()} opens.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return

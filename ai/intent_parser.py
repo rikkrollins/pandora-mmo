@@ -2012,6 +2012,23 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # on it" slipped through this exclusion (only "break down" was
     # listed, not "break open") and got a passive "examine" instead of
     # the real strength check it should trigger.
+    # Real live bug (2026-08-31, dev-bridge, Elduinn: "Open the door" at
+    # a real locked door -- the Wrathflame Vault's own warded iron gate
+    # -- got "doesn't spot anything like that here" instead of actually
+    # attempting the lock). Root cause: the generic "open X" -> examine
+    # catch-all right below has no awareness of lockables at all, so the
+    # single most natural phrase for a real locked door/gate was
+    # swallowed as a failed examine before ever reaching the real
+    # "pick the lock" dexterity check further down this function.
+    # Checked BEFORE that catch-all, same "carve out the real skill-
+    # check phrasing first" shape as force open/break open/smash below
+    # -- _do_skill_check's own _find_lockable resolution (kind_words
+    # already covers "door"/"gate"/"lock") correctly attempts the real
+    # lock if one exists here, and falls through to an honest generic
+    # ability check otherwise, never a false "nothing here" examine.
+    if re.search(r"\bopen(?:ing|ed)?\b.*\b(?:door|gate|lock)\b", lowered):
+        return {**base, "action": "skill_check", "ability": "dexterity"}
+
     if not any(w in lowered for w in ["force open", "break down", "break open", "smash"]):
         open_match = re.search(r"\bopen(?:ing|ed)?\b\s+(?:the |a |an )?(.+)", lowered)
         if open_match:
