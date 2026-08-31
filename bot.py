@@ -32015,6 +32015,22 @@ async def development_topic_handler(update: Update, context: ContextTypes.DEFAUL
 
     question = update.message.text.strip()
 
+    # Real live bug (2026-08-31, dev-bridge: Coffee sent a real message
+    # to Development and got no acknowledgment from check_dev_bridge.py
+    # even though the bot itself may have already replied). Root cause:
+    # this logging line used to sit AFTER every special-command branch
+    # below (TTS toggle, story mode, combat speed, AI party/Moltbook
+    # toggle, URL capture) -- any message matching one of THOSE got a
+    # real reply in Development but an early `return` before ever
+    # reaching the log line, making it fully invisible to
+    # check_dev_bridge.py's [dev_topic] sweep even though nothing
+    # actually failed. Moved to fire unconditionally, right after the
+    # owner check, so every real owner message in Development is
+    # traceable regardless of which branch below ends up handling it --
+    # the original 2026-07-18 fix (see the comment that used to sit
+    # here) only closed part of this gap, not all of it.
+    logger.info(f"[dev_topic] user={update.effective_user.id} text={question!r}")
+
     # TTS on/off toggle (2026-07-14) -- checked before the AI dev-question
     # flow gets a turn, same "specific command before general" pattern
     # used throughout ai/intent_parser.py all session. Persisted in
@@ -32134,12 +32150,6 @@ async def development_topic_handler(update: Update, context: ContextTypes.DEFAUL
         return
 
     history = context.user_data.setdefault("dev_history", [])
-
-    # Message CONTENT wasn't logged here before — same gap as Adventure
-    # had (see the [intent] logging above). Coffee reported sending a
-    # Development message this session that got no visible acknowledgment
-    # here; this is so a future one is actually traceable.
-    logger.info(f"[dev_topic] user={update.effective_user.id} text={question!r}")
 
     # Real live bug (dev-topic screenshot, 2026-07-18, "The Dev topic is
     # acting a little wonky"): a plain STATEMENT/directive ("The support

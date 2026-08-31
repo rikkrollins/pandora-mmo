@@ -11976,6 +11976,28 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bot._get_combat_throttle_seconds(), bot.COMBAT_THROTTLE_SECONDS_CAP)
         db.set_setting("combat_throttle_seconds", str(bot.COMBAT_THROTTLE_SECONDS_DEFAULT))
 
+    async def test_dev_topic_special_commands_are_still_logged_for_check_dev_bridge(self):
+        """
+        Real live bug (2026-08-31, dev-bridge: Coffee sent a real message
+        to Development and check_dev_bridge.py showed nothing new, even
+        though the bot may have already replied). Root cause: the
+        [dev_topic] logging line used to sit AFTER every special-command
+        branch (TTS toggle, story mode, combat speed, AI party/Moltbook,
+        URL capture) -- a message matching one of those got a real reply
+        but an early `return` before the log line, making it invisible
+        to check_dev_bridge.py's sweep even though nothing failed. Now
+        logs unconditionally, right after the owner check.
+        """
+        from unittest.mock import patch, AsyncMock
+        with patch("bot._is_dev_topic_authorized", new=AsyncMock(return_value=True)):
+            with self.assertLogs("pandora_mmo", level="INFO") as cm:
+                sink = []
+                await bot.development_topic_handler(
+                    FakeUpdate(7052163553, "set combat speed to 2", sink), DummyContext(),
+                )
+        self.assertTrue(any("[dev_topic] user=7052163553" in line and "set combat speed to 2" in line for line in cm.output), cm.output)
+        db.set_setting("combat_throttle_seconds", str(bot.COMBAT_THROTTLE_SECONDS_DEFAULT))
+
     async def test_post_narrated_actually_sleeps_for_the_configured_throttle(self):
         """A real, direct call to _post_narrated awaits asyncio.sleep with exactly the configured throttle value -- confirms the pacing delay is real, not just documented."""
         import sessions

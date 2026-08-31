@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.435] — fix: real dev-bridge blind spot for Development-topic special commands
+
+Real live incident (2026-08-31, Coffee: "check dev i jus posted, how
+are u missing this?"). Investigated live and found a real gap: the
+`[dev_topic]` log line that `scripts/check_dev_bridge.py` depends on to
+surface every real message sent to the Development topic used to sit
+AFTER several special-command branches in `development_topic_handler`
+(TTS on/off, story mode, combat speed, AI party/Moltbook toggle, URL
+capture). A message matching any of those got a real reply from the
+bot directly in Development, but hit an early `return` before ever
+reaching the log line — fully invisible to every dev-bridge sweep even
+though nothing actually failed. The original 2026-07-18 fix that added
+this logging only closed part of the gap, not all of it. Moved the log
+line to fire unconditionally, right after the owner check, so every
+real owner message in Development is traceable regardless of which
+branch ends up handling it.
+
+Tested: a real fail-then-pass repro confirms a "set combat speed to N"
+command (previously invisible) now logs `[dev_topic]` correctly; a
+broader dev-topic/dev-command regression slice re-run clean (3/3).
+
 ## [1.27.434] — fix: wrong-verb lever message + a room describing a mechanic that didn't exist
 
 Found via a routine dev-bridge sweep, not a new report: two more real
