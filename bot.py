@@ -14597,6 +14597,59 @@ async def _check_quest_completions_defeat_monster(update_like, session: sessions
                     update_like, db.get_character(telegram_user_id, session.chat_id),
                 )
 
+    # Real live bug (2026-08-31, Coffee: "why didn't Charvenna get exp
+    # for the last quest i completed?"). Investigated live: Elduinn
+    # defeated a real unique guardian (the_bound_cinder_hound) while
+    # Charvenna -- same real party_id, but standing elsewhere -- wasn't
+    # in this combat session. She DID still get her fair 50% XP/gold
+    # share via _share_quest_rewards_with_party (that path was already
+    # correct, confirmed by direct code read) -- but her own separate
+    # copy of the exact same quest_id (accepted independently, before
+    # the guardian died) stayed active forever: this loop only ever
+    # checked session.turn_order, never the rest of the real party_id
+    # roster, contradicting this function's own docstring ("every party
+    # member's active quests"). A unique guardian can't be re-fought,
+    # so there was no path back to completion for her at all --
+    # silently blocking her own arc progression too, since
+    # _offerable_quest_at_location and _current_story_arc both key off
+    # a character's own completed_quests. Caught up here: any OTHER
+    # real party member (by real party_id, not just who was standing in
+    # this fight) holding the exact same quest_id gets it marked
+    # complete too. Deliberately reward_item only, no extra XP/gold --
+    # they already received their fair share the normal way above, and
+    # granting it again would double-pay. Skips the full climax-
+    # narration/image pipeline _complete_quest_and_announce runs for
+    # the actual fighter -- this isn't a moment they lived through, just
+    # bookkeeping catching up to reality, so one short, quiet line is
+    # more honest than a duplicated cutscene.
+    checked_party_ids: set[int] = set()
+    for source_pid in party_ids:
+        source_character = db.get_character(source_pid, session.chat_id)
+        source_party_id = source_character.get("party_id") if source_character else None
+        if not source_party_id or source_party_id in checked_party_ids:
+            continue
+        checked_party_ids.add(source_party_id)
+        for member in db.get_party_members_by_id(source_party_id):
+            member_id = member["telegram_user_id"]
+            if member_id in party_ids:
+                continue
+            for quest_id in list(member["active_quests"].keys()):
+                quest = CAMPAIGN["quests"].get(quest_id)
+                if not quest:
+                    continue
+                trigger = quest.get("trigger", {})
+                if trigger.get("type") != "defeat_monster" or trigger.get("monster") not in defeated_monster_keys:
+                    continue
+                db.complete_quest(member_id, session.chat_id, quest_id)
+                reward_item = quest.get("reward_item")
+                if reward_item:
+                    db.add_item(member_id, session.chat_id, reward_item, 1)
+                await _safe_send(
+                    update_like,
+                    f"📜 **{member['name']}** also gets credit for \"{quest['title']}\" — "
+                    f"the rest of the party already handled it.",
+                )
+
 
 # Real request (2026-08-23, per Coffee, after a real accepted-quest
 # list piled up to 12+ simultaneous Weekly/Monthly board quests across

@@ -8662,6 +8662,61 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(after["spell_slots_max"], 3, "an already-real caster's slots must be untouched")
         sessions.end_session(-999)
 
+    async def test_an_absent_party_members_own_copy_of_an_already_won_quest_also_completes(self):
+        """
+        Real live bug (2026-08-31, Coffee: "why didn't Charvenna get exp
+        for the last quest i completed?"). Root-caused live: Charvenna
+        held her own independently-accepted copy of "The Cinder Key"
+        (a real defeat_monster quest against a UNIQUE, unrepeatable
+        guardian), but wasn't in the fight when a different real party
+        member (same party_id) defeated it -- this loop only ever
+        checked session.turn_order, so her own copy stayed active
+        forever with no way back to completion, on top of never
+        receiving the reward_item real passive XP-sharing never covers.
+        Fixed: any other real party member holding the same quest_id
+        now gets it completed too, with the reward_item, but no extra
+        XP/gold on top of the fair share _share_quest_rewards_with_party
+        already gives them the normal way (double-paying would be its
+        own new bug).
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock as _AsyncMock
+        sessions.end_session(-999)
+        fighter_id = 950972
+        absent_id = 950973
+        fighter = make_basic_character(fighter_id, "QuestFighter", current_location="wrathflame_vault_cinder_key_alcove")
+        party_id = db.create_party(fighter_id, -999)
+        db.accept_quest(fighter_id, -999, "the_cinder_keys_reckoning")
+
+        make_basic_character(absent_id, "AbsentPartyMate", current_location="crossroads_tavern")
+        db.update_character(absent_id, -999, party_id=party_id)
+        db.accept_quest(absent_id, -999, "the_cinder_keys_reckoning")
+        absent_before = db.get_character(absent_id, -999)
+
+        enemy = {
+            "telegram_user_id": -5200972, "name": "The Bound Cinder Hound", "dexterity": 10, "strength": 10,
+            "hp_current": 0, "hp_max": 100, "is_ai": 1, "monster_key": "the_bound_cinder_hound",
+        }
+        session = sessions.start_session(-999, [db.get_character(fighter_id, -999), enemy], {fighter_id: "party", -5200972: "enemy"})
+        session.turn_order = [fighter_id, -5200972]
+        with patch("bot._maybe_send_remnant_lore_image", new=_AsyncMock()), \
+             patch("bot._check_and_award_achievements", new=_AsyncMock()):
+            await bot._check_quest_completions_defeat_monster(FakeUpdate(fighter_id, "", []), session)
+
+        fighter_after = db.get_character(fighter_id, -999)
+        self.assertIn("the_cinder_keys_reckoning", fighter_after["completed_quests"])
+        self.assertIn("the_cinder_key", fighter_after["inventory"])
+
+        absent_after = db.get_character(absent_id, -999)
+        self.assertIn("the_cinder_keys_reckoning", absent_after["completed_quests"], "must no longer be stuck active forever")
+        self.assertNotIn("the_cinder_keys_reckoning", absent_after["active_quests"])
+        self.assertIn("the_cinder_key", absent_after["inventory"], "passive XP-sharing never covers items -- this is the only way she'd ever get it")
+        self.assertEqual(
+            absent_after["xp"] - absent_before["xp"], int(350 * bot.INACTIVE_PARTY_XP_SHARE),
+            "exactly the normal 50% absent-party share, no double-pay from the catch-up completion",
+        )
+        sessions.end_session(-999)
+
     async def test_binding_still_teaches_the_taught_spell_even_if_a_different_matching_element_spell_is_known(self):
         """
         Real dev-bridge report (2026-08-23, Coffee): "my character

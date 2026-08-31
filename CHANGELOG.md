@@ -2,6 +2,39 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.439] — fix: an absent party member's own quest could get stuck active forever
+
+Real live report (2026-08-31, Coffee: "why didn't Charvenna get exp
+for the last quest i completed?"). Investigated directly against the
+live database: Elduinn defeated a real unique guardian (the_bound_
+cinder_hound) while Charvenna — same real party, but standing
+elsewhere — wasn't in that combat session. She DID still get her fair
+50% XP/gold share (`_share_quest_rewards_with_party` was already
+correct for that), but her own separately-accepted copy of the exact
+same quest ("The Cinder Key") stayed active forever: `_check_quest_
+completions_defeat_monster` only ever checked the actual combat
+session's participants, never the rest of the real party roster,
+contradicting its own docstring ("every party member's active
+quests"). Since the guardian is a unique, unrepeatable kill, there was
+no path back to completion for her at all — silently blocking her own
+arc progression too (several systems key off a character's own
+`completed_quests`), and she'd never receive the real key item either,
+since passive XP-sharing never covers items.
+
+Fixed: any other real party member (by real party_id, not just who
+was standing in the fight) holding the exact same quest now gets it
+completed too — the real reward item, but deliberately no extra XP/
+gold on top of the fair share they already received the normal way
+(avoiding a double-pay). Charvenna's own already-stuck copy was
+restored live (character_id-scoped): completed, cleared from her
+active quests, and the real Cinder Key added to her inventory.
+
+Tested: a real fail-then-pass repro with two genuinely separate real
+party members confirms the absent member's own copy completes, gets
+the reward item, and gains exactly the normal 50% share — never
+double-paid. Related Remnant-binding/quest-completion regression slice
+re-run clean.
+
 ## [1.27.438] — feature: visible lockables call themselves out in room descriptions
 
 Follow-up clarification (2026-08-31, dev-bridge, Coffee, right after
