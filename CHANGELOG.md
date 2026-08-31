@@ -2,6 +2,37 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.438] — feature: visible lockables call themselves out in room descriptions
+
+Follow-up clarification (2026-08-31, dev-bridge, Coffee, right after
+v1.27.437): the travel-button feature was correct as built — a button
+for the newly-unlocked DESTINATION is wanted, buttons to trigger the
+lockpicking/lever/key ACTION itself are explicitly not (and were never
+added). The real remaining ask: make a real, not-yet-unlocked door,
+chest, or lever "pop out" in the plain "look around" text with a clear
+emoji, rather than leaving a player to stumble onto it by guessing —
+exactly the confusion behind the Ember Hall floor-text bug and the
+"look for a lever" reports.
+
+`_location_extra_detail` now calls out every visible, not-yet-unlocked
+lockable directly: 🔒 for a locked door/chest, 🔧 for an unpulled
+lever. Disappears once genuinely unlocked (the ordinary connections/
+travel-button listing already covers an open path from there). Per
+Coffee's own explicit distinction — "if its a hidden item dont use an
+emoji tho... include them in the narrations after they have found
+them" — a lockable can opt out entirely via a new `hidden: true` flag,
+suppressing the callout until actually discovered via examine/search.
+No real lockable sets this yet (this game has never had a genuine
+hidden-lockable mechanic — confirmed directly in code), but the display
+logic already respects it correctly for whenever a future one does.
+
+Tested: real fail-then-pass repros for a locked door (Ember Hall) and
+an unpulled lever (Cinder Key Alcove), confirming the callout appears
+with the right emoji and wording, disappears once unlocked, and never
+fires for a hidden lockable before it's found. Wrathflame Vault (11/11),
+lockpick/lockable/find_lockable/blocked (24/24), and look-action-
+keyboard (2/2) slices re-run clean.
+
 ## [1.27.437] — feature: an immediate travel button right after a successful unlock
 
 Real live feature request (2026-08-31, dev-bridge, Coffee: "when we

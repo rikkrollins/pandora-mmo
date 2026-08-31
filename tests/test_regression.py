@@ -5997,6 +5997,75 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("hollow underfoot", hub["description"])
         self.assertNotIn("floor", hub["description"])
 
+    async def test_look_around_calls_out_a_visible_unlocked_lockable_with_an_emoji(self):
+        """
+        Real live feature request (2026-08-31, dev-bridge, Coffee: "make
+        sure they are clear in the look around narrations ... with an
+        appropriate emoji beside it so it pops out to the player"). A
+        real door/chest/lever a player could otherwise walk right past
+        (the exact confusion behind the Ember Hall floor-text bug and
+        the "look for a lever" reports) now calls itself out plainly.
+        Disappears once actually unlocked -- the ordinary travel/
+        connections listing already covers an open path from there.
+        """
+        from unittest.mock import patch
+
+        async def no_real_image_call(*args, **kwargs):
+            return None
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "Something old and warm hums in the dark."}
+
+        chat_id = -960220
+        character = make_basic_character(960220, "LockableCalloutTester", chat_id=chat_id, current_location="wrathflame_vault_ember_hall")
+        db.add_item(960220, chat_id, "torch", 1)  # so _do_look doesn't short-circuit on darkness first
+        sink = []
+        with patch("bot._send_generated_image", side_effect=no_real_image_call), \
+             patch("ai.dm_agent.requests.post", return_value=FakeResponse()):
+            await bot._do_look(FakeUpdate(960220, "look around", sink, chat_id=chat_id))
+        combined = " ".join(sink)
+        self.assertIn("🔒", combined)
+        self.assertIn("warded iron door", combined)
+        self.assertIn("locked", combined)
+
+        # A lever gets its own emoji and "waiting to be pulled" wording.
+        chat_id2 = -960221
+        make_basic_character(960221, "LeverCalloutTester", chat_id=chat_id2, current_location="wrathflame_vault_cinder_key_alcove")
+        db.add_item(960221, chat_id2, "torch", 1)
+        sink2 = []
+        with patch("bot._send_generated_image", side_effect=no_real_image_call), \
+             patch("ai.dm_agent.requests.post", return_value=FakeResponse()):
+            await bot._do_look(FakeUpdate(960221, "look around", sink2, chat_id=chat_id2))
+        combined2 = " ".join(sink2)
+        self.assertIn("🔧", combined2)
+        self.assertIn("rusted lever", combined2)
+        self.assertIn("waiting to be pulled", combined2)
+
+        # Once genuinely unlocked, the callout disappears -- the open
+        # path is already covered by the ordinary travel listing.
+        location = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_ember_hall")
+        key_lockable = next(lk for lk in location["lockables"] if lk["id"] == "wrathflame_vault_key_gate")
+        bot._chat_scoped_set(bot._UNLOCKED, chat_id).add(key_lockable["id"])
+        sink3 = []
+        with patch("bot._send_generated_image", side_effect=no_real_image_call), \
+             patch("ai.dm_agent.requests.post", return_value=FakeResponse()):
+            await bot._do_look(FakeUpdate(960220, "look around", sink3, chat_id=chat_id))
+        self.assertNotIn("🔒", " ".join(sink3))
+
+    def test_hidden_lockable_never_shows_the_callout_before_being_found(self):
+        """No real lockable sets hidden:true yet, but the display logic must already respect it for whenever one does -- a genuinely hidden mechanism should never spoil itself in the plain look-around listing."""
+        fake_location = {
+            "name": "Test Room", "layer": "surface", "description": "A room.",
+            "lockables": [{"id": "test_hidden_lever", "kind": "lever", "name": "a well-hidden lever", "hidden": True}],
+        }
+        character = make_basic_character(960222, "HiddenLockableTester", chat_id=-960222)
+        lines, _ = bot._location_extra_detail(character, fake_location, "test_room_fake", -960222)
+        self.assertFalse(any("🔧" in line or "hidden lever" in line for line in lines))
+
     def test_find_lockable_resolves_natural_lever_and_gate_phrasing(self):
         alcove = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_cinder_key_alcove")
         self.assertIsNotNone(bot._find_lockable(alcove, "pull the lever"))

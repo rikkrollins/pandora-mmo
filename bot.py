@@ -21766,6 +21766,30 @@ def _location_extra_detail(character: dict, location: dict, location_id: str, ch
     if interactables:
         names = [i["name"] for i in interactables.values()]
         lines.append(f"Things worth a closer look: {', '.join(names)}")
+    # Real live feature request (2026-08-31, dev-bridge, Coffee: "make
+    # sure they are clear in the look around narrations and descriptions
+    # of the rooms maybe with an appropriate emoji beside it so it pops
+    # out to the player ... if its a hidden item dont use an emoji tho").
+    # A visible, not-yet-unlocked lockable (a real door/chest/lever a
+    # player could plausibly walk right past, per the exact confusion
+    # the Ember Hall floor-text bug and the "look for a lever" reports
+    # both came from) now calls itself out plainly with a distinguishing
+    # emoji, same "pop out" ask. Explicitly opt-in `hidden: true` (no
+    # real lockable sets this yet -- this game's lockables have never
+    # had a genuine hidden/undiscovered state, confirmed by
+    # _mentions_hidden_passage's own docstring) skips the callout
+    # entirely until the player actually finds it via examine/search,
+    # so a future genuinely-hidden mechanism doesn't spoil itself here.
+    # Once unlocked, the ordinary connections/travel-button listing
+    # already covers the now-open path -- no need to keep calling out a
+    # lockable that no longer blocks anything.
+    lockable_emoji = {"door": "🔒", "chest": "🔒", "lever": "🔧"}
+    for lockable in location.get("lockables", []):
+        if lockable.get("hidden") or lockable["id"] in _chat_scoped_set(_UNLOCKED, chat_id):
+            continue
+        emoji = lockable_emoji.get(lockable.get("kind"), "🔒")
+        state = "waiting to be pulled" if lockable.get("kind") == "lever" else "locked"
+        lines.append(f"{emoji} {lockable['name'].capitalize()} is here, {state}.")
     resource_nodes = location.get("resource_nodes", [])
     if resource_nodes:
         node_names = [n["name"] for n in resource_nodes]
